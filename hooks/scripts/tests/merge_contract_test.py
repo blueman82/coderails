@@ -21,7 +21,7 @@ from scripts.lib.eval_integrity import suite_hash
 
 def frozen_eval(level: int) -> git.EvalSummary:
     """A trusted eval artifact as post_evals.py post writes it: frozen suite, matching facts line, no late freeze."""
-    data: dict[str, object] = {"verification_level": level, "task_ref": "1", "evals": []}
+    data: dict[str, object] = {"verification_level": level, "task_ref": "1", "evals": [], "frozen_sha": "a" * 40}
     data["frozen_hash"] = suite_hash(data)
     stamp = facts_line(level, False, suite_hash(data)[:16])
     return git.EvalSummary(0, str(level), json.dumps(data), facts=stamp)
@@ -44,7 +44,7 @@ class MergeContractTests(unittest.TestCase):
     ) -> tuple[int, str, bool, bool]:
         """Run the real merge entrypoint over controlled provider and evidence replies."""
         if summary is None:
-            summary = git.EvalSummary(0, "0", "{}")
+            summary = frozen_eval(0)
         merged: list[tuple[str, ...]] = []
 
         def command(*arguments: str, check: bool = False) -> subprocess.CompletedProcess[str]:

@@ -62,6 +62,7 @@ class ArtifactCase(unittest.TestCase):
             "verification_level": 1,
             "verification_justification": "Exercise real commands and their controls",
             "head_sha": "head",
+            "frozen_sha": "a" * 40,  # level >= 1 needs a full sha; no repository here, so it is never resolved
             "task_ref": "192",
             "evals": [entry()],
         }

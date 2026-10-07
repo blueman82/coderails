@@ -238,9 +238,10 @@ class HeadlessTests(RepoCase):
         """Negative control: diff_manifest off lets the same diff reach gh pr merge.
 
         The config file is itself a committed control file (.coderails/** needs security-review), so the review
-        check is switched off too; this test is about the manifest only.
+        check and the eval-level check (the stubbed level-0 artifact is below the derived level of those paths) are
+        switched off too; this test is about the manifest only.
         """
-        self.config("diff_manifest: off\nreview_passes: off\n")
+        self.config("diff_manifest: off\nreview_passes: off\neval_level: off\n")
         result = self.merge(self.commit_secret())
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(self.ghlog.exists())

@@ -72,8 +72,12 @@ def eval_level_check(number: str, sha: str, unit: str, progress: str) -> list[Vi
     The marker level must be >= the level derived from the PR diff (policy/surface_policy.json, raised by progress.json
     units and the embed's declared facts); the facts line must carry the recomputed late_freeze and the embed's own
     suite hash; verify_suite(stamped) must pass and a level >= 1 suite must be frozen. A v1 artifact with no facts line
-    is refused when the diff needs level >= 1. Fails closed; no off switch.
+    is refused when the diff needs level >= 1. Fails closed; `eval_level: off` skips, every other value enforces.
     """
+    values, _ = load_config(config_path() or "")
+    if str(values.get("eval_level") or "enforce") == "off":
+        manifest_policy.trace(f"{git.repo()}@pr-{number}", "skipped", "eval_level_off", command="eval-level")
+        return []
     found = git.gate_eval_summary_for_pr(number, sha)
     if found.status == 2:
         return [{"code": "eval_artifact_unreadable", "detail": found.failure_reason}]
@@ -83,11 +87,13 @@ def eval_level_check(number: str, sha: str, unit: str, progress: str) -> list[Vi
         data = object_value(json.loads(found.embed))
     except ValueError:  # JSONDecodeError and the non-object case
         return [{"code": "eval_embed_malformed", "detail": ""}]
+    if str(data.get("verification_level", "")) != found.verification_level:
+        return [{"code": "eval_embed_malformed", "detail": "marker and embedded verification_level differ"}]
     changes = eval_level.pr_changes(number, sha)
     if changes is None:
         return [{"code": "eval_level_diff_unavailable", "detail": ""}]
     _, minimum = eval_level.derive(changes, eval_level.progress_units(progress), data, eval_level.load_policy())
-    late = eval_level.late_freeze(str(data.get("frozen_sha") or ""), eval_level.branch_base(sha))
+    late = eval_level.suite_late(data, eval_level.branch_base(sha))
     codes: list[str] = []
     if int(found.verification_level) < minimum:
         codes.append("level_below_derived")

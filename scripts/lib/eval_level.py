@@ -10,6 +10,7 @@ else from the declared lower bound; a diff alone cannot show how many units prod
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, cast
@@ -42,13 +43,13 @@ def _strings(value: object) -> bool:
 
 
 def classify(path: str, policy: dict[str, Any]) -> str:
-    """Classify a path as none, outward or irreversible; `none` (docs, tests) wins, then the more severe class."""
+    """Classify a path: irreversible first, then none (anchored docs and test dirs), else outward (fail closed)."""
     from .manifest_policy import matches  # lazy: manifest_policy imports git_common, which imports eval_validation
 
-    for name in ("none", "irreversible", "outward"):
+    for name in ("irreversible", "none"):
         if matches(path, policy[name]):
             return name
-    return "none"
+    return "outward"
 
 
 def facts_from_changes(changes: Changes, progress_units: int = 0, policy: dict[str, Any] | None = None) -> JsonObject:
@@ -85,10 +86,24 @@ def _git(*args: str, directory: str = ".") -> subprocess.CompletedProcess[str]:
 
 
 def late_freeze(frozen_sha: str, base: str, directory: str = ".") -> bool:
-    """True when a frozen_sha is not an ancestor of the branch base (an unresolvable one cannot be shown to be)."""
-    if not frozen_sha or not base:
+    """True unless frozen_sha is a full 40-hex commit that is an ancestor of the branch base.
+
+    Empty, abbreviated or rev-expression values (origin/main, HEAD~50) and unresolvable shas cannot be shown to precede
+    the base, so they count as late. Only a missing base (no origin ref to compare with) returns False.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", frozen_sha):
+        return True
+    if not base:
         return False
     return _git("merge-base", "--is-ancestor", frozen_sha, base, directory=directory).returncode != 0
+
+
+def suite_late(data: JsonObject, base: str, directory: str = ".") -> bool:
+    """late_freeze for a suite: a level-0 suite may omit frozen_sha, every other missing or unverifiable one is late."""
+    frozen = str(data.get("frozen_sha") or "")
+    if not frozen and str(data.get("verification_level")) == "0":
+        return False
+    return late_freeze(frozen, base, directory)
 
 
 def branch_base(head: str, directory: str = ".") -> str:

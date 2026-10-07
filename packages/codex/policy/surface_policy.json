@@ -1,5 +1,20 @@
 {
-  "none": ["docs/**", "**/tests/**", "**/test/**"],
+  "none": [
+    "docs/**",
+    "README.md",
+    "INSTALLATION.md",
+    "LICENSE",
+    "scripts/tests/**",
+    "scripts/quality/tests/**",
+    "hooks/scripts/tests/**",
+    "packages/tests/**",
+    "packages/graph-semantics/tests/**",
+    "packages/codex/hooks/scripts/tests/**",
+    "skills/workflow-audit/scripts/tests/**",
+    "packages/codex/skills/workflow-audit/scripts/tests/**",
+    "skills/dashboard/*/test/**",
+    "packages/codex/skills/dashboard/*/test/**"
+  ],
   "irreversible": [
     "install.py",
     "uninstall.py",
@@ -8,7 +23,13 @@
     "scripts/installer/**",
     ".github/workflows/**",
     "hooks/hooks.json",
-    "packages/codex/hooks/hooks.json"
+    "packages/codex/hooks/hooks.json",
+    "policy/surface_policy.json",
+    "packages/codex/policy/surface_policy.json",
+    "scripts/lib/eval_level.py",
+    "packages/codex/scripts/lib/eval_level.py",
+    "scripts/lib/publication_gate.py",
+    "packages/codex/scripts/lib/publication_gate.py"
   ],
   "outward": [
     "commands/**",

@@ -87,7 +87,10 @@ class CodexPublicationGateTests(unittest.TestCase):
             "PATH": f"{install_gh_shim(self.dir.parent)}{os.pathsep}{os.environ['PATH']}",
             "FAKE_SHA": self.sha,
             "CLEAN_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
-            "FAKE_EVAL_FILE": str(write_comment(self.dir.parent, self.sha, 0)),
+            # an unclassified path is outward (level 1); frozen at the branch base, so not late
+            "FAKE_EVAL_FILE": str(
+                write_comment(self.dir.parent, self.sha, 1, frozen_sha=git_cmd(self.dir, "rev-parse", "main").strip())
+            ),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.loop),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
         }
@@ -150,7 +153,8 @@ class CodexPublicationGateTests(unittest.TestCase):
     def test_clean_diff_passes(self) -> None:
         """Negative control: a clean docs-only PR is not blocked by the default."""
         git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
-        (self.dir / "docs.md").write_text("x\n")
+        (self.dir / "docs").mkdir()
+        (self.dir / "docs" / "x.md").write_text("x\n")
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()

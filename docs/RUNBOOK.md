@@ -228,11 +228,11 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `pr_publication_gate`) refuses with `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`,
   `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, `integrity_stripped`, `not_frozen`,
   `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed` or
-  `eval_level_diff_unavailable`. The check is the third entry of the single publication gate, ON by default; there is no
-  config switch. The minimum level comes from `policy/surface_policy.json` applied to the PR diff
+  `eval_level_diff_unavailable`. The check is the third entry of the single publication gate, ON by default (config
+  `eval_level: off` is the optional switch). The minimum level comes from `policy/surface_policy.json` applied to the PR diff
   (`scripts/lib/eval_level.py`): level 2 for an irreversible path (`install.py`, `launchd/`, `.github/workflows/`,
   `hooks/hooks.json`, ...) or three work units, level 1 for any outward path (`hooks/`, `scripts/`, `skills/`, ...) or two
-  units, else 0; docs and tests are neutral.
+  units, else 0; only the anchored docs and test directories are neutral, every unlisted path (`AGENTS.md`, `.claude-plugin/`, ...) is outward.
 - Artifact: line 1 is the unchanged v1 marker, line 2 is `<!-- coderails-eval-facts v1 derived_min_level=N
   late_freeze=0|1 suite=<16 hex> -->`, then the summary and the fenced embed whose `gate_facts` block is stamped by
   `post_evals.py post <PR> <evals.json> [--progress PROGRESS]`. The merge side ignores the stamped level and recomputes it
@@ -248,10 +248,19 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `eval_artifact_unreadable` is a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
 - Limits: a cooperating-agent safeguard. The work-unit count of a diff cannot be derived from the diff, so the floor
   without `--progress` (and without a declared lower bound) assumes one unit; the PR author can omit the progress file.
-  `verify_suite` is tamper-evident, not tamper-proof (a same-user agent holding the signing key can rewrite and re-sign the
-  suite, see `skills/task-evals/SKILL.md`). The surface classes are globs: a path outside them is neutral, so a new
-  control directory must be added to `policy/surface_policy.json` (both copies). The gate trusts the posted comment's
-  author (the authenticated, write-permission login), not the content.
+  `verify_suite` is tamper-evident, not tamper-proof: the suite hash and amendment chain are unkeyed and a signature is
+  optional, so a same-user agent can recompute `frozen_hash`/`suite_hash` after editing a cmd and post it with `gh api`;
+  nothing ties the embed to the hash recorded at smoke-run time (see `skills/task-evals/SKILL.md`). Only a naive edit is
+  caught. `late_freeze` is attestation, not evidence: an empty, abbreviated or rev-expression `frozen_sha` counts as late
+  (a level-0 suite may omit it) and level >= 1 needs a full 40-hex sha, but an honest-looking real sha cannot be proven to
+  be the freeze commit, and the
+  disclosure requirement is a substring match for "freeze"/"frozen" in the justification or an amendment `why`. The surface
+  classes are globs: irreversible wins, then the anchored docs and test directories (`none`), and every other path is
+  outward (level 1), so a new control directory needs no entry to be covered, only an irreversible one does. The policy and
+  `eval_level.py`/`publication_gate.py` are themselves irreversible (editing them forces level 2), but they are read from the
+  running checkout, so run `merge.py` from main, not from the PR branch. The gate trusts the posted comment's author (the
+  authenticated, write-permission login), not the content. Config `eval_level: off` skips the check (absent or any other
+  value enforces) and records `eval-level/skipped/eval_level_off`.
 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 

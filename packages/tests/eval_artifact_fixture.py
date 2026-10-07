@@ -34,6 +34,7 @@ def eval_comment(
     if level:
         data["frozen_hash"] = digest
     marker = f"<!-- coderails-eval-summary v1 pr={pr} head_sha={sha} result=GO verification_level={level} -->"
+    late = late or (level != 0 and not frozen_sha)  # at level >= 1 a missing frozen_sha is stamped late
     facts = f"<!-- coderails-eval-facts v1 derived_min_level={level} late_freeze={int(late)} suite={digest[:16]} -->"
     return "\n".join([marker, facts, "## Eval summary", "", "```json", json.dumps(data), "```", ""])
 

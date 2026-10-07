@@ -158,8 +158,13 @@ def pr_number(text: str) -> str:
     return text
 
 
+def _inline(value: object) -> str:
+    """One line with no backticks or comment openers, so narrative text cannot start a fence or a marker."""
+    return re.sub(r"\s+", " ", str(value)).replace("`", "'").replace("<!--", "<!-")
+
+
 def summary_of(data: JsonObject) -> str:
-    """Per-priority pass/fail counts and the freeform amendments verbatim (narrative, never validated)."""
+    """Per-priority pass/fail counts and the amendments (narrative, never validated; flattened to one line each)."""
     evals = [cast(JsonObject, x) for x in cast(list[object], data.get("evals", [])) if isinstance(x, dict)]
     lines = ["## Eval summary"]
     for priority in ("P0", "P1"):
@@ -167,7 +172,7 @@ def summary_of(data: JsonObject) -> str:
         passed = sum(item.get("status") == "pass" for item in group)
         lines.append(f"- {priority}: {passed} pass, {len(group) - passed} fail")
     notes = [cast(JsonObject, x) for x in cast(list[object], data.get("amendments", [])) if isinstance(x, dict)]
-    lines += [f"- amendment {note.get('eval')}: {note.get('why')}" for note in notes]
+    lines += [f"- amendment {_inline(note.get('eval'))}: {_inline(note.get('why'))}" for note in notes]
     return "\n".join(lines)
 
 
@@ -196,7 +201,7 @@ def post(number: str, path: str, progress: str) -> int:
     data = read_object(path)
     changes = eval_level.pr_changes(number, head) or []
     facts, minimum = eval_level.derive(changes, eval_level.progress_units(progress), data, eval_level.load_policy())
-    late = eval_level.late_freeze(str(data.get("frozen_sha") or ""), eval_level.branch_base(head))
+    late = eval_level.suite_late(data, eval_level.branch_base(head))
     suite = suite_hash(data)
     gate = {**facts, "derived_min_level": minimum, "late_freeze": late, "suite_hash": suite}
     top = [marker(number, head, result, str(data["verification_level"])), facts_line(minimum, late, suite[:16])]

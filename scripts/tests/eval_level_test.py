@@ -145,8 +145,8 @@ class LateFreezeTests(RepoCase):
         self.assertTrue(eval_level.late_freeze(later, self.base))
 
     def test_blank_or_unknown_sha(self) -> None:
-        """No frozen_sha is nothing to compute; an unresolvable one is late (cannot be shown to precede the base)."""
-        self.assertFalse(eval_level.late_freeze("", self.base))
+        """No frozen_sha and an unresolvable one are late (cannot be shown to precede the base)."""
+        self.assertTrue(eval_level.late_freeze("", self.base))
         self.assertTrue(eval_level.late_freeze("f" * 40, self.base))
 
     def test_branch_base_and_pr_changes(self) -> None:

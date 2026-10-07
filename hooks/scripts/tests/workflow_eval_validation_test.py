@@ -27,6 +27,7 @@ def fixture() -> JsonObject:
         "verification_level": 1,
         "verification_justification": "runtime boundary",
         "head_sha": "abc",
+        "frozen_sha": "a" * 40,  # level >= 1 needs a full sha; no repository here, so it is never resolved
         "task_ref": "branch",
         "evals": [
             {

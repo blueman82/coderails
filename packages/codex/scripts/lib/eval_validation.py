@@ -25,6 +25,8 @@ def validate_freeze(path: str | Path) -> None:
     data = read_object(path)
     frozen = str(data.get("frozen_sha") or "").strip()
     directory = Path(path).resolve().parent
+    if str(data.get("verification_level", "")) != "0" and not re.fullmatch(r"[0-9a-f]{40}", frozen):
+        raise ValueError("verification_level >= 1 requires a full 40-hex frozen_sha (the freeze commit)")
     if not frozen or git_output(directory, "rev-parse", "--is-inside-work-tree").returncode:
         return
     if git_output(directory, "cat-file", "-e", f"{frozen}^{{commit}}").returncode:
@@ -129,10 +131,12 @@ def validate_embed(path: str | Path, body_path: str | Path) -> None:
     level = parse_verification_level(body.splitlines()[0] if body else "")
     if not level:
         raise ValueError("body marker line does not parse (missing or malformed marker)")
+    if len(re.findall(r"^```json\s*$", body, re.MULTILINE)) != 1:
+        raise ValueError("body must contain exactly one fenced json block")
+    if any(line.lstrip().startswith("<!--") for line in body.splitlines()[2:]):
+        raise ValueError("body carries a marker-like line after the marker and facts lines")
     if level != "0":
         return
-    if len(re.findall(r"^```json\s*$", body, re.MULTILINE)) != 1:
-        raise ValueError("verification_level-0 body must contain exactly one fenced json block")
     block: object = json.loads(extract_json_block(body))
     block = object_value(block)
     if str(block.get("verification_level", "")) != level:

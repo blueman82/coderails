@@ -109,6 +109,15 @@ class StructureTests(ArtifactCase):
         self.save()
         with self.assertRaisesRegex(ValueError, "does not resolve"):
             validate_structure(self.path, "192", "head")
+        for unverifiable in (None, "", "origin/main", base[:12]):
+            self.data.pop("frozen_sha")
+            if unverifiable is not None:
+                self.data["frozen_sha"] = unverifiable
+            self.save()
+            with self.subTest(frozen_sha=unverifiable), self.assertRaisesRegex(ValueError, "40-hex frozen_sha"):
+                validate_structure(self.path, "192", "head")
+            self.data["frozen_sha"] = base
+        self.data.update(verification_level=0, evals=[])
         self.data.pop("frozen_sha")
         self.save()
         validate_structure(self.path, "192", "head")
@@ -136,8 +145,10 @@ class StructureTests(ArtifactCase):
             with self.assertRaisesRegex(ValueError, reason):
                 validate_embed(self.path, self.body(0, block))
         body = self.body(1, {})
-        body.write_text(body.read_text().splitlines()[0])
         validate_embed(self.path, body)
+        body.write_text(body.read_text().splitlines()[0])  # a level >= 1 body with no embed is refused too
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            validate_embed(self.path, body)
 
 
 if __name__ == "__main__":
