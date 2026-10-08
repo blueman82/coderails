@@ -184,11 +184,10 @@ def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
             lifecycle.check_staged_identity(repo_dir, ledger, row)
         held["approved"] = True
         original, degraded = ledger, ""
-        applied = lifecycle.loop_key(a.session, a.loop) in ledger["ticked_loops"]
         for row in prepared["records"]:
             known = ol.find(ledger, row["id"]) or row
             prior = known["muninn"].get("id") or row["muninn"].get("id")
-            if not applied:
+            if not any((e["session_id"], e["loop_id"]) == (a.session, a.loop) for e in known.get("evidence", [])):
                 ledger = _record_row(ledger, row, a.session, a.loop)
             field = lessons.metadata(lessons.current(row["id"], a.session, prior), prior)
             ledger = ol.set_muninn(ledger, row["id"], field)
@@ -238,12 +237,13 @@ def cmd_lessons(a: argparse.Namespace, repo_dir: Path) -> Result:
 
 def cmd_render(a: argparse.Namespace, repo_dir: Path) -> Result:
     """Regenerate both views from the ledger, dropping orders Muninn no longer holds as current (when it answers)."""
+    if any((repo_dir / name).is_symlink() for name, _ in VIEWS):
+        return _refuse("order_wrong_session")
     ledger = ol.open_ledger(repo_dir)
     got = lessons.joined(ledger, include_decayed=True, session=a.session)
     if "degraded" in got:  # no ledger-text fallback: with Muninn down the view could resurrect retracted orders
         ol.trace("order.render", "degraded", got["degraded"], a.session)
         return {"degraded": got["degraded"]}, 3
-    gone = {g["order"] for g in got.get("excluded", [])}
     keep = got["state"] == "memory_backend_off"
     rows = {r["id"]: r for r in got["lessons"] if keep or r["cited"]}
     shown: ol.Ledger = {
@@ -261,7 +261,7 @@ def cmd_render(a: argparse.Namespace, repo_dir: Path) -> Result:
             return {"degraded": bad.reason}, 3
         os.chmod(repo_dir / name, 0o444)
     ol.trace("order.render", "rendered", "ok", a.session)
-    return {"rendered": [n for n, _ in VIEWS], "excluded": sorted(gone)}, 0
+    return {"rendered": [n for n, _ in VIEWS], "excluded": sorted({g["order"] for g in got.get("excluded", [])})}, 0
 
 
 def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
