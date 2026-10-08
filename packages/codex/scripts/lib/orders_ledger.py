@@ -19,16 +19,15 @@ import copy
 import datetime
 import hashlib
 import json
-import os
 import re
 import runpy
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
+from scripts.lib.artifact_io import write_bytes  # noqa: E402
 from scripts.lib.memory_adapter import MARKER, NO_SESSION  # noqa: E402
 
 K = 5  # a loop count, deliberately a code constant and not config: an order decays after K loops without recurrence
@@ -332,8 +331,12 @@ def parse_legacy(text: str, now: str) -> list[dict[str, Any]]:
 
 def load(path: Path) -> Ledger:
     """Read orders.json (an absent file is an empty ledger); raises ValueError on unreadable or non-ledger content."""
+    if path.is_symlink():
+        raise ValueError("order_wrong_session")
     if not path.exists():
         view = path.parent / "standing-orders.md"
+        if view.is_symlink():
+            raise ValueError("order_wrong_session")
         if view.is_file() and view.read_text(encoding="utf-8", errors="replace").split("\n", 1)[0] == MARKER:
             raise ValueError("ledger_missing")  # a generated view exists, so the ledger was deleted
         return empty()
@@ -349,17 +352,8 @@ def load(path: Path) -> Ledger:
 
 
 def save(path: Path, ledger: Ledger) -> None:
-    """Atomic write (temp file in the same dir, then os.replace)."""
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(ledger, f, indent=1, sort_keys=True)
-            f.write("\n")
-        os.replace(tmp, path)
-    except OSError:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
+    """Publish the established JSON bytes after their sibling file has been completely written and fsynced."""
+    write_bytes(path, (json.dumps(ledger, indent=1, sort_keys=True) + "\n").encode("utf-8"))
 
 
 class ChainError(ValueError):

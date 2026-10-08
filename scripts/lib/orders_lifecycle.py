@@ -57,6 +57,8 @@ def loop_key(session: str, loop: str) -> str:
 
 def object_file(path: Path) -> dict[str, Any]:
     """Read a required object-shaped source without empty-on-error fallback."""
+    if path.is_symlink() or path.parent.is_symlink():
+        raise ValueError("order_wrong_session")
     try:
         value: object = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as error:
@@ -287,8 +289,10 @@ def _finite_float(value: str) -> float:
     return number
 
 
-def observe(state_dir: Path, step: str, binding: dict[str, Any], evidence: str) -> None:
-    """Publish a truthful receipt under the persistent teardown lock; callers already hold the orders lock."""
+def observe(
+    state_dir: Path, step: str | None = None, binding: dict[str, Any] | None = None, evidence: str = ""
+) -> None:
+    """Validate under the teardown lock; absent step is preflight, otherwise publish the bound truthful receipt."""
     path = state_dir / "teardown.jsonl"
     lock = state_dir / "teardown.jsonl.lock"
     if state_dir.is_symlink() or path.is_symlink() or lock.is_symlink():
@@ -307,6 +311,10 @@ def observe(state_dir: Path, step: str, binding: dict[str, Any], evidence: str) 
             for line in prior.decode("utf-8").split("\n")[:-1]
         ]
         if any(not isinstance(row, dict) for row in rows):
+            raise ValueError("order_source_invalid")
+        if step is None:
+            return
+        if binding is None:
             raise ValueError("order_source_invalid")
         if any(
             row.get("step") == step and row.get("binding") == binding and row.get("evidence_sha256") == evidence
@@ -371,7 +379,10 @@ def retro_count(repo_dir: Path) -> int:
                 elif name.startswith("progress."):
                     actual = sha(state.get(name.split(".", 1)[1]))
                 elif name in ("evals.json", "proof.json", "proof_results.jsonl", "teardown.jsonl"):
-                    source = path.with_name(name).read_bytes()
+                    source_path = path.with_name(name)
+                    if source_path.is_symlink():
+                        raise ValueError("order_wrong_session")
+                    source = source_path.read_bytes()
                     actual = sha(json.loads(source)) if name.endswith(".json") else hashlib.sha256(source).hexdigest()
                 else:
                     raise ValueError("order_source_invalid")

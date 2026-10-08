@@ -192,13 +192,17 @@ class OwnedCli(StoreCase):
         self.complete()
         receipts = self.path.with_name("teardown.jsonl")
         original = receipts.read_text()
-        receipts.unlink()
-        receipts.mkdir()
-        rc, out = self.cli("tick", "--loop", "logical-loop")
+        output = io.StringIO()
+        argv = ["--dir", str(self.repo), "--session", SESSION, "tick", "--loop", "logical-loop"]
+        with (
+            mock.patch.object(lifecycle, "write_bytes", side_effect=OSError("receipt-publication")),
+            contextlib.redirect_stdout(output),
+        ):
+            rc = orders.main(argv)
+        out = json.loads(output.getvalue())
         self.assertEqual((rc, out.get("pending_teardown")), (3, True))
         self.assertEqual(len(self.ledger()["orders"][0]["evidence"]), 1)
-        receipts.rmdir()
-        receipts.write_text(original)
+        self.assertEqual(receipts.read_text(), original)
         rc, out = self.cli("tick", "--loop", "logical-loop")
         self.assertEqual((rc, out["ticked"]), (0, False))
         self.assertEqual(len(self.ledger()["orders"][0]["evidence"]), 1)

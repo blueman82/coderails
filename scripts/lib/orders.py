@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Standing orders CLI: record|prepare|tick|predicate|lessons|render|import-legacy|cite (provider-neutral).
 
-D is the repo-key dir. The ledger `orders.json` (counters, decay, hash chain; see orders_ledger.py) is written under
-dir_lock through currentness, reconciliation, bounded Muninn sync and atomic ledger save. A degrade
-never loses the order: it is kept active with `muninn.state=degraded` and the reason (`no_user_cite` without --quote).
+D is the repo-key dir. The ledger is written under dir_lock through currentness, reconciliation, bounded
+Muninn sync and atomic save. Degradation retains an active order with its reason (`no_user_cite` without --quote).
 `render` exits 3 and writes nothing with Muninn down. Re-recording retracted/expired claims syncs a new owner quote.
 Exit 0 ok or disabled, 2 refused/error (reason_code printed), 3 degraded/pending (reason printed, local state retained).
-Never falls back to Markdown.
 """
 
 from __future__ import annotations
@@ -126,6 +124,7 @@ def cmd_record(a: argparse.Namespace, repo_dir: Path) -> Result:
 
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
         state_dir, state, binding = lifecycle.owned(repo_dir, a.session, a.loop)
+        lifecycle.observe(state_dir)
         held["complete"] = state["status"] == "complete"
         prepared = lifecycle.prepared(state_dir, binding)
         old: dict[str, Any] = (
@@ -163,6 +162,7 @@ def cmd_prepare(a: argparse.Namespace, repo_dir: Path) -> Result:
 
     def change(ledger: ol.Ledger) -> tuple[None, dict[str, Any]]:
         state_dir, prepared = lifecycle.prepare(repo_dir, a.session, a.loop, ledger, a.refresh_from_sha256)
+        lifecycle.observe(state_dir)
         binding = prepared["binding"]
         _prepare(state_dir, prepared)
         return None, {"prepared": True, "binding": binding, "evidence_sha256": lifecycle.sha(prepared)}
@@ -178,6 +178,7 @@ def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
 
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
         state_dir, _, binding = lifecycle.owned(repo_dir, a.session, a.loop, complete=True)
+        lifecycle.observe(state_dir)
         prepared = lifecycle.prepared(state_dir, binding, required=True)
         for row in prepared["records"]:
             lifecycle.check_staged_identity(repo_dir, ledger, row)

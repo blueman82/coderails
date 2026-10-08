@@ -198,7 +198,7 @@ class PreparationRefresh(StoreCase):
         self.revise(revision=2)
         argv = self.argv("prepare", "--loop", LOOP, "--refresh-from-sha256", self.current_hash)[2:]
         with (
-            mock.patch.object(lifecycle, "observe", side_effect=OSError("disk-full")),
+            mock.patch.object(lifecycle, "write_bytes", side_effect=OSError("disk-full")),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             rc = orders.main(argv)

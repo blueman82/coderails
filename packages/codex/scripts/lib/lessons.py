@@ -77,7 +77,7 @@ def metadata(result: ma.Record | ma.Written | ma.Degraded | None, prior: str | N
         return {"id": result.id, "state": "written", "reason_code": "ok"}
     reason = result.reason if isinstance(result, ma.Degraded) else "lesson_not_current" if prior else "no_user_cite"
     if reason == "memory_backend_off":
-        return {"id": None, "state": "disabled", "reason_code": reason}
+        return {"id": prior, "state": "disabled", "reason_code": reason}
     return {"id": prior, "state": "degraded", "reason_code": reason}
 
 
