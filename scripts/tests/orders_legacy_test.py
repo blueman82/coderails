@@ -14,6 +14,7 @@ sys.path.insert(0, str(REPO))
 from scripts.lib import orders_ledger as ol  # noqa: E402
 from scripts.lib.memory_adapter import MARKER  # noqa: E402
 from scripts.tests.fake_muninn_case import SESSION, StoreCase  # noqa: E402
+from scripts.tests.orders_retry_view_test import ConsumerCase  # noqa: E402
 
 BODY = "### Keep source text\n**loops_since_recurrence:** 5\n**First seen:** session old\nKeep the whole lesson.\n"
 MOVE_PROBE = r"""
@@ -227,6 +228,59 @@ class LegacyPreservation(StoreCase):
                 self.assertEqual(source.read_text(), text)
                 self.assertEqual(backup.read_text(), "Prior backup\n")
                 self.assertEqual(list(repo.glob("standing-orders.legacy*.md")), [backup])
+
+
+class StagedLegacyIdentity(ConsumerCase):
+    """Cutover imports must preserve identities accepted by genuine owned preparation."""
+
+    def test_conflicting_legacy_import_refuses_before_save_or_archive_and_record_remains_usable(self) -> None:
+        """An agnostic staged order cannot become a repo order through the one-time handwritten conversion."""
+        body = "### retry-safely\n**loops_since_recurrence:** 0\n**First seen:** legacy\nKeep retries bounded.\n"
+        for codex in (False, True):
+            for backend in ("off", "muninn"):
+                self.configured(codex, backend, "legacy-identity")
+                rc, staged = self.record_order("s1", "retry-safely", "Keep retries bounded.")
+                self.assertEqual((rc, staged["prepared"], staged["recorded"]), (0, True, False), staged)
+                self.assertEqual(staged["muninn"]["state"], "disabled" if backend == "off" else "written")
+                self.assert_backend(backend)
+                self.assertFalse((self.repo / "orders.json").exists())
+                source, backup = self.repo / "standing-orders.md", self.repo / "standing-orders.legacy.md"
+                source.write_text(body)
+                backup.write_text("Preserve prior archive.\n")
+                before = self.canonical()
+                progress = (self.repo / "s1/progress.json").read_bytes()
+                receipts = (self.repo / "s1/teardown.jsonl").read_bytes()
+                archives = {p.name: p.read_bytes() for p in self.repo.glob("standing-orders.legacy*.md")}
+                rc, out = self.cli("import-legacy")
+                for boundary, actual, expected in (
+                    ("refusal", (rc, out.get("reason_code")), (2, "order_id_collision")),
+                    ("canonical", self.canonical() == before, True),
+                    ("source", source.read_text() if source.exists() else None, body),
+                    (
+                        "archives",
+                        {p.name: p.read_bytes() for p in self.repo.glob("standing-orders.legacy*.md")},
+                        archives,
+                    ),
+                    ("progress", (self.repo / "s1/progress.json").read_bytes(), progress),
+                    ("receipts", (self.repo / "s1/teardown.jsonl").read_bytes(), receipts),
+                ):
+                    with self.subTest(codex=codex, backend=backend, boundary=boundary):
+                        self.assertEqual(actual, expected, out)
+                rc, repeated = self.record_order("s1", "retry-safely", "Keep retries bounded.")
+                with self.subTest(codex=codex, backend=backend, boundary="ordinary-record"):
+                    self.assertEqual((rc, repeated.get("prepared")), (0, True), repeated)
+                self.complete("s1")
+                rc, ticked = self.cli("tick", "--loop", "logical-s1")
+                with self.subTest(codex=codex, backend=backend, boundary="completed-tick"):
+                    self.assertEqual((rc, ticked.get("ticked")), (0, True), ticked)
+                row = ol.open_ledger(self.repo)["orders"][0]
+                with self.subTest(codex=codex, backend=backend, boundary="accepted-identity"):
+                    self.assertEqual(
+                        (row["id"], row["failure_mode"], row["scope"], row["lesson"]),
+                        ("retry-safely", "retry-safely", "agnostic", "Keep retries bounded."),
+                    )
+                with self.subTest(codex=codex, backend=backend, boundary="accepted-evidence"):
+                    self.assertEqual([(e["session_id"], e["loop_id"]) for e in row["evidence"]], [("s1", "logical-s1")])
 
 
 if __name__ == "__main__":

@@ -223,6 +223,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `orders.py --dir <repo-key dir> cite <id> --quote "<verbatim words the owner typed>"` from the owning session. To
   adopt the old hand-written file run `orders.py import-legacy` once (it moves the original to
   `standing-orders.legacy.md`, never deletes it), then `orders.py render`.
+  This importer is for one-time cutover only; retire it after conversion and use typed orders thereafter.
 - Apply contract: use `--dir <repo-key dir> --session <provider session>` with the separate logical `--loop` copied
   from `<repo-key dir>/<session>/progress.json`. Stage `record` inputs, then `prepare --loop <logical loop>` after
   the final progress-source mutations. Preparation validates ownership, revision, eligibility and hashes, and appends

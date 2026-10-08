@@ -281,6 +281,8 @@ def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
 
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
         new = {**ledger, "orders": list(ledger["orders"])}
+        for row in parsed:
+            lifecycle.check_staged_identity(repo_dir, ledger, row)
         have = {o["id"]: o for o in new["orders"]}
         shared = [row for row in parsed if row["id"] in have]
         if shared:
