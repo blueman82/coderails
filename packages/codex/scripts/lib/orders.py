@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Standing orders CLI: record|prepare|tick|predicate|lessons|render|import-legacy|cite (provider-neutral).
-
-D is the repo-key dir. The ledger is written under dir_lock through currentness, reconciliation, bounded
-Muninn sync and atomic save. Degradation retains an active order with its reason (`no_user_cite` without --quote).
-`render` exits 3 and writes nothing with Muninn down. Re-recording retracted/expired claims syncs a new owner quote.
-Exit 0 ok or disabled, 2 refused/error (reason_code printed), 3 degraded/pending (reason printed, local state retained).
-"""
+"""Standing orders CLI under one lock: exit 0 ok/disabled, 2 refused/error, 3 degraded/pending."""
 
 from __future__ import annotations
 
@@ -100,10 +94,11 @@ def _prepare(state_dir: Path, prepared: dict[str, Any]) -> None:
     lifecycle.observe(state_dir, "orders_prepared", prepared["binding"], lifecycle.sha(prepared))
 
 
-def _record_row(ledger: ol.Ledger, row: dict[str, Any], session: str, loop: str) -> ol.Ledger:
+def _record_row(ledger: ol.Ledger, row: dict[str, Any], binding: dict[str, Any]) -> ol.Ledger:
     """Apply the validated row with its explicit identity and the owned session/loop."""
     fields = {key: row[key] for key in ("scope", "failure_mode")}
-    fields.update(session_id=session, loop_id=loop, now=row["ts"])
+    fields.update(session_id=binding["session_id"], loop_id=binding["loop_id"], now=row["ts"])
+    fields["lesson_source"] = ol.source_token(row, binding)
     return cast("ol.Ledger", ol.record(ledger, row["id"], row["lesson"], **fields)["ledger"])
 
 
@@ -137,12 +132,14 @@ def cmd_record(a: argparse.Namespace, repo_dir: Path) -> Result:
             "scope": a.scope,
             "ts": ol.now_iso(),
         }
+        if any((e["session_id"], e["loop_id"]) == (a.session, a.loop) for e in old.get("evidence", [])):
+            row["replaces_source"] = old.get("lesson_source")
         row["muninn"] = sync_order({**old, **row}, a.session, a.quote, repo_dir, ledger, replace=True)
         prepared["records"] = [r for r in prepared["records"] if r["id"] != order_id] + [row]
         _prepare(state_dir, prepared)
         new = None
         if state["status"] == "complete":
-            new = ol.set_muninn(_record_row(ledger, row, a.session, a.loop), order_id, row["muninn"])
+            new = ol.set_muninn(_record_row(ledger, row, binding), order_id, row["muninn"])
         return new, {"recorded": new is not None, "prepared": True, "id": order_id, "muninn": row["muninn"]}
 
     payload, rc = update(repo_dir, change)
@@ -178,8 +175,8 @@ def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
 
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
         state_dir, _, binding = lifecycle.owned(repo_dir, a.session, a.loop, complete=True)
-        lifecycle.observe(state_dir)
         prepared = lifecycle.prepared(state_dir, binding, required=True)
+        acknowledged = lifecycle.observe(state_dir, "orders_ticked", binding, lifecycle.sha(prepared), emit=False)
         for row in prepared["records"]:
             lifecycle.check_staged_identity(repo_dir, ledger, row)
         held["approved"] = True
@@ -187,8 +184,8 @@ def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
         for row in prepared["records"]:
             known = ol.find(ledger, row["id"]) or row
             prior = known["muninn"].get("id") or row["muninn"].get("id")
-            if not any((e["session_id"], e["loop_id"]) == (a.session, a.loop) for e in known.get("evidence", [])):
-                ledger = _record_row(ledger, row, a.session, a.loop)
+            if ol.needs_record(known, row, binding, acknowledged is True):
+                ledger = _record_row(ledger, row, binding)
             field = lessons.metadata(lessons.current(row["id"], a.session, prior), prior)
             ledger = ol.set_muninn(ledger, row["id"], field)
             if field["state"] == "degraded":

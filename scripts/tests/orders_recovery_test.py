@@ -351,21 +351,26 @@ class SharedIdentity(RecoveryCase):
     def test_existing_conflicting_preparation_cannot_replace_applied_scope(self) -> None:
         """A typed pre-existing conflicting staged row cannot preserve agnostic scope while replacing repo text."""
         for codex in (False, True):
-            with self.subTest(codex=codex):
-                self.configure(codex)
-                for sid in ("s1", "s2"):
-                    self.assertEqual(self.stage(sid)[0], 0)
-                self.complete("s1")
-                self.assertEqual(self.cli("tick", "--loop", "logical-s1")[0], 0)
-                path = lifecycle.preparation_path(self.repo / "s2", "logical-s2")
-                prepared = json.loads(path.read_text())
-                prepared["records"][0]["scope"] = "repo"
-                path.write_text(json.dumps(prepared))
-                self.complete("s2")
-                before = (self.repo / "orders.json").read_bytes()
-                rc, out = self.cli("tick", "--loop", "logical-s2", session="s2")
-                self.assertEqual((rc, out.get("reason_code")), (2, "order_id_collision"), out)
-                self.assertEqual((self.repo / "orders.json").read_bytes(), before)
+            for key, value, reason in (
+                ("scope", "repo", "order_id_collision"),
+                ("replaces_source", True, "order_source_invalid"),
+                ("lesson_source", None, "order_source_invalid"),
+            ):
+                with self.subTest(codex=codex, key=key):
+                    self.configure(codex, key)
+                    for sid in ("s1", "s2"):
+                        self.assertEqual(self.stage(sid)[0], 0)
+                    self.complete("s1")
+                    self.assertEqual(self.cli("tick", "--loop", "logical-s1")[0], 0)
+                    path = lifecycle.preparation_path(self.repo / "s2", "logical-s2")
+                    prepared = json.loads(path.read_text())
+                    prepared["records"][0][key] = value
+                    path.write_text(json.dumps(prepared))
+                    self.complete("s2")
+                    before = (self.repo / "orders.json").read_bytes()
+                    rc, out = self.cli("tick", "--loop", "logical-s2", session="s2")
+                    self.assertEqual((rc, out.get("reason_code")), (2, reason), out)
+                    self.assertEqual((self.repo / "orders.json").read_bytes(), before)
 
     def test_same_identity_stages_across_sessions_and_recurrence_applies_once(self) -> None:
         """Three owned sessions may stage one id/mode/scope before any completion, then apply accepted recurrence."""

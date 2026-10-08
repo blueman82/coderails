@@ -1,9 +1,4 @@
-"""Owner/source bindings and honest observations for prepare, durable completion, then local orders apply.
-
-This module never acquires a progress lock or completes a graph. The provider completes progress first;
-orders.py subsequently reads it under its one orders lock. Preparation carries no recurrence/tick effect.
-Cooperating-agent safeguard: source hashes and observations remain writable by the same user.
-"""
+"""Owned orders preparation/receipts; no graph completion or progress lock. Same-user evidence is mutable."""
 
 from __future__ import annotations
 
@@ -19,7 +14,6 @@ import sys
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
-from types import ModuleType
 from typing import Any, cast
 
 from hooks.scripts.test_output import file_lock
@@ -33,13 +27,12 @@ if CODEX:
 else:
     _completion = importlib.import_module("hooks.scripts.lib.loop_completion")
 WORK_UNIT_CHECK = cast("Callable[[dict[str, Any]], None]", _completion.validate_work_units)
-_retro_check: ModuleType | None
+_retro_check = None
 try:
     _retro_check = importlib.import_module("scripts.lib.retro_check")
 except ModuleNotFoundError as error:
     if error.name != "scripts.lib.retro_check":
         raise
-    _retro_check = None
 RETRO_CHECK = _retro_check
 
 
@@ -163,6 +156,11 @@ def valid_record(row: dict[str, Any]) -> bool:
         return False
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,119}", row["id"]) or row.get("scope") not in ("repo", "agnostic"):
         return False
+    for key, value in row.items():
+        if key not in ("lesson_source", "replaces_source") or (key == "replaces_source" and value is None):
+            continue
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            return False
     field = row.get("muninn")
     if not isinstance(field, dict):
         return False
@@ -290,8 +288,8 @@ def _finite_float(value: str) -> float:
 
 
 def observe(
-    state_dir: Path, step: str | None = None, binding: dict[str, Any] | None = None, evidence: str = ""
-) -> None:
+    state_dir: Path, step: str | None = None, bound: dict[str, Any] | None = None, digest: str = "", emit: bool = True
+) -> bool:
     """Validate under the teardown lock; absent step is preflight, otherwise publish the bound truthful receipt."""
     path = state_dir / "teardown.jsonl"
     lock = state_dir / "teardown.jsonl.lock"
@@ -313,24 +311,27 @@ def observe(
         if any(not isinstance(row, dict) for row in rows):
             raise ValueError("order_source_invalid")
         if step is None:
-            return
-        if binding is None:
+            return False
+        if bound is None:
             raise ValueError("order_source_invalid")
         if any(
-            row.get("step") == step and row.get("binding") == binding and row.get("evidence_sha256") == evidence
+            row.get("step") == step and row.get("binding") == bound and row.get("evidence_sha256") == digest
             for row in rows
         ):
-            return
+            return True
+        if not emit:
+            return False
         row = {
             "step": step,
-            "session_id": binding["session_id"],
-            "loop_id": binding["loop_id"],
-            "revision": binding["revision"],
-            "binding": binding,
-            "evidence_sha256": evidence,
+            "session_id": bound["session_id"],
+            "loop_id": bound["loop_id"],
+            "revision": bound["revision"],
+            "binding": bound,
+            "evidence_sha256": digest,
             "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         write_bytes(path, prior + (json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
+        return True
 
 
 def retro_count(repo_dir: Path) -> int:

@@ -99,20 +99,31 @@ class LateCompletedRecord(ConsumerCase):
     """A loop tick does not establish that every later accepted order observation has been saved."""
 
     def interrupted_record(
-        self, ledger_path: Path, prepared_path: Path, receipts: Path, prior: tuple[bytes, bytes, bytes]
+        self,
+        ledger_path: Path,
+        prepared_path: Path,
+        receipts: Path,
+        prior: tuple[bytes, bytes, bytes],
+        replacement: tuple[str, str, tuple[str, ...]] | None = None,
+        published: bool = False,
     ) -> dict[str, Any]:
         """Accept preparation, fail only the final ledger save, and preserve the prior canonical evidence."""
         before, preparation_before, receipt_before = prior
+        order_id, lesson, expected_ids = replacement or (
+            "late-mode",
+            "Keep the complete late lesson.",
+            ("stable-mode", "late-mode"),
+        )
         args = self.argv(
             "orders.py",
             "s1",
             "record",
             "--id",
-            "late-mode",
+            order_id,
             "--failure-mode",
-            "late-mode",
+            order_id,
             "--lesson",
-            "Keep the complete late lesson.",
+            lesson,
             "--scope",
             "agnostic",
             "--quote",
@@ -120,8 +131,13 @@ class LateCompletedRecord(ConsumerCase):
             "--loop",
             "logical-s1",
         )[2:]
+        fault = (
+            FINAL_SAVE_FAULT.replace("raise OSError", "real_save(path, value); raise OSError")
+            if published
+            else FINAL_SAVE_FAULT
+        )
         got = subprocess.run(
-            [sys.executable, "-c", FINAL_SAVE_FAULT, str(self.root), str(ledger_path), *args],
+            [sys.executable, "-c", fault, str(self.root), str(ledger_path), *args],
             cwd=self.repo,
             env=self.native_env,
             capture_output=True,
@@ -132,10 +148,11 @@ class LateCompletedRecord(ConsumerCase):
         out, seen = map(json.loads, got.stdout.splitlines())
         self.assertEqual((got.returncode, seen["rc"], out.get("pending_teardown")), (3, 3, True), out)
         self.assertEqual((seen["saved"], seen["refused"]), ([str(prepared_path)], [str(ledger_path)]))
-        self.assertEqual(ledger_path.read_bytes(), before)
+        if not published:
+            self.assertEqual(ledger_path.read_bytes(), before)
         self.assertNotEqual(prepared_path.read_bytes(), preparation_before)
         prepared: dict[str, Any] = json.loads(prepared_path.read_bytes())
-        self.assertEqual([r["id"] for r in prepared["records"]], ["stable-mode", "late-mode"])
+        self.assertEqual([r["id"] for r in prepared["records"]], list(expected_ids))
         self.assertTrue(receipts.read_bytes().startswith(receipt_before))
         rows = [json.loads(line) for line in receipts.read_bytes().split(b"\n") if line]
         self.assertEqual((rows[-1]["step"], rows[-1]["evidence_sha256"]), ("orders_prepared", lifecycle.sha(prepared)))
@@ -237,6 +254,82 @@ class LateCompletedRecord(ConsumerCase):
                     self.assertEqual(
                         prepared_path.read_bytes(), json.dumps(prepared, indent=1, sort_keys=True).encode() + b"\n"
                     )
+
+    def test_same_bound_replacement_is_saved_before_acknowledging_amended_preparation(self) -> None:
+        """An accepted explicit replacement recovers without another recurrence for the already applied tuple."""
+        for codex in (False, True):
+            for backend in ("off", "muninn"):
+                with self.subTest(codex=codex, backend=backend):
+                    self.configured(codex, backend, "replacement")
+                    self.assertEqual(self.stage("s1")[0], 0)
+                    self.apply("s1")
+                    self.assert_backend(backend)
+                    ledger_path = self.repo / "orders.json"
+                    prepared_path = lifecycle.preparation_path(self.repo / "s1", "logical-s1")
+                    receipts = self.repo / "s1/teardown.jsonl"
+                    before, previous = ledger_path.read_bytes(), ol.open_ledger(self.repo)
+                    original = cast("dict[str, Any]", ol.find(previous, "stable-mode"))
+                    self.assertEqual(original["lesson"], "Lesson for s1")
+                    self.assertEqual(
+                        [(e["session_id"], e["loop_id"]) for e in original["evidence"]], [("s1", "logical-s1")]
+                    )
+                    self.assertEqual(previous["ticked_loops"], [lifecycle.loop_key("s1", "logical-s1")])
+                    fields = ("created", "last_recurred", "loops_since_recurrence", "status", "decayed_at", "evidence")
+                    saved = {key: original[key] for key in fields}
+                    preparation_before, receipt_before = prepared_path.read_bytes(), receipts.read_bytes()
+                    replacement = "Keep the explicitly replaced same-bound lesson."
+                    prepared = self.interrupted_record(
+                        ledger_path,
+                        prepared_path,
+                        receipts,
+                        (before, preparation_before, receipt_before),
+                        ("stable-mode", replacement, ("stable-mode",)),
+                    )
+                    self.assertEqual(
+                        [(r["id"], r["lesson"]) for r in prepared["records"]], [("stable-mode", replacement)]
+                    )
+                    rc, retry, recovered = self.probe(ledger_path, "tick", "--loop", "logical-s1")
+                    current = ol.open_ledger(self.repo)
+                    actual = cast("dict[str, Any]", ol.find(current, "stable-mode"))
+                    for boundary, result, expected in (
+                        ("retry", (rc, retry.get("ticked"), retry.get("pending_teardown", False)), (0, False, False)),
+                        ("canonical-replacement", actual["lesson"], replacement),
+                        ("lifecycle-fields", {key: actual[key] for key in fields}, saved),
+                        ("tick-keys", current["ticked_loops"], previous["ticked_loops"]),
+                        (
+                            "save-before-receipt",
+                            [
+                                e["destination"]
+                                for e in recovered["events"]
+                                if e["event"] == "replace" and e["destination"] in (str(ledger_path), str(receipts))
+                            ],
+                            [str(ledger_path), str(receipts)],
+                        ),
+                    ):
+                        with self.subTest(codex=codex, backend=backend, boundary=boundary):
+                            self.assertEqual(result, expected, retry)
+                    rows = [json.loads(line) for line in receipts.read_bytes().split(b"\n") if line]
+                    with self.subTest(codex=codex, backend=backend, boundary="current-preparation-receipt"):
+                        self.assertEqual(
+                            (rows[-1]["step"], rows[-1]["evidence_sha256"]),
+                            ("orders_ticked", lifecycle.sha(prepared)),
+                        )
+                    canonical, receipt_saved = self.canonical(), receipts.read_bytes()
+                    rc, repeated = self.cli("tick", "--loop", "logical-s1")
+                    with self.subTest(codex=codex, backend=backend, boundary="repeat-result"):
+                        self.assertEqual((rc, repeated.get("ticked")), (0, False), repeated)
+                    with self.subTest(codex=codex, backend=backend, boundary="repeat-canonical-bytes"):
+                        self.assertTrue(self.canonical() == canonical)
+                    with self.subTest(codex=codex, backend=backend, boundary="repeat-receipt-bytes"):
+                        self.assertEqual(receipts.read_bytes(), receipt_saved)
+                    self.assertEqual(
+                        prepared_path.read_bytes(), json.dumps(prepared, indent=1, sort_keys=True).encode() + b"\n"
+                    )
+
+                    unbound_fields = dict(session_id="s1", loop_id="logical-s1", now="2026-10-08", scope="agnostic")
+                    unbound = ol.record(current, "stable-mode", "Unbound authored update", **unbound_fields)["ledger"]
+                    with self.subTest(codex=codex, backend=backend, boundary="unbound-author-invalidation"):
+                        self.assertNotIn("lesson_source", cast("dict[str, Any]", ol.find(unbound, "stable-mode")))
 
 
 class OwnedGeneratedViews(ConsumerCase):

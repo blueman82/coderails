@@ -383,9 +383,8 @@ class Sources(unittest.TestCase):
         """Each order/lesson/legacy reason is a REASONS key and named in the runbook."""
         runbook = (REPO / "docs/RUNBOOK.md").read_text()
         for code in (
-            "order_chain_broken", "order_blank_field", "order_not_found", "order_state_error",
-            "order_already_ticked", "no_user_cite", "legacy_uncited", "legacy_parse_error", "legacy_missing",
-            "lesson_not_current",
+            "order_chain_broken", "order_blank_field", "order_not_found", "order_state_error", "order_already_ticked",
+            "no_user_cite", "legacy_uncited", "legacy_parse_error", "legacy_missing", "lesson_not_current",
         ):  # fmt: skip
             self.assertIn(code, memory_reasons.REASONS)
             self.assertIn(f"`{code}`", runbook)

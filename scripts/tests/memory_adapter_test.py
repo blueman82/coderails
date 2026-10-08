@@ -42,7 +42,6 @@ sys.stdout.write('{"entry": {"id": "K9"}}')
 """.replace(
     "@FLAGS@", NEW_FLAGS
 )
-
 USER_ANCHOR = {"role": "user", "kind": "prompt", "state": "live", "verify": "ok"}
 ENTRIES: dict[str, Any] = {
     "entries": [

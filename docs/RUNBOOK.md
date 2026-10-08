@@ -231,6 +231,16 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   lock and emits `orders_ticked` after its ledger save. A failed completion save ages nothing. A failed postcompletion
   ledger save or observation returns exit 3 and `pending_teardown: true`; retry the same tick to recover idempotently.
   Automatic provider completion wiring is pending in this source checkpoint; the instructed caller remains advisory.
+- Completed text replacement: when this session/loop observation already exists, explicit `record` captures
+  `replaces_source` in the prepared row. The canonical `lesson_source` hashes owned binding, authored fields and that
+  predecessor, excluding mutable store observations, and is sealed/saved with the lesson. Ordinary tick recovers only
+  the accepted row while preserving counters and evidence; an equal published token needs no replay. A later authored
+  source is preserved. Without an exact validated success receipt for this preparation, a conflicting retry stays
+  pending and emits no false completion receipt. Older absent predecessor fields are never retroactively invented;
+  a captured null is distinct and cannot authorize delayed replacement without its own published source or exact
+  validated acknowledgement, even if no later edit occurred. Direct completed explicit record remains available.
+  Publication, receipt loss and then a later replacement can remain pending because these
+  two retained facts do not prove historical application. Unbound pure-model record updates clear an old source token.
 - Preparation recovery: changed sources are refused by default. Before completion, use
   `prepare --loop <logical loop> --refresh-from-sha256 <CURRENT evidence_sha256>` only with the canonical hash returned
   by the current preparation. Comparison happens under the same orders lock. Resolved directories, session and

@@ -40,6 +40,7 @@ edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Decision record
 | Changed preparation recovery | no separately bound preparation | explicit current-hash compare-and-swap; staged records preserved without effects | `orders_prepare_test.py` |
 | Citation chronology | cached ledger/preparation could restore older claims or ids | cite reconciles without authoring; tick reads fresh metadata, preserving later known ids during outages | `orders_current_test.py` |
 | Legacy move interruption | saved imported rows made ordinary retry collide | full parsed-cohort equality resumes only the source move, without another ledger save | `orders_legacy_test.py` |
+| Completed lesson replacement recovery | existing evidence could acknowledge an unsaved same-loop edit | captured predecessor and sealed authored-source token recover only the accepted row | `orders_retry_view_test.py` |
 
 Counters: `order.record|prepare|tick|render|import|cite` and `lesson.query|predicate` trace rows are counted by
 `scripts/lib/memory_counters.py` (`by_command`, `by_reason_code`), which `scripts/measure_graph_alignment.py` already embeds
@@ -59,3 +60,14 @@ Legacy retry equivalence covers every parsed row except seal fields, not a whole
 identity. Current reads exclude nonfinite expiries; scope labels remain opaque as supplied by Muninn's cwd-filtered
 repository list. Receipt parsing requires physical LF records and finite JSON numbers; Unicode inside a legitimate
 JSON string remains supported. Linked preparation/receipt/sidecar paths refuse before content read/open/create.
+
+For an explicit replacement with existing session/loop evidence, prepared `replaces_source` captures the canonical
+`lesson_source` (including an explicit null when none existed). The canonical token hashes owned binding and authored
+row fields, excluding mutable Muninn observations, and is saved with its lesson under the existing chain. Tick applies
+only a missing observation or a replacement whose predecessor still matches; equal published source is already applied.
+A different later authored source is preserved, with exit 3/pending unless exact validated success evidence already
+acknowledges this preparation. An unbound pure `record` update clears the old token. Older absent predecessor data is
+not retroactively invented. Captured null cannot authorize a delayed replacement without its own published source or
+exact validated acknowledgement; even an unchanged null-source predecessor cannot prove authorship. Direct completed
+explicit record remains available. Publication followed by a lost receipt and then another authored replacement can remain
+honestly pending: the latest source and predecessor do not establish that historical application.

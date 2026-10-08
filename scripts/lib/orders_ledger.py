@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Standing orders as typed records: the pure model, a hash chain over the orders, atomic file IO (provider-neutral).
-
-An order is `{id, created, failure_mode, lesson, evidence[{session_id, loop_id, ts}], last_recurred,
-loops_since_recurrence, status active|decayed, decayed_at, scope repo|agnostic, muninn{id, state, reason_code}}`
-plus the chain fields `{seq, prev_sha256, row_sha256}`. `row_sha256` covers every field except `muninn` and itself,
-and `prev_sha256` names the previous order's hash (64 zeros first), so a hand edit or a dropped or swapped middle order
-is named by `verify`. A `head` {count, last_sha256, ticks_sha256} anchors the tail and the ticked loops, so a dropped
-last order or edited ticks are named too (`#ledger`/`bad_head`). Every writer here recomputes the whole chain (`seal`)
-because ticks change every order. Cooperating-agent safeguard, not a security boundary: a same-user agent can rewrite
-the file and recompute chain and head, and an absent file beside no generated view loads as an empty ledger;
-`muninn` sits outside the hash. The counters and decay live here; the cited claim lives in Muninn
-(see lessons.py, orders.py).
-"""
+"""Typed orders: sealed authored publication and lifecycle fields, excluding mutable store observations."""
 
 from __future__ import annotations
 
@@ -149,6 +137,24 @@ def find(ledger: Ledger, order_id: str) -> dict[str, Any] | None:
     return next((o for o in ledger["orders"] if o["id"] == order_id), None)
 
 
+def source_token(row: dict[str, Any], binding: dict[str, Any]) -> str:
+    """Bind authored fields and their captured predecessor to the owned source, excluding store observations."""
+    return lifecycle.sha({"binding": binding, "record": {k: v for k, v in row.items() if k != "muninn"}})
+
+
+def needs_record(order: dict[str, Any], row: dict[str, Any], binding: dict[str, Any], acknowledged: bool) -> bool:
+    """Recover only missing observations or an accepted replacement whose predecessor remains canonical."""
+    if any(
+        (e["session_id"], e["loop_id"]) == (binding["session_id"], binding["loop_id"])
+        for e in order.get("evidence", [])
+    ):
+        if "replaces_source" not in row or order.get("lesson_source") == source_token(row, binding) or acknowledged:
+            return False
+        if row["replaces_source"] is None or order.get("lesson_source") != row["replaces_source"]:
+            raise ValueError("order_pending_teardown")
+    return True
+
+
 def _evidence(session_id: str, loop_id: str, ts: str) -> dict[str, str]:
     return {"session_id": session_id, "loop_id": loop_id, "ts": ts}
 
@@ -163,6 +169,7 @@ def record(
     now: str,
     scope: str = "repo",
     failure_mode: str | None = None,
+    lesson_source: str | None = None,
 ) -> dict[str, Any]:
     """Add a new order or, on an id match, recur it. Returns {"ledger", "order", "created"}; the input is untouched."""
     new = copy.deepcopy(ledger)
@@ -191,6 +198,9 @@ def record(
             order.update(last_recurred=now, loops_since_recurrence=0, status="active", decayed_at=None)
             order["evidence"].append(ev)
         order["lesson"] = lesson
+    order.pop("lesson_source", None)
+    if lesson_source is not None:
+        order["lesson_source"] = lesson_source
     return {"ledger": seal(new), "order": find(new, order_id), "created": created}
 
 
