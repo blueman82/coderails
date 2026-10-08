@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Iterator
 
 from . import git_common as git
 from .manifest_policy import unit_flags
@@ -17,9 +18,28 @@ from .manifest_policy import unit_flags
 AMBIGUOUS = "?"
 _VALUE_FLAGS = {
     "-b", "--body", "-F", "--body-file", "-t", "--subject", "-A", "--author-email", "--match-head-commit",
-    "--unit", "--progress",
+    "--unit", "--progress", "-R", "--repo",
 }  # fmt: skip
 _URL = re.compile(r"https?://github\.com/([^/]+/[^/]+)/pull/(\d+)/?$", re.IGNORECASE)
+
+
+def _option_items(tokens: list[str]) -> Iterator[tuple[str, str]]:
+    """Yield arguments with their consumed values, using the merge option arities."""
+    items = iter(tokens)
+    for token in items:
+        flag, equals, value = token.partition("=")
+        if flag in _VALUE_FLAGS:
+            yield flag, value if equals else next(items, "")
+        else:
+            yield token, ""
+
+
+def has_noop_option(segment: str) -> bool:
+    """Only an actual help/dry-run option makes a command harmless; an option value does not."""
+    try:
+        return any(token in {"--help", "--dry-run"} for token, _ in _option_items(shlex.split(segment)))
+    except ValueError:
+        return False
 
 
 def parse(segment: str) -> tuple[str, str, str]:
@@ -46,13 +66,12 @@ def parse(segment: str) -> tuple[str, str, str]:
             return AMBIGUOUS, "", ""
     positional: list[str] = []
     values: dict[str, str] = {}
-    items = iter(arguments)
-    for token in items:
-        flag, equals, value = token.partition("=")
+    for token, value in _option_items(arguments):
+        flag = token.partition("=")[0]
         if flag.startswith("-R") or flag == "--repo":
             return AMBIGUOUS, "", ""
         if flag in _VALUE_FLAGS:
-            values[flag] = value if equals else next(items, "")
+            values[flag] = value
         elif not token.startswith("-"):
             positional.append(token)
     target = positional[0] if len(positional) == 1 else "" if not positional else AMBIGUOUS

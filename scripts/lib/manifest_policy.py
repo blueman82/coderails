@@ -125,7 +125,9 @@ def check(
 
 def linked_worktree() -> bool:
     """True when the current checkout is a linked worktree (git dir differs from the common dir)."""
-    return git.output("git", "rev-parse", "--git-dir") != git.output("git", "rev-parse", "--git-common-dir")
+    return git.output("git", "rev-parse", "--git-dir", check=True) != git.output(
+        "git", "rev-parse", "--git-common-dir", check=True
+    )
 
 
 def load_json(path: str | Path) -> dict[str, Any] | None:

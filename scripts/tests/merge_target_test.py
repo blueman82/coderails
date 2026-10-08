@@ -32,6 +32,18 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(self.target("gh pr merge https://github.com/o/r/pull/42"), "https://github.com/o/r/pull/42")
         self.assertEqual(self.target("gh pr merge feat-b --merge"), "feat-b")
 
+    def test_only_unconsumed_noop_options_are_harmless(self) -> None:
+        """One arity table governs quoted/equals-form values and genuine no-op flags."""
+        for value in ("--help", "--dry-run"):
+            for option in ("--body", "-b", "--subject", "--body-file", "--match-head-commit", "--repo", "-R"):
+                for argument in (f"{option} '{value}'", f"{option}={value}"):
+                    with self.subTest(argument=argument):
+                        self.assertFalse(merge_target.has_noop_option(f"gh pr merge 42 {argument}"))
+            self.assertTrue(merge_target.has_noop_option(f"gh pr merge --body 'ordinary text' 42 {value}"))
+            self.assertTrue(merge_target.has_noop_option(f"gh pr merge 42 '{value}'"))
+        for command in ("gh pr merge --body", "gh pr merge --body '--help", "gh pr merge --body 'text --help'"):
+            self.assertFalse(merge_target.has_noop_option(command))
+
     def test_no_target_and_api_form(self) -> None:
         """No positional means the current branch; the api form carries the number in the path."""
         self.assertEqual(self.target("gh pr merge --merge"), "")

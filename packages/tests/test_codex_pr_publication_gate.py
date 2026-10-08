@@ -107,6 +107,15 @@ class CodexPublicationGateTests(unittest.TestCase):
         self.assertEqual(self.reason("git status"), "")
         self.assertEqual(self.reason("gh pr view 7"), "")
 
+    def test_body_flag_values_remain_guarded(self) -> None:
+        """Quoted and equals-form body values cannot turn a protected diff into a no-op."""
+        for value in ("--help", "--dry-run"):
+            for option in (f"--body '{value}'", f"--body={value}", f"--subject '{value}'"):
+                command = f"gh pr merge 7 {option} --merge"
+                with self.subTest(command=command):
+                    self.assertTrue(self.reason(command).startswith("diff_manifest:denied_path"), command)
+            self.assertEqual(self.reason(f"gh pr merge 7 {value}"), "")
+
     def test_off_passes(self) -> None:
         """Negative control: diff_manifest off lets the same merge through."""
         self.config("diff_manifest: off\n")
@@ -173,6 +182,26 @@ class CodexPublicationGateTests(unittest.TestCase):
         """No head SHA from gh means the diff cannot be read: deny, not allow."""
         self.env["FAKE_SHA"] = ""
         self.assertTrue(self.reason("gh pr merge 7").startswith("diff_manifest:manifest_unreadable"))
+
+    def test_outer_cd_before_shell_wrapper_binds_the_intended_worktree(self) -> None:
+        """A nested merge uses its preceding cd; the same unit from the starting cwd is refused."""
+        git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
+        (self.dir / "docs.md").write_text("canary\n")
+        git_cmd(self.dir, "add", "-A")
+        git_cmd(self.dir, "commit", "-qm", "docs")
+        self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        other = self.dir.parent / "other-worktree"
+        git_cmd(self.dir, "worktree", "add", "-qb", "feature/intended", str(other), "HEAD")
+        progress = self.dir.parent / "progress.json"
+        progress.write_text(
+            json.dumps(
+                {"session_id": "s", "loop_id": "l", "work_units": {"2": {"manifest": ["*.md"], "worktree": str(other)}}}
+            )
+        )
+        command = f"python3 scripts/merge.py 7 --unit 2 --progress {progress}"
+        self.assertTrue(self.reason(command).startswith("diff_manifest:manifest_unreadable"))
+        self.assertEqual(self.reason(f"cd {other} && {command}"), "")
+        self.assertEqual(self.reason(f"cd {other} && bash -c '{command}'"), "")
 
 
 class RegistrationTests(unittest.TestCase):

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 
 from lib.destructive_patterns import git_output
@@ -16,14 +17,15 @@ MERGE_SCRIPT = r"""(?:(?:bash|sh|python3?)\s+)?["']?(?:[^\s"']*/)?merge\.(?:py|s
 
 def operation(command: str) -> tuple[str, str, str]:
     """Return guarded operation, matched segment, and optional Git target directory."""
-    if re.search(r"(^|[^-a-zA-Z0-9])(--dry-run|--help)([^-a-zA-Z0-9]|$)", command) and not re.search(
-        r"(^|[;&|\s])" + MERGE_SCRIPT, command
-    ):
-        return "", "", ""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from scripts.lib.merge_target import has_noop_option
+
     if re.search(r"\bgit +merge +(--abort|--continue|--quit|--skip)\b", command):
         return "", "", ""
     for segment in re.split(r"&&|\|\||[;|&\n]", command):
         segment = segment.lstrip()
+        if has_noop_option(segment) and not re.search("^" + MERGE_SCRIPT, segment):
+            continue
         for pattern, name in (
             (r"^gh\s+pr\s+create(?:\s|$)", "create"),
             (r"^gh\s+pr\s+merge(?:\s|$)", "merge"),
@@ -78,14 +80,18 @@ def guarded_segments(command: str, cwd: str) -> list[tuple[str, str, str]]:
     Still unmatched: eval, xargs, aliases, functions, scripts that push. ponytail: regex, not a shell parser.
     """
     found: list[tuple[str, str, str]] = []
-    for inner in _SHELL_C.finditer(command):
-        found.extend(guarded_segments(inner[2], cwd))
-    command = _SHELL_C.sub(" ", command)
-    for segment in re.split(r"&&|\|\||[;|&\n]", command):
+    masked = _SHELL_C.sub(lambda inner: " " * len(inner[0]), command)
+    cursor = 0
+    for boundary in re.finditer(r"&&|\|\||[;|&\n]|$", masked):
+        segment = command[cursor : boundary.start()]
+        cursor = boundary.end()
         segment = unwrap(segment)
         if move := re.match(r"^cd\s+(\S+)$", segment):
             cwd = os.path.normpath(os.path.join(cwd, os.path.expanduser(move[1].strip("\"'"))))
             continue
+        for inner in _SHELL_C.finditer(segment):
+            found.extend(guarded_segments(inner[2], cwd))
+        segment = _SHELL_C.sub(" ", segment)
         if _API_MERGE.match(segment):
             found.append(("merge", segment, cwd))
             continue

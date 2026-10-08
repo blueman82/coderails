@@ -132,6 +132,7 @@ class MergeEvidenceTests(HookTestCase):
             (command, directory),
             (f"bash -c '{command}'", directory),
             (f"cd {directory} && {command}", str(self.directory.parent)),
+            (f"cd {directory} && bash -c '{command}'", str(self.directory.parent)),
         ):
             payload = {"cwd": cwd, "transcript_path": __file__, "tool_input": {"command": text}}
             with (
@@ -144,6 +145,19 @@ class MergeEvidenceTests(HookTestCase):
             ):
                 enforce_pr_workflow.main()
                 gate.assert_called_once_with("42", directory, unit="2", progress="p.json")
+
+    def test_body_flag_values_are_not_no_ops(self) -> None:
+        """Consumed body values remain guarded; actual help and dry-run options are harmless."""
+        from hooks.scripts.lib.pr_workflow_match import guarded_segments
+
+        for value in ("--help", "--dry-run"):
+            for option in (f"--body '{value}'", f"--body={value}", f"--subject '{value}'"):
+                command = f"gh pr merge 42 {option} --merge"
+                with self.subTest(command=command):
+                    self.assertEqual(
+                        guarded_segments(command, str(self.directory)), [("merge", command, str(self.directory))]
+                    )
+            self.assertEqual(guarded_segments(f"gh pr merge 42 {value}", str(self.directory)), [])
 
     def test_publication_gate_violation_denies_with_code_first(self) -> None:
         """Direct Claude path: a publication violation denies, reason code first; no violation passes."""

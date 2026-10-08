@@ -60,7 +60,11 @@ def main(arguments: list[str] | None = None) -> int:
     if diff.returncode:
         mp.trace(label, "failed_open", "manifest_unreadable")
         return finish({"ok": True, "violations": [], "reason_code": "manifest_unreadable"}, 0)
-    linked = mp.linked_worktree() if policy.get("require_linked_worktree") else None
+    try:
+        linked = mp.linked_worktree() if policy.get("require_linked_worktree") else None
+    except git.WorkflowError:
+        mp.trace(label, "failed_open", "manifest_unreadable")
+        return finish({"ok": True, "violations": [], "reason_code": "manifest_unreadable"}, 0)
     result = mp.check(mp.parse_raw_z(diff.stdout), policy, manifest, linked)
     if result["ok"]:
         mp.trace(label, "ok", "diff_manifest_ok")

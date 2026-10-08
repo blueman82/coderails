@@ -177,6 +177,30 @@ class UnitMismatchTests(base.DefaultGateTests):
         policy.write_text(json.dumps({"manifest": ["**"]}))
         self.assertEqual(self.refusal(f"diff_manifest_policy: {policy}\n"), "diff_manifest:denied_path")
 
+    def test_linked_metadata_failure_respects_enforce_advisory_and_off(self) -> None:
+        """A failed metadata lookup is an error, rather than proof of a linked worktree."""
+        self.commit("docs/guide.md")
+        policy = self.dir.parent / "linked-policy.json"
+        policy.write_text(json.dumps({"require_linked_worktree": True}))
+        config = f"diff_manifest_policy: {policy}\n"
+        self.assertEqual(self.refusal(config), "diff_manifest:not_linked_worktree")
+        original = git.output
+        for lookup in ("--git-dir", "--git-common-dir"):
+
+            def output(*args: str, check: bool = False, failed_lookup: str = lookup) -> str:
+                if args == ("git", "rev-parse", failed_lookup):
+                    if check:
+                        raise git.WorkflowError("controlled metadata failure")
+                    return ""
+                return original(*args, check=check)
+
+            with self.subTest(lookup=lookup), mock.patch.object(git, "output", side_effect=output):
+                self.assertEqual(self.refusal(config), "diff_manifest:manifest_internal_error")
+                self.gate(config + "diff_manifest: advisory\n")
+                self.gate(config + "diff_manifest: off\n")
+        rows = [json.loads(line) for path in self.loop.rglob("trace.jsonl") for line in path.read_text().splitlines()]
+        self.assertIn(("failed_open", "manifest_internal_error"), [(r["outcome"], r["reason_code"]) for r in rows])
+
 
 class MergePinTests(unittest.TestCase):
     """merge.py pins the merge to the head the gate checked."""
