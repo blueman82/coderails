@@ -15,10 +15,12 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
+from scripts.lib import lessons, memory_read  # noqa: E402
 from scripts.lib import memory_adapter as ma  # noqa: E402
-from scripts.lib import memory_read  # noqa: E402
+from scripts.lib import orders_ledger as ol  # noqa: E402
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
-from scripts.tests.fake_muninn_case import LINES, PROMPT, SESSION, StoreCase  # noqa: E402
+from scripts.tests import orders_recovery_test as recovery  # noqa: E402
+from scripts.tests.fake_muninn_case import FAKE, LINES, PROMPT, SESSION, StoreCase  # noqa: E402
 from scripts.tests.orders_lifecycle_test import progress, retrospective  # noqa: E402
 
 LESSONS = REPO / "scripts/lib/lessons.py"
@@ -189,6 +191,84 @@ class ReadBoundary(unittest.TestCase):
                 )
                 with self.subTest(reason=reason), self.assertRaises(ValueError):
                     lifecycle.owned(repo, "s1", "L1", complete=True)
+
+
+class SessionAttribution(recovery.RecoveryCase):
+    """Real provider callers bind default/explicit sessions to successful and degraded read observations."""
+
+    def unavailable_list(self) -> None:
+        """Fail only the actual typed read; the separate capability/schema probe genuinely succeeds."""
+        exe = self.tmp / "bin/muninn"
+        exe.write_text(
+            f"#!{sys.executable}\nimport runpy, sys\n"
+            "if sys.argv[1:3] == ['know', 'list'] and '--kind' in sys.argv: raise SystemExit(1)\n"
+            f"sys.argv[0] = {str(FAKE)!r}\nrunpy.run_path(sys.argv[0], run_name='__main__')\n"
+        )
+
+    def test_actual_provider_session_environment_defaults(self) -> None:
+        """Explicit synthetic environment contracts cover both Codex identifiers with Claude variables absent."""
+        for codex in (False, True):
+            for key in recovery.SESSION_KEYS:
+                for command in ("query", "predicate"):
+                    with self.subTest(codex=codex, key=key, command=command):
+                        self.configure(codex, key + command)
+                        env = {k: v for k, v in self.native_env.items() if k not in recovery.SESSION_KEYS}
+                        env[key] = "current-caller"
+                        self.assertEqual(self.cli(command, script="lessons.py", explicit=False, env=env)[0], 0)
+                        rows = self.trace_rows()
+                        self.assertTrue(rows)
+                        self.assertEqual({r["session_id"] for r in rows}, {"current-caller"})
+                        self.assertIn("lesson." + command, [r["command"] for r in rows])
+
+    def test_explicit_session_reaches_actual_degraded_list_in_all_join_callers(self) -> None:
+        """An explicit session overrides environment attribution down to the adapter's genuine failed read."""
+        self.unavailable_list()
+        for codex in (False, True):
+            for script, command in (
+                ("lessons.py", "query"),
+                ("lessons.py", "predicate"),
+                ("orders.py", "lessons"),
+                ("orders.py", "render"),
+            ):
+                with self.subTest(codex=codex, script=script, command=command):
+                    self.configure(codex, script + command)
+                    rc, out = self.cli(command, script=script, session="explicit-caller")
+                    self.assertEqual((rc, out.get("degraded")), (3, "muninn_error"), out)
+                    rows = self.trace_rows()
+                    self.assertIn("memory.list", [r["command"] for r in rows])
+                    self.assertEqual({r["session_id"] for r in rows}, {"explicit-caller"})
+                    self.assertTrue(all(r["outcome"] == "degraded" for r in rows))
+
+    def test_codex_default_session_reaches_genuine_degraded_query_and_predicate(self) -> None:
+        """The omitted --session callers still bind adapter and lesson observations to the current Codex fixture."""
+        self.unavailable_list()
+        for codex in (False, True):
+            for command in ("query", "predicate"):
+                with self.subTest(codex=codex, command=command):
+                    self.configure(codex, command)
+                    env = {k: v for k, v in self.native_env.items() if k not in recovery.SESSION_KEYS}
+                    env["CODEX_THREAD_ID"] = "codex-current"
+                    self.assertEqual(self.cli(command, script="lessons.py", explicit=False, env=env)[0], 3)
+                    rows = self.trace_rows()
+                    self.assertIn("memory.list", [r["command"] for r in rows])
+                    self.assertEqual({r["session_id"] for r in rows}, {"codex-current"})
+
+    def test_function_serve_propagates_session_to_real_failure_trace(self) -> None:
+        """A library caller's supplied session survives the joined/list boundary without a mocked trace."""
+        with (
+            mock.patch.object(ma, "probe", return_value=None),
+            mock.patch.object(ma, "_run", return_value=ma.Degraded("muninn_error")),
+            mock.patch.object(ma, "list_records", wraps=ma.list_records) as listed,
+        ):
+            payload, rc = lessons.serve(ol.empty(), "library-caller")
+        self.assertEqual((rc, payload), (3, {"degraded": "muninn_error"}))
+        self.assertEqual(listed.call_args.kwargs.get("session_id"), "library-caller")
+        rows = [
+            json.loads(line)
+            for path in (self.tmp / "loops").glob("*/trace.jsonl")
+            for line in path.read_text().splitlines()
+        ]
+        self.assertEqual({r["session_id"] for r in rows}, {"library-caller"})
 
 
 if __name__ == "__main__":

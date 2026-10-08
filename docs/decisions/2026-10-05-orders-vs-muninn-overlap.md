@@ -44,6 +44,11 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
   not roll back, and that session+loop has no applied tick or recurrence. Staged records are preserved, with no effects.
   After a saved replacement whose receipt failed, ordinary unchanged `prepare` repairs the receipt. Never refresh
   completed or already applied inputs.
+- D4 receipts use the persistent `teardown.jsonl.lock` after the orders lock, validate prior JSONL framing/objects
+  before any-matching dedupe, and atomically publish prior bytes plus a complete fsynced row. Partial failed writes
+  leave canonical evidence untouched; an ambiguous post-publication error permits ordinary dedupe retry. Existing
+  corrupt or newline-less evidence refuses untouched. Concurrent preservation requires every publisher to share this
+  protocol; D6 adoption is pending and retains its separate latest-step dedupe semantics.
 - Uncited orders are diagnostic only: `lessons` lists them `cited: false`, `query --format contract` and the promotion
   `predicate` exclude them, and candidate text is Muninn's claim. `render` exits 3 with Muninn down (no ledger text).
 - `orders.json` carries a `head` anchor (count, last hash, ticks hash) so a dropped tail or edited ticks are named, and a
@@ -61,7 +66,12 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
   `muninn` sits outside the row hash; the head anchors the tick set. Replay of one completed observation cannot reset
   counters or revive a tombstone. Only a new completed session+loop recurrence can do so.
 - A lesson over 500 collapsed characters is refused before storage, never silently truncated. Explicit ids must be
-  canonical; generated ids retain a hash suffix for ambiguous text, and identity collisions are refused.
+  canonical; generated ids retain a hash suffix for ambiguous text. An id binds failure mode and scope across the
+  ledger and valid retained preparations before record/cite sync or application. Historical preparations constrain
+  identity after progress advances, without asserting present eligibility/currentness/citations or lifecycle effects.
+- Known caller sessions propagate through lesson query/predicate/render reads and underlying degraded adapter traces.
+  Both Claude and Codex environment identifiers are supported; explicit `--session` wins. Installed environment
+  presence is not established by source or private fixtures.
 - `render` omits orders Muninn no longer holds as current; with Muninn unreachable it exits 3 and leaves the existing
   view untouched, so a view can lag a Muninn retraction until the next successful render.
 - Import of the old hand-written `standing-orders-decayed.md` is not provided; it was never created in this repo.

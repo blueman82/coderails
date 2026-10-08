@@ -96,7 +96,10 @@ REASONS: dict[str, str] = {
         "that order id already names another failure mode or scope; use its real identity or a distinct id."
     ),
     "order_not_found": "no order with that id in orders.json; check the id with `orders.py lessons`.",
-    "order_state_error": "orders.json could not be read, locked or written; check the repo-key dir and orders.lock.",
+    "order_state_error": (
+        "orders, preparation or receipt could not be read, locked or written; check the repo-key dir, "
+        "orders.lock and persistent teardown.jsonl.lock."
+    ),
     "order_loop_unknown": (
         "no source at <repo-key dir>/<session>/progress.json; pass the owning --session and its separate "
         "logical --loop."

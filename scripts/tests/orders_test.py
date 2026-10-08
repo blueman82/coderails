@@ -36,9 +36,8 @@ def new_ledger(*ids: str, scope: str = "repo") -> dict[str, Any]:
     """A ledger with one order per id, each created at 2026-01-01 in session s1."""
     ledger = ol.empty()
     for i in ids:
-        ledger = ol.record(ledger, i, f"lesson {i}", session_id="s1", loop_id="L0", now="2026-01-01", scope=scope)[
-            "ledger"
-        ]
+        claim = f"lesson {i}"
+        ledger = ol.record(ledger, i, claim, session_id="s1", loop_id="L0", now="2026-01-01", scope=scope)["ledger"]
     return ledger
 
 
@@ -136,8 +135,9 @@ class Lifecycle(unittest.TestCase):
         for oid in ("g", "r", "one"):  # "unc" stays uncited: the control for the muninn-written requirement
             order(ledger, oid)["muninn"]["state"] = "written"
         for oid, sessions in (("g", ("s2", "s3")), ("r", ("s2", "s3")), ("one", ("s1", "s1")), ("unc", ("s2", "s3"))):
+            fields = dict(now="2026-03-01", scope=order(ledger, oid)["scope"])
             for n, sid in enumerate(sessions):
-                ledger = ol.record(ledger, oid, "x", session_id=sid, loop_id=f"{oid}{n}", now="2026-03-01")["ledger"]
+                ledger = ol.record(ledger, oid, "x", session_id=sid, loop_id=f"{oid}{n}", **fields)["ledger"]
         self.assertEqual([o["id"] for o in ol.candidates(ledger)], ["g"])
 
 

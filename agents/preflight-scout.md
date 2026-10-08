@@ -33,10 +33,11 @@ task names before invoking a skill on it.
 
 Before or alongside the skill sequence:
 
-- Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/lessons.py" --dir <repo-key dir> query --format contract` for verbatim
+- Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/lessons.py" --dir <repo-key dir> --session <native caller session id> query --format contract` for verbatim
   current, live, verified owner-cited lessons. The generated, read-only `standing-orders.md` is context only; it may lag
   a retraction and cannot replace a current query. Exit 2 is a refusal; exit 3 is a degraded read: report the printed
   reason and mark lesson intake unknown. Never substitute `orders.json` or an older view for authoritative lesson text.
+  Bind the actual caller's supplied native session id; do not invent one or assume an environment variable is present.
 - Read the last 5 `retro.json` files (by mtime) in that same location.
 - From these, extract two things:
   - **Observed-failure premortem seeds** — premortem entries whose failure mode

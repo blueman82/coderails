@@ -58,7 +58,7 @@ def pick(records: list[ma.Record], order_id: str, prior: str | None = None) -> m
     return exact or max(mine, key=lambda r: int(str(r.id)[1:]), default=None)
 
 
-def joined(ledger: ol.Ledger, include_decayed: bool = False) -> dict[str, Any]:
+def joined(ledger: ol.Ledger, include_decayed: bool = False, session: str = "") -> dict[str, Any]:
     """{"lessons", "excluded"} for the active orders, or {"degraded": reason} (no text) when Muninn cannot answer."""
     active = sorted(
         (o for o in ledger["orders"] if include_decayed or o["status"] == "active"), key=lambda o: str(o["id"])
@@ -68,7 +68,7 @@ def joined(ledger: ol.Ledger, include_decayed: bool = False) -> dict[str, Any]:
     down = ma.probe()
     if down:
         return {"degraded": down.reason}
-    listed = ma.list_records("repository", type="lesson", tags=["order"])
+    listed = ma.list_records("repository", type="lesson", tags=["order"], session_id=session)
     if isinstance(listed, ma.Degraded):
         return {"degraded": listed.reason}
     rows: list[dict[str, Any]] = []
@@ -86,7 +86,7 @@ def joined(ledger: ol.Ledger, include_decayed: bool = False) -> dict[str, Any]:
 
 def serve(ledger: ol.Ledger, session: str) -> tuple[dict[str, Any], int]:
     """Joined + trace rows (one per exclusion, one for the query); returns (payload, exit code)."""
-    got = joined(ledger)
+    got = joined(ledger, session=session)
     if "degraded" in got:
         ol.trace("lesson.query", "degraded", got["degraded"], session)
         return {"degraded": got["degraded"]}, 3
@@ -106,12 +106,12 @@ def contract(payload: dict[str, Any]) -> dict[str, Any]:
     return {"lessons": rows, "sha256": hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()}
 
 
-def selection(ledger: ol.Ledger, repo_dir: Path) -> dict[str, Any]:
+def selection(ledger: ol.Ledger, repo_dir: Path, session: str = "") -> dict[str, Any]:
     """Graduation result plus the promotion candidates (cited, agnostic, >= 2 recurrences, >= 2 distinct sessions).
 
     The lesson text is Muninn's cited claim; with Muninn down or the entry not current there is no candidate.
     """
-    got = joined(ledger)
+    got = joined(ledger, session=session)
     texts = {r["id"]: r["text"] for r in got.get("lessons", []) if r["cited"]}
     picked = [
         {
@@ -135,7 +135,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dir", required=True, help="the repo-key dir holding orders.json")
     ap.add_argument(
-        "--session", default=os.environ.get("CLAUDE_SESSION_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+        "--session",
+        default=os.environ.get("CLAUDE_SESSION_ID")
+        or os.environ.get("CLAUDE_CODE_SESSION_ID")
+        or os.environ.get("CODEX_THREAD_ID")
+        or os.environ.get("CODEX_SESSION_ID", ""),
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("query").add_argument("--format", choices=("contract",), default="contract")
@@ -152,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if a.cmd == "predicate":
         try:
-            out = selection(ledger, repo_dir)
+            out = selection(ledger, repo_dir, a.session)
         except ValueError as error:
             reason = str(error) if str(error) in REASONS else "order_state_error"
             ol.trace("lesson.predicate", "refused", reason, a.session)

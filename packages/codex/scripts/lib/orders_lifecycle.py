@@ -12,7 +12,6 @@ import datetime
 import hashlib
 import importlib
 import json
-import os
 import re
 import runpy
 import sys
@@ -20,7 +19,10 @@ from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast
+from typing import Any, NoReturn, cast
+
+from hooks.scripts.test_output import file_lock
+from scripts.lib.artifact_io import write_bytes
 
 ROOT = Path(__file__).resolve().parents[2]
 CODEX = (ROOT / ".codex-plugin/plugin.json").is_file()
@@ -193,6 +195,54 @@ def prepared(state_dir: Path, binding: dict[str, Any], required: bool = False) -
     return value
 
 
+def require_identity(order: dict[str, Any], failure_mode: str | None, scope: str) -> None:
+    """One order id binds its failure mode and scope, including every direct ledger recurrence caller."""
+    if order["scope"] != scope or (failure_mode is not None and order["failure_mode"] != failure_mode):
+        raise ValueError("order_id_collision")
+
+
+def staged(repo_dir: Path) -> list[dict[str, Any]]:
+    """Validate retained preparations as historical identities, without asserting present source eligibility."""
+    rows: list[dict[str, Any]] = []
+    for path in repo_dir.glob("*/orders-prepared-*.json"):
+        if path.is_symlink() or path.parent.is_symlink() or path.parent.resolve().parent != repo_dir.resolve():
+            raise ValueError("order_wrong_session")
+        value = object_file(path)
+        raw = value.get("binding")
+        if not isinstance(raw, dict):
+            raise ValueError("order_source_invalid")
+        binding = cast("dict[str, Any]", raw)
+        if set(binding) != {"repo_dir", "state_dir", "session_id", "loop_id", "revision", "progress_sha256"}:
+            raise ValueError("order_source_invalid")
+        if (
+            binding["repo_dir"] != str(repo_dir.resolve())
+            or binding["state_dir"] != str(path.parent.resolve())
+            or binding["session_id"] != path.parent.name
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", path.parent.name)
+        ):
+            raise ValueError("order_wrong_session")
+        loop = binding["loop_id"]
+        if (
+            not isinstance(loop, str)
+            or not loop.strip()
+            or preparation_path(path.parent, loop) != path
+            or type(binding["revision"]) is not int
+            or binding["revision"] < 1
+            or not isinstance(binding["progress_sha256"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", binding["progress_sha256"])
+        ):
+            raise ValueError("order_source_invalid")
+        rows.extend(cast("list[dict[str, Any]]", prepared(path.parent, binding, required=True)["records"]))
+    return rows
+
+
+def check_staged_identity(repo_dir: Path, ledger: dict[str, Any], order: dict[str, Any]) -> None:
+    """Check all owned staged history and the ledger under the orders lock, before any store write or apply."""
+    for prior in [*ledger["orders"], *staged(repo_dir)]:
+        if prior["id"] == order["id"]:
+            require_identity(prior, order["failure_mode"], order["scope"])
+
+
 def prepare(
     repo_dir: Path, session: str, loop: str, ledger: dict[str, Any], refresh_from_sha256: str | None = None
 ) -> tuple[Path, dict[str, Any]]:
@@ -225,37 +275,41 @@ def prepare(
     return state_dir, old
 
 
+def _nonfinite(_value: str) -> NoReturn:
+    """Nonfinite numeric literals are not JSON, so they cannot be preserved as canonical evidence."""
+    raise ValueError("order_source_invalid")
+
+
 def observe(state_dir: Path, step: str, binding: dict[str, Any], evidence: str) -> None:
-    """Append a truthful preparation/post-save observation; fail loudly so callers can report pending teardown."""
+    """Publish a truthful receipt under the persistent teardown lock; callers already hold the orders lock."""
     path = state_dir / "teardown.jsonl"
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        lines = []
-    rows = [json.loads(line) for line in lines]
-    if any(not isinstance(row, dict) for row in rows):
-        raise ValueError("order_source_invalid")
-    if any(
-        row.get("step") == step and row.get("binding") == binding and row.get("evidence_sha256") == evidence
-        for row in rows
-    ):
-        return
-    row = {
-        "step": step,
-        "session_id": binding["session_id"],
-        "loop_id": binding["loop_id"],
-        "revision": binding["revision"],
-        "binding": binding,
-        "evidence_sha256": evidence,
-        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    }
-    data = (json.dumps(row, sort_keys=True) + "\n").encode()
-    descriptor = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
-    try:
-        if os.write(descriptor, data) != len(data):
-            raise OSError("incomplete orders observation")
-    finally:
-        os.close(descriptor)
+    with file_lock(state_dir / "teardown.jsonl.lock", exclusive=True) as acquired:
+        if not acquired:
+            raise ValueError("order_state_error")
+        try:
+            prior = path.read_bytes()
+        except FileNotFoundError:
+            prior = b""
+        if prior and not prior.endswith(b"\n"):
+            raise ValueError("order_source_invalid")
+        rows = [json.loads(line, parse_constant=_nonfinite) for line in prior.decode("utf-8").splitlines()]
+        if any(not isinstance(row, dict) for row in rows):
+            raise ValueError("order_source_invalid")
+        if any(
+            row.get("step") == step and row.get("binding") == binding and row.get("evidence_sha256") == evidence
+            for row in rows
+        ):
+            return
+        row = {
+            "step": step,
+            "session_id": binding["session_id"],
+            "loop_id": binding["loop_id"],
+            "revision": binding["revision"],
+            "binding": binding,
+            "evidence_sha256": evidence,
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        write_bytes(path, prior + (json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
 
 
 def retro_count(repo_dir: Path) -> int:

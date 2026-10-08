@@ -187,8 +187,7 @@ def record(
         created = True
     else:  # a recurrence revives a tombstone: the record is kept, only its status changes
         created = False
-        if failure_mode is not None and order["failure_mode"] != failure_mode:
-            raise ValueError("order_id_collision")
+        lifecycle.require_identity(order, failure_mode, scope)
         if all((e["session_id"], e["loop_id"]) != (session_id, loop_id) for e in order["evidence"]):
             order.update(last_recurred=now, loops_since_recurrence=0, status="active", decayed_at=None)
             order["evidence"].append(ev)

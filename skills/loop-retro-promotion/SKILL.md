@@ -17,7 +17,7 @@ anything else:
 
 1. Resolve the repo-key dir: `dirname` of `dirname` of the path printed by
    `hooks/scripts/lib/agentic_loop_path.py`.
-2. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/lessons.py" --dir <repo-key-dir> predicate`
+2. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/lessons.py" --dir <repo-key-dir> --session <native caller session id> predicate`
    and read `graduation` from its JSON; do not count files or read Markdown by hand.
    It checks **>= 10 distinct completed retros** with owned validated progress and matching source hashes,
 3. `recurred` **>= 1** — an order in `orders.json` whose typed `last_recurred` !=
@@ -28,6 +28,7 @@ anything else:
 An exit 2 refusal or exit 3 degraded read is an unknown result, never an unmet predicate or a successful dormant run.
 Report its reason and leave a failure marker; do not use a generated view or ledger claim as authoritative fallback.
 Schema3 history requires the matching `retro_check` validator; unavailable validation is an explicit refusal.
+Pass the actual caller's native session id so degraded reads remain attributable; do not infer environment presence.
 
 After a successful evaluation, append one line to `<repo-key-dir>/promotion-runs.log`:
 

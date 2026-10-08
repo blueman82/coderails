@@ -171,7 +171,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `order_bad_id` | an explicit order id must match [a-z0-9][a-z0-9_-]{0,119}; use a canonical id. |
 | `order_id_collision` | that id names another failure mode or scope; use its real identity or a distinct id. |
 | `order_not_found` | no order with that id in orders.json; check the id with `orders.py lessons`. |
-| `order_state_error` | orders.json could not be read, locked or written; check the repo-key dir and orders.lock. |
+| `order_state_error` | orders, preparation or receipt could not be read, locked or written; check the repo-key dir, orders.lock and persistent teardown.jsonl.lock. |
 | `order_loop_unknown` | no source at <repo-key dir>/<session>/progress.json; pass its owning --session and separate logical --loop. |
 | `order_wrong_session` | the source directory, session or logical loop is foreign; use the owning directory and identifiers. |
 | `order_source_invalid` | progress, preparation or observations are malformed; restore genuine validated source artifacts. |
@@ -238,6 +238,17 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   prior application refuse unchanged. A durably saved replacement with a failed preparation receipt leaves progress
   incomplete; ordinary unchanged `prepare` repairs the receipt without another replacement or duplicate observation.
   After durable completion, retry `tick` only. Flush and reload pending source updates before final prepare/refresh.
+- Receipt publication: D4 holds orders.lock, then the persistent `teardown.jsonl.lock`. It validates every prior
+  JSONL object and terminal newline before deduplication, preserves prior bytes, and atomically publishes a complete
+  fsynced sibling. Short writes make progress until complete; a zero write or partial-write exception leaves canonical
+  evidence untouched. An ambiguous error after replacement needs an ordinary prepare/tick retry, without duplicate
+  lifecycle effects. Pre-existing malformed or newline-less evidence is refused untouched; restore genuine evidence,
+  never truncate or skip a tail. Other teardown publishers must adopt the same sidecar/framing/atomic publication
+  contract to preserve concurrent events. D6 adoption remains pending; its latest-step dedupe policy is separate.
+- Shared identity: an id binds failure mode and scope across the ledger and every valid retained preparation before
+  record/cite sync or local application. Historical preparations still constrain identity after progress advances;
+  they establish no present eligibility, currentness, citation or lifecycle effect. Same identities in other sessions
+  are accepted recurrences; conflicts and foreign/malformed stored bindings refuse before superseding a store claim.
 - Limits: the one same-user orders lock covers currentness, reconciliation, bounded sync and direct atomic ledger
   save; it provides no exactly-once network guarantee. Current tagged claims are reconciled even for degraded/pending
   local records. Only a new completed session+loop recurrence resets a counter or revives a tombstone; replaying the
@@ -253,6 +264,10 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   remain a cooperating-agent safeguard: the same user can rewrite and recompute them.
   Measurement note: `docs/typed-records-measurement.md`; overlap decision:
   `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
+- Lesson attribution: pass the known native caller id with `--session`. The CLI also recognizes CLAUDE_SESSION_ID,
+  CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID and CODEX_SESSION_ID, in that order; explicit input wins. Joined reads carry
+  that id through query, predicate, diagnostic lessons and render to underlying degraded adapter traces. Environment
+  support in source and private fixtures does not prove a variable is exported in an installed provider session.
 
 ## Stop declared in text instead of recorded, or a stop released unexpectedly
 

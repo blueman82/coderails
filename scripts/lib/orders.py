@@ -13,8 +13,7 @@
 D is the repo-key dir. The ledger `orders.json` (counters, decay, hash chain; see orders_ledger.py) is written under
 dir_lock through currentness, reconciliation, bounded Muninn sync and atomic ledger save. A degrade
 never loses the order: it is kept active with `muninn.state=degraded` and the reason (`no_user_cite` without --quote).
-`render` also exits 3 with Muninn down and writes nothing. Re-recording an order whose Muninn entry was retracted or
-expired syncs the new quote (a recovery path).
+`render` exits 3 and writes nothing with Muninn down. Re-recording retracted/expired claims syncs a new owner quote.
 Exit 0 ok or disabled, 2 refused/error (reason_code printed), 3 degraded/pending (reason printed, local state retained).
 Never falls back to Markdown.
 """
@@ -80,8 +79,9 @@ def update(repo_dir: Path, change: Callable[[ol.Ledger], tuple[ol.Ledger | None,
         return _refuse(str(error) if str(error) in REASONS else "order_state_error")
 
 
-def sync_order(order: dict[str, Any], session: str, quote: str) -> dict[str, Any]:
+def sync_order(order: dict[str, Any], session: str, quote: str, repo_dir: Path, ledger: ol.Ledger) -> dict[str, Any]:
     """Reconcile current tagged claims before add; the caller holds the one orders lock throughout."""
+    lifecycle.check_staged_identity(repo_dir, ledger, order)
     prior = order.get("muninn", {}).get("id")
     if ma.backend() == "off":
         return {"id": None, "state": "disabled", "reason_code": "memory_backend_off"}
@@ -136,16 +136,14 @@ def cmd_record(a: argparse.Namespace, repo_dir: Path) -> Result:
         old: dict[str, Any] = (
             ol.find(ledger, order_id) or next((r for r in prepared["records"] if r["id"] == order_id), None) or {}
         )
-        if old and (old["failure_mode"] != a.failure_mode or old["scope"] != a.scope):
-            raise ValueError("order_id_collision")
         row: dict[str, Any] = {
             "id": order_id,
             "failure_mode": a.failure_mode,
             "lesson": a.lesson,
             "scope": a.scope,
             "ts": ol.now_iso(),
-            "muninn": sync_order({**old, "id": order_id, "lesson": a.lesson}, a.session, a.quote),
         }
+        row["muninn"] = sync_order({**old, **row}, a.session, a.quote, repo_dir, ledger)
         prepared["records"] = [r for r in prepared["records"] if r["id"] != order_id] + [row]
         _prepare(state_dir, prepared)
         new = None
@@ -196,6 +194,8 @@ def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
         state_dir, _, binding = lifecycle.owned(repo_dir, a.session, a.loop, complete=True)
         prepared = lifecycle.prepared(state_dir, binding, required=True)
+        for row in prepared["records"]:
+            lifecycle.check_staged_identity(repo_dir, ledger, row)
         held["approved"] = True
         if lifecycle.loop_key(a.session, a.loop) not in ledger["ticked_loops"]:
             for row in prepared["records"]:
@@ -250,7 +250,7 @@ def cmd_lessons(a: argparse.Namespace, repo_dir: Path) -> Result:
 def cmd_render(a: argparse.Namespace, repo_dir: Path) -> Result:
     """Regenerate both views from the ledger, dropping orders Muninn no longer holds as current (when it answers)."""
     ledger = ol.open_ledger(repo_dir)
-    got = lessons.joined(ledger, include_decayed=True)
+    got = lessons.joined(ledger, include_decayed=True, session=a.session)
     if "degraded" in got:  # no ledger-text fallback: with Muninn down the view could resurrect retracted orders
         ol.trace("order.render", "degraded", got["degraded"], a.session)
         return {"degraded": got["degraded"]}, 3
@@ -324,7 +324,7 @@ def cmd_cite(a: argparse.Namespace, repo_dir: Path) -> Result:
         order = ol.find(ledger, a.order_id)
         if order is None:
             raise ValueError("order_not_found")
-        field = sync_order(order, a.session, a.quote)
+        field = sync_order(order, a.session, a.quote, repo_dir, ledger)
         return ol.set_muninn(ledger, a.order_id, field), {"id": a.order_id, "muninn": field}
 
     payload, rc = update(repo_dir, change)

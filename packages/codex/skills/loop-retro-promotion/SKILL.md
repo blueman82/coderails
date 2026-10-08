@@ -20,7 +20,7 @@ anything else:
    `CODERAILS_AGENTIC_LOOP_DIR`; default to
    `$HOME/.coderails/agentic-loop`. The caller must scope this directory to
    the current repo. Do not call a root plugin hook or graph helper.
-2. Run `python3 "$SKILL_DIR/../../scripts/lib/lessons.py" --dir <repo-key-dir> predicate`
+2. Run `python3 "$SKILL_DIR/../../scripts/lib/lessons.py" --dir <repo-key-dir> --session <native caller session id> predicate`
    (resolve the path from this `SKILL.md`) and read `graduation` from its JSON;
    do not count files or read Markdown by hand. It checks **>= 10 distinct completed retros**
    with owned validated progress and matching source hashes,
@@ -32,6 +32,7 @@ anything else:
 An exit 2 refusal or exit 3 degraded read is an unknown result, never an unmet predicate or a successful dormant run.
 Report its reason and leave a failure marker; do not use a generated view or ledger claim as authoritative fallback.
 Schema3 history requires the matching `retro_check` validator; unavailable validation is an explicit refusal.
+Pass the actual caller's native session id so degraded reads remain attributable; do not infer environment presence.
 
 After a successful evaluation, append one line to `<repo-key-dir>/promotion-runs.log`:
 
