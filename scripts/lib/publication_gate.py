@@ -32,8 +32,12 @@ def evaluate(number: str, sha: str, unit: str = "", progress: str = "") -> list[
         try:
             found += check(number, sha, unit, progress)
         except Exception as error:  # noqa: BLE001 - fail closed: an erroring check must not publish
-            found.append({"code": f"{check.__name__}_error", "detail": type(error).__name__})
-    label = f"{git.repo()}@pr-{number}"
+            code = "diff_manifest:manifest_internal_error" if check is manifest_check else f"{check.__name__}_error"
+            found.append({"code": code, "detail": type(error).__name__})
+    try:
+        label = f"{git.repo()}@pr-{number}"
+    except Exception:  # noqa: BLE001 - trace metadata must never change the verdict
+        label = f"pr-{number}"
     for violation in found:
         manifest_policy.trace(label, "refused", violation["code"], command="publication")
     return found

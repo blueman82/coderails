@@ -12,6 +12,7 @@ import re
 import shlex
 
 from . import git_common as git
+from .manifest_policy import unit_flags
 
 AMBIGUOUS = "?"
 _VALUE_FLAGS = {
@@ -36,9 +37,16 @@ def parse(segment: str) -> tuple[str, str, str]:
     if start is None or any(t.startswith("-R") or t.partition("=")[0] == "--repo" for t in tokens[:start]):
         return AMBIGUOUS, "", ""
     script = tokens[start] != "merge"
+    arguments = tokens[start + 1 :]
+    unit, progress = "", ""
+    if script:
+        try:
+            arguments, unit, progress = unit_flags(arguments)
+        except git.WorkflowError:
+            return AMBIGUOUS, "", ""
     positional: list[str] = []
     values: dict[str, str] = {}
-    items = iter(tokens[start + 1 :])
+    items = iter(arguments)
     for token in items:
         flag, equals, value = token.partition("=")
         if flag.startswith("-R") or flag == "--repo":
@@ -50,7 +58,7 @@ def parse(segment: str) -> tuple[str, str, str]:
     target = positional[0] if len(positional) == 1 else "" if not positional else AMBIGUOUS
     if script and target == "auto":
         target = ""
-    return target, values.get("--unit", ""), values.get("--progress", "")
+    return target, unit or values.get("--unit", ""), progress or values.get("--progress", "")
 
 
 def resolve(target: str) -> str:

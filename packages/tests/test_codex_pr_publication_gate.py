@@ -156,7 +156,15 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
         progress = self.dir.parent / "progress.json"
-        progress.write_text(json.dumps({"session_id": "s", "work_units": {"2": {"manifest": ["src/**"]}}}))
+        progress.write_text(
+            json.dumps(
+                {
+                    "session_id": "s",
+                    "loop_id": "l",
+                    "work_units": {"2": {"manifest": ["src/**"], "worktree": str(self.dir)}},
+                }
+            )
+        )
         flags = f"--unit 2 --progress {progress}"
         self.assertTrue(self.reason(f"python3 scripts/merge.py {flags} 7").startswith("diff_manifest:out_of_manifest"))
         self.assertEqual(self.reason("python3 scripts/merge.py 7"), "")  # control: no unit, clean docs diff passes

@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import git_common as git
-from scripts.lib import manifest_policy, publication_gate
+from scripts.lib import manifest_policy, merge_target, publication_gate
 from scripts.lib.config import config_path, integrity_machine_user
 from scripts.lib.integrity_status import verify_integrity_status
 from scripts.lib.wiki_debt import has_wiki_ingest_for_merged_prs
@@ -73,19 +73,21 @@ def cleanup(number: str, default: str) -> None:
 
 def main(arguments: list[str] | None = None) -> int:
     """Resolve the PR and preserve all gates before calling the remote merge."""
-    arguments, unit, progress = manifest_policy.unit_flags(sys.argv[1:] if arguments is None else arguments)
-    argument = arguments[0] if arguments else "auto"
     try:
+        arguments, unit, progress = manifest_policy.unit_flags(sys.argv[1:] if arguments is None else arguments)
+        if len(arguments) > 1 or (arguments and arguments[0].startswith("-")):
+            raise git.WorkflowError("pr_number_invalid: specify one PR number, URL or branch")
+        argument = arguments[0] if arguments else "auto"
         git.require_repo()
         default = git.main()
         if argument == "auto":
             if git.branch() == default:
                 raise git.WorkflowError(f"On {default} ─ specify PR# or branch")
-            number = git.pr_num()
+            number = merge_target.resolve("")
         else:
-            number = argument if argument[:1].isdigit() else git.pr_num(argument)
+            number = merge_target.resolve(argument)
         if not number:
-            raise git.WorkflowError(f"No PR for {argument}")
+            raise git.WorkflowError(f"pr_number_invalid: No PR for {argument}")
         print(f"• PR #{number} │ {git.pr_field(number, 'title', f'PR #{number}')}")
         state = git.pr_field(number, "state", "UNKNOWN")
         if state == "OPEN":

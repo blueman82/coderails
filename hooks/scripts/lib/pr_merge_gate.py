@@ -72,7 +72,7 @@ def integrity_reason(number: str, sha: str, cwd: str) -> str:
     return ""
 
 
-def merge_reason(number: str, cwd: str) -> str:
+def merge_reason(number: str, cwd: str, unit: str = "", progress: str = "") -> str:
     """Return the fail-closed merge denial, or empty after live evidence re-execution."""
     try:
         os.chdir(cwd)
@@ -134,7 +134,7 @@ def merge_reason(number: str, cwd: str) -> str:
             prefix + "local temporary file allocation failed for the smoke-verify gate. Check /tmp "
             "disk space or permissions, then retry."
         )
-    if violations := publication_gate.evaluate(number, sha):
+    if violations := publication_gate.evaluate(number, sha, unit=unit, progress=progress):
         first = violations[0]
         return (
             f"{first['code']}: {prefix}the publication gate refused this head ({first['detail'] or 'no detail'}). "

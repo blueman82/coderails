@@ -190,9 +190,25 @@ class DefaultGateTests(RepoCase):
         """--unit/--progress: a file outside the unit's manifest is out_of_manifest."""
         self.commit("README.md", "changed\n")
         progress = self.dir.parent / "progress.json"
-        progress.write_text(json.dumps({"session_id": "s", "work_units": {"2": {"manifest": ["src/**"]}}}))
+        progress.write_text(
+            json.dumps(
+                {
+                    "session_id": "s",
+                    "loop_id": "l",
+                    "work_units": {"2": {"manifest": ["src/**"], "worktree": str(self.dir)}},
+                }
+            )
+        )
         self.assertEqual(self.refusal(unit="2", progress=str(progress)), "diff_manifest:out_of_manifest")
-        progress.write_text(json.dumps({"session_id": "s", "work_units": {"2": {"manifest": ["**/*.md"]}}}))
+        progress.write_text(
+            json.dumps(
+                {
+                    "session_id": "s",
+                    "loop_id": "l",
+                    "work_units": {"2": {"manifest": ["**/*.md"], "worktree": str(self.dir)}},
+                }
+            )
+        )
         self.gate(unit="2", progress=str(progress))
 
     def test_retro_policy_refuses_second_path_and_added_file(self) -> None:

@@ -15,7 +15,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts import merge  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
-from scripts.lib import publication_gate  # noqa: E402
+from scripts.lib import manifest_policy, publication_gate  # noqa: E402
 from scripts.tests.manifest_policy_test import RepoCase, git_cmd  # noqa: E402
 
 SECRET = ".en" + "v"  # two parts so no source line spells the secret-file name
@@ -94,11 +94,21 @@ class EvaluateTests(unittest.TestCase):
         """U1 registers the manifest check."""
         self.assertEqual(publication_gate.CHECKS[0].__name__, "manifest_check")
 
+    def test_metadata_error_obeys_mode_and_keeps_the_manifest_reason(self) -> None:
+        """Repository metadata errors refuse under enforce and fail open under advisory."""
+        for mode, expected in (("enforce", ["diff_manifest:manifest_internal_error"]), ("advisory", [])):
+            with (
+                self.subTest(mode=mode),
+                mock.patch.object(manifest_policy, "settings", return_value=(mode, "policy.json", False)),
+                mock.patch.object(git, "repo", side_effect=RuntimeError("metadata failure")),
+            ):
+                self.assertEqual([v["code"] for v in publication_gate.evaluate("7", "head")], expected)
+
 
 class MergeCallTests(unittest.TestCase):
     """merge.py calls publication_gate.enforce after verify_gates and before gh pr merge."""
 
-    def run_merge(self, effect: Exception | None) -> tuple[int, list[str]]:
+    def run_merge(self, effect: Exception | None, arguments: list[str] | None = None) -> tuple[int, list[str]]:
         """Run merge.main for PR 7 with the evidence gates stubbed; return status and the call order."""
         order: list[str] = []
 
@@ -129,7 +139,7 @@ class MergeCallTests(unittest.TestCase):
             mock.patch.object(merge, "cleanup"),
             mock.patch.object(publication_gate, "enforce", side_effect=publication),
         ):
-            status = merge.main(["7"])
+            status = merge.main(["7"] if arguments is None else arguments)
         return status, order
 
     def test_order_and_pass(self) -> None:
@@ -140,6 +150,10 @@ class MergeCallTests(unittest.TestCase):
         """A refusing publication gate returns 1 and never reaches gh pr merge."""
         status, order = self.run_merge(git.WorkflowError("diff_manifest:denied_path"))
         self.assertEqual((status, "merge" in order), (1, False))
+
+    def test_ambiguous_cli_target_never_reaches_a_merge(self) -> None:
+        """A second positional target must refuse rather than silently selecting the first."""
+        self.assertEqual(self.run_merge(None, ["7", "9"]), (1, []))
 
     def test_unit_and_progress_are_forwarded(self) -> None:
         """--unit N --progress PATH reach the gate."""
@@ -249,7 +263,15 @@ class HeadlessTests(RepoCase):
         (self.dir / "README.md").write_text("changed\n")
         git_cmd(self.dir, "commit", "-qam", "doc")
         progress = self.dir.parent / "progress.json"
-        progress.write_text(json.dumps({"session_id": "s", "work_units": {"2": {"manifest": ["src/**"]}}}))
+        progress.write_text(
+            json.dumps(
+                {
+                    "session_id": "s",
+                    "loop_id": "l",
+                    "work_units": {"2": {"manifest": ["src/**"], "worktree": str(self.dir)}},
+                }
+            )
+        )
         result = subprocess.run(
             [sys.executable, str(REPO / "scripts/push.py"), "--unit", "2", "--progress", str(progress)],
             cwd=self.dir,
@@ -259,6 +281,35 @@ class HeadlessTests(RepoCase):
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("diff_manifest:out_of_manifest", result.stderr)
+
+    def test_push_inline_unit_flags_and_missing_value(self) -> None:
+        """Inline flags enforce unit scope, and an explicitly empty flag cannot disappear."""
+        (self.dir / "README.md").write_text("changed\n")
+        git_cmd(self.dir, "commit", "-qam", "doc")
+        progress = self.dir.parent / "progress.json"
+        progress.write_text(
+            json.dumps(
+                {
+                    "session_id": "s",
+                    "loop_id": "l",
+                    "work_units": {"2": {"manifest": ["src/**"], "worktree": str(self.dir)}},
+                }
+            )
+        )
+        for flags, reason in (
+            (["--unit=2", f"--progress={progress}"], "out_of_manifest"),
+            (["--unit"], "manifest_unreadable"),
+        ):
+            with self.subTest(flags=flags):
+                result = subprocess.run(
+                    [sys.executable, str(REPO / "scripts/push.py"), *flags],
+                    cwd=self.dir,
+                    env=self.env,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(f"diff_manifest:{reason}", result.stderr)
 
 
 class CounterTests(unittest.TestCase):

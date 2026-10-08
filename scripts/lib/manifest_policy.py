@@ -156,19 +156,24 @@ def diff_changes(head: str, fetch: str = "") -> Changes | None:
     return None if result.returncode else parse_raw_z(result.stdout)
 
 
-def unit_manifest(progress: str, unit: str) -> list[str] | None:
-    """The unit's manifest from progress.json: None when the unit has none; ValueError when the file is unusable."""
+def unit_manifest(progress: str, unit: str) -> list[str]:
+    """The explicitly requested unit's bound manifest; ValueError for unusable metadata or a different worktree."""
     state = load_json(progress)
     units = (state or {}).get("work_units")
     if state is None or not isinstance(units, dict):
         raise ValueError("progress unreadable")
+    if any(not isinstance(state.get(key), str) or not str(state[key]).strip() for key in ("session_id", "loop_id")):
+        raise ValueError("progress ownership missing")
     entry = cast(dict[str, Any], units).get(unit)
     if not isinstance(entry, dict):
         raise ValueError("unit missing")
     fields = cast(dict[str, Any], entry)
-    if "manifest" not in fields:
-        return None
-    manifest = fields["manifest"]
+    worktree, current = fields.get("worktree"), git.output("git", "rev-parse", "--show-toplevel")
+    if not isinstance(worktree, str) or not worktree.strip() or not Path(worktree).is_absolute():
+        raise ValueError("unit worktree missing")
+    if not current or Path(worktree).resolve() != Path(current).resolve():
+        raise ValueError("unit worktree mismatch")
+    manifest = fields.get("manifest")
     if not isinstance(manifest, list) or not all(isinstance(path, str) for path in cast(list[object], manifest)):
         raise ValueError("unit manifest invalid")
     return strings(cast(list[object], manifest))
@@ -178,10 +183,16 @@ def unit_flags(arguments: list[str]) -> tuple[list[str], str, str]:
     """Split `--unit N --progress PATH` out of an argument list: (remaining arguments, unit, progress)."""
     rest: list[str] = []
     flags = {"--unit": "", "--progress": ""}
+    seen: set[str] = set()
     items = iter(arguments)
     for argument in items:
-        if argument in flags:
-            flags[argument] = next(items, "")
+        flag, equals, value = argument.partition("=")
+        if flag in flags:
+            value = value if equals else next(items, "")
+            if flag in seen or not value or value.startswith("--"):
+                raise git.WorkflowError(f"diff_manifest:manifest_unreadable: invalid {flag} value")
+            flags[flag] = value
+            seen.add(flag)
         else:
             rest.append(argument)
     return rest, flags["--unit"], flags["--progress"]
@@ -192,8 +203,9 @@ def settings() -> tuple[str, str, bool]:
     values, findings = load_config(config_path() or "")
     if any(finding["code"] == "config_unreadable" for finding in findings):
         raise ValueError("config unreadable")
-    mode = str(values.get("diff_manifest") or "enforce")
-    policy = str(values.get("diff_manifest_policy") or DEFAULT_POLICY)
+    mode = str(values.get("diff_manifest", "enforce"))
+    configured_policy = values.get("diff_manifest_policy")
+    policy = str(DEFAULT_POLICY if configured_policy is None else configured_policy)
     return (mode if mode in MODES else "enforce"), policy, mode not in MODES
 
 
@@ -209,7 +221,7 @@ def _evaluate(pr: str, head: str, policy_file: str, unit: str, progress: str, la
     if bool(unit) != bool(progress):  # a lone flag would otherwise be silently ignored
         return [{"code": "manifest_unreadable", "path": "--unit and --progress must be given together"}]
     scoped = None
-    if unit:  # legacy entries without a manifest retain the policy's own bound
+    if unit:
         try:
             scoped = unit_manifest(progress, unit)
         except ValueError:
@@ -237,14 +249,15 @@ def violations(pr: str = "", unit: str = "", progress: str = "", head: str = "")
         return [{"code": "diff_manifest:manifest_internal_error", "detail": "config unreadable"}]
     if mode == "off":
         return []
-    label = f"{git.repo()}@pr-{pr}" if pr else f"{git.repo()}@{git.branch()}"
+    label = f"pr-{pr}" if pr else "local"
+    try:
+        label = f"{git.repo()}@pr-{pr}" if pr else f"{git.repo()}@{git.branch()}"
+        found = _evaluate(pr, head, policy_file, unit, progress, label)
+    except Exception:  # noqa: BLE001 - metadata and diff errors share the manifest mode
+        found = [{"code": "manifest_internal_error", "path": "internal error"}]
     if invalid:
         trace(label, "warned", "diff_manifest_mode_invalid")
         print("! diff_manifest diff_manifest_mode_invalid: treated as enforce", file=sys.stderr)
-    try:
-        found = _evaluate(pr, head, policy_file, unit, progress, label)
-    except Exception:  # noqa: BLE001 - a bug here is manifest_internal_error, not a policy verdict
-        found = [{"code": "manifest_internal_error", "path": "internal error"}]
     if not found:
         trace(label, "ok", "diff_manifest_ok")
         return []

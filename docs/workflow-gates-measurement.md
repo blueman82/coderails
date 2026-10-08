@@ -6,7 +6,8 @@ it, and what the numbers cannot tell you.
 ## Rows
 
 Every refusal writes non-authoritative trace rows (`<loop dir>/<session>/trace.jsonl`; the session id is
-`<repo>@pr-<N>` or `<repo>@<branch>`), tallied by `measure_graph_alignment.py` into `trace.by_reason` keyed
+the sanitized `<repo>@pr-<N>` or `<repo>@<branch>` label (falling back to `pr-<N>`/`local` when metadata fails),
+tallied by `measure_graph_alignment.py` into `trace.by_reason` keyed
 `command/outcome/reason_code`:
 
 | Row | Meaning |
@@ -19,6 +20,12 @@ Every refusal writes non-authoritative trace rows (`<loop dir>/<session>/trace.j
 | `diff-manifest/warned/diff_manifest_mode_invalid` | an unknown `diff_manifest` value was treated as enforce |
 | `publication/refused/<code>` | the single gate refused; `<code>` is `diff_manifest:<code>`, and later units add theirs |
 
+Manifest codes are `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`,
+`special_file_type`, `mode_change`, `status_not_allowed`, `too_many_paths`, `manifest_unreadable` and
+`manifest_internal_error`. `diff_manifest_mode_invalid` is a warning about forced enforcement, not a verdict code.
+`foreign_session` belongs to the diagnostic CLI's explicit `--session` comparison. Publication checks unit owner-field
+shape and worktree equality; it does not authenticate those owner fields.
+
 ## Counters
 
     python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py
@@ -30,11 +37,13 @@ edited.
 ## How to read it
 
 - Healthy: `ok` rows dominate and `refused` rows are rare and each traceable to a real out-of-scope diff.
-- Many `refused/manifest_unreadable`: a policy path or the PR head cannot be read (fix the path), not a policy hit.
+- Many `refused/manifest_unreadable`: check policy, diff, paired flags and requested unit metadata, including its manifest,
+  owner fields and worktree. These rows do not identify an out-of-scope path.
 - Any `refused/manifest_internal_error`: a bug in the gate; file it.
 - `warned` rows with no `refused` rows mean the install is on `advisory` (the pre-default behaviour).
 - No `publication/*` rows at all proves nothing: it is also what a disabled hook, an untrusted Codex plugin or
-  `diff_manifest: off` look like. Confirm by observing one real denial after a restart (a throwaway PR with a symlink).
+  `diff_manifest: off` look like. Push emits `diff-manifest` rows without `publication` rows. Confirm active registration
+  and observe a denial through the relevant installed consumer before claiming installed enforcement.
 
 ## Limits
 
@@ -42,4 +51,9 @@ The rows are written by the same user that the gate constrains and never decide 
 gate fired, not whether publication paths exist that bypass it (a merge made from a browser or a script the Codex hook
 cannot match is invisible). The gate is a cooperating-agent safeguard: an agent with write access to
 `.coderails/workflow.config.yaml` can set `diff_manifest: off`, and that change is itself a diff the gate reviews only if
-the policy denies the path.
+the policy denies the path. The shipped policy denies additions or modifications to its own policy paths and workflow
+config, but it reads the local checkout's effective config. A same-worktree progress file with forged nonblank owner
+fields can pass the metadata check. Claude's direct arm needs config and a readable transcript; raw Git operations,
+unmatched scripts/aliases and browser merges are not observations of this publication gate. Direct hooks cannot pin
+the subsequent remote merge head; `merge.py` uses `--match-head-commit`. Trace-write failure is ignored, so missing rows
+also cannot prove that a check did not run.

@@ -10,7 +10,7 @@ from unittest import mock
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts.lib import git_common as git  # noqa: E402
-from scripts.lib import merge_target  # noqa: E402
+from scripts.lib import manifest_policy, merge_target  # noqa: E402
 
 
 class ParseTests(unittest.TestCase):
@@ -62,6 +62,24 @@ class ParseTests(unittest.TestCase):
         got = merge_target.parse("python3 scripts/merge.py --unit 2 --progress p.json 5")
         self.assertEqual(got, ("5", "2", "p.json"))
         self.assertEqual(merge_target.parse("python3 scripts/merge.py auto"), ("", "", ""))
+
+    def test_unit_flags_inline_missing_and_duplicates(self) -> None:
+        """Wrapper flags support equals syntax and refuse missing or ambiguous values."""
+        self.assertEqual(manifest_policy.unit_flags(["42", "--unit=2", "--progress=p.json"]), (["42"], "2", "p.json"))
+        for flags in (
+            ["--unit"],
+            ["--progress="],
+            ["--unit", "--progress", "p.json"],
+            ["--unit", "2", "--unit", "3", "--progress", "p.json"],
+        ):
+            with self.subTest(flags=flags), self.assertRaises(git.WorkflowError):
+                manifest_policy.unit_flags(flags)
+
+    def test_script_scope_flags_cannot_silently_disappear(self) -> None:
+        """An invalid scope option makes the hook target unresolvable."""
+        for flags in ("--unit", "--progress=", "--unit 2 --unit 3 --progress p.json"):
+            with self.subTest(flags=flags):
+                self.assertEqual(merge_target.parse(f"python3 scripts/merge.py 42 {flags}")[0], merge_target.AMBIGUOUS)
 
 
 class ResolveTests(unittest.TestCase):

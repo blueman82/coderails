@@ -65,17 +65,51 @@ class UnitMismatchTests(base.DefaultGateTests):
                 self.assertEqual(self.refusal(**kwargs), "diff_manifest:manifest_unreadable")
         self.gate("diff_manifest: advisory\n", unit="2")
         progress = self.dir.parent / "progress.json"
-        progress.write_text(json.dumps({"session_id": "s", "work_units": {"2": {"manifest": ["**/*.md"]}}}))
+        progress.write_text(
+            json.dumps(
+                {
+                    "session_id": "s",
+                    "loop_id": "l",
+                    "work_units": {"2": {"manifest": ["**/*.md"], "worktree": str(self.dir)}},
+                }
+            )
+        )
         self.gate(unit="2", progress=str(progress))
 
-    def test_unit_without_manifest_falls_back_to_default(self) -> None:
-        """Documented choice: a unit entry with no manifest is bounded by the default policy only."""
+    def test_requested_unit_requires_manifest(self) -> None:
+        """An explicitly requested unit cannot discard its manifest bound."""
         self.commit("docs/guide.md")
         progress = self.dir.parent / "progress.json"
-        progress.write_text(json.dumps({"session_id": "s", "work_units": {"2": {"status": "pending"}}}))
+        progress.write_text(
+            json.dumps(
+                {
+                    "session_id": "s",
+                    "loop_id": "l",
+                    "work_units": {"2": {"status": "pending", "worktree": str(self.dir)}},
+                }
+            )
+        )
+        self.assertEqual(self.refusal(unit="2", progress=str(progress)), "diff_manifest:manifest_unreadable")
+
+    def test_unit_binding_requires_owner_shape_and_matching_worktree(self) -> None:
+        """Missing owner metadata or a foreign worktree refuses; an empty manifest permits no paths."""
+        self.commit("docs/guide.md")
+        progress = self.dir.parent / "progress.json"
+        entry: dict[str, object] = {"manifest": ["docs/**"], "worktree": str(self.dir)}
+        valid = {"session_id": "s", "loop_id": "l", "work_units": {"2": entry}}
+        for state in (
+            {**valid, "session_id": ""},
+            {**valid, "loop_id": None},
+            {**valid, "work_units": {"2": {"manifest": ["docs/**"], "worktree": str(self.dir.parent)}}},
+        ):
+            with self.subTest(state=state):
+                progress.write_text(json.dumps(state))
+                self.assertEqual(self.refusal(unit="2", progress=str(progress)), "diff_manifest:manifest_unreadable")
+        progress.write_text(json.dumps(valid))
         self.gate(unit="2", progress=str(progress))
-        self.commit(SECRET)
-        self.assertEqual(self.refusal(unit="2", progress=str(progress)), "diff_manifest:denied_path")
+        entry["manifest"] = []
+        progress.write_text(json.dumps(valid))
+        self.assertEqual(self.refusal(unit="2", progress=str(progress)), "diff_manifest:out_of_manifest")
 
     def test_config_load_error_is_internal_error(self) -> None:
         """A config that cannot be loaded refuses with manifest_internal_error instead of a raw exception."""
@@ -94,6 +128,18 @@ class UnitMismatchTests(base.DefaultGateTests):
         with mock.patch.object(manifest_policy, "config_path", return_value=str(self.dir / "missing.yaml")):
             self.assertEqual(manifest_policy.violations()[0]["code"], "diff_manifest:manifest_internal_error")
 
+    def test_explicit_empty_mode_reports_invalid_enforcement(self) -> None:
+        """An explicitly empty mode is invalid, even though enforcement remains the default."""
+        self.commit("docs/guide.md")
+        self.gate("diff_manifest:\n")
+        rows = [json.loads(x) for f in self.loop.rglob("trace.jsonl") for x in f.read_text().splitlines()]
+        self.assertIn("diff_manifest_mode_invalid", [r["reason_code"] for r in rows])
+
+    def test_typed_null_policy_uses_the_shipped_default(self) -> None:
+        """The existing config grammar coerces an empty nullable scalar to null."""
+        self.commit("docs/guide.md")
+        self.gate("diff_manifest_policy: ''\n")
+
     def test_unit_cannot_widen_policy_manifest(self) -> None:
         """Both declared bounds apply, and unknown or malformed requested units refuse."""
         self.commit("docs/guide.md")
@@ -102,8 +148,8 @@ class UnitMismatchTests(base.DefaultGateTests):
         progress = self.dir.parent / "progress.json"
         config = f"diff_manifest_policy: {policy}\n"
         for entry in ({"manifest": ["**"]}, None, {"manifest": "**"}):
-            units = {} if entry is None else {"2": entry}
-            progress.write_text(json.dumps({"work_units": units}))
+            units = {} if entry is None else {"2": {**entry, "worktree": str(self.dir)}}
+            progress.write_text(json.dumps({"session_id": "s", "loop_id": "l", "work_units": units}))
             self.assertEqual(
                 self.refusal(config, unit="2", progress=str(progress)),
                 (
@@ -113,7 +159,15 @@ class UnitMismatchTests(base.DefaultGateTests):
                 ),
             )
         policy.write_text(json.dumps({"manifest": ["docs/**"]}))
-        progress.write_text(json.dumps({"work_units": {"2": {"manifest": ["**"]}}}))
+        progress.write_text(
+            json.dumps(
+                {
+                    "session_id": "s",
+                    "loop_id": "l",
+                    "work_units": {"2": {"manifest": ["**"], "worktree": str(self.dir)}},
+                }
+            )
+        )
         self.gate(config, unit="2", progress=str(progress))
 
     def test_custom_policy_keeps_default_denials(self) -> None:

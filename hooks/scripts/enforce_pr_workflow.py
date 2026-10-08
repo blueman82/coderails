@@ -11,7 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, read_payload
 from hooks.scripts.lib.loop_state_common import log
 from hooks.scripts.lib.pr_merge_gate import merge_reason
-from hooks.scripts.lib.pr_workflow_match import operation, pr_number, step_found, targets_main, transcript_entries
+from hooks.scripts.lib.pr_workflow_match import (
+    guarded_segments,
+    operation,
+    step_found,
+    targets_main,
+    transcript_entries,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import merge_target
@@ -27,8 +33,8 @@ def main() -> int:
         return 0
     name, segment, target = operation(command)
     cwd = str(payload.get("cwd") or os.getcwd())
-    if not name or not config_path(cwd) or not targets_main(command, cwd, target, name):
-        return 0
+    segments = [(name, segment, cwd)] if name and name != "merge" else []
+    segments += [item for item in guarded_segments(command, cwd) if item[0] == "merge"]
     paths = [
         str(payload[key])
         for key in ("transcript_path", "agent_transcript_path")
@@ -36,34 +42,39 @@ def main() -> int:
     ]
     if not paths:
         return 0
-    number = pr_number(segment) if name == "merge" else ""
-    if name == "merge" and number:
-        try:
-            os.chdir(cwd)
-            number = merge_target.resolve(number)
-        except (OSError, ValueError, RuntimeError):
-            number = ""
-        if not number:
-            deny("pr_number_invalid: Blocked: gh pr merge — could not resolve the target PR.")
+    entries = transcript_entries(paths)
+    for name, segment, where in segments:
+        if not config_path(where) or not targets_main(command, where, target, name):
+            continue
+        number, unit, progress = merge_target.parse(segment) if name == "merge" else ("", "", "")
+        if name == "merge" and number:
+            try:
+                os.chdir(where)
+                number = merge_target.resolve(number)
+            except (OSError, ValueError, RuntimeError):
+                number = ""
+            if not number:
+                deny("pr_number_invalid: Blocked: gh pr merge — could not resolve the target PR.")
+                return 0
+        if not step_found(entries, name, number):
+            required = "/coderails:push" if name == "create" else "/pr-review-toolkit:review-pr"
+            action = {
+                "create": "gh pr create",
+                "merge": "gh pr merge",
+                "git_merge": "`git merge` on main",
+                "git_push": "`git push` on main/master",
+            }[name]
+            deny(f"Blocked: {action} requires {required} to have run this session. Run {required} {number} first.")
+            log(f"hook=enforce_pr_workflow decision=deny subcommand={name.replace('_', '-')} required={required}")
             return 0
-    if not step_found(transcript_entries(paths), name, number):
-        required = "/coderails:push" if name == "create" else "/pr-review-toolkit:review-pr"
-        action = {
-            "create": "gh pr create",
-            "merge": "gh pr merge",
-            "git_merge": "`git merge` on main",
-            "git_push": "`git push` on main/master",
-        }[name]
-        deny(f"Blocked: {action} requires {required} to have run this session. Run {required} {number} first.")
-        log(f"hook=enforce_pr_workflow decision=deny subcommand={name.replace('_', '-')} required={required}")
-        return 0
-    if name == "merge":
-        try:
-            reason = merge_reason(number, cwd)
-        except (OSError, ValueError, RuntimeError) as error:
-            reason = f"Blocked: gh pr merge — eval artifact verification failed: {error}. Do not bypass."
-        if reason:
-            deny(reason)
+        if name == "merge":
+            try:
+                reason = merge_reason(number, where, unit=unit, progress=progress)
+            except (OSError, ValueError, RuntimeError) as error:
+                reason = f"Blocked: gh pr merge — eval artifact verification failed: {error}. Do not bypass."
+            if reason:
+                deny(reason)
+                return 0
     return 0
 
 

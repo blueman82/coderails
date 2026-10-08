@@ -91,7 +91,15 @@ class WorkflowGateTests(HookTestCase):
                     check=False,
                 )
                 self.assertEqual(result.returncode, case["returncode"], result.stderr)
-                self.assertEqual('"deny"' in result.stdout, case["denied"], result.stdout + result.stderr)
+                wrapped_merge = case["request"]["tool_input"]["command"] in (
+                    "command bash scripts/merge.sh 140",
+                    "command python3 scripts/merge.py 140",
+                )
+                self.assertEqual(
+                    '"deny"' in result.stdout, case["denied"] or wrapped_merge, result.stdout + result.stderr
+                )
+                if wrapped_merge:
+                    self.assertIn("requires /pr-review-toolkit:review-pr", result.stdout)
         self.assertEqual(original_count, 114)
 
 

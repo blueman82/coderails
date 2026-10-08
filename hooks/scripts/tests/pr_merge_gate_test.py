@@ -121,6 +121,30 @@ class MergeEvidenceTests(HookTestCase):
                 prerequisite.assert_called_once_with([], "merge", "42")
                 deny.assert_not_called()
 
+    def test_scope_and_effective_directory_reach_the_merge_gate(self) -> None:
+        """Plain, wrapped and chained merges carry their unit scope and actual directory."""
+        before = Path.cwd()
+        self.addCleanup(os.chdir, before)
+        module = "hooks.scripts.enforce_pr_workflow"
+        directory = str(self.directory)
+        command = "python3 scripts/merge.py 42 --unit 2 --progress p.json"
+        for text, cwd in (
+            (command, directory),
+            (f"bash -c '{command}'", directory),
+            (f"cd {directory} && {command}", str(self.directory.parent)),
+        ):
+            payload = {"cwd": cwd, "transcript_path": __file__, "tool_input": {"command": text}}
+            with (
+                self.subTest(command=text),
+                patch(module + ".read_payload", return_value=payload),
+                patch(module + ".config_path", return_value="config"),
+                patch(module + ".transcript_entries", return_value=[]),
+                patch(module + ".step_found", return_value=True),
+                patch(module + ".merge_reason", return_value="") as gate,
+            ):
+                enforce_pr_workflow.main()
+                gate.assert_called_once_with("42", directory, unit="2", progress="p.json")
+
     def test_publication_gate_violation_denies_with_code_first(self) -> None:
         """Direct Claude path: a publication violation denies, reason code first; no violation passes."""
         before = Path.cwd()
