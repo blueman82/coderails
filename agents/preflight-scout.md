@@ -42,14 +42,14 @@ Before or alongside the skill sequence:
 - From these, extract two things:
   - **Observed-failure premortem seeds** — premortem entries whose failure mode
     is something that actually happened in a past loop, not a hypothetical you
-    invented. Cite which retro or standing-order line each seed comes from.
-  - **Carry-into-worker-prompts list** — lessons from standing-orders/retros
+    invented. Cite the retro or current lesson id, Muninn K-id and user citation each seed comes from.
+  - **Carry-into-worker-prompts list** — current queried lessons and retros
     that apply to THIS plan specifically, phrased so an orchestrator can paste
     them into a worker's dispatch prompt. Skip lessons that don't apply; a
     generic lesson pasted into every prompt loses its force.
 
 Do not invent a failure mode and label it "observed" — if you didn't read it in
-standing-orders.md or a retro.json, it belongs in the skill-sequence premortem
+the current cited lesson query or a retro.json, it belongs in the skill-sequence premortem
 output (clearly a hypothesis), not in the retro-intake section (clearly a fact).
 
 ## Hard constraint: additive-only
@@ -95,7 +95,7 @@ Consolidate everything into ONE report, not five disconnected skill outputs:
 **Not yet checked** (per coderails:notchecked)
 - ...
 
-**Premortem — observed failure modes** (from standing-orders.md / retro.json)
+**Premortem — observed failure modes** (from current cited lessons / retro.json)
 - <seed> — source: <file, line or retro id>
 
 **Premortem — hypothesised failure modes** (from the skill sequence)

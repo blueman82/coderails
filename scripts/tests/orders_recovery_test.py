@@ -255,7 +255,17 @@ class ReceiptRecovery(RecoveryCase):
         """No attempt identity authorizes changing a pre-existing malformed or unframed canonical tail."""
         for codex in (False, True):
             for n, raw in enumerate(
-                (PRIOR + b'{"partial":', PRIOR + b"[]\n", PRIOR.rstrip(b"\n"), PRIOR + b'{"value":NaN}\n')
+                (
+                    PRIOR + b'{"partial":',
+                    PRIOR + b"[]\n",
+                    PRIOR.rstrip(b"\n"),
+                    PRIOR + b'{"value":NaN}\n',
+                    PRIOR + b'{"value":1e999}\n',
+                    PRIOR + b'{"nested":[{"value":-1e999}]}\n',
+                    b'{"a":1}\r{"b":2}\n',
+                    b'{"a":1}\xc2\x85{"b":2}\n',
+                    b'{"a":1}\xe2\x80\xa8{"b":2}\n',
+                )
             ):
                 with self.subTest(codex=codex, raw=raw):
                     path, _ = self.setup_receipt(codex, "prepare", "corrupt" + str(n))

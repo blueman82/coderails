@@ -51,11 +51,34 @@ def _row(order: dict[str, Any], rec: ma.Record | None) -> dict[str, Any]:
     }
 
 
-def pick(records: list[ma.Record], order_id: str, prior: str | None = None) -> ma.Record | None:
-    """Select this order's current tagged claim, preferring its known K-id when still current."""
+def pick(records: list[ma.Record], order_id: str, prior: str | None = None) -> ma.Record | ma.Degraded | None:
+    """Select an unambiguous current claim, preferring its known K-id among identical claims."""
     mine = [r for r in records if tag_for(order_id) in r.tags]
+    if len({r.claim for r in mine}) > 1:
+        return ma.Degraded("lesson_not_current")
     exact = next((r for r in mine if r.id == prior), None)
     return exact or max(mine, key=lambda r: int(str(r.id)[1:]), default=None)
+
+
+def current(order_id: str, session: str, prior: str | None = None) -> ma.Record | ma.Degraded | None:
+    """Read this order's current cited claim without authoring knowledge."""
+    if ma.backend() == "off":
+        return ma.Degraded("memory_backend_off")
+    try:
+        listed = ma.list_records("repository", type="lesson", tags=["order"], session_id=session)
+        return listed if isinstance(listed, ma.Degraded) else pick(listed, order_id, prior)
+    except Exception:  # noqa: BLE001  unavailable currentness stays explicit and never becomes an empty read
+        return ma.Degraded("muninn_error")
+
+
+def metadata(result: ma.Record | ma.Written | ma.Degraded | None, prior: str | None) -> dict[str, Any]:
+    """Cache an observation, retaining known provenance when currentness cannot be established."""
+    if isinstance(result, (ma.Record, ma.Written)):
+        return {"id": result.id, "state": "written", "reason_code": "ok"}
+    reason = result.reason if isinstance(result, ma.Degraded) else "lesson_not_current" if prior else "no_user_cite"
+    if reason == "memory_backend_off":
+        return {"id": None, "state": "disabled", "reason_code": reason}
+    return {"id": prior, "state": "degraded", "reason_code": reason}
 
 
 def joined(ledger: ol.Ledger, include_decayed: bool = False, session: str = "") -> dict[str, Any]:
@@ -65,9 +88,6 @@ def joined(ledger: ol.Ledger, include_decayed: bool = False, session: str = "") 
     )
     if ma.backend() == "off":
         return {"lessons": [_row(o, None) for o in active], "excluded": [], "state": "memory_backend_off"}
-    down = ma.probe()
-    if down:
-        return {"degraded": down.reason}
     listed = ma.list_records("repository", type="lesson", tags=["order"], session_id=session)
     if isinstance(listed, ma.Degraded):
         return {"degraded": listed.reason}
@@ -75,6 +95,8 @@ def joined(ledger: ol.Ledger, include_decayed: bool = False, session: str = "") 
     excluded: list[dict[str, str]] = []
     for order in active:
         current = pick(listed, order["id"], order["muninn"].get("id"))
+        if isinstance(current, ma.Degraded):
+            return {"degraded": current.reason}
         if current is not None:
             rows.append(_row(order, current))
         elif order["muninn"].get("state") != "written":  # diagnostic only; never a contract/promotion fallback

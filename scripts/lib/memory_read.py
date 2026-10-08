@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import math
 import re
 import time
 from typing import Any, cast
@@ -21,7 +22,8 @@ def expired(valid_until: object) -> bool:
         return False
     try:
         if type(valid_until) in (int, float):
-            return float(cast("int | float", valid_until)) <= time.time()
+            numeric = float(cast("int | float", valid_until))
+            return not math.isfinite(numeric) or numeric <= time.time()
         if isinstance(valid_until, str) and DATE.fullmatch(valid_until):
             return datetime.date.fromisoformat(valid_until) <= datetime.date.today()
         instant = datetime.datetime.fromisoformat(str(valid_until).replace("Z", "+00:00"))

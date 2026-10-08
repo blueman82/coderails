@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Standing orders CLI: record|tick|predicate|lessons|render|import-legacy|cite (provider-neutral).
-
-    orders.py --dir D record --failure-mode FM --lesson TEXT --loop LOOP [--quote Q] [--scope repo|agnostic]
-    orders.py --dir D prepare --loop LOOP [--refresh-from-sha256 H] bind eligible inputs without aging
-    orders.py --dir D tick --loop LOOP    apply prepared inputs after durable completion; decay at K=5
-    orders.py --dir D predicate           the graduation predicate (retro.json count, recurred, decayed)
-    orders.py --dir D lessons             active orders joined with Muninn's current status (exit 3 if down)
-    orders.py --dir D render              regenerate standing-orders.md / -decayed.md (0444, marker-stamped)
-    orders.py --dir D import-legacy       load the hand-written standing-orders.md, move it aside
-    orders.py --dir D cite ID --quote Q   attach the user-anchored cite to an order stored without one
+"""Standing orders CLI: record|prepare|tick|predicate|lessons|render|import-legacy|cite (provider-neutral).
 
 D is the repo-key dir. The ledger `orders.json` (counters, decay, hash chain; see orders_ledger.py) is written under
 dir_lock through currentness, reconciliation, bounded Muninn sync and atomic ledger save. A degrade
@@ -28,7 +19,7 @@ import re
 import sys
 from collections.abc import Callable, Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
 from hooks.scripts.lib import dir_lock  # noqa: E402
@@ -79,30 +70,27 @@ def update(repo_dir: Path, change: Callable[[ol.Ledger], tuple[ol.Ledger | None,
         return _refuse(str(error) if str(error) in REASONS else "order_state_error")
 
 
-def sync_order(order: dict[str, Any], session: str, quote: str, repo_dir: Path, ledger: ol.Ledger) -> dict[str, Any]:
+def sync_order(
+    order: dict[str, Any], session: str, quote: str, repo_dir: Path, ledger: ol.Ledger, replace: bool = False
+) -> dict[str, Any]:
     """Reconcile current tagged claims before add; the caller holds the one orders lock throughout."""
     lifecycle.check_staged_identity(repo_dir, ledger, order)
     prior = order.get("muninn", {}).get("id")
-    if ma.backend() == "off":
-        return {"id": None, "state": "disabled", "reason_code": "memory_backend_off"}
     claim = _collapse(str(order["lesson"]))
+    current = lessons.current(order["id"], session, prior)
+    if isinstance(current, ma.Degraded) or current and (not replace or current.claim == claim or not quote.strip()):
+        return lessons.metadata(current, prior)
+    if not replace and prior:
+        return lessons.metadata(None, prior)
+    if not quote.strip():
+        return lessons.metadata(ma.Degraded("no_user_cite"), prior)
     try:
-        listed = ma.list_records("repository", type="lesson", tags=["order"], session_id=session)
-        if isinstance(listed, ma.Degraded):
-            return {"id": prior, "state": "degraded", "reason_code": listed.reason}
-        current = lessons.pick(listed, order["id"], prior)
-        if current is not None and (current.claim == claim or not quote.strip()):
-            return {"id": current.id, "state": "written", "reason_code": "ok"}
-        if not quote.strip():
-            return {"id": prior, "state": "degraded", "reason_code": "no_user_cite"}
         rec = ma.Record("repository", "lesson", claim, "", _collapse(quote), ["order", lessons.tag_for(order["id"])])
         rec.confidence, rec.supersedes = "inferred", current.id if current else None
         res: ma.Degraded | ma.Written = ma.resolve_cite(rec, False, session) or ma.add(rec, session)
     except Exception:  # noqa: BLE001  a failed sync retains the prior K-id and reports explicit degradation
         res = ma.Degraded("muninn_error")
-    if isinstance(res, ma.Written):
-        return {"id": res.id, "state": "written", "reason_code": "ok"}
-    return {"id": prior, "state": "degraded", "reason_code": res.reason}
+    return lessons.metadata(res, prior)
 
 
 def _exit(field: dict[str, Any]) -> int:
@@ -112,6 +100,13 @@ def _exit(field: dict[str, Any]) -> int:
 def _prepare(state_dir: Path, prepared: dict[str, Any]) -> None:
     ol.save(lifecycle.preparation_path(state_dir, prepared["binding"]["loop_id"]), prepared)
     lifecycle.observe(state_dir, "orders_prepared", prepared["binding"], lifecycle.sha(prepared))
+
+
+def _record_row(ledger: ol.Ledger, row: dict[str, Any], session: str, loop: str) -> ol.Ledger:
+    """Apply the validated row with its explicit identity and the owned session/loop."""
+    fields = {key: row[key] for key in ("scope", "failure_mode")}
+    fields.update(session_id=session, loop_id=loop, now=row["ts"])
+    return cast("ol.Ledger", ol.record(ledger, row["id"], row["lesson"], **fields)["ledger"])
 
 
 def cmd_record(a: argparse.Namespace, repo_dir: Path) -> Result:
@@ -143,22 +138,12 @@ def cmd_record(a: argparse.Namespace, repo_dir: Path) -> Result:
             "scope": a.scope,
             "ts": ol.now_iso(),
         }
-        row["muninn"] = sync_order({**old, **row}, a.session, a.quote, repo_dir, ledger)
+        row["muninn"] = sync_order({**old, **row}, a.session, a.quote, repo_dir, ledger, replace=True)
         prepared["records"] = [r for r in prepared["records"] if r["id"] != order_id] + [row]
         _prepare(state_dir, prepared)
         new = None
         if state["status"] == "complete":
-            out = ol.record(
-                ledger,
-                order_id,
-                a.lesson,
-                session_id=a.session,
-                loop_id=a.loop,
-                now=row["ts"],
-                scope=a.scope,
-                failure_mode=a.failure_mode,
-            )
-            new = ol.set_muninn(out["ledger"], order_id, row["muninn"])
+            new = ol.set_muninn(_record_row(ledger, row, a.session, a.loop), order_id, row["muninn"])
         return new, {"recorded": new is not None, "prepared": True, "id": order_id, "muninn": row["muninn"]}
 
     payload, rc = update(repo_dir, change)
@@ -197,23 +182,23 @@ def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
         for row in prepared["records"]:
             lifecycle.check_staged_identity(repo_dir, ledger, row)
         held["approved"] = True
-        if lifecycle.loop_key(a.session, a.loop) not in ledger["ticked_loops"]:
-            for row in prepared["records"]:
-                out = ol.record(
-                    ledger,
-                    row["id"],
-                    row["lesson"],
-                    session_id=a.session,
-                    loop_id=a.loop,
-                    now=row["ts"],
-                    scope=row["scope"],
-                    failure_mode=row["failure_mode"],
-                )
-                ledger = ol.set_muninn(out["ledger"], row["id"], row["muninn"])
+        original, degraded = ledger, ""
+        applied = lifecycle.loop_key(a.session, a.loop) in ledger["ticked_loops"]
+        for row in prepared["records"]:
+            known = ol.find(ledger, row["id"]) or row
+            prior = known["muninn"].get("id") or row["muninn"].get("id")
+            if not applied:
+                ledger = _record_row(ledger, row, a.session, a.loop)
+            field = lessons.metadata(lessons.current(row["id"], a.session, prior), prior)
+            ledger = ol.set_muninn(ledger, row["id"], field)
+            if field["state"] == "degraded":
+                degraded = field["reason_code"]
         out = ol.tick(ledger, a.loop, ol.now_iso(), session_id=a.session)
-        if out["ticked"]:
+        if out["ticked"] or out["ledger"] != original:
             ol.save(repo_dir / "orders.json", out["ledger"])
         payload = {"ticked": out["ticked"], "decayed": out["decayed"]}
+        if degraded:
+            payload["degraded"] = degraded
         try:
             lifecycle.observe(state_dir, "orders_ticked", binding, lifecycle.sha(prepared))
         except (OSError, ValueError):
@@ -230,6 +215,9 @@ def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
     if payload.get("pending_teardown"):
         payload["progress_complete"] = True
         ol.trace("order.tick", "degraded", "order_pending_teardown", a.session, a.loop)
+        return payload, 3
+    if payload.get("degraded"):
+        ol.trace("order.tick", "degraded", payload["degraded"], a.session, a.loop)
         return payload, 3
     ol.trace(
         "order.tick",
@@ -295,20 +283,31 @@ def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
 
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
         new = {**ledger, "orders": list(ledger["orders"])}
-        have = {o["id"] for o in new["orders"]}
-        collisions = [o["failure_mode"] for o in parsed if o["id"] in have]
-        if collisions:
-            raise ValueError("legacy_parse_error")
+        have = {o["id"]: o for o in new["orders"]}
+        shared = [row for row in parsed if row["id"] in have]
+        if shared:
+            timestamps = {have[row["id"]]["created"] for row in shared}
+            expected = ol.parse_legacy(text, have[shared[0]["id"]]["created"])
+            if (
+                len(shared) != len(parsed)
+                or len(timestamps) != 1
+                or any(
+                    {k: v for k, v in have[row["id"]].items() if k not in ("seq", "prev_sha256", "row_sha256")} != row
+                    for row in expected
+                )
+            ):
+                raise ValueError("legacy_parse_error")
         for n in range(1, 1000):
             dest = repo_dir / ("standing-orders.legacy.md" if n == 1 else f"standing-orders.legacy.{n}.md")
             if not dest.exists() and not dest.is_symlink():
                 break
         else:
             raise ValueError("legacy_parse_error")
-        new["orders"] += parsed
-        ol.save(repo_dir / "orders.json", ol.seal(new))
+        if not shared:
+            new["orders"] += parsed
+            ol.save(repo_dir / "orders.json", ol.seal(new))
         os.replace(src, dest)
-        return None, {"imported": len(parsed), "skipped": 0, "moved_to": str(dest)}
+        return None, {"imported": 0 if shared else len(parsed), "skipped": len(shared), "moved_to": str(dest)}
 
     payload, rc = update(repo_dir, change)
     if rc:

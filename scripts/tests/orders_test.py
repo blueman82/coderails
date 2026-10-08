@@ -132,13 +132,13 @@ class Lifecycle(unittest.TestCase):
         """Only an agnostic order recurred >= 2 times across >= 2 distinct sessions is a candidate."""
         ledger = new_ledger("g", "r", "one", "unc", scope="agnostic")
         order(ledger, "r")["scope"] = "repo"
-        for oid in ("g", "r", "one"):  # "unc" stays uncited: the control for the muninn-written requirement
+        for oid in ("g", "r", "one"):  # cached write state does not establish current citation authority
             order(ledger, oid)["muninn"]["state"] = "written"
         for oid, sessions in (("g", ("s2", "s3")), ("r", ("s2", "s3")), ("one", ("s1", "s1")), ("unc", ("s2", "s3"))):
             fields = dict(now="2026-03-01", scope=order(ledger, oid)["scope"])
             for n, sid in enumerate(sessions):
                 ledger = ol.record(ledger, oid, "x", session_id=sid, loop_id=f"{oid}{n}", **fields)["ledger"]
-        self.assertEqual([o["id"] for o in ol.candidates(ledger)], ["g"])
+        self.assertEqual([o["id"] for o in ol.candidates(ledger)], ["g", "unc"])
 
 
 class Chain(unittest.TestCase):

@@ -44,7 +44,8 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
   not roll back, and that session+loop has no applied tick or recurrence. Staged records are preserved, with no effects.
   After a saved replacement whose receipt failed, ordinary unchanged `prepare` repairs the receipt. Never refresh
   completed or already applied inputs.
-- D4 receipts use the persistent `teardown.jsonl.lock` after the orders lock, validate prior JSONL framing/objects
+- D4 receipts use the persistent `teardown.jsonl.lock` after the orders lock, reject linked artifact/sidecar paths,
+  and validate physical LF framing, objects and finite JSON numbers
   before any-matching dedupe, and atomically publish prior bytes plus a complete fsynced row. Partial failed writes
   leave canonical evidence untouched; an ambiguous post-publication error permits ordinary dedupe retry. Existing
   corrupt or newline-less evidence refuses untouched. Concurrent preservation requires every publisher to share this
@@ -59,8 +60,13 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
 - A recurrence revives a decayed order (status back to `active`, record kept), so the predicate's "one decayed order"
   is a snapshot, not a history.
 - Current tagged claims are reconciled even for degraded/pending local rows before another add. A failed currentness
-  lookup retains a prior K-id and degrades explicitly. A genuinely changed owner-cited claim may supersede current
-  text; an unchanged current claim needs no duplicate add. The orders lock covers lookup, reconciliation, bounded
+  lookup retains a prior K-id and degrades explicitly. Only explicit `record` may supersede claim text; `cite`
+  reconciles an existing current claim without reauthoring older ledger text, or validates a genuinely uncited first
+  attachment. Different claims simultaneously current under one order tag refuse as `lesson_not_current`.
+  Tick reads current cited metadata without writing knowledge, preserving saved provenance over stale preparations
+  during an outage. An already-ticked retry may refresh that metadata without lifecycle effects. Promotion joins
+  current cited claims to active/agnostic lifecycle eligibility, independent of cached pending/degraded state.
+  The orders lock covers lookup, reconciliation, bounded
   sync and direct atomic ledger save. Network exactly-once behavior is not claimed; sync stays outside progress locks.
 - The chain is a cooperating-agent safeguard: a same-user agent can rewrite `orders.json` and recompute every hash, and
   `muninn` sits outside the row hash; the head anchors the tick set. Replay of one completed observation cannot reset
@@ -77,7 +83,10 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
 - Import of the old hand-written `standing-orders-decayed.md` is not provided; it was never created in this repo.
 - Legacy import preserves titles, counters including decay, full source text and first-seen provenance. Duplicate,
   incomplete, malformed or colliding entries and foreign paths are refused without moving the source. The original
-  remains in a local backup; no live legacy migration is claimed by fixture tests.
+  remains in a local backup. A retry after ledger save but failed source move resumes only when the entire parsed
+  cohort equals every saved typed row, excluding only seal fields, at one common saved creation timestamp. It skips
+  ledger save and moves intact source to an unused backup. This is parsed-row equivalence, not whole-source/preamble
+  hash identity or atomicity across the ledger and source move; no live migration is claimed by fixture tests.
 
 Runbook: `docs/RUNBOOK.md` "Standing order stored without a cite, or a lesson missing from dispatch". Measurement:
 `docs/typed-records-measurement.md`. Related: `docs/decisions/2026-10-05-memory-authoritative.md`.

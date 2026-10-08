@@ -103,6 +103,21 @@ class LessonsCli(StoreCase):
         self.sql("UPDATE citation SET role = 'user', state = 'erased'")
         self.assertEqual(self.call(LESSONS, "query")[1]["lessons"], [])
 
+    def test_current_selection_excludes_uncited_lifecycle_eligible_orders(self) -> None:
+        """Lifecycle candidates g/unc become only g at the real current cited CLI intersection."""
+        self.add("g", scope="agnostic", sessions=("s1", "s2", "s3"))
+        for n, sid in enumerate(("s1", "s2", "s3")):
+            progress(self.dir, sid, f"unc{n}")
+            rc, out = self.call(
+                ORDERS, "--session", sid, "record", "--failure-mode", "unc", "--lesson", "Uncited lesson.",
+                "--loop", f"unc{n}", "--scope", "agnostic",
+            )  # fmt: skip
+            self.assertEqual(rc, 3, out)
+        self.assertEqual([o["id"] for o in ol.candidates(ol.open_ledger(self.dir))], ["g", "unc"])
+        rc, out = self.call(LESSONS, "predicate")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual([o["id"] for o in out["candidates"]], ["g"])
+
     def test_predicate_with_unavailable_currentness_is_degraded(self) -> None:
         """Missing store reads must not be reported as an ordinary empty successful promotion result."""
         self.add("alpha-mode")
@@ -196,7 +211,7 @@ class ReadBoundary(unittest.TestCase):
 class SessionAttribution(recovery.RecoveryCase):
     """Real provider callers bind default/explicit sessions to successful and degraded read observations."""
 
-    def unavailable_list(self) -> None:
+    def unavailable_list(self: recovery.RecoveryCase) -> None:
         """Fail only the actual typed read; the separate capability/schema probe genuinely succeeds."""
         exe = self.tmp / "bin/muninn"
         exe.write_text(
@@ -269,6 +284,96 @@ class SessionAttribution(recovery.RecoveryCase):
             for line in path.read_text().splitlines()
         ]
         self.assertEqual({r["session_id"] for r in rows}, {"library-caller"})
+
+    def test_early_probe_failure_is_counted_by_the_actual_session_bound_read(self) -> None:
+        """Binary absence uses the underlying list trace as well as the high-level caller observation."""
+        for codex in (False, True):
+            for script, command in (
+                ("lessons.py", "query"),
+                ("lessons.py", "predicate"),
+                ("orders.py", "lessons"),
+                ("orders.py", "render"),
+            ):
+                with self.subTest(codex=codex, script=script, command=command):
+                    self.configure(codex, "absent" + script + command)
+                    env = {**self.native_env, "PATH": str(self.tmp / "absent-binary")}
+                    rc, out = self.cli(command, script=script, session="early-caller", env=env)
+                    self.assertEqual((rc, out.get("degraded")), (3, "muninn_absent"), out)
+                    rows = self.trace_rows()
+                    self.assertIn("memory.list", [r["command"] for r in rows])
+                    self.assertEqual({r["session_id"] for r in rows}, {"early-caller"})
+
+
+class NativeReadBoundary(recovery.RecoveryCase):
+    """Modify an actual typed-list response from a private store rather than inventing citation authority."""
+
+    def modify_list(self, field: str, value: object, raw: bool = False) -> None:
+        """The schema/capability smoke stays real; only the served row's tested field changes on the wire."""
+        (self.tmp / "bin/muninn").write_text(
+            f"#!{sys.executable}\nimport contextlib, io, json, runpy, sys\n"
+            f"sys.argv[0] = {str(FAKE)!r}\n"
+            "if sys.argv[1:3] == ['know', 'list'] and '--kind' in sys.argv:\n"
+            "    buf = io.StringIO()\n"
+            "    try:\n"
+            "        with contextlib.redirect_stdout(buf): runpy.run_path(sys.argv[0], run_name='__main__')\n"
+            "    except SystemExit as done:\n"
+            "        if done.code not in (None, 0): print(buf.getvalue(), end=''); raise\n"
+            "    data = json.loads(buf.getvalue())\n"
+            f"    for row in data['entries']: row[{field!r}] = {value!r}\n"
+            "    text = json.dumps(data)\n"
+            + (f"    text = text.replace(json.dumps({value!r}), {value!r})\n" if raw else "")
+            + "    print(text)\nelse: runpy.run_path(sys.argv[0], run_name='__main__')\n"
+        )
+
+    def current_candidate(self, codex: bool, label: str) -> None:
+        """Three genuinely owned completed sessions create a cited current promotion candidate."""
+        self.configure(codex, label)
+        for sid in ("s1", "s2", "s3"):
+            self.assertEqual(self.stage(sid)[0], 0)
+            self.complete(sid)
+            self.assertEqual(self.cli("tick", "--loop", "logical-" + sid, session=sid)[0], 0)
+        self.assertEqual(len(self.cli("predicate", script="lessons.py")[1]["candidates"]), 1)
+
+    def test_nonfinite_and_overflow_expiry_never_serves_renders_or_promotes(self) -> None:
+        """Malformed rows are excluded from a successful list; unavailable reads retain their separate failure API."""
+        exe = self.tmp / "bin/muninn"
+        original = exe.read_bytes()
+        for codex in (False, True):
+            exe.write_bytes(original)
+            self.current_candidate(codex, "expiry")
+            for token in ("NaN", "Infinity", "-Infinity", "1e999", "-1e999", "9" * 400):
+                self.modify_list("valid_until", token, raw=True)
+                for command, key in (("query", "lessons"), ("predicate", "candidates")):
+                    with self.subTest(codex=codex, token=token[:20], command=command):
+                        rc, out = self.cli(command, script="lessons.py")
+                        self.assertEqual(rc, 0, out)
+                        self.assertEqual(out[key], [])
+                with self.subTest(codex=codex, token=token[:20], command="render"):
+                    self.assertEqual(self.cli("render")[0], 0)
+                    self.assertNotIn("Lesson for", (self.repo / "standing-orders.md").read_text())
+
+    def test_opaque_scope_labels_and_finite_supported_expiry_remain_current(self) -> None:
+        """Muninn labels are display text; its cwd scope-id query supplies repository ownership."""
+        exe = self.tmp / "bin/muninn"
+        original = exe.read_bytes()
+        for codex in (False, True):
+            exe.write_bytes(original)
+            self.current_candidate(codex, "supported")
+            for field, values in (
+                ("scope", ("not-a-scope", "/private/repository", "repo:p", "repo:", "global:ordinary-label")),
+                ("valid_until", (None, "", 4102444800.5, "2099-01-01", "2099-01-01T12:00:00+00:00")),
+            ):
+                for value in values:
+                    self.modify_list(field, value)
+                    with self.subTest(codex=codex, field=field, value=value):
+                        self.assertEqual(len(self.cli("query", script="lessons.py")[1]["lessons"]), 1)
+                        self.assertEqual(len(self.cli("predicate", script="lessons.py")[1]["candidates"]), 1)
+            bad_scopes: tuple[object, ...] = (None, 4, {}, "", " \t", "global", "loop:L1", "loop:", "loop:bad/id")
+            for bad_scope in bad_scopes:
+                self.modify_list("scope", bad_scope)
+                with self.subTest(codex=codex, excluded=bad_scope):
+                    self.assertEqual(self.cli("query", script="lessons.py")[1]["lessons"], [])
+                    self.assertEqual(self.cli("predicate", script="lessons.py")[1]["candidates"], [])
 
 
 if __name__ == "__main__":

@@ -38,6 +38,8 @@ edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Decision record
 | Unavailable currentness | n/a | explicit exit 3, prior K-id retained, no ledger-text fallback | `orders_test.py`, `orders_repair_test.py`, `lessons_test.py` |
 | Lifecycle effect before durable completion | prose ticked before completion | none: record/prepare stage inputs, tick applies only saved owned completion | `orders_lifecycle_test.py` |
 | Changed preparation recovery | no separately bound preparation | explicit current-hash compare-and-swap; staged records preserved without effects | `orders_prepare_test.py` |
+| Citation chronology | cached ledger/preparation could restore older claims or ids | cite reconciles without authoring; tick reads fresh metadata, preserving later known ids during outages | `orders_current_test.py` |
+| Legacy move interruption | saved imported rows made ordinary retry collide | full parsed-cohort equality resumes only the source move, without another ledger save | `orders_legacy_test.py` |
 
 Counters: `order.record|prepare|tick|render|import|cite` and `lesson.query|predicate` trace rows are counted by
 `scripts/lib/memory_counters.py` (`by_command`, `by_reason_code`), which `scripts/measure_graph_alignment.py` already embeds
@@ -53,3 +55,7 @@ Uncited claims are diagnostic and excluded from dispatch, promotion and views. C
 are refused, never truncated. Schema3 history needs the matching `retro_check` validator; absence is unknown/refused.
 The chain and source hashes are cooperating-agent safeguards. Legacy fixture imports preserve all five entries,
 counters, full text and first-seen provenance; a live hand-written-file migration was not verified.
+Legacy retry equivalence covers every parsed row except seal fields, not a whole-source/preamble hash or own-attempt
+identity. Current reads exclude nonfinite expiries; scope labels remain opaque as supplied by Muninn's cwd-filtered
+repository list. Receipt parsing requires physical LF records and finite JSON numbers; Unicode inside a legitimate
+JSON string remains supported. Linked preparation/receipt/sidecar paths refuse before content read/open/create.

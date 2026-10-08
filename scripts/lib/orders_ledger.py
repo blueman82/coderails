@@ -240,12 +240,12 @@ def predicate(ledger: Ledger, retro_count: int) -> dict[str, Any]:
 
 
 def candidates(ledger: Ledger) -> list[dict[str, Any]]:
-    """Cited (muninn written) agnostic orders that recurred >= 2 times across >= 2 distinct session ids."""
+    """Active agnostic orders that recurred >= 2 times across >= 2 distinct session ids; citations join separately."""
     return [
         o
         for o in ledger["orders"]
         if o["scope"] == "agnostic"
-        and o["muninn"].get("state") == "written"
+        and o["status"] == "active"
         and len(o["evidence"]) - 1 >= 2
         and len({e["session_id"] for e in o["evidence"]}) >= 2
     ]

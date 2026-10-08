@@ -138,7 +138,7 @@ REASONS: dict[str, str] = {
     ),
     "legacy_missing": "there is no hand-written standing-orders.md to import (absent, empty or already generated).",
     "lesson_not_current": (
-        "the order's Muninn entry is retracted, expired or superseded without a replacement and was left out "
-        "of lessons; re-record the order with a fresh quote."
+        "the order has no unambiguous current cited Muninn claim (retracted, expired, superseded or conflicting "
+        "current claims); inspect the current evidence and explicitly record the intended lesson with a fresh quote."
     ),
 }

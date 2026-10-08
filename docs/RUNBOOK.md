@@ -185,7 +185,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `legacy_uncited` | an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`. |
 | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
 | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
-| `lesson_not_current` | the order's Muninn entry is retracted, expired or superseded without a replacement and was left out of lessons; re-record the order with a fresh quote. |
+| `lesson_not_current` | no unambiguous current cited claim exists; inspect conflicting current evidence, or explicitly re-record a retracted/expired lesson with a fresh quote. |
 
 - Limits: only the orchestrator session can write (subagent threads are not citable); cites must anchor in a user
   prompt; the hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Measurement note: compare
@@ -214,7 +214,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   owned progress is durably complete, local apply records recurrence and aging in `orders.json`. A degraded store
   result retains any prior K-id. `lessons` never prints ledger text when Muninn is down (`memory.backend: off` is the
   explicit switch). Trace rows: `order.record|prepare|tick|render|import|cite`, `lesson.query|predicate`.
-- Query: `python3 scripts/lib/orders.py --dir <repo-key dir> lessons` (the `excluded` list names orders whose Muninn entry
+- Query: `python3 scripts/lib/lessons.py --dir <repo-key dir> --session <known native caller id> query --format contract`
+  reads current cited lessons. Diagnostic `orders.py ... lessons` also returns an `excluded` list naming entries
   is retracted, expired or superseded, reason `lesson_not_current`), or
   `grep -E '"command": "(order|lesson)\.' <agentic-loop dir>/<session_id>/trace.jsonl`. A hand edit of `orders.json` is
   refused with `order_chain_broken` naming the order.
@@ -238,8 +239,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   prior application refuse unchanged. A durably saved replacement with a failed preparation receipt leaves progress
   incomplete; ordinary unchanged `prepare` repairs the receipt without another replacement or duplicate observation.
   After durable completion, retry `tick` only. Flush and reload pending source updates before final prepare/refresh.
-- Receipt publication: D4 holds orders.lock, then the persistent `teardown.jsonl.lock`. It validates every prior
-  JSONL object and terminal newline before deduplication, preserves prior bytes, and atomically publishes a complete
+- Receipt publication: D4 refuses linked preparation, receipt and persistent sidecar paths before read/open/create.
+  It holds orders.lock, then `teardown.jsonl.lock`, and validates every prior physical LF JSONL object, finite JSON
+  number and terminal newline before deduplication, preserves prior bytes, and atomically publishes a complete
   fsynced sibling. Short writes make progress until complete; a zero write or partial-write exception leaves canonical
   evidence untouched. An ambiguous error after replacement needs an ordinary prepare/tick retry, without duplicate
   lifecycle effects. Pre-existing malformed or newline-less evidence is refused untouched; restore genuine evidence,
@@ -249,6 +251,12 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   record/cite sync or local application. Historical preparations still constrain identity after progress advances;
   they establish no present eligibility, currentness, citation or lifecycle effect. Same identities in other sessions
   are accepted recurrences; conflicts and foreign/malformed stored bindings refuse before superseding a store claim.
+- Current citation: explicit `record` alone may replace lesson text. `cite` reconciles the current tagged claim even
+  when the ledger holds older text, without a knowledge write. A formerly cited id without a current replacement
+  refuses; a genuinely uncited first attachment still validates the owner's quote. Distinct simultaneous current
+  claims refuse as `lesson_not_current`. Tick performs current reads without knowledge writes; outages retain saved
+  K-ids over stale preparation metadata and return explicit degradation. Idempotent tick retry may refresh metadata
+  without repeating lifecycle effects. Promotion uses the current cited join, independent of cached write state.
 - Limits: the one same-user orders lock covers currentness, reconciliation, bounded sync and direct atomic ledger
   save; it provides no exactly-once network guarantee. Current tagged claims are reconciled even for degraded/pending
   local records. Only a new completed session+loop recurrence resets a counter or revives a tombstone; replaying the
@@ -258,6 +266,10 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   observations remain metadata only. Failed reads exit 3, with no ledger-text fallback. A fresh cited claim can
   supersede prior text. Legacy import retains full source text and first-seen provenance, preserves decayed counters,
   and refuses duplicate/incomplete/colliding entries or an external source path without moving the original.
+- Legacy retry: after a saved ledger and failed source move, ordinary `import-legacy` resumes only an entirely equal
+  parsed cohort at one saved creation timestamp, excluding only seal fields from row comparison. It skips ledger save
+  and moves intact source to an unused bounded backup slot. Mixed/new/divergent rows refuse. This proves parsed-row
+  equivalence, not whole-source/preamble hash identity, own-attempt identity or a two-file atomic transaction.
 - Graduation still requires >=10 distinct completed source-bound retros, recurrence and decay. Schema2 records need
   complete typed fields and their genuine completed progress hash. Schema3 delegates to `retro_check.check`; an absent
   validator returns `order_retro_validator_unavailable`, rather than a known zero count. Both ledger and source hashes

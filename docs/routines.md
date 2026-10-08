@@ -274,7 +274,7 @@ the typed ledger `orders.json` has at least one order whose `last_recurred` diff
 from its `created` date (one lesson has recurred at least once), and (3)
 at least one order has `status: decayed` (one lesson has
 completed a full create → recur → decay lifecycle). The routine evaluates
-this with `scripts/lib/lessons.py --dir <repo-key dir> predicate` (code, not
+this with `scripts/lib/lessons.py --dir <repo-key dir> --session <known native caller id> predicate` (code, not
 prose; the same result also lists the promotion candidates). Until all three
 hold, the routine is dormant.
 

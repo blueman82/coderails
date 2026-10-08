@@ -12,6 +12,7 @@ import datetime
 import hashlib
 import importlib
 import json
+import math
 import re
 import runpy
 import sys
@@ -19,7 +20,7 @@ from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
-from typing import Any, NoReturn, cast
+from typing import Any, cast
 
 from hooks.scripts.test_output import file_lock
 from scripts.lib.artifact_io import write_bytes
@@ -148,7 +149,10 @@ def owned(
 
 def preparation_path(state_dir: Path, loop: str) -> Path:
     """Keep separate preparations when one native session runs more than one logical loop."""
-    return state_dir / f"orders-prepared-{hashlib.sha256(loop.encode()).hexdigest()}.json"
+    path = state_dir / f"orders-prepared-{hashlib.sha256(loop.encode()).hexdigest()}.json"
+    if state_dir.is_symlink() or path.is_symlink():
+        raise ValueError("order_wrong_session")
+    return path
 
 
 def valid_record(row: dict[str, Any]) -> bool:
@@ -275,15 +279,21 @@ def prepare(
     return state_dir, old
 
 
-def _nonfinite(_value: str) -> NoReturn:
-    """Nonfinite numeric literals are not JSON, so they cannot be preserved as canonical evidence."""
-    raise ValueError("order_source_invalid")
+def _finite_float(value: str) -> float:
+    """Reject named nonfinite values and overflowing exponent tokens at every nested JSON position."""
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("order_source_invalid")
+    return number
 
 
 def observe(state_dir: Path, step: str, binding: dict[str, Any], evidence: str) -> None:
     """Publish a truthful receipt under the persistent teardown lock; callers already hold the orders lock."""
     path = state_dir / "teardown.jsonl"
-    with file_lock(state_dir / "teardown.jsonl.lock", exclusive=True) as acquired:
+    lock = state_dir / "teardown.jsonl.lock"
+    if state_dir.is_symlink() or path.is_symlink() or lock.is_symlink():
+        raise ValueError("order_wrong_session")
+    with file_lock(lock, exclusive=True) as acquired:
         if not acquired:
             raise ValueError("order_state_error")
         try:
@@ -292,7 +302,10 @@ def observe(state_dir: Path, step: str, binding: dict[str, Any], evidence: str) 
             prior = b""
         if prior and not prior.endswith(b"\n"):
             raise ValueError("order_source_invalid")
-        rows = [json.loads(line, parse_constant=_nonfinite) for line in prior.decode("utf-8").splitlines()]
+        rows = [
+            json.loads(line, parse_float=_finite_float, parse_constant=_finite_float)
+            for line in prior.decode("utf-8").split("\n")[:-1]
+        ]
         if any(not isinstance(row, dict) for row in rows):
             raise ValueError("order_source_invalid")
         if any(
