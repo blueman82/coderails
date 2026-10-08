@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
+from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
 from scripts.lib.memory_adapter import MARKER, NO_SESSION  # noqa: E402
 
 K = 5  # a loop count, deliberately a code constant and not config: an order decays after K loops without recurrence
@@ -44,8 +45,11 @@ def now_iso() -> str:
 
 
 def slug(text: str) -> str:
-    """A stable lowercase id from free text."""
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:120]
+    """Preserve canonical ids; hash free text so normalization cannot merge distinct failure modes."""
+    if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", text) and len(text) <= 120:
+        return text
+    base = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:107] or "order"
+    return f"{base}-{hashlib.sha256(text.encode()).hexdigest()[:12]}"
 
 
 def empty() -> Ledger:
@@ -77,6 +81,7 @@ def seal(ledger: Ledger) -> Ledger:
 
 def verify(ledger: Ledger) -> list[dict[str, str]]:
     """Offenders `{id, reason}` (bad_seq, bad_prev, bad_hash, and bad_head for the ledger anchor); empty is clean."""
+    validate_shape(ledger)
     bad: list[dict[str, str]] = []
     prev = GENESIS
     for seq, order in enumerate(ledger.get("orders", []), start=1):
@@ -92,6 +97,52 @@ def verify(ledger: Ledger) -> list[dict[str, str]]:
     if ledger.get("head") != _head(ledger, prev):  # a dropped tail, or edited ticks, leaves the chain itself clean
         bad.append({"id": "#ledger", "reason": "bad_head"})
     return bad
+
+
+def validate_shape(ledger: Ledger) -> None:
+    """Reject malformed typed counters and identities even when their integrity hashes were recomputed."""
+    if type(ledger.get("schema")) is not int or ledger["schema"] != 1:
+        raise ValueError("order_state_error")
+    raw_ticks: object = ledger.get("ticked_loops")
+    ticks = cast("list[Any]", raw_ticks)
+    if not isinstance(raw_ticks, list):
+        raise ValueError("order_state_error")
+    if any(not isinstance(t, str) or not t.strip() for t in ticks):
+        raise ValueError("order_state_error")
+    head = ledger.get("head")
+    if (
+        len(ticks) != len(set(ticks))
+        or not isinstance(head, dict)
+        or type(cast("dict[str, Any]", head).get("count")) is not int
+    ):
+        raise ValueError("order_state_error")
+    ids: set[str] = set()
+    for order in ledger["orders"]:
+        if not isinstance(order, dict) or not lifecycle.valid_record(cast("dict[str, Any]", order)):
+            raise ValueError("order_state_error")
+        order = cast("dict[str, Any]", order)
+        oid, count, ev = order.get("id"), order.get("loops_since_recurrence"), order.get("evidence")
+        if not isinstance(oid, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,119}", oid) or oid in ids:
+            raise ValueError("order_state_error")
+        ids.add(oid)
+        if type(count) is not int or count < 0 or order.get("status") not in ("active", "decayed"):
+            raise ValueError("order_state_error")
+        if any(not isinstance(order.get(k), str) or not order[k].strip() for k in ("created", "last_recurred")):
+            raise ValueError("order_state_error")
+        evidence = cast("list[Any]", ev)
+        if not isinstance(ev, list) or not ev:
+            raise ValueError("order_state_error")
+        identities: set[tuple[str, str]] = set()
+        for raw_e in evidence:
+            if not isinstance(raw_e, dict):
+                raise ValueError("order_state_error")
+            e = cast("dict[str, Any]", raw_e)
+            if any(not isinstance(e.get(k), str) or not e[k].strip() for k in ("session_id", "loop_id", "ts")):
+                raise ValueError("order_state_error")
+            ident = (e["session_id"], e["loop_id"])
+            if ident in identities:
+                raise ValueError("order_state_error")
+            identities.add(ident)
 
 
 def find(ledger: Ledger, order_id: str) -> dict[str, Any] | None:
@@ -136,21 +187,27 @@ def record(
         created = True
     else:  # a recurrence revives a tombstone: the record is kept, only its status changes
         created = False
-        order.update(last_recurred=now, loops_since_recurrence=0, status="active", decayed_at=None)
+        if failure_mode is not None and order["failure_mode"] != failure_mode:
+            raise ValueError("order_id_collision")
         if all((e["session_id"], e["loop_id"]) != (session_id, loop_id) for e in order["evidence"]):
+            order.update(last_recurred=now, loops_since_recurrence=0, status="active", decayed_at=None)
             order["evidence"].append(ev)
+        order["lesson"] = lesson
     return {"ledger": seal(new), "order": find(new, order_id), "created": created}
 
 
-def tick(ledger: Ledger, loop_id: str, now: str) -> dict[str, Any]:
+def tick(ledger: Ledger, loop_id: str, now: str, session_id: str | None = None) -> dict[str, Any]:
     """Count one loop: every active order this loop did not record gains 1 and decays at K. Idempotent per loop_id."""
     new = copy.deepcopy(ledger)
     decayed: list[str] = []
-    if loop_id in new["ticked_loops"]:
+    identity = lifecycle.loop_key(session_id, loop_id) if session_id else loop_id
+    if identity in new["ticked_loops"]:
         return {"ledger": new, "ticked": False, "decayed": decayed}
-    new["ticked_loops"] = sorted([*new["ticked_loops"], loop_id])
+    new["ticked_loops"] = sorted([*new["ticked_loops"], identity])
     for order in new["orders"]:
-        if order["status"] != "active" or any(e["loop_id"] == loop_id for e in order["evidence"]):
+        if order["status"] != "active" or any(
+            e["loop_id"] == loop_id and (session_id is None or e["session_id"] == session_id) for e in order["evidence"]
+        ):
             continue
         order["loops_since_recurrence"] += 1
         if order["loops_since_recurrence"] >= K:
@@ -236,17 +293,24 @@ def parse_legacy(text: str, now: str) -> list[dict[str, Any]]:
     for line in text.splitlines():
         head = HEADING.match(line)
         if head:
+            if not head.group(1).strip():
+                raise LegacyParseError("blank title")
             blocks.append((head.group(1), []))
         elif blocks:
             blocks[-1][1].append(line)
+    if text.strip() and not blocks:
+        raise LegacyParseError("no recognized entries")
     found: list[dict[str, Any]] = []
     for title, body in blocks:
-        counter = next((m.group(1) for m in map(COUNTER.match, body) if m), "")
-        if not re.fullmatch(r"\d+", counter):
+        counters = [m.group(1) for m in map(COUNTER.match, body) if m]
+        firsts = [m.group(1) for m in map(FIRST.match, body) if m]
+        if len(counters) != 1 or not re.fullmatch(r"\d+", counters[0]) or len(firsts) != 1 or not firsts[0]:
             raise LegacyParseError(title)
-        first = next((m.group(1) for m in map(FIRST.match, body) if m), "")
+        counter, first = counters[0], firsts[0]
         sid = SESSION_ID.search(first)
         rest = [x.strip() for x in body if x.strip() and not COUNTER.match(x) and not FIRST.match(x)]
+        if not rest or any(o["id"] == slug(title) for o in found):
+            raise LegacyParseError(title)
         found.append(
             {
                 "id": slug(title),
@@ -256,10 +320,12 @@ def parse_legacy(text: str, now: str) -> list[dict[str, Any]]:
                 "evidence": [_evidence(sid.group(0) if sid else first or "legacy", "legacy-import", now)],
                 "last_recurred": now,
                 "loops_since_recurrence": int(counter),
-                "status": "active",
-                "decayed_at": None,
+                "status": "decayed" if int(counter) >= K else "active",
+                "decayed_at": now if int(counter) >= K else None,
                 "scope": "repo",
                 "muninn": {"id": None, "state": "degraded", "reason_code": "legacy_uncited"},
+                "legacy_first_seen": first,
+                "legacy_text": "\n".join(body),
             }
         )
     return found
@@ -316,18 +382,8 @@ def open_ledger(repo_dir: Path) -> Ledger:
 
 
 def retro_count(repo_dir: Path) -> int:
-    """Distinct loop ids among the parseable `<repo-key-dir>/*/retro.json` files that carry an int schema_version."""
-    loops: set[str] = set()
-    for path in repo_dir.glob("*/retro.json"):
-        try:
-            data: Any = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(data, dict):
-            retro = cast("dict[str, Any]", data)
-            if isinstance(retro.get("schema_version"), int) and retro.get("loop_id"):
-                loops.add(str(retro["loop_id"]))
-    return len(loops)
+    """Distinct logical loops with valid completed, owner/source-bound retrospectives."""
+    return lifecycle.retro_count(repo_dir)
 
 
 def trace(command: str, outcome: str, reason: str, session_id: str, loop_id: str | None = None) -> None:

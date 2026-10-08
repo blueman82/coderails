@@ -7,12 +7,19 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
+from scripts.lib import memory_adapter as ma  # noqa: E402
+from scripts.lib import memory_read  # noqa: E402
+from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
 from scripts.tests.fake_muninn_case import LINES, PROMPT, SESSION, StoreCase  # noqa: E402
+from scripts.tests.orders_lifecycle_test import progress, retrospective  # noqa: E402
 
 LESSONS = REPO / "scripts/lib/lessons.py"
 ORDERS = REPO / "scripts/lib/orders.py"
@@ -41,6 +48,7 @@ class LessonsCli(StoreCase):
             (self.tmp / "projects" / "p" / f"{sid}.jsonl").write_text("\n".join(json.dumps(x) for x in LINES) + "\n")
             args = ["--session", sid, "record", "--failure-mode", mode, "--lesson", f"Lesson for {mode}.", "--loop"]
             args += [f"{mode}{n}", "--scope", scope, "--quote", PROMPT]
+            progress(self.dir, sid, f"{mode}{n}")
             self.assertIn(self.call(ORDERS, *args)[0], (0, 3))
 
     def test_contract_list_is_stable_sorted_and_verbatim(self) -> None:
@@ -82,6 +90,106 @@ class LessonsCli(StoreCase):
         self.assertEqual((out["graduation"]["met"], out["graduation"]["retro_count"]), (False, 0))
         self.assertEqual(out["graduation"]["recurred"], 2)
         for n in range(10):
-            (self.dir / f"sess{n}").mkdir()
-            (self.dir / f"sess{n}" / "retro.json").write_text(json.dumps({"schema_version": 2, "loop_id": f"L{n}"}))
+            retrospective(self.dir, f"sess{n}", f"L{n}")
         self.assertEqual(self.call(LESSONS, "predicate")[1]["graduation"]["retro_count"], 10)
+
+    def test_retracted_or_non_user_citation_is_never_authoritative(self) -> None:
+        """Non-user anchors and no-longer-current citations cannot supply dispatch text."""
+        self.add("alpha-mode")
+        self.sql("UPDATE citation SET role = 'assistant'")
+        self.assertEqual(self.call(LESSONS, "query")[1]["lessons"], [])
+        self.sql("UPDATE citation SET role = 'user', state = 'erased'")
+        self.assertEqual(self.call(LESSONS, "query")[1]["lessons"], [])
+
+    def test_predicate_with_unavailable_currentness_is_degraded(self) -> None:
+        """Missing store reads must not be reported as an ordinary empty successful promotion result."""
+        self.add("alpha-mode")
+        p = subprocess.run(
+            [sys.executable, str(LESSONS), "--dir", str(self.dir), "predicate"],
+            capture_output=True, text=True, env={**os.environ, "PATH": str(self.tmp / "nowhere")},
+        )  # fmt: skip
+        self.assertEqual((p.returncode, json.loads(p.stdout).get("degraded")), (3, "muninn_absent"))
+
+
+class ReadBoundary(unittest.TestCase):
+    """Malformed currentness/provenance is excluded, and timestamp expiry keeps its full precision."""
+
+    def test_missing_currentness_or_typed_provenance_is_not_served(self) -> None:
+        """A successful CLI response alone cannot establish currentness or a user citation."""
+        cite = {
+            "ref": "claude:s1:1.1",
+            "quote": "The owner said this.",
+            "role": "user",
+            "kind": "prompt",
+            "state": "live",
+            "verify": "ok",
+        }
+        entry = {
+            "id": "K1",
+            "kind": "lesson",
+            "text": "Cited lesson",
+            "status": "current",
+            "scope": "repo:p",
+            "sensitivity": "normal",
+            "expired": False,
+            "tags": ["order"],
+            "cites": [cite],
+        }
+        changes: list[dict[str, Any]] = [
+            {"status": None},
+            {"id": "invented"},
+            {"text": []},
+            {"tags": "order"},
+            {"expired": "false"},
+            {"scope": None},
+            {"cites": [{**cite, "verify": "unknown"}]},
+            {"cites": [{**cite, "kind": "reply"}]},
+            {"cites": [{**cite, "state": "erased"}]},
+        ]
+        with mock.patch.object(ma, "probe", return_value=None):
+            for change in changes:
+                with (
+                    self.subTest(change=change),
+                    mock.patch.object(ma, "_run", return_value=json.dumps({"entries": [{**entry, **change}]})),
+                ):
+                    self.assertEqual(ma.list_records("repository", type="lesson", tags=["order"]), [])
+            with mock.patch.object(ma, "_run", return_value=json.dumps({"entries": [entry]})):
+                records = ma.list_records("repository", type="lesson", tags=["order"])
+                self.assertIsInstance(records, list)
+                assert not isinstance(records, ma.Degraded)
+                self.assertEqual([r.id for r in records], ["K1"])
+
+    def test_expiry_timestamp_before_at_and_after_boundary(self) -> None:
+        """A future time on the same day stays current; at the expiry instant it is excluded."""
+        self.assertIs(ma.__dict__["_expired"], memory_read.expired)
+        with mock.patch("scripts.lib.memory_read.time.time", return_value=1780315200):  # 2026-06-01T12:00:00Z
+            self.assertFalse(memory_read.expired("2026-06-01T12:00:01+00:00"))
+            self.assertTrue(memory_read.expired("2026-06-01T12:00:00+00:00"))
+            self.assertTrue(memory_read.expired("2026-06-01T11:59:59+00:00"))
+            self.assertTrue(memory_read.expired(True))
+
+    def test_native_terminal_work_units_are_reused(self) -> None:
+        """Reasoned drops and absent rosters remain terminal; malformed drops still fail native validation."""
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            path = progress(repo, "s1", "L1")
+            state = json.loads(path.read_text())
+            for units in (
+                {"1": {"status": "done"}},
+                {"1": {"status": "dropped", "dropped_reason": "Out of scope."}},
+                None,
+            ):
+                path.write_text(json.dumps({**state, "work_units": units}))
+                with self.subTest(units=units):
+                    self.assertEqual(lifecycle.owned(repo, "s1", "L1", complete=True)[1]["status"], "complete")
+            reasons: list[Any] = [None, "", " ", True, 4, [], {}]
+            for reason in reasons:
+                path.write_text(
+                    json.dumps({**state, "work_units": {"1": {"status": "dropped", "dropped_reason": reason}}})
+                )
+                with self.subTest(reason=reason), self.assertRaises(ValueError):
+                    lifecycle.owned(repo, "s1", "L1", complete=True)
+
+
+if __name__ == "__main__":
+    unittest.main()

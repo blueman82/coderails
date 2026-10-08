@@ -167,13 +167,23 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `decision_state_error` | the loop state could not be read, validated or locked; nothing was written. |
 | `order_chain_broken` | orders.json was edited by hand (the hash chain names the order); restore it from backup or review the named order, then re-seal by recording through orders.py. |
 | `order_blank_field` | an order needs a non-blank failure mode and lesson; nothing was written. |
+| `order_lesson_too_long` | the collapsed lesson exceeds 500 characters; provide a shorter complete claim, never truncate it. |
+| `order_bad_id` | an explicit order id must match [a-z0-9][a-z0-9_-]{0,119}; use a canonical id. |
+| `order_id_collision` | that id names another failure mode or scope; use its real identity or a distinct id. |
 | `order_not_found` | no order with that id in orders.json; check the id with `orders.py lessons`. |
 | `order_state_error` | orders.json could not be read, locked or written; check the repo-key dir and orders.lock. |
-| `order_loop_unknown` | tick --loop names a loop with no <repo-key dir>/<loop>/progress.json; use the real loop/session id. |
-| `order_already_ticked` | this loop id was already counted; the tick was skipped (informational, not an error). |
+| `order_loop_unknown` | no source at <repo-key dir>/<session>/progress.json; pass its owning --session and separate logical --loop. |
+| `order_wrong_session` | the source directory, session or logical loop is foreign; use the owning directory and identifiers. |
+| `order_source_invalid` | progress, preparation or observations are malformed; restore genuine validated source artifacts. |
+| `order_source_mismatch` | the prepared source/hash is stale; before completion use `prepare --refresh-from-sha256` with its CURRENT `evidence_sha256`. |
+| `order_loop_ineligible` | graph or work units are incomplete or stopped; finish the existing completion requirements. |
+| `order_not_complete` | preparation is prospective; durably save owned progress complete before recurrence or aging. |
+| `order_pending_teardown` | completion saved but local apply or observation failed; retry tick with the same bound source. |
+| `order_retro_validator_unavailable` | schema3 retros need the matching retro_check.py validator; reconcile that source dependency before graduation. |
+| `order_already_ticked` | this session and logical loop were already counted; the tick was skipped (informational). |
 | `no_user_cite` | the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner prompt text>`. |
 | `legacy_uncited` | an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`. |
-| `legacy_parse_error` | a hand-written entry has no parseable loops_since_recurrence line (the entry is named); fix it and rerun import-legacy, nothing was imported. |
+| `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
 | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
 | `lesson_not_current` | the order's Muninn entry is retracted, expired or superseded without a replacement and was left out of lessons; re-record the order with a fresh quote. |
 
@@ -200,9 +210,10 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 - Symptom: `orders.py record` exited 3 with `muninn.reason_code` (`no_user_cite`, `muninn_absent`, `cite_*`), or
   `lessons.py query` / `orders.py lessons` exited 3 with `{"degraded": ...}`, or an order you recorded is absent from the
-  list. The order is already in `orders.json` (written first, under dir_lock) and counts and decays normally; only its
-  Muninn copy is missing. `lessons` never prints ledger text when Muninn is down (`memory.backend: off` is the explicit
-  switch). Trace rows: `order.record|tick|render|import|cite`, `lesson.query|predicate`.
+  list. Before completion, `record` stages bound inputs and syncs the cited claim without lifecycle effects. After
+  owned progress is durably complete, local apply records recurrence and aging in `orders.json`. A degraded store
+  result retains any prior K-id. `lessons` never prints ledger text when Muninn is down (`memory.backend: off` is the
+  explicit switch). Trace rows: `order.record|prepare|tick|render|import|cite`, `lesson.query|predicate`.
 - Query: `python3 scripts/lib/orders.py --dir <repo-key dir> lessons` (the `excluded` list names orders whose Muninn entry
   is retracted, expired or superseded, reason `lesson_not_current`), or
   `grep -E '"command": "(order|lesson)\.' <agentic-loop dir>/<session_id>/trace.jsonl`. A hand edit of `orders.json` is
@@ -211,17 +222,35 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `orders.py --dir <repo-key dir> cite <id> --quote "<verbatim words the owner typed>"` from the owning session. To
   adopt the old hand-written file run `orders.py import-legacy` once (it moves the original to
   `standing-orders.legacy.md`, never deletes it), then `orders.py render`.
-- Limits: counters and decay are the typed ledger's; Muninn has no touch primitive, so only the first cite is in Muninn.
-  The chain and head anchor are a cooperating-agent safeguard (a same-user agent can rewrite file, chain and head).
-  A recurrence revives a decayed order (the tombstone record is kept) and `record` with an existing id by any caller
-  resets its counter; a recurrence does not update the stored lesson or the Muninn claim. Uncited orders are listed by
-  `orders.py lessons` (`cited: false`) but are not in `lessons.py query --format contract` and are never promotion
-  candidates. `render` and `lessons` exit 3 with Muninn down (no ledger text). A retracted order recovers by re-recording
-  with a fresh `--quote`. The caller is advisory: the record/tick/render sequence is instructed in
-  `skills/agentic-loop/teardown.md` (Claude) and `packages/codex/skills/agentic-loop/SKILL.md` (Codex) and no completion
-  hook runs it (the completion path, `graph.py complete`, belongs to the graph lane and is not extended by a second
-  enforcement route), so decay and recurrence happen only when the model follows that step. `retro_count` counts
-  distinct `loop_id` values in parseable `retro.json` files; it is still unauthenticated against a same-user agent.
+- Apply contract: use `--dir <repo-key dir> --session <provider session>` with the separate logical `--loop` copied
+  from `<repo-key dir>/<session>/progress.json`. Stage `record` inputs, then `prepare --loop <logical loop>` after
+  the final progress-source mutations. Preparation validates ownership, revision, eligibility and hashes, and appends
+  `orders_prepared`; it ages nothing. Run the existing native provider completion checks and durable save under the
+  progress lock. After releasing that lock, run `tick --loop <logical loop>` and `render`. Tick holds only the orders
+  lock and emits `orders_ticked` after its ledger save. A failed completion save ages nothing. A failed postcompletion
+  ledger save or observation returns exit 3 and `pending_teardown: true`; retry the same tick to recover idempotently.
+  Automatic provider completion wiring is pending in this source checkpoint; the instructed caller remains advisory.
+- Preparation recovery: changed sources are refused by default. Before completion, use
+  `prepare --loop <logical loop> --refresh-from-sha256 <CURRENT evidence_sha256>` only with the canonical hash returned
+  by the current preparation. Comparison happens under the same orders lock. Resolved directories, session and
+  logical loop must match; revision cannot roll back, and no matching local tick or recurrence may already exist.
+  Staged records are preserved, with no lifecycle effects. Wrong/stale hashes, invalid/foreign/complete sources and
+  prior application refuse unchanged. A durably saved replacement with a failed preparation receipt leaves progress
+  incomplete; ordinary unchanged `prepare` repairs the receipt without another replacement or duplicate observation.
+  After durable completion, retry `tick` only. Flush and reload pending source updates before final prepare/refresh.
+- Limits: the one same-user orders lock covers currentness, reconciliation, bounded sync and direct atomic ledger
+  save; it provides no exactly-once network guarantee. Current tagged claims are reconciled even for degraded/pending
+  local records. Only a new completed session+loop recurrence resets a counter or revives a tombstone; replaying the
+  same observation cannot rejuvenate it. Authoritative dispatch, promotion and views use current, normal, live,
+  verified user-cited claims. Diagnostic `orders.py lessons` may show uncited rows (`cited: false`); contract queries,
+  promotion and views exclude them. Owner-cited lesson text is legitimate typed memory; advisory transcript
+  observations remain metadata only. Failed reads exit 3, with no ledger-text fallback. A fresh cited claim can
+  supersede prior text. Legacy import retains full source text and first-seen provenance, preserves decayed counters,
+  and refuses duplicate/incomplete/colliding entries or an external source path without moving the original.
+- Graduation still requires >=10 distinct completed source-bound retros, recurrence and decay. Schema2 records need
+  complete typed fields and their genuine completed progress hash. Schema3 delegates to `retro_check.check`; an absent
+  validator returns `order_retro_validator_unavailable`, rather than a known zero count. Both ledger and source hashes
+  remain a cooperating-agent safeguard: the same user can rewrite and recompute them.
   Measurement note: `docs/typed-records-measurement.md`; overlap decision:
   `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 

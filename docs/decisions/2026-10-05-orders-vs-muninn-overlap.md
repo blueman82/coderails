@@ -25,31 +25,49 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
 - With Muninn down, `lessons` exits 3 with the reason and prints no ledger text (`memory.backend: off` is the explicit
   switch and serves ledger text, exit 0). The ledger never silently stands in for Muninn.
 - An order recorded without a user quote is kept active with `muninn.state=degraded`, reason `no_user_cite`, and
-  `orders.py cite <id> --quote` attaches the cite later. The five orders in the pre-existing hand-written file are
-  imported the same way (`legacy_uncited`) and served flagged `cited: false` until cited.
+  `orders.py cite <id> --quote` attaches the cite later. Legacy entries are imported as `legacy_uncited` and served
+  diagnostically with `cited: false` until cited. Dispatch, promotion and generated views exclude uncited claims.
 
 ## Consequences and limits
 
 - K=5 is a code constant (`orders_ledger.K`), not config.
-- The enforcing caller is advisory on both providers: the record/tick/render sequence is instructed in
+- The caller is advisory on both providers: the record/prepare/native-complete/tick/render sequence is instructed in
   `skills/agentic-loop/teardown.md` and `packages/codex/skills/agentic-loop/SKILL.md`; no hook or completion command
-  runs it, and none is added here (no second enforcement route beside the integrity gate).
-- `tick --loop` is accepted only for a loop with `<repo-key dir>/<loop>/progress.json`; `record` with an existing id by
-  any caller still resets that order's counter, and a recurrence does not update the stored lesson or Muninn claim.
+  automatically runs it in this checkpoint. Later provider wiring must use this interface without a second gate.
+- Preparation validates genuine eligible progress at `<repo-key dir>/<session>/progress.json` and binds the resolved
+  directories, owning session, separate logical loop, revision and source hash. Prospective eligibility permits
+  preparation only. Actual recurrence/aging requires that owned progress be durably saved complete. Failed completion
+  saves age nothing; local apply is idempotent per session+loop, and `orders_ticked` follows the ledger save. Failed
+  postcompletion apply or receipt means pending teardown and retrying the same tick.
+- A changed source is refused by default. Before completion, `prepare --refresh-from-sha256 H` may replace the current
+  preparation only when H equals its canonical current `evidence_sha256`, immutable ownership matches, revision does
+  not roll back, and that session+loop has no applied tick or recurrence. Staged records are preserved, with no effects.
+  After a saved replacement whose receipt failed, ordinary unchanged `prepare` repairs the receipt. Never refresh
+  completed or already applied inputs.
 - Uncited orders are diagnostic only: `lessons` lists them `cited: false`, `query --format contract` and the promotion
   `predicate` exclude them, and candidate text is Muninn's claim. `render` exits 3 with Muninn down (no ledger text).
 - `orders.json` carries a `head` anchor (count, last hash, ticks hash) so a dropped tail or edited ticks are named, and a
   missing ledger beside a generated view is an error; a same-user agent can still rewrite the file, chain and head.
-  `retro_count` counts distinct loop ids in parseable `retro.json` files; it is not authenticated.
+  `retro_count` requires distinct completed logical loops, valid owned progress and complete source-bound retros.
+  Schema2 uses complete typed fields and the saved progress hash. Schema3 delegates to the matching `retro_check`;
+  absence of that validator is an explicit refusal, never a known zero count. The same user can rewrite these sources.
 - A recurrence revives a decayed order (status back to `active`, record kept), so the predicate's "one decayed order"
   is a snapshot, not a history.
-- Muninn holds only the first cite of an order; recurrences add evidence to the ledger, not a new Muninn record.
+- Current tagged claims are reconciled even for degraded/pending local rows before another add. A failed currentness
+  lookup retains a prior K-id and degrades explicitly. A genuinely changed owner-cited claim may supersede current
+  text; an unchanged current claim needs no duplicate add. The orders lock covers lookup, reconciliation, bounded
+  sync and direct atomic ledger save. Network exactly-once behavior is not claimed; sync stays outside progress locks.
 - The chain is a cooperating-agent safeguard: a same-user agent can rewrite `orders.json` and recompute every hash, and
-  `muninn` and `ticked_loops` sit outside the hash.
-- A lesson longer than 500 characters is truncated (with an ellipsis) in Muninn, which caps claims at 500.
+  `muninn` sits outside the row hash; the head anchors the tick set. Replay of one completed observation cannot reset
+  counters or revive a tombstone. Only a new completed session+loop recurrence can do so.
+- A lesson over 500 collapsed characters is refused before storage, never silently truncated. Explicit ids must be
+  canonical; generated ids retain a hash suffix for ambiguous text, and identity collisions are refused.
 - `render` omits orders Muninn no longer holds as current; with Muninn unreachable it exits 3 and leaves the existing
   view untouched, so a view can lag a Muninn retraction until the next successful render.
 - Import of the old hand-written `standing-orders-decayed.md` is not provided; it was never created in this repo.
+- Legacy import preserves titles, counters including decay, full source text and first-seen provenance. Duplicate,
+  incomplete, malformed or colliding entries and foreign paths are refused without moving the source. The original
+  remains in a local backup; no live legacy migration is claimed by fixture tests.
 
 Runbook: `docs/RUNBOOK.md` "Standing order stored without a cite, or a lesson missing from dispatch". Measurement:
 `docs/typed-records-measurement.md`. Related: `docs/decisions/2026-10-05-memory-authoritative.md`.

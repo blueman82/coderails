@@ -25,6 +25,7 @@ from scripts.lib import memory_adapter as ma  # noqa: E402
 from scripts.lib import memory_reasons  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
 from scripts.tests.fake_muninn_case import LATER, PROMPT, SESSION, StoreCase  # noqa: E402
+from scripts.tests.orders_lifecycle_test import progress  # noqa: E402
 
 CLI = REPO / "scripts/lib/orders.py"
 LEGACY = REPO / "scripts/tests/fixtures/standing-orders.legacy.md"
@@ -126,7 +127,7 @@ class Lifecycle(unittest.TestCase):
         """Negative control: the predicate reads the typed field, so a lone free-text note does not count."""
         ledger = new_ledger("a")
         ledger["orders"][0]["notes"] = "last_recurred: yesterday"
-        self.assertFalse(ol.predicate(ledger, 10)["met"])
+        self.assertEqual([ol.predicate(ledger, 10)[key] for key in ("recurred", "met")], [0, False])
 
     def test_candidates_need_two_recurrences_two_sessions_and_agnostic(self) -> None:
         """Only an agnostic order recurred >= 2 times across >= 2 distinct sessions is a candidate."""
@@ -173,18 +174,14 @@ class Cli(StoreCase):
         self, *args: str, env: dict[str, str] | None = None, cwd: Path | None = None
     ) -> tuple[int, dict[str, Any]]:
         """Run orders.py in a fresh process; return (rc, stdout JSON)."""
-        p = subprocess.run(
-            [sys.executable, str(CLI), "--dir", str(self.dir), *args],
-            capture_output=True,
-            text=True,
-            env={**os.environ, **(env or {})},
-            cwd=str(cwd) if cwd else None,
-        )
+        command = [sys.executable, str(CLI), "--dir", str(self.dir), *args]
+        p = subprocess.run(command, capture_output=True, text=True, env={**os.environ, **(env or {})}, cwd=cwd)
         text = p.stdout.strip()
         return p.returncode, json.loads(text) if text.startswith(("{", "[")) else {"raw": text, "stderr": p.stderr}
 
     def rec(self, *extra: str, fm: str = FM, lesson: str = LESSON, loop: str = "L1") -> tuple[int, dict[str, Any]]:
         """orders.py record with a cite quote unless extra supplies none."""
+        progress(self.dir, SESSION, loop)
         return self.run_cli("record", "--failure-mode", fm, "--lesson", lesson, "--loop", loop, *extra)
 
     def ledger(self) -> dict[str, Any]:
@@ -243,6 +240,7 @@ class Cli(StoreCase):
         self.assertEqual(p.returncode, 3)
         self.assertEqual(json.loads(p.stdout), {"degraded": "muninn_absent"})
         self.assertNotIn(LESSON, p.stdout + p.stderr)
+        progress(self.dir, SESSION, "L2")
         rc, out = self.run_cli(
             "record", "--failure-mode", "second-mode", "--lesson", "Second lesson.", "--loop", "L2",
             "--quote", PROMPT, env=away,
@@ -256,6 +254,7 @@ class Cli(StoreCase):
         (repo / ".coderails").mkdir(parents=True)
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
         (repo / ".coderails/workflow.config.yaml").write_text("memory:\n  backend: off\n")
+        progress(self.dir, SESSION, "L1")
         rc, out = self.run_cli(
             "record", "--failure-mode", FM, "--lesson", LESSON, "--loop", "L1", "--quote", PROMPT, cwd=repo
         )
@@ -289,8 +288,9 @@ class Cli(StoreCase):
         """(a)(e) five ticks decay it; render writes both views with the marker, mode 0444, decayed only in its file."""
         self.rec("--quote", PROMPT)
         for n in range(5):
-            (self.dir / f"T{n}").mkdir()
-            (self.dir / f"T{n}" / "progress.json").write_text("{}")  # a tick needs a real loop
+            progress(self.dir, SESSION, f"T{n}", "in-progress")
+            self.assertEqual(self.run_cli("prepare", "--loop", f"T{n}")[0], 0)
+            progress(self.dir, SESSION, f"T{n}")
             self.assertEqual(self.run_cli("tick", "--loop", f"T{n}")[0], 0)
         self.assertEqual(order(self.ledger(), FM)["status"], "decayed")
         rc, _ = self.run_cli("render")
@@ -392,7 +392,7 @@ class Sources(unittest.TestCase):
 
     def test_slug_is_stable(self) -> None:
         """Ids derive deterministically from the failure mode."""
-        self.assertEqual(ol.slug("Flaky  tests: hidden!"), "flaky-tests-hidden")
+        self.assertEqual(ol.slug("Flaky  tests: hidden!"), "flaky-tests-hidden-70e14f0c6a2f")
         self.assertTrue(re.fullmatch(r"[a-z0-9-]+", ol.slug("Ünï cödé 123")))
 
 

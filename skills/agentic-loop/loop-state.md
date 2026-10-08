@@ -116,7 +116,7 @@ grace and block every time.
 - **Start (Phase -2):** run `graph.py start` (see phases-setup.md). It stamps this `session_id`, your unique non-blank `loop_id`, `revision: 1` and `status: "in-progress"` with an empty graph and no active wave, then `graph.py add-unit` registers each work unit. Never hand-write these; the initial state is validated, not decorative. A different `loop_id` over an unfinished loop is refused: resume it.
 - **Phase 0:** the envelope is already in `authorising_prompt_raw`; update it only when an improved envelope is adopted.
 - **Update at each phase boundary:** `graph` node states, work-unit states, disposition fields, `last_updated` — these fields are written through the graph commands (`add-unit`, `begin-wave`, `record-wave`, `record-unit`, `hard-stop`) and read back with `inspect` or `summarize`; never hand-edit `progress.json` and never touch `loop_stop_counts`.
-- **Teardown at Phase 13:** first run `python3 "${PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session>` after final grading, proofs and retro exist. Then run `python3 "${PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete <cwd> <session>` to set status and the live invocation-count marker together under the state lock. Never hand-derive or increment `completed_marker`.
+- **Teardown at Phase 13:** after final progress updates, stage any orders with `orders.py record` and run `orders.py --dir <repo-key dir> --session <session> prepare --loop <logical loop>` even when none were recorded. Preparation binds the eligible owned source and emits `orders_prepared`; it changes no lifecycle counters. Run `python3 "${PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session>` after final grading, proofs and retro exist. Then run `python3 "${PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete <cwd> <session>` to set status and the live invocation-count marker together under the state lock. Only after a successful durable completion save, run the bound `orders.py tick --loop <logical loop>` and `render`. `orders_ticked` follows the ledger save; a failed postcompletion apply or observation is pending teardown, recoverable by idempotent retry. Automatic provider wiring remains pending in this checkpoint. Never hand-derive or increment `completed_marker`.
 
 ## Recency
 
@@ -150,6 +150,7 @@ is still your job; the guard only catches its absence.
 
 - **`sdd-ledger.md`** — when a work-unit delegates to `superpowers:subagent-driven-development`, that skill's ledger lives beside `progress.json`, written by its own workspace helper rather than by this skill.
 - **`retro.json`** — session-keyed, beside `progress.json`, written once by the Phase 13 teardown contract.
+- **`orders-prepared-<logical-loop sha256>.json`** and **`teardown.jsonl`** — session-keyed preparations and honest lifecycle observations. Preparations bind the repo directory, state directory, session, separate logical loop, revision and progress hash. They stage claims without recurrence/aging effects; a receipt alone cannot authorize apply.
 - **`evals.json`** — loop-scope and pr-scope, frozen at Phase 2.7c/2.7d via `/coderails:task-evals`; see `skills/agentic-loop/SKILL.md` for the field contract.
 - **`proof.json`** — loop-scope, frozen at Phase 2.7e beside `evals.json`, by a SEPARATE agent given only `authorising_prompt_raw`, `session_id`, and `loop_id` as explicit dispatch inputs (never the plan/spec/conversation, never a `progress.json` read) — generalising `task-evals`' grader-independence to the author. Schema: `{"schema_version":1,"session_id","loop_id","frozen_at","frozen_sha","proofs":[{"id","claim","cmd","expect","status":"pending"}]}`. Voluntary adoption, same posture as `evals.json`: a loop with no executable surface writes none, and records that choice in `decisions_absorbed` **and** in `progress.json`'s own `proof_disposition` field (see the Fields table above) — the latter is what the gate actually reads.
 
@@ -165,6 +166,6 @@ is still your job; the guard only catches its absence.
 - **`orders.json`** (the typed ledger, written only by `scripts/lib/orders.py`) and its generated views **`standing-orders.md` / `standing-orders-decayed.md`** — repo-keyed, one dir up (the grandparent of the `progress.json` path), shared across every session and loop against that repo. The views are read-only (mode 0444, marker-stamped); read lessons with `scripts/lib/lessons.py query --format contract`.
 
 The asymmetry is deliberate: a retro belongs to the loop that produced it, but a lesson is meant
-to outlive any single loop. Two concurrent loops updating `orders.json` are serialised by
-`orders.py` under `dir_lock` (a lock failure is `order_state_error`, nothing written), so a recorded
-lesson is no longer lost to a last-writer-wins race.
+to outlive any single loop. `orders.py` holds one `dir_lock` through currentness lookup, tagged-claim reconciliation,
+bounded sync and direct atomic ledger save. A failed read retains a prior K-id and degrades explicitly. External
+Muninn sync stays outside the progress lock. The same-user orders lock supplies no exactly-once network guarantee.

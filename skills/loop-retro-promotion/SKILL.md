@@ -19,13 +19,17 @@ anything else:
    `hooks/scripts/lib/agentic_loop_path.py`.
 2. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/lessons.py" --dir <repo-key-dir> predicate`
    and read `graduation` from its JSON; do not count files or read Markdown by hand.
-   It checks `retro_count` (`<repo-key-dir>/*/retro.json`) **>= 10**,
+   It checks **>= 10 distinct completed retros** with owned validated progress and matching source hashes,
 3. `recurred` **>= 1** — an order in `orders.json` whose typed `last_recurred` !=
    `created` (one full lifecycle: created, then recurred at least once), and
 4. `decayed` **>= 1** — an order with `status: decayed` (one clean decay).
    `met` is true only when all three hold.
 
-Append one line to `<repo-key-dir>/promotion-runs.log`:
+An exit 2 refusal or exit 3 degraded read is an unknown result, never an unmet predicate or a successful dormant run.
+Report its reason and leave a failure marker; do not use a generated view or ledger claim as authoritative fallback.
+Schema3 history requires the matching `retro_check` validator; unavailable validation is an explicit refusal.
+
+After a successful evaluation, append one line to `<repo-key-dir>/promotion-runs.log`:
 
 ```
 <ISO8601> predicate=<met|unmet> retros=<n> lifecycle=<0|1> decay=<0|1>
@@ -52,6 +56,8 @@ If the predicate is met, read all `retro.json` files under
 `<repo-key-dir>/*/retro.json` plus the `candidates` list from the
 `lessons.py ... predicate` output of §1 (the typed standing orders; the
 generated `standing-orders.md` is only a view of them).
+Candidates carry current, live, verified owner-cited lesson text from Muninn. Retros lacking complete owned sources
+cannot inflate the graduation count; free-text notes cannot substitute for typed recurrence fields.
 Select ONLY failure modes that:
 
 - recurred **>= 2** times, and

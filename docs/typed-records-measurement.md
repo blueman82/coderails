@@ -33,17 +33,23 @@ edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Decision record
 | Writers of standing-order counters in code | 0 (prose told the model to hand-edit Markdown) | 1 (`scripts/lib/orders.py` over `orders_ledger.py`) | `grep -rln "loops_since_recurrence" scripts hooks packages` minus tests and Markdown lists only `orders_ledger.py`, `orders.py`, `lessons.py` and their Codex mirrors |
 | Orders carrying a hash chain | 0 | every order written by `orders.py` | `orders_ledger.verify(ledger)` returns `[]`; a hand edit is refused as `order_chain_broken` naming the order |
 | Decay rule | prose ("K=5") | `orders_ledger.K = 5`, tested at 4 ticks (active) and 5 (decayed, never deleted) | `scripts/tests/orders_test.py` |
-| Graduation predicate | model counted files and read Markdown | `lessons.py predicate` / `orders.py predicate` JSON | `orders_test.py`, `lessons_test.py` |
+| Graduation predicate | model counted files and read Markdown | >=10 distinct completed source-bound retros, typed recurrence and decay | `orders_test.py`, `lessons_test.py`, `orders_lifecycle_test.py` |
 | Lessons given to a dispatch | model copied from Markdown | `lessons.py query --format contract`: sorted, verbatim, stable sha256 | `lessons_test.py` |
-| Silent loss when Muninn is down | n/a | 0: ledger kept (`muninn.state=degraded`), exit 3, reason printed; `lessons` prints no ledger text | `orders_test.py` |
+| Unavailable currentness | n/a | explicit exit 3, prior K-id retained, no ledger-text fallback | `orders_test.py`, `orders_repair_test.py`, `lessons_test.py` |
+| Lifecycle effect before durable completion | prose ticked before completion | none: record/prepare stage inputs, tick applies only saved owned completion | `orders_lifecycle_test.py` |
+| Changed preparation recovery | no separately bound preparation | explicit current-hash compare-and-swap; staged records preserved without effects | `orders_prepare_test.py` |
 
-Counters: `order.record|tick|render|import|cite` and `lesson.query|predicate` trace rows are counted by
+Counters: `order.record|prepare|tick|render|import|cite` and `lesson.query|predicate` trace rows are counted by
 `scripts/lib/memory_counters.py` (`by_command`, `by_reason_code`), which `scripts/measure_graph_alignment.py` already embeds
 under the `memory` key; no edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Standing order stored without
 a cite, or a lesson missing from dispatch". Decision: `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 
-Limits (written, not hidden): the record/tick/render caller is advisory prose on both providers (Claude `teardown.md`, Codex
-`agentic-loop/SKILL.md`), with no hook enforcing it; uncited orders are excluded from the dispatch contract and from
-promotion; the chain and its head anchor are a cooperating-agent safeguard; Muninn holds only an order's first cite;
-a recurrence revives a decayed order; claims over 500 characters are truncated in Muninn; orders without a user quote stay
-`cited: false` until `orders.py cite`. The hand-written file was imported once (5 entries, all `legacy_uncited`).
+Limits: the instructed prepare/native-complete/apply caller is advisory at this checkpoint; automatic provider wiring
+remains pending. `orders_ticked` is a post-save observation, and a failed apply/receipt after completion means pending
+teardown. The one same-user lock covers currentness, reconciliation, bounded sync and atomic ledger save, with no
+exactly-once network claim. New completed recurrences revive tombstones; replay cannot reset counters. Current live,
+verified owner-cited lesson text is legitimate typed memory; transcript advisory observations remain metadata only.
+Uncited claims are diagnostic and excluded from dispatch, promotion and views. Claims over 500 collapsed characters
+are refused, never truncated. Schema3 history needs the matching `retro_check` validator; absence is unknown/refused.
+The chain and source hashes are cooperating-agent safeguards. Legacy fixture imports preserve all five entries,
+counters, full text and first-seen provenance; a live hand-written-file migration was not verified.

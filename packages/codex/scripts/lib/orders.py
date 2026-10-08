@@ -2,7 +2,8 @@
 """Standing orders CLI: record|tick|predicate|lessons|render|import-legacy|cite (provider-neutral).
 
     orders.py --dir D record --failure-mode FM --lesson TEXT --loop LOOP [--quote Q] [--scope repo|agnostic]
-    orders.py --dir D tick --loop LOOP    count one real loop (D/LOOP/progress.json must exist); decay at K=5
+    orders.py --dir D prepare --loop LOOP [--refresh-from-sha256 H] bind eligible inputs without aging
+    orders.py --dir D tick --loop LOOP    apply prepared inputs after durable completion; decay at K=5
     orders.py --dir D predicate           the graduation predicate (retro.json count, recurred, decayed)
     orders.py --dir D lessons             active orders joined with Muninn's current status (exit 3 if down)
     orders.py --dir D render              regenerate standing-orders.md / -decayed.md (0444, marker-stamped)
@@ -10,11 +11,11 @@
     orders.py --dir D cite ID --quote Q   attach the user-anchored cite to an order stored without one
 
 D is the repo-key dir. The ledger `orders.json` (counters, decay, hash chain; see orders_ledger.py) is written under
-dir_lock; the cited claim is synced to Muninn outside the lock as a `lesson` tagged `order` and `ord-<id>`. A degrade
+dir_lock through currentness, reconciliation, bounded Muninn sync and atomic ledger save. A degrade
 never loses the order: it is kept active with `muninn.state=degraded` and the reason (`no_user_cite` without --quote).
 `render` also exits 3 with Muninn down and writes nothing. Re-recording an order whose Muninn entry was retracted or
 expired syncs the new quote (a recovery path).
-Exit 0 ok or disabled, 2 refused (nothing written, reason_code printed), 3 degraded (reason printed, ledger written).
+Exit 0 ok or disabled, 2 refused/error (reason_code printed), 3 degraded/pending (reason printed, local state retained).
 Never falls back to Markdown.
 """
 
@@ -24,6 +25,7 @@ import argparse
 import contextlib
 import json
 import os
+import re
 import sys
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -34,6 +36,8 @@ from hooks.scripts.lib import dir_lock  # noqa: E402
 from scripts.lib import lessons  # noqa: E402
 from scripts.lib import memory_adapter as ma  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
+from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
+from scripts.lib.memory_reasons import REASONS  # noqa: E402
 
 CLAIM_MAX = 500  # muninn's claim length rule
 VIEWS = (("standing-orders.md", False), ("standing-orders-decayed.md", True))
@@ -73,98 +77,168 @@ def update(repo_dir: Path, change: Callable[[ol.Ledger], tuple[ol.Ledger | None,
     except ol.ChainError as error:
         return _refuse("order_chain_broken", offenders=error.offenders)
     except (ValueError, OSError) as error:
-        known = ("order_not_found", "order_loop_unknown")
-        return _refuse(str(error) if str(error) in known else "order_state_error")
+        return _refuse(str(error) if str(error) in REASONS else "order_state_error")
 
 
 def sync_order(order: dict[str, Any], session: str, quote: str) -> dict[str, Any]:
-    """Write the lesson to Muninn; returns the muninn field {id, state written|degraded|disabled, reason_code}."""
+    """Reconcile current tagged claims before add; the caller holds the one orders lock throughout."""
+    prior = order.get("muninn", {}).get("id")
     if ma.backend() == "off":
         return {"id": None, "state": "disabled", "reason_code": "memory_backend_off"}
-    if not quote.strip():
-        return {"id": None, "state": "degraded", "reason_code": "no_user_cite"}
     claim = _collapse(str(order["lesson"]))
-    claim = claim if len(claim) <= CLAIM_MAX else claim[: CLAIM_MAX - 1] + "…"
-    rec = ma.Record("repository", "lesson", claim, "", _collapse(quote), ["order", lessons.tag_for(order["id"])])
-    rec.confidence = "inferred"
     try:
+        listed = ma.list_records("repository", type="lesson", tags=["order"], session_id=session)
+        if isinstance(listed, ma.Degraded):
+            return {"id": prior, "state": "degraded", "reason_code": listed.reason}
+        current = lessons.pick(listed, order["id"], prior)
+        if current is not None and (current.claim == claim or not quote.strip()):
+            return {"id": current.id, "state": "written", "reason_code": "ok"}
+        if not quote.strip():
+            return {"id": prior, "state": "degraded", "reason_code": "no_user_cite"}
+        rec = ma.Record("repository", "lesson", claim, "", _collapse(quote), ["order", lessons.tag_for(order["id"])])
+        rec.confidence, rec.supersedes = "inferred", current.id if current else None
         res: ma.Degraded | ma.Written = ma.resolve_cite(rec, False, session) or ma.add(rec, session)
-    except Exception:  # noqa: BLE001  a crash is a degrade; the ledger row is already safe
+    except Exception:  # noqa: BLE001  a failed sync retains the prior K-id and reports explicit degradation
         res = ma.Degraded("muninn_error")
     if isinstance(res, ma.Written):
         return {"id": res.id, "state": "written", "reason_code": "ok"}
-    return {"id": None, "state": "degraded", "reason_code": res.reason}
-
-
-def _store(repo_dir: Path, order_id: str, field: dict[str, Any]) -> Result:
-    return update(repo_dir, lambda ledger: (ol.set_muninn(ledger, order_id, field), {}))
+    return {"id": prior, "state": "degraded", "reason_code": res.reason}
 
 
 def _exit(field: dict[str, Any]) -> int:
     return 3 if field["state"] == "degraded" else 0
 
 
-def _not_current(repo_dir: Path) -> set[str]:
-    """Ids of orders whose Muninn entry is no longer current (empty when Muninn cannot answer)."""
-    return {g["order"] for g in lessons.joined(ol.open_ledger(repo_dir)).get("excluded", [])}
+def _prepare(state_dir: Path, prepared: dict[str, Any]) -> None:
+    ol.save(lifecycle.preparation_path(state_dir, prepared["binding"]["loop_id"]), prepared)
+    lifecycle.observe(state_dir, "orders_prepared", prepared["binding"], lifecycle.sha(prepared))
 
 
 def cmd_record(a: argparse.Namespace, repo_dir: Path) -> Result:
-    """Record a new order or a recurrence, then sync it to Muninn unless it is already written."""
+    """Prepare a failure observation; apply recurrence only when owned progress is durably complete."""
     order_id = a.id or ol.slug(a.failure_mode)
     if not (a.failure_mode.strip() and a.lesson.strip() and order_id):
         ol.trace("order.record", "refused", "order_blank_field", a.session, a.loop)
         return _refuse("order_blank_field")
+    if len(_collapse(a.lesson)) > CLAIM_MAX:
+        ol.trace("order.record", "refused", "order_lesson_too_long", a.session, a.loop)
+        return _refuse("order_lesson_too_long")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,119}", order_id):
+        ol.trace("order.record", "refused", "order_bad_id", a.session, a.loop)
+        return _refuse("order_bad_id")
+
     held: dict[str, Any] = {}
 
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
-        out = ol.record(
-            ledger, order_id, a.lesson, session_id=a.session or "unknown", loop_id=a.loop,
-            now=ol.now_iso(), scope=a.scope, failure_mode=a.failure_mode,
-        )  # fmt: skip
-        held.update(out["order"])
-        return out["ledger"], {}
+        state_dir, state, binding = lifecycle.owned(repo_dir, a.session, a.loop)
+        held["complete"] = state["status"] == "complete"
+        prepared = lifecycle.prepared(state_dir, binding)
+        old: dict[str, Any] = (
+            ol.find(ledger, order_id) or next((r for r in prepared["records"] if r["id"] == order_id), None) or {}
+        )
+        if old and (old["failure_mode"] != a.failure_mode or old["scope"] != a.scope):
+            raise ValueError("order_id_collision")
+        row: dict[str, Any] = {
+            "id": order_id,
+            "failure_mode": a.failure_mode,
+            "lesson": a.lesson,
+            "scope": a.scope,
+            "ts": ol.now_iso(),
+            "muninn": sync_order({**old, "id": order_id, "lesson": a.lesson}, a.session, a.quote),
+        }
+        prepared["records"] = [r for r in prepared["records"] if r["id"] != order_id] + [row]
+        _prepare(state_dir, prepared)
+        new = None
+        if state["status"] == "complete":
+            out = ol.record(
+                ledger,
+                order_id,
+                a.lesson,
+                session_id=a.session,
+                loop_id=a.loop,
+                now=row["ts"],
+                scope=a.scope,
+                failure_mode=a.failure_mode,
+            )
+            new = ol.set_muninn(out["ledger"], order_id, row["muninn"])
+        return new, {"recorded": new is not None, "prepared": True, "id": order_id, "muninn": row["muninn"]}
 
     payload, rc = update(repo_dir, change)
     if rc:
         ol.trace("order.record", "refused", payload["reason_code"], a.session, a.loop)
+        if held.get("complete") and payload["reason_code"] == "order_state_error":
+            return {**payload, "pending_teardown": True, "progress_complete": True}, 3
         return payload, rc
-    field = held["muninn"]
-    if field.get("state") == "written" and order_id in _not_current(repo_dir):  # retracted/expired: re-sync
-        field = {"state": "pending"}
-    if field.get("state") != "written":
-        field = sync_order(held, a.session, a.quote)
-        payload, rc = _store(repo_dir, order_id, field)
-        if rc:
-            return payload, rc
+    field = payload["muninn"]
     outcome = {"written": "recorded", "disabled": "disabled"}.get(field["state"], "degraded")
     ol.trace("order.record", outcome, field["reason_code"], a.session, a.loop)
-    return {"recorded": True, "id": order_id, "muninn": field}, _exit(field)
+    return payload, _exit(field)
+
+
+def cmd_prepare(a: argparse.Namespace, repo_dir: Path) -> Result:
+    """Bind all staged inputs (including an empty set), observing preparation without lifecycle effects."""
+
+    def change(ledger: ol.Ledger) -> tuple[None, dict[str, Any]]:
+        state_dir, prepared = lifecycle.prepare(repo_dir, a.session, a.loop, ledger, a.refresh_from_sha256)
+        binding = prepared["binding"]
+        _prepare(state_dir, prepared)
+        return None, {"prepared": True, "binding": binding, "evidence_sha256": lifecycle.sha(prepared)}
+
+    payload, rc = update(repo_dir, change)
+    ol.trace("order.prepare", "refused" if rc else "prepared", payload.get("reason_code", "ok"), a.session, a.loop)
+    return payload, rc
 
 
 def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
-    """Count one loop (idempotent per loop id)."""
+    """Apply recurrence/tick after durable completion, then observe only the successfully saved ledger."""
     held: dict[str, Any] = {}
 
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
-        if not (repo_dir / a.loop / "progress.json").is_file():  # only a loop that really ran can age the orders
-            raise ValueError("order_loop_unknown")
-        out = ol.tick(ledger, a.loop, ol.now_iso())
-        held.update(out)
-        return (out["ledger"] if out["ticked"] else None), {}
+        state_dir, _, binding = lifecycle.owned(repo_dir, a.session, a.loop, complete=True)
+        prepared = lifecycle.prepared(state_dir, binding, required=True)
+        held["approved"] = True
+        if lifecycle.loop_key(a.session, a.loop) not in ledger["ticked_loops"]:
+            for row in prepared["records"]:
+                out = ol.record(
+                    ledger,
+                    row["id"],
+                    row["lesson"],
+                    session_id=a.session,
+                    loop_id=a.loop,
+                    now=row["ts"],
+                    scope=row["scope"],
+                    failure_mode=row["failure_mode"],
+                )
+                ledger = ol.set_muninn(out["ledger"], row["id"], row["muninn"])
+        out = ol.tick(ledger, a.loop, ol.now_iso(), session_id=a.session)
+        if out["ticked"]:
+            ol.save(repo_dir / "orders.json", out["ledger"])
+        payload = {"ticked": out["ticked"], "decayed": out["decayed"]}
+        try:
+            lifecycle.observe(state_dir, "orders_ticked", binding, lifecycle.sha(prepared))
+        except (OSError, ValueError):
+            payload.update(pending_teardown=True, reason_code="order_pending_teardown")
+        return None, payload
 
     payload, rc = update(repo_dir, change)
     if rc:
+        if held.get("approved"):
+            ol.trace("order.tick", "degraded", "order_pending_teardown", a.session, a.loop)
+            return {**payload, "pending_teardown": True, "progress_complete": True}, 3
         ol.trace("order.tick", "refused", payload["reason_code"], a.session, a.loop)
         return payload, rc
+    if payload.get("pending_teardown"):
+        payload["progress_complete"] = True
+        ol.trace("order.tick", "degraded", "order_pending_teardown", a.session, a.loop)
+        return payload, 3
     ol.trace(
         "order.tick",
-        "ticked" if held["ticked"] else "skipped",
-        "ok" if held["ticked"] else "order_already_ticked",
+        "ticked" if payload["ticked"] else "skipped",
+        "ok" if payload["ticked"] else "order_already_ticked",
         a.session,
         a.loop,
     )
-    return {"ticked": held["ticked"], "decayed": held["decayed"]}, 0
+    return payload, 0
 
 
 def cmd_lessons(a: argparse.Namespace, repo_dir: Path) -> Result:
@@ -176,12 +250,21 @@ def cmd_lessons(a: argparse.Namespace, repo_dir: Path) -> Result:
 def cmd_render(a: argparse.Namespace, repo_dir: Path) -> Result:
     """Regenerate both views from the ledger, dropping orders Muninn no longer holds as current (when it answers)."""
     ledger = ol.open_ledger(repo_dir)
-    got = lessons.joined(ledger)
+    got = lessons.joined(ledger, include_decayed=True)
     if "degraded" in got:  # no ledger-text fallback: with Muninn down the view could resurrect retracted orders
         ol.trace("order.render", "degraded", got["degraded"], a.session)
         return {"degraded": got["degraded"]}, 3
     gone = {g["order"] for g in got.get("excluded", [])}
-    shown: ol.Ledger = {**ledger, "orders": [o for o in ledger["orders"] if o["id"] not in gone]}
+    keep = got["state"] == "memory_backend_off"
+    rows = {r["id"]: r for r in got["lessons"] if keep or r["cited"]}
+    shown: ol.Ledger = {
+        **ledger,
+        "orders": [
+            {**o, "lesson": rows[o["id"]]["text"], "muninn": {**o["muninn"], "id": rows[o["id"]]["muninn_id"]}}
+            for o in ledger["orders"]
+            if o["id"] in rows
+        ],
+    }
     for name, decayed in VIEWS:
         bad = ma.write_view(repo_dir / name, ol.view(shown, decayed), a.session)
         if bad:
@@ -195,6 +278,8 @@ def cmd_render(a: argparse.Namespace, repo_dir: Path) -> Result:
 def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
     """Load the hand-written file into the ledger (legacy_uncited), then move it aside."""
     src = Path(a.file) if a.file else repo_dir / "standing-orders.md"
+    if src.is_symlink() or src.resolve().parent != repo_dir.resolve():
+        return _refuse("legacy_parse_error", entry=str(src))
     try:
         text = src.read_text(encoding="utf-8")
     except OSError:
@@ -207,41 +292,50 @@ def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
     except ol.LegacyParseError as error:
         ol.trace("order.import", "refused", "legacy_parse_error", a.session)
         return _refuse("legacy_parse_error", entry=error.entry)
-    count = {"imported": 0}
 
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
         new = {**ledger, "orders": list(ledger["orders"])}
         have = {o["id"] for o in new["orders"]}
-        fresh = [o for o in parsed if o["id"] not in have]
-        new["orders"] += fresh
-        count["imported"] = len(fresh)
-        return ol.seal(new), {}
+        collisions = [o["failure_mode"] for o in parsed if o["id"] in have]
+        if collisions:
+            raise ValueError("legacy_parse_error")
+        for n in range(1, 1000):
+            dest = repo_dir / ("standing-orders.legacy.md" if n == 1 else f"standing-orders.legacy.{n}.md")
+            if not dest.exists() and not dest.is_symlink():
+                break
+        else:
+            raise ValueError("legacy_parse_error")
+        new["orders"] += parsed
+        ol.save(repo_dir / "orders.json", ol.seal(new))
+        os.replace(src, dest)
+        return None, {"imported": len(parsed), "skipped": 0, "moved_to": str(dest)}
 
     payload, rc = update(repo_dir, change)
     if rc:
         return payload, rc
-    dest = repo_dir / "standing-orders.legacy.md"
-    for n in range(2, 1000):
-        if not dest.exists():
-            break
-        dest = repo_dir / f"standing-orders.legacy.{n}.md"
-    os.replace(src, dest)
     ol.trace("order.import", "imported", "legacy_uncited", a.session)
-    return {"imported": count["imported"], "skipped": len(parsed) - count["imported"], "moved_to": str(dest)}, 0
+    return payload, 0
 
 
 def cmd_cite(a: argparse.Namespace, repo_dir: Path) -> Result:
-    """Attach the user-anchored cite to an order that has none (a written order is left alone)."""
-    order = ol.find(ol.open_ledger(repo_dir), a.order_id)
-    if order is None:
-        ol.trace("order.cite", "refused", "order_not_found", a.session)
-        return _refuse("order_not_found")
-    if order["muninn"].get("state") == "written":
-        return {"id": a.order_id, "muninn": order["muninn"]}, 0
-    field = sync_order(order, a.session, a.quote)
-    payload, rc = _store(repo_dir, a.order_id, field)
-    ol.trace("order.cite", "cited" if field["state"] == "written" else field["state"], field["reason_code"], a.session)
-    return ({"id": a.order_id, "muninn": field}, _exit(field)) if not rc else (payload, rc)
+    """Reconcile/attach a user cite under the same single lock as its ledger save."""
+
+    def change(ledger: ol.Ledger) -> tuple[ol.Ledger, dict[str, Any]]:
+        order = ol.find(ledger, a.order_id)
+        if order is None:
+            raise ValueError("order_not_found")
+        field = sync_order(order, a.session, a.quote)
+        return ol.set_muninn(ledger, a.order_id, field), {"id": a.order_id, "muninn": field}
+
+    payload, rc = update(repo_dir, change)
+    field = payload.get("muninn", {})
+    ol.trace(
+        "order.cite",
+        "refused" if rc else field["state"],
+        payload.get("reason_code", field.get("reason_code")),
+        a.session,
+    )
+    return payload, rc or _exit(field)
 
 
 def cmd_predicate(a: argparse.Namespace, repo_dir: Path) -> Result:
@@ -253,7 +347,12 @@ def build_parser() -> argparse.ArgumentParser:
     """The CLI surface."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dir", required=True, help="the repo-key dir (grandparent of progress.json)")
-    sid = os.environ.get("CLAUDE_SESSION_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    sid = (
+        os.environ.get("CLAUDE_SESSION_ID")
+        or os.environ.get("CLAUDE_CODE_SESSION_ID")
+        or os.environ.get("CODEX_THREAD_ID")
+        or os.environ.get("CODEX_SESSION_ID", "")
+    )
     ap.add_argument("--session", default=sid, help="the caller session (cites and trace rows)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     rec = sub.add_parser("record")
@@ -264,6 +363,9 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--scope", choices=ol.SCOPES, default="repo")
     rec.add_argument("--quote", default="", help="verbatim quote of the owner's own prompt (12-300 chars)")
     sub.add_parser("tick").add_argument("--loop", required=True)
+    prep = sub.add_parser("prepare")
+    prep.add_argument("--loop", required=True)
+    prep.add_argument("--refresh-from-sha256", default=None, help="CURRENT preparation's evidence_sha256")
     for name in ("predicate", "lessons", "render"):
         sub.add_parser(name)
     sub.add_parser("import-legacy").add_argument("--file", default="")
@@ -275,7 +377,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 COMMANDS: dict[str, Callable[[argparse.Namespace, Path], Result]] = {
     "record": cmd_record, "tick": cmd_tick, "predicate": cmd_predicate, "lessons": cmd_lessons,
-    "render": cmd_render, "import-legacy": cmd_import, "cite": cmd_cite,
+    "render": cmd_render, "import-legacy": cmd_import, "cite": cmd_cite, "prepare": cmd_prepare,
 }  # fmt: skip
 
 
@@ -287,8 +389,8 @@ def main(argv: list[str] | None = None) -> int:
         payload, rc = COMMANDS[a.cmd](a, repo_dir)
     except ol.ChainError as error:
         payload, rc = _refuse("order_chain_broken", offenders=error.offenders)
-    except (ValueError, OSError):
-        payload, rc = _refuse("order_state_error")
+    except (ValueError, OSError, TypeError, KeyError, AttributeError) as error:
+        payload, rc = _refuse(str(error) if str(error) in REASONS else "order_state_error")
     print(json.dumps(payload, sort_keys=True))
     return rc
 

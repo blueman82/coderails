@@ -269,7 +269,7 @@ any hook or server-side check.
 Unlike the other three read-only routines, `loop-retro-promotion-weekly`'s own
 skill (`skills/loop-retro-promotion/SKILL.md`) evaluates a 3-part
 graduation predicate every time it runs, before doing anything else: (1)
-at least 10 `retro.json` files exist under the repo-key dir, (2)
+at least 10 distinct completed `retro.json` records have owned validated progress and matching source hashes, (2)
 the typed ledger `orders.json` has at least one order whose `last_recurred` differs
 from its `created` date (one lesson has recurred at least once), and (3)
 at least one order has `status: decayed` (one lesson has
@@ -277,6 +277,9 @@ completed a full create → recur → decay lifecycle). The routine evaluates
 this with `scripts/lib/lessons.py --dir <repo-key dir> predicate` (code, not
 prose; the same result also lists the promotion candidates). Until all three
 hold, the routine is dormant.
+
+Only a successful predicate read can declare dormancy. Refused or degraded reads are unknown; report their reason
+and leave a failure marker, never a `run=ok` marker. Schema3 history requires the matching `retro_check` validator.
 
 A dormant run appends its predicate line to `promotion-runs.log`
 (`<ISO8601> predicate=unmet retros=<n> lifecycle=<0|1> decay=<0|1>`),

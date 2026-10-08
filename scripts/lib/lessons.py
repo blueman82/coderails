@@ -26,6 +26,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
 from scripts.lib import memory_adapter as ma  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
+from scripts.lib.memory_reasons import REASONS  # noqa: E402
 
 TAG_MAX = 32  # muninn's tag rule
 
@@ -50,9 +51,18 @@ def _row(order: dict[str, Any], rec: ma.Record | None) -> dict[str, Any]:
     }
 
 
-def joined(ledger: ol.Ledger) -> dict[str, Any]:
+def pick(records: list[ma.Record], order_id: str, prior: str | None = None) -> ma.Record | None:
+    """Select this order's current tagged claim, preferring its known K-id when still current."""
+    mine = [r for r in records if tag_for(order_id) in r.tags]
+    exact = next((r for r in mine if r.id == prior), None)
+    return exact or max(mine, key=lambda r: int(str(r.id)[1:]), default=None)
+
+
+def joined(ledger: ol.Ledger, include_decayed: bool = False) -> dict[str, Any]:
     """{"lessons", "excluded"} for the active orders, or {"degraded": reason} (no text) when Muninn cannot answer."""
-    active = sorted((o for o in ledger["orders"] if o["status"] == "active"), key=lambda o: str(o["id"]))
+    active = sorted(
+        (o for o in ledger["orders"] if include_decayed or o["status"] == "active"), key=lambda o: str(o["id"])
+    )
     if ma.backend() == "off":
         return {"lessons": [_row(o, None) for o in active], "excluded": [], "state": "memory_backend_off"}
     down = ma.probe()
@@ -64,16 +74,13 @@ def joined(ledger: ol.Ledger) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     excluded: list[dict[str, str]] = []
     for order in active:
-        if order["muninn"].get("state") != "written":  # never reached Muninn: served, flagged uncited
+        current = pick(listed, order["id"], order["muninn"].get("id"))
+        if current is not None:
+            rows.append(_row(order, current))
+        elif order["muninn"].get("state") != "written":  # diagnostic only; never a contract/promotion fallback
             rows.append(_row(order, None))
-            continue
-        mine = [r for r in listed if tag_for(order["id"]) in r.tags]
-        exact = [r for r in mine if r.id == order["muninn"].get("id")]
-        pick = exact[0] if exact else max(mine, key=lambda r: int(str(r.id)[1:]), default=None)
-        if pick is None:
-            excluded.append({"order": order["id"], "reason": "lesson_not_current"})
         else:
-            rows.append(_row(order, pick))
+            excluded.append({"order": order["id"], "reason": "lesson_not_current"})
     return {"lessons": rows, "excluded": excluded, "state": "muninn"}
 
 
@@ -144,10 +151,17 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"reason_code": "order_state_error"}))
         return 2
     if a.cmd == "predicate":
-        out = selection(ledger, repo_dir)
-        ol.trace("lesson.predicate", "met" if out["graduation"]["met"] else "unmet", "ok", a.session)
+        try:
+            out = selection(ledger, repo_dir)
+        except ValueError as error:
+            reason = str(error) if str(error) in REASONS else "order_state_error"
+            ol.trace("lesson.predicate", "refused", reason, a.session)
+            print(json.dumps({"reason_code": reason}))
+            return 2
+        outcome = "degraded" if "degraded" in out else "met" if out["graduation"]["met"] else "unmet"
+        ol.trace("lesson.predicate", outcome, out.get("degraded", "ok"), a.session)
         print(json.dumps(out, sort_keys=True))
-        return 0
+        return 3 if "degraded" in out else 0
     payload, rc = serve(ledger, a.session)
     print(json.dumps(payload if rc else contract(payload), sort_keys=True))
     return rc

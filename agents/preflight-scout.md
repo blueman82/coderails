@@ -33,11 +33,10 @@ task names before invoking a skill on it.
 
 Before or alongside the skill sequence:
 
-- Read the generated, read-only `standing-orders.md` at the repo-key dir the task names (a view of the typed
-  `orders.json`; never edit it), or, with a shell,
-  `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/lessons.py" --dir <repo-key dir> query --format contract` for the verbatim
-  lessons with Muninn's current status. Exit 3 means Muninn is down: report the printed reason, do not read `orders.json`
-  for lesson text.
+- Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/lessons.py" --dir <repo-key dir> query --format contract` for verbatim
+  current, live, verified owner-cited lessons. The generated, read-only `standing-orders.md` is context only; it may lag
+  a retraction and cannot replace a current query. Exit 2 is a refusal; exit 3 is a degraded read: report the printed
+  reason and mark lesson intake unknown. Never substitute `orders.json` or an older view for authoritative lesson text.
 - Read the last 5 `retro.json` files (by mtime) in that same location.
 - From these, extract two things:
   - **Observed-failure premortem seeds** — premortem entries whose failure mode
