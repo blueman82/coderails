@@ -159,6 +159,35 @@ class MergeEvidenceTests(HookTestCase):
                     )
             self.assertEqual(guarded_segments(f"gh pr merge 42 {value}", str(self.directory)), [])
 
+    def test_lifecycle_body_values_are_guarded(self) -> None:
+        """Git lifecycle text in an option value cannot exempt a PR merge."""
+        from hooks.scripts.lib.pr_workflow_match import guarded_segments, operation
+
+        for flag in ("--abort", "--continue", "--quit", "--skip"):
+            command = f"gh pr merge 42 --body 'git merge {flag}' --merge"
+            with self.subTest(flag=flag):
+                self.assertEqual(
+                    guarded_segments(command, str(self.directory)), [("merge", command, str(self.directory))]
+                )
+                self.assertEqual(operation(f"git merge {flag}"), ("", "", ""))
+
+    def test_subshell_restores_cwd_and_braces_retain_it(self) -> None:
+        """Parentheses localize cd, including cd-only and wrapped groups; braces share it."""
+        from hooks.scripts.lib.pr_workflow_match import guarded_segments
+
+        cwd, other = str(self.directory), str(self.directory / "other")
+        for prefix in (f"(cd {other} && gh pr merge 42)", f"(cd {other} && bash -c 'gh pr merge 42')"):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(
+                    guarded_segments(prefix + "; gh pr merge 43", cwd),
+                    [("merge", "gh pr merge 42", other), ("merge", "gh pr merge 43", cwd)],
+                )
+        self.assertEqual(guarded_segments(f"(cd {other}); gh pr merge 43", cwd), [("merge", "gh pr merge 43", cwd)])
+        self.assertEqual(
+            guarded_segments(f"{{ cd {other} && gh pr merge 42; }}; gh pr merge 43", cwd),
+            [("merge", "gh pr merge 42", other), ("merge", "gh pr merge 43", other)],
+        )
+
     def test_publication_gate_violation_denies_with_code_first(self) -> None:
         """Direct Claude path: a publication violation denies, reason code first; no violation passes."""
         before = Path.cwd()

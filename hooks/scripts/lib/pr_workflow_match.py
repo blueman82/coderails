@@ -20,10 +20,10 @@ def operation(command: str) -> tuple[str, str, str]:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
     from scripts.lib.merge_target import has_noop_option
 
-    if re.search(r"\bgit +merge +(--abort|--continue|--quit|--skip)\b", command):
-        return "", "", ""
     for segment in re.split(r"&&|\|\||[;|&\n]", command):
         segment = segment.lstrip()
+        if re.match(r"^git +merge +(--abort|--continue|--quit|--skip)(?:\s|$)", segment):
+            continue
         if has_noop_option(segment) and not re.search("^" + MERGE_SCRIPT, segment):
             continue
         for pattern, name in (
@@ -76,28 +76,36 @@ def guarded_segments(command: str, cwd: str) -> list[tuple[str, str, str]]:
 
     A leading `cd <dir>` segment moves the effective cwd for the segments after it, so the receipt hash binds the
     directory the operation really runs in. Each segment is matched on its own: a chain is one guard per segment.
+    Subshells restore their caller's cwd; brace groups keep their cwd changes.
     Wrappers are unwrapped (env/sudo/time prefixes, subshell and brace groups, `bash -c '...'`, `gh api .../merge`).
     Still unmatched: eval, xargs, aliases, functions, scripts that push. ponytail: regex, not a shell parser.
     """
     found: list[tuple[str, str, str]] = []
+    subshells: list[str] = []
     masked = _SHELL_C.sub(lambda inner: " " * len(inner[0]), command)
     cursor = 0
     for boundary in re.finditer(r"&&|\|\||[;|&\n]|$", masked):
-        segment = command[cursor : boundary.start()]
+        segment = command[cursor : boundary.start()].strip()
         cursor = boundary.end()
+        leading = segment[: len(segment) - len(segment.lstrip("({ "))]
+        subshells.extend([cwd] * leading.count("("))
+        closes = segment[len(segment.rstrip(")} ")) :].count(")")
         segment = unwrap(segment)
         if move := re.match(r"^cd\s+(\S+)$", segment):
             cwd = os.path.normpath(os.path.join(cwd, os.path.expanduser(move[1].strip("\"'"))))
-            continue
-        for inner in _SHELL_C.finditer(segment):
-            found.extend(guarded_segments(inner[2], cwd))
-        segment = _SHELL_C.sub(" ", segment)
-        if _API_MERGE.match(segment):
-            found.append(("merge", segment, cwd))
-            continue
-        name, matched, target = operation(segment)
-        if name in {"merge", "git_push"} and targets_main(segment, cwd, target, name):
-            found.append((name, matched, cwd))
+        else:
+            for inner in _SHELL_C.finditer(segment):
+                found.extend(guarded_segments(inner[2], cwd))
+            segment = _SHELL_C.sub(" ", segment)
+            if _API_MERGE.match(segment):
+                found.append(("merge", segment, cwd))
+            else:
+                name, matched, target = operation(segment)
+                if name in {"merge", "git_push"} and targets_main(segment, cwd, target, name):
+                    found.append((name, matched, cwd))
+        for _ in range(closes):
+            if subshells:
+                cwd = subshells.pop()
     return found
 
 

@@ -116,6 +116,17 @@ class CodexPublicationGateTests(unittest.TestCase):
                     self.assertTrue(self.reason(command).startswith("diff_manifest:denied_path"), command)
             self.assertEqual(self.reason(f"gh pr merge 7 {value}"), "")
 
+    def test_lifecycle_body_values_remain_guarded(self) -> None:
+        """Only actual Git lifecycle options are harmless, not the same text in a body."""
+        for flag in ("--abort", "--continue", "--quit", "--skip"):
+            with self.subTest(flag=flag):
+                self.assertTrue(
+                    self.reason(f"gh pr merge 7 --body 'git merge {flag}' --merge").startswith(
+                        "diff_manifest:denied_path"
+                    )
+                )
+                self.assertEqual(self.reason(f"git merge {flag}"), "")
+
     def test_off_passes(self) -> None:
         """Negative control: diff_manifest off lets the same merge through."""
         self.config("diff_manifest: off\n")
@@ -202,6 +213,38 @@ class CodexPublicationGateTests(unittest.TestCase):
         self.assertTrue(self.reason(command).startswith("diff_manifest:manifest_unreadable"))
         self.assertEqual(self.reason(f"cd {other} && {command}"), "")
         self.assertEqual(self.reason(f"cd {other} && bash -c '{command}'"), "")
+
+    def test_subshell_and_brace_groups_bind_the_trailing_unit_to_their_actual_cwd(self) -> None:
+        """A subshell restores the starting worktree; a brace group retains its cd."""
+        git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
+        (self.dir / "docs.md").write_text("canary\n")
+        git_cmd(self.dir, "add", "-A")
+        git_cmd(self.dir, "commit", "-qm", "docs")
+        self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        other = self.dir.parent / "other-worktree"
+        git_cmd(self.dir, "worktree", "add", "-qb", "feature/intended", str(other), "HEAD")
+        paths = [self.dir.parent / "own-progress.json", self.dir.parent / "other-progress.json"]
+        for path, worktree in zip(paths, (self.dir, other)):
+            path.write_text(
+                json.dumps(
+                    {
+                        "session_id": "s",
+                        "loop_id": "l",
+                        "work_units": {"2": {"manifest": ["*.md"], "worktree": str(worktree)}},
+                    }
+                )
+            )
+        own, intended = (f"python3 scripts/merge.py 7 --unit 2 --progress {path}" for path in paths)
+        for command, denied in (
+            (f"(cd {other} && {intended}); {own}", False),
+            (f"(cd {other} && {intended}); {intended}", True),
+            (f"{{ cd {other} && {intended}; }}; {intended}", False),
+        ):
+            with self.subTest(command=command):
+                reason = self.reason(command)
+                self.assertEqual(bool(reason), denied, reason)
+                if denied:
+                    self.assertTrue(reason.startswith("diff_manifest:manifest_unreadable"), reason)
 
 
 class RegistrationTests(unittest.TestCase):
