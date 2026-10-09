@@ -188,6 +188,20 @@ class LineTests(unittest.TestCase):
         self.assertEqual(first, f"<!-- coderails-review-summary v1 pr=7 head_sha={SHA} -->")
         self.assertTrue(review_artifact.matches_marker(first, "7", SHA))
 
+    def test_ambiguous_and_duplicate_sections_are_malformed(self) -> None:
+        """A matching hash cannot make conflicting summary grammar valid."""
+        repeated = CRITICAL.replace("- injection in hooks/x.py", "None") + "\n" + CRITICAL
+        for text in (CLEAN + CRITICAL, repeated, CLEAN + CLEAN):
+            with self.subTest(text=text):
+                passes = [entry("review-pr"), entry("security-review", text)]
+                self.assertIsNone(review_passes.parse(body(passes, texts={"security-review": text}), "7", SHA))
+        good = body([entry("review-pr"), entry("security-review")])
+        duplicate = good + "\n<!-- coderails-review-pass security-review -->\n" + CLEAN
+        self.assertIsNone(review_passes.parse(duplicate, "7", SHA))
+        duplicates = body([entry("review-pr"), entry("security-review"), entry("security-review")])
+        self.assertIsNone(review_passes.parse(duplicates, "7", SHA))
+        self.assertIsNotNone(review_passes.parse(good, "7", SHA))
+
 
 def found(passes: list[dict[str, object]] | None, status: int = 0, reason: str = "") -> git.ReviewPasses:
     """A review_passes_for_pr reply."""

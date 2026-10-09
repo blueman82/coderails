@@ -101,6 +101,7 @@ class EvaluateTests(unittest.TestCase):
         for mode, expected in (("enforce", ["diff_manifest:manifest_internal_error"]), ("advisory", [])):
             with (
                 self.subTest(mode=mode),
+                mock.patch.object(publication_gate, "CHECKS", [publication_gate.manifest_check]),
                 mock.patch.object(manifest_policy, "settings", return_value=(mode, "policy.json", False)),
                 mock.patch.object(git, "repo", side_effect=RuntimeError("metadata failure")),
             ):

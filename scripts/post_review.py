@@ -22,28 +22,7 @@ def validate_summary(path: str | Path) -> None:
     """Require no-findings or all populated severity sections without ambiguity."""
     if not Path(path).is_file():
         raise ValueError(f"file not found: {path}")
-    lines = Path(path).read_text().splitlines()
-    headings = ("## Critical", "## Important", "## Suggestions")
-    if "## No findings" in lines:
-        if any(heading in lines for heading in headings):
-            raise ValueError('ambiguous — "## No findings" present alongside structured headings')
-        return
-    missing = [heading for heading in headings if heading not in lines]
-    if missing:
-        raise ValueError(f"missing required headings: {' '.join(missing)}")
-    for heading in headings:
-        populated = False
-        for line in lines[lines.index(heading) + 1 :]:
-            if line.startswith("## "):
-                break
-            if line.startswith("- ") or line == "None":
-                populated = True
-                break
-        if not populated:
-            raise ValueError(f'section "{heading}" has no bullet or None')
-    critical = review_passes.critical_lines("\n".join(lines))
-    if "None" in critical and critical != ["None"]:
-        raise ValueError('section "## Critical" says None and also lists other lines')
+    review_passes.validate_summary_text(Path(path).read_text())
 
 
 def write_cache(path: str | Path, pr: str, head_sha: str, url: str, author: str, posted_at: str) -> int:
@@ -97,22 +76,32 @@ def sections(summary: Path, extra: list[str]) -> list[tuple[str, str]]:
         if not separator or not re.fullmatch(r"[a-z][a-z0-9-]*", name) or name in dict(found):
             raise ValueError(f"--pass must be NAME=FILE with a new lowercase name, got {item!r}")
         found.append((name, Path(filename)))
-    for _, source in found:
-        validate_summary(source)
-    return [(name, source.read_text()) for name, source in found]
+    texts = [(name, source.read_text()) for name, source in found]
+    for _, text in texts:
+        review_passes.validate_summary_text(text)
+    return texts
 
 
-def comment_for(repo: str, number: int, login: str, top: list[str]) -> dict[str, str] | None:
-    """The author's existing comment whose first two lines equal `top` (marker and passes line), if any."""
+def comment_for(repo: str, number: int, login: str, head: str, top: list[str]) -> dict[str, str] | None:
+    """Reuse only the author's newest recognized artifact for this head when its whole body is valid."""
     listing = git.run(
         "gh", "api", f"repos/{repo}/issues/{number}/comments", "--paginate",
         "--jq", ".[] | {url:.html_url,author:.user.login,created:.created_at,body:.body}",
         check=True,
     )  # fmt: skip
+    newest = None
     for line in filter(None, listing.stdout.splitlines()):
         comment = cast(dict[str, str], json.loads(line))
-        if comment["author"] == login and comment["body"].splitlines()[:2] == top:
-            return comment
+        if comment["author"] == login and any(
+            review_artifact.matches_marker(line, str(number), head) for line in comment["body"].splitlines()
+        ):
+            newest = comment
+    if (
+        newest is not None
+        and newest["body"].splitlines()[:2] == top
+        and review_passes.parse(newest["body"], str(number), head) is not None
+    ):
+        return newest
     return None
 
 
@@ -130,7 +119,7 @@ def post(number: int, summary: Path, extra: list[str]) -> int:
     top = [review_artifact.marker(str(number), head), review_passes.render(head, passes)]
     repo = git.repo()
     login = git.output("gh", "api", "user", "-q", ".login", check=True)
-    comment = comment_for(repo, number, login, top)
+    comment = comment_for(repo, number, login, head, top)
     if git.pr_field(str(number), "headRefOid") != head:
         raise ValueError(f"stale: PR head moved from {head} before posting; review the new head")
     if comment:

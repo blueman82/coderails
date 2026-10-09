@@ -77,8 +77,39 @@ def verdict_from_summary(text: str) -> str:
     Any other Critical line is a finding whatever its bullet style, so prose cannot hide one.
     """
     if "## No findings" in text.splitlines():
-        return "pass"
+        headings = ("## Critical", "## Important", "## Suggestions")
+        return "fail" if any(heading in text.splitlines() for heading in headings) else "pass"
     return "pass" if critical_lines(text) == ["None"] else "fail"
+
+
+def validate_summary_text(text: str) -> None:
+    """Require one unambiguous no-findings summary or all populated severity sections."""
+    lines = text.splitlines()
+    headings = ("## Critical", "## Important", "## Suggestions")
+    if any(lines.count(heading) > 1 for heading in (*headings, "## No findings")):
+        raise ValueError("duplicate summary heading")
+    if any(line.startswith("<!-- coderails-review-") for line in lines):
+        raise ValueError("review marker inside summary")
+    if "## No findings" in lines:
+        if any(heading in lines for heading in headings):
+            raise ValueError('ambiguous — "## No findings" present alongside structured headings')
+        return
+    missing = [heading for heading in headings if heading not in lines]
+    if missing:
+        raise ValueError(f"missing required headings: {' '.join(missing)}")
+    for heading in headings:
+        populated = False
+        for line in lines[lines.index(heading) + 1 :]:
+            if line.startswith("## "):
+                break
+            if line.startswith("- ") or line == "None":
+                populated = True
+                break
+        if not populated:
+            raise ValueError(f'section "{heading}" has no bullet or None')
+    critical = critical_lines(text)
+    if "None" in critical and critical != ["None"]:
+        raise ValueError('section "## Critical" says None and also lists other lines')
 
 
 def summary_sha256(text: str) -> str:
@@ -95,7 +126,18 @@ def tail(sections: list[tuple[str, str]]) -> str:
 def _bound(rest: str, passes: Passes) -> bool:
     """Every pass names a posted section whose hash and derived verdict match what the line claims."""
     parts = re.split(r"^<!-- coderails-review-pass ([a-z][a-z0-9-]*) -->\r?\n", rest, flags=re.MULTILINE)
-    texts = {"review-pr": parts[0], **dict(zip(parts[1::2], parts[2::2]))}
+    names = ["review-pr", *parts[1::2]]
+    declared = [p["name"] for p in passes]
+    if len(names) != len(set(names)) or len(declared) != len(set(declared)):
+        return False
+    texts = dict(zip(names, [parts[0], *parts[2::2]]))
+    if set(texts) != {"review-pr", *declared}:
+        return False
+    try:
+        for text in texts.values():
+            validate_summary_text(text)
+    except ValueError:
+        return False
     return all(
         p["name"] in texts
         and p["summary_sha256"] == summary_sha256(texts[p["name"]])
@@ -116,7 +158,7 @@ def _valid(item: object) -> bool:
     entry = cast(dict[str, Any], item)
     return (
         isinstance(entry.get("name"), str)
-        and bool(entry["name"])
+        and re.fullmatch(r"[a-z][a-z0-9-]*", entry["name"]) is not None
         and entry.get("verdict") in ("pass", "fail")
         and isinstance(entry.get("blocking"), bool)
         and isinstance(entry.get("summary_sha256"), str)
@@ -130,7 +172,7 @@ def parse(body: str, pr: str, head_sha: str) -> Passes | None:
     marker = next((i for i, line in enumerate(lines) if review_artifact.matches_marker(line, pr, head_sha)), -1)
     line = lines[marker + 1] if 0 <= marker < len(lines) - 1 else ""
     if not (line.startswith(PREFIX) and line.endswith(SUFFIX)):
-        return []
+        return None if line.startswith("<!-- coderails-review-passes") else []
     try:
         data = json.loads(line[len(PREFIX) : -len(SUFFIX)])
     except ValueError:

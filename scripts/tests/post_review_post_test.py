@@ -127,6 +127,38 @@ class PostTests(unittest.TestCase):
         self.run_post(fake, "post", "12", "--summary", str(self.clean))
         self.assertEqual(len(fake.posted), 1)
 
+    def test_dedupe_uses_the_newest_valid_same_head_artifact(self) -> None:
+        """An older matching marker or a corrupt matching tail must not suppress a repairing post."""
+        first = FakeGh([SHA])
+        self.run_post(first, "post", "12", "--summary", str(self.clean))
+        good = {"url": URL, "author": "me", "created": "t", "body": first.posted[0]}
+        failed = FakeGh([SHA])
+        self.run_post(failed, "post", "12", "--summary", str(self.critical))
+        corrupt = "\n".join(first.posted[0].splitlines()[:2]) + "\n" + CRITICAL
+        for existing in ([{**good, "body": corrupt}], [good, {**good, "body": failed.posted[0]}]):
+            with self.subTest(existing=existing):
+                fake = FakeGh([SHA], existing)
+                code, _, err = self.run_post(fake, "post", "12", "--summary", str(self.clean))
+                self.assertEqual(code, 0, err)
+                self.assertEqual(len(fake.posted), 1)
+        fake = FakeGh([SHA], [good, {**good, "url": URL + "-new"}])
+        code, out, _ = self.run_post(fake, "post", "12", "--summary", str(self.clean))
+        self.assertEqual((code, fake.posted), (0, []))
+        self.assertIn(URL + "-new", out)
+        fake = FakeGh([SHA], [good, {**good, "author": "mallory", "body": corrupt}])
+        code, out, _ = self.run_post(fake, "post", "12", "--summary", str(self.clean))
+        self.assertEqual((code, fake.posted), (0, []))
+        self.assertIn(URL, out)
+
+    def test_duplicate_summary_headings_never_reach_gh(self) -> None:
+        """Conflicting repeats cannot derive a pass from their first severity section."""
+        bad = self.dir / "duplicate.md"
+        bad.write_text(CRITICAL.replace("- injection", "None") + "\n" + CRITICAL)
+        fake = FakeGh([SHA])
+        code, _, _ = self.run_post(fake, "post", "12", "--summary", str(bad))
+        self.assertNotEqual(code, 0)
+        self.assertEqual(fake.calls, [])
+
     def test_head_change_before_post_is_refused(self) -> None:
         """A head that moves between the first read and the pre-post re-fetch posts nothing."""
         fake = FakeGh([SHA, OTHER])

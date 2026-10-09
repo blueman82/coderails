@@ -40,15 +40,41 @@ exit 0
 POST_SHIM = """#!/usr/bin/env python3
 import json, os, sys
 a = sys.argv[1:]
+log_path = os.environ["FAKE_LOG"]
+previous = [json.loads(line) for line in open(log_path).read().splitlines()]
 with open(os.environ["FAKE_LOG"], "a") as log:
-    log.write(" ".join(a) + "\\n")
+    log.write(json.dumps(a) + "\\n")
 if a[:2] == ["pr", "view"]:
-    print(os.environ["FAKE_SHA"])
+    heads = json.loads(os.environ["FAKE_HEADS"])
+    index = sum(row[:2] == ["pr", "view"] for row in previous)
+    print(heads[min(index, len(heads) - 1)])
 elif a[:2] == ["api", "user"]:
     print("me")
 elif a[0] == "api" and "-F" in a:
     open(os.environ["FAKE_POSTED"], "w").write(open(a[a.index("-F") + 1].removeprefix("body=@")).read())
     print(json.dumps({"url": "https://github.com/o/r/pull/12#c1", "author": "me", "created": "t"}))
+elif a[0] == "api":
+    for row in json.loads(os.environ["FAKE_COMMENTS"]):
+        print(json.dumps(row))
+"""
+POLICY_DRIVER = """import runpy
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+hook = Path(sys.argv[1])
+sys.path.insert(0, str(hook.parent))
+sys.path.insert(0, str(hook.parents[2]))
+from scripts.lib import review_passes
+
+original = review_passes.load_policy
+def read_policy():
+    if sys.argv[2] == "internal":
+        raise RuntimeError("probe")
+    return original(Path(sys.argv[2]))
+
+with patch.object(review_passes, "load_policy", side_effect=read_policy):
+    runpy.run_path(str(hook), run_name="__main__")
 """
 
 
@@ -117,15 +143,18 @@ class Repo(unittest.TestCase):
 class HookTests(Repo):
     """The Codex hook, run as Codex runs it, applies the required-reviewer policy."""
 
-    def reason(self, **env: str) -> str:
+    def reason(self, policy: str = "", **env: str) -> str:
         """Permission-decision reason for `gh pr merge 7`, or empty when allowed."""
         environment = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
         environment |= {"FAKE_SHA": self.sha, "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"), **env}
         command = {"command": "gh pr merge 7"}
         payload = {"session_id": "s", "cwd": str(self.dir), "tool_name": "Bash", "tool_input": command}
-        result = subprocess.run(
-            [sys.executable, str(HOOK)], input=json.dumps(payload), text=True, capture_output=True, env=environment
-        )
+        argv = [sys.executable, str(HOOK)]
+        if policy:
+            driver = self.tmp / "policy-driver.py"
+            driver.write_text(POLICY_DRIVER)
+            argv = [sys.executable, str(driver), str(HOOK), policy]
+        result = subprocess.run(argv, input=json.dumps(payload), text=True, capture_output=True, env=environment)
         self.assertEqual(result.returncode, 0, result.stderr)
         output = cast(dict[str, dict[str, str]], json.loads(result.stdout)) if result.stdout.strip() else {}
         return output.get("hookSpecificOutput", {}).get("permissionDecisionReason", "")
@@ -155,6 +184,8 @@ class HookTests(Repo):
         """A failed security pass, a missing artifact and a malformed passes line each deny."""
         failed = artifact(entry("review-pr"), entry("security-review", "fail"))
         self.assertTrue(self.reason(**failed).startswith("required_review_failed:security-review"))
+        failed["FAKE_PASSES"] = failed["FAKE_PASSES"].replace('"blocking": true', '"blocking": false')
+        self.assertTrue(self.reason(**failed).startswith("required_review_failed:security-review"))
         self.assertTrue(self.reason(FAKE_NO_ARTIFACT="1").startswith("review_artifact_missing"))
         self.assertTrue(self.reason(FAKE_PASSES='"nope"').startswith("review_passes_malformed"))
 
@@ -162,6 +193,40 @@ class HookTests(Repo):
         """A passes line carrying a different head_sha does not satisfy the policy."""
         reason = self.reason(**artifact(entry("review-pr"), entry("security-review")), FAKE_PASSES_SHA="stale")
         self.assertTrue(reason.startswith("required_review_missing:security-review"), reason)
+
+    def test_conflicting_summary_and_section_markers_are_refused(self) -> None:
+        """The actual hook refuses ambiguous grammar even when every declared hash matches."""
+        valid = artifact(entry("review-pr"), entry("security-review"))
+        repeated = CRITICAL.replace("- injection", "None") + "\n" + CRITICAL
+        for text in (CLEAN + CRITICAL, repeated, CLEAN + CLEAN):
+            digest = hashlib.sha256(text.strip().encode()).hexdigest()
+            given = artifact(entry("review-pr"), entry("security-review", digest=digest))
+            given["FAKE_TAIL"] = CLEAN + "<!-- coderails-review-pass security-review -->\n" + text
+            with self.subTest(text=text):
+                self.assertTrue(self.reason(**given).startswith("review_passes_malformed"))
+        duplicate = {
+            **valid,
+            "FAKE_TAIL": valid["FAKE_TAIL"] + "\n<!-- coderails-review-pass security-review -->\n" + CLEAN,
+        }
+        self.assertTrue(self.reason(**duplicate).startswith("review_passes_malformed"))
+        self.assertEqual(self.reason(**valid), "")
+
+    def test_policy_and_internal_refusals_do_not_prescribe_reposting(self) -> None:
+        """Actual hook input/output keeps unreadable-policy and internal-error remedies distinct from reposting."""
+        valid = artifact(entry("review-pr"), entry("security-review"))
+        missing = self.tmp / "missing.json"
+        malformed = self.tmp / "malformed.json"
+        malformed.write_text("{")
+        for policy, code in (
+            (str(missing), "review_policy_unreadable"),
+            (str(malformed), "review_policy_unreadable"),
+            ("internal", "review_passes_check_error"),
+        ):
+            with self.subTest(policy=policy):
+                reason = self.reason(policy=policy, **valid)
+                self.assertTrue(reason.startswith(code), reason)
+                self.assertNotIn("re-post", reason)
+                self.assertNotIn("post_review.py post", reason)
 
 
 class DocsOnlyTests(Repo):
@@ -186,14 +251,27 @@ class PostTests(Repo):
 
     touched = "docs/a.md"
 
-    def post(self, *arguments: str) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    def post(
+        self,
+        *arguments: str,
+        provider: str = "codex",
+        comments: list[dict[str, str]] | None = None,
+        heads: list[str] | None = None,
+    ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
         """Run `post_review.py post ...` against a fake gh; returns (result, gh call log, posted body)."""
         log, posted = self.tmp / "gh.log", self.tmp / "posted.md"
         log.write_text("")
         env = {**os.environ, "PATH": f"{shim(self.tmp, POST_SHIM)}{os.pathsep}{os.environ['PATH']}"}
-        env |= {"FAKE_SHA": self.sha, "FAKE_LOG": str(log), "FAKE_POSTED": str(posted)}
+        env |= {
+            "FAKE_SHA": self.sha,
+            "FAKE_LOG": str(log),
+            "FAKE_POSTED": str(posted),
+            "FAKE_HEADS": json.dumps(heads or [self.sha]),
+            "FAKE_COMMENTS": json.dumps(comments or []),
+        }
+        path = POST if provider == "codex" else ROOT / "scripts/post_review.py"
         result = subprocess.run(
-            [sys.executable, str(POST), "post", *arguments], cwd=self.dir, env=env, capture_output=True, text=True
+            [sys.executable, str(path), "post", *arguments], cwd=self.dir, env=env, capture_output=True, text=True
         )
         return result, log, posted
 
@@ -215,12 +293,13 @@ class PostTests(Repo):
         """Negative control: injection-shaped numbers fail with pr_number_invalid and the gh shim is never run."""
         clean = self.tmp / "clean.md"
         clean.write_text(CLEAN)
-        for bad in ("7; id", "$(id)", "-1"):
-            with self.subTest(bad=bad):
-                result, log, _ = self.post(bad, "--summary", str(clean))
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("pr_number_invalid", result.stderr)
-                self.assertEqual(log.read_text(), "")
+        for provider in ("claude", "codex"):
+            for bad in ("7; id", "$(id)", "-1", "0", "07", "abc", ""):
+                with self.subTest(provider=provider, bad=bad):
+                    result, log, _ = self.post(bad, "--summary", str(clean), provider=provider)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("pr_number_invalid", result.stderr)
+                    self.assertEqual(log.read_text(), "")
 
     def test_validate_operation_still_works(self) -> None:
         """The pre-existing validate operation keeps its interface."""
@@ -229,6 +308,46 @@ class PostTests(Repo):
         done = subprocess.run([sys.executable, str(POST), "validate", str(clean)], capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertNotIn("write_cache", POST.read_text())
+
+    def test_both_provider_clis_select_and_validate_the_newest_authored_artifact(self) -> None:
+        """The real CLI reuses only the newest valid same-author body, while foreign bodies stay excluded."""
+        clean = self.tmp / "clean.md"
+        clean.write_text(CLEAN)
+        for provider in ("claude", "codex"):
+            result, _, posted = self.post("12", "--summary", str(clean), provider=provider)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            good = {"url": "old", "author": "me", "created": "t", "body": posted.read_text()}
+            corrupt = {**good, "url": "corrupt", "body": "\n".join(good["body"].splitlines()[:2]) + "\n" + CRITICAL}
+            for comments, reused in (
+                ([good, corrupt], ""),
+                ([corrupt], ""),
+                ([good, {**good, "url": "new"}], "new"),
+                ([good, {**corrupt, "author": "other"}], "old"),
+            ):
+                with self.subTest(provider=provider, reused=reused, count=len(comments)):
+                    result, log, _ = self.post("12", "--summary", str(clean), provider=provider, comments=comments)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    calls = [json.loads(line) for line in log.read_text().splitlines()]
+                    self.assertEqual(any("-F" in call for call in calls), not bool(reused))
+                    if reused:
+                        self.assertIn("Existing: " + reused, result.stdout)
+
+    def test_both_provider_clis_keep_literal_paths_and_refuse_head_races(self) -> None:
+        """Shell-looking paths are read literally; a changed head before or after posting cannot report success."""
+        clean = self.tmp / "$(touch should-not-exist).md"
+        clean.write_text(CLEAN)
+        for provider in ("claude", "codex"):
+            for heads, posts in (
+                ([self.sha], True),
+                ([self.sha, "b" * 40], False),
+                ([self.sha, self.sha, "b" * 40], True),
+            ):
+                with self.subTest(provider=provider, heads=heads):
+                    result, log, _ = self.post("12", "--summary", str(clean), provider=provider, heads=heads)
+                    self.assertEqual(result.returncode, int(len(heads) > 1), result.stderr)
+                    calls = [json.loads(line) for line in log.read_text().splitlines()]
+                    self.assertEqual(any("-F" in call for call in calls), posts)
+                    self.assertFalse((self.dir / "should-not-exist").exists())
 
 
 class MirrorTests(unittest.TestCase):

@@ -46,11 +46,7 @@ def main() -> int:
                 return 0
             if violations := publication_gate.evaluate(number, git.pr_field(number, "headRefOid"), unit, progress):
                 first = violations[0]
-                fix = (
-                    "Fix the diff or the policy; diff_manifest: off is the switch."
-                    if first["code"].startswith("diff_manifest")
-                    else "Run the required reviews, then re-post: post_review.py post <PR> --summary F --pass NAME=F."
-                )
+                fix = publication_gate.remediation(first["code"])
                 deny(
                     f"{first['code']}: Blocked: merge of PR {number} — the publication gate refused this head "
                     f"({first['detail'] or 'no detail'}). {fix}"

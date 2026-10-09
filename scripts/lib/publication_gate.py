@@ -66,6 +66,19 @@ def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list
 CHECKS: list[Check] = [manifest_check, review_passes_check]
 
 
+def remediation(code: str) -> str:
+    """Prescribe a repair for the refused check; an unreadable policy or runtime error needs no new artifact."""
+    if code == "review_policy_unreadable":
+        return "Restore a readable policy/review_policy.json and check that the current-head diff is available."
+    if code.endswith("_error"):
+        return "Investigate the reported publication-check error, repair its cause, then retry."
+    if code.startswith("diff_manifest"):
+        return "Fix the diff or the policy; set diff_manifest: off only on purpose."
+    if code.startswith("required_review_") or code in ("review_artifact_missing", "review_passes_malformed"):
+        return "Run the required reviews, then re-post: post_review.py post <PR> --summary F --pass NAME=F."
+    return "Resolve the reported publication-check refusal, then retry."
+
+
 def evaluate(number: str, sha: str, unit: str = "", progress: str = "") -> list[Violation]:
     """Run every registered check; a check that raises is a refusal, never a pass."""
     found: list[Violation] = []
