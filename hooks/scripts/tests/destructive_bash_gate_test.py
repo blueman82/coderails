@@ -78,7 +78,14 @@ class DestructiveGateTests(unittest.TestCase):
     def test_no_verify_is_seen_behind_global_options_and_wrappers(self) -> None:
         """Git -C/-c commit --no-verify and -n are denied with the established identifier; quoted text is not."""
         denied = ("git -C d commit --no-verify", "git commit -n", "git -c a=b commit -nm x", "env A=1 git commit -n")
-        allowed = ("git commit -m x", "git -C d commit -m x", 'echo "git commit -n"', "git commit -m -n")
+        allowed = (
+            "git commit -m x",
+            "git -C d commit -m x",
+            'echo "git commit -n"',
+            "git commit -m -n",
+            'echo "git commit -m x --no-verify"',
+            'git commit -m "text --no-verify"',
+        )
         for command, expected in [(c, True) for c in denied] + [(c, False) for c in allowed]:
             with self.subTest(command=command):
                 result = subprocess.run(

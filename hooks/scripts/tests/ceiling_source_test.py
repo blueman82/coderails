@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 import unittest
@@ -99,7 +100,16 @@ class CeilingSourceTests(HookCase):
         progress.parent.mkdir(parents=True)
         top = os.path.realpath(git_out(repo, "rev-parse", "--show-toplevel"))
         units = {"1": {"worktree": top}, "2": {"worktree": "/elsewhere"}, "3": {}}
-        progress.write_text(json.dumps({"work_units": units}), encoding="utf-8")
+        state = {
+            "schema_version": 3,
+            "session_id": "s1",
+            "loop_id": "loop1",
+            "status": "in-progress",
+            "work_units": units,
+            "graph": {"active_wave": {"nodes": ["U3[1]"]}, "nodes": {"U3[1]": {"status": "running"}}},
+        }
+        progress.write_text(json.dumps(state), encoding="utf-8")
+        self.environment["CLAUDE_LOOP_ID"] = "loop1"
         self.run_times(RUN_ALL, repo, 2, session_id="s1")
         self.run_times(POST, repo, 1, session_id="s1")
         data = json.loads(progress.read_text(encoding="utf-8"))["work_units"]
@@ -108,10 +118,89 @@ class CeilingSourceTests(HookCase):
         self.assertNotIn("verification", data["3"])
         self.assertFalse(Path(f"{progress}.lock").exists())
 
+    def test_effective_directory_charges_only_the_target_worktree(self) -> None:
+        """Supported cd and env directory selection share the physical target's counter."""
+        origin, target = self.repository("origin", "origin"), self.repository("target space", "target")
+        quoted = shlex.quote(str(target))
+        for command in (f"cd {quoted} && {RUN_ALL}", f"env --chdir {quoted} {RUN_ALL}"):
+            self.assertEqual(self.run_times(command, origin, 1), [False])
+        self.assertEqual(self.run_times(RUN_ALL, target, 1), [True])
+        self.assertEqual(self.counter(target, "run_all").read_text().strip(), "3")
+        self.assertFalse(self.counter(origin, "run_all").exists())
+
+    def test_foreign_unknown_or_ambiguous_mirror_is_not_written(self) -> None:
+        """Optional mirroring requires a live owned loop and one current matching work unit."""
+        repo = self.repository("repo", "unit-test")
+        progress = self.loop / "fixture" / "s1" / "progress.json"
+        progress.parent.mkdir(parents=True)
+        self.environment["CLAUDE_LOOP_ID"] = "loop1"
+        state = {
+            "schema_version": 3,
+            "session_id": "s1",
+            "loop_id": "loop1",
+            "status": "in-progress",
+            "work_units": {"1": {"worktree": str(repo)}},
+            "graph": {"active_wave": {"nodes": ["U3[1]"]}, "nodes": {"U3[1]": {"status": "running"}}},
+        }
+        variants = [
+            dict(state, session_id="foreign"),
+            dict(state, loop_id="foreign"),
+            dict(state, graph={}),
+            dict(state, status="complete"),
+            dict(state, schema_version=2),
+            dict(state, graph={"active_wave": {"nodes": ["U3[2]"]}, "nodes": {"U3[2]": {"status": "running"}}}),
+            dict(state, graph={"active_wave": {"nodes": ["U3[1]"]}, "nodes": {"U3[1]": {"status": "pending"}}}),
+            dict(state, work_units={"1": {"worktree": str(repo)}, "2": {"worktree": str(repo)}}),
+        ]
+        for variant in variants:
+            raw = json.dumps(variant)
+            progress.write_text(raw)
+            self.run_times(RUN_ALL, repo, 1, session_id="s1")
+            with self.subTest(variant=variant):
+                self.assertEqual(progress.read_text(), raw)
+        self.environment.pop("CLAUDE_LOOP_ID")
+        raw = json.dumps(state)
+        progress.write_text(raw)
+        self.run_times(RUN_ALL, repo, 1, session_id="s1")
+        self.assertEqual(progress.read_text(), raw)
+
     def test_missing_progress_file_does_not_affect_the_file_counter(self) -> None:
         """Without a progress file only the worktree-keyed counter applies."""
         repo = self.repository("repo", "unit-test")
         self.assertEqual(self.run_times(RUN_ALL, repo, 3, session_id="nosuch"), [False, False, True])
+
+    def test_corrupt_progress_keeps_counter_denial(self) -> None:
+        """Unreadable progress content is optional and cannot exempt the third counted run."""
+        repo = self.repository("repo", "unit-test")
+        progress = self.loop / "fixture/s1/progress.json"
+        progress.parent.mkdir(parents=True)
+        progress.write_text("{broken")
+        self.environment["CLAUDE_LOOP_ID"] = "loop1"
+        self.assertEqual(self.run_times(RUN_ALL, repo, 3, session_id="s1"), [False, False, True])
+        self.assertEqual(progress.read_text(), "{broken")
+
+    def test_ordinary_mirror_write_failure_keeps_counter_denial(self) -> None:
+        """A real unwritable progress parent cannot suppress the existing worktree counter."""
+        repo = self.repository("repo", "unit-test")
+        progress = self.loop / "fixture/s1/progress.json"
+        progress.parent.mkdir(parents=True)
+        state = {
+            "schema_version": 3,
+            "session_id": "s1",
+            "loop_id": "loop1",
+            "status": "in-progress",
+            "work_units": {"1": {"worktree": str(repo)}},
+            "graph": {"active_wave": {"nodes": ["U3[1]"]}, "nodes": {"U3[1]": {"status": "running"}}},
+        }
+        raw = json.dumps(state)
+        progress.write_text(raw)
+        self.environment["CLAUDE_LOOP_ID"] = "loop1"
+        progress.parent.chmod(0o500)
+        try:
+            self.assertEqual(self.run_times(RUN_ALL, repo, 3, session_id="s1"), [False, False, True])
+            self.assertEqual(progress.read_text(), raw)
+        finally:
+            progress.parent.chmod(0o700)
 
 
 if __name__ == "__main__":

@@ -28,15 +28,13 @@ class HookTests(unittest.TestCase):
         self.directory = Path(temporary.name)
         self.loop = self.directory / "loops"
         self.repo = self.directory / "repo"
-        self.repo.mkdir()
-        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
-        subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/feature/test"], check=True)
+        subprocess.run(["git", "init", "-q", "-b", "feature/test", str(self.repo)], check=True)
         self.environment = os.environ | {
-            "HOME": str(self.directory / "home"),
             "PLUGIN_ROOT": str(PACKAGE),
             "PLUGIN_DATA": str(self.directory / "data"),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.directory / "loops"),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
+            "CLAUDE_DISCIPLINE_LOG": str(self.directory / "discipline.log"),
             "CODERAILS_TEST_OUTPUT_DIR": str(self.directory / "logs"),
         }
 

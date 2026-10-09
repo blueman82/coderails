@@ -55,7 +55,13 @@ def source_regex(data: dict[str, list[str]]) -> str:
     """Regex over command text that finds a protected source file or plugin instruction file."""
     extensions = "|".join(re.escape(e[1:]) for e in data["source_extensions"]) or "(?!)"
     plugin = "|".join(glob_regex(g) for g in data["plugin_source_globs"]) or "(?!)"
-    return rf"\.({extensions})([\s'\"]|$)|(^|[\s/'\"])({plugin})([\s'\"]|$)"
+    return rf"\.({extensions})([\s'\"]|$)|(^|[\s/'\"])({plugin}|{re.escape(POLICY_NAME)})([\s'\"]|$)"
+
+
+def is_policy(path: str) -> bool:
+    """The policy's own canonical path is always protected independently of its contents."""
+    path = os.path.normpath(path)
+    return path == POLICY_NAME or path.endswith(f"/{POLICY_NAME}")
 
 
 def is_plugin_source(path: str, data: dict[str, list[str]]) -> bool:
@@ -66,7 +72,7 @@ def is_plugin_source(path: str, data: dict[str, list[str]]) -> bool:
 def is_document(path: str, data: dict[str, list[str]]) -> bool:
     """Whether the path is a document/config file that may be edited on main."""
     path = os.path.normpath(path)
-    if path == POLICY_NAME or path.endswith(f"/{POLICY_NAME}"):  # the policy cannot exempt itself
+    if is_policy(path):
         return False
     name = path.rsplit("/", 1)[-1]
     return name in data["doc_names"] or Path(path).suffix in data["doc_extensions"]
@@ -74,4 +80,5 @@ def is_document(path: str, data: dict[str, list[str]]) -> bool:
 
 def is_settings(path: str, files: list[str] | tuple[str, ...]) -> bool:
     """Whether the path names one of the owner permission files (exact or as a trailing path)."""
+    path = os.path.normpath(path)
     return any(path == f or path.endswith(f"/{f}") for f in files)

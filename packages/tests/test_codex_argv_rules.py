@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,7 @@ PACKAGE = ROOT / "packages/codex"
 HOOKS = PACKAGE / "hooks/scripts"
 MIRRORED = (
     "hooks/scripts/lib/argv_match.py",
+    "hooks/scripts/lib/shell_context.py",
     "hooks/scripts/lib/protected_paths.py",
     "hooks/scripts/lib/ceiling_key.py",
     "policy/protected_paths.json",
@@ -56,11 +58,12 @@ class CodexHookCase(unittest.TestCase):
         self.data = self.directory / "data"
         self.loop = self.directory / "loops"
         self.environment = os.environ | {
-            "HOME": str(self.directory / "home"),
             "PLUGIN_ROOT": str(PACKAGE),
             "PLUGIN_DATA": str(self.data),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.loop),
+            "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
             "CODERAILS_TEST_OUTPUT_DIR": str(self.directory / "logs"),
+            "CLAUDE_DISCIPLINE_LOG": str(self.directory / "discipline.log"),
         }
         self.repo = self.repository("repo", "feature/test")
 
@@ -107,11 +110,11 @@ class TestGateTests(CodexHookCase):
             "timeout 60 git commit -m x",
             "2>&1 git commit -m x",
             "bash -c 'git commit -m x' # \"",
-            "git -C /r commit -m x",
+            "git -C . commit -m x",
             "git -c user.name=x commit -m x",
             "/usr/bin/git commit -m x",
-            "env A=1 git -C d commit",
-            "bash -c 'git -C d commit -m x'",
+            "env A=1 git -C . commit",
+            "bash -c 'git -C . commit -m x'",
             'git commit -m "unbalanced',
         ]
         for command in denied:
@@ -119,6 +122,55 @@ class TestGateTests(CodexHookCase):
                 self.assertTrue(self.bash("test_gate", command))
         for command in ('echo "git commit"', "git log --grep commit", 'echo "unbalanced git commit'):
             with self.subTest(command=command):
+                self.assertFalse(self.bash("test_gate", command))
+
+    def test_effective_repo_and_native_workdir_control_test_configuration(self) -> None:
+        """The trusted test command is read from each actual committing repository."""
+        target = self.repository("target space", "feature/target")
+        trusted = target / ".git/coderails/test_command"
+        trusted.parent.mkdir(parents=True)
+        trusted.write_text("false\n", encoding="utf-8")
+        quoted = shlex.quote(str(target))
+        requests = [
+            {"command": f"git -C {quoted} commit -m x"},
+            {"command": f"cd {quoted} && git commit -m x"},
+            {"command": f"env --chdir {quoted} git commit -m x"},
+            {"command": "git commit -m x", "workdir": str(target)},
+            {"cmd": "git commit -m x", "workdir": str(target)},
+            {"command": f"bash -c {shlex.quote(f'cd {quoted} && git commit -m x')}"},
+        ]
+        for data in requests:
+            with self.subTest(data=data):
+                output = self.hook("test_gate", {"cwd": str(self.repo), "tool_input": data})
+                self.assertEqual(output.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
+
+    def test_unconfigured_target_does_not_run_origin_tests(self) -> None:
+        """A different project's configured failure cannot remove the target's opt-in exemption."""
+        trusted = self.repo / ".git/coderails/test_command"
+        trusted.parent.mkdir(parents=True)
+        trusted.write_text("false\n", encoding="utf-8")
+        target = self.repository("unconfigured", "feature/target")
+        self.assertFalse(self.bash("test_gate", f"git -C {shlex.quote(str(target))} commit -m x"))
+
+    def test_explicit_git_selection_controls_trusted_metadata(self) -> None:
+        """Global metadata/worktree selectors and successive relative -C select the tested project."""
+        target = self.repository("selected space", "feature/target")
+        for repo, command in ((self.repo, "true\n"), (target, "false\n")):
+            path = repo / ".git/coderails/test_command"
+            path.parent.mkdir(parents=True)
+            path.write_text(command, encoding="utf-8")
+        commands = (
+            f"git --git-dir {shlex.quote(str(target / '.git'))} --work-tree {shlex.quote(str(target))} commit",
+            f"git --git-dir={shlex.quote(str(target / '.git'))} --work-tree={shlex.quote(str(target))} commit",
+            "git -C ../'selected space' -C . commit",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(self.bash("test_gate", command))
+        (self.repo / ".git/coderails/test_command").write_text("false\n", encoding="utf-8")
+        (target / ".git/coderails/test_command").write_text("true\n", encoding="utf-8")
+        for command in commands:
+            with self.subTest(command=command, control="unrelated failure"):
                 self.assertFalse(self.bash("test_gate", command))
 
 
@@ -138,7 +190,14 @@ class DestructiveTests(CodexHookCase):
         for command in denied:
             with self.subTest(command=command):
                 self.assertTrue(self.bash("destructive_bash_gate", command))
-        for command in ("git commit -m x", "git -C d commit -m x", 'echo "git commit -n"', "git commit -m -n"):
+        for command in (
+            "git commit -m x",
+            "git -C d commit -m x",
+            'echo "git commit -n"',
+            "git commit -m -n",
+            'echo "git commit -m x --no-verify"',
+            'git commit -m "text --no-verify"',
+        ):
             with self.subTest(command=command):
                 self.assertFalse(self.bash("destructive_bash_gate", command))
 
@@ -192,7 +251,16 @@ class CeilingTests(CodexHookCase):
         progress.parent.mkdir(parents=True)
         top = ceiling_key.worktree_key(str(self.repo))[1]
         units = {"1": {"worktree": top}, "2": {"worktree": "/elsewhere"}}
-        progress.write_text(json.dumps({"work_units": units}), encoding="utf-8")
+        state = {
+            "schema_version": 3,
+            "session_id": "s1",
+            "loop_id": "loop1",
+            "status": "in-progress",
+            "work_units": units,
+            "graph": {"active_wave": {"nodes": ["U3[1]"]}, "nodes": {"U3[1]": {"status": "running"}}},
+        }
+        progress.write_text(json.dumps(state), encoding="utf-8")
+        self.environment["CLAUDE_LOOP_ID"] = "loop1"
         self.runs(RUN_ALL, self.repo, 2)
         self.runs(POST, self.repo, 1)
         data = json.loads(progress.read_text(encoding="utf-8"))["work_units"]
@@ -234,12 +302,33 @@ class ProtectedPathsTests(CodexHookCase):
     def test_adding_an_extension_changes_both_gates_without_code_change(self) -> None:
         """Negative control: .rs is not a source extension until the JSON says so; edits follow doc_extensions."""
         self.assertEqual(self.sed("x.rs"), "")
+        self.assertIn("Blocked edit", self.patch("x.rs"))
         self.edit_policy("source_extensions", lambda values: [*values, ".rs"])
         self.assertIn("source edit on main", self.sed("x.rs"))
         self.assertIn("Blocked edit", self.patch("x.rs"))
         self.assertEqual(self.patch("README.md"), "")
         self.edit_policy("doc_extensions", lambda values: [v for v in values if v != ".md"])
         self.assertIn("Blocked edit", self.patch("README.md"))
+
+    def test_bash_policy_spellings_remain_protected(self) -> None:
+        """The policy is source at the Bash consumer even when its path contains dot components."""
+        self.assertEqual(self.sed("config/other.json"), "")
+        for target in (
+            "policy/protected_paths.json",
+            "policy/./protected_paths.json",
+            "policy//protected_paths.json",
+            "policy/nested/../protected_paths.json",
+            "packages/codex/policy/./protected_paths.json",
+        ):
+            with self.subTest(target=target):
+                self.assertIn("source", self.sed(target))
+
+    def test_normalized_owner_settings_are_denied_on_every_branch(self) -> None:
+        """Native permission files stay denied for equivalent path spellings on feature branches."""
+        subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/feature"], check=True)
+        for target in (".codex/./config.toml", ".codex//requirements.toml", ".codex/nested/../config.toml"):
+            with self.subTest(target=target):
+                self.assertIn("permission", self.patch(target).lower())
 
     def test_the_policy_file_cannot_be_edited_on_main(self) -> None:
         """Negative control: another .json is a document; the policy file itself is not."""

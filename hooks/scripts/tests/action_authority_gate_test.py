@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import unittest
@@ -45,7 +46,6 @@ class GateTests(HookCase):
         """Repo on main, no config yet."""
         super().setUp()
         self.repo = self.directory / "repo"
-        self.repo.mkdir()
         subprocess.run(["git", "init", "-q", "-b", "main", str(self.repo)], check=True)
         binary = self.directory / "bin"
         binary.mkdir()
@@ -75,11 +75,12 @@ class GateTests(HookCase):
             self.assertEqual((result.returncode, result.stdout), (expected_code, ""))
         self.assertEqual([json.loads(line)["expected"] for line in log.read_text().splitlines()], [True, False])
 
-    def configure(self, value: str | None) -> None:
+    def configure(self, value: str | None, repo: Path | None = None) -> None:
         """Write (or skip) the action_authority config line."""
         if value is not None:
-            (self.repo / ".coderails").mkdir(exist_ok=True)
-            (self.repo / ".coderails/workflow.config.yaml").write_text(f"action_authority: {value}\n")
+            directory = (repo or self.repo) / ".coderails"
+            directory.mkdir(exist_ok=True)
+            (directory / "workflow.config.yaml").write_text(f"action_authority: {value}\n")
 
     def payload(self, command: str, session: str = "s1") -> dict[str, Any]:
         """A Bash PreToolUse payload."""
@@ -161,6 +162,80 @@ class GateTests(HookCase):
         self.mint(PUSH, "git_push")
         self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))
 
+    def test_effective_target_configuration_is_checked_per_operation(self) -> None:
+        """A target's enforced receipt policy applies even when the origin has no configuration."""
+        target = self.second_repo()
+        self.configure("enforce", target)
+        quoted = shlex.quote(str(target))
+        for command in (
+            f"git -C {quoted} push",
+            f"cd {quoted} && git push",
+            f"env --chdir {quoted} git push",
+            f"git --git-dir {shlex.quote(str(target / '.git'))} --work-tree {quoted} push",
+            f"git --git-dir={shlex.quote(str(target / '.git'))} --work-tree={quoted} push",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+
+    def test_cli_and_hook_use_the_selected_branch_and_head(self) -> None:
+        """Real receipt minting and enforcement bind the selected Git metadata without changing command bytes."""
+        target = self.second_repo()
+        self.configure("enforce", target)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(target),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "selected",
+            ],
+            check=True,
+        )
+        head = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/feature/origin"], check=True)
+        command = f"git --git-dir={shlex.quote(str(target / '.git'))} --work-tree={shlex.quote(str(target))} push"
+        minted = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts/action_receipt_cli.py"),
+                "approve-action",
+                "--session",
+                "s1",
+                "--kind",
+                "git_push",
+                "--command",
+                command,
+                "--cwd",
+                str(self.repo),
+                "--artifact-sha",
+                head,
+            ],
+            env=self.environment,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        obj = json.loads(minted.stdout)
+        expected = ar.proposed_action("git_push", command, str(self.repo), "main", head)
+        self.assertEqual(obj["exact_payload_hash"], expected["exact_payload_hash"])
+        self.assertFalse(self.denied("action_authority_gate", self.payload(command)))
+        self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+
+    def test_quoted_operations_and_unrelated_help_do_not_change_receipt_requirement(self) -> None:
+        """Quoted punctuation is prose; another segment's help flag cannot exempt a push."""
+        self.configure("enforce")
+        self.assertFalse(self.denied("action_authority_gate", self.payload('echo "message ; gh pr merge 12"')))
+        self.assertTrue(self.denied("action_authority_gate", self.payload("echo --help; git push origin main")))
+
     def test_hook_error_fails_open_with_reason(self) -> None:
         """An injected exception exits 0 without denying and traces action_authority_failed_open."""
         self.configure("enforce")
@@ -183,7 +258,6 @@ class GateTests(HookCase):
     def second_repo(self) -> Path:
         """A second repo, also on main."""
         other = self.directory / "other"
-        other.mkdir()
         subprocess.run(["git", "init", "-q", "-b", "main", str(other)], check=True)
         return other
 
@@ -203,6 +277,7 @@ class GateTests(HookCase):
         """A receipt for `git push` in repoA does not authorise `cd repoB && git push`; one minted for repoB does."""
         self.configure("enforce")
         other = self.second_repo()
+        self.configure("enforce", other)
         self.mint("git push", "git_push")
         self.assertTrue(self.denied("action_authority_gate", self.payload(f"cd {other} && git push")))
         self.mint("git push", "git_push", cwd=other, rid="r2")

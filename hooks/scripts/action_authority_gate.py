@@ -12,7 +12,6 @@ A receipt does not prove a human minted it.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -21,7 +20,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, read_payload
 from hooks.scripts.lib.destructive_patterns import git_output
-from hooks.scripts.lib.pr_workflow_match import guarded_segments, pr_number
+from hooks.scripts.lib.pr_workflow_match import guarded_operations, pr_number, repository
+from hooks.scripts.lib.shell_context import payload_cwd
 from hooks.scripts.lib.trace_row import append_row
 from scripts.lib.action_receipt import find_valid, proposed_action
 from scripts.lib.authority_object import read_authority
@@ -35,13 +35,13 @@ def mode(cwd: str) -> str:
     return value if value in {"enforce", "advisory"} else "off"
 
 
-def artifact_sha(name: str, segment: str, cwd: str) -> str | None:
+def artifact_sha(name: str, segment: str, cwd: str, prefix: list[str]) -> str | None:
     """The real artifact at enforcement time: HEAD for a push, the PR head for a merge; None when unknowable.
 
     A receipt minted with --artifact-sha verifies only when this equals it, so an unknowable sha fails closed.
     """
     if name == "git_push":
-        return git_output(cwd, "rev-parse", "HEAD") or None
+        return git_output(cwd, *prefix, "rev-parse", "HEAD") or None
     number = pr_number(segment)
     if not number:
         return None
@@ -66,35 +66,50 @@ def main() -> int:
         command = data.get("command") if isinstance(data, dict) else None
         if not isinstance(command, str) or not command:
             return 0
-        cwd = str(payload.get("cwd") or os.getcwd())
-        mode_ = mode(cwd)
-        if mode_ == "off" or not (segments := guarded_segments(command, cwd)):
+        calls = [(call, mode(repository(call))) for call in guarded_operations(command, payload_cwd(payload))]
+        calls = [(call, value) for call, value in calls if value != "off"]
+        if not calls:
             return 0
         authority = read_authority(session)
         loop_id = authority["loop_id"] if authority else None
         now = datetime.now(timezone.utc)
         proposals = [
-            (name, proposed_action(name, segment, where, git_output(where, "branch", "--show-current"),
-                                   artifact_sha(name, segment, where)))
-            for name, segment, where in segments
-        ]  # fmt: skip
-        results = [(name, *find_valid(session, proposed, now, loop_id)) for name, proposed in proposals]
-        missing = next(((name, code) for name, found, code in results if found is None), None)
-        if missing is None and mode_ == "enforce":
-            for name, proposed in proposals:  # the O_EXCL claim, not the verify above, decides who is allowed
-                found, code = find_valid(session, proposed, now, loop_id, consume_it=True)
-                if found is None:
-                    missing = (name, code)
-                    break
+            (
+                call.name,
+                proposed_action(
+                    call.name,
+                    call.segment,
+                    call.cwd,
+                    git_output(call.git_cwd, *call.prefix, "branch", "--show-current"),
+                    artifact_sha(call.name, call.segment, call.git_cwd, call.prefix),
+                ),
+                value,
+            )
+            for call, value in calls
+        ]
+        results = [(name, *find_valid(session, proposed, now, loop_id), value) for name, proposed, value in proposals]
+        missing = next(
+            ((name, code) for name, found, code, value in results if found is None and value == "enforce"), None
+        )
         if missing is None:
-            if mode_ == "enforce":
+            for name, proposed, value in proposals:
+                if value == "enforce":
+                    found, code = find_valid(session, proposed, now, loop_id, consume_it=True)
+                    if found is None:
+                        missing = (name, code)
+                        break
+        if missing is None:
+            if any(value == "enforce" for _, _, value in proposals):
                 append_row("action_authority", "allowed", "receipt_consumed", trace_id, loop_id)
+            for name, found, code, value in results:
+                if found is None and value == "advisory":
+                    append_row("action_authority", "advisory", f"advisory_{code}", trace_id, loop_id)
+                    print(
+                        f"action_authority (advisory): no valid receipt for {name} ({code}); not blocked.",
+                        file=sys.stderr,
+                    )
             return 0
         name, code = missing
-        if mode_ == "advisory":
-            append_row("action_authority", "advisory", f"advisory_{code}", trace_id, loop_id)
-            print(f"action_authority (advisory): no valid receipt for {name} ({code}); not blocked.", file=sys.stderr)
-            return 0
         append_row("action_authority", "denied", f"denied_{code}", trace_id, loop_id)
         how = (
             "The payload has no session_id, so no receipt can be bound."

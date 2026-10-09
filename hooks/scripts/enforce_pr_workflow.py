@@ -11,15 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, read_payload
 from hooks.scripts.lib.loop_state_common import log
 from hooks.scripts.lib.pr_merge_gate import merge_reason
-from hooks.scripts.lib.pr_workflow_match import (
-    guarded_segments,
-    operation,
-    step_found,
-    targets_main,
-    transcript_entries,
-)
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.lib.pr_workflow_match import operations, repository, step_found, targets_main, transcript_entries
+from hooks.scripts.lib.shell_context import payload_cwd
 from scripts.lib import merge_target
 from scripts.lib.config import config_path
 
@@ -31,10 +24,6 @@ def main() -> int:
     command = data.get("command") if isinstance(data, dict) else None
     if not isinstance(command, str) or not command:
         return 0
-    name, segment, target = operation(command)
-    cwd = str(payload.get("cwd") or os.getcwd())
-    segments = [(name, segment, cwd)] if name and name != "merge" else []
-    segments += [item for item in guarded_segments(command, cwd) if item[0] == "merge"]
     paths = [
         str(payload[key])
         for key in ("transcript_path", "agent_transcript_path")
@@ -43,13 +32,15 @@ def main() -> int:
     if not paths:
         return 0
     entries = transcript_entries(paths)
-    for name, segment, where in segments:
-        if not config_path(where) or not targets_main(command, where, target, name):
+    for call in operations(command, payload_cwd(payload)):
+        cwd = repository(call)
+        if not config_path(cwd) or not targets_main(call):
             continue
+        name, segment = call.name, call.segment
         number, unit, progress = merge_target.parse(segment) if name == "merge" else ("", "", "")
         if name == "merge" and number:
             try:
-                os.chdir(where)
+                os.chdir(cwd)
                 number = merge_target.resolve(number)
             except (OSError, ValueError, RuntimeError):
                 number = ""
@@ -69,7 +60,7 @@ def main() -> int:
             return 0
         if name == "merge":
             try:
-                reason = merge_reason(number, where, unit=unit, progress=progress)
+                reason = merge_reason(number, cwd, unit=unit, progress=progress)
             except (OSError, ValueError, RuntimeError) as error:
                 reason = f"Blocked: gh pr merge — eval artifact verification failed: {error}. Do not bypass."
             if reason:

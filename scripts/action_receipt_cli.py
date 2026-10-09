@@ -18,6 +18,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from hooks.scripts.lib.destructive_patterns import git_output
+from hooks.scripts.lib.pr_workflow_match import operations
 from hooks.scripts.lib.trace_row import append_row
 from scripts.lib import action_receipt as ar
 
@@ -36,7 +37,16 @@ def approve(args: argparse.Namespace) -> int:
     """Write one new receipt for the exact command, cwd and branch; never overwrites."""
     now = datetime.now(timezone.utc)
     cwd = args.cwd or str(Path.cwd())
-    branch = args.branch if args.branch is not None else git_output(cwd, "branch", "--show-current")
+    call = next((value for value in operations(args.action_command, cwd) if value.name == args.kind), None)
+    branch = (
+        args.branch
+        if args.branch is not None
+        else (
+            git_output(call.git_cwd, *call.prefix, "branch", "--show-current")
+            if call is not None
+            else git_output(cwd, "branch", "--show-current")
+        )
+    )
     proposed = ar.proposed_action(args.kind, args.action_command, cwd, branch, args.artifact_sha)
     if len(args.scope) > ar.MAX_SCOPE:
         return refuse("receipt_refused_scope_too_long", f"scope over {ar.MAX_SCOPE} chars", args.session, args.loop)

@@ -3,10 +3,10 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import re
+import stat
 import sys
 import tempfile
 from contextlib import suppress
@@ -17,6 +17,8 @@ from hook_common import append_trace_row, loop_state_path
 from lib import argv_match
 from lib.ceiling_key import mirror, worktree_key
 from lib.dir_lock import acquire_dir_lock, release_dir_lock
+from lib.shell_context import invocations, payload_cwd
+from test_output import file_lock
 
 SUITES = ("run_all.py", "run_all.sh", "test_codex_hooks.py")
 CEREMONIES = ("validate-structure", "post")
@@ -45,17 +47,6 @@ def target_for(command: object) -> str | None:
         if argv_match.is_script(argv, "post_evals.py", CEREMONIES):
             return "eval-ceremony"
     return None
-
-
-def payload_cwd(payload: dict[str, object]) -> str:
-    """Return workdir, then cwd, then the process directory."""
-    tool_input = payload.get("tool_input")
-    typed_tool_input = cast(dict[str, object], tool_input) if isinstance(tool_input, dict) else {}
-    workdir = typed_tool_input.get("workdir")
-    if isinstance(workdir, str) and workdir:
-        return workdir
-    cwd = payload.get("cwd")
-    return cwd if isinstance(cwd, str) and cwd else os.getcwd()
 
 
 def deny(reason: str) -> None:
@@ -87,21 +78,23 @@ def mirror_count(cwd: str, session: str, top: str, target: str, total: int) -> N
     path = loop_state_path(cwd, session) if session else None
     if path is None or not path.is_file():
         return
-    lock = Path(f"{path}.lock")
-    if not acquire_dir_lock(lock, 5, 0.1)[0]:
-        return
     temporary = ""
     try:
-        raw: object = json.loads(path.read_text(encoding="utf-8"))
-        state = cast(dict[str, Any], raw) if isinstance(raw, dict) else {}
-        if mirror(copy.deepcopy(state), top, PROGRESS_FIELD[target], total):
-            mirror(state, top, PROGRESS_FIELD[target], total)
+        with file_lock(Path(f"{path}.lock"), exclusive=True, blocking=False) as acquired:
+            if not acquired:
+                return
+            mode = stat.S_IMODE(path.stat().st_mode)
+            raw: object = json.loads(path.read_text(encoding="utf-8"))
+            state = cast(dict[str, Any], raw) if isinstance(raw, dict) else {}
+            if not mirror(state, top, PROGRESS_FIELD[target], total, session, os.environ.get("CLAUDE_LOOP_ID", "")):
+                return
             with tempfile.NamedTemporaryFile(
                 "w", dir=path.parent, prefix=f"{path.name}.tmp.", delete=False, encoding="utf-8"
             ) as stream:
                 temporary = stream.name
                 json.dump(state, stream, indent=2)
                 stream.write("\n")
+            os.chmod(temporary, mode)
             os.replace(temporary, path)
     except (OSError, ValueError):
         pass
@@ -109,7 +102,6 @@ def mirror_count(cwd: str, session: str, top: str, target: str, total: int) -> N
         if temporary:
             with suppress(OSError):
                 Path(temporary).unlink()
-        release_dir_lock(lock)
 
 
 def main() -> int:
@@ -122,7 +114,11 @@ def main() -> int:
     if target is None or isinstance(payload.get("agent_id"), str) and payload["agent_id"]:
         return 0
 
-    cwd = payload_cwd(payload)
+    cwd = next(
+        where
+        for _, argv, where in invocations(str(command), payload_cwd(payload))
+        if argv_match.is_script(argv, SUITES) or argv_match.is_script(argv, "post_evals.py", CEREMONIES)
+    )
     digest, top = worktree_key(cwd)
     data_root = Path(os.environ.get("PLUGIN_DATA", str(Path.home() / ".coderails" / "codex")))
     state_dir = data_root / "verification-ceiling"

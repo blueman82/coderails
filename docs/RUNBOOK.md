@@ -278,11 +278,14 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `--no-verify`/`-n` commit; `enforce_pr_workflow` / the Codex action hook missed a `git -C d push origin main`; the
   verification-volume ceiling denied the 3rd `run_all.py`, `test_codex_hooks.py` or `post_evals.py post|validate-structure`
   after a branch rename, or did not deny in a second repo; an edit on main was denied with `protected_paths_unreadable`.
-- Mechanism: `hooks/scripts/lib/argv_match.py` (byte-identical Codex copy) splits the command on `; && || | & ( )`,
+- Mechanism: the byte-identical `lib/shell_context.py` copies produce exact source segments, unwrapped argv and local
+  invocation directories; `lib/argv_match.py` classifies their Git/script operations. The producer splits the command on `; && || | & ( )`,
   backticks and newlines outside quotes, drops shell comments, and unwraps assignments, leading redirections, shell
   keywords, per-wrapper options (`env/sudo/command/exec/time/nohup/nice/timeout/stdbuf/setsid/xargs/uv run`), absolute
-  paths and `bash [-o x] -c '...'`. It
-  recognises git by subcommand (global options `-C dir`, `-c k=v`, `--git-dir`, `--no-pager`, `-p` skipped; `-nm` decoded) and
+  paths and `bash [-o x] -c '...'`. Literal `cd`, `env --chdir` and shell-c directories are local to their
+  shell scope; successive relative Git `-C` options compose. Repository-dependent test/workflow/receipt reads replay
+  the original Git prefix (including separate/attached `--git-dir` and `--work-tree`) from the pre-Git directory.
+  Help and dry-run flags exempt only their own operation. It recognises Git by subcommand (`-nm` decoded) and
   scripts by basename plus the first positional operation after supported leading `--progress` options. A path named
   `post` in `validate-embed` does not count as a ceremony. Quoted text is one token, so `echo "git commit"` matches
   nothing. If shlex cannot parse (unbalanced quote), whitespace splitting may over-match plain words, but a split `-c`
@@ -291,22 +294,29 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `<loop dir>/verification-ceiling/` (Codex `$PLUGIN_DATA/verification-ceiling/`). A renamed branch keeps its count; a
   linked worktree or a second clone starts at zero. To reset, delete the one count file (the digest is printed in no
   message; compute it, or list the directory by mtime). The count is mirrored into `progress.json`
-  `work_units[u].verification{run_all,post_evals}` when a unit's `worktree` equals the toplevel (no unit carries
-  `worktree` until `add-unit --worktree` exists, so today only the file counter applies).
+  `work_units[u].verification{run_all,post_evals}` only when the actual payload session and existing `CLAUDE_LOOP_ID`
+  exactly own a schema-3 in-progress loop, exactly one physical worktree unit matches, and that unit has a running
+  `U3[<id>]` node registered in `active_wave.nodes`. Unknown, foreign or ambiguous input is left unchanged. Codex
+  reuses the native progress file's persistent regular flock, nonblocking, and preserves its mode on atomic save;
+  Claude retains its existing directory lock. A busy/erroring optional mirror cannot exempt the file counter.
+  The native add-unit producer still supplies status/manifest without worktree registration; this integration is
+  a separate producer dependency, so fixture mirroring alone does not prove native unit accounting.
 - `protected_paths_unreadable`: `policy/protected_paths.json` (both plugin copies) is missing, torn or ill-shaped, so
   `no_edit_on_main` and the in-Bash source-write check refuse every non-owner edit on main/master until it is repaired.
   Owner permission files stay denied on every branch. Keys: `source_extensions`, `plugin_source_globs`, `doc_extensions`,
   `doc_names`, `settings_files`. Adding `.rs` to `source_extensions` protects `sed -i x.rs` on main with no code change;
   `no_edit_on_main` treats every suffix not in `doc_extensions`/`doc_names` as protected already. The hardcoded
-  `policy/protected_paths.json` suffix also denies Edit/apply_patch on main for both copies; in-Bash writes to that JSON
-  remain outside the source-write regex.
+  `policy/protected_paths.json` path also denies Edit/apply_patch and supported in-Bash writes on main for both copies,
+  including normalized `./` and `..` aliases. Owner settings paths are normalized before matching on every branch.
 - Query: `trace.by_reason` for `argv/denied/ceiling_exceeded` and `argv/denied/protected_paths_unreadable`
   (`python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`).
   See `docs/workflow-gates-measurement.md`.
 - Limits: still no shell parser. `eval`, aliases, shell functions, ANSI-C quoted or run-time-built command names,
   backticks inside double quotes and scripts that themselves run `git commit` or `run_all.py` are not seen. Wrapper
-  options are only partly modelled. Abbreviated `--no-verify` flags are recognised. Relative targets use the last `-C`
-  string without composing multiple directories or resolving `--work-tree`. A new worktree/clone starts a fresh
+  options are only partly modelled; variable expansion and command-local `GIT_DIR`/`GIT_WORK_TREE` assignments are not
+  evaluated. Merge-script matching retains its existing anchored source policy, including its interpreter-option
+  boundary; Git/GH operations use the shared context. Abbreviated `--no-verify` flags are recognised.
+  A new worktree/clone starts a fresh
   counter; subagent calls bypass the ceiling and the same user can edit its count files. A cooperating-agent
   safeguard, not a barrier.
 
