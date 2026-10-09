@@ -197,20 +197,22 @@ def post(number: str, path: str, progress: str) -> int:
         raise ValueError("could not resolve the PR head SHA")
     validate_structure(path, number, head, progress=progress)
     validate_discriminating(path)
-    result = compute_and_validate_result(path)
     data = read_object(path)
     changes = eval_level.pr_changes(number, head) or []
     facts, minimum = eval_level.derive(changes, eval_level.progress_units(progress), data, eval_level.load_policy())
     late = eval_level.suite_late(data, eval_level.branch_base(head))
     suite = suite_hash(data)
     gate = {**facts, "derived_min_level": minimum, "late_freeze": late, "suite_hash": suite}
-    top = [marker(number, head, result, str(data["verification_level"])), facts_line(minimum, late, suite[:16])]
+    top = [marker(number, head, "NO-GO", str(data["verification_level"])), facts_line(minimum, late, suite[:16])]
     embed = json.dumps({**data, "gate_facts": gate}, indent=2, ensure_ascii=False)
     body = "\n".join([*top, summary_of(data), "", "```json", embed, "```", ""])
     with tempfile.TemporaryDirectory(prefix="coderails-evals-") as directory:
         body_path = Path(directory) / "body.md"
         body_path.write_text(body)
         validate_embed(path, body_path)
+        result = compute_and_validate_result(path)
+        top[0] = marker(number, head, result, str(data["verification_level"]))
+        body_path.write_text(top[0] + "\n" + body.partition("\n")[2])
         repo = git.repo()
         existing = comment_for(repo, number, git.output("gh", "api", "user", "-q", ".login", check=True), top)
         if git.pr_field(number, "headRefOid") != head:

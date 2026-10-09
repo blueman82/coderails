@@ -20,7 +20,7 @@ tallied by `measure_graph_alignment.py` into `trace.by_reason` keyed
 | `diff-manifest/warned/diff_manifest_mode_invalid` | an unknown `diff_manifest` value was treated as enforce |
 | `review-passes/ok/review_passes_ok` | the artifact's passes covered every pass the diff requires |
 | `review-passes/refused/<code>` | `<code>` is `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`, `review_artifact_missing` or `review_policy_unreadable` |
-| `eval-level/ok/eval_level_ok` | the posted eval's level covered the diff-derived minimum, the late-freeze stamp matched and the suite verified |
+| `eval-level/ok/eval_level_ok` | the posted eval's level covered the live diff and declared/posted work-unit floor, the late-freeze stamp matched, and the suite verified with a full frozen SHA at level 1 or 2 |
 | `eval-level/refused/<code>` | `<code>` is `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`, `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, `integrity_stripped`, `not_frozen`, `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed` or `eval_level_diff_unavailable` |
 | `publication/refused/<code>` | the single gate refused; `<code>` is `diff_manifest:<code>`, a review code or an eval-level code |
 

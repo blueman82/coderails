@@ -68,16 +68,17 @@ def derive_min_level(facts: JsonObject, policy: dict[str, Any]) -> int:
 
 
 def derive(changes: Changes, progress_units: int, data: JsonObject, policy: dict[str, Any]) -> tuple[JsonObject, int]:
-    """(facts, level): computed facts raised, never lowered, by the suite's declared `facts`."""
+    """(facts, level): computed facts raised, never lowered, by declared or posted facts."""
     facts = facts_from_changes(changes, progress_units, policy)
-    declared = data.get("facts")
-    if isinstance(declared, dict):
-        units = cast(JsonObject, declared).get("work_units")
-        if isinstance(units, int) and not isinstance(units, bool):
-            facts["work_units"] = max(cast(int, facts["work_units"]), units)
-        extra = cast(JsonObject, declared).get("surfaces")
-        named = {str(s) for s in cast(list[object], extra)} if isinstance(extra, list) else set[str]()
-        facts["surfaces"] = [s for s in SURFACES if s in named | set(cast(list[str], facts["surfaces"]))]
+    for key in ("facts", "gate_facts"):
+        declared = data.get(key)
+        if isinstance(declared, dict):
+            units = cast(JsonObject, declared).get("work_units")
+            if isinstance(units, int) and not isinstance(units, bool):
+                facts["work_units"] = max(cast(int, facts["work_units"]), units)
+            extra = cast(JsonObject, declared).get("surfaces")
+            named = {str(s) for s in cast(list[object], extra)} if isinstance(extra, list) else set[str]()
+            facts["surfaces"] = [s for s in SURFACES if s in named | set(cast(list[str], facts["surfaces"]))]
     return facts, derive_min_level(facts, policy)
 
 
@@ -136,3 +137,5 @@ def check_suite(data: JsonObject, level: str, stamped: bool = False) -> None:
     if level != "0" and not data.get("frozen_hash"):
         code = INTEGRITY_STRIPPED if data.get("signature") else NOT_FROZEN
         raise IntegrityError(code, "a level >= 1 suite must carry the frozen_hash smoke-run stamps")
+    if level != "0" and not re.fullmatch(r"[0-9a-f]{40}", str(data.get("frozen_sha") or "")):
+        raise IntegrityError(NOT_FROZEN, "a level >= 1 suite must carry a full 40-hex frozen_sha")

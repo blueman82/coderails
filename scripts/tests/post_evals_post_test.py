@@ -11,13 +11,14 @@ import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import FrameType
 from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from hooks.scripts.tests.lib.post_evals_fixture import ArtifactCase, entry  # noqa: E402
 from scripts import post_evals  # noqa: E402
-from scripts.lib import eval_artifact  # noqa: E402
+from scripts.lib import eval_artifact, eval_validation  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
 from scripts.lib.eval_execution import record_smoke  # noqa: E402
 from scripts.lib.eval_integrity import suite_hash  # noqa: E402
@@ -268,6 +269,38 @@ class LateFreezeTests(PostCase):
 
 class BodyTests(PostCase):
     """Body shape, dedupe and stale-head handling."""
+
+    def test_embed_validation_precedes_neutral_result(self) -> None:
+        """Observe genuine validators and preserve the validated Unicode body below the final marker."""
+        head = self.commit("hooks/scripts/a.py")
+        self.suite(head, 1, verification_justification="evidence α\u2028β")
+        fake = FakeGh([head])
+        functions = {
+            eval_validation.validate_embed.__code__: "validate_embed",
+            post_evals.compute_and_validate_result.__code__: "compute_and_validate_result",
+        }
+        calls: list[str] = []
+        drafts: list[str] = []
+
+        def observe(frame: FrameType, event: str, _argument: object) -> None:
+            """Record calls without changing validators, computation or their outcomes."""
+            if event == "call" and frame.f_code in functions:
+                calls.append(functions[frame.f_code])
+                if frame.f_code == eval_validation.validate_embed.__code__:
+                    drafts.append(Path(frame.f_locals["body_path"]).read_text())
+
+        previous = sys.getprofile()
+        try:
+            sys.setprofile(observe)
+            code, _, error = self.post(fake)
+        finally:
+            sys.setprofile(previous)
+        self.assertEqual((code, len(fake.posted)), (0, 1), error)
+        self.assertEqual(calls, ["validate_embed", "compute_and_validate_result"])
+        self.assertEqual(drafts[0].partition("\n")[0], eval_artifact.marker("7", head, "NO-GO", "1"))
+        self.assertEqual(fake.posted[0].partition("\n")[0], eval_artifact.marker("7", head, "GO", "1"))
+        self.assertEqual(drafts[0].partition("\n")[2], fake.posted[0].partition("\n")[2])
+        self.assertIn("α\u2028β", fake.posted[0])
 
     def test_body_shape(self) -> None:
         """Line 1 is the unchanged v1 marker, line 2 the facts line, then the summary and one fenced embed."""

@@ -106,6 +106,34 @@ class MarkerLevelTests(RepoCase):
                 self.assertEqual(codes, expected)
 
 
+class MergeFreezeAndFactsTests(RepoCase):
+    """Merge consumers retain the freeze and work-unit requirements enforced at posting."""
+
+    def test_merge_requires_full_frozen_sha(self) -> None:
+        """A late stamp does not make a missing, abbreviated or symbolic freeze commit valid."""
+        head = self.commit("hooks/scripts/a.py")
+        for frozen in ("", "HEAD", self.base[:12]):
+            summary, _ = self.posted(1, head, late=True, frozen_sha=frozen)
+            with (
+                self.subTest(frozen=frozen),
+                mock.patch.object(git, "gate_eval_summary_for_pr", return_value=summary),
+            ):
+                codes = [v["code"] for v in publication_gate.eval_level_check("7", head, "", "")]
+                self.assertIn("not_frozen", codes)
+
+    def test_posted_work_units_remain_a_lower_bound(self) -> None:
+        """Omitting progress at merge cannot erase a higher count carried in posted gate facts."""
+        head = self.commit("hooks/scripts/a.py")
+        for units in (1, 3):
+            summary, _ = self.posted(1, head, gate_facts={"work_units": units, "surfaces": []})
+            with (
+                self.subTest(units=units),
+                mock.patch.object(git, "gate_eval_summary_for_pr", return_value=summary),
+            ):
+                codes = [v["code"] for v in publication_gate.eval_level_check("7", head, "", "")]
+                self.assertEqual(codes, [] if units == 1 else ["level_below_derived"])
+
+
 class OffSwitchTests(RepoCase):
     """Config eval_level: off skips the check; absent or any other value enforces."""
 

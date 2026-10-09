@@ -236,8 +236,10 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Artifact: line 1 is the unchanged v1 marker, line 2 is `<!-- coderails-eval-facts v1 derived_min_level=N
   late_freeze=0|1 suite=<16 hex> -->`, then the summary and the fenced embed whose `gate_facts` block is stamped by
   `post_evals.py post <PR> <evals.json> [--progress PROGRESS]`. The merge side ignores the stamped level and recomputes it
-  from the live diff, the embed's declared `facts` (a lower bound) and the optional `--unit N --progress PATH` flags of
-  `merge.py`.
+  from the live diff, the embed's declared `facts` and posted `gate_facts` (lower bounds), and the optional
+  `--unit N --progress PATH` flags of `merge.py`. Omitting progress on a direct hook call cannot erase a posted count.
+  The facts-line displayed minimum is informational at merge; the enforced floor is recomputed. The late-freeze
+  flag and suite hash are checked against the embedded suite, and the marker and embedded levels must agree.
 - Query: `trace.by_reason` for `eval-level/ok/eval_level_ok` and `eval-level/refused/<code>`, plus
   `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
 - Remediation: `level_below_derived` means the suite was frozen at a lower level than the diff needs; write a suite at the
@@ -246,6 +248,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   <reason> <actor>`, then re-post. `late_freeze_unstamped`/`eval_facts_missing`: re-post with the current
   `post_evals.py post` (an artifact posted by the old recipe has no facts line and is refused for outward diffs).
   `eval_artifact_unreadable` is a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
+  `not_frozen` also rejects a missing, abbreviated or symbolic `frozen_sha` at level 1 or 2 on every merge route;
+  stamping it late does not satisfy the full 40-hex commit requirement.
 - Limits: a cooperating-agent safeguard. The work-unit count of a diff cannot be derived from the diff, so the floor
   without `--progress` (and without a declared lower bound) assumes one unit; the PR author can omit the progress file.
   `verify_suite` is tamper-evident, not tamper-proof: the suite hash and amendment chain are unkeyed and a signature is

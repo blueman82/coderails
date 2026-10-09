@@ -134,6 +134,7 @@ class Repo(unittest.TestCase):
         (self.dir / "README.md").write_text("doc\n")
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "base")
+        self.base = git_cmd(self.dir, "rev-parse", "HEAD").strip()
         git_cmd(self.dir, "update-ref", "refs/remotes/origin/main", "HEAD")
         git_cmd(self.dir, "checkout", "-qb", "feature/x")
         git_cmd(self.dir, "remote", "add", "origin", "https://github.com/o/r.git")
@@ -144,7 +145,7 @@ class Repo(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "change")
         self.sha = git_cmd(self.dir, "rev-parse", "HEAD").strip()
-        self.eval_file = write_comment(self.tmp, self.sha, self.eval_level)
+        self.eval_file = write_comment(self.tmp, self.sha, self.eval_level, frozen_sha=self.base)
 
 
 class HookTests(Repo):
@@ -153,7 +154,11 @@ class HookTests(Repo):
     def reason(self, policy: str = "", **env: str) -> str:
         """Permission-decision reason for `gh pr merge 7`, or empty when allowed."""
         environment = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
-        environment |= {"FAKE_SHA": self.sha, "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops")}
+        environment |= {
+            "FAKE_SHA": self.sha,
+            "CLAUDE_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
+            "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
+        }
         environment |= {"FAKE_EVAL_FILE": str(self.eval_file), **env}
         command = {"command": "gh pr merge 7"}
         payload = {"session_id": "s", "cwd": str(self.dir), "tool_name": "Bash", "tool_input": command}

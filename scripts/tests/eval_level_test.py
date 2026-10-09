@@ -171,7 +171,9 @@ class SuiteIntegrityTests(unittest.TestCase):
 
     def frozen(self, level: int = 1) -> dict[str, object]:
         """A suite stamped like smoke-run does."""
-        data: dict[str, object] = {"verification_level": level, "task_ref": "1", "evals": [entry()]}
+        data: dict[str, object] = {
+            "verification_level": level, "task_ref": "1", "evals": [entry()], "frozen_sha": "a" * 40,
+        }  # fmt: skip
         data["frozen_hash"] = suite_hash(data)
         return data
 
