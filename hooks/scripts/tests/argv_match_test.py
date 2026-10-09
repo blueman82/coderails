@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from hooks.scripts.lib import argv_match, destructive_patterns
+from hooks.scripts.lib import argv_match, destructive_patterns, shell_context
 
 # The regexes the gates used before the classifier, kept as literals to document the defect.
 OLD_CLAUDE_COMMIT = re.compile(r"\bgit +commit\b")
@@ -134,6 +134,24 @@ ABBREVIATED_NO_VERIFY = ["--no-verif", "--no-ver", "--no-v"]
 
 class HardeningTests(unittest.TestCase):
     """Reviewer findings: wrapper options, shell keywords, redirections, comments and -c option values."""
+
+    def test_directories_are_invocation_local(self) -> None:
+        """Git -C composes while wrapper, nested shell and subshell directories stay local."""
+        commands = {
+            "git -C a -C ../b status; git status": ["/base/b", "/base"],
+            "env --chdir a git status; git status": ["/base/a", "/base"],
+            "bash -c 'cd a && git status'; git status": ["/base/a", "/base"],
+            "(cd a && git status); git status": ["/base/a", "/base"],
+            "cd 'a space' && git status": ["/base/a space"],
+        }
+        for command, expected in commands.items():
+            with self.subTest(command=command):
+                self.assertEqual([cwd for _, cwd, _ in argv_match.git_calls(command, "/base")], expected)
+        source = "env A=1 git -C 'a space' status"
+        self.assertEqual(shell_context.invocations(source, "/base")[-1][0], source)
+        for command in ("git -C", "env --chdir", "sudo -u", "bash -o pipefail -c"):
+            with self.subTest(command=command):
+                self.assertEqual(argv_match.git_calls(command, "/base"), [])
 
     def test_wrapped_and_grouped_commits_are_seen(self) -> None:
         """Each form resolves to a commit; the retired regex missed most of them."""

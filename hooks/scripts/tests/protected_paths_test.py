@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -92,7 +93,7 @@ class PolicyDrivenHookTests(unittest.TestCase):
             capture_output=True,
             text=True,
             check=False,
-            env={"PATH": "/usr/bin:/bin", "HOME": str(self.directory), "CLAUDE_DISCIPLINE_LOG": f"{self.directory}/l"},
+            env=os.environ | {"CLAUDE_DISCIPLINE_LOG": f"{self.directory}/l"},
         )
         self.assertEqual(done.returncode, 0, done.stderr)
         output: dict[str, Any] = json.loads(done.stdout)["hookSpecificOutput"] if done.stdout.strip() else {}
@@ -109,8 +110,30 @@ class PolicyDrivenHookTests(unittest.TestCase):
     def test_adding_an_extension_to_the_json_protects_it_without_code_change(self) -> None:
         """Negative control: .rs is absent so sed -i is allowed; adding it denies the same command."""
         self.assertEqual(self.sed("x.rs"), "")
+        self.assertIn("source file", self.edit("x.rs"))
         self.edit_policy("source_extensions", [*json.loads(self.policy.read_text())["source_extensions"], ".rs"])
         self.assertIn("source edit on main", self.sed("x.rs"))
+        self.assertIn("source file", self.edit("x.rs"))
+
+    def test_bash_policy_spellings_remain_protected(self) -> None:
+        """The protected policy cannot disable its own main-branch source-write protection."""
+        self.assertEqual(self.sed("config/other.json"), "")
+        for target in (
+            "policy/protected_paths.json",
+            "policy/./protected_paths.json",
+            "policy//protected_paths.json",
+            "policy/nested/../protected_paths.json",
+            "packages/codex/policy/./protected_paths.json",
+        ):
+            with self.subTest(target=target):
+                self.assertIn("source", self.sed(target))
+
+    def test_normalized_owner_settings_are_denied_on_every_branch(self) -> None:
+        """Permission file spellings remain protected independently of the current branch."""
+        subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/feature"], check=True)
+        for target in (".claude/./settings.json", ".claude//settings.local.json", ".claude/nested/../settings.json"):
+            with self.subTest(target=target):
+                self.assertIn("permission file", self.edit(target))
 
     def test_the_policy_file_cannot_be_edited_on_main(self) -> None:
         """Negative control: another .json is a document; the policy file itself is treated as source."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -14,11 +15,11 @@ from typing import Any
 HOOK = Path(__file__).resolve().parent.parent / "test_gate.py"
 
 DENIED = [
-    "git -C /r commit -m x",
+    "git -C . commit -m x",
     "git -c user.name=x commit -m x",
     "/usr/bin/git commit -m x",
-    "env A=1 git -C d commit",
-    "bash -c 'git -C d commit -m x'",
+    "env A=1 git -C . commit",
+    "bash -c 'git -C . commit -m x'",
     "git commit -nm x",
     'git commit -m "unbalanced',
 ]
@@ -58,6 +59,50 @@ class TestGateArgvTests(unittest.TestCase):
                 self.assertTrue(self.decision(command))
         for command in ALLOWED:
             with self.subTest(command=command):
+                self.assertFalse(self.decision(command))
+
+    def test_effective_project_controls_the_test_command(self) -> None:
+        """Commit tests belong to the directory selected by Git or the supported shell prefix."""
+        target = self.project / "target space"
+        (target / ".claude").mkdir(parents=True)
+        (target / ".claude/test_command").write_text("false\n", encoding="utf-8")
+        (self.project / ".claude/test_command").write_text("true\n", encoding="utf-8")
+        quoted = shlex.quote(str(target))
+        for command in (
+            f"git -C {quoted} commit -m x",
+            f"cd {quoted} && git commit -m x",
+            f"env --chdir {quoted} git commit -m x",
+            f"bash -c {shlex.quote(f'cd {quoted} && git commit -m x')}",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.decision(command))
+
+    def test_unconfigured_target_does_not_run_the_origin_tests(self) -> None:
+        """The opt-in contract applies to the committing project rather than an unrelated process cwd."""
+        target = self.project / "unconfigured"
+        target.mkdir()
+        self.assertFalse(self.decision(f"git -C {shlex.quote(str(target))} commit -m x"))
+
+    def test_explicit_git_selection_controls_config(self) -> None:
+        """The original global prefix selects metadata and worktree even when process cwd differs."""
+        target = self.project / "selected space"
+        subprocess.run(["git", "init", "-q", str(target)], check=True)
+        (target / ".claude").mkdir()
+        config = target / ".claude/test_command"
+        config.write_text("false\n", encoding="utf-8")
+        (self.project / ".claude/test_command").write_text("true\n", encoding="utf-8")
+        commands = (
+            f"git --git-dir {shlex.quote(str(target / '.git'))} --work-tree {shlex.quote(str(target))} commit",
+            f"git --git-dir={shlex.quote(str(target / '.git'))} --work-tree={shlex.quote(str(target))} commit",
+            "git -C 'selected space' -C . commit",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(self.decision(command))
+        config.write_text("true\n", encoding="utf-8")
+        (self.project / ".claude/test_command").write_text("false\n", encoding="utf-8")
+        for command in commands:
+            with self.subTest(command=command, control="unrelated failure"):
                 self.assertFalse(self.decision(command))
 
 

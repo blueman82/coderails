@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -99,6 +100,7 @@ class WorkflowGateTests(HookTestCase):
         for raw, branch in repositories.items():
             name = raw.replace("{sandbox}/", "")
             repo = self.git_repo(name, branch)
+            (repo / "sub").mkdir()
             # fixed dates make every fixture repo's init commit the same sha, so the PR head exists in each one;
             # origin/main at that commit gives the publication gate a computable (empty) diff and no network fetch
             date = "2026-01-01T00:00:00Z"
@@ -192,6 +194,50 @@ class WorkflowGateTests(HookTestCase):
         for command in quiet:
             with self.subTest(command=command):
                 self.assertEqual(pr_workflow_match.guarded_segments(command, str(feature)), [])
+
+    def test_actual_gate_uses_the_effective_repository_and_operation(self) -> None:
+        """A separate project's config and quoted prose cannot decide the guarded operation."""
+        origin = self.git_repo("origin", "feature/x")
+        target = self.git_repo("target space", "main")
+        (target / ".coderails").mkdir()
+        (target / ".coderails/workflow.config.yaml").write_text("action_authority: off\n")
+        transcript = self.directory / "empty.jsonl"
+        transcript.write_text("{}\n")
+        quoted = shlex.quote(str(target))
+        for command in (
+            f"git -C {quoted} push",
+            f"cd {quoted} && git push",
+            f"env --chdir {quoted} git push",
+            f"git --git-dir {shlex.quote(str(target / '.git'))} --work-tree {quoted} push",
+            f"git --git-dir={shlex.quote(str(target / '.git'))} --work-tree={quoted} push",
+        ):
+            payload = {"cwd": str(origin), "transcript_path": str(transcript), "tool_input": {"command": command}}
+            result = subprocess.run(
+                [sys.executable, str(HOOKS / "enforce_pr_workflow.py")],
+                input=json.dumps(payload),
+                capture_output=True,
+                text=True,
+                env=self.environment,
+                check=False,
+            )
+            with self.subTest(command=command):
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('"deny"', result.stdout)
+        for command, denied in (
+            ("echo --help; git push origin main", True),
+            ('echo "message ; gh pr merge 12"', False),
+        ):
+            payload = {"cwd": str(target), "transcript_path": str(transcript), "tool_input": {"command": command}}
+            result = subprocess.run(
+                [sys.executable, str(HOOKS / "enforce_pr_workflow.py")],
+                input=json.dumps(payload),
+                capture_output=True,
+                text=True,
+                env=self.environment,
+                check=False,
+            )
+            with self.subTest(command=command):
+                self.assertEqual('"deny"' in result.stdout, denied, result.stderr)
 
 
 class AuthorityEarlyDenialTests(HookTestCase):

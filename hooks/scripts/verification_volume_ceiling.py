@@ -16,6 +16,7 @@ from hooks.scripts.lib.agentic_loop_path import resolve_path
 from hooks.scripts.lib.ceiling_key import mirror, worktree_key
 from hooks.scripts.lib.dir_lock import acquire_dir_lock, release_dir_lock
 from hooks.scripts.lib.loop_state_common import atomic_progress_update, read_state
+from hooks.scripts.lib.shell_context import invocations, payload_cwd
 from hooks.scripts.lib.trace_row import append_row
 
 SUITES = ("run_all.py", "run_all.sh", "test_codex_hooks.py")
@@ -37,11 +38,13 @@ def mirror_count(cwd: str, session: object, top: str, target: str, total: int) -
     if not isinstance(session, str) or not session:
         return
     path = resolve_path(cwd, session)
-    if not mirror(copy.deepcopy(read_state(path)), top, target, total):
+    loop = os.environ.get("CLAUDE_LOOP_ID", "")
+    if not mirror(copy.deepcopy(read_state(path)), top, target, total, session, loop):
         return
 
     def update(data: dict[str, Any]) -> dict[str, Any]:
-        mirror(data, top, target, total)
+        if not mirror(data, top, target, total, session, loop):
+            raise ValueError("optional mirror ownership changed before the locked read")
         return data
 
     atomic_progress_update(path, update)
@@ -53,10 +56,13 @@ def main() -> int:
     data = payload.get("tool_input")
     command = data.get("command", "") if isinstance(data, dict) else ""
     target = target_for(command) if isinstance(command, str) else ""
-    if not target or isinstance(payload.get("agent_id"), str) and payload["agent_id"]:
+    if not isinstance(command, str) or not target or isinstance(payload.get("agent_id"), str) and payload["agent_id"]:
         return 0
-    cwd_value = payload.get("cwd")
-    cwd = cwd_value if isinstance(cwd_value, str) else os.getcwd()
+    cwd = next(
+        where
+        for _, argv, where in invocations(command, payload_cwd(payload))
+        if argv_match.is_script(argv, SUITES) or argv_match.is_script(argv, "post_evals.py", CEREMONIES)
+    )
     digest, top = worktree_key(cwd)
     state = (
         Path(os.environ.get("CLAUDE_AGENTIC_LOOP_DIR", str(Path.home() / ".coderails/agentic-loop")))
