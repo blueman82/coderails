@@ -1,10 +1,4 @@
-"""The one publication gate every path to a merge calls: merge.py, headless runs and the direct-merge hooks.
-
-`CHECKS` is an ordered list of check functions `check(number, sha, unit, progress) -> [{code, detail}]`. U1 registers
-the diff manifest and U2 the review passes; later units append their own (eval level), no new call site. `evaluate`
-returns every violation, `enforce` raises WorkflowError whose text starts with the first reason code. Each refusal
-writes a `publication/refused/<code>` trace row; rows never decide anything.
-"""
+"""One ordered publication gate for merge commands, headless runs and direct hooks; traces never decide."""
 
 from __future__ import annotations
 
@@ -27,12 +21,7 @@ def manifest_check(number: str, sha: str, unit: str, progress: str) -> list[Viol
 
 
 def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list[Violation]:
-    """Required reviewers for the diff (policy/review_policy.json) against the passes in the SHA-bound artifact.
-
-    `review-pr` is satisfied by the v1 marker itself; a v1 artifact with no passes line has passes=[]. A pass counts
-    only with verdict `pass`; the artifact's `blocking` flag never waives a required pass. Fails closed. Config
-    `review_passes: off` skips the check; absent or any other value enforces.
-    """
+    """Require live-diff reviews from the newest exact-head artifact; only explicit off skips."""
     values, _ = load_config(config_path() or "")
     if str(values.get("review_passes") or "enforce") == "off":
         manifest_policy.trace(f"{git.repo()}@pr-{number}", "skipped", "review_passes_off", command="review-passes")
@@ -67,12 +56,9 @@ def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list
 
 
 def eval_level_check(number: str, sha: str, unit: str, progress: str) -> list[Violation]:
-    """Recompute the minimum verification level, late freeze and suite integrity from the live PR and the posted eval.
+    """Require a current-head GO suite with matching level, computed lateness and hash.
 
-    The marker level must be >= the level derived from the PR diff (policy/surface_policy.json, raised by progress.json
-    units and the embed's declared facts); the facts line must carry the recomputed late_freeze and the embed's own
-    suite hash; verify_suite(stamped) must pass and a level >= 1 suite must be frozen. A v1 artifact with no facts line
-    is refused when the diff needs level >= 1. Fails closed; `eval_level: off` skips, every other value enforces.
+    The live diff/unit lower bounds set the floor; level >= 1 must be frozen. Only eval_level: off skips.
     """
     values, _ = load_config(config_path() or "")
     if str(values.get("eval_level") or "enforce") == "off":
@@ -95,6 +81,10 @@ def eval_level_check(number: str, sha: str, unit: str, progress: str) -> list[Vi
     _, minimum = eval_level.derive(changes, eval_level.progress_units(progress), data, eval_level.load_policy())
     late = eval_level.suite_late(data, eval_level.branch_base(sha))
     codes: list[str] = []
+    if data.get("head_sha") != sha:
+        codes.append("eval_head_mismatch")
+    if not eval_artifact.compute_go(data):
+        codes.append("eval_result_mismatch")
     if int(found.verification_level) < minimum:
         codes.append("level_below_derived")
     stamped = eval_artifact.parse_facts(found.facts)

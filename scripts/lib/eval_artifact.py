@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.lib.artifact_io import array_value, object_value, read_object
+from scripts.lib.artifact_io import JsonObject, array_value, object_value, read_object
 
 EVAL_ARTIFACT_MARKER_VERSION = "v1"
 _PATTERN = re.compile(
@@ -62,10 +62,11 @@ def parse_verification_level(line: str) -> str:
     return match[2] if match else ""
 
 
-def compute_go(path: str | Path) -> bool:
-    """Require every P0 eval to pass, failing closed on malformed JSON."""
+def compute_go(path: str | Path | JsonObject) -> bool:
+    """Require every P0 eval from a path or parsed object to pass; malformed input fails closed."""
     try:
-        evals = [object_value(item) for item in array_value(read_object(path).get("evals"))]
+        data = path if isinstance(path, dict) else read_object(path)
+        evals = [object_value(item) for item in array_value(data.get("evals"))]
         return all(item.get("priority") != "P0" or item.get("status") == "pass" for item in evals)
     except (OSError, ValueError, TypeError):
         return False

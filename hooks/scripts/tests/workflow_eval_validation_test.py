@@ -58,6 +58,9 @@ class EvalValidationTests(unittest.TestCase):
         level_gate = patch("scripts.lib.eval_validation.validate_level")
         level_gate.start()
         self.addCleanup(level_gate.stop)
+        previous = Path.cwd()
+        os.chdir(self.keys.name)
+        self.addCleanup(os.chdir, previous)
 
     def test_justification_control_evidence_sha_and_p0(self) -> None:
         """Reject each structural refusal using one independently mutated valid artifact."""

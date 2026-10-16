@@ -91,36 +91,38 @@ class StructureTests(ArtifactCase):
     def test_freeze_ancestry_and_explicit_disclosure(self) -> None:
         """Use real Git history to distinguish the branch base from a late freeze."""
         base = self.repository()
+        self.git("update-ref", "refs/remotes/origin/main", base)
         self.git("checkout", "-b", "feature")
         self.git("commit", "--allow-empty", "-m", "implementation")
         later = self.git("rev-parse", "HEAD")
+        self.data["head_sha"] = later
         self.data["frozen_sha"] = base
         self.save()
-        validate_structure(self.path, "192", "head")
+        validate_structure(self.path, "192", later)
         self.data["frozen_sha"] = later
         self.save()
         with self.assertRaisesRegex(ValueError, "late freeze"):
-            validate_structure(self.path, "192", "head")
+            validate_structure(self.path, "192", later)
         validate_structure(self.path, scope="loop")
         self.data["verification_justification"] = "Explicit late freeze after implementation"
         self.save()
-        validate_structure(self.path, "192", "head")
+        validate_structure(self.path, "192", later)
         self.data["frozen_sha"] = "f" * 40
         self.save()
         with self.assertRaisesRegex(ValueError, "does not resolve"):
-            validate_structure(self.path, "192", "head")
+            validate_structure(self.path, "192", later)
         for unverifiable in (None, "", "origin/main", base[:12]):
             self.data.pop("frozen_sha")
             if unverifiable is not None:
                 self.data["frozen_sha"] = unverifiable
             self.save()
             with self.subTest(frozen_sha=unverifiable), self.assertRaisesRegex(ValueError, "40-hex frozen_sha"):
-                validate_structure(self.path, "192", "head")
+                validate_structure(self.path, "192", later)
             self.data["frozen_sha"] = base
         self.data.update(verification_level=0, evals=[])
         self.data.pop("frozen_sha")
         self.save()
-        validate_structure(self.path, "192", "head")
+        validate_structure(self.path, "192", later)
 
     def test_embed_contract(self) -> None:
         """Require one matching level-zero JSON block and a well-formed marker."""

@@ -124,7 +124,10 @@ class RepoCase(unittest.TestCase):
         self, level: int, head: str, derived: int | None = None, late: bool = False, **over: object
     ) -> tuple[EvalSummary, dict[str, object]]:
         """The newest trusted artifact as post would have written it (marker level, facts line, embed)."""
-        data: dict[str, object] = {"verification_level": level, "task_ref": "1", "evals": [entry()], **over}
+        data: dict[str, object] = {
+            "verification_level": level, "head_sha": head or self.git("rev-parse", "HEAD"),
+            "task_ref": "1", "evals": [entry()], **over,
+        }  # fmt: skip
         data.setdefault("frozen_sha", self.base)
         data["frozen_hash"] = suite_hash(data)
         digest = suite_hash(data)

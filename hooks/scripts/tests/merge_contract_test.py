@@ -21,7 +21,13 @@ from scripts.lib.eval_integrity import suite_hash
 
 def frozen_eval(level: int) -> git.EvalSummary:
     """A trusted eval artifact as post_evals.py post writes it: frozen suite, matching facts line, no late freeze."""
-    data: dict[str, object] = {"verification_level": level, "task_ref": "1", "evals": [], "frozen_sha": "a" * 40}
+    data: dict[str, object] = {
+        "verification_level": level,
+        "task_ref": "1",
+        "evals": [],
+        "frozen_sha": "a" * 40,
+        "head_sha": "deadbeef",
+    }
     data["frozen_hash"] = suite_hash(data)
     stamp = facts_line(level, False, suite_hash(data)[:16])
     return git.EvalSummary(0, str(level), json.dumps(data), facts=stamp)

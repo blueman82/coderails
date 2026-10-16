@@ -18,7 +18,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from hooks.scripts.tests.lib.post_evals_fixture import ArtifactCase, entry  # noqa: E402
 from scripts import post_evals  # noqa: E402
-from scripts.lib import eval_artifact, eval_validation  # noqa: E402
+from scripts.lib import eval_artifact, eval_level, eval_validation  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
 from scripts.lib.eval_execution import record_smoke  # noqa: E402
 from scripts.lib.eval_integrity import suite_hash  # noqa: E402
@@ -266,6 +266,42 @@ class LateFreezeTests(PostCase):
         self.post(fake)
         self.assertEqual(self.stamped_late(fake), False)
 
+    def test_explicit_pr_freeze_uses_pr_base_from_another_checkout(self) -> None:
+        """An advanced main checkout cannot excuse an undisclosed freeze after the explicit PR's base."""
+        self.assert_pr_freeze(True)
+
+    def test_initially_absent_pr_is_fetched_before_freeze_validation(self) -> None:
+        """The maintained PR fetch must establish the target's base before checking its freeze."""
+        self.assert_pr_freeze(False)
+
+    def assert_pr_freeze(self, present: bool) -> None:
+        """Exercise disclosed, early and undisclosed freezes against the explicit PR's actual base."""
+        head, advanced = self.pr_history(present)
+        self.assertEqual(self.git("rev-parse", "HEAD"), advanced)
+        self.assertEqual(eval_level.branch_base(head), self.base if present else "")
+        self.suite(head, 1)
+        self.data = self.reload()
+        for frozen, justification, late, expected in (
+            (advanced, "outward surface", None, 1),
+            (self.base, "outward surface", False, 0),
+            (advanced, "outward surface; late freeze", True, 0),
+        ):
+            with self.subTest(frozen=frozen, justification=justification):
+                self.data.update(frozen_sha=frozen, verification_justification=justification)
+                self.save()
+                fake = FakeGh([head])
+                code, _, error = self.post(fake)
+                self.git("cat-file", "-e", head)
+                if not present and expected:
+                    self.assertIn(("git", "fetch", "-q", "origin", "pull/7/head"), fake.calls)
+                self.assertEqual(code, expected, error)
+                if expected:
+                    self.assertEqual(fake.posted, [])
+                    self.assertIn("disclose the late freeze", error)
+                else:
+                    self.assertEqual(self.stamped_late(fake), late)
+                    self.assertEqual(fake.posted[0].splitlines()[0], eval_artifact.marker("7", head, "GO", "1"))
+
 
 class BodyTests(PostCase):
     """Body shape, dedupe and stale-head handling."""
@@ -336,7 +372,7 @@ class BodyTests(PostCase):
         self.assertEqual(embed["gate_facts"]["derived_min_level"], 2)
 
     def test_duplicate_is_skipped(self) -> None:
-        """An identical marker and facts line already posted by this login: no second comment."""
+        """An identical current body already posted by this login needs no second comment."""
         head = self.commit("docs/a.md")
         self.suite(head, 0)
         first = FakeGh([head])

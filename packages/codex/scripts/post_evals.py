@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import eval_level
 from scripts.lib import git_common as git
 from scripts.lib.artifact_io import JsonObject, array_value, object_value, read_object, write_object
-from scripts.lib.eval_artifact import compute_go, facts_line, grading_checksum, marker
+from scripts.lib.eval_artifact import compute_go, facts_line, grading_checksum, marker, matches_marker
 from scripts.lib.eval_execution import record_smoke, scripted_evals, verify_execution
 from scripts.lib.eval_integrity import (
     LEGACY_UNHASHED,
@@ -176,18 +176,21 @@ def summary_of(data: JsonObject) -> str:
     return "\n".join(lines)
 
 
-def comment_for(repo: str, number: str, login: str, top: list[str]) -> dict[str, str] | None:
-    """This login's existing comment whose first two lines equal `top` (marker and facts line), if any."""
+def comment_for(repo: str, number: str, login: str, head: str, body: str) -> dict[str, str] | None:
+    """Reuse only this login's latest recognized PR/head artifact when its entire body is identical."""
     listing = git.run(
         "gh", "api", f"repos/{repo}/issues/{number}/comments", "--paginate",
         "--jq", ".[] | {url:.html_url,author:.user.login,body:.body}",
         check=True,
     )  # fmt: skip
+    latest = None
     for line in filter(None, listing.stdout.splitlines()):
         comment = cast(dict[str, str], json.loads(line))
-        if comment["author"] == login and comment["body"].splitlines()[:2] == top:
-            return comment
-    return None
+        if comment["author"] == login and any(
+            matches_marker(line, number, head) for line in comment["body"].splitlines()
+        ):
+            latest = comment
+    return latest if latest and latest["body"] == body else None
 
 
 def post(number: str, path: str, progress: str) -> int:
@@ -212,9 +215,10 @@ def post(number: str, path: str, progress: str) -> int:
         validate_embed(path, body_path)
         result = compute_and_validate_result(path)
         top[0] = marker(number, head, result, str(data["verification_level"]))
-        body_path.write_text(top[0] + "\n" + body.partition("\n")[2])
+        body = top[0] + "\n" + body.partition("\n")[2]
+        body_path.write_text(body)
         repo = git.repo()
-        existing = comment_for(repo, number, git.output("gh", "api", "user", "-q", ".login", check=True), top)
+        existing = comment_for(repo, number, git.output("gh", "api", "user", "-q", ".login", check=True), head, body)
         if git.pr_field(number, "headRefOid") != head:
             raise ValueError(f"stale: PR head moved from {head} before posting; re-run the evals on the new head")
         if existing:

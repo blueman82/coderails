@@ -12,7 +12,7 @@ from .artifact_io import JsonObject, array_value, object_value, read_object
 from .eval_artifact import parse_verification_level
 from .eval_execution import is_environmental_rc, run_recorded, scripted_evals, validate_smoke, verify_execution
 from .eval_integrity import FIXTURE_FORMULA_NOT_IN_CMD, IntegrityError
-from .eval_level import check_suite, derive, late_freeze, load_policy, pr_changes, progress_units
+from .eval_level import branch_base, check_suite, derive, late_freeze, load_policy, pr_changes, progress_units
 
 
 def git_output(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -20,24 +20,18 @@ def git_output(directory: Path, *arguments: str) -> subprocess.CompletedProcess[
     return subprocess.run(["git", "-C", str(directory), *arguments], capture_output=True, text=True, check=False)
 
 
-def validate_freeze(path: str | Path) -> None:
-    """Require a resolvable pre-branch freeze or an explicit late-freeze disclosure."""
+def validate_freeze(path: str | Path, head: str = "HEAD") -> None:
+    """Require a pre-branch freeze for the operation's target head or an explicit late-freeze disclosure."""
     data = read_object(path)
     frozen = str(data.get("frozen_sha") or "").strip()
-    directory = Path(path).resolve().parent
+    directory = Path.cwd()
     if str(data.get("verification_level", "")) != "0" and not re.fullmatch(r"[0-9a-f]{40}", frozen):
         raise ValueError("verification_level >= 1 requires a full 40-hex frozen_sha (the freeze commit)")
     if not frozen or git_output(directory, "rev-parse", "--is-inside-work-tree").returncode:
         return
     if git_output(directory, "cat-file", "-e", f"{frozen}^{{commit}}").returncode:
         raise ValueError(f"frozen_sha {frozen} does not resolve to a commit in this repository")
-    base = ""
-    for ref in ("origin/HEAD", "origin/main", "origin/master", "main", "master"):
-        if git_output(directory, "rev-parse", "--verify", "--quiet", ref).returncode == 0:
-            result = git_output(directory, "merge-base", "HEAD", ref)
-            if result.returncode == 0 and result.stdout.strip():
-                base = result.stdout.strip()
-                break
+    base = branch_base(head, str(directory))
     if not base or not late_freeze(frozen, base, str(directory)):
         return
     disclosure = " ".join(
@@ -84,8 +78,8 @@ def validate_structure(
     if level != "0" and not any(item.get("priority") == "P0" for item in evals):
         raise ValueError("verification_level>=1 requires at least one P0 eval in .evals")
     if scope != "loop":
-        validate_freeze(path)
         validate_level(data, level, pr, current_head_sha, progress)
+        validate_freeze(path, current_head_sha or "HEAD")
         validate_smoke(data)
         verify_execution(data)
     new_cases = data.get("new_cases", [])

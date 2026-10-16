@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -11,10 +13,14 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
+from hooks.scripts.tests.git_common_artifacts_test import responder  # noqa: E402
 from scripts import post_evals  # noqa: E402
 from scripts.lib import eval_artifact, eval_level, eval_validation, publication_gate  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
+from scripts.lib.eval_execution import record_smoke  # noqa: E402
+from scripts.lib.eval_integrity import suite_hash, verify_suite  # noqa: E402
 from scripts.tests.eval_level_test import POLICY, RepoCase, level_for  # noqa: E402
+from scripts.tests.post_evals_post_test import URL, FakeGh, PostCase  # noqa: E402
 
 HEAD = "c" * 40
 INJECTED = "x\n```json\n" + json.dumps({"verification_level": "0", "task_ref": "evil"}) + "\n```\n<!-- coderails-x -->"
@@ -154,6 +160,201 @@ class OffSwitchTests(RepoCase):
             ):
                 codes = [v["code"] for v in publication_gate.eval_level_check("7", head, "", "")]
                 self.assertEqual(codes, expected)
+
+
+class PostFreshnessTests(PostCase):
+    """Reposting repairs the latest artifact and checks freezes in the operation's repository."""
+
+    def test_go_after_newer_no_go_is_posted(self) -> None:
+        """An older identical GO cannot hide the newest NO-GO for the same head and oracle."""
+        self.assertEqual(Path.cwd(), self.directory.resolve())
+        head = self.commit("hooks/scripts/a.py")
+        self.suite(head, 1)
+        self.data = self.reload()
+        frozen_oracle = suite_hash(self.data)
+        existing: list[dict[str, str]] = []
+        for status, result in (("pass", "GO"), ("fail", "NO-GO")):
+            self.data["evals"][0]["status"] = status
+            self.save()
+            fake = FakeGh([head], existing)
+            code, _, error = self.post(fake)
+            self.assertEqual((code, len(fake.posted)), (0, 1), error)
+            self.assertEqual(eval_artifact.parse_result(fake.posted[0].splitlines()[0]), result)
+            existing.append({"url": URL, "author": "me", "body": fake.posted[0]})
+        self.data["evals"][0]["status"] = "pass"
+        self.save()
+        self.assertEqual(suite_hash(self.data), frozen_oracle)
+        fake = FakeGh([head], existing)
+        code, _, error = self.post(fake)
+        self.assertEqual((code, len(fake.posted)), (0, 1), error)
+        self.assertEqual(fake.posted[0], existing[0]["body"])
+        current = FakeGh([head], existing + [{"url": URL, "author": "me", "body": fake.posted[0]}])
+        self.assertEqual((self.post(current)[0], current.posted), (0, []))
+
+    def test_newest_altered_embed_is_replaced(self) -> None:
+        """Matching header and facts lines do not prove that an existing body is the validated body."""
+        self.assertEqual(Path.cwd(), self.directory.resolve())
+        head = self.commit("docs/a.md")
+        self.suite(head, 0)
+        first = FakeGh([head])
+        code, _, error = self.post(first)
+        self.assertEqual((code, len(first.posted)), (0, 1), error)
+        body = first.posted[0]
+        altered = body.replace('"task_ref": "192"', '"task_ref": "altered"')
+        self.assertNotEqual(body, altered)
+        self.assertEqual(body.splitlines()[:2], altered.splitlines()[:2])
+        for newer in (altered, "preamble\n" + altered):
+            with self.subTest(newer=newer[:20]):
+                existing = [{"url": URL, "author": "me", "body": value} for value in (body, newer)]
+                fake = FakeGh([head], existing)
+                code, _, error = self.post(fake)
+                self.assertEqual((code, len(fake.posted)), (0, 1), error)
+                self.assertEqual(fake.posted[0], body)
+
+    def test_unrecognized_comments_do_not_displace_current_duplicate(self) -> None:
+        """Foreign authors, other PRs/heads and invalid marker grammar cannot supersede this artifact."""
+        head = self.commit("docs/a.md")
+        self.suite(head, 0)
+        first = FakeGh([head])
+        self.assertEqual(self.post(first)[0], 0)
+        body = first.posted[0]
+        for author, newer in (
+            ("other", body.replace("result=GO", "result=NO-GO")),
+            ("me", body.replace(head, self.base)),
+            ("me", body.replace("pr=7 ", "pr=8 ")),
+            ("me", body.replace("result=GO", "result=MAYBE")),
+        ):
+            with self.subTest(author=author, marker=newer.splitlines()[0]):
+                existing = [
+                    {"url": URL, "author": "me", "body": body},
+                    {"url": URL, "author": author, "body": newer},
+                ]
+                fake = FakeGh([head], existing)
+                self.assertEqual((self.post(fake)[0], fake.posted), (0, []))
+
+    def test_external_freeze_uses_operation_repository(self) -> None:
+        """External artifacts retain early-freeze acceptance and require disclosure for a late freeze."""
+        self.assertEqual(Path.cwd(), self.directory.resolve())
+        head = self.commit("install.py")
+        self.suite(head, 2)
+        self.data = self.reload()
+        external = tempfile.TemporaryDirectory(prefix="coderails-external-evals-")
+        self.addCleanup(external.cleanup)
+        self.path = Path(external.name) / "evals.json"
+        self.assertNotEqual(self.path.parent, self.directory)
+        for frozen, justification, late, expected in (
+            (self.base, "irreversible surface", False, 0),
+            (head, "irreversible surface; late freeze", True, 0),
+            (head, "irreversible surface", None, 1),
+        ):
+            with self.subTest(frozen=frozen, justification=justification):
+                self.data.update(frozen_sha=frozen, verification_justification=justification)
+                self.save()
+                fake = FakeGh([head])
+                code, _, error = self.post(fake)
+                self.assertEqual(code, expected, error)
+                if expected:
+                    self.assertEqual(fake.posted, [])
+                    self.assertIn("disclose the late freeze", error)
+                else:
+                    self.assertEqual(len(fake.posted), 1)
+                    facts = eval_artifact.parse_facts(fake.posted[0].splitlines()[1])
+                    self.assertIsNotNone(facts)
+                    self.assertEqual(facts[1] if facts else None, late)
+
+
+class SelectedSuiteTests(PostCase):
+    """A trusted current-head GO must contain that head's passing suite, even with a valid signature."""
+
+    def signed_suite(self, head: str) -> None:
+        """Freeze an agent-run suite with a private synthetic signing key and real Git ancestry."""
+        self.git("remote", "add", "origin", "https://github.com/o/r.git")
+        self.data.update(
+            verification_level=1, head_sha=head, frozen_sha=self.base,
+            evals=[{"id": "E1", "priority": "P0", "mode": "agent-run", "status": "pass", "evidence": "observed"}],
+        )  # fmt: skip
+        self.save()
+        record_smoke(self.path)
+        self.data = self.reload()
+        self.assertEqual(verify_suite(self.data, path=self.path), "verified")
+
+    def publication_codes(self, head: str) -> list[str]:
+        """Run the real trusted-comment reader and publication consumer over offline API responses."""
+        body = "\n".join(
+            [
+                eval_artifact.marker("42", head, "GO", "1"),
+                eval_artifact.facts_line(1, False, suite_hash(self.data)[:16]),
+                "```json",
+                json.dumps(self.data),
+                "```",
+                "",
+            ]
+        )
+        respond, original = responder([("trusted-bot", body)]), git.run
+
+        def transport(*arguments: str, check: bool = False) -> subprocess.CompletedProcess[str]:
+            """Delegate real Git and serve only the fixture's exact authenticated GitHub queries."""
+            return respond(*arguments, check=check) if arguments[0] == "gh" else original(*arguments, check=check)
+
+        with (
+            mock.patch.dict(os.environ, {"_PR_TRUSTED_LOGIN": "", "_PR_TRUSTED_PERMISSION": ""}),
+            mock.patch.object(git, "run", side_effect=transport),
+        ):
+            return [row["code"] for row in publication_gate.eval_level_check("42", head, "", "")]
+
+    def test_selected_embed_requires_current_head(self) -> None:
+        """Changing the volatile embedded head does not change the valid frozen hash or signature."""
+        head = self.commit("hooks/scripts/a.py")
+        self.signed_suite(head)
+        self.assertEqual(self.publication_codes(head), [])
+        oracle, signature = suite_hash(self.data), self.data["signature"]
+        for embedded in (self.base, None):
+            with self.subTest(embedded=embedded):
+                self.data["head_sha"] = embedded
+                if embedded is None:
+                    self.data.pop("head_sha")
+                self.save()
+                self.assertEqual((suite_hash(self.data), self.data["signature"]), (oracle, signature))
+                self.assertEqual(verify_suite(self.data, path=self.path), "verified")
+                self.assertEqual(post_evals.smoke_verify(self.path, head), 0)
+                self.assertIn("eval_head_mismatch", self.publication_codes(head))
+
+    def test_go_requires_passing_p0_in_selected_embed(self) -> None:
+        """A failed volatile status cannot keep a GO solely because the oracle's signature still verifies."""
+        head = self.commit("hooks/scripts/a.py")
+        self.signed_suite(head)
+        self.assertEqual(self.publication_codes(head), [])
+        oracle, signature = suite_hash(self.data), self.data["signature"]
+        self.data["evals"][0]["status"] = "fail"
+        self.save()
+        self.assertEqual((suite_hash(self.data), self.data["signature"]), (oracle, signature))
+        self.assertEqual(verify_suite(self.data, path=self.path), "verified")
+        self.assertFalse(eval_artifact.compute_go(self.path))
+        self.assertEqual(post_evals.smoke_verify(self.path, head), 0)
+        self.assertIn("eval_result_mismatch", self.publication_codes(head))
+
+
+class NeutralResultTests(unittest.TestCase):
+    """Path and parsed-object callers use the same neutral P0 rule and malformed-input refusals."""
+
+    def test_path_and_object_results_match(self) -> None:
+        """Empty level-zero suites remain GO; missing or failed P0 statuses and malformed evals fail closed."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evals.json"
+            cases: tuple[tuple[object, bool], ...] = (
+                ([], True), ([{"priority": "P0", "status": "pass"}], True),
+                ([{"priority": "P1", "status": "fail"}], True),
+                ([{"priority": "P0", "status": "fail"}], False),
+                ([{"priority": "P0"}], False), ({}, False), ([42], False),
+            )  # fmt: skip
+            for evals, expected in cases:
+                with self.subTest(evals=evals):
+                    data = {"verification_level": 0, "evals": evals}
+                    path.write_text(json.dumps(data))
+                    self.assertEqual(eval_artifact.compute_go(path), expected)
+                    self.assertEqual(eval_artifact.compute_go(data), expected)
+            path.write_text("{broken")
+            self.assertFalse(eval_artifact.compute_go(path))
 
 
 class PostBodyInjectionTests(unittest.TestCase):

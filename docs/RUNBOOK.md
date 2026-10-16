@@ -227,8 +227,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Symptom: `post_evals.py post`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex
   `pr_publication_gate`) refuses with `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`,
   `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, `integrity_stripped`, `not_frozen`,
-  `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed` or
-  `eval_level_diff_unavailable`. The check is the third entry of the single publication gate, ON by default (config
+  `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed`,
+  `eval_head_mismatch`, `eval_result_mismatch` or `eval_level_diff_unavailable`.
+  The check is the third entry of the single publication gate, ON by default (config
   `eval_level: off` is the optional switch). The minimum level comes from `policy/surface_policy.json` applied to the PR diff
   (`scripts/lib/eval_level.py`): level 2 for an irreversible path (`install.py`, `launchd/`, `.github/workflows/`,
   `hooks/hooks.json`, ...) or three work units, level 1 for any outward path (`hooks/`, `scripts/`, `skills/`, ...) or two
@@ -240,6 +241,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `--unit N --progress PATH` flags of `merge.py`. Omitting progress on a direct hook call cannot erase a posted count.
   The facts-line displayed minimum is informational at merge; the enforced floor is recomputed. The late-freeze
   flag and suite hash are checked against the embedded suite, and the marker and embedded levels must agree.
+  The selected suite must name the current PR head and every P0 must pass under the same neutral GO rule used
+  by posting; a valid frozen hash or signature does not establish those volatile head/status fields.
 - Query: `trace.by_reason` for `eval-level/ok/eval_level_ok` and `eval-level/refused/<code>`, plus
   `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
 - Remediation: `level_below_derived` means the suite was frozen at a lower level than the diff needs; write a suite at the
@@ -250,6 +253,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `eval_artifact_unreadable` is a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
   `not_frozen` also rejects a missing, abbreviated or symbolic `frozen_sha` at level 1 or 2 on every merge route;
   stamping it late does not satisfy the full 40-hex commit requirement.
+  `eval_head_mismatch` means the selected suite's head is absent or stale; `eval_result_mismatch` means its P0
+  statuses contradict GO. Correct the head/evidence, rerun and regrade the evals, then re-post with
+  `post_evals.py post <PR> <evals.json>`; the existing eval-level and publication trace rows/counters expose both codes.
 - Limits: a cooperating-agent safeguard. The work-unit count of a diff cannot be derived from the diff, so the floor
   without `--progress` (and without a declared lower bound) assumes one unit; the PR author can omit the progress file.
   `verify_suite` is tamper-evident, not tamper-proof: the suite hash and amendment chain are unkeyed and a signature is

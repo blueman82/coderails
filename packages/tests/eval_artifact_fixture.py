@@ -25,9 +25,12 @@ def eval_comment(
 
     tamper=True adds an eval to the embed after the freeze hash was taken (an oracle edit without amend).
     """
-    data: dict[str, object] = {"verification_level": level, "task_ref": "1", "evals": []}
+    data: dict[str, object] = {"verification_level": level, "head_sha": sha, "task_ref": "1", "evals": []}
     if tamper:
-        data["evals"] = [{"id": "E1", "priority": "P0", "mode": "scripted", "cmd": "true", "negative_control": "false"}]
+        data["evals"] = [
+            {"id": "E1", "priority": "P0", "mode": "scripted", "status": "pass",
+             "cmd": "true", "negative_control": "false"}
+        ]  # fmt: skip
     if frozen_sha:
         data["frozen_sha"] = frozen_sha
     digest = suite_hash(level, [])
