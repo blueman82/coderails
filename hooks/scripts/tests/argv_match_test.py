@@ -83,6 +83,28 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(argv_match.flags(["--no-verify", "--message=x"]), {"--no-verify", "--message"})
         self.assertIsNone(argv_match.git_invocation(["echo", "git", "commit"]))
 
+    def test_merge_option_values_do_not_become_noop_flags(self) -> None:
+        """Required values consume the next token; optional signing values do not."""
+        options = (
+            "-m",
+            "-F",
+            "-s",
+            "-X",
+            "--message",
+            "--file",
+            "--into-name",
+            "--strategy",
+            "--strategy-option",
+            "--cleanup",
+        )
+        for option in options:
+            for value in ("--help", "--dry-run"):
+                with self.subTest(option=option, value=value):
+                    self.assertNotIn(value, argv_match.flags([option, value], "mFsX"))
+        for rest in (["--help"], ["--dry-run"], ["-S", "--help"], ["-S", "--dry-run"]):
+            with self.subTest(rest=rest):
+                self.assertIn(rest[-1], argv_match.flags(rest, "mFsX"))
+
     def test_is_script_matches_by_basename_and_operation(self) -> None:
         """Interpreters, relative and absolute paths resolve; operations gate the match."""
         post = ("validate-structure", "post")

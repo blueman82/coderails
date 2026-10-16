@@ -226,6 +226,13 @@ class WorkflowGateTests(HookTestCase):
         for command, denied in (
             ("echo --help; git push origin main", True),
             ('echo "message ; gh pr merge 12"', False),
+            ('git merge -m "--dry-run" topic', True),
+            ('git merge -m "--help" topic', True),
+            ('git merge -F "--help" topic', True),
+            ('git merge --into-name "--help" topic', True),
+            ("git merge --dry-run topic", False),
+            ("git merge --help", False),
+            ("git merge -S --help", False),
         ):
             payload = {"cwd": str(target), "transcript_path": str(transcript), "tool_input": {"command": command}}
             result = subprocess.run(
@@ -238,6 +245,39 @@ class WorkflowGateTests(HookTestCase):
             )
             with self.subTest(command=command):
                 self.assertEqual('"deny"' in result.stdout, denied, result.stderr)
+
+    def test_global_option_merge_consumes_only_the_prior_review(self) -> None:
+        """A real historical merge consumes review; quoted text and later review do not."""
+        repo = self.git_repo("history", "main")
+        (repo / ".coderails").mkdir()
+        (repo / ".coderails/workflow.config.yaml").write_text("jira: null\n")
+        transcript = self.directory / "history.jsonl"
+        review = {"type": "tool_use", "name": "Skill", "input": {"skill": "pr-review-toolkit:review-pr"}}
+        for history, review_after, denied in (
+            ("git -c user.name=x merge previous", False, True),
+            ("git --no-pager merge previous", False, True),
+            ("git -c user.name=x merge previous", True, False),
+            ('echo "git -c user.name=x merge previous"', False, False),
+        ):
+            tools = [review, {"type": "tool_use", "name": "Bash", "input": {"command": history}}]
+            if review_after:
+                tools.append(review)
+            transcript.write_text(
+                "\n".join(
+                    json.dumps({"type": "assistant", "timestamp": str(index), "message": {"content": [tool]}})
+                    for index, tool in enumerate(tools)
+                )
+                + "\n"
+            )
+            payload = {
+                "cwd": str(repo),
+                "transcript_path": str(transcript),
+                "tool_input": {"command": "git merge next"},
+            }
+            result = self.run_hook("enforce_pr_workflow", payload)
+            with self.subTest(history=history, review_after=review_after):
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual('"deny"' in result.stdout, denied, result.stdout + result.stderr)
 
 
 class AuthorityEarlyDenialTests(HookTestCase):
