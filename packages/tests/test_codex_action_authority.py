@@ -24,6 +24,21 @@ from scripts.lib import action_receipt as claude  # noqa: E402  # isort: skip
 
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 MERGE = "gh pr merge 12 --squash"
+GH_FIXTURE = """#!/usr/bin/env python3
+import json
+import os
+import sys
+
+args = sys.argv[1:]
+expected = args in [
+    ["pr", "view", number, "--json", "headRefOid", "-q", ".headRefOid"]
+    for number in ("12", "13")
+]
+with open(os.environ["AUTHORITY_GH_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps({"argv": args, "expected": expected}) + "\\n")
+print("fixture: PR head unavailable" if expected else "fixture: unexpected gh query", file=sys.stderr)
+raise SystemExit(1 if expected else 95)
+"""
 
 
 def receipt(**over: object) -> dict[str, Any]:
@@ -139,11 +154,19 @@ class HookTests(unittest.TestCase):
         self.repo.mkdir()
         subprocess.run(["git", "init", "-q", "-b", "main", str(self.repo)], check=True)
         self.loop = self.directory / "loops"
+        bin_dir = self.directory / "bin"
+        bin_dir.mkdir()
+        fake_gh = bin_dir / "gh"
+        fake_gh.write_text(GH_FIXTURE)
+        fake_gh.chmod(0o700)
+        self.gh_log = self.directory / "gh.jsonl"
         self.environment = os.environ | {
             "HOME": str(self.directory / "home"),
             "PLUGIN_ROOT": str(ROOT / "packages/codex"),
             "PLUGIN_DATA": str(self.directory / "data"),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "AUTHORITY_GH_LOG": str(self.gh_log),
         }
 
     def configure(self, value: str | None) -> None:
@@ -161,7 +184,7 @@ class HookTests(unittest.TestCase):
             "hook_event_name": "PreToolUse",
             "tool_input": {"command": command},
         }
-        return subprocess.run(
+        result = subprocess.run(
             [sys.executable, str(HOOKS / "action_authority_gate.py")],
             input=json.dumps(payload),
             capture_output=True,
@@ -169,6 +192,22 @@ class HookTests(unittest.TestCase):
             env=self.environment,
             check=False,
         )
+        if self.gh_log.exists():
+            calls = [json.loads(line) for line in self.gh_log.read_text().splitlines()]
+            self.assertTrue(all(call["expected"] for call in calls), calls)
+        return result
+
+    def test_gh_fixture_is_offline_and_refuses_other_queries(self) -> None:
+        """The intended unknown-head reply and unexpected-query refusal both come from the private executable."""
+        for args, code in (
+            (["pr", "view", "12", "--json", "headRefOid", "-q", ".headRefOid"], 1),
+            (["api", "user"], 95),
+        ):
+            result = subprocess.run(["gh", *args], env=self.environment, capture_output=True, text=True, check=False)
+            self.assertEqual((result.returncode, result.stdout), (code, ""))
+            self.assertIn("fixture:", result.stderr)
+        calls = [json.loads(line) for line in self.gh_log.read_text().splitlines()]
+        self.assertEqual([call["expected"] for call in calls], [True, False])
 
     def denied(self, command: str, session: str = "s1") -> bool:
         """True when the hook emitted a deny decision."""
