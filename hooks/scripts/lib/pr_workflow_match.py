@@ -13,7 +13,7 @@ from .destructive_patterns import git_output
 from .discipline_common import tool_uses
 from .shell_context import invocations
 
-MERGE_SCRIPT = r"""(?:(?:bash|sh|python3?)\s+)?["']?(?:[^\s"']*/)?merge\.(?:py|sh)["']?(?:\s|$)"""
+MERGE_SCRIPTS = {"merge.py", "merge.sh"}
 
 
 class Operation(NamedTuple):
@@ -24,6 +24,7 @@ class Operation(NamedTuple):
     cwd: str
     git_cwd: str
     prefix: list[str]
+    git_args: list[str]
 
 
 def operations(command: str, cwd: str = "") -> list[Operation]:
@@ -33,11 +34,11 @@ def operations(command: str, cwd: str = "") -> list[Operation]:
 
     found: list[Operation] = []
     for source, argv, where in invocations(command, cwd):
-        name, directory, prefix = "", where, []
+        name, directory, prefix, git_args = "", where, [], []
         call = git_invocation(argv, where)
         if call is not None:
             subcommand, directory, rest = call
-            options = flags(rest)
+            options = flags(rest, "mFsX" if subcommand == "merge" else "")
             if options & {"--dry-run", "--help"}:
                 continue
             if subcommand == "merge" and not options & {"--abort", "--continue", "--quit", "--skip"}:
@@ -45,6 +46,7 @@ def operations(command: str, cwd: str = "") -> list[Operation]:
             elif subcommand == "push":
                 name = "git_push"
             prefix = git_prefix(argv, rest)
+            git_args = rest
         elif argv[:3] in (["gh", "pr", "create"], ["gh", "pr", "merge"]):
             if has_noop_option(source):
                 continue
@@ -52,10 +54,12 @@ def operations(command: str, cwd: str = "") -> list[Operation]:
         elif argv[:2] == ["gh", "api"] and any(re.search(r"/pulls/\d+/merge$", arg) for arg in argv[2:]):
             if "--help" not in flags(argv[2:]):
                 name = "merge"
-        elif re.search("^" + MERGE_SCRIPT, source):
+        elif Path(argv[0]).name in MERGE_SCRIPTS or (
+            len(argv) > 1 and argv[0] in {"bash", "sh", "python", "python3"} and Path(argv[1]).name in MERGE_SCRIPTS
+        ):
             name = "merge"
         if name:
-            found.append(Operation(name, unwrap(source), directory, where, prefix))
+            found.append(Operation(name, unwrap(source), directory, where, prefix, git_args))
     return found
 
 
@@ -77,14 +81,11 @@ def targets_main(call: Operation) -> bool:
     if git_output(call.git_cwd, *call.prefix, "branch", "--show-current") in {"main", "master"}:
         return True
     if call.name == "git_push":
-        for _, argv, where in invocations(call.segment, call.git_cwd):
-            parsed = git_invocation(argv, where)
-            if parsed and parsed[0] == "push":
-                return any(
-                    re.fullmatch(r"\+?(?:(?:[^:]*:)?refs/heads/|[^:]*:)?(?:main|master)", token)
-                    for token in parsed[2]
-                    if not token.startswith("-")
-                )
+        return any(
+            re.fullmatch(r"\+?(?:(?:[^:]*:)?refs/heads/|[^:]*:)?(?:main|master)", token)
+            for token in call.git_args
+            if not token.startswith("-")
+        )
     return False
 
 
@@ -142,7 +143,7 @@ def step_found(entries: list[dict[str, Any]], name: str, number: str) -> bool:
                 for tool in tool_uses(entry)
                 if tool.get("name") == "Bash"
                 and isinstance(tool.get("input"), dict)
-                and re.search(r"\bgit\s+merge\b", str(tool["input"].get("command") or ""))
+                and any(call.name == "git_merge" for call in operations(str(tool["input"].get("command") or "")))
             ),
             default=-1,
         )

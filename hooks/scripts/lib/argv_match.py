@@ -8,7 +8,19 @@ import re
 from .shell_context import SHELLS, invocations, move
 
 _GIT_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"}
-_LONG_ARG = {"--message", "--file", "--author", "--date", "--template", "--reuse-message", "--reedit-message"}
+_LONG_ARG = {
+    "--message",
+    "--file",
+    "--author",
+    "--date",
+    "--template",
+    "--reuse-message",
+    "--reedit-message",
+    "--into-name",
+    "--strategy",
+    "--strategy-option",
+    "--cleanup",
+}
 
 
 def argvs(command: str) -> list[list[str]]:

@@ -28,7 +28,7 @@ MIRRORED = (
 RUN_ALL = "python3 packages/tests/test_codex_hooks.py"
 POST = "python3 scripts/post_evals.py post 5 abc123"
 sys.path.insert(0, str(HOOKS))
-from lib import ceiling_key  # noqa: E402 - needs the hooks directory on the path first
+from lib import action_match, ceiling_key  # noqa: E402 - needs the hooks directory on the path first
 
 
 def git(repo: Path, *arguments: str) -> str:
@@ -45,6 +45,29 @@ class ParityTests(unittest.TestCase):
         for relative in MIRRORED:
             with self.subTest(file=relative):
                 self.assertEqual((ROOT / relative).read_bytes(), (PACKAGE / relative).read_bytes())
+
+    def test_merge_option_values_remain_real_operations(self) -> None:
+        """The independent policy uses mandatory option arity and keeps genuine no-ops."""
+        options = (
+            "-m",
+            "-F",
+            "-s",
+            "-X",
+            "--message",
+            "--file",
+            "--into-name",
+            "--strategy",
+            "--strategy-option",
+            "--cleanup",
+        )
+        for option in options:
+            for value in ("--help", "--dry-run"):
+                with self.subTest(option=option, value=value):
+                    calls = action_match.operations(f"git merge {option} {value} topic")
+                    self.assertEqual([call.name for call in calls], ["git_merge"])
+        for arguments in ("--help", "--dry-run", "-S --help", "-S --dry-run"):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(action_match.operations(f"git merge {arguments}"), [])
 
 
 class CodexHookCase(unittest.TestCase):

@@ -30,7 +30,7 @@ import sys
 args = sys.argv[1:]
 expected = args in [
     ["pr", "view", number, "--json", "headRefOid", "-q", ".headRefOid"]
-    for number in ("1", "2", "5", "12", "13", "https://github.com/o/r/pull/5")
+    for number in ("1", "2", "5", "12", "13", "140", "https://github.com/o/r/pull/5")
 ]
 with open(os.environ["AUTHORITY_GH_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps({"argv": args, "expected": expected}) + "\\n")
@@ -45,16 +45,14 @@ class GateTests(HookCase):
     def setUp(self) -> None:
         """Repo on main, no config yet."""
         super().setUp()
-        self.repo = self.directory / "repo"
-        subprocess.run(["git", "init", "-q", "-b", "main", str(self.repo)], check=True)
-        binary = self.directory / "bin"
-        binary.mkdir()
-        gh = binary / "gh"
+        self.repo = self.second_repo("repo")
+        gh = self.directory / "bin" / "gh"
+        gh.parent.mkdir()
         gh.write_text(GH_FIXTURE)
         gh.chmod(0o700)
         self.gh_log = self.directory / "gh.jsonl"
         self.environment.update(
-            PATH=f"{binary}{os.pathsep}{self.environment['PATH']}", AUTHORITY_GH_LOG=str(self.gh_log)
+            PATH=f"{gh.parent}{os.pathsep}{self.environment['PATH']}", AUTHORITY_GH_LOG=str(self.gh_log)
         )
 
     def tearDown(self) -> None:
@@ -154,6 +152,9 @@ class GateTests(HookCase):
             self.assertFalse(self.denied("action_authority_gate", self.payload(command)), command)
         subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/feature/x"], check=True)
         self.assertFalse(self.denied("action_authority_gate", self.payload("git push origin feature/x")))
+        for command in ("command -p git push origin main", "env -u UNUSED git push origin main"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
 
     def test_enforce_guards_git_push_to_main(self) -> None:
         """A push on main needs a push receipt."""
@@ -181,26 +182,7 @@ class GateTests(HookCase):
         """Real receipt minting and enforcement bind the selected Git metadata without changing command bytes."""
         target = self.second_repo()
         self.configure("enforce", target)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(target),
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                "commit",
-                "-q",
-                "--allow-empty",
-                "-m",
-                "selected",
-            ],
-            check=True,
-        )
-        head = subprocess.run(
-            ["git", "-C", str(target), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        ).stdout.strip()
+        head = self.commit_head(target, "selected")
         subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/feature/origin"], check=True)
         command = f"git --git-dir={shlex.quote(str(target / '.git'))} --work-tree={shlex.quote(str(target))} push"
         minted = subprocess.run(
@@ -255,11 +237,19 @@ class GateTests(HookCase):
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE, "worker")))
         self.assertEqual(self.reasons("worker"), ["denied_no_receipt"])
 
-    def second_repo(self) -> Path:
+    def second_repo(self, name: str = "other") -> Path:
         """A second repo, also on main."""
-        other = self.directory / "other"
+        other = self.directory / name
         subprocess.run(["git", "init", "-q", "-b", "main", str(other)], check=True)
         return other
+
+    def commit_head(self, repo: Path, message: str) -> str:
+        """Create an empty fixture commit with explicit identity and return its real head."""
+        git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", message], check=True)
+        return subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
 
     def test_chained_second_guarded_op_needs_its_own_receipt(self) -> None:
         """A receipt for the first segment never authorises a chained second guarded operation."""
@@ -286,26 +276,7 @@ class GateTests(HookCase):
     def test_artifact_sha_is_checked_against_real_head(self) -> None:
         """A push receipt bound to HEAD's sha verifies; a wrong sha is refused sha_mismatch."""
         self.configure("enforce")
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(self.repo),
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                "commit",
-                "-q",
-                "--allow-empty",
-                "-m",
-                "x",
-            ],
-            check=True,
-        )
-        head = subprocess.run(
-            ["git", "-C", str(self.repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        ).stdout.strip()
+        head = self.commit_head(self.repo, "x")
         self.mint(PUSH, "git_push", artifact_sha="0" * 40)
         self.assertTrue(self.denied("action_authority_gate", self.payload(PUSH)))
         self.assertEqual(self.reasons(), ["denied_sha_mismatch"])
@@ -371,6 +342,8 @@ class GateTests(HookCase):
             "FOO=1 git push origin main", "env git push origin main", "sudo git push origin main",
             "(git push origin main)", "{ git push origin main; }", "bash -c 'git push origin main'",
             'sh -c "git push origin main"', "time git push origin main",
+            "command bash scripts/merge.sh 140",
+            "command python3 scripts/merge.py 140",
         ]  # fmt: skip
         for command in wrapped:
             with self.subTest(command=command):

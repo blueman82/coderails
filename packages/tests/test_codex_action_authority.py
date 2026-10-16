@@ -33,7 +33,7 @@ import sys
 args = sys.argv[1:]
 expected = args in [
     ["pr", "view", number, "--json", "headRefOid", "-q", ".headRefOid"]
-    for number in ("12", "13")
+    for number in ("12", "13", "140")
 ]
 with open(os.environ["AUTHORITY_GH_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps({"argv": args, "expected": expected}) + "\\n")
@@ -277,7 +277,9 @@ class HookTests(unittest.TestCase):
         """Env prefix, sudo, subshell, bash -c and gh api merge are guarded like the bare command."""
         self.configure("enforce")
         for command in ("FOO=1 gh pr merge 12", "sudo gh pr merge 12", "(gh pr merge 12)",
-                        "bash -c 'git push origin main'", "gh api repos/o/r/pulls/5/merge -X PUT"):  # fmt: skip
+                        "bash -c 'git push origin main'", "gh api repos/o/r/pulls/5/merge -X PUT",
+                        "command bash scripts/merge.sh 140",
+                        "command python3 scripts/merge.py 140"):  # fmt: skip
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
 
@@ -311,6 +313,9 @@ class HookTests(unittest.TestCase):
         self.assertTrue(self.denied("git push origin main"))
         subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/feature/x"], check=True)
         self.assertFalse(self.denied("git push origin feature/x"))
+        for command in ("command -p git push origin main", "env -u UNUSED git push origin main"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
 
     def mint_for(self, command: str, kind: str, cwd: Path, rid: str = "r1", **over: object) -> None:
         """Write a receipt for `command` run in `cwd` on main."""
