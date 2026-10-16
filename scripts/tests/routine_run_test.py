@@ -283,6 +283,75 @@ class DocsSyncRunTests(RoutineCase):
         self.assertEqual(self.run_tool("begin").returncode, 2)
         self.assertEqual(self.run_tool("begin", "--new").returncode, 0)
 
+    def test_log_failure_does_not_advance_or_leave_an_unpaired_row(self) -> None:
+        """A failed human-log append must leave the stage pending and both event logs unchanged."""
+        self.assertEqual(self.run_tool("begin").returncode, 0)
+        before = self.jsonl.read_bytes()
+        self.log.rename(self.log.with_suffix(".saved"))
+        self.log.mkdir()
+        result = self.stage("fetch_branch")
+        state = json.loads(self.log.with_suffix(".state.json").read_text())
+        self.assertEqual((result.returncode, state["next"], self.jsonl.read_bytes()), (2, 0, before))
+        self.assertIn("log_unwritable", result.stderr)
+
+    def test_missing_gate_records_refusal_and_cleanup_once(self) -> None:
+        """A pinned executable that cannot spawn is a terminal gate refusal without a traceback."""
+        self.assertEqual(self.advance_to_manifest_check().returncode, 0)
+        result = self.run_tool("run-gate", "push", "--", str(self.bin / "missing/push.py"))
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual((self.rows()[-1]["outcome"], self.rows()[-1]["reason_code"]), ("run_refused", "push"))
+        self.assert_cleaned_once()
+        self.assertEqual(self.run_tool("abort", "audit_failed").returncode, 2)
+        self.assert_cleaned_once()
+
+    def test_foreign_routine_cannot_finish_another_routines_state(self) -> None:
+        """Sharing a log path does not authorize the other routine to finish or replace active state."""
+        self.assertEqual(self.run_tool("begin").returncode, 0)
+        state = self.log.with_suffix(".state.json")
+        before = (state.read_bytes(), self.jsonl.read_bytes(), self.log.read_bytes())
+        self.routine = "loop-retro-promotion"
+        for args in (("finish", "no_drift"), ("begin", "--new")):
+            result = self.run_tool(*args)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("routine_mismatch", result.stderr)
+            self.assertEqual((state.read_bytes(), self.jsonl.read_bytes(), self.log.read_bytes()), before)
+
+    def test_old_open_run_is_not_overwritten_at_date_rollover(self) -> None:
+        """An open run from yesterday remains active until explicitly ended or replaced."""
+        self.assertEqual(self.run_tool("begin").returncode, 0)
+        path = self.log.with_suffix(".state.json")
+        state = json.loads(path.read_text())
+        state["date"] = "2000-01-01"
+        path.write_text(json.dumps(state))
+        result = self.run_tool("begin")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(json.loads(path.read_text()), state)
+
+    def test_explicit_new_begin_closes_the_previous_open_run(self) -> None:
+        """Explicit replacement leaves one abort for the previous id before the next provisional row."""
+        self.assertEqual(self.run_tool("begin").returncode, 0)
+        previous = self.rows()[0]["run_id"]
+        self.assertEqual(self.run_tool("begin", "--new").returncode, 0)
+        self.assertEqual([r["outcome"] for r in self.rows()], ["run_incomplete", "run_abort", "run_incomplete"])
+        self.assertEqual(self.rows()[1]["run_id"], previous)
+        self.assertEqual(self.rows()[1]["reason_code"], "incomplete-run")
+        self.assertNotEqual(self.rows()[-1]["run_id"], previous)
+
+    def test_new_dated_run_uses_todays_log_after_loading_old_state(self) -> None:
+        """Loading a completed previous day's pinned path must not redirect the next run to that old log."""
+        self.log = Path(self.tmp.name) / "run-{date}.log"
+        self.assertEqual(self.run_tool("begin").returncode, 0)
+        self.assertEqual(self.run_tool("finish", "no_drift").returncode, 0)
+        path = self.log.with_name("run-active.state.json")
+        state = json.loads(path.read_text())
+        expected_human = state["human"]
+        state["date"], state["human"] = "2000-01-01", str(self.log.with_name("run-2000-01-01.log"))
+        path.write_text(json.dumps(state))
+        self.assertEqual(self.run_tool("begin").returncode, 0)
+        self.assertEqual(json.loads(path.read_text())["human"], expected_human)
+        self.assertIn("abort=incomplete-run", Path(expected_human).read_text().splitlines()[-1])
+
 
 class RetroPromotionRunTests(RoutineCase):
     """The loop-retro-promotion spec and its one-path policy."""

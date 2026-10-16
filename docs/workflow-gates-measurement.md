@@ -33,6 +33,12 @@ Manifest codes are `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_syn
 `foreign_session` belongs to the diagnostic CLI's explicit `--session` comparison. Publication checks unit owner-field
 shape and worktree equality; it does not authenticate those owner fields.
 
+Routine counters count emitted events, not unique completed jobs. `run_incomplete` is provisional; explicit
+`begin --new` closes an open previous id with `run_abort/incomplete-run`. An unspawnable gate emits
+`run_refused/<gate>`. A failed log write (`log_unwritable`) or foreign state (`routine_mismatch`) is reported on stderr
+without a success trace or state advancement. Partial file writes and the runner's unlocked fallback appends are not
+transactional or authoritative counter evidence; inspect JSONL, human log and state together.
+
 ## Counters
 
     python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py

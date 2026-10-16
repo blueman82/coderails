@@ -28,8 +28,11 @@ write the run log by hand: `routine_run.py` appends a JSONL event row
 `run_incomplete`; closed reason codes in the spec) and derives the legacy
 marker line (`run=ok`, `abort=<code>`, `refused=<gate>`,
 `abort=incomplete-run`) that the dashboard's `last-marker` predicate reads.
-An outcome or code outside the closed lists is refused (exit 2), so there is
-no way to log an invented marker.
+An outcome or code outside the closed lists is refused (exit 2).
+`RR begin` refuses an open run even across midnight. Explicit `RR begin --new`
+first aborts the previous open id; never replace a run merely to hide its failure.
+`log_unwritable` refuses state advancement; inspect both logs and state for
+partial writes. Same-user forgery and runner limits are in `docs/routines.md`.
 
 ## 1. Audit
 

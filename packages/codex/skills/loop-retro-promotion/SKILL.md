@@ -23,6 +23,10 @@ time, below). `routine_run.py` appends a JSONL event row (closed outcomes
 reason codes in the spec) and derives the legacy marker line (`run=ok`,
 `abort=<code>`, `refused=<gate>`, `abort=incomplete-run`). Do not write terminal
 markers by hand; an outcome or code outside the closed lists exits 2.
+`RR begin` refuses an open run even across midnight. Explicit `RR begin --new`
+first aborts the previous open id. `log_unwritable` refuses state advancement;
+inspect both logs and state for partial writes. Same-user forgery and runner
+limits are in `docs/routines.md`.
 
 ## 1. Predicate evaluation (always runs, even when dormant)
 

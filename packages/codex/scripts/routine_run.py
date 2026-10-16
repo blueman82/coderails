@@ -69,6 +69,9 @@ class Run:
         except (OSError, ValueError):
             print("no_active_run: call begin first", file=sys.stderr)
             return False
+        if self.state.get("routine") != self.routine:
+            print("routine_mismatch: use this routine's own log", file=sys.stderr)
+            return False
         if self.state.get("human"):  # the log paths pinned at begin
             self.human = Path(str(self.state["human"]))
             self.jsonl = self.human.with_suffix(".jsonl")
@@ -127,7 +130,10 @@ class Run:
 
     def advance(self, name: str) -> int:
         """Record a passed stage."""
-        self.emit(name, "stage_ok")
+        refusal = self.emit(name, "stage_ok")
+        if refusal:
+            print(refusal, file=sys.stderr)
+            return 2
         self.state["next"] = int(self.state["next"]) + 1
         self.save()
         return 0
@@ -171,16 +177,25 @@ def manifest_check(run: Run, stage: str) -> int:
 def cmd_begin(run: Run, args: argparse.Namespace) -> int:
     """Start a run: write the state and the provisional run_incomplete row; print the run id.
 
-    Refused while a run is open, or after a same-day abort/refusal, unless --new (no laundering a failed run).
+    Refused while a run is open, or after a same-day abort/refusal, unless --new closes the previous run.
     """
-    if not args.new and run.load():
+    human = run.human
+    if run.state_path.exists():
+        if not run.load():
+            return 2
         old = run.state
         failed = old.get("outcome") in ("run_abort", "run_refused")
-        if old.get("date") == run.today and (failed or not old.get("ended")):
+        if not args.new and (not old.get("ended") or (old.get("date") == run.today and failed)):
             print("run_in_progress_or_failed: pass --new to start over", file=sys.stderr)
             return 2
+        if not old.get("ended"):
+            refusal = run.end("begin", "run_abort", "incomplete-run")
+            if refusal:
+                print(refusal, file=sys.stderr)
+                return 2
+    run.human, run.jsonl = human, human.with_suffix(".jsonl")
     run.state = {"v": 1, "run_id": uuid.uuid4().hex[:12], "next": 0, "branch": "", "ended": False}
-    run.state |= {"date": run.today, "human": str(run.human)}
+    run.state |= {"routine": run.routine, "date": run.today, "human": str(run.human)}
     run.save()
     refusal = run.emit("begin", "run_incomplete", "incomplete-run")
     print(refusal or run.state["run_id"], file=sys.stderr if refusal else sys.stdout)
@@ -226,7 +241,11 @@ def cmd_run_gate(run: Run, args: argparse.Namespace) -> int:
         return 2
     if args.stage == "push" and manifest_check(run, "push"):  # a late edit is caught before it is pushed
         return 1
-    code = subprocess.run(argv, check=False).returncode
+    try:
+        code = subprocess.run(argv, check=False).returncode
+    except OSError as error:
+        print(f"gate_spawn_failed: {error}", file=sys.stderr)
+        code = 127
     if code == 0:
         return run.advance(args.stage)
     print(f"refused: gate {args.stage} exited {code}", file=sys.stderr)

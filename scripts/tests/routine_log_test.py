@@ -95,6 +95,14 @@ class EmitTests(unittest.TestCase):
         bad = emit(self.dir, "--outcome", "run_abort", "--reason-code", "docs_sync_deny", routine=retro)
         self.assertEqual(bad.returncode, 2)
 
+    def test_unwritable_human_log_does_not_append_a_jsonl_terminal(self) -> None:
+        """Opening both log destinations precedes either append under the existing lock."""
+        (self.dir / "x.log").mkdir()
+        result = emit(self.dir, "--outcome", "run_ok")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("log_unwritable", result.stderr)
+        self.assertEqual(self.rows(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

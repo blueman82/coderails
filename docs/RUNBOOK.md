@@ -157,11 +157,15 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `status_not_allowed`, `too_many_paths`, `manifest_unreadable`, `manifest_internal_error`), and a gate name
   (`push`, `review`, `post_review`, `post_evals`, `merge`) for `run_refused`.
 - Remediation: `incomplete-run` and `runner_exit_no_terminal` mean the agent session stopped early; read the run
-  output under the runner's runs dir, fix the cause and let the next scheduled run start fresh (`begin` always opens a
-  new run). A refusal names the gate that exited non-zero: run that gate by hand to see why. Cleanup prints
+  output under the runner's runs dir and fix the cause. `begin` refuses an open run even across midnight, or a same-day
+  abort/refusal. Use `begin --new` explicitly to replace it; an open previous run first gets `run_abort incomplete-run`.
+  A refusal names the gate that exited non-zero or could not start (`gate_spawn_failed` on stderr). Cleanup prints
   `cleanup_failed: <step>` when a PR, remote branch or local branch could not be removed; delete it with `gh pr close`
   and `git push origin --delete` / `git branch -D`. `routine_unknown`/`reason_code_invalid`/`outcome_invalid` (exit 2)
   mean a caller used a value outside the closed lists.
+- `log_unwritable` refuses advancement or terminal state: inspect both event logs and the persisted state for partial
+  output from an interrupted/failed write, then repair the destination. `routine_mismatch` means the log belongs to a
+  different routine; select the correct routine log. Do not finish or replace another routine's state.
 - Limits: see `docs/routines.md` "Routine state machine and event log".
 
 ## Diff-manifest check warned or refused

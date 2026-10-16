@@ -99,10 +99,9 @@ def emit(
         human.parent.mkdir(parents=True, exist_ok=True)
         with Path(f"{path}.lock").open("a+", encoding="utf-8") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            with path.open("a", encoding="utf-8") as stream:
+            with path.open("a", encoding="utf-8") as stream, human.open("a", encoding="utf-8") as human_stream:
                 stream.write(json.dumps(row, sort_keys=True) + "\n")
-            with human.open("a", encoding="utf-8") as stream:
-                stream.write(f"{now} {marker(outcome, stage, reason_code)}\n")
+                human_stream.write(f"{now} {marker(outcome, stage, reason_code)}\n")
     except OSError:
         return "log_unwritable"
     trace(routine, outcome, reason_code)

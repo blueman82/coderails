@@ -80,10 +80,10 @@ class CodexBehaviourTests(unittest.TestCase):
         shim.chmod(0o755)
         self.log = self.root / "logs/run.log"
 
-    def run_tool(self, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    def run_tool(self, cwd: Path, *args: str, routine: str = "docs-sync") -> subprocess.CompletedProcess[str]:
         """Run the Codex routine_run.py for docs-sync in cwd."""
         script = CODEX / "scripts/routine_run.py"
-        argv = [sys.executable, str(script), "--log", str(self.log), "docs-sync", *args]
+        argv = [sys.executable, str(script), "--log", str(self.log), routine, *args]
         return subprocess.run(argv, cwd=cwd, capture_output=True, text=True, env=self.env)
 
     def test_invented_outcome_exits_2_and_appends_nothing(self) -> None:
@@ -92,6 +92,37 @@ class CodexBehaviourTests(unittest.TestCase):
         argv += ["--run-id", "r", "--routine", "docs-sync", "--stage", "merge", "--outcome", "merge-blocked"]
         self.assertEqual(subprocess.run(argv, capture_output=True, text=True, env=self.env).returncode, 2)
         self.assertFalse((self.root / "x.jsonl").exists())
+
+    def test_failed_event_write_keeps_the_stage_pending(self) -> None:
+        """The independent Codex CLI refuses a failed log append without advancing or emitting half an event."""
+        self.assertEqual(self.run_tool(self.root, "begin").returncode, 0)
+        before = self.log.with_suffix(".jsonl").read_bytes()
+        self.log.rename(self.log.with_suffix(".saved"))
+        self.log.mkdir()
+        result = self.run_tool(self.root, "stage", "fetch_branch")
+        state = json.loads(self.log.with_suffix(".state.json").read_text())
+        self.assertEqual((result.returncode, state["next"]), (2, 0))
+        self.assertIn("log_unwritable", result.stderr)
+        self.assertEqual(self.log.with_suffix(".jsonl").read_bytes(), before)
+
+    def test_open_run_survives_rollover_and_rejects_foreign_routine(self) -> None:
+        """Only explicit replacement closes the original id, and another routine cannot consume its state."""
+        self.assertEqual(self.run_tool(self.root, "begin").returncode, 0)
+        path = self.log.with_suffix(".state.json")
+        state = json.loads(path.read_text())
+        state["date"] = "2000-01-01"
+        path.write_text(json.dumps(state))
+        self.assertEqual(self.run_tool(self.root, "begin").returncode, 2)
+        self.assertEqual(json.loads(path.read_text()), state)
+        result = self.run_tool(self.root, "finish", "no_drift", routine="loop-retro-promotion")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("routine_mismatch", result.stderr)
+        self.assertEqual(json.loads(path.read_text()), state)
+        self.assertEqual(self.run_tool(self.root, "begin", "--new").returncode, 0)
+        rows = [json.loads(line) for line in self.log.with_suffix(".jsonl").read_text().splitlines()]
+        self.assertEqual([row["outcome"] for row in rows], ["run_incomplete", "run_abort", "run_incomplete"])
+        self.assertEqual(rows[1]["run_id"], state["run_id"])
+        self.assertNotEqual(rows[-1]["run_id"], state["run_id"])
 
     def test_no_drift_run_is_green_and_script_edit_aborts_with_one_cleanup(self) -> None:
         """A no-drift run reads green; a scripts/ edit aborts at manifest_check with one cleanup."""
