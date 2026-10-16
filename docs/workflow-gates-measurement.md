@@ -79,10 +79,15 @@ edited.
 ### Procedure scripts
 
 `verify_merged.py` is the only one of the prose-to-script helpers that writes rows. `wiki_lint.py stale`, `memory_dir.py`,
-`detect_test_command.py`, `merge.py --describe` and `check.py --json` are read-only and print their result as JSON; they
+`detect_test_command.py`, `merge.py --describe` and `check.py --json` are read-only and print their result (`memory_dir.py`
+prints a path; the others print JSON); they
 write no trace rows, so there is no count of how often a skill ran them. A rising `verify-merged/refused/content_absent`
 or `content_check_required` means claims of "merged" are not being backed by content (or the skill is called without
 `--grep` on squash merges), not that merges are failing.
+`content_preexisting` means the needle predates the merge; `content_check_failed` means Git could not establish presence
+or absence (for example, a shallow clone lacks the first parent). Neither is a merge-failure count. Restore history or
+choose a new needle before retrying. Wiki candidate/data-gap counts and quality feedback are advisory output, not
+installed-call or enforcement measurements; the Codex quality adapter attempts no external tools.
 
 ## Limits
 

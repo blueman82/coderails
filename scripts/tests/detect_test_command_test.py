@@ -29,6 +29,28 @@ def detect(files: dict[str, str]) -> dict[str, object]:
 class DetectTests(unittest.TestCase):
     """Each marker maps to its command; several markers keep the documented order and leave `command` null."""
 
+    def test_non_string_npm_script_is_not_a_command(self) -> None:
+        """Malformed scripts.test values cannot invent an executable test candidate."""
+        malformed: list[object] = [True, 1, [], {}, "  "]
+        for value in malformed:
+            with self.subTest(value=value):
+                self.assertEqual(
+                    detect({"package.json": json.dumps({"scripts": {"test": value}})}),
+                    {"command": None, "candidates": []},
+                )
+
+    def test_missing_directory_is_reported_unavailable(self) -> None:
+        """An absent project is not a project with no detected runner."""
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), "--dir", str(Path(directory) / "absent")],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("directory_unavailable", result.stderr)
+
     def test_each_marker(self) -> None:
         """One file gives one candidate and that command."""
         cases = (

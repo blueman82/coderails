@@ -378,28 +378,22 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## A procedure script (wiki_lint, verify_merged, merge --describe, memory_dir, detect_test_command, check --json) answered unexpectedly
 
-- Symptom: a skill or command that used to carry a procedure in prose now prints JSON that surprises you: a page you
-  expected stale is not, `verify_merged.py` exits 1 on a PR you watched merge, `merge.py --describe` lists a gate you
-  did not expect, or quality feedback appeared (or not) for a file.
-- `wiki_lint.py stale --repo R --vault V`: `stale_days` in the output is the typed `wiki_stale_days` (default 30,
-  `.coderails/workflow.config.yaml`). A candidate is stale only when a repo source's last commit date
-  (`git log -1 --format=%cs`) is more than 7 days after `last_updated` (`basis: sources`), or when no source resolves
-  to a repo file (`basis: date-only`). `data_gaps` lists unresolvable sources, missing commit dates and pages with no
-  `last_updated`; a gap never clears a page. `sources/`, `investigations/`, `templates/`, `inbox/` are skipped.
-- `verify_merged.py <PR> [--grep STR --path P]`: exit 0 only when confirmed. `reasons` is one of `gh_failed`,
-  `not_merged`, `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent` (the grep found
-  nothing at `origin/<base>`), `content_check_required` (no `--grep` and not a true two-parent merge whose head is
-  an ancestor: always the case for a squash). `method` is `content` or `merge-commit-ancestry`. Rows:
-  `verify-merged/<ok|refused>/<reason>` in `trace.by_reason`, tallied under key `verify-merged`. Remedy: pass a string
-  unique to the change as `--grep`.
-- `merge.py --describe`: JSON of `VERIFY_STAGES` then `publication_gate.CHECKS`, built from the same lists
-  `verify_gates` and `publication_gate.evaluate` iterate; it contacts no remote. A gate missing there is not run.
-- `memory_dir.py [--provider claude|codex]` prints the folder whether or not it exists (slug: every character outside
-  `[A-Za-z0-9]` becomes `-`, from the realpath). `detect_test_command.py` prints `command: null` for zero or several
-  candidates; the caller asks the user.
-- `scripts/quality/check.py --json` prints `{scanned, findings[{path,line,message}], external_ok}`; external tool
-  output is redirected to stderr in that mode. Both `quality_feedback.py` hooks warn when `findings` is non-empty or the
-  checker printed no JSON; they ignore `external_ok` (the tools' own output is not shown to the model).
-- Limits: the helpers are read-only except the `verify_merged` trace row; they trust `gh` and the local clone as the
-  caller supplied them, and the skills still have to choose to run them (nothing forces a skill to call a script). The
-  quality check's `external_ok` is not part of the warn decision.
+- `wiki_lint.py stale --repo R --vault V`: typed `wiki_stale_days` (default 30; zero valid) sets candidate age.
+  Only later source commits prove drift, without grace. `data_gaps` names unresolvable sources, missing commit dates,
+  missing `last_updated` and `no_repo_sources`. Missing directories exit 2 (`repo_unavailable`, `vault_unavailable`);
+  bad thresholds report `wiki_stale_days_invalid`. Repair and rerun. Point-in-time/structural directories are excluded.
+- `verify_merged.py <PR> [--grep STR --path P]` exits 0 only when confirmed (`content` or `merge-commit-ancestry`).
+  Refusals: `gh_failed`, `not_merged`, `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`,
+  `content_preexisting` (needle predates merge), `content_check_failed` (Git error/missing parent), `content_check_required`
+  (no needle and no true two-parent ancestry). A squash needs `--grep`. Choose a new needle or restore missing history.
+  Rows `verify-merged/<ok|refused>/<reason>` feed `trace.by_reason` and the `verify-merged` counter.
+- `merge.py --describe` prints JSON from `VERIFY_STAGES` then `publication_gate.CHECKS`, without remote contact.
+  Conditional stages may skip; earlier refusals stop execution. Target/auth/state/approval checks precede those stages.
+- `memory_dir.py [--provider claude|codex]` prints a path even if absent: realpath, every non-alphanumeric becomes `-`.
+  `detect_test_command.py` returns null for zero/several candidates; callers ask before writing configuration. Missing
+  projects exit 2 (`directory_unavailable`); malformed/blank npm test scripts are not candidates. Repair input and rerun.
+- `scripts/quality/check.py --json` emits `{scanned, findings[{path,line,message}], external_ok}` with tools on stderr.
+  Both feedback hooks disclose findings, unusable JSON, nonzero checker exits and external failures, with bounded diagnostics.
+  The Codex adapter runs built-in checks only; `external_ok: true` means no external tools were attempted.
+- Limits: skills choose these helpers; verification writes a trace. Same-user `gh`/clone/dates/sources/config are trusted.
+  Wiki lint is advisory; presence on base and absence at the first parent do not prove PR authorship.

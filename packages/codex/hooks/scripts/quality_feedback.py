@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 SOURCE_SUFFIXES = {
     ".bash",
@@ -46,11 +46,38 @@ def patch_paths(command: object) -> list[str]:
 
 
 def finding_lines(result: subprocess.CompletedProcess[str]) -> list[str]:
-    """One line per finding from the checker's --json; a checker that printed no JSON is itself reported."""
+    """Validate structured findings and disclose external or checker failures."""
     try:
-        return [f"{i['path']}:{i['line'] or ''}: {i['message']}" for i in json.loads(result.stdout)["findings"]]
+        raw: object = json.loads(result.stdout)
+        if not isinstance(raw, dict):
+            raise ValueError("invalid quality result")
+        data = cast("dict[str, Any]", raw)
+        if (
+            type(data.get("scanned")) is not int
+            or data["scanned"] < 0
+            or not isinstance(data.get("findings"), list)
+            or type(data.get("external_ok")) is not bool
+        ):
+            raise ValueError("invalid quality result")
+        lines: list[str] = []
+        for raw_issue in cast("list[object]", data["findings"]):
+            if not isinstance(raw_issue, dict):
+                raise ValueError("invalid finding")
+            issue = cast("dict[str, Any]", raw_issue)
+            if (
+                not isinstance(issue.get("path"), str)
+                or not isinstance(issue.get("message"), str)
+                or not (issue.get("line") is None or type(issue["line"]) is int and issue["line"] > 0)
+            ):
+                raise ValueError("invalid finding")
+            lines.append(f"{issue['path']}:{issue['line'] or ''}: {issue['message']}")
+        if not data["external_ok"]:
+            lines.append(f"external quality checks failed: {result.stderr.strip()[:500]}")
+        elif result.returncode:
+            lines.append(f"quality checker failed (exit {result.returncode}): {result.stderr.strip()[:500]}")
+        return lines
     except (ValueError, KeyError, TypeError):
-        return [f"quality check produced no JSON: {result.stderr.strip()[:500]}"]
+        return [f"quality check produced unusable JSON: {result.stderr.strip()[:500]}"]
 
 
 def repo_for(path: Path) -> Path | None:

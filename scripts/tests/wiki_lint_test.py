@@ -94,8 +94,51 @@ class WikiLintCase(unittest.TestCase):
 class StaleTests(WikiLintCase):
     """The staleness rule from skills/wiki-lint/SKILL.md Step 2, run by code."""
 
+    def test_zero_threshold_and_next_day_source_change(self) -> None:
+        """Zero is a typed threshold; any source commit after the page date counts as moved."""
+        self.commit_source("hooks/moved.py", "2026-10-04")
+        self.write_page("recent.md", "2026-10-03", "[hooks/moved.py]")
+        self.config(0)
+        report = self.run_stale()
+        self.assertEqual(report["stale_days"], 0)
+        self.assertEqual(self.stale_pages(report), ["recent.md"])
+
+    def test_source_change_one_day_after_an_old_page_is_drift(self) -> None:
+        """There is no extra grace period beyond the configured page age threshold."""
+        self.commit_source("hooks/moved.py", "2026-08-02")
+        self.write_page("old.md", "2026-08-01", "[hooks/moved.py]")
+        self.assertEqual(self.stale_pages(self.run_stale()), ["old.md"])
+
+    def test_old_pages_without_comparable_sources_are_only_data_gaps(self) -> None:
+        """Missing, untracked and vault-only sources cannot prove source drift."""
+        (self.repo / "hooks/untracked.py").write_text("untracked\n")
+        (self.vault / "sources/reference.md").write_text(page("2026-01-01", "[]"))
+        for name, sources in (
+            ("empty.md", "[]"),
+            ("missing.md", "[nowhere.py]"),
+            ("untracked.md", "[hooks/untracked.py]"),
+            ("vault.md", "[sources/reference.md]"),
+        ):
+            self.write_page(name, "2026-01-01", sources)
+        report = self.run_stale()
+        self.assertEqual(self.stale_pages(report), [])
+        self.assertEqual(
+            {Path(g["page"]).name for g in report["data_gaps"]}, {"empty.md", "missing.md", "untracked.md", "vault.md"}
+        )
+
+    def test_missing_vault_is_unavailable_instead_of_an_empty_report(self) -> None:
+        """A nonexistent input directory must not look like a healthy empty vault."""
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "stale", "--repo", str(self.repo), "--vault", str(self.vault / "absent")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("vault_unavailable", result.stderr)
+
     def test_old_page_with_moved_source_is_stale_and_unmoved_is_not(self) -> None:
-        """Candidate age plus a source commit more than 7 days after last_updated is stale; otherwise not."""
+        """Candidate age plus a source commit after last_updated is stale; otherwise not."""
         self.commit_source("hooks/moved.py", "2026-09-20")
         self.commit_source("hooks/still.py", "2026-06-01")
         self.write_page("moved.md", "2026-08-01", "[hooks/moved.py]")
@@ -113,14 +156,14 @@ class StaleTests(WikiLintCase):
         self.config(None)
         self.assertEqual(self.stale_pages(self.run_stale()), [])
         self.config(1)
-        self.assertEqual(self.stale_pages(self.run_stale()), ["moved.md"])
+        self.assertEqual(self.stale_pages(self.run_stale()), ["fresh.md", "moved.md"])
         self.config(100)
         self.assertEqual(self.stale_pages(self.run_stale()), [])
         self.config(None)
         self.assertEqual(self.run_stale()["stale_days"], 30)
 
-    def test_grace_window_and_skill_shorthand_and_vault_entries(self) -> None:
-        """A 3-day gap is authoring lag; `skills/foo.md` resolves to skills/foo/SKILL.md; a vault entry is skipped."""
+    def test_skill_shorthand_and_vault_entries(self) -> None:
+        """Every later commit is drift; shorthand resolves to SKILL.md; vault-only sources are data gaps."""
         self.commit_source("hooks/lag.py", "2026-08-04")
         self.commit_source("skills/foo/SKILL.md", "2026-09-20")
         self.write_page("lag.md", "2026-08-01", "[hooks/lag.py]")
@@ -129,10 +172,11 @@ class StaleTests(WikiLintCase):
         (self.vault / "sources/pr_1_x.md").write_text(page("2026-01-01", "[]"))
         self.config(None)
         data = self.run_stale()
-        self.assertEqual(sorted(self.stale_pages(data)), ["short.md", "vaultonly.md"])
+        self.assertEqual(sorted(self.stale_pages(data)), ["lag.md", "short.md"])
         by_name = {Path(s["page"]).name: s for s in data["stale"]}
         self.assertEqual(by_name["short.md"]["basis"], "sources")
-        self.assertEqual(by_name["vaultonly.md"]["basis"], "date-only")
+        self.assertEqual(by_name["lag.md"]["basis"], "sources")
+        self.assertEqual(data["data_gaps"], [{"page": "hooks/vaultonly.md", "source": "", "reason": "no_repo_sources"}])
 
     def test_unresolvable_source_is_a_data_gap_not_unchanged(self) -> None:
         """An entry that resolves nowhere is reported as a gap and does not clear the page."""

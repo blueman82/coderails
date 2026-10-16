@@ -11,6 +11,7 @@ Work from the project's root directory.
 
 1. Resolve the configuration path with `git rev-parse --git-path coderails/test_command`. If that file exists, read and report its current command. Use `request_user_input` to ask whether to keep or replace it. Stop without changing the file if the user keeps it.
 2. Otherwise, detect available test commands with `scripts/detect_test_command.py`, resolved relative to this `SKILL.md` (`../../scripts/detect_test_command.py`) and run from the project root. It owns the ordered marker list and prints JSON `{"command": ..., "candidates": [...]}`.
+   A missing directory exits 2 with `directory_unavailable`; resolve the project root and rerun before selecting or writing a command.
 3. If `command` is set, propose it. If `command` is null and `candidates` has several entries, use `request_user_input` to select one. If `candidates` is empty, ask for a test command.
 4. Run the selected command once from the project root. If it fails, report the failure and do not activate the gate unless the user explicitly chooses to keep that failing command.
 5. Create the resolved path's parent directory if needed and write the selected command as its single line.

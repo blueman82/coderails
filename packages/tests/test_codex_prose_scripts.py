@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -96,6 +97,19 @@ class CodexRunTests(unittest.TestCase):
 
 class CodexQualityTests(unittest.TestCase):
     """quality_feedback consumes --json: a path that spells the clean summary no longer hides a finding."""
+
+    def test_bad_json_external_failure_and_nonzero_clean_claim_are_disclosed(self) -> None:
+        """The maintained consumer validates its input and reports checker failures."""
+        reader = runpy.run_path(str(CODEX / "hooks/scripts/quality_feedback.py"))["finding_lines"]
+        for stdout, code in (
+            ("", 0),
+            ("not-json", 0),
+            ('{"findings": {}}', 0),
+            ('{"scanned": 1, "findings": [], "external_ok": true}', 1),
+            ('{"scanned": 1, "findings": [], "external_ok": false}', 0),
+        ):
+            with self.subTest(stdout=stdout, code=code):
+                self.assertTrue(reader(subprocess.CompletedProcess([], code, stdout, "diagnostic")))
 
     def test_json_and_crafted_filename(self) -> None:
         """The checker's --json names the finding; the hook still emits feedback for `a 0 finding(s).py`."""

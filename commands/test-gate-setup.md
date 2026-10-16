@@ -16,7 +16,8 @@ Set up the test gate hook for the current project. This makes `git commit` autom
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/detect_test_command.py"
    ```
 
-   It prints JSON `{"command": ..., "candidates": [...]}`.
+   It prints JSON `{"command": ..., "candidates": [...]}`. A missing directory exits 2 with
+   `directory_unavailable`; resolve the project root and rerun before selecting or writing a command.
 
 3. If `command` is set, propose it to the user. If `command` is null and `candidates` has several entries, ask which one to use. If `candidates` is empty, ask the user to provide the command.
 

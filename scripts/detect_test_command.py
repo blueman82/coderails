@@ -23,7 +23,8 @@ def npm_has_test(path: Path) -> bool:
     except (OSError, ValueError):
         return False
     scripts = cast("dict[str, Any]", data).get("scripts") if isinstance(data, dict) else None
-    return isinstance(scripts, dict) and bool(cast("dict[str, Any]", scripts).get("test"))
+    command = cast("dict[str, Any]", scripts).get("test") if isinstance(scripts, dict) else None
+    return isinstance(command, str) and bool(command.strip())
 
 
 def make_has_test(path: Path) -> bool:
@@ -57,7 +58,10 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dir", type=Path, default=Path.cwd())
-    print(json.dumps(detect(parser.parse_args(argv).dir)))
+    directory = parser.parse_args(argv).dir
+    if not directory.is_dir():
+        parser.error("directory_unavailable: expected an existing project directory")
+    print(json.dumps(detect(directory)))
     return 0
 
 

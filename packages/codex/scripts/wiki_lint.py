@@ -2,8 +2,8 @@
 """Wiki staleness check: `wiki_lint.py stale --repo R --vault V` prints JSON {stale_days, candidates, stale, data_gaps}.
 
 A page is a candidate when `last_updated` is more than `wiki_stale_days` (typed config, default 30) old. A candidate
-is stale when a resolvable source's last commit date is more than GRACE_DAYS after `last_updated`; a candidate with no
-repo-resolvable source at all is stale on date alone (`basis: date-only`). Sources resolve as the wiki-lint skill says:
+is stale when a resolvable source's last commit date is after `last_updated`; a candidate with no comparable repo
+source is a data gap, never proof of drift. Sources resolve as the wiki-lint skill says:
 `$repo/<entry>`, then `$repo/<entry minus .md>/SKILL.md`, then a vault page (skipped), else unresolvable (a data gap).
 """
 
@@ -20,7 +20,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib.config import config_path, load_config
 
-GRACE_DAYS = 7
 POINT_IN_TIME = {".git", ".obsidian", "assets", "dashboard-runs", "inbox", "investigations", "sources", "templates"}
 SKIP_FILES = {"index.md", "log.md", "AGENTS.md"}
 FRONT = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
@@ -79,7 +78,10 @@ def pages(vault: Path) -> list[Path]:
 def stale_report(repo: Path, vault: Path, today: date) -> dict[str, object]:
     """Apply the staleness rule to every page."""
     values, _ = load_config(config_path(repo))
-    days = int(values.get("wiki_stale_days") or 30)
+    days = values.get("wiki_stale_days")
+    days = 30 if days is None else days
+    if type(days) is not int or days < 0:
+        raise ValueError("wiki_stale_days_invalid: expected a nonnegative integer")
     candidates: list[str] = []
     stale: list[dict[str, object]] = []
     gaps: list[dict[str, str]] = []
@@ -106,11 +108,12 @@ def stale_report(repo: Path, vault: Path, today: date) -> dict[str, object]:
                     gaps.append({"page": name, "source": entry, "reason": "no_commit_date"})
                     continue
                 comparable += 1
-                if found > updated + timedelta(days=GRACE_DAYS):
+                if found > updated:
                     moved.append({"source": relative, "commit_date": found.isoformat()})
-        if moved or not comparable:
-            basis = "sources" if moved else "date-only"
-            stale.append({"page": name, "last_updated": updated.isoformat(), "basis": basis, "moved": moved})
+        if moved:
+            stale.append({"page": name, "last_updated": updated.isoformat(), "basis": "sources", "moved": moved})
+        if not comparable:
+            gaps.append({"page": name, "source": "", "reason": "no_repo_sources"})
     return {"stale_days": days, "candidates": candidates, "stale": stale, "data_gaps": gaps}
 
 
@@ -123,8 +126,15 @@ def main(argv: list[str] | None = None) -> int:
     stale.add_argument("--vault", type=Path, required=True)
     stale.add_argument("--today", default="", help="YYYY-MM-DD override (tests)")
     args = parser.parse_args(argv)
-    today = date.fromisoformat(args.today) if args.today else date.today()
-    print(json.dumps(stale_report(args.repo.resolve(), args.vault.resolve(), today), indent=2))
+    for name in ("repo", "vault"):
+        if not getattr(args, name).is_dir():
+            parser.error(f"{name}_unavailable: expected an existing directory")
+    try:
+        today = date.fromisoformat(args.today) if args.today else date.today()
+        report = stale_report(args.repo.resolve(), args.vault.resolve(), today)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    print(json.dumps(report, indent=2))
     return 0
 
 

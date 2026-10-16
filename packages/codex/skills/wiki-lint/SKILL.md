@@ -74,8 +74,7 @@ hit: `$repo/<entry>`, then `$repo/<entry-without-.md>/SKILL.md` (the `skills/foo
 (another wiki page, skipped, tested by existence); nothing existing is unresolvable. Repo forms are tried before the
 vault because a wiki page that mirrors a repo file has the same path in both trees. For each repo source it compares
 `git log -1 --format=%cs` (commit date, never mtime; an empty result is a gap, not "unchanged") with `last_updated`,
-and counts a source as moved only when its commit date is more than 7 days later (authoring lag, not drift: a bulk
-commit re-dates many files at once). 7 is calibrated against one repo; say in the report which value the pass used.
+and counts a source as moved when its commit date is later than the page date. There is no additional grace period.
 
 Classify each entry of `stale`:
 - `basis: sources` — read each `moved` source's diff over the drifted span before reporting. Find the base commit
@@ -92,13 +91,12 @@ Classify each entry of `stale`:
   does not cover, it is not drift. If it changed something the page states, report a **source-drift** finding naming
   every moved source and its exact commit, so the follow-up is a real `/wiki-ingest` rather than a date edit. Count it
   under **missing cross-references** in Step 5's total; say "source drift" in the prose.
-- `basis: date-only` — no entry resolved to a repo file, so the page was never compared against anything. It **is** a
-  stale finding; say the check was date-only so the finding carries its weaker provenance. Do not bump
-  `last_updated` to close it.
 - A candidate absent from `stale` is not a finding: do not report it and do not bump `last_updated`; a blind bump
   turns "unverified" into "verified" with no verification.
-- Every `data_gaps` entry (unresolvable source, empty commit date, missing `last_updated`) is a **data gap**: name the
+- Every `data_gaps` entry (unresolvable source, empty commit date, missing `last_updated`, `no_repo_sources`) is a **data gap**: name the
   page and entry. Never treat it as unchanged, and never let it clear a page other sources already flagged.
+  Pages without any comparable repo source remain data gaps. This lint is advisory and trusts the supplied page dates,
+  sources and configuration. A missing repo or vault is reported unavailable with exit 2; repair the input and rerun.
 
 **Orphan pages**: Zero inbound links (exclude index.md, log.md, AGENTS.md).
 

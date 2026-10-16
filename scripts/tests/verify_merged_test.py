@@ -96,6 +96,18 @@ class VerifyMergedCase(unittest.TestCase):
 class VerifyMergedTests(VerifyMergedCase):
     """Both merge shapes verify by content; absence and wrong state do not."""
 
+    def test_missing_base_parent_is_not_evidence_of_absent_content(self) -> None:
+        """A shallow clone cannot prove a needle was absent in an unavailable first parent."""
+        commit = self.land(squash=True)
+        shallow = self.work.parent / "shallow"
+        git(self.work.parent, "clone", "-q", "--depth", "1", (self.work.parent / "origin.git").as_uri(), str(shallow))
+        self.work = shallow
+        code, verdict = self.verify(
+            commit, "MERGED", "2026-10-01T00:00:00Z", "--grep", "unique-change-token", "--path", "feat.txt"
+        )
+        self.assertEqual((code, verdict["confirmed"]), (1, False))
+        self.assertIn("content_check_failed", verdict["reasons"])
+
     def test_merge_commit_verifies_by_content_and_by_ancestry(self) -> None:
         """A true merge commit confirms with a grep; with no grep the two-parent ancestry is trusted."""
         merge_commit = self.land(squash=False)

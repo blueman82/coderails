@@ -72,7 +72,9 @@ def verify(repo: Path, number: str, needle: str, path: str) -> dict[str, object]
         verdict["content_found"] = found.returncode == 0
         # the needle must be new in this PR: present at the base parent means it proves nothing about the change
         before = run(repo, "git", "grep", "-q", "-F", "-e", needle, f"{oid}^1", *(["--", path] if path else []))
-        if found.returncode == 0 and before.returncode == 0:
+        if found.returncode not in (0, 1) or before.returncode not in (0, 1):
+            reasons.append("content_check_failed")
+        elif found.returncode == 0 and before.returncode == 0:
             reasons.append("content_preexisting")
         elif found.returncode == 0:
             verdict.update(confirmed=True, method="content")
