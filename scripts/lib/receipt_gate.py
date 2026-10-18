@@ -72,6 +72,8 @@ def check_and_consume(
         verdict = permits(session, name, now)
         if not verdict["allow"]:
             return name, str(verdict["reason"])
+        if not verdict.get("requires_approval", False):
+            return name, "approval_requirement_missing"
     unbound = next((name for name, proposed in proposals if proposed["artifact_sha"] is None), None)
     if unbound:
         return unbound, "binding_unknown"  # unknowable repository+ref+sha fails closed
@@ -131,6 +133,8 @@ def _claim_merge(session: str, number: str, cwd: str, now: datetime) -> str:
     verdict = permits(session, "merge", now)
     if not verdict["allow"]:
         return str(verdict["reason"])
+    if not verdict.get("requires_approval", False):
+        return "approval_requirement_missing"
     bind = binding("merge", f"python3 scripts/merge.py {number}", cwd)  # merge.py pins the head sha it verified
     if bind is None:
         return "binding_unknown"

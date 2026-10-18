@@ -374,6 +374,27 @@ class SeamSpyTests(unittest.TestCase):
         self.assertIn("authority_denied", str(caught.exception))
         self.assertEqual(spy.call_args.args[:2], ("spy-session", "merge"))
 
+    def test_the_gate_refuses_when_permits_omits_required_approval(self) -> None:
+        """A guarded action cannot proceed if its permit verdict omits the approval requirement."""
+        verdict = {"allow": True, "reason": "ok", "requires_approval": False, "authority_id": "auth-1"}
+        with (
+            mock.patch.dict(os.environ, {"CLAUDE_SESSION_ID": "spy-session"}),
+            mock.patch.object(receipt_gate, "permits", return_value=verdict),
+            mock.patch.object(receipt_gate, "append_row"),
+            mock.patch.object(receipt_gate, "resolve_mode", return_value=("enforce", False)),
+            self.assertRaises(receipt_gate.ReceiptRefusedError) as caught,
+        ):  # fmt: skip
+            refusal = receipt_gate.check_and_consume(
+                "spy-session",
+                [("merge", {})],
+                datetime.now(timezone.utc),
+                None,
+                None,
+            )
+            self.assertEqual(refusal, ("merge", "approval_requirement_missing"))
+            receipt_gate.require_merge_receipt("7", "/nowhere")
+        self.assertIn("approval_requirement_missing", str(caught.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -56,6 +56,7 @@ def trust_summary(by_reason: dict[str, int]) -> dict[str, int]:
 
 GATE_CODES = (
     "authority_denied",
+    "approval_requirement_missing",
     "max_prs_exceeded",
     "action_authority_bad_mode",
     "authority_denied_destructive_shell",

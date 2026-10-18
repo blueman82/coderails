@@ -119,12 +119,14 @@ class PermitsTests(unittest.TestCase):
         aa = "action_authority"
         got = gate_summary({
             f"{aa}/denied/denied_authority_denied": 2, f"{aa}/denied/merge_py_authority_denied": 1,
+            f"{aa}/denied/approval_requirement_missing": 1,
             f"{aa}/denied/denied_max_prs_exceeded": 1, f"{aa}/advisory/action_authority_bad_mode": 3,
             f"{aa}/denied/authority_denied_destructive_shell": 1, f"{aa}/denied/merge_py_no_receipt": 4,
             f"{aa}/allowed/merge_py_receipt_executed": 5, "capability/denied/authority_denied": 9,
         })  # fmt: skip
         self.assertEqual(got, {
-            "authority_denied": 3, "max_prs_exceeded": 1, "action_authority_bad_mode": 3,
+            "authority_denied": 3, "approval_requirement_missing": 1, "max_prs_exceeded": 1,
+            "action_authority_bad_mode": 3,
             "authority_denied_destructive_shell": 1, "no_receipt": 4, "merge_py_receipt_executed": 5,
         })  # fmt: skip
 
