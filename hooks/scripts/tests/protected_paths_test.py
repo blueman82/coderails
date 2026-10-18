@@ -77,6 +77,9 @@ class PolicyDrivenHookTests(unittest.TestCase):
         self.repo.mkdir()
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
         subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/main"], check=True)
+        marker = self.repo / ".claude-plugin/plugin.json"
+        marker.parent.mkdir()
+        marker.write_text("{}", encoding="utf-8")
 
     def edit_policy(self, key: str, value: list[str]) -> None:
         """Replace one list in the private policy copy."""
@@ -148,6 +151,10 @@ class PolicyDrivenHookTests(unittest.TestCase):
         ):
             with self.subTest(target=target):
                 self.assertIn("source file", self.edit(target))
+
+    def test_normalized_plugin_source_alias_is_denied_on_main(self) -> None:
+        """Dot components cannot turn a protected skill path into an allowed document."""
+        self.assertIn("source file", self.edit("./skills/canary/../canary/SKILL.md"))
 
     def test_edit_on_main_follows_doc_extensions(self) -> None:
         """Edit of x.rs is denied until .rs is declared a document extension, and .md loses its exemption on removal."""

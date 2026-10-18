@@ -302,6 +302,9 @@ class ProtectedPathsTests(CodexHookCase):
         shutil.copytree(PACKAGE / "policy", self.plugin / "policy")
         self.policy = self.plugin / "policy/protected_paths.json"
         subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/main"], check=True)
+        marker = self.repo / ".codex-plugin/plugin.json"
+        marker.parent.mkdir()
+        marker.write_text("{}", encoding="utf-8")
 
     def edit_policy(self, key: str, change: Callable[[list[str]], list[str]]) -> None:
         """Replace one list in the private policy copy."""
@@ -366,6 +369,10 @@ class ProtectedPathsTests(CodexHookCase):
         ):
             with self.subTest(target=target):
                 self.assertIn("Blocked edit", self.patch(target))
+
+    def test_normalized_plugin_source_alias_is_denied_on_main(self) -> None:
+        """Dot components cannot turn a protected skill path into an allowed document."""
+        self.assertIn("Blocked edit", self.patch("./skills/canary/../canary/SKILL.md"))
 
     def test_deleted_policy_fails_closed_on_main(self) -> None:
         """A missing file denies with protected_paths_unreadable on main and not on a feature branch."""
