@@ -78,6 +78,85 @@ class GraphCollectionTests(unittest.TestCase):
                 )
         self.assertEqual({path: path.read_bytes() for path in before}, before)
 
+    def test_explicit_links_and_disconnected_graph_are_returned_without_writes(self) -> None:
+        """The collection index links graph records without changing native states."""
+        (self.root / "collection.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "graphs": [
+                        {"key": "first", "path": "first/progress.json", "loop_id": "first", "links": ["second"]},
+                        {"key": "second", "path": "second/progress.json", "loop_id": "second", "links": []},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        before = {path: path.read_bytes() for path in self.root.rglob("progress.json")}
+        for script in PROVIDERS:
+            with self.subTest(provider=script.relative_to(ROOT)):
+                result = self.run_collection(script)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                graphs = json.loads(result.stdout)["graphs"]
+                self.assertEqual(graphs[0]["links"], ["second"])
+                self.assertEqual(graphs[1]["links"], [])
+                self.assertEqual(json.loads(result.stdout)["unresolved_targets"], [])
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+
+    def test_missing_link_target_is_reported(self) -> None:
+        """Unknown link keys fail clearly instead of producing guessed graph links."""
+        (self.root / "collection.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "graphs": [
+                        {"key": "first", "path": "first/progress.json", "loop_id": "first", "links": ["missing"]},
+                        {"key": "second", "path": "second/progress.json", "loop_id": "second", "links": []},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        for script in PROVIDERS:
+            with self.subTest(provider=script.relative_to(ROOT)):
+                result = self.run_collection(script)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("unknown graph link target 'missing'", result.stderr)
+
+    def test_duplicate_collection_keys_are_refused(self) -> None:
+        """Duplicate graph keys are ambiguous and rejected by both provider CLIs."""
+        row: dict[str, Any] = {"key": "same", "path": "first/progress.json", "loop_id": "first", "links": []}
+        (self.root / "collection.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "graphs": [row, {**row, "path": "second/progress.json", "loop_id": "second"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        for script in PROVIDERS:
+            with self.subTest(provider=script.relative_to(ROOT)):
+                result = self.run_collection(script)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("duplicate graph key 'same'", result.stderr)
+
+    def test_duplicate_collection_paths_are_refused(self) -> None:
+        """One state file cannot be registered under two collection keys."""
+        rows: list[dict[str, Any]] = [
+            {"key": "one", "path": "first/progress.json", "loop_id": "first", "links": []},
+            {"key": "two", "path": "first/progress.json", "loop_id": "first", "links": []},
+        ]
+        (self.root / "collection.json").write_text(
+            json.dumps({"schema_version": 1, "graphs": rows}),
+            encoding="utf-8",
+        )
+        for script in PROVIDERS:
+            with self.subTest(provider=script.relative_to(ROOT)):
+                result = self.run_collection(script)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("duplicate graph path 'first/progress.json'", result.stderr)
+
     def test_invalid_graph_refuses_collection(self) -> None:
         """Malformed graphs are reported as errors instead of disappearing."""
         (self.root / "broken").mkdir()
