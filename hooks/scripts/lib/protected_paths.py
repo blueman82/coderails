@@ -66,6 +66,7 @@ def is_policy(path: str) -> bool:
 
 def is_plugin_source(path: str, data: dict[str, list[str]]) -> bool:
     """Whether the path is a plugin instruction file (skills/*/SKILL.md, commands/*.md by default)."""
+    path = os.path.normpath(path)
     return any(re.search(rf"(^|/){glob_regex(g)}$", path) for g in data["plugin_source_globs"])
 
 
