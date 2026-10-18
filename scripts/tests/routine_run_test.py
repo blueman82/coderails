@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -52,6 +53,16 @@ class RoutineCase(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         self.work, self.origin, self.bin = root / "work", root / "origin.git", root / "bin"
+        self.plugin = root / "plugin"
+        shutil.copytree(
+            REPO / "scripts",
+            self.plugin / "scripts",
+            ignore=shutil.ignore_patterns("tests", "__pycache__"),
+        )
+        shutil.copytree(REPO / "routines", self.plugin / "routines")
+        shutil.copytree(REPO / "policy", self.plugin / "policy")
+        shutil.copytree(REPO / "hooks" / "scripts" / "lib", self.plugin / "hooks" / "scripts" / "lib")
+        self.script = self.plugin / "scripts" / "routine_run.py"
         git(root, "init", "-q", "--bare", "-b", "main", str(self.origin))
         git(root, "clone", "-q", str(self.origin), str(self.work))
         for name, text in self.base_files.items():
@@ -67,10 +78,15 @@ class RoutineCase(unittest.TestCase):
         shim.write_text(GH_SHIM)
         shim.chmod(0o755)
         for name in ("push", "post_review", "post_evals", "merge"):
-            gate = self.bin / f"{name}.py"
-            gate.write_text('#!/bin/sh\necho ran >> "$(dirname "$0")/ran"\nexit ${1:-0}\n')
+            gate = self.plugin / "scripts" / f"{name}.py"
+            gate.write_text(
+                "#!/usr/bin/env python3\nimport pathlib, sys\n"
+                "(pathlib.Path(__file__).parent / 'ran').open('a').write('ran\\n')\n"
+                "raise SystemExit(int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 0)\n"
+            )
             gate.chmod(0o755)
-        self.ran = self.bin / "ran"
+        self.ran = self.plugin / "scripts" / "ran"
+        self.remote_branch_pushed = False
         self.gh_log = root / "gh.log"
         self.log = root / "logs" / "run.log"
         self.jsonl = self.log.with_suffix(".jsonl")
@@ -86,6 +102,7 @@ class RoutineCase(unittest.TestCase):
         git(self.work, "add", "-A")
         git(self.work, "commit", "-qm", message)
         git(self.work, "push", "-q", "origin", BRANCH)
+        self.remote_branch_pushed = True
 
     def run_tool(self, *args: str) -> subprocess.CompletedProcess[str]:
         """Run routine_run.py for this routine in the work tree with the shim on PATH."""
@@ -106,7 +123,7 @@ class RoutineCase(unittest.TestCase):
         """Perform a stage: gates through run-gate with `true`, the rest through stage."""
         gates = ("push", *LATER)
         if name in gates:
-            return self.run_tool("run-gate", name, "--", str(self.bin / f"{name}.py"))
+            return self.run_tool("run-gate", name, "--", str(self.plugin / "scripts" / f"{name}.py"))
         return self.run_tool("stage", name)
 
     def advance_to_manifest_check(self) -> subprocess.CompletedProcess[str]:
@@ -117,9 +134,10 @@ class RoutineCase(unittest.TestCase):
         return self.run_tool("stage", "manifest_check")
 
     def assert_cleaned_once(self) -> None:
-        """PR closed exactly once, remote and local branch gone, and no run_ok row."""
+        """PR close and local cleanup run once; remote branch stays and no run_ok row is emitted."""
         self.assertEqual([c for c in self.gh_calls() if c.startswith("pr close")], ["pr close 7"])
-        self.assertEqual(git(self.work, "ls-remote", "--heads", "origin", BRANCH).strip(), "")
+        remote = git(self.work, "ls-remote", "--heads", "origin", BRANCH).strip()
+        self.assertEqual(bool(remote), self.remote_branch_pushed)
         self.assertEqual(git(self.work, "branch", "--list", BRANCH).strip(), "")
         self.assertNotIn("run_ok", [r["outcome"] for r in self.rows()])
 
@@ -159,7 +177,7 @@ class DocsSyncRunTests(RoutineCase):
         self.assertTrue(last_marker_is_green(self.log))
 
     def test_script_edit_aborts_once_with_cleanup(self) -> None:
-        """A diff touching scripts/x.py ends the run run_abort; PR, remote and local branch cleanup run once."""
+        """A diff touching scripts/x.py aborts, closes the PR and cleans up the local branch once."""
         self.write("scripts/x.py", "print(1)\n")
         self.commit()
         result = self.advance_to_manifest_check()
@@ -186,7 +204,7 @@ class DocsSyncRunTests(RoutineCase):
         self.assertEqual(self.advance_to_manifest_check().returncode, 0)
         for name in STAGES[4:] + LATER[:-1]:
             self.assertEqual(self.stage(name).returncode, 0, name)
-        result = self.run_tool("run-gate", "merge", "--", str(self.bin / "merge.py"), "1")
+        result = self.run_tool("run-gate", "merge", "--", str(self.plugin / "scripts/merge.py"), "1")
         self.assertNotEqual(result.returncode, 0)
         last = self.rows()[-1]
         self.assertEqual((last["outcome"], last["reason_code"], last["stage"]), ("run_refused", "merge", "merge"))
@@ -212,13 +230,14 @@ class DocsSyncRunTests(RoutineCase):
         self.assertEqual(self.run_tool("finish", "ok").returncode, 2)
         self.assertNotIn("run_ok", [r["outcome"] for r in self.rows()])
 
-    def test_cleanup_never_deletes_the_default_branch(self) -> None:
-        """An abort while on main performs no branch deletion."""
-        git(self.work, "switch", "-q", "main")
+    def test_cleanup_refuses_after_branch_switch(self) -> None:
+        """An abort from a different branch leaves the run branch and PR untouched."""
         self.assertEqual(self.run_tool("begin").returncode, 0)
         self.assertEqual(self.run_tool("stage", "fetch_branch").returncode, 0)
-        self.run_tool("abort", "audit_failed")
+        git(self.work, "switch", "-q", "main")
+        self.assertEqual(self.run_tool("abort", "audit_failed").returncode, 0)
         self.assertNotIn("pr close 7", self.gh_calls())
+        self.assertNotEqual(git(self.work, "branch", "--list", BRANCH).strip(), "")
         self.assertNotEqual(git(self.work, "ls-remote", "--heads", "origin", "main").strip(), "")
 
     def test_run_gate_pins_the_script_per_stage(self) -> None:
@@ -226,7 +245,12 @@ class DocsSyncRunTests(RoutineCase):
         self.write("docs/a.md", "x\n")
         self.commit()
         self.assertEqual(self.advance_to_manifest_check().returncode, 0)
-        self.assertEqual(self.run_tool("run-gate", "push", "--", "true").returncode, 2)
+        foreign = self.bin / "push.py"
+        foreign.write_text("#!/bin/sh\nexit 0\n")
+        foreign.chmod(0o755)
+        result = self.run_tool("run-gate", "push", "--", str(foreign))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("gate_argv_not_allowed", result.stderr)
         self.assertEqual(self.rows()[-1]["reason_code"], "gate_argv_not_allowed")
         self.assert_cleaned_once()
 
@@ -239,12 +263,14 @@ class DocsSyncRunTests(RoutineCase):
         self.assertEqual(self.rows()[-1]["reason_code"], "gate_argv_not_allowed")
         self.assertFalse(last_marker_is_green(self.log))
 
-    def test_python_interpreter_form_of_the_pinned_script_is_allowed(self) -> None:
-        """The SKILL spells gates as python3 PATH/push.py; that form passes the pin."""
+    def test_documented_python3_form_of_the_pinned_script_is_allowed(self) -> None:
+        """The configured plugin script passes under the documented python3 command."""
         self.write("docs/a.md", "x\n")
         self.commit()
         self.assertEqual(self.advance_to_manifest_check().returncode, 0)
-        self.assertEqual(self.run_tool("run-gate", "push", "--", "python3", "/p/push.py", "--version").returncode, 1)
+        script = str(self.plugin / "scripts/push.py")
+        result = self.run_tool("run-gate", "push", "--", "python3", script)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_uncommitted_edit_fails_manifest_check(self) -> None:
         """An edit left uncommitted at manifest_check is not an empty diff."""
@@ -262,7 +288,10 @@ class DocsSyncRunTests(RoutineCase):
         self.assertEqual(self.advance_to_manifest_check().returncode, 0)
         self.write("scripts/x.py", "print(1)\n")
         self.commit("late edit")
-        self.assertEqual(self.run_tool("run-gate", "push", "--", str(self.bin / "push.py")).returncode, 1)
+        self.assertEqual(
+            self.run_tool("run-gate", "push", "--", str(self.plugin / "scripts/push.py")).returncode,
+            1,
+        )
         self.assertEqual(self.rows()[-1]["reason_code"], "docs_sync_deny")
         self.assertFalse(self.ran.exists())
         self.assert_cleaned_once()
@@ -293,17 +322,6 @@ class DocsSyncRunTests(RoutineCase):
         state = json.loads(self.log.with_suffix(".state.json").read_text())
         self.assertEqual((result.returncode, state["next"], self.jsonl.read_bytes()), (2, 0, before))
         self.assertIn("log_unwritable", result.stderr)
-
-    def test_missing_gate_records_refusal_and_cleanup_once(self) -> None:
-        """A pinned executable that cannot spawn is a terminal gate refusal without a traceback."""
-        self.assertEqual(self.advance_to_manifest_check().returncode, 0)
-        result = self.run_tool("run-gate", "push", "--", str(self.bin / "missing/push.py"))
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertNotIn("Traceback", result.stderr)
-        self.assertEqual((self.rows()[-1]["outcome"], self.rows()[-1]["reason_code"]), ("run_refused", "push"))
-        self.assert_cleaned_once()
-        self.assertEqual(self.run_tool("abort", "audit_failed").returncode, 2)
-        self.assert_cleaned_once()
 
     def test_foreign_routine_cannot_finish_another_routines_state(self) -> None:
         """Sharing a log path does not authorize the other routine to finish or replace active state."""

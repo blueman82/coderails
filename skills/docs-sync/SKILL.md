@@ -129,9 +129,9 @@ Use `RR abort audit_failed` for an audit that cannot continue.
 
 Cleanup (on `abort`, `refuse`, a manifest violation or a refused gate) runs
 once, in code, with `git` and `gh` only: close the PR if one was opened,
-delete the remote branch and the local branch, never the default branch.
-No file is removed with `rm`. Do not leave orphaned branches, PRs, or
-partial state.
+delete the current local branch only while still on the branch recorded at
+`fetch_branch`. The remote branch is left intact. No file is removed with
+`rm`.
 
 ## 4. Run log and failure visibility
 

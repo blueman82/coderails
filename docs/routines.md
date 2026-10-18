@@ -132,7 +132,8 @@ human step; configured publication/authority/integrity checks can still refuse i
 The manifest uses `git diff origin/main...HEAD --name-status`: three dots avoid
 treating a sibling PR's intervening merge as this branch's changes. Changes must
 be git-tracked `.md` files. Any other path (hooks, scripts, settings or code)
-aborts with PR/remote/local branch cleanup.
+aborts by closing any opened PR and cleaning up the current local branch; the
+remote branch stays intact.
 
 The self-governance deny-list also rejects `skills/**/SKILL.md` (including this
 routine), `AGENTS.md`, `CLAUDE.md`, `docs/routines.md` and `.claude/**`.
@@ -205,17 +206,15 @@ Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
 - `stage manifest_check` executes `scripts/diff_manifest.py --policy <spec policy>`.
   Violations abort; dirty/untracked work fails with `dirty_worktree`.
   `run-gate push` rechecks the manifest before executing its command.
-- Gate argv must match the spec's `gates` script basename: `push.py`,
-  `post_review.py post`, `post_evals.py post` or `merge.py`, directly or via
-  `python3 PATH/script`. Other argv/non-gate stages abort
-  `gate_argv_not_allowed`. This basename pin cannot defeat a deliberate fake
-  script with the same name.
+- Gate argv must resolve to the configured script under the provider's shipped
+  `scripts/` directory, directly or through the active Python interpreter.
+  Same-basename files elsewhere are refused with `gate_argv_not_allowed`.
 - A nonzero gate exit becomes `run_refused` for that gate, including a command
   that cannot spawn (`gate_spawn_failed` on stderr).
-- `abort`, `refuse` and failed checks clean up once using Git/gh: close PR,
-  delete remote/local branch, never the default branch. No `rm`.
-  Cleanup uses the branch recorded at `fetch_branch`, with no naming-prefix
-  check. A wrong checkout there targets that branch. Failed cleanup prints
+- `abort`, `refuse` and failed checks clean up once using Git/gh: close the PR
+  and delete the current local branch, never a remote or default branch. No
+  `rm`. Cleanup proceeds only while still on the branch recorded at
+  `fetch_branch`; a changed checkout is left untouched. Failed cleanup prints
   `cleanup_failed: <step>`; a dirty tree is not force-switched.
 - `begin` refuses an open run even across midnight, or a same-day abort/refusal,
   unless `--new`. Explicit replacement first closes an open previous id/log

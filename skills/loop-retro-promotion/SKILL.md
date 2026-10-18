@@ -131,8 +131,9 @@ enforce it (a call out of order aborts the run: `stage_out_of_order`).
 it records `run_refused` for that gate, cleans up and never emits `run_ok`.
 Never wait, poll or retry for a gate, and never invent a marker (`RR abort
 CODE` / `RR refuse GATE` accept only the spec's closed reason codes). Cleanup
-runs once, in code, with `git` and `gh` only: close the PR, delete the remote
-and local branch, never the default branch.
+runs once, in code, with `git` and `gh` only: close the PR and delete the
+current local branch only while still on the branch recorded at
+`fetch_branch`. The remote branch is left intact.
 
 ## 5. Prohibitions
 

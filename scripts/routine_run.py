@@ -7,9 +7,9 @@
 `begin` writes the state file and a provisional run_incomplete row. `stage` and `run-gate` enforce the spec's stage
 order (an out-of-order call aborts the run: stage_out_of_order). `stage manifest_check` runs diff_manifest.py with the
 spec's policy and aborts on any violation. `run-gate` runs a gate command and maps any non-zero exit to run_refused for
-that gate. `abort` and `refuse` end the run and clean up with git and gh only (close the PR, delete the remote and the
-local branch, never the default branch), once. `finish` emits run_ok. Exit: 0 ok, 1 the run ended abort/refused,
-2 a call refused. Events go through routine_log.emit; the human log is the JSONL path with a .log suffix.
+that gate. `abort` and `refuse` end the run and clean up with git and gh only (close the PR and delete the current
+local branch, never the remote or default branch), once. `finish` emits run_ok. Exit: 0 ok; 1 abort/refused; 2 refused.
+Events go through routine_log.emit; the human log is the JSONL path with a .log suffix.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import shutil
 import subprocess
 import sys
 import uuid
@@ -99,21 +100,22 @@ class Run:
         return ""
 
     def cleanup(self) -> None:
-        """Close the PR and delete the remote and local branch via gh and git; best effort, each step reported."""
+        """Close the PR and delete only this run's current local branch; report failures."""
         branch = str(self.state.get("branch", ""))
         default = git.main()
-        if not branch or branch in (default, "main", "master"):
+        if not branch or branch != git.branch() or branch in (default, "main", "master"):
             return
         steps = cast(list[str], self.spec.get("cleanup", []))
         if "close_pr" in steps:
             listing = ("gh", "pr", "list", "--head", branch, "--state", "open")
             for number in git.run(*listing, "--json", "number", "--jq", ".[].number").stdout.split():
                 report("close_pr", git.run("gh", "pr", "close", number))
-        if "delete_remote_branch" in steps and git.output("git", "ls-remote", "--heads", "origin", branch):
-            report("delete_remote_branch", git.run("git", "push", "origin", "--delete", branch))
         if "delete_local_branch" in steps:
             if git.branch() == branch:
-                git.run("git", "switch", "--detach", f"origin/{default}")
+                switched = git.run("git", "switch", "--detach", f"origin/{default}")
+                if switched.returncode:
+                    report("switch_to_default", switched)
+                    return
             report("delete_local_branch", git.run("git", "branch", "-D", branch))
 
     def next_stage(self) -> str:
@@ -217,11 +219,20 @@ def cmd_stage(run: Run, args: argparse.Namespace) -> int:
 
 
 def gate_allowed(script: str, argv: list[str]) -> bool:
-    """True when argv runs the stage's pinned script directly or as `python* SCRIPT ...`."""
-    if not script:
+    """Accept only the shipped gate script, invoked directly or by this Python interpreter."""
+    expected = (ROOT / "scripts" / script).resolve()
+    if not script or not expected.is_file() or not argv:
         return False
-    names = [Path(a).name for a in argv[:2]]
-    return names[0] == script or (names[0].startswith("python") and len(names) > 1 and names[1] == script)
+    command = Path(argv[0])
+    executable = Path(shutil.which(argv[0]) or argv[0]).resolve()
+    if command.name == script and executable == expected:
+        return True
+    interpreter = Path(shutil.which("python3") or "").resolve()
+    return (
+        executable in {Path(sys.executable).resolve(), interpreter}
+        and len(argv) > 1
+        and Path(argv[1]).resolve() == expected
+    )
 
 
 def cmd_run_gate(run: Run, args: argparse.Namespace) -> int:

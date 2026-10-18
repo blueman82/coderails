@@ -139,6 +139,7 @@ class CodexBehaviourTests(unittest.TestCase):
         git(work, "fetch", "-q", "origin")
         git(work, "remote", "set-head", "origin", "main")
         git(work, "switch", "-q", "-c", "docs/fix")
+        git(work, "push", "-q", "-u", "origin", "docs/fix")
         (work / "scripts").mkdir()
         (work / "scripts/x.py").write_text("print(1)\n")
         git(work, "add", ".")
@@ -151,8 +152,33 @@ class CodexBehaviourTests(unittest.TestCase):
         last = json.loads(self.log.with_suffix(".jsonl").read_text().splitlines()[-1])
         self.assertEqual((last["outcome"], last["reason_code"]), ("run_abort", "docs_sync_deny"))
         self.assertEqual((self.root / "gh.log").read_text().count("pr close 7"), 1)
-        self.assertEqual(git(work, "ls-remote", "--heads", "origin", "docs/fix").strip(), "")
+        self.assertNotEqual(git(work, "ls-remote", "--heads", "origin", "docs/fix").strip(), "")
         self.assertIn("abort=docs_sync_deny", self.log.read_text().splitlines()[-1])
+
+    def test_same_basename_gate_outside_plugin_is_refused(self) -> None:
+        """A same-named script from /tmp cannot stand in for the shipped push gate."""
+        origin, work = self.root / "origin.git", self.root / "work"
+        git(self.root, "init", "-q", "--bare", "-b", "main", str(origin))
+        git(self.root, "clone", "-q", str(origin), str(work))
+        (work / "README.md").write_text("a\n")
+        git(work, "add", ".")
+        git(work, "commit", "-qm", "base")
+        git(work, "push", "-q", "origin", "HEAD:main")
+        git(work, "fetch", "-q", "origin")
+        git(work, "remote", "set-head", "origin", "main")
+        git(work, "switch", "-q", "-c", "docs/fix")
+        git(work, "push", "-q", "-u", "origin", "docs/fix")
+        self.assertEqual(self.run_tool(work, "begin").returncode, 0)
+        for stage in ("fetch_branch", "evals_frozen", "edit_made", "manifest_check"):
+            self.assertEqual(self.run_tool(work, "stage", stage).returncode, 0, stage)
+        foreign = self.root / "push.py"
+        foreign.write_text("#!/bin/sh\nexit 0\n")
+        foreign.chmod(0o755)
+        result = self.run_tool(work, "run-gate", "push", "--", str(foreign))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        last = json.loads(self.log.with_suffix(".jsonl").read_text().splitlines()[-1])
+        self.assertEqual((last["outcome"], last["reason_code"]), ("run_abort", "gate_argv_not_allowed"))
+        self.assertNotEqual(git(work, "ls-remote", "--heads", "origin", "docs/fix").strip(), "")
 
 
 if __name__ == "__main__":

@@ -78,7 +78,7 @@ class DocsSyncTests(unittest.TestCase):
                 self.assertEqual(spec["stages"], STAGES)
                 self.assertEqual(spec["policy"], f"policy/{policy}.policy.json")
                 self.assertTrue((ROOT / spec["policy"]).is_file())
-                self.assertEqual(spec["cleanup"], ["close_pr", "delete_remote_branch", "delete_local_branch"])
+                self.assertEqual(spec["cleanup"], ["close_pr", "delete_local_branch"])
                 text = (ROOT / f"skills/{routine}/SKILL.md").read_text()
                 self.assertEqual(text.count("RR run-gate merge --"), 1, "the chain appears once")
                 self.assertNotIn("/coderails:post-evals", text, "the old prose chain is gone")
