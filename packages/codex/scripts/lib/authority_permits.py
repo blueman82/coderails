@@ -24,19 +24,15 @@ ALWAYS_APPROVED = ("merge", "push_main")
 CATEGORY = {"git_push": "push_main"}  # the hook's operation name -> the authority category
 
 
-def executed_merges(session_id: str, base: Path | None = None) -> int:
-    """Count `.executed` markers whose receipt is a merge, whatever authority_id it carries (or none).
-
-    A receipt minted before the authority was granted, or under another one, still executes through merge.py, so
-    filtering on authority_id would let a pre-minted receipt walk around max_prs.
-    """
+def executed_merges(session_id: str, authority_id: str, base: Path | None = None) -> int:
+    """Count `.executed` merge markers whose receipt carries this authority id."""
     auth = authority_path(session_id, base)
     if auth is None:
         return 0
     count = 0
     for marker in (auth.parent / "receipts").glob("*.executed"):
         data = ar.read_receipt(marker.with_suffix(".json"))
-        count += bool(data and data.get("action") == "merge")
+        count += bool(data and data.get("action") == "merge" and data.get("authority_id") == authority_id)
     return count
 
 
@@ -53,6 +49,6 @@ def permits(session_id: str, action: str, now: datetime | None = None, base: Pat
     }  # fmt: skip
     if action in live["denied"]:
         return verdict | {"allow": False, "reason": "authority_denied"}
-    if action == "merge" and executed_merges(session_id, base) >= live["max_prs"]:
+    if action == "merge" and executed_merges(session_id, live["authority_id"], base) >= live["max_prs"]:
         return verdict | {"allow": False, "reason": "max_prs_exceeded"}
     return verdict

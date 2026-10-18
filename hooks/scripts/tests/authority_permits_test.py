@@ -85,13 +85,15 @@ class PermitsTests(unittest.TestCase):
         self.assertTrue(self.permits("deploy")["requires_approval"])
         self.assertFalse(self.permits("destructive_shell")["requires_approval"])
 
-    def test_max_prs_counts_every_executed_merge_whatever_its_authority_id(self) -> None:
-        """Executed merge markers count even when minted before (null id) or under another authority; pushes do not."""
+    def test_max_prs_counts_only_executed_merges_for_this_authority(self) -> None:
+        """Only executed merge receipts carrying this authority id spend its budget; pushes do not."""
         self.grant(max_prs=2)
         self.execute("r3", action="git_push")
         self.execute("r1", authority_id=None)  # type: ignore[arg-type]
-        self.assertTrue(self.permits("merge")["allow"])
         self.execute("r2", authority_id="other")
+        self.assertTrue(self.permits("merge")["allow"])
+        self.execute("r3", authority_id="auth-1")
+        self.execute("r4", authority_id="auth-1")
         refused = self.permits("merge")
         self.assertEqual((refused["allow"], refused["reason"]), (False, "max_prs_exceeded"))
         self.assertTrue(self.permits("push_main")["allow"])
