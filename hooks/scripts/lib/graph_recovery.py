@@ -267,3 +267,30 @@ def summarize(state: dict[str, Any]) -> dict[str, Any]:
         "ready": ready,
         "pending": pending,
     }
+
+
+def collection(root: Path) -> dict[str, Any]:
+    """List validated graph states beneath a directory without changing them."""
+    root = root.resolve()
+    if not root.is_dir():
+        raise ValueError("graph collection root must be a directory")
+    graphs: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("progress.json")):
+        if path.is_symlink() or not path.resolve().is_relative_to(root):
+            raise ValueError(f"graph state escapes collection root: {path}")
+        state = load(path)
+        graph = state["graph"]
+        graphs.append(
+            {
+                "path": path.relative_to(root).as_posix(),
+                "loop_id": state["loop_id"],
+                "session_id": state["session_id"],
+                "revision": state["revision"],
+                "status": state["status"],
+                "nodes": [
+                    {"id": node_id, "name": node["label"], "status": node["status"]}
+                    for node_id, node in sorted(graph["nodes"].items())
+                ],
+            }
+        )
+    return {"graphs": graphs}

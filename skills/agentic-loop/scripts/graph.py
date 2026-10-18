@@ -25,6 +25,7 @@ def parser() -> argparse.ArgumentParser:
         "add-unit",
         "inspect",
         "summarize",
+        "collection",
         "recover-wave",
         "plan",
         "begin-wave",
@@ -161,6 +162,8 @@ def main() -> int:
             }
         elif args.command == "summarize":
             output = graph_recovery.summarize(load(args.state))
+        elif args.command == "collection":
+            output = graph_recovery.collection(args.state)
         elif args.command == "recover-wave":
             output = dispatch.recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
         elif args.command == "plan":

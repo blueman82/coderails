@@ -13,6 +13,7 @@ from typing import Any, cast
 
 from graph_data import event_payload, read_records
 from graph_identity import GraphError, next_attempt, task_name
+from graph_io import load as _load
 from graph_transcript import child_read_records, parent_indexes, refused_launches, thread_transcript
 
 
@@ -23,6 +24,33 @@ class RecoveryRefusedError(GraphError):
         """Keep the closed-enum code, the implicated nodes, the refused attempt (if known) and the bare message."""
         super().__init__(f"{message} [reason_code={reason_code}]")
         self.reason_code, self.message, self.nodes, self.attempt = reason_code, message, nodes, attempt
+
+
+def collection(root: Path) -> dict[str, Any]:
+    """List validated graph states beneath a directory without changing them."""
+    root = root.resolve()
+    if not root.is_dir():
+        raise GraphError("graph collection root must be a directory")
+    graphs: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("progress.json")):
+        if path.is_symlink() or not path.resolve().is_relative_to(root):
+            raise GraphError(f"graph state escapes collection root: {path}")
+        state = _load(path)
+        graph = state["graph"]
+        graphs.append(
+            {
+                "path": path.relative_to(root).as_posix(),
+                "loop_id": state["loop_id"],
+                "session_id": state["session_id"],
+                "revision": state["revision"],
+                "status": state["status"],
+                "nodes": [
+                    {"id": node_id, "name": node["label"], "status": node["status"]}
+                    for node_id, node in sorted(graph["nodes"].items())
+                ],
+            }
+        )
+    return {"graphs": graphs}
 
 
 def node_lease(state: dict[str, Any], node_id: str, active: dict[str, Any], now: float, lease: int) -> str:

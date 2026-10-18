@@ -21,6 +21,7 @@ from graph_io import locked as _locked
 from graph_io import object_value as _object
 from graph_io import write as _write
 from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace, traced_refusal
+from graph_recovery import collection as collect
 from json_types import JsonValue
 
 
@@ -225,11 +226,7 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
 def recover_wave(
     path: Path, session: str, lease_seconds: int, now: float | None = None, apply: bool = True
 ) -> dict[str, Any]:
-    """Recover an active wave whose every spawned worker is silent past the lease, in one locked save.
-
-    A node with no spawn is only reported ("spawn it now"): nothing is recorded for it. Bounded: a node whose
-    respawn generation has reached retry.max refuses recovery (fail closed, human decides).
-    """
+    """Recover silent active waves atomically; leave unspawned or exhausted nodes for the human."""
     if lease_seconds <= 0:  # a non-positive lease marks every live worker stalled
         raise RecoveryRefusedError("invalid_lease", "lease_seconds must be positive")
     return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
@@ -302,9 +299,9 @@ def authorize_dispatch(path: Path, session: str, task: str, evals_path: Path) ->
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Operate one native Codex agentic-loop graph.")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("begin-wave", "inspect", "summarize"):
+    for name in ("begin-wave", "inspect", "summarize", "collection"):
         command = commands.add_parser(name)
-        command.add_argument("state", type=Path)
+        command.add_argument("root" if name == "collection" else "state", type=Path)
     for name in ("start", "add-unit"):
         controller = commands.add_parser(name)
         controller.add_argument("state", type=Path)
@@ -379,8 +376,8 @@ def main() -> int:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "recover-wave":
             output = recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
-        elif args.command == "summarize":
-            output = summarize(args.state)
+        elif args.command in {"summarize", "collection"}:
+            output = summarize(args.state) if args.command == "summarize" else collect(args.root)
         elif args.command == "inspect":
             output = inspect(args.state)
         elif args.command == "authorize-dispatch":
