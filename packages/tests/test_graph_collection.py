@@ -181,6 +181,19 @@ class GraphCollectionTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("escapes collection root", result.stderr)
 
+    def test_symlinked_collection_index_outside_root_is_refused(self) -> None:
+        """A collection index cannot make the command read outside its root."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        outside = Path(temporary.name) / "collection.json"
+        outside.write_text(json.dumps({"schema_version": 1, "graphs": []}), encoding="utf-8")
+        (self.root / "collection.json").symlink_to(outside)
+        for script in PROVIDERS:
+            with self.subTest(provider=script.relative_to(ROOT)):
+                result = self.run_collection(script)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("collection index escapes collection root", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

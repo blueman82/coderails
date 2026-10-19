@@ -306,6 +306,8 @@ def collection(root: Path) -> dict[str, Any]:
             "links": [],
         }
     index_path = root / "collection.json"
+    if index_path.is_symlink() or not index_path.resolve().is_relative_to(root):
+        raise ValueError("collection index escapes collection root")
     if index_path.exists():
         try:
             raw_index: object = json.loads(index_path.read_text(encoding="utf-8"))
