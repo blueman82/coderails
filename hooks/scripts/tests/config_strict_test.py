@@ -121,6 +121,21 @@ class StrictTests(ScratchCase):
             strict_settings(self.write("action_authority: enforse\n"))
         self.assertEqual(caught.exception.findings[0]["hint"], "enforce")
 
+    def test_missing_or_corrupt_schema_cannot_resolve_controls_to_off(self) -> None:
+        """A missing schema is a typed refusal, never an empty controls table."""
+        with (
+            patch("scripts.lib.config.SCHEMA_PATH", Path("/not/a/schema.json")),
+            self.assertRaises(ConfigRejected) as caught,
+        ):
+            strict_settings(self.write("sandbox_workers: true\n"))
+        self.assertEqual(caught.exception.findings[0]["code"], "config_schema_unreadable")
+        with patch("scripts.lib.config_strict.SCHEMA_PATH", Path("/not/a/schema.json")):
+            with self.assertRaises(ConfigRejected) as caught:
+                controls_resolved({"sandbox_workers": True})
+            self.assertEqual(caught.exception.findings[0]["code"], "config_schema_unreadable")
+            with self.assertRaises(ConfigRejected):
+                sandbox_mode({"sandbox_workers": True})
+
     def test_documented_shapes_stay_clean(self) -> None:
         """Negative control target: deleting action_authority from the schema makes REAL an unknown_key."""
         init = (ROOT / "commands/init.md").read_text()

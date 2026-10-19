@@ -370,6 +370,26 @@ class HookTests(unittest.TestCase):
         )
         self.assertTrue(all(r["event_id"] for r in rows))
 
+    def test_wiki_taxonomy_does_not_fall_back_to_legacy_schema(self) -> None:
+        """A prose-only legacy schema cannot replace a missing authoritative JSON schema."""
+        config = self.repo / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
+        config.write_text('wiki_path: "."\n', encoding="utf-8")
+        (self.repo / "AGENTS-wiki-schema.md").write_text(
+            "## Page types\n\n- `concepts/`\n- `projects/`\n", encoding="utf-8"
+        )
+        for directory in ("concepts", "projects", "wrong"):
+            (self.repo / directory).mkdir()
+        result = self.hook(
+            "wiki_taxonomy_gate",
+            {"session_id": "s3", "cwd": str(self.repo), "tool_input": {"command": "*** Add File: wrong/new.md"}},
+        )
+        reason = result["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("wiki_schema_missing", reason)
+        rows = [json.loads(line) for line in (self.loop / "s3/trace.jsonl").read_text().splitlines()]
+        self.assertEqual([row["reason_code"] for row in rows], ["wiki_schema_missing"])
+
 
 if __name__ == "__main__":
     unittest.main()

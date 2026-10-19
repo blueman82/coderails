@@ -62,7 +62,7 @@ def config_value(path: str | Path, key: str, section: str = "") -> str:
         prefix = r"\s+" if section else ""
         match = re.match(prefix + re.escape(key) + r":\s*(.*)$", line)
         if active and match:
-            return match[1].split("#", 1)[0].strip().strip("\"'")
+            return _without_comment(match[1]).strip().strip("\"'")
     return ""
 
 
@@ -71,13 +71,41 @@ KEY_LINE = re.compile(r"(\s*)([A-Za-z_][\w-]*):[ \t]*(.*)")
 NULLS = frozenset({"null", "~"})
 
 
+def _without_comment(value: str) -> str:
+    """Remove a YAML comment while keeping hashes in quoted or attached scalars."""
+    quote = ""
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if quote == '"' and char == "\\":
+            index += 2
+            continue
+        if quote == "'" and char == "'" and value[index : index + 2] == "''":
+            index += 2
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "\"'" and not value[:index].strip():
+            quote = char
+        elif char == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index].rstrip()
+        index += 1
+    return value
+
+
 def _schema() -> dict[str, Any]:
-    """Return the schema; on any failure an empty one, so every key stays a raw (still readable) unknown."""
+    """Read the typed-config schema or report that typed resolution is unavailable."""
     try:
-        data = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-        return cast("dict[str, Any]", data) if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+        data: Any = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError("config_schema_unreadable") from error
+    if not isinstance(data, dict):
+        raise ValueError("config_schema_unreadable")
+    schema = cast("dict[str, Any]", data)
+    if not isinstance(schema.get("properties"), dict):
+        raise ValueError("config_schema_unreadable")
+    return schema
 
 
 def _entries(text: str, findings: list[dict[str, str]] | None = None) -> dict[str, dict[str, Any]]:
@@ -104,14 +132,14 @@ def _entries(text: str, findings: list[dict[str, str]] | None = None) -> dict[st
             current = {"raw": "", "items": [], "children": {}} if match else None
             indent = None
             if match and current is not None:
-                current["raw"] = match[3].split("#", 1)[0].strip().strip("\"'")
+                current["raw"] = _without_comment(match[3]).strip().strip("\"'")
                 if match[2] in top:
                     flag("config_duplicate_key", match[2])
                 top[match[2]] = current
             else:
                 flag("config_unparseable_line", where)
         elif current is not None and stripped.startswith("- "):
-            current["items"].append(stripped[2:].split("#", 1)[0].strip().strip("\"'"))
+            current["items"].append(_without_comment(stripped[2:]).strip().strip("\"'"))
         elif current is not None and match:
             indent = len(match[1]) if indent is None else indent
             kids = cast("list[dict[str, Any]]", list(current["children"].values()))
@@ -122,7 +150,7 @@ def _entries(text: str, findings: list[dict[str, str]] | None = None) -> dict[st
             else:
                 if match[2] in current["children"]:
                     flag("config_duplicate_key", f"{match[2]} ({where})")
-                current["children"][match[2]] = {"raw": match[3].split("#", 1)[0].strip().strip("\"'")}
+                current["children"][match[2]] = {"raw": _without_comment(match[3]).strip().strip("\"'")}
         else:
             flag("config_unparseable_line", where)
     return top
@@ -184,8 +212,13 @@ def _typed(
 
 def load_config(path: str | Path) -> tuple[dict[str, Any], list[dict[str, str]]]:
     """Parse path against config.schema.json: (typed values with defaults, reason-coded findings). Never raises."""
-    properties: dict[str, Any] = _schema().get("properties", {})
     findings: list[dict[str, str]] = []
+    properties: dict[str, Any]
+    try:
+        properties = cast("dict[str, Any]", _schema()["properties"])
+    except (OSError, ValueError, KeyError, TypeError):
+        properties = {}
+        findings.append({"code": "config_schema_unreadable", "key": "", "hint": ""})
     text = ""
     if path:
         try:
@@ -264,16 +297,6 @@ def wiki_page_types(path: str | Path) -> tuple[list[str], str]:
     return [str(n) for n in names], ""
 
 
-def legacy_page_types(path: str | Path) -> list[str]:
-    """Top-level dirs from the '## Page types' section of a pre-wiki.schema.json AGENTS-wiki-schema.md, else []."""
-    try:
-        sections = re.split(r"(?m)^## ", Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    section = next((part for part in sections if part.startswith("Page types\n")), "")
-    return [name[:-1] for name in re.findall(r"`([A-Za-z0-9_-]+/)`", section)]
-
-
 def _section(path: str | Path, key: str) -> dict[str, Any]:
     """One typed nested section of the config at path, or {}."""
     value = settings(path).get(key)
@@ -303,7 +326,11 @@ def resolve_config_json(start_dir: str | Path | None = None) -> dict[str, Any]:
     present: set[str] = set()
     with contextlib.suppress(OSError):
         present = set(_entries(Path(path).read_text(encoding="utf-8", errors="replace"))) if path else present
-    properties = _schema().get("properties", {})
+    properties: dict[str, Any]
+    try:
+        properties = cast("dict[str, Any]", _schema()["properties"])
+    except (OSError, ValueError, KeyError, TypeError):
+        properties = {}
     return {
         "path": path,
         "values": values,

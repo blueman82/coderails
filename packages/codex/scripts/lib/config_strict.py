@@ -43,12 +43,15 @@ def strict_settings(path: str | Path, session: str = "") -> dict[str, Any]:
 
 
 def _properties() -> dict[str, Any]:
-    """The schema's top-level properties; empty when the schema cannot be read."""
+    """The schema's top-level properties, or a typed refusal when unavailable."""
     try:
-        data = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return cast("dict[str, Any]", cast("dict[str, Any]", data).get("properties", {})) if isinstance(data, dict) else {}
+        data: Any = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ConfigRejected([{"code": "config_schema_unreadable", "key": "", "hint": ""}]) from error
+    properties = cast("dict[str, Any]", data).get("properties") if isinstance(data, dict) else None
+    if not isinstance(properties, dict):
+        raise ConfigRejected([{"code": "config_schema_unreadable", "key": "", "hint": ""}])
+    return cast("dict[str, Any]", properties)
 
 
 def controls_resolved(values: dict[str, Any]) -> dict[str, Any]:

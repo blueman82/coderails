@@ -20,7 +20,7 @@ from .loop_state_common import LoopState, read_state
 
 sys.path.insert(0, str(ROOT))
 from scripts.lib.config import config_path, load_config  # noqa: E402
-from scripts.lib.config_strict import sandbox_mode  # noqa: E402
+from scripts.lib.config_strict import sandbox_mode, strict_settings  # noqa: E402
 
 TARGETS = {
     "S-1": "skills/improve-prompt/SKILL.md",
@@ -77,7 +77,9 @@ def plan(path: Path) -> list[dict[str, Any]]:
     state = load(path)
     nodes = state["graph"]["active_wave"]["nodes"] if state["graph"]["active_wave"] else graph_semantics.ready(state)
     result: list[dict[str, Any]] = []
-    mode = sandbox_mode(load_config(config_path())[0])  # sandbox_workers has a code reader here
+    config = config_path()
+    settings = strict_settings(config) if config else load_config("")[0]
+    mode = sandbox_mode(settings)  # sandbox_workers has a typed code reader here
     for node_id in nodes:
         role = state["graph"]["nodes"][node_id].get("graph_role") or re.sub(r"\[.*\]$", "", node_id)
         source = TARGETS.get(role)

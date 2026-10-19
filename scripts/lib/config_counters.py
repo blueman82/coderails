@@ -16,6 +16,7 @@ REASONS = (
     "config_bad_type",
     "config_bad_value",
     "config_unreadable",
+    "config_schema_unreadable",
     "config_rejected",
     "wiki_schema_fail_closed",
     "wiki_schema_missing",

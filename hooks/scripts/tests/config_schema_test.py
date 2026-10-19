@@ -133,6 +133,27 @@ class LoadConfigTests(ConfigCase):
         self.assertEqual(values["sandbox_workers"], "maybe")
         self.assertEqual(values["wiki_debt_epoch_pr"], "null")
 
+    def test_hash_is_comment_only_outside_quoted_or_attached_scalars(self) -> None:
+        """A hash attached to a scalar remains data; whitespace-delimited hashes start comments."""
+        text = 'sandbox_workers: false#suffix\naction_authority: off#suffix\nwiki_path: "vault#one" # comment\n'
+        values, findings = load_config(self.write(text))
+        self.assertEqual(values["sandbox_workers"], "false#suffix")
+        self.assertEqual(values["action_authority"], "off#suffix")
+        self.assertEqual(values["wiki_path"], "vault#one")
+        self.assertEqual(
+            [(item["code"], item["key"]) for item in findings],
+            [("config_bad_type", "sandbox_workers"), ("config_bad_value", "action_authority")],
+        )
+        commented, clean = load_config(
+            self.write("sandbox_workers: false # comment\naction_authority: off # comment\n")
+        )
+        self.assertEqual(clean, [])
+        self.assertIs(commented["sandbox_workers"], False)
+        self.assertEqual(commented["action_authority"], "off")
+        self.assertEqual(
+            config_value(self.write("action_authority: off#suffix # comment\n"), "action_authority"), "off#suffix"
+        )
+
     def test_action_authority_enum(self) -> None:
         """enforce|advisory|off are clean, absent defaults to enforce, anything else is config_bad_type."""
         for value in ("enforce", "advisory", "off"):
@@ -243,6 +264,26 @@ class CliTests(ConfigCase):
         ):
             data = resolve_config_json()
         self.assertEqual([f["code"] for f in data["findings"]], ["config_unreadable"])
+
+    def test_hash_scalar_behavior_matches_both_provider_clis(self) -> None:
+        """Both published config CLIs preserve attached and quoted hashes while accepting comments."""
+        text = 'sandbox_workers: false#suffix\naction_authority: off#suffix\nwiki_path: "vault#one" # comment\n'
+        for provider in (ROOT, CODEX):
+            with self.subTest(provider=provider.name):
+                root = self.repo(text)
+                result = subprocess.run(
+                    [sys.executable, str(provider / "scripts/lib/config.py"), "resolve-config", "--json"],
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                data = json.loads(result.stdout)
+                self.assertEqual(data["values"]["sandbox_workers"], "false#suffix")
+                self.assertEqual(data["values"]["action_authority"], "off#suffix")
+                self.assertEqual(data["values"]["wiki_path"], "vault#one")
+                self.assertEqual(data["unknown_keys"], [])
 
     def test_json_without_config(self) -> None:
         """NO_CONFIG still yields valid JSON and exit 0."""

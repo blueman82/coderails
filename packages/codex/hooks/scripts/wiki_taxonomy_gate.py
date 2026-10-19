@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Keep native apply-patch writes within the configured wiki taxonomy."""
+
 from __future__ import annotations
 
 import os
@@ -18,7 +19,7 @@ from hook_common import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.lib.config import legacy_page_types, load_config, wiki_page_types  # noqa: E402
+from scripts.lib.config import load_config, wiki_page_types  # noqa: E402
 from scripts.lib.config_strict import ConfigRejected, strict_settings  # noqa: E402
 
 
@@ -52,13 +53,6 @@ def taxonomy(cwd: Path, session: str) -> tuple[Path, Path, list[str], str, str] 
         except ConfigRejected as error:
             return vault, schema, [], "config_rejected", str(error)
         types, problem = wiki_page_types(schema)
-        legacy = root / "AGENTS-wiki-schema.md"
-        if problem == "wiki_schema_missing" and legacy.is_file():
-            # Vaults made by older wiki-init have only the prose schema: keep policing, say so.
-            types = legacy_page_types(legacy)
-            schema, problem = legacy, "" if types else "wiki_schema_invalid"
-            if types:
-                append_trace_row("wiki_taxonomy_gate", "fallback", "wiki_schema_legacy", session)
         if problem:
             return vault, schema, [], problem, f"{schema} is {problem}"
         sanctioned = [name + "/" for name in types]

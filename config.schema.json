@@ -117,7 +117,7 @@
       ],
       "default": true,
       "status": "enforced_by_code",
-      "description": "true = agentic-loop dispatches implementation workers as OS-sandboxed processes. Read by code: graph_dispatch.plan() adds dispatch_mode per U3 node (sandboxed, in-process, or in-process-fallback:<reason> when npx or gh is missing); the worker launch consumes it in Phase 3c. Default ON; false = in-process.",
+      "description": "Default ON. Claude graph_dispatch.plan() reports sandboxed or in-process-fallback:<reason> for U3 nodes, and the Claude worker launcher consumes that mode. Codex native workers inherit the parent session sandbox; this setting does not configure or prove per-worker Codex containment.",
       "control": true,
       "on_value": true
     },
