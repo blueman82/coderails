@@ -140,7 +140,7 @@ class DispatchGuardTests(GraphCase):
             self.denied(request, "envelope")
         request = copy.deepcopy(original)
         request["tool_input"]["subagent_type"] = ""
-        check(request)  # a blank type is Claude's general-purpose, allowed for an unguarded role
+        self.denied(request, "role_mismatch")
         for key in ("loop_id", "revision"):
             state = load(self.path)
             del state[key]

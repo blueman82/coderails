@@ -161,8 +161,12 @@ def authorize_dispatch(
     state = load(path)
     if state["session_id"] != session or state["status"] == "complete":
         raise ValueError("this session does not own an active loop")
-    role = role.strip() or "general-purpose"  # Claude Code runs an omitted subagent_type as general-purpose
+    role = role.strip()
     inputs = {"session": session, "role": role}
+    if not role:
+        error = graph_contract.DispatchDeniedError("role_mismatch", "native Agent requires subagent_type")
+        trace(path, state, "refused", error.code, inputs, [(None, None, None)], "authorize-dispatch")
+        raise error
     if graph_contract.dispatch_off():
         try:
             graph_contract.require_converted(state)

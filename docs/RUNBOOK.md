@@ -358,12 +358,14 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   `dispatch_state_unconverted` (`state_minor` < 2: run `graph.py convert --check` then `convert`; it refuses while a wave
   is open, `convert_refused_active_wave_in_flight`, so finish or `recover-wave` first), `dispatch_unauthorized` (Claude
   `record-wave` / completion found a bound spawn whose record the PreToolUse guard never consumed, i.e. a spawn the hook did
-  not see: re-dispatch it through the guard via `recover-wave`). A Claude `Agent` call with no `subagent_type` is treated as
-  `general-purpose` (allowed for unguarded roles, `role_mismatch` for a scout).
+  not see: re-dispatch it through the guard via `recover-wave`). A Claude graph-bound `Agent` call with no
+  `subagent_type` is refused as `role_mismatch` before native dispatch.
 - Off-switch: `CODERAILS_GRAPH_DISPATCH=off` (also `0` or `false`) in the hooks and graph CLI bypasses the contract hash,
   rendered sections, role and single-use checks. A graph-bound spawn still needs the current v2 envelope issued by
   `begin-wave`, the recorded task name on Codex, and frozen evals; native evidence still binds its node, wave and attempt.
-  An absent or v1 envelope is refused. An ordinary Agent outside a graph is unaffected. Each allowed spawn leaves an
+  An absent or v1 envelope is refused. Claude graph-bound Agent calls must include a nonblank `subagent_type`, including
+  `general-purpose` for unguarded roles; a missing type cannot be bound to native evidence. An ordinary Agent outside a
+  graph is unaffected. Each allowed spawn leaves an
   `authorize-dispatch/reported/dispatch_check_off` trace row. Default ON; unset to re-enable. Use it only to rescue a
   loop wedged by a bad contract or an uninstalled plugin agent.
 - Bad `add-unit --model-role` is `add_unit_refused_bad_field` (allowed: `fast-mechanical`, `default`, `frontier`).
@@ -378,8 +380,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   block is unconstrained and `write_scope` is prompt text only, not enforced. (2) Only the five capability-guarded roles
   (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `source-auditor`) are role-contained;
   `spec-reviewer` (empty capability list), the `shell.raw` roles (`docs-auditor`, `wiki-writer`, `proof-author`) and nodes
-  with no `agent_role` (default `loop-worker`) may run as `general-purpose` on Claude, and any non-role `agent_type` on
-  Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent` and `spawn_agent` only, so `SendMessage` on
+  with no `agent_role` (default `loop-worker`) may run as explicit `general-purpose` on Claude, or with omitted or exact
+  role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent` and `spawn_agent` only, so `SendMessage` on
   Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
   (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
   `spawn_agent` function-call message with its v2 record, role and consumed authorization; a task-name-only legacy event

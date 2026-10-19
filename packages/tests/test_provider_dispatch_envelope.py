@@ -243,17 +243,28 @@ class DispatchEnvelopeTests(unittest.TestCase):
                 self.typed(provider, request, "source-auditor")
                 self.refuse(provider, request, "role_mismatch")
 
-    def test_omitted_subagent_type_is_general_purpose(self) -> None:
-        """An omitted subagent_type is general-purpose: allowed for an unguarded role, role_mismatch for a scout."""
+    def test_omitted_subagent_type_is_refused_before_native_evidence(self) -> None:
+        """Claude cannot bind a native Agent call whose provider role is missing."""
         provider = self.opened("claude")
         request = provider.request()
         del request["tool_input"]["subagent_type"]
-        self.assertFalse(self.verdict(provider, request))
-        self.assertEqual(self.reason(provider), "dispatch_authorized")
+        self.refuse(provider, request, "role_mismatch")
         scout = self.opened("claude", ("S2",))
         request = scout.request()
         del request["tool_input"]["subagent_type"]
         self.refuse(scout, request, "role_mismatch")
+        attempted = self.opened("claude")
+        report = attempted.launch()
+        lines = attempted.parent.read_text().splitlines()
+        native = json.loads(lines[1])
+        del native["message"]["content"][0]["input"]["subagent_type"]
+        lines[1] = json.dumps(native)
+        attempted.parent.write_text("\n".join(lines) + "\n")
+        before = attempted.path.read_bytes()
+        failed = attempted.call("record-wave", json.dumps(report))
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("provider role", failed.stderr)
+        self.assertEqual(attempted.path.read_bytes(), before)
 
     def test_codex_named_native_role_is_not_generic(self) -> None:
         """An unguarded worker may omit agent_type, but cannot silently become explorer."""

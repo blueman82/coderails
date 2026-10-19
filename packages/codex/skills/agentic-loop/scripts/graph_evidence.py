@@ -159,20 +159,18 @@ def _validate_missing_attempts(
             call, (line, _, child, nickname, path, role) = matches[0]
             if used & {call, child}:
                 raise GraphError(f"node {node_id} stale attempt reuses native identity")
-            calls = requests.get(call, [])
-            message = calls[0].get("message") if len(calls) == 1 and isinstance(calls[0], dict) else None
-            if isinstance(message, str) and message.startswith(graph_contract.ENVELOPE_KEY + "="):
-                owner = graph_contract.parse_envelope(message, allow_legacy=True)
-                if "dispatch_id" in owner:
-                    _verify_dispatch(state, node_id, attempt, owner["wave_id"], call, requests)
-                elif owner["revision"] >= state["graph"].get("contract_from_revision", 0):
-                    raise graph_contract.DispatchDeniedError(
-                        "dispatch_missing_envelope", "stale attempt lacks v2 ownership"
-                    )
-            elif state["graph"].get("contract_from_revision") == 1:
+            issued = [
+                record
+                for record in state["graph"].get("dispatches", {}).values()
+                if record.get("node_id") == node_id and record.get("attempt") == attempt
+            ]
+            if len(issued) > 1:
+                raise GraphError(f"node {node_id} stale attempt has ambiguous dispatch records")
+            if not issued:
                 raise graph_contract.DispatchDeniedError(
-                    "dispatch_missing_envelope", "stale attempt lacks v2 ownership"
+                    "dispatch_missing_envelope", "stale attempt has no stored wave revision"
                 )
+            _verify_dispatch(state, node_id, attempt, issued[0]["wave_id"], call, requests)
             child_read_records(state["session_id"], child, nickname, path, role)
             used.update({call, child})
         if line <= previous_line:
