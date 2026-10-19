@@ -29,9 +29,11 @@ def state_path(session: str) -> Path | None:
     return trace.with_name("hook_state.json") if trace else None
 
 
-def _shape(data: dict[str, Any]) -> dict[str, Any]:
+def _shape(data: dict[str, Any], allow_new_state: bool = False) -> dict[str, Any]:
     """Fill the skeleton and refuse malformed fields so bad state is never trusted or rewritten."""
-    version = data.setdefault("schema_version", SCHEMA_VERSION)
+    if "schema_version" not in data and allow_new_state:
+        data["schema_version"] = SCHEMA_VERSION
+    version = data.get("schema_version")
     if not isinstance(version, int) or isinstance(version, bool) or version != SCHEMA_VERSION:
         raise ValueError("unsupported schema_version")
     for key, kind in (("ordinals", dict), ("arms", list), ("nudged", dict)):
@@ -83,7 +85,7 @@ def record_absent_block(state: LoopState, hook: str = "loop_state_guard") -> Non
         return
 
     def update(data: dict[str, Any]) -> dict[str, Any]:
-        data = _shape(data)
+        data = _shape(data, allow_new_state=not path.exists())
         data["ordinals"]["absent_blocked"] = state.invocations
         data["arms"].append({"hook": hook, "ordinal": state.invocations})
         return data
@@ -112,7 +114,7 @@ def mark_nudged(session: str, hook: str) -> bool:
     first: list[bool] = []
 
     def update(data: dict[str, Any]) -> dict[str, Any]:
-        data = _shape(data)
+        data = _shape(data, allow_new_state=path is not None and not path.exists())
         first[:] = [data["nudged"].get(hook) is not True]
         data["nudged"][hook] = True
         return data
