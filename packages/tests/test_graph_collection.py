@@ -74,7 +74,7 @@ class GraphCollectionTests(unittest.TestCase):
                 self.assertEqual([item["loop_id"] for item in graphs], ["first", "second"])
                 self.assertEqual(
                     graphs[0]["nodes"],
-                    [{"id": "U3[1]", "name": "Build unit 1", "status": "pending"}],
+                    [{"id": "U3[1]", "name": "Builder", "lane_code": "A-1", "status": "pending"}],
                 )
         self.assertEqual({path: path.read_bytes() for path in before}, before)
 

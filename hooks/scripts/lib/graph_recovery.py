@@ -291,6 +291,7 @@ def collection(root: Path) -> dict[str, Any]:
             raise ValueError(f"graph state escapes collection root: {path}")
         state = load(path)
         graph = state["graph"]
+        node_names = graph_semantics.node_names(graph["nodes"])
         relative = path.relative_to(root).as_posix()
         if state["loop_id"] in {item["loop_id"] for item in graphs_by_path.values()}:
             raise ValueError(f"duplicate graph loop_id {state['loop_id']!r}; collection keys must be unambiguous")
@@ -302,7 +303,12 @@ def collection(root: Path) -> dict[str, Any]:
             "revision": state["revision"],
             "status": state["status"],
             "nodes": [
-                {"id": node_id, "name": node["label"], "status": node["status"]}
+                {
+                    "id": node_id,
+                    "name": node_names[node_id]["job_name"],
+                    "lane_code": node_names[node_id]["lane_code"],
+                    "status": node["status"],
+                }
                 for node_id, node in sorted(graph["nodes"].items())
             ],
             "links": [],
