@@ -157,6 +157,34 @@ class GraphCollectionTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("duplicate graph path 'first/progress.json'", result.stderr)
 
+    def test_boolean_schema_version_is_refused(self) -> None:
+        """JSON true is not the integer collection schema version."""
+        (self.root / "collection.json").write_text(
+            '{"schema_version":true,"graphs":['
+            '{"key":"first","path":"first/progress.json","loop_id":"first","links":[]},'
+            '{"key":"second","path":"second/progress.json","loop_id":"second","links":[]}]}',
+            encoding="utf-8",
+        )
+        for script in PROVIDERS:
+            with self.subTest(provider=script.relative_to(ROOT)):
+                result = self.run_collection(script)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("schema_version 1", result.stderr)
+
+    def test_duplicate_json_field_is_refused(self) -> None:
+        """Ambiguous object fields cannot be resolved by last-value-wins parsing."""
+        (self.root / "collection.json").write_text(
+            '{"schema_version":1,"graphs":[{"key":"wrong","key":"first",'
+            '"path":"first/progress.json","loop_id":"first","links":[]},'
+            '{"key":"second","path":"second/progress.json","loop_id":"second","links":[]}]}',
+            encoding="utf-8",
+        )
+        for script in PROVIDERS:
+            with self.subTest(provider=script.relative_to(ROOT)):
+                result = self.run_collection(script)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("duplicate collection field", result.stderr)
+
     def test_invalid_graph_refuses_collection(self) -> None:
         """Malformed graphs are reported as errors instead of disappearing."""
         (self.root / "broken").mkdir()

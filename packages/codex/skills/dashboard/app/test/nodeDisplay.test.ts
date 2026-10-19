@@ -6,6 +6,7 @@ describe("graph node display names", () => {
     expect(describeNode("S-2")?.display).toBe("Initializer [S-2]");
     expect(describeNode("S2.7d[1]")?.jobName).toBe("Freezer");
     expect(describeNode("U3[15]")?.display).toBe("Builder · C-3 [U3[15]]");
+    expect(describeNode("U4[15]")?.display).toBe("Verifier · C-3 [U4[15]]");
     expect(nodeAttributes("U3[15]")).toEqual({ "coderails.node.id": "U3[15]",
       "coderails.node.name": "Builder", "coderails.node.lane_code": "C-3" });
   });

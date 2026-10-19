@@ -25,7 +25,7 @@ function laneCode(unit: number): string | null {
 }
 
 export function describeNode(nodeId: string): NodeDisplay | null {
-  const unit = /^(?:U3|S2\.7d)\[([1-9][0-9]*)\]$/.exec(nodeId);
+  const unit = /^(?:S2\.7d|U(?:3|4|4b-review|5|5-repair|6|7\/8|4b-merge-gate|10-respawn))\[([1-9][0-9]*)\]$/.exec(nodeId);
   const role = /^U(3|4|4b-review|5|5-repair|6|7\/8|4b-merge-gate|10-respawn)\[[1-9][0-9]*\]$/.exec(nodeId);
   const freezer = /^S2\.7d\[[1-9][0-9]*\]$/.test(nodeId);
   const jobName = fixedName(nodeId) ?? (freezer ? "Freezer" : role ? ACTION_NAMES[role[1]] : undefined);

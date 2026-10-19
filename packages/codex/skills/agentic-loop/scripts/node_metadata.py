@@ -85,7 +85,7 @@ UNIT_LANES = {
     32: "V-1",
     33: "H-1",
 }
-UNIT_ID = re.compile(r"(?:U3|S2\.7d)\[([1-9][0-9]*)\]")
+UNIT_ID = re.compile(r"(?:S2\.7d|U(?:3|4|4b-review|5|5-repair|6|7/8|4b-merge-gate|10-respawn))\[([1-9][0-9]*)\]")
 ACTION_ID = re.compile(r"U(3|4|4b-review|5|5-repair|6|7/8|4b-merge-gate|10-respawn)\[[1-9][0-9]*\]")
 FREEZER_ID = re.compile(r"S2\.7d\[[1-9][0-9]*\]")
 

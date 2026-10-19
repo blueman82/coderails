@@ -36,6 +36,16 @@ class CollectionRecord(TypedDict):
     links: list[str]
 
 
+def _unique_collection_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous JSON object fields in a collection index."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise GraphError(f"duplicate collection field {key!r}")
+        result[key] = value
+    return result
+
+
 def collection(root: Path) -> dict[str, Any]:
     """List validated graph states beneath a directory without changing them."""
     root = root.resolve()
@@ -74,13 +84,19 @@ def collection(root: Path) -> dict[str, Any]:
         raise GraphError("collection index escapes collection root")
     if index_path.exists():
         try:
-            raw_index: object = json.loads(index_path.read_text(encoding="utf-8"))
+            raw_index: object = json.loads(
+                index_path.read_text(encoding="utf-8"), object_pairs_hook=_unique_collection_fields
+            )
         except (OSError, json.JSONDecodeError) as error:
             raise GraphError(f"invalid collection index {index_path}: {error}") from error
         if not isinstance(raw_index, dict):
             raise GraphError("collection index must contain schema_version 1 and a graphs array")
         index = cast(dict[str, Any], raw_index)
-        if index.get("schema_version") != 1 or not isinstance(index.get("graphs"), list):
+        if (
+            type(index.get("schema_version")) is not int
+            or index["schema_version"] != 1
+            or not isinstance(index.get("graphs"), list)
+        ):
             raise GraphError("collection index must contain schema_version 1 and a graphs array")
         by_key: dict[str, CollectionRecord] = {}
         by_path: dict[str, CollectionRecord] = {}

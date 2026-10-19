@@ -43,12 +43,13 @@ class GraphNodeNameTests(unittest.TestCase):
 
     def test_unit_nodes_show_the_human_lane_code(self) -> None:
         """The lane code is shown beside the existing machine node ID."""
-        described = graph_semantics.describe_node("U3[15]")
-
-        self.assertEqual(described["lane_code"], "C-3")
-        display = cast(str, described["display"])
-        self.assertIn("C-3", display)
-        self.assertIn("U3[15]", display)
+        for node_id in ("S2.7d[15]", "U3[15]", "U4[15]", "U4b-review[15]"):
+            with self.subTest(node_id=node_id):
+                described = graph_semantics.describe_node(node_id)
+                self.assertEqual(described["lane_code"], "C-3")
+                display = cast(str, described["display"])
+                self.assertIn("C-3", display)
+                self.assertIn(node_id, display)
 
     def test_unknown_node_ids_are_rejected(self) -> None:
         """Names cannot be attached to arbitrary or legacy identifiers."""
