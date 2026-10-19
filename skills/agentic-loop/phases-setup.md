@@ -222,7 +222,7 @@ Thresholds live in `packages/graph-semantics/policy.yaml` and are rendered here 
 | `loop_evals_min_units` | `1` | `S2.7c` loop-scope evals are required from this many work units (`loop_dispatch_guard` and `loop_state_guard` still hard-code the floor of 1: this key documents it, no hook reads it yet) |
 | `retry_max` | `5` | default per-node retry bound (the pure core caps it at 5) |
 | `repair_attempts_max` | `5` | distinct repair attempts per failure (`U5-repair[i]` retry bound) |
-| `graph.profile` | `units-only` | what `graph.py instantiate` builds when `--profile` is absent: `units-only` is the unit lane `U3[i]` plus `J12-all-units`; `full` is every node in the table |
+| `graph.profile` | `full` | what `graph.py instantiate` builds when `--profile` is absent: `units-only` is the unit lane `U3[i]` plus `J12-all-units`; `full` is every node in the table |
 <!-- END GENERATED graph-spec:thresholds -->
 
 The **2.7a/2.7b** design-doc sub-steps fire ONLY when the loop has **at least `design_doc_min_units` work-units (table above) or a cross-unit dependency** — the same line Phase 3 draws to choose a spawned team over a single agent. A 1–2-unit fix that Phase 3 routes to a single agent needs no separate design docs: the envelope (Phase 0) + `progress.json` + the one self-contained task description already carry everything. If the loop is below that threshold, skip 2.7a/2.7b.

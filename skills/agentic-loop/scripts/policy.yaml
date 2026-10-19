@@ -3,5 +3,5 @@
   "loop_evals_min_units": 1,
   "retry_max": 5,
   "repair_attempts_max": 5,
-  "graph": {"profile": "units-only"}
+  "graph": {"profile": "full"}
 }

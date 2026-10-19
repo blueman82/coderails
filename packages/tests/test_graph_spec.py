@@ -69,7 +69,7 @@ class SpecValidationTests(unittest.TestCase):
     def test_committed_spec_and_policy_validate(self) -> None:
         """Loading validates; the expansion of three units is acyclic and every join has inputs."""
         spec, policy = graph_spec.load_spec(), graph_spec.load_policy()
-        self.assertEqual(policy["graph"]["profile"], "units-only")
+        self.assertEqual(policy["graph"]["profile"], "full")
         built = graph_spec.expand(spec, policy, ["1", "2", "3"], "full")
         graph_semantics.validate(
             {
@@ -231,10 +231,10 @@ class SpecEnforcementTests(unittest.TestCase):
             with self.subTest(name), tempfile.TemporaryDirectory() as scratch:
                 controller = Controller(Path(scratch), name)
                 self.assertEqual(controller.start().returncode, 0)
-                self.assertEqual(controller.run("instantiate", *self.args("units-only", "1", "2")).returncode, 0)
+                self.assertEqual(controller.run("instantiate", *self.args("full", "1", "2")).returncode, 0)
                 good = controller.read()
                 short = copy.deepcopy(good)
-                short["graph"]["joins"]["J12-all-units"]["inputs"].remove("U3[2]")
+                short["graph"]["joins"]["J12-all-units"]["inputs"].remove("U4b-merge-gate[2]")
                 gone = copy.deepcopy(good)
                 del gone["graph"]["joins"]["J12-all-units"]
                 for state in (short, gone):
@@ -244,16 +244,17 @@ class SpecEnforcementTests(unittest.TestCase):
                     self.assertIn("spec_join_inputs", result.stderr)
 
     def test_stamped_profile_cannot_fall_below_the_policy_floor(self) -> None:
-        """A units-only stamp under a full policy is refused; a full stamp under units-only is fine."""
+        """A units-only stamp is accepted only after an owner lowers the policy floor."""
         with tempfile.TemporaryDirectory() as scratch:
             controller = Controller(Path(scratch), "claude")
             self.assertEqual(controller.start().returncode, 0)
-            self.assertEqual(controller.run("instantiate", *self.args("units-only", "1")).returncode, 0)
-            state = controller.read()
-            floor = {**graph_spec.load_policy(), "graph": {"profile": "full"}}
-            with patch.object(graph_spec, "load_policy", return_value=floor):
+            policy = graph_spec.load_policy()
+            lower_floor = {**policy, "graph": {"profile": "units-only"}}
+            with patch.object(graph_spec, "load_policy", return_value=lower_floor):
+                state, _ = graph_spec.instantiate(controller.read(), SESSION, LOOP, "units-only", ["1"])
+                graph_spec.check(state)
+            with patch.object(graph_spec, "load_policy", return_value=policy):
                 self.assertRaisesRegex(graph_spec.SpecError, "spec_profile_downgrade", graph_spec.check, state)
-            graph_spec.check(state)
 
     def test_env_off_switch_skips_the_check(self) -> None:
         """CODERAILS_GRAPH_SPEC=off lets a spec-violating graph load on both providers; unset refuses again."""
@@ -302,14 +303,15 @@ class InstantiateTests(unittest.TestCase):
                 self.assertEqual(count_reasons(controller.root / "state")["instantiate_ok"], 1)
 
     def test_default_profile_comes_from_policy(self) -> None:
-        """Without --profile the policy's units-only profile builds only the unit lane and its join."""
+        """Without --profile the policy's full profile builds every spec node."""
         for name in PROVIDERS:
             with self.subTest(name), tempfile.TemporaryDirectory() as scratch:
                 controller = Controller(Path(scratch), name)
                 self.assertEqual(controller.start().returncode, 0)
                 args = ["--session", SESSION, "--loop-id", LOOP, "--unit", "1"]
                 self.assertEqual(controller.run("instantiate", *args).returncode, 0, name)
-                self.assertEqual(set(controller.read()["graph"]["nodes"]), {"U3[1]", "J12-all-units"})
+                expected = graph_spec.expand(graph_spec.load_spec(), graph_spec.load_policy(), ["1"], "full")
+                self.assertEqual(set(controller.read()["graph"]["nodes"]), set(expected["nodes"]))
 
     def test_rerun_is_a_noop_and_foreign_graphs_are_refused(self) -> None:
         """An identical re-run writes nothing; a hand-built graph is refused with a coded reason."""
