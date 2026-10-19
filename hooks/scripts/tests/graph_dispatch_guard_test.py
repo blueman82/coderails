@@ -235,6 +235,7 @@ class DispatchGuardTests(GraphCase):
             self.frozen()
             check(request)
             self.path.with_name("evals.json").unlink()
+        request = self.setup_request("U3[1]")
         state = load(self.path)
         for version in (1, 2):
             self.save({**state, "schema_version": version})
