@@ -24,6 +24,7 @@ TOOLS = {"repo.inspect", "diff.read", "tests.run", "pr.comment", "cmd.run"}
 ENV_ALLOW = ("PATH", "HOME", "CODEX_HOME", "LANG", "LC_ALL", "TERM", "TMPDIR")
 ROLE = re.compile(r"^[a-z][a-z0-9-]{0,60}$")
 OPTIONS = {"--role", "--prompt-file", "--cwd"}
+APPROVAL = 'default_tools_approval_mode = "approve"'
 
 
 def guarded_roles(root: Path) -> set[str]:
@@ -62,7 +63,7 @@ def build_argv(role: str, root: Path, cwd: str | None = None) -> list[str]:
     args = json.dumps([str(root / "scripts" / "capability_mcp.py"), "--role", role])
     # JSON string syntax is valid TOML basic-string syntax, so json.dumps quotes the inline table safely.
     argv = ["codex", "exec", "--ignore-user-config", "-s", "read-only", "-c", "features.shell_tool=false"]
-    argv += ["-c", f"mcp_servers.cap-{role}={{command = {command}, args = {args}}}"]
+    argv += ["-c", f"mcp_servers.cap-{role}={{command = {command}, args = {args}, {APPROVAL}}}"]
     if cwd:
         argv += ["-C", cwd]
     return argv + ["-"]
@@ -80,6 +81,7 @@ def contained(argv: list[str], role: str) -> bool:
         and "features.shell_tool=false" in overrides
         and len(servers) == 1
         and servers[0].startswith(f"mcp_servers.cap-{role}=")
+        and servers[0].endswith(f", {APPROVAL}}}")
         and argv[-1] == "-"
     )
 
