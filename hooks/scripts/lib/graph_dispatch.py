@@ -77,12 +77,14 @@ def plan(path: Path) -> list[dict[str, Any]]:
         source = TARGETS.get(role)
         item: dict[str, Any] = {
             "node_id": node_id,
+            **graph_semantics.describe_node(node_id),
             "graph_role": role,
             "path": source,
             "unresolved": not source or not (ROOT / source).is_file(),
         }
         if state["graph"]["active_wave"]:
             item["prompt_prefix"] = ENVELOPE_KEY + "=" + json.dumps(ownership(state, node_id), sort_keys=True)
+            item["node_name_marker"] = "CODERAILS_GRAPH_NODE_NAME=" + item["display"]
         result.append(item)
     return result
 

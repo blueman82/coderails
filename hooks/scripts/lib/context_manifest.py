@@ -175,6 +175,16 @@ def inspect_graph(plugin_root: Path, state: Path) -> dict[str, Any] | None:
         return None
 
 
+def _display_node(node_names: object, node_id: object) -> str:
+    """Render a registered graph node with its name while retaining the stable ID."""
+    if isinstance(node_names, dict) and isinstance(node_id, str):
+        node = cast(dict[str, Any], node_names).get(node_id)
+        display = cast(dict[str, Any], node).get("display") if isinstance(node, dict) else None
+        if isinstance(display, str):
+            return display
+    return str(node_id)
+
+
 def loop_lines(root: Path, session_id: str, plugin_root: Path, cwd: str = "") -> tuple[list[str], str, bool]:
     """Return (lines, reason, active) for this session's loop. Raises ValueError/OSError on unreadable state."""
     state = find_state(root, session_id, cwd)
@@ -194,9 +204,10 @@ def loop_lines(root: Path, session_id: str, plugin_root: Path, cwd: str = "") ->
             digest[key] = f"{len(evidence)}:{hashlib.sha256(blob).hexdigest()[:8]}"
     inspected = inspect_graph(plugin_root, state)
     ready: list[Any] = (inspected or {}).get("ready", [])
+    node_names = (inspected or {}).get("node_names", {})
     hard_stop: dict[str, Any] = (inspected or {}).get("hard_stop") or {}
-    stop_node = hard_stop.get("node", "-")
-    listed = ",".join(map(str, ready[:MAX_LISTED_NODES])) + (
+    stop_node = _display_node(node_names, hard_stop.get("node", "-"))
+    listed = ",".join(_display_node(node_names, node_id) for node_id in ready[:MAX_LISTED_NODES]) + (
         f"+{len(ready) - MAX_LISTED_NODES}" if len(ready) > MAX_LISTED_NODES else ""
     )
     head = (

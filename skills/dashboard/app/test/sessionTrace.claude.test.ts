@@ -31,6 +31,44 @@ async function fixture() {
 }
 
 describe("Claude native session trace", () => {
+  it("attaches registered names to graph snapshot events", async () => {
+    const { deps } = await fixture();
+    deps.graphRoot = join(deps.cacheRoot, "graph-state");
+    await mkdir(deps.graphRoot, { recursive: true });
+    await writeFile(join(deps.graphRoot, "progress.json"), JSON.stringify({
+      schema_version: 3, session_id: "s1", loop_id: "loop", graph: { hard_stop: null,
+        nodes: { "U3[1]": { retry: { attempts: 1 }, respawn: { generation: 0 }, evidence: [] } } },
+    }));
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    for (const name of ["graph_node", "graph_retry"]) {
+      const event = page.events.find((item) => item.name === name)!;
+      expect(event.attributes).toMatchObject({ "coderails.node.id": "U3[1]",
+        "coderails.node.name": "Builder", "coderails.node.lane_code": "A-1" });
+    }
+  });
+
+  it("extracts the node display marker only when its ID matches the dispatch envelope", async () => {
+    const { deps, parent, rows } = await fixture();
+    const call = fixtureBlocks(rows[0])[0];
+    const input = call.input as Record<string, unknown>;
+    input.prompt = 'CODERAILS_GRAPH_DISPATCH={"session_id":"s1","loop_id":"l1","revision":1,"wave_id":"w1","node_id":"U3[1]"}\nCODERAILS_GRAPH_NODE_NAME=Builder · A-1 [U3[1]]\nWork';
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    const request = page.events.find((event) => event.name === "tool_request")!;
+    expect(request.attributes["coderails.node.id"]).toBe("U3[1]");
+    expect(request.attributes["coderails.node.name"]).toBe("Builder");
+    expect(request.attributes["coderails.node.lane_code"]).toBe("A-1");
+
+    input.prompt = String(input.prompt).replace(
+      "CODERAILS_GRAPH_NODE_NAME=Builder · A-1 [U3[1]]",
+      "CODERAILS_GRAPH_NODE_NAME=Builder · A-1 [U4[1]]");
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const mismatched = await readClaudeTracePage("s1", null, 50, deps);
+    const mismatchedRequest = mismatched.events.find((event) => event.name === "tool_request")!;
+    expect(mismatchedRequest.attributes["coderails.node.id"]).toBe("U3[1]");
+    expect(mismatchedRequest.attributes["coderails.node.name"]).toBeUndefined();
+  });
+
   it.each(["foreign-only", "mixed"])("marks %s explicit foreign parent identity incomplete without indexing it", async (shape) => {
     const { deps, parent, rows } = await fixture();
     const foreign = { type: "assistant", sessionId: "other", timestamp: "2026-09-28T12:00:01Z",

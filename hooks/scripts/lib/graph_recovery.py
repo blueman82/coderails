@@ -253,9 +253,10 @@ def summarize(state: dict[str, Any]) -> dict[str, Any]:
     pending = sorted(n for n, s in statuses.items() if s not in {"done", "skipped"})
     ready = [] if graph["active_wave"] or graph["hard_stop"] else graph_semantics.ready(state)
     if graph["hard_stop"] is not None:
+        stopped = graph_semantics.describe_node(graph["hard_stop"]["node"])["display"]
         phase, detail = (
             "waiting for human",
-            f"hard stop on {graph['hard_stop']['node']}: {graph['hard_stop']['reason']}",
+            f"hard stop on {stopped}: {graph['hard_stop']['reason']}",
         )
     elif graph["active_wave"] is not None:
         phase, detail = "waiting for worker", f"wave {graph['active_wave']['wave_id']} dispatched"
@@ -271,6 +272,7 @@ def summarize(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "phase": phase,
         "detail": detail,
+        "node_names": graph_semantics.node_names(graph["nodes"]),
         "done": sorted(n for n in statuses if n not in pending),
         "active": list(graph["active_wave"]["nodes"]) if graph["active_wave"] else [],
         "ready": ready,

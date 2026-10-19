@@ -43,6 +43,7 @@ def begin_wave(path: Path) -> dict[str, Any]:
         return {
             "wave_id": wave["wave_id"],
             "nodes": wave["nodes"],
+            "node_names": graph_semantics.node_names(proposed["graph"]["nodes"]),
             "task_names": task_names,
             "revision": proposed["revision"],
         }
@@ -143,9 +144,8 @@ def inspect(path: Path) -> dict[str, Any]:
     return {
         "session_id": state["session_id"],
         "loop_id": state["loop_id"],
-        "revision": state["revision"],
         "status": state.get("status"),
-        "active_wave": graph["active_wave"],
+        **graph_semantics.inspect(state),
         "task_names": (
             {
                 node_id: task_name(state["loop_id"], node_id, next_attempt(graph["nodes"][node_id]))
@@ -154,9 +154,6 @@ def inspect(path: Path) -> dict[str, Any]:
             if graph["active_wave"] is not None
             else {}
         ),
-        "running": sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] == "running"),
-        "ready": graph_semantics.ready(state) if graph["active_wave"] is None and graph["hard_stop"] is None else [],
-        "hard_stop": graph["hard_stop"],
     }
 
 
@@ -245,9 +242,10 @@ def summarize(path: Path) -> dict[str, Any]:
     pending = sorted(n for n, s in statuses.items() if s not in {"done", "skipped"})
     ready = [] if graph["active_wave"] or graph["hard_stop"] else graph_semantics.ready(state)
     if graph["hard_stop"] is not None:
+        stopped = graph_semantics.describe_node(graph["hard_stop"]["node"])["display"]
         phase, detail = (
             "waiting for human",
-            f"hard stop on {graph['hard_stop']['node']}: {graph['hard_stop']['reason']}",
+            f"hard stop on {stopped}: {graph['hard_stop']['reason']}",
         )
     elif graph["active_wave"] is not None:
         phase, detail = "waiting for worker", f"wave {graph['active_wave']['wave_id']} dispatched"
@@ -263,6 +261,7 @@ def summarize(path: Path) -> dict[str, Any]:
     return {
         "phase": phase,
         "detail": detail,
+        "node_names": graph_semantics.node_names(graph["nodes"]),
         "done": sorted(n for n in statuses if n not in pending),
         "active": list(graph["active_wave"]["nodes"]) if graph["active_wave"] else [],
         "ready": ready,
