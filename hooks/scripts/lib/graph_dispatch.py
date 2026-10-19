@@ -159,7 +159,11 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
             )
         recorded.append(statuses + [{"node": node, "status": "FINAL_REPORT"} for node in reports])
         response.update(
-            {"revision": proposed["revision"], "released_joins": proposal["released_joins"], "ready": proposal["ready"]}
+            {
+                "revision": proposed["revision"],
+                "released_joins": proposal["released_joins"],
+                "ready": graph_semantics.ready(proposed),
+            }
         )
         return proposed
 

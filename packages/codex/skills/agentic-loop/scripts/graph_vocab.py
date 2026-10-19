@@ -77,3 +77,19 @@ def disposition_report(units: object) -> dict[str, Any]:
         for identifier, stored in _stored(units).items()
     }
     return {"units": kinds, "offenders": disposition_offenders(units)}
+
+
+def decision_pending(state: dict[str, Any], node_id: str) -> bool:
+    """Block this node on unanswered statuses; malformed status storage blocks all nodes."""
+    rows = state.get("worker_statuses", [])
+    if not isinstance(rows, list):
+        return True
+    for raw in cast(list[object], rows):
+        if not isinstance(raw, dict):
+            return True
+        row = cast(dict[str, Any], raw)
+        if not _filled(row.get("node")) or not isinstance(row.get("decision_pending"), bool):
+            return True
+        if row["node"] == node_id and row["decision_pending"]:
+            return True
+    return False

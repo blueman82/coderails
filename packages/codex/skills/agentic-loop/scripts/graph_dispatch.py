@@ -127,7 +127,7 @@ def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
         return {
             "revision": proposed["revision"],
             "released_joins": transition["released_joins"],
-            "ready": transition["ready"],
+            "ready": graph_semantics.ready(proposed),
         }
 
 

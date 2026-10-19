@@ -129,6 +129,109 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                         f"worker_status_{status.lower()}", provider.path.with_name("recovery-trace.jsonl").read_text()
                     )
 
+    def test_pending_decision_blocks_readiness_and_start_until_resolved(self) -> None:
+        """A real typed result inhibits another wave until record-decision resolves it."""
+        for provider in self.providers:
+            with self.subTest(provider=provider.name):
+                result = self.record(provider, typed("NEEDS_DECISION"), "failed")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["ready"], [])
+                self.assertEqual(provider.success("inspect")["ready"], [])
+                before = provider.path.read_bytes()
+                self.assertEqual(provider.call("begin-wave").returncode, 1)
+                self.assertEqual(provider.path.read_bytes(), before)
+                provider.success(
+                    "record-decision",
+                    "--session",
+                    provider.session,
+                    "--phase",
+                    "implementation",
+                    "--decision",
+                    "answer",
+                    "--chosen",
+                    "a",
+                    "--worker-status-seq",
+                    "1",
+                )
+                self.assertEqual(provider.success("inspect")["ready"], [NODE])
+                provider.success("begin-wave")
+
+    def test_malformed_status_storage_inhibits_readiness(self) -> None:
+        """Malformed rows fail closed instead of being mistaken for resolved decisions."""
+        cases: list[Any] = [None, {}, [None], [{}], [{"node": NODE, "decision_pending": "false"}]]
+        for rows in cases:
+            for provider in self.providers:
+                with self.subTest(provider=provider.name, rows=rows):
+                    state = provider.read()
+                    state["worker_statuses"] = rows
+                    provider.write(state)
+                    self.assertEqual(provider.success("inspect")["ready"], [])
+                    before = provider.path.read_bytes()
+                    self.assertEqual(provider.call("begin-wave").returncode, 1)
+                    self.assertEqual(provider.path.read_bytes(), before)
+
+    def test_pending_decision_does_not_block_an_unrelated_node(self) -> None:
+        """Only the node awaiting an answer is removed from the next wave."""
+        for provider in self.providers:
+            with self.subTest(provider=provider.name):
+                state = provider.state((NODE, "U3[2]"))
+                state["worker_statuses"] = [{"node": NODE, "decision_pending": True}]
+                provider.write(state)
+                self.assertEqual(provider.success("inspect")["ready"], ["U3[2]"])
+                self.assertEqual(provider.success("begin-wave")["nodes"], ["U3[2]"])
+
+    def test_pending_decision_blocks_stale_retry_without_mutation(self) -> None:
+        """Both retry adapters refuse a stale node with an unanswered worker status."""
+        for provider in self.providers:
+            with self.subTest(provider=provider.name):
+                state = provider.read()
+                state["graph"]["nodes"][NODE].update(
+                    status="stale",
+                    outcome="stale",
+                    stale_check={"checked": True, "method": "inspection", "result": "absent"},
+                )
+                state["worker_statuses"] = [{"node": NODE, "decision_pending": True}]
+                provider.write(state)
+                before = provider.path.read_bytes()
+                result = provider.call(
+                    "respawn-stale", "--session", provider.session, "--node", NODE, "--reason", "retry"
+                )
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("decision", result.stderr)
+                self.assertEqual(provider.path.read_bytes(), before)
+
+    def test_pending_decision_blocks_live_authorization(self) -> None:
+        """A pending status appearing during a wave cannot authorize its native dispatch."""
+        for provider in self.providers:
+            with self.subTest(provider=provider.name):
+                wave = provider.success("begin-wave")
+                dispatch = wave["dispatches"][0]
+                prompt = dispatch["prompt_prefix"] + "\n" + dispatch["prompt_sections"]
+                state = provider.read()
+                state["worker_statuses"] = [{"node": NODE, "decision_pending": True}]
+                provider.write(state)
+                before = provider.path.read_bytes()
+                args: tuple[str, ...]
+                if provider.name == "claude":
+                    args = ("--prompt", prompt, "--subagent-type", "coderails:loop-worker")
+                else:
+                    message = provider.home / "message.txt"
+                    message.write_text(prompt, encoding="utf-8")
+                    args = (
+                        "--dispatch-id",
+                        dispatch["dispatch_id"],
+                        "--message-file",
+                        str(message),
+                        "--agent-type",
+                        "loop-worker",
+                        "--task-name",
+                        dispatch["task_name"],
+                    )
+                result = provider.call("authorize-dispatch", "--session", provider.session, *args)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("decision", result.stderr)
+                self.assertEqual(provider.path.read_bytes(), before)
+
     def test_codex_stop_guard_releases_the_status_row_once(self) -> None:
         """The recorded row releases the Codex Stop guard exactly once, with no text parsing."""
         provider = self.providers[1]

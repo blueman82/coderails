@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_spec
+from graph_vocab import decision_pending
 
 ENVELOPE_VERSION = 2
 ENVELOPE_KEY = "CODERAILS_GRAPH_DISPATCH"
@@ -241,6 +242,8 @@ def check_ownership(state: dict[str, Any], env: dict[str, Any], live: bool) -> d
     active = state["graph"].get("active_wave")
     if live and not (active and active["wave_id"] == record["wave_id"] and record["node_id"] in active["nodes"]):
         raise DispatchDeniedError("dispatch_foreign", "dispatch envelope does not own an exact node in the active wave")
+    if live and decision_pending(state, record["node_id"]):
+        raise DispatchDeniedError("decision_pending", "cannot authorize a node with a pending worker decision")
     return record
 
 

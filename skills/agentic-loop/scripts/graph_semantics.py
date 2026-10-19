@@ -8,6 +8,8 @@ import re
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, NoReturn, cast
 
+from graph_vocab import decision_pending
+
 STATUSES = frozenset({"pending", "ready", "running", "blocked", "done", "skipped", "failed", "hard-stop", "stale"})
 SUCCESS = frozenset({"done", "skipped"})
 PERSISTED_STATUSES = STATUSES - {"failed"}
@@ -251,6 +253,7 @@ def ready(state: object) -> list[str]:
         for node_id, node in graph["nodes"].items()
         if node_id not in graph["joins"]
         and node["status"] == "pending"
+        and not decision_pending(root, node_id)
         and all(graph["nodes"][source]["status"] in SUCCESS for source in dependencies[node_id])
     )
 
@@ -338,6 +341,8 @@ def respawn_stale(state: object, node_id: object, reason: object) -> dict[str, A
     reason_text = _text(reason, "reason")
     if node_key not in graph["nodes"] or graph["nodes"][node_key]["status"] != "stale":
         _error("respawn", "respawn requires a stale node")
+    if decision_pending(root, node_key):
+        _error("decision_pending", "cannot retry a node with a pending worker decision")
     node = graph["nodes"][node_key]
     _stale_check(node.get("stale_check"), f"node {node_key}")
     node["respawn"]["generation"] += 1
