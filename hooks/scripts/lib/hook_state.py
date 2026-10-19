@@ -30,11 +30,33 @@ def state_path(session: str) -> Path | None:
 
 
 def _shape(data: dict[str, Any]) -> dict[str, Any]:
-    """Fill the typed skeleton and refuse (ValueError) any field of the wrong type, so a bad file is never rewritten."""
-    data.setdefault("schema_version", SCHEMA_VERSION)
+    """Fill the skeleton and refuse malformed fields so bad state is never trusted or rewritten."""
+    version = data.setdefault("schema_version", SCHEMA_VERSION)
+    if not isinstance(version, int) or isinstance(version, bool) or version != SCHEMA_VERSION:
+        raise ValueError("unsupported schema_version")
     for key, kind in (("ordinals", dict), ("arms", list), ("nudged", dict)):
         if not isinstance(data.setdefault(key, kind()), kind):
             raise ValueError(f"{key} has the wrong type")
+    ordinals = cast(dict[str, Any], data["ordinals"])
+    if any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in ordinals.values()):
+        raise ValueError("ordinals must contain non-negative integers")
+    arms = cast(list[Any], data["arms"])
+    for item in arms:
+        if not isinstance(item, dict):
+            raise ValueError("arms must contain hook names and non-negative integer ordinals")
+        arm = cast(dict[str, Any], item)
+        hook, ordinal = arm.get("hook"), arm.get("ordinal")
+        if (
+            not isinstance(hook, str)
+            or not hook.strip()
+            or not isinstance(ordinal, int)
+            or isinstance(ordinal, bool)
+            or ordinal < 0
+        ):
+            raise ValueError("arms must contain hook names and non-negative integer ordinals")
+    nudged = cast(dict[str, Any], data["nudged"])
+    if any(not isinstance(value, bool) for value in nudged.values()):
+        raise ValueError("nudged values must be booleans")
     return data
 
 

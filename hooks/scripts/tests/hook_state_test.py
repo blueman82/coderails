@@ -93,6 +93,24 @@ class HookStateTests(HookTestCase):
         counts = count_reasons(self.directory / "state")
         self.assertEqual((counts["hook_state_unreadable"], counts["nudge_first"]), (3, 0))
 
+    def test_unsupported_schema_and_malformed_entries_are_unreadable(self) -> None:
+        """Unknown versions and malformed nested fields cannot release grace or be overwritten."""
+        state_file = self.state_file("S1")
+        state_file.parent.mkdir(parents=True)
+        invalid_states: list[dict[str, Any]] = [
+            {"schema_version": 2, "ordinals": {"absent_blocked": 1}, "arms": [], "nudged": {}},
+            {"schema_version": 1, "ordinals": {"absent_blocked": True}, "arms": [], "nudged": {}},
+            {"schema_version": 1, "ordinals": {}, "arms": [{"hook": "loop_state_guard"}], "nudged": {}},
+            {"schema_version": 1, "ordinals": {}, "arms": [], "nudged": {"offload_push_guard": 1}},
+        ]
+        for invalid in invalid_states:
+            with self.subTest(invalid=invalid), patch.dict(os.environ, self.environment):
+                state_file.write_text(json.dumps(invalid))
+                before = state_file.read_bytes()
+                self.assertIsNone(hook_state.load_state("S1", "loop_state_guard"))
+                self.assertFalse(hook_state.mark_nudged("S1", "offload_push_guard"))
+                self.assertEqual(state_file.read_bytes(), before)
+
     def test_ordinals_and_arms_persist(self) -> None:
         """record_absent_block stores the ordinal and appends an arms row each time; nudged is untouched."""
         with patch.dict(os.environ, self.environment):

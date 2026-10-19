@@ -93,7 +93,7 @@ class LoopStateGuardTests(HookTestCase):
                 "hook=loop_state_guard session=S1 invocations=1 reason=absent blocked=1\n"
             )
             self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 2, contents)
-        self.assertEqual(self.trace_reasons(), ["hook_state_unreadable"] * 3)
+        self.assertEqual(self.trace_reasons(), ["hook_state_unreadable"] * 4)
 
     def test_wrong_owner_and_rearmed_completion_never_get_absent_grace(self) -> None:
         """Wrong session and completion ordinal mismatch block repeatedly."""
