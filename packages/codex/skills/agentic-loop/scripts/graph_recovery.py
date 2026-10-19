@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import uuid
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
@@ -46,13 +47,28 @@ def _unique_collection_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _collection_paths(root: Path) -> list[Path]:
+    """Find graph files, refusing directory links and incomplete traversal."""
+    paths: list[Path] = []
+
+    def walk_error(error: OSError) -> None:
+        raise GraphError(f"cannot inspect collection directory: {error}") from error
+
+    for directory, dirs, files in os.walk(root, onerror=walk_error):
+        if any((Path(directory) / name).is_symlink() for name in dirs):
+            raise GraphError(f"symlinked collection directory: {directory}")
+        if "progress.json" in files:
+            paths.append(Path(directory) / "progress.json")
+    return sorted(paths)
+
+
 def collection(root: Path) -> dict[str, Any]:
     """List validated graph states beneath a directory without changing them."""
     root = root.resolve()
     if not root.is_dir():
         raise GraphError("graph collection root must be a directory")
     graphs_by_path: dict[str, dict[str, Any]] = {}
-    for path in sorted(root.rglob("progress.json")):
+    for path in _collection_paths(root):
         if path.is_symlink() or not path.resolve().is_relative_to(root):
             raise GraphError(f"graph state escapes collection root: {path}")
         state = _load(path)

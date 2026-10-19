@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict, cast
@@ -290,13 +291,26 @@ def _unique_collection_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _collection_paths(root: Path) -> Iterator[Path]:
+    """Find graph files, refusing directory links and incomplete traversal."""
+
+    def walk_error(error: OSError) -> None:
+        raise ValueError(f"cannot inspect collection directory: {error}") from error
+
+    for directory, dirs, files in os.walk(root, onerror=walk_error):
+        if any((Path(directory) / name).is_symlink() for name in dirs):
+            raise ValueError(f"symlinked collection directory: {directory}")
+        if "progress.json" in files:
+            yield Path(directory) / "progress.json"
+
+
 def collection(root: Path) -> dict[str, Any]:
     """List validated graph states beneath a directory without changing them."""
     root = root.resolve()
     if not root.is_dir():
         raise ValueError("graph collection root must be a directory")
     graphs_by_path: dict[str, dict[str, Any]] = {}
-    for path in sorted(root.rglob("progress.json")):
+    for path in sorted(_collection_paths(root)):
         if path.is_symlink() or not path.resolve().is_relative_to(root):
             raise ValueError(f"graph state escapes collection root: {path}")
         state = load(path)
@@ -350,12 +364,10 @@ def collection(root: Path) -> dict[str, Any]:
             entry = cast(dict[str, object], raw_record)
             if not all(field in entry for field in ("key", "path", "loop_id", "links")):
                 raise ValueError("each collection graph needs nonblank key, path, loop_id and string links")
-            key_value, path_value, loop_id_value, links = (
-                entry["key"],
-                entry["path"],
-                entry["loop_id"],
-                entry["links"],
-            )
+            key_value = entry["key"]
+            path_value = entry["path"]
+            loop_id_value = entry["loop_id"]
+            links = entry["links"]
             if not all(isinstance(value, str) and value for value in (key_value, path_value, loop_id_value)):
                 raise ValueError("each collection graph needs nonblank key, path, loop_id and string links")
             if not isinstance(links, list):

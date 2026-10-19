@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -208,6 +209,35 @@ class GraphCollectionTests(unittest.TestCase):
                 result = self.run_collection(script)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("escapes collection root", result.stderr)
+
+    def test_symlinked_graph_directory_refuses_collection(self) -> None:
+        """Discovery must not silently omit a graph behind a directory link."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        outside = Path(temporary.name) / "graph"
+        outside.mkdir()
+        (outside / "progress.json").write_text("{}", encoding="utf-8")
+        (self.root / "linked").symlink_to(outside, target_is_directory=True)
+        for script in PROVIDERS:
+            with self.subTest(provider=script.relative_to(ROOT)):
+                result = self.run_collection(script)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("symlinked collection directory", result.stderr)
+
+    def test_unreadable_graph_directory_refuses_collection(self) -> None:
+        """Discovery errors cannot silently produce a partial collection."""
+        hidden = self.root / "hidden"
+        hidden.mkdir()
+        (hidden / "progress.json").write_text("{}", encoding="utf-8")
+        hidden.chmod(0)
+        self.addCleanup(hidden.chmod, 0o700)
+        if os.access(hidden, os.R_OK | os.X_OK):
+            self.skipTest("permission bits do not restrict directory reads here")
+        for script in PROVIDERS:
+            with self.subTest(provider=script.relative_to(ROOT)):
+                result = self.run_collection(script)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("cannot inspect collection directory", result.stderr)
 
     def test_symlinked_collection_index_outside_root_is_refused(self) -> None:
         """A collection index cannot make the command read outside its root."""
