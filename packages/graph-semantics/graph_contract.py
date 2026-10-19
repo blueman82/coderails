@@ -46,7 +46,7 @@ CODES = (
     "role_mismatch",
     "dispatch_unauthorized",
 )
-OFF_SWITCH = "CODERAILS_GRAPH_DISPATCH"  # off/0/false: pre-envelope pass-through (default ON)
+OFF_SWITCH = "CODERAILS_GRAPH_DISPATCH"  # off/0/false: bypass policy after v2 ownership (default ON)
 BEGIN, END = "CODERAILS_GRAPH_CONTRACT v2", "END CODERAILS_GRAPH_CONTRACT"
 CAPABILITY_TOOLS = ("repo.inspect", "diff.read", "tests.run", "pr.comment")  # mirrors hooks capability_profiles.TOOLS
 CLAUDE_TYPES = ("general-purpose",)  # unguarded roles may also run as this untyped native agent
@@ -225,8 +225,8 @@ def parse_envelope(prompt: object, allow_legacy: bool = False) -> dict[str, Any]
     return found
 
 
-def check_dispatch(state: dict[str, Any], env: dict[str, Any], prompt: str, live: bool) -> dict[str, Any]:
-    """Cross-check a prompt's envelope against the stored record; `live` also requires the current active wave."""
+def check_ownership(state: dict[str, Any], env: dict[str, Any], live: bool) -> dict[str, Any]:
+    """Bind a v2 envelope to its issued node and wave, including when dispatch policy is explicitly off."""
     found: object = cast(dict[str, Any], state["graph"].get("dispatches", {})).get(env["dispatch_id"])
     if not isinstance(found, dict):
         raise DispatchDeniedError("dispatch_unknown_id", "dispatch envelope names no begin-wave record")
@@ -241,6 +241,12 @@ def check_dispatch(state: dict[str, Any], env: dict[str, Any], prompt: str, live
     active = state["graph"].get("active_wave")
     if live and not (active and active["wave_id"] == record["wave_id"] and record["node_id"] in active["nodes"]):
         raise DispatchDeniedError("dispatch_foreign", "dispatch envelope does not own an exact node in the active wave")
+    return record
+
+
+def check_dispatch(state: dict[str, Any], env: dict[str, Any], prompt: str, live: bool) -> dict[str, Any]:
+    """Cross-check an owned prompt against its stored contract and rendered sections."""
+    record = check_ownership(state, env, live)
     try:
         contract = validate_contract(record.get("contract"))
         altered = record.get("envelope_version") != ENVELOPE_VERSION
@@ -255,14 +261,14 @@ def check_dispatch(state: dict[str, Any], env: dict[str, Any], prompt: str, live
 
 
 def assert_role(contract: dict[str, Any], requested: str, prefix: str, generic: tuple[str, ...] | None) -> None:
-    """Guarded roles need their own typed agent; any other role also accepts the provider's untyped agents.
+    """Guarded roles need their own typed agent; other roles accept only a truly omitted or generic type.
 
-    `generic` lists the accepted untyped agents (Claude); None accepts any type that is not itself a named role (Codex).
+    `generic` lists the accepted untyped agents (Claude); None accepts only an omitted type (Codex).
     """
     role = contract["role"]
     if requested == prefix + role:
         return
-    untyped = requested not in roles() if generic is None else requested in generic
+    untyped = not requested if generic is None else requested in generic
     if role in guarded_roles() or not untyped:
         shown = requested or "no agent type"
         raise DispatchDeniedError("role_mismatch", f"role {role} cannot be dispatched as {shown}")

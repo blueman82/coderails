@@ -255,8 +255,15 @@ class DispatchEnvelopeTests(unittest.TestCase):
         del request["tool_input"]["subagent_type"]
         self.refuse(scout, request, "role_mismatch")
 
-    def test_off_switch_passes_every_spawn_through_with_a_trace_row(self) -> None:
-        """CODERAILS_GRAPH_DISPATCH=off lets a role-mismatched, envelope-less spawn through on both providers."""
+    def test_codex_named_native_role_is_not_generic(self) -> None:
+        """An unguarded worker may omit agent_type, but cannot silently become explorer."""
+        provider = self.opened("codex")
+        request = provider.request()
+        request["tool_input"]["agent_type"] = "explorer"
+        self.refuse(provider, request, "role_mismatch")
+
+    def test_off_switch_preserves_v2_ownership_with_a_trace_row(self) -> None:
+        """Off bypasses role policy, while a graph spawn still needs its current v2 ownership envelope."""
         for name in ("claude", "codex"):
             with self.subTest(provider=name):
                 provider = self.opened(name, ("S2",))
@@ -264,9 +271,38 @@ class DispatchEnvelopeTests(unittest.TestCase):
                 self.untyped(provider, request, "general-purpose")
                 self.assertTrue(self.verdict(provider, request))  # control: denied while the switch is unset
                 provider.environment = {**provider.environment, "CODERAILS_GRAPH_DISPATCH": "off"}
+                original = request["tool_input"][field(provider)]
                 request["tool_input"][field(provider)] = "Read the documentation."
+                self.refuse(provider, request, "dispatch_missing_envelope")
+                first, body = original.split("\n", 1)
+                old = json.loads(first.split("=", 1)[1])
+                old.pop("envelope_version")
+                old.pop("dispatch_id")
+                request["tool_input"][field(provider)] = first.split("=", 1)[0] + "=" + json.dumps(old) + "\n" + body
+                self.refuse(provider, request, "dispatch_missing_envelope")
+                request["tool_input"][field(provider)] = original
                 self.assertFalse(self.verdict(provider, request))
                 self.assertEqual(self.reason(provider), "dispatch_check_off")
+
+    def test_claude_off_records_one_owned_native_wave_without_authorization(self) -> None:
+        """An explicitly disabled policy still binds a real v2 native spawn and rejects losing its ownership."""
+        provider = self.opened("claude")
+        provider.environment = {**provider.environment, "CODERAILS_GRAPH_DISPATCH": "off"}
+        report = provider.launch()
+        self.unauthorize(provider)
+        provider.success("record-wave", json.dumps(report))
+
+        missing = self.opened("claude")
+        missing.environment = {**missing.environment, "CODERAILS_GRAPH_DISPATCH": "off"}
+        report = missing.launch()
+        native = json.loads(missing.parent.read_text().splitlines()[1])
+        native["message"]["content"][0]["input"]["prompt"] = "No graph envelope"
+        lines = missing.parent.read_text().splitlines()
+        lines[1] = json.dumps(native)
+        missing.parent.write_text("\n".join(lines) + "\n")
+        failed = missing.call("record-wave", json.dumps(report))
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("no native spawn", failed.stderr)
 
     def launched(self, nodes: tuple[str, ...] = ("U3[1]",)) -> tuple[Provider, dict[str, Any]]:
         """A Claude provider whose wave was begun and spawned, plus the wave report."""

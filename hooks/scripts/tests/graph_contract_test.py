@@ -119,9 +119,15 @@ class ContractTests(unittest.TestCase):
                 contract_module.assert_role(contract, requested, *claude)
             self.assertEqual(caught.exception.code, "role_mismatch")
         contract_module.assert_role(scout, "source-auditor", "", None)  # Codex: the role's own agent_type
-        contract_module.assert_role(worker, "worker", "", None)  # an unnamed native role is untyped
         contract_module.assert_role(worker, "", "", None)
-        for contract, requested in ((scout, ""), (scout, "worker"), (worker, "source-auditor")):
+        for contract, requested in (
+            (scout, ""),
+            (scout, "worker"),
+            (worker, "worker"),
+            (worker, "general-purpose"),
+            (worker, "explorer"),
+            (worker, "source-auditor"),
+        ):
             with self.subTest(codex=requested), self.assertRaises(DispatchDeniedError):
                 contract_module.assert_role(contract, requested, "", None)
 

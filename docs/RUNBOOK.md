@@ -353,16 +353,19 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   new wave), `dispatch_contract_altered` (the stored contract no longer matches its digest or lost a field: the state was
   edited, restart the wave via `recover-wave`), `dispatch_sections_missing` (the pasted contract block was edited or left
   out: paste `prompt_sections` verbatim), `role_mismatch` (dispatch a guarded scout as `coderails:<role>` / Codex
-  `agent_type: <role>`; other roles accept their own type or `general-purpose` on Claude, any unnamed role on Codex),
+  `agent_type: <role>`; other roles accept their own type or `general-purpose` on Claude, and their own type or omitted
+  `agent_type` on Codex; a different named native role such as `explorer` is refused),
   `dispatch_state_unconverted` (`state_minor` < 2: run `graph.py convert --check` then `convert`; it refuses while a wave
   is open, `convert_refused_active_wave_in_flight`, so finish or `recover-wave` first), `dispatch_unauthorized` (Claude
   `record-wave` / completion found a bound spawn whose record the PreToolUse guard never consumed, i.e. a spawn the hook did
   not see: re-dispatch it through the guard via `recover-wave`). A Claude `Agent` call with no `subagent_type` is treated as
   `general-purpose` (allowed for unguarded roles, `role_mismatch` for a scout).
-- Off-switch: `CODERAILS_GRAPH_DISPATCH=off` (also `0` or `false`) in the environment of the hooks and the graph CLI sends
-  every spawn down the pre-envelope pass-through route on both providers (no envelope, role or single-use check, and no
-  evidence-side re-check); each such spawn leaves an `authorize-dispatch/reported/dispatch_check_off` trace row. Default ON;
-  unset to re-enable. Use it only to rescue a loop wedged by a bad contract or an uninstalled plugin agent.
+- Off-switch: `CODERAILS_GRAPH_DISPATCH=off` (also `0` or `false`) in the hooks and graph CLI bypasses the contract hash,
+  rendered sections, role and single-use checks. A graph-bound spawn still needs the current v2 envelope issued by
+  `begin-wave`, the recorded task name on Codex, and frozen evals; native evidence still binds its node, wave and attempt.
+  An absent or v1 envelope is refused. An ordinary Agent outside a graph is unaffected. Each allowed spawn leaves an
+  `authorize-dispatch/reported/dispatch_check_off` trace row. Default ON; unset to re-enable. Use it only to rescue a
+  loop wedged by a bad contract or an uninstalled plugin agent.
 - Bad `add-unit --model-role` is `add_unit_refused_bad_field` (allowed: `fast-mechanical`, `default`, `frontier`).
 - Limits: a plugin agent that is not installed in the session cannot run a guarded scout (refused, never downgraded); the
   sandboxed Bash launcher carries no agent type, so the role is asserted on the `Agent` and `spawn_agent` routes only
@@ -378,8 +381,9 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   with no `agent_role` (default `loop-worker`) may run as `general-purpose` on Claude, and any non-role `agent_type` on
   Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent` and `spawn_agent` only, so `SendMessage` on
   Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
-  (4) Codex has no evidence-side re-check: `record-wave` and completion bind by `task_name` and never re-verify the dispatch
-  record or `authorized`, and `graph_transcript._legacy_dispatch` (first-line `CODERAILS_GRAPH_TASK`) stays on the live
-  binding path, so a spawn that bypassed the hook still binds on Codex. Claude re-checks record, digest, role,
-  consumption and one-spawn-per-id for waves at or after `contract_from_revision`; Claude hooks still fail open if the
-  hook times out (10 s in `hooks.json`) before it denies.
+  (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
+  `spawn_agent` function-call message with its v2 record, role and consumed authorization; a task-name-only legacy event
+  cannot bind a contract-era wave. Claude matches a non-null hook `tool_use_id` to the native Agent call; when the hook
+  supplies no id, it retains the consumed flag and one-spawn-per-id check without claiming call-id proof. Historical
+  pre-contract attempts retain their original evidence rules. Claude hooks can still fail open if the hook times out
+  (10 s in `hooks.json`) before it denies.

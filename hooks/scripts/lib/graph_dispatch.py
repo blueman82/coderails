@@ -164,8 +164,24 @@ def authorize_dispatch(
     role = role.strip() or "general-purpose"  # Claude Code runs an omitted subagent_type as general-purpose
     inputs = {"session": session, "role": role}
     if graph_contract.dispatch_off():
-        trace(path, state, "reported", "dispatch_check_off", inputs, [(None, None, None)], "authorize-dispatch")
-        return {}
+        try:
+            graph_contract.require_converted(state)
+            request = graph_contract.parse_envelope(prompt)
+            graph_contract.check_ownership(state, request, live=True)
+            validate_dispatch_evals(path, state, request["node_id"], role == "coderails:loop-worker")
+        except graph_contract.DispatchDeniedError as error:
+            trace(path, state, "refused", error.code, inputs, [(None, None, None)], "authorize-dispatch")
+            raise
+        trace(
+            path,
+            state,
+            "reported",
+            "dispatch_check_off",
+            inputs,
+            [(request["node_id"], None, None)],
+            "authorize-dispatch",
+        )
+        return request
     denied: list[graph_contract.DispatchDeniedError] = []
     granted: list[dict[str, Any]] = []
     named: list[str | None] = [None]  # the envelope's node, once it parses, for the trace row

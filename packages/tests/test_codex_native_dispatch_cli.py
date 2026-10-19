@@ -123,11 +123,18 @@ class NativeDispatchCliTests(unittest.TestCase):
                 "cwd": scratch,
                 "tool_input": {"task_name": TASK, "message": message_for(base)},
             }
-            for role in (None, "worker", "general-purpose"):
+            for role in (None,):
                 seed()
                 if role is not None:
                     payload["tool_input"]["agent_type"] = role
                 self.assertFalse(denied(run(payload)), role)
+            for role in ("worker", "general-purpose", "explorer"):
+                seed()
+                payload["tool_input"]["agent_type"] = role
+                self.assertTrue(denied(run(payload)), role)
+            payload["tool_input"].pop("agent_type", None)
+            seed()
+            self.assertFalse(denied(run(payload)))
             after = state_path.read_bytes()
             self.assertTrue(denied(run(payload)), "a second spawn with the same envelope is a replay")
             self.assertEqual(state_path.read_bytes(), after)

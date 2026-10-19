@@ -126,7 +126,34 @@ def authorize_dispatch(
         named: str | None = None
         inputs = {"session": session, "role": agent_type}
         if graph_contract.dispatch_off():
-            trace(path, state, "reported", "dispatch_check_off", inputs, [(None, None, None)], "authorize-dispatch")
+            try:
+                graph_contract.require_converted(state)
+                message = message_file.read_text(encoding="utf-8")
+                request = graph_contract.parse_envelope(message)
+                if request["dispatch_id"] != dispatch_id:
+                    raise graph_contract.DispatchDeniedError(
+                        "dispatch_unknown_id", "--dispatch-id is not the envelope's"
+                    )
+                record = graph_contract.check_ownership(state, request, live=True)
+                if record.get("task_name") != task:
+                    raise graph_contract.DispatchDeniedError(
+                        "dispatch_foreign", "task_name is not the record's task name"
+                    )
+                validate_evals(state, None, evals_path)
+            except graph_contract.DispatchDeniedError as error:
+                trace(path, state, "refused", error.code, inputs, [(None, None, None)], "authorize-dispatch")
+                raise GraphError(str(error)) from error
+            except OSError as error:
+                raise GraphError(f"cannot read the message file: {error}") from error
+            trace(
+                path,
+                state,
+                "reported",
+                "dispatch_check_off",
+                inputs,
+                [(request["node_id"], None, None)],
+                "authorize-dispatch",
+            )
             return {"loop_id": state["loop_id"], "task_name": task, "dispatch_id": dispatch_id, "off": True}
         try:
             graph_contract.require_converted(state)

@@ -106,6 +106,28 @@ def _native_function_call(record: dict[str, Any]) -> tuple[str, str, str | None]
     return (call_id, task, expected_role) if task is not None else None
 
 
+def native_dispatch_requests(records: list[tuple[int, dict[str, Any]]]) -> dict[str, list[dict[str, Any] | None]]:
+    """Keep the raw native spawn arguments by call id for evidence-side contract checks."""
+    requests: dict[str, list[dict[str, Any] | None]] = {}
+    for _, record in records:
+        if record.get("type") != "response_item":
+            continue
+        item = event_payload(record)
+        if item.get("type") != "function_call" or item.get("name") != "spawn_agent":
+            continue
+        call_id = item.get("call_id")
+        if not isinstance(call_id, str):
+            continue
+        try:
+            arguments: object = json.loads(item.get("arguments", ""))
+        except (TypeError, ValueError):
+            arguments = None
+        requests.setdefault(call_id, []).append(
+            cast(dict[str, Any], arguments) if isinstance(arguments, dict) else None
+        )
+    return requests
+
+
 def _native_activity(record: dict[str, Any]) -> tuple[str, str, str] | None:
     payload = event_payload(record)
     item = payload.get("item") if record.get("type") == "event_msg" else None

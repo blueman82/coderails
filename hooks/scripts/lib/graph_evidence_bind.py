@@ -20,12 +20,17 @@ def check_record(state: dict[str, Any], row: dict[str, Any]) -> None:
             "dispatch_missing_envelope", "native spawn lacks a v2 dispatch envelope"
         )
     if graph_contract.dispatch_off():
+        graph_contract.check_ownership(state, row, live=False)
         return
     record = graph_contract.check_dispatch(state, row, row["prompt"], live=False)
     graph_contract.assert_role(record["contract"], row["subagent_type"], "coderails:", graph_contract.CLAUDE_TYPES)
-    if record.get("authorized") is None:
+    authorized: object = record.get("authorized")
+    authorized = cast(dict[str, Any], authorized) if isinstance(authorized, dict) else None
+    if not isinstance(authorized, dict) or (
+        authorized.get("tool_use_id") is not None and authorized.get("tool_use_id") != row["tool_use_id"]
+    ):
         raise graph_contract.DispatchDeniedError(
-            "dispatch_unauthorized", "native spawn has no consumed dispatch authorization (the guard never saw it)"
+            "dispatch_unauthorized", "native spawn does not match its consumed dispatch authorization"
         )
 
 
