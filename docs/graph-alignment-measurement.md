@@ -269,9 +269,22 @@ with `authority.py inspect`); `no_receipt` dominating `merge_py_receipt_executed
 Wiring `gate_summary` into `measure_graph_alignment.py` itself is a handoff to the lane that owns that file; until then
 the stdin CLI above is the supported route.
 
+## Strict typed config and wiki fail-closed (measurement note)
+
+Guarded actions read `.coderails/workflow.config.yaml` through `strict_settings` and deny with `config_rejected`
+(trace `action_authority/denied/config_rejected`, `diff-manifest/refused/config_rejected`,
+`wiki_taxonomy_gate/failed_closed/config_rejected`). Once the vault is positively identified, a missing or invalid
+`wiki.schema.json` also denies (`wiki_taxonomy_gate/failed_closed/wiki_schema_missing|wiki_schema_invalid`). Safety
+controls default ON in `config.schema.json`: `sandbox_workers`, `action_authority`, `evals.require_signatures`, and
+`diff_manifest` (the latter remains inactive until a policy path is configured). The receipt CLI is shipped for both
+providers in this stack. Limits: no config file keeps non-action config consumers inert; `dispatch_mode` is computed in
+`plan()` and consumed in Phase 3c; the srt probe checks `npx` and `gh` on PATH, not whether runtime sandbox startup works.
+
 **Reproduce.**
 
 ```
 python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py
 PYTHONPATH=. python3 -m unittest hooks/scripts/tests/authority_permits_test.py
+python3 scripts/lib/config_counters.py
+python3 hooks/scripts/tests/config_strict_test.py && python3 hooks/scripts/tests/wiki_taxonomy_gate_test.py
 ```

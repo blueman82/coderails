@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,10 @@ from .graph_recovery import recover_wave as recover_wave
 from .loop_completion import validate_completion
 from .loop_evals import read_loop_evals_result
 from .loop_state_common import LoopState, read_state
+
+sys.path.insert(0, str(ROOT))
+from scripts.lib.config import config_path, load_config  # noqa: E402
+from scripts.lib.config_strict import sandbox_mode  # noqa: E402
 
 TARGETS = {
     "S-1": "skills/improve-prompt/SKILL.md",
@@ -72,6 +77,7 @@ def plan(path: Path) -> list[dict[str, Any]]:
     state = load(path)
     nodes = state["graph"]["active_wave"]["nodes"] if state["graph"]["active_wave"] else graph_semantics.ready(state)
     result: list[dict[str, Any]] = []
+    mode = sandbox_mode(load_config(config_path())[0])  # sandbox_workers has a code reader here
     for node_id in nodes:
         role = state["graph"]["nodes"][node_id].get("graph_role") or re.sub(r"\[.*\]$", "", node_id)
         source = TARGETS.get(role)
@@ -81,6 +87,8 @@ def plan(path: Path) -> list[dict[str, Any]]:
             "path": source,
             "unresolved": not source or not (ROOT / source).is_file(),
         }
+        if role == "U3":
+            item["dispatch_mode"] = mode
         if state["graph"]["active_wave"]:
             item["prompt_prefix"] = ENVELOPE_KEY + "=" + json.dumps(ownership(state, node_id), sort_keys=True)
         result.append(item)

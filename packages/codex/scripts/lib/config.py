@@ -80,28 +80,51 @@ def _schema() -> dict[str, Any]:
         return {}
 
 
-def _entries(text: str) -> dict[str, dict[str, Any]]:
-    """Parse the single-level grammar plus one nested level: {key: {raw, items, children}}."""
+def _entries(text: str, findings: list[dict[str, str]] | None = None) -> dict[str, dict[str, Any]]:
+    """Parse the single-level grammar plus one nested level: {key: {raw, items, children}}.
+
+    A line that fits no branch or repeats a key at its level is reported (config_unparseable_line,
+    config_duplicate_key; key "line N") so malformed syntax cannot silently drop a setting.
+    """
+    found = findings if findings is not None else []
     top: dict[str, dict[str, Any]] = {}
     current: dict[str, Any] | None = None
     indent = None
-    for line in text.splitlines():
+
+    def flag(code: str, key: str) -> None:
+        found.append({"code": code, "key": key, "hint": ""})
+
+    for number, line in enumerate(text.splitlines(), 1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
+        where = f"line {number}"
+        match = KEY_LINE.fullmatch(line)
         if not line[0].isspace():
-            match = KEY_LINE.fullmatch(line)
             current = {"raw": "", "items": [], "children": {}} if match else None
             indent = None
             if match and current is not None:
                 current["raw"] = match[3].split("#", 1)[0].strip().strip("\"'")
+                if match[2] in top:
+                    flag("config_duplicate_key", match[2])
                 top[match[2]] = current
+            else:
+                flag("config_unparseable_line", where)
         elif current is not None and stripped.startswith("- "):
             current["items"].append(stripped[2:].split("#", 1)[0].strip().strip("\"'"))
-        elif current is not None and (match := KEY_LINE.fullmatch(line)):
+        elif current is not None and match:
             indent = len(match[1]) if indent is None else indent
-            if len(match[1]) == indent:
+            kids = cast("list[dict[str, Any]]", list(current["children"].values()))
+            if len(match[1]) > indent and kids and kids[-1]["raw"] == "":
+                continue  # grandchild of a bare parent key (jira.transitions.*): not typed, not a typo
+            if len(match[1]) != indent:
+                flag("config_unparseable_line", where)
+            else:
+                if match[2] in current["children"]:
+                    flag("config_duplicate_key", f"{match[2]} ({where})")
                 current["children"][match[2]] = {"raw": match[3].split("#", 1)[0].strip().strip("\"'")}
+        else:
+            flag("config_unparseable_line", where)
     return top
 
 
@@ -123,7 +146,7 @@ def _coerce(entry: dict[str, Any], spec: dict[str, Any]) -> tuple[Any, bool]:
         return int(raw), True
     if "array" in types and raw.startswith("[") and raw.endswith("]"):
         return [item.strip().strip("\"'") for item in raw[1:-1].split(",") if item.strip()], True
-    return raw, "string" in types and raw in spec.get("enum", [raw])
+    return raw, "string" in types
 
 
 def _hint(key: str, known: dict[str, Any]) -> str:
@@ -145,8 +168,10 @@ def _typed(
             values[key] = entry["raw"]
             continue
         value, ok = _coerce(entry, spec)
-        if not ok:
-            findings.append({"code": "config_bad_type", "key": prefix + key, "hint": "/".join(spec["type"])})
+        if not ok or (isinstance(value, str) and value not in spec.get("enum", [value])):
+            code = "config_bad_value" if ok else "config_bad_type"
+            hint = _hint(value, dict.fromkeys(spec["enum"])) if ok else "/".join(spec["type"])
+            findings.append({"code": code, "key": prefix + key, "hint": hint})
         elif isinstance(value, dict) and spec.get("properties"):
             nested = cast("dict[str, Any]", value)
             value = _typed({k: {"raw": v} for k, v in nested.items()}, spec["properties"], prefix + key + ".", findings)
@@ -167,7 +192,8 @@ def load_config(path: str | Path) -> tuple[dict[str, Any], list[dict[str, str]]]
             text = Path(path).read_text(encoding="utf-8")
         except (OSError, ValueError):
             findings.append({"code": "config_unreadable", "key": "", "hint": ""})
-    return _typed(_entries(text), properties, "", findings), findings
+    entries = _entries(text, findings)
+    return _typed(entries, properties, "", findings), findings
 
 
 def _append_row(code: str, key: str, session: str) -> None:
@@ -260,8 +286,14 @@ def integrity_machine_user(path: str | Path) -> str:
 
 
 def require_signatures(path: str | Path) -> bool:
-    """True when evals.require_signatures is true."""
-    return str(_section(path, "evals").get("require_signatures")).lower() == "true"
+    """True unless evals.require_signatures is explicitly false (a config with findings stays ON; no path = inert)."""
+    if not path:
+        return False
+    values, findings = load_config(path)
+    report_findings(findings)
+    # An explicit false is the only OFF; null, a bad type or a rejected config keep signing ON (fail closed).
+    evals = cast("dict[str, Any]", values.get("evals") or {})
+    return bool(findings) or evals.get("require_signatures") is not False
 
 
 def resolve_config_json(start_dir: str | Path | None = None) -> dict[str, Any]:
@@ -278,6 +310,7 @@ def resolve_config_json(start_dir: str | Path | None = None) -> dict[str, Any]:
         "defaults_applied": sorted(set(properties) - present),
         "unknown_keys": [f["key"] for f in findings if f["code"] == "config_unknown_key"],
         "findings": findings,
+        "valid": not findings,
     }
 
 
@@ -289,8 +322,9 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="resolve-config: print the typed view as JSON")
     args = parser.parse_args()
     if args.json and args.operation == "resolve-config":
-        print(json.dumps(resolve_config_json(args.start_dir), indent=2, sort_keys=True))
-        return 0
+        data = resolve_config_json(args.start_dir)
+        print(json.dumps(data, indent=2, sort_keys=True))
+        return 0 if data["valid"] else 1
     result = config_path(args.start_dir) if args.operation == "config-path" else resolve_config(args.start_dir)
     print(result, end="" if result.endswith("\n") else "\n")
     return 0

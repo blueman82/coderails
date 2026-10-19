@@ -22,18 +22,23 @@ class GateTests(ReceiptHookCase):
     """Drive the hook as a subprocess against the shared receipt fixture."""
 
     def test_only_explicit_off_is_silent(self) -> None:
-        """`off` never denies, warns or traces; absent config, junk and empty values are enforce (default ON)."""
+        """`off` is silent, absence/blank use ON defaults, and invalid config is rejected."""
         self.configure("off")
         result = self.invoke("action_authority_gate", self.payload(MERGE))
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
         self.assertEqual(self.reasons(), [])
-        for value in (None, "yes", ""):
+        for value in (None, ""):
             with self.subTest(value=value):
                 self.configure(value if value is not None else "")
                 if value is None:
                     (self.repo / ".coderails/workflow.config.yaml").unlink()
                 self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
-        self.assertEqual(set(self.reasons()), {"denied_no_receipt", "action_authority_bad_mode"})  # "yes" is junk
+        self.configure("yes")
+        result = self.invoke("action_authority_gate", self.payload(MERGE))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("config_rejected", result.stdout)
+        self.assertEqual(self.reasons()[-2:], ["config_bad_value", "config_rejected"])
 
     def test_default_is_enforce_without_any_config_file(self) -> None:
         """No .coderails directory at all: an unreceipted merge and push to main are denied."""
@@ -54,11 +59,11 @@ class GateTests(ReceiptHookCase):
                     self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
         self.assertNotIn("action_authority_bad_mode", self.reasons())
 
-    def test_unknown_value_denies_and_traces_bad_mode(self) -> None:
-        """An unrecognised value is enforce, and the typo is visible as action_authority_bad_mode."""
+    def test_invalid_value_is_rejected(self) -> None:
+        """A guarded action refuses a config value outside the schema enum."""
         self.configure("yes")
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
-        self.assertEqual(self.reasons(), ["action_authority_bad_mode", "denied_no_receipt"])
+        self.assertEqual(self.reasons(), ["config_bad_value", "config_rejected"])
 
     def test_authority_denied_and_max_prs_refuse_even_with_a_valid_receipt(self) -> None:
         """(a) A valid signed receipt does not override authority.denied or a spent max_prs, and is not consumed."""

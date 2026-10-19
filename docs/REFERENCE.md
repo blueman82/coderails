@@ -731,26 +731,28 @@ reads a key: `enforced_by_code`, `read_by_prose_only` (skills and commands read 
 no script does) or `unused`. Regenerate the table with `python3 scripts/lib/config_schema_docs.py --write`.
 
 <!-- config-schema:start -->
-| Key | Type | Default | Status | Description |
-|---|---|---|---|---|
-| `project` | string/null | `null` | read_by_prose_only | Project name written by /coderails:init; read by command prose only. |
-| `wiki_path` | string/null | `null` | enforced_by_code | LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate. |
-| `wiki_supervision` | string/null | `"discuss"` | read_by_prose_only | wiki-ingest mode: discuss (pause before writing) or autonomous. |
-| `wiki_git_worktree` | boolean/null | `true` | read_by_prose_only | true = PR flow for wiki commits; false = commit directly to the vault. |
-| `wiki_git_bypass_flag` | string/null | `null` | read_by_prose_only | Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1. |
-| `wiki_git_pull_path` | string/null | `null` | read_by_prose_only | Source repo pulled after a wiki PR merges. |
-| `wiki_debt_epoch_pr` | integer | `null` | enforced_by_code | First PR number the wiki-ingest debt merge gate covers; absent or empty disables the gate. A literal null is rejected as a bad type, as before. |
-| `worktree_base` | string/null | `null` | read_by_prose_only | Parent directory for sibling worktrees. |
-| `worktree_script` | string/null | `null` | read_by_prose_only | Project script that creates a worktree. |
-| `jira` | object/null | `null` | read_by_prose_only | Jira settings (project, epic, component_name, component_id, epic_field, points_field, fix_version, mcp_namespace, transitions). Nested keys are not type-checked. |
-| `engineering_principles_paths` | array/null | `null` | read_by_prose_only | Glob patterns that trigger the engineering-principles pre-flight in /coderails:push. |
-| `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
-| `sandbox_workers` | boolean/null | `false` | read_by_prose_only | true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md). |
-| `action_authority` | string/null | `"enforce"` | enforced_by_code | enforce (default, also with no config or no key) = gh pr merge, scripts/merge.py and git push to main/master need an owner-signed single-use receipt and honour the session authority (denied, approval_required_for, max_prs); advisory = trace and warn only; off = switch the gate off. Any other value is treated as enforce and traced action_authority_bad_mode. |
-| `integrity_review` | object/null | `null` | enforced_by_code | Integrity attestation settings. |
-| `integrity_review.machine_user` | string/null | `null` | enforced_by_code | GitHub login that must post the integrity-review status; null or absent = local gate inactive. |
-| `evals` | object/null | `null` | enforced_by_code | Eval settings. |
-| `evals.require_signatures` | boolean/null | `false` | enforced_by_code | true = eval artifacts must be signed; refuse when signing is impossible. |
+| Key | Type | Default | Control ON value | Status | Description |
+|---|---|---|---|---|---|
+| `project` | string/null | `null` | - | read_by_prose_only | Project name written by /coderails:init; read by command prose only. |
+| `wiki_path` | string/null | `null` | - | enforced_by_code | LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate. |
+| `wiki_supervision` | string/null | `"discuss"` | - | read_by_prose_only | wiki-ingest mode: discuss (pause before writing) or autonomous. |
+| `wiki_git_worktree` | boolean/null | `true` | - | read_by_prose_only | true = PR flow for wiki commits; false = commit directly to the vault. |
+| `wiki_git_bypass_flag` | string/null | `null` | - | read_by_prose_only | Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1. |
+| `wiki_git_pull_path` | string/null | `null` | - | read_by_prose_only | Source repo pulled after a wiki PR merges. |
+| `wiki_debt_epoch_pr` | integer | `null` | - | enforced_by_code | First PR number the wiki-ingest debt merge gate covers; absent or empty disables the gate. A literal null is rejected as a bad type, as before. |
+| `worktree_base` | string/null | `null` | - | read_by_prose_only | Parent directory for sibling worktrees. |
+| `worktree_script` | string/null | `null` | - | read_by_prose_only | Project script that creates a worktree. |
+| `jira` | object/null | `null` | - | read_by_prose_only | Jira settings (project, epic, component_name, component_id, epic_field, points_field, fix_version, mcp_namespace, transitions). Nested keys are not type-checked. |
+| `engineering_principles_paths` | array/null | `null` | - | read_by_prose_only | Glob patterns that trigger the engineering-principles pre-flight in /coderails:push. |
+| `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | - | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
+| `sandbox_workers` | boolean/null | `true` | `true` | enforced_by_code | true = agentic-loop dispatches implementation workers as OS-sandboxed processes. Read by code: graph_dispatch.plan() adds dispatch_mode per U3 node (sandboxed, in-process, or in-process-fallback:<reason> when npx or gh is missing); the worker launch consumes it in Phase 3c. Default ON; false = in-process. |
+| `action_authority` | string/null | `"enforce"` | `"enforce"` | enforced_by_code | enforce (default, also with no config or no key) = gh pr merge, scripts/merge.py and git push to main/master need an owner-signed single-use receipt and honour the session authority; advisory = trace and warn only; off = switch the gate off. |
+| `diff_manifest` | string/null | `"enforce"` | `"enforce"` | enforced_by_code | off \| advisory \| enforce, read by scripts/push.py and scripts/merge.py. Default enforce but inert until diff_manifest_policy names a policy file (the default policy is a Phase 4 deliverable). |
+| `diff_manifest_policy` | string/null | `null` | - | enforced_by_code | Path to the diff-manifest policy JSON; null or absent = the diff check is inactive. |
+| `integrity_review` | object/null | `null` | - | enforced_by_code | Integrity attestation settings. |
+| `integrity_review.machine_user` | string/null | `null` | - | enforced_by_code | GitHub login that must post the integrity-review status; null or absent = local gate inactive. |
+| `evals` | object/null | `{"require_signatures": true}` | - | enforced_by_code | Eval settings. |
+| `evals.require_signatures` | boolean/null | `true` | `true` | enforced_by_code | true (default) = eval artifacts must be signed; the local key is created on first use, and signing refuses when ssh-keygen is unavailable. false opts out. |
 <!-- config-schema:end -->
 
 ## Scripts and Libraries

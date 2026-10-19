@@ -120,6 +120,12 @@ class LoadConfigTests(ConfigCase):
         self.assertEqual(findings[0]["key"], "integrity_review.machin_user")
         self.assertEqual(findings[0]["hint"], "integrity_review.machine_user")
 
+    def test_enum_violation_is_a_bad_value_with_closest_hint(self) -> None:
+        """A string outside the property's enum is config_bad_value naming the closest allowed value."""
+        values, findings = load_config(self.write("action_authority: enforse\n"))
+        self.assertEqual(findings, [{"code": "config_bad_value", "key": "action_authority", "hint": "enforce"}])
+        self.assertEqual(values["action_authority"], "enforse")
+
     def test_bad_type_keeps_raw_value(self) -> None:
         """A value of the wrong type is reported and left as written."""
         values, findings = load_config(self.write("sandbox_workers: maybe\nwiki_debt_epoch_pr: null\n"))
@@ -135,7 +141,7 @@ class LoadConfigTests(ConfigCase):
         values, findings = load_config(self.write("project: x\n"))
         self.assertEqual((values["action_authority"], findings), ("enforce", []))
         values, findings = load_config(self.write("action_authority: bogus\n"))
-        self.assertEqual((values["action_authority"], self.codes(findings)), ("bogus", ["config_bad_type"]))
+        self.assertEqual((values["action_authority"], self.codes(findings)), ("bogus", ["config_bad_value"]))
         schema = json.loads((ROOT / "config.schema.json").read_text())["properties"]["action_authority"]
         self.assertEqual((schema["status"], schema["default"]), ("enforced_by_code", "enforce"))
 
@@ -180,8 +186,10 @@ class ReaderTests(ConfigCase):
         self.assertEqual(integrity_machine_user(self.write("integrity_review:\n  machine_user: null\n")), "")
         self.assertEqual(integrity_machine_user("/nonexistent"), "")
         self.assertTrue(require_signatures(self.write("evals:\n  require_signatures: true\n")))
-        self.assertFalse(require_signatures(self.write("evals:\n  require_signatures: yes\n")))
+        self.assertTrue(require_signatures(self.write("evals:\n  require_signatures: yes\n")))  # bad type: fail closed
         self.assertFalse(require_signatures(""))
+        self.assertTrue(require_signatures(self.write("sandbox_workers: true\n")))  # default ON once a config exists
+        self.assertFalse(require_signatures(self.write("evals:\n  require_signatures: false\n")))
 
 
 class CliTests(ConfigCase):
@@ -213,12 +221,19 @@ class CliTests(ConfigCase):
         root = self.repo(text)
         self.assertEqual(self.run_cli("resolve-config", cwd=root).stdout, text)
         result = self.run_cli("resolve-config", "--json", cwd=root)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)  # findings: valid false and exit 1
         data = json.loads(result.stdout)
-        self.assertEqual(sorted(data), ["defaults_applied", "findings", "path", "unknown_keys", "values"])
+        self.assertIs(data["valid"], False)
+        self.assertEqual(sorted(data), ["defaults_applied", "findings", "path", "unknown_keys", "valid", "values"])
         self.assertEqual(data["unknown_keys"], ["wiki_pth"])
         self.assertIn("wiki_path", data["defaults_applied"])
         self.assertNotIn("sandbox_workers", data["defaults_applied"])
+
+    def test_json_clean_config_is_valid(self) -> None:
+        """A clean file: valid true, exit 0, no findings."""
+        result = self.run_cli("resolve-config", "--json", cwd=self.repo("sandbox_workers: false\n"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((json.loads(result.stdout)["valid"], json.loads(result.stdout)["findings"]), (True, []))
 
     def test_json_unreadable_path_never_raises(self) -> None:
         """A discovered path that cannot be read yields JSON with a config_unreadable finding, not a traceback."""
@@ -258,7 +273,9 @@ class MirrorTests(unittest.TestCase):
                 walk(spec.get("properties", {}))  # type: ignore[arg-type]
 
         walk(schema["properties"])
-        self.assertEqual(schema["properties"]["sandbox_workers"]["status"], "read_by_prose_only")
+        self.assertEqual(schema["properties"]["sandbox_workers"]["status"], "enforced_by_code")
+        for key in ("action_authority", "diff_manifest", "diff_manifest_policy"):
+            self.assertEqual(schema["properties"][key]["status"], "enforced_by_code", key)
 
 
 if __name__ == "__main__":

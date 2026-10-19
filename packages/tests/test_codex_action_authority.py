@@ -183,18 +183,24 @@ class HookTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
 
     def test_off_and_advisory(self) -> None:
-        """Explicit off is silent; advisory warns and traces but never denies."""
+        """Explicit off is silent; invalid config is refused; advisory warns and traces but never denies."""
         self.configure("off")
         result = self.run_hook(MERGE)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
         self.assertEqual(self.reasons(), [])
+        self.configure("bogus")
+        rejected = self.run_hook(MERGE)
+        self.assertEqual(rejected.returncode, 0, rejected.stderr)
+        self.assertEqual(json.loads(rejected.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("config_rejected", rejected.stdout)
+        self.assertEqual(self.reasons(), ["config_bad_value", "config_rejected"])
         self.configure("advisory")
         result = self.run_hook(MERGE)
         self.assertEqual((result.stdout, "advisory" in result.stderr), ("", True))
         self.assertEqual(self.reasons()[-1], "advisory_no_receipt")
 
     def test_default_is_enforce_and_unknown_value_is_traced(self) -> None:
-        """(b) No config, a config without the key and an unknown value all deny; the unknown value is traced."""
+        """(b) No config, a config without the key and an invalid value deny the guarded action."""
         for command in (MERGE, "git push origin main", "python3 scripts/merge.py 12"):
             self.assertTrue(self.denied(command), command)
         (self.repo / ".coderails").mkdir()
@@ -203,7 +209,7 @@ class HookTests(unittest.TestCase):
         self.assertNotIn("action_authority_bad_mode", self.reasons())
         self.configure("bogus")
         self.assertTrue(self.denied(MERGE))
-        self.assertIn("action_authority_bad_mode", self.reasons())
+        self.assertIn("config_rejected", self.reasons())
 
     def test_rejected_set(self) -> None:
         """(c) wrong repository, wrong ref, stale sha, unsigned, agent-signed, expired and foreign-session receipts."""
