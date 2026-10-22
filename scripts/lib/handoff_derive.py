@@ -113,12 +113,13 @@ def lesson_rows(repo_dir: Path, degraded: list[dict[str, str]]) -> list[dict[str
     return cast("list[dict[str, Any]]", lessons.contract(got)["lessons"])
 
 
-def proof_lines(state_dir: Path) -> list[str]:
+def proof_lines(state_dir: Path, degraded: list[dict[str, str]]) -> list[str]:
     """One `proof <id>: <verdict>` line per proof that has a run row."""
     try:
         rows = proof_results.read_rows(state_dir / proof_results.RESULTS_NAME)
     except proof_results.ChainError:
-        return ["proofs: proof_chain_broken"]
+        degraded.append({"source": "proofs", "reason": "proof_chain_broken"})
+        return []
     latest = {r["proof_id"]: r["verdict"] for r in rows if r["kind"] == "run"}
     return [f"proof {k}: {v}" for k, v in sorted(latest.items())]
 
@@ -132,6 +133,8 @@ def derive(state_path: Path, session: str) -> tuple[dict[str, Any], int]:
     if not isinstance(loaded, dict):
         return {"reason_code": "handoff_state_unreadable"}, 2
     state = cast("dict[str, Any]", loaded)
+    if state.get("session_id") != session:
+        return {"reason_code": "handoff_wrong_session"}, 2
     degraded: list[dict[str, str]] = []
     summary, inspected = _graph("summarize", state_path), _graph("inspect", state_path)
     for name, got in (("summarize", summary), ("inspect", inspected)):
@@ -143,7 +146,7 @@ def derive(state_path: Path, session: str) -> tuple[dict[str, Any], int]:
     skeleton: dict[str, Any] = {
         "goal": prompt[:GOAL_MAX],
         "decisions": decisions(state, str(state.get("loop_id") or ""), session, degraded),
-        "done": [*_names(summary.get("done")), *proof_lines(state_path.parent)],
+        "done": [*_names(summary.get("done")), *proof_lines(state_path.parent, degraded)],
         "next_steps": [*_names(summary.get("active")), *_names(summary.get("ready")), *_names(summary.get("pending"))],
         "open_questions": [f"hard stop: {json.dumps(hard_stop, sort_keys=True)}"] if hard_stop else [],
         "lessons": lesson_rows(state_path.parent.parent, degraded),

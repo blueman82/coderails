@@ -118,6 +118,19 @@ class Derive(StoreCase):
         got, code = self.derive()
         self.assertEqual((code, got["reason_code"]), (2, "handoff_state_unreadable"))
 
+    def test_foreign_session_is_refused_before_sources_are_joined(self) -> None:
+        """The caller cannot mix this progress source with another session's Muninn records."""
+        got, code = handoff_derive.derive(self.path, "another-session")
+        self.assertEqual((code, got), (2, {"reason_code": "handoff_wrong_session"}))
+
+    def test_broken_proof_chain_is_degraded_not_done(self) -> None:
+        """A corrupt proof log cannot be presented as completed work with a success exit."""
+        self.path.with_name("proof_results.jsonl").write_text("{broken\n")
+        got, code = self.derive()
+        self.assertEqual(code, 3)
+        self.assertIn({"source": "proofs", "reason": "proof_chain_broken"}, got["degraded"])
+        self.assertFalse(any("proof_chain_broken" in line for line in got["done"]))
+
 
 if __name__ == "__main__":
     unittest.main()
