@@ -29,6 +29,8 @@ sandbox_workers: true
 action_authority: advisory
 diff_manifest: enforce
 diff_manifest_policy: .coderails/manifest-policy.json
+subagent_identity_gate: off
+wiki_stale_days: 45
 evals:
   require_signatures: true
 """
@@ -154,12 +156,17 @@ class StrictTests(ScratchCase):
             ('"action_authority": enforce\n', "config_unparseable_line"),
             ("  action_authority: enforce\n", "config_unparseable_line"),
             ("evals:\n  require_signatures: true\n    nested: 1\n", "config_unparseable_line"),
+            ("integrity_review:\n  machine_user:\n    bypass: yes\n", "config_unparseable_line"),
             ("action_authority: enforce\naction_authority: off\n", "config_duplicate_key"),
             ("evals:\n  require_signatures: true\n  require_signatures: false\n", "config_duplicate_key"),
         ):
             with self.subTest(text), self.assertRaises(ConfigRejected) as caught:
                 strict_settings(self.write(text))
             self.assertEqual(caught.exception.findings[0]["code"], code)
+
+    def test_jira_transition_mapping_remains_allowed(self) -> None:
+        """Jira's documented untyped mapping keeps its nested transition values."""
+        strict_settings(self.write("jira:\n  transitions:\n    done: Closed\n"))
 
     def test_require_signatures_fails_closed(self) -> None:
         """Only an explicit false is OFF; null, a bad type and a rejected config keep signing ON."""
