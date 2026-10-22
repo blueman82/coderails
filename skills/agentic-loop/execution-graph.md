@@ -37,7 +37,9 @@ available anywhere in this session's rendered context, stop — report that the
 plugin root is unresolvable and do not dispatch the node.
 Dispatch only nodes it reports `"ready": true` for (exit 0 iff ready). Its
 `reason_code` is exactly one of `ready`, `predecessor_pending` (a real
-non-terminal predecessor), `node_unknown` (the node is not in the graph) or
+non-terminal predecessor), `node_unknown` (the node is not in the graph),
+`node_not_pending` (already running or terminal), `graph_blocked` (an active wave or hard stop),
+`join_not_dispatchable` (joins release automatically), or
 `state_unreadable` (missing or malformed `progress.json`); treat each non-ready
 code as a different next step, never as one undifferentiated "blocked". Conversely, a node with no recorded incoming edges is vacuously
 `ready` — register the candidate's node and edges before querying, not after.
