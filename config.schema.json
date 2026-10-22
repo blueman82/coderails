@@ -21,6 +21,14 @@
       "status": "enforced_by_code",
       "description": "LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate."
     },
+    "wiki_stale_days": {
+      "type": [
+        "integer"
+      ],
+      "default": 30,
+      "status": "read_by_prose_only",
+      "description": "Page age in days before wiki-lint considers staleness; age alone does not mark a page stale."
+    },
     "wiki_supervision": {
       "type": [
         "string",
@@ -120,6 +128,20 @@
       "description": "Default ON. Claude graph_dispatch.plan() reports sandboxed or in-process-fallback:<reason> for U3 nodes, and the Claude worker launcher consumes that mode. Codex native workers inherit the parent session sandbox; this setting does not configure or prove per-worker Codex containment.",
       "control": true,
       "on_value": true
+    },
+    "subagent_identity_gate": {
+      "type": [
+        "string"
+      ],
+      "default": "on",
+      "enum": [
+        "on",
+        "off"
+      ],
+      "status": "enforced_by_code",
+      "description": "on (default) denies an untyped Bash subagent in a graph-bound Claude session; off disables that hook.",
+      "control": true,
+      "on_value": "on"
     },
     "action_authority": {
       "type": [
