@@ -47,7 +47,7 @@ describe("Claude native session trace", () => {
     }
   });
 
-  it("extracts the node display marker only when its ID matches the dispatch envelope", async () => {
+  it("derives node display attributes from the owned ID despite a misleading marker", async () => {
     const { deps, parent, rows } = await fixture();
     const call = fixtureBlocks(rows[0])[0];
     const input = call.input as Record<string, unknown>;
@@ -66,7 +66,16 @@ describe("Claude native session trace", () => {
     const mismatched = await readClaudeTracePage("s1", null, 50, deps);
     const mismatchedRequest = mismatched.events.find((event) => event.name === "tool_request")!;
     expect(mismatchedRequest.attributes["coderails.node.id"]).toBe("U3[1]");
-    expect(mismatchedRequest.attributes["coderails.node.name"]).toBeUndefined();
+    expect(mismatchedRequest.attributes["coderails.node.name"]).toBe("Builder");
+
+    input.prompt = String(input.prompt).replace(
+      "CODERAILS_GRAPH_NODE_NAME=Builder · A-1 [U4[1]]",
+      "CODERAILS_GRAPH_NODE_NAME=Verifier · Z-9 [U3[1]]");
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const forged = await readClaudeTracePage("s1", null, 50, deps);
+    const forgedRequest = forged.events.find((event) => event.name === "tool_request")!;
+    expect(forgedRequest.attributes["coderails.node.name"]).toBe("Builder");
+    expect(forgedRequest.attributes["coderails.node.lane_code"]).toBe("A-1");
   });
 
   it.each(["foreign-only", "mixed"])("marks %s explicit foreign parent identity incomplete without indexing it", async (shape) => {

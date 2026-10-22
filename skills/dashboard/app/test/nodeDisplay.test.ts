@@ -15,5 +15,7 @@ describe("graph node display names", () => {
     expect(describeNode("C3")).toBeNull();
     expect(describeNode("S2.7d[bad]")).toBeNull();
     expect(describeNode("U3[0]")).toBeNull();
+    expect(describeNode("__proto__")).toBeNull();
+    expect(describeNode("constructor")).toBeNull();
   });
 });

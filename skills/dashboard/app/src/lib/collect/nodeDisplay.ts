@@ -14,7 +14,9 @@ const ACTION_NAMES: Record<string, string> = {
   "10-respawn": "Respawner",
 };
 
-function fixedName(nodeId: string): string | undefined { return FIXED_NAMES[nodeId]; }
+function fixedName(nodeId: string): string | undefined {
+  return Object.prototype.hasOwnProperty.call(FIXED_NAMES, nodeId) ? FIXED_NAMES[nodeId] : undefined;
+}
 
 function laneCode(unit: number): string | null {
   if (unit >= 1 && unit <= 6) return `A-${unit}`;
