@@ -99,6 +99,8 @@ class HookStateTests(HookTestCase):
         state_file.parent.mkdir(parents=True)
         invalid_states: list[dict[str, Any]] = [
             {"ordinals": {"absent_blocked": 1}, "arms": [], "nudged": {}},
+            {"schema_version": 1, "ordinals": {"absent_blocked": 1}},
+            {"schema_version": 1, "ordinals": {"absent_blocked": 1}, "arms": []},
             {"schema_version": 2, "ordinals": {"absent_blocked": 1}, "arms": [], "nudged": {}},
             {"schema_version": 1, "ordinals": {"absent_blocked": True}, "arms": [], "nudged": {}},
             {"schema_version": 1, "ordinals": {}, "arms": [{"hook": "loop_state_guard"}], "nudged": {}},

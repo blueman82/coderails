@@ -242,7 +242,7 @@ class StallGuardTests(HookTestCase):
         self.assertNotIn("loop_stop_counts", after)
 
     def test_counter_failure_never_fabricates_state_or_leaks_temporary_files(self) -> None:
-        """Absent/corrupt state blocks and is never rewritten; a recorded release survives a failed counter write."""
+        """Absent/corrupt state blocks and is never rewritten; a failed consume write cannot release Stop."""
         payload = self.payload(self.stopped("LOOP-STOP: hard-stop"))
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)
         fabricated = [p.name for p in (self.directory / "state").rglob("*") if p.is_file() and p.name != "trace.jsonl"]
@@ -256,12 +256,12 @@ class StallGuardTests(HookTestCase):
         lock = Path(str(path) + ".lock")
         lock.mkdir()
         before = path.read_bytes()
-        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
+        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)
         self.assertEqual(path.read_bytes(), before)
         lock.rmdir()
         path.parent.chmod(0o555)
         try:
-            self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
+            self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)
             self.assertFalse(list(path.parent.glob("*.tmp")))
         finally:
             path.parent.chmod(0o755)
