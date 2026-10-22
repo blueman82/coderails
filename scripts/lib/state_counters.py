@@ -32,6 +32,9 @@ REASONS = (
     "attest_not_bound",
     "predecessor_pending",
     "node_unknown",
+    "node_not_pending",
+    "graph_blocked",
+    "join_not_dispatchable",
     *(f"eval_verdict_{s.lower().replace('-', '_')}" for s in EVAL_STATUSES),
 )
 

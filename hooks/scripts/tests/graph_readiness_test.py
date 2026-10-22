@@ -57,6 +57,21 @@ class ReadinessTests(GraphCase):
             self.assertEqual(json.loads(result.stdout), {"ready": False, "reason_code": "state_unreadable"})
             self.assertEqual(result.returncode, 1)
 
+    def test_completed_node_is_not_called_predecessor_pending(self) -> None:
+        """A completed node is already consumed, even if its successors are pending."""
+        state = self.two_node_state()
+        state["graph"]["nodes"]["U3[1]"].update(status="done", outcome="done")
+        self.save(state)
+        result = self.query(str(self.path), "U3[1]")
+        self.assertEqual(json.loads(result.stdout), {"ready": False, "reason_code": "node_not_pending"})
+
+    def test_active_wave_has_a_graph_blocked_reason(self) -> None:
+        """The active wave is the immediate reason a pending node cannot dispatch."""
+        self.save(self.two_node_state())
+        dispatch.begin_wave(self.path)
+        result = self.query(str(self.path), "U4[1]")
+        self.assertEqual(json.loads(result.stdout), {"ready": False, "reason_code": "graph_blocked"})
+
     def test_not_ready_leaves_a_trace_row(self) -> None:
         """A readable not-ready verdict is counted: trace graph_readiness/not_ready/<code>."""
         self.save(self.two_node_state())
