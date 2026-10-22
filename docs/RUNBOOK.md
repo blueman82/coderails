@@ -324,11 +324,21 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `proof.py freeze` then `run`. `proof_chain_broken`: `proof_results.jsonl` was edited or lost rows; never hand-edit it,
   re-freeze and re-run (a fresh file). `proof_cmd_destructive`: the cmd matches the destructive classifier and was never
   executed; reword the proof. `proof_disposition_no_reason`: with no proof.json record `proof.py disposition <state-dir>
-  --none --reason-code <code> --reason <text>`; a bare `none` is rejected. `proof_disposition_legacy` is a trace note
+  --none --reason-code <code> --reason <text>`; a bare `none` or a code outside `DISPOSITION_CODES` (`docs_only`,
+  `no_executable_surface`, `research_only`, `superseded`, `other`) is rejected, and a valid disposition is echoed in the
+  gate output. `proof_no_proofs`: proof.json holds no non-withdrawn proof (an empty or withdrawn-only document); freeze a
+  real proof or record a disposition. `proof_disposition_legacy` is a trace note
   only (string `none: <reason>` accepted). `proof_withdrawn_unobserved`: a withdrawn proof needs a failed/timeout run row
   and a reason.
 - Limit: a same-user agent can forge rows and recompute the chain, as it could forge a transcript; this is a
-  cooperating-agent safeguard, not a trust boundary.
+  cooperating-agent safeguard, not a trust boundary. Also not covered: the destructive classifier is literal-pattern,
+  not a sandbox, so obfuscated or interpreter-wrapped deletes (`python3 -c 'shutil.rmtree(...)'`, quote-split `rm`) still
+  run; run rows are not bound to the current HEAD (`head_sha` is recorded, not compared), so a satisfied row from an
+  earlier commit still releases the gate; the latest freeze wins, so an agent can weaken a cmd or move a failing proof
+  to `withdrawn_proofs` and re-freeze (only the frozen set is checked, not the loop's first one); schema 1 is refused at
+  freeze; a disposition's reason is checked for presence and an enum code, not truth.
+- Off-switch: none, by design. The proof gate is intentionally non-disableable on both providers (default ON, no config
+  key or env var); the previous transcript-based check was removed, so there is no earlier behaviour to fall back to.
 
 ## Diff-manifest check warned or refused
 

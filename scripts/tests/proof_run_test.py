@@ -132,7 +132,7 @@ class ProofRunTests(unittest.TestCase):
             self.blocked("disposition")
         for accepted in ("none: no executable surface", {"kind": "none", "reason_code": "docs_only", "reason": "docs"}):
             self.state["proof_disposition"] = accepted
-            self.assertEqual(self.gate(), "")
+            self.assertIn("No-proof disposition", self.gate())
         self.state.pop("proof_disposition")
         self.blocked("disposition")
         self.assertEqual(
@@ -141,7 +141,7 @@ class ProofRunTests(unittest.TestCase):
             ).returncode,
             0,
         )
-        self.assertEqual(self.gate(), "")
+        self.assertEqual(self.gate(), "No-proof disposition: docs_only: docs only")
         self.assertEqual(
             self.cli("disposition", str(self.dir), "--none", "--reason-code", " ", "--reason", "x").returncode, 2
         )
@@ -179,14 +179,52 @@ class ProofRunTests(unittest.TestCase):
         self.assertEqual((row["verdict"], row["exit_code"]), ("timeout", None))
         self.blocked(r"P1\(proof_failed\)")
 
-    def test_legacy_schema_one_runs_exit_zero_only_and_is_flagged(self) -> None:
-        """A schema 1 proof with prose expect runs, checks exit 0 only, and is flagged expect_unstructured."""
+    def test_schema_one_is_refused_at_freeze(self) -> None:
+        """Schema 1 ignores a structured expect, so it cannot be chosen to dodge one: freeze and run refuse it."""
         self.proof.write_text(
             json.dumps({"schema_version": 1, "proofs": [{"id": "P1", "cmd": "echo hi", "expect": "prints hi"}]})
         )
-        (row,) = self.freeze_run()
-        self.assertEqual(row["verdict"], "satisfied")
-        self.assertTrue(row["excerpt"].startswith("[expect_unstructured]"))
+        self.assertEqual(self.cli("freeze", str(self.dir)).returncode, 2)
+        self.assertEqual(self.cli("run", str(self.dir), "--all").returncode, 2)
+        self.assertFalse(self.results.exists())
+
+    def test_withdrawn_only_document_is_refused_at_freeze_and_gate(self) -> None:
+        """A document with only withdrawn proofs is not a proof set: freeze refuses it, and a forged freeze blocks."""
+        only = {"id": "W1", "cmd": "exit 1", "expect": {"exit_code": 0}, "withdrawn_reason": "wrong"}
+        self.doc(withdrawn_proofs=[only])
+        self.assertEqual(self.cli("freeze", str(self.dir)).returncode, 2)
+        pr.append(
+            self.results,
+            kind="freeze",
+            proof_json_sha256=pr.doc_sha(json.loads(self.proof.read_text())),
+            session_id=SESSION,
+            loop_id=LOOP,
+        )
+        self.blocked("proof_no_proofs")
+
+    def test_empty_proofs_block_unless_a_disposition_exists(self) -> None:
+        """An empty proofs array no longer passes the Claude gate; a valid disposition row releases it."""
+        self.doc()
+        pr.append(
+            self.results,
+            kind="freeze",
+            proof_json_sha256=pr.doc_sha(json.loads(self.proof.read_text())),
+            session_id=SESSION,
+            loop_id=LOOP,
+        )
+        self.blocked("proof_no_proofs")
+        self.cli("disposition", str(self.dir), "--none", "--reason-code", "docs_only", "--reason", "docs only")
+        self.assertIn("docs_only: docs only", self.gate())
+
+    def test_disposition_reason_code_is_an_enum(self) -> None:
+        """An unknown reason code is refused by the CLI and by the gate (typed dict and forged row alike)."""
+        self.assertEqual(
+            self.cli("disposition", str(self.dir), "--none", "--reason-code", "whatever", "--reason", "x").returncode, 2
+        )
+        self.state["proof_disposition"] = {"kind": "none", "reason_code": "whatever", "reason": "x"}
+        self.blocked("disposition")
+        pr.append(self.results, kind="disposition", session_id=SESSION, loop_id=LOOP, verdict="whatever", excerpt="x")
+        self.blocked("disposition")
 
     def test_freeze_rejects_invalid_documents(self) -> None:
         """Duplicate ids, blank cmds, unstructured v2 expect and bad timeouts are refused at freeze."""

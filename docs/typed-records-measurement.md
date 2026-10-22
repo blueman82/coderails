@@ -89,4 +89,5 @@ the `memory` key of `scripts/measure_graph_alignment.py`; no edit to that script
 Limits (written, not hidden): a same-user agent can forge rows and recompute the chain (cooperating-agent safeguard);
 the gate checks the frozen command ran and matched `expect`, not that it is a good proof; the freeze hashes the canonical
 JSON, so a re-freeze after an edit is the sanctioned (and traced) way to change a proof; `graph.py complete --transcript`
-is accepted and ignored; a legacy schema 1 proof only has its exit code checked (flagged `expect_unstructured`).
+is accepted and ignored; schema 1 proofs are refused at freeze (they ignore structured `expect`); the destructive
+classifier is literal-pattern, not a sandbox; run rows are not bound to HEAD; the gate has no off-switch by design.

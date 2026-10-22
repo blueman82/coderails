@@ -3,7 +3,9 @@
 Rows sit beside proof.json. kind is freeze (sha256 of the canonical proof.json), run (the controller executed one
 frozen cmd) or disposition (a typed no-proof decision). Each row carries prev_sha256 and row_sha256, so deleting or
 editing any row breaks the chain. Honest limit: a same-user agent can forge rows the way it can forge a transcript;
-this is a cooperating-agent safeguard, not a trust boundary.
+this is a cooperating-agent safeguard, not a trust boundary. Also not enforced: run rows are not bound to the
+current HEAD (head_sha is recorded only), the latest freeze wins (an agent can re-freeze a weakened proof set), and
+the destructive classifier is literal-pattern, not a sandbox.
 """
 
 from __future__ import annotations
@@ -23,11 +25,13 @@ REASONS: dict[str, str] = {
     "proof_stale_cmd": "proof.json changed after the freeze row, or the run row hashes a different cmd; re-freeze.",
     "proof_chain_broken": "proof_results.jsonl is torn, edited or missing rows; never edit it by hand.",
     "proof_cmd_destructive": "the frozen cmd matches the destructive-command classifier and was never run.",
-    "proof_disposition_no_reason": "a bare 'none' disposition is rejected; record a reason.",
+    "proof_no_proofs": "proof.json holds no non-withdrawn proof and no valid disposition; add a proof or record one.",
+    "proof_disposition_no_reason": "a bare 'none' or unknown reason code is rejected; record an enum code + reason.",
     "proof_disposition_legacy": "string disposition 'none: <reason>' accepted; prefer `proof.py disposition`.",
     "proof_withdrawn_unobserved": "a withdrawn proof needs an observed failed/timeout run row and a reason.",
 }
 RESULTS_NAME = "proof_results.jsonl"
+DISPOSITION_CODES = ("docs_only", "no_executable_surface", "research_only", "superseded", "other")
 GENESIS = "0" * 64
 VERDICT_REASON = {
     "failed": "proof_failed",
@@ -113,22 +117,28 @@ def trace(command: str, outcome: str, reason: str, session_id: object, loop_id: 
         return
 
 
-def disposition_reason(state: dict[str, Any], rows: list[dict[str, Any]]) -> str:
-    """Return '' when a valid no-proof disposition exists, else the reason code it fails with."""
+def find_disposition(state: dict[str, Any], rows: list[dict[str, Any]]) -> str:
+    """Return '<code>: <reason>' for a valid no-proof disposition (code in DISPOSITION_CODES), else ''."""
     value = state.get("proof_disposition")
     if isinstance(value, dict):
         item = cast(dict[str, Any], value)
-        fields = [item.get(k) for k in ("reason_code", "reason")]
-        if item.get("kind") == "none" and all(isinstance(f, str) and f.strip() for f in fields):
-            return ""
+        code, reason = item.get("reason_code"), item.get("reason")
+        if item.get("kind") == "none" and code in DISPOSITION_CODES and isinstance(reason, str) and reason.strip():
+            return f"{code}: {reason.strip()}"
     elif isinstance(value, str) and value.startswith("none:") and value[5:].strip():
         trace("proof.gate", "accepted", "proof_disposition_legacy", state.get("session_id"), state.get("loop_id"))
-        return ""
+        return f"legacy: {value[5:].strip()}"
     identity = (state.get("session_id"), state.get("loop_id"))
     for row in rows:
-        if row["kind"] == "disposition" and (row["session_id"], row["loop_id"]) == identity:
-            return ""
-    return "proof_disposition_no_reason"
+        valid = row["verdict"] in DISPOSITION_CODES and str(row["excerpt"] or "").strip()
+        if row["kind"] == "disposition" and (row["session_id"], row["loop_id"]) == identity and valid:
+            return f"{row['verdict']}: {str(row['excerpt']).strip()}"
+    return ""
+
+
+def disposition_reason(state: dict[str, Any], rows: list[dict[str, Any]]) -> str:
+    """Return '' when a valid no-proof disposition exists, else the reason code it fails with."""
+    return "" if find_disposition(state, rows) else "proof_disposition_no_reason"
 
 
 def _label(item: dict[str, Any], fallback: str) -> str:

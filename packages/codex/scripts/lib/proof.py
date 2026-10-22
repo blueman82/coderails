@@ -65,9 +65,8 @@ def _is_str_list(value: object) -> bool:
 
 def validate(doc: dict[str, Any]) -> list[str]:
     """Return freeze-time schema errors for a proof document (empty when valid)."""
-    version = doc.get("schema_version")
-    if type(version) is not int or version not in (1, 2):
-        return ["schema_version must be 1 (legacy) or 2"]
+    if doc.get("schema_version") != 2 or type(doc.get("schema_version")) is not int:
+        return ["schema_version must be 2 (schema 1 ignores structured expect and is refused)"]
     errors: list[str] = []
     seen: set[str] = set()
     for key in ("proofs", "withdrawn_proofs"):
@@ -75,6 +74,7 @@ def validate(doc: dict[str, Any]) -> list[str]:
             errors.append(f"{key} must be an array")
     if errors:
         return errors
+    has_live = any(not withdrawn for _, withdrawn in items(doc))
     for entry, _ in items(doc):
         identifier, cmd = entry.get("id"), entry.get("cmd")
         if not isinstance(identifier, str) or not identifier.strip() or identifier in seen:
@@ -86,15 +86,14 @@ def validate(doc: dict[str, Any]) -> list[str]:
         if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0):
             errors.append(f"{identifier}: timeout_s must be a positive number")
         expect = entry.get("expect")
-        if version == 2:
-            shaped = isinstance(expect, dict)
-            spec = cast(dict[str, Any], expect) if shaped else {}
-            code = spec.get("exit_code", 0)
-            if not shaped or isinstance(code, bool) or not isinstance(code, int):
-                errors.append(f"{identifier}: expect must be an object with an integer exit_code")
-            if not all(_is_str_list(spec.get(k, [])) for k in ("stdout_contains", "stdout_not_contains")):
-                errors.append(f"{identifier}: stdout_contains/stdout_not_contains must be string arrays")
-    return errors + (["no proofs or withdrawn_proofs"] if not seen else [])
+        shaped = isinstance(expect, dict)
+        spec = cast(dict[str, Any], expect) if shaped else {}
+        code = spec.get("exit_code", 0)
+        if not shaped or isinstance(code, bool) or not isinstance(code, int):
+            errors.append(f"{identifier}: expect must be an object with an integer exit_code")
+        if not all(_is_str_list(spec.get(k, [])) for k in ("stdout_contains", "stdout_not_contains")):
+            errors.append(f"{identifier}: stdout_contains/stdout_not_contains must be string arrays")
+    return errors + (["no non-withdrawn proofs (record `proof.py disposition` instead)"] if not has_live else [])
 
 
 def _destructive(cmd: str, cwd: str) -> bool:
@@ -119,11 +118,11 @@ def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool]:
         return None, out or "", err or "", True
 
 
-def _judge(entry: dict[str, Any], version: object, code: int | None, out: str, timed_out: bool) -> tuple[str, bool]:
+def _judge(entry: dict[str, Any], code: int | None, out: str, timed_out: bool) -> tuple[str, bool]:
     """Evaluate expect against a finished run; returns (verdict, expect_matched)."""
     if timed_out:
         return "timeout", False
-    expect = cast(dict[str, Any], entry["expect"]) if version == 2 else {}
+    expect = cast(dict[str, Any], entry["expect"])
     if code != expect.get("exit_code", 0):
         return "failed", False
     if any(t not in out for t in expect.get("stdout_contains", [])) or any(
@@ -133,7 +132,7 @@ def _judge(entry: dict[str, Any], version: object, code: int | None, out: str, t
     return "satisfied", True
 
 
-def _run_one(entry: dict[str, Any], doc: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path: Path) -> str:
+def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path: Path) -> str:
     cmd, cwd = cast(str, entry["cmd"]), os.getcwd()
     base: dict[str, Any] = {
         "kind": "run",
@@ -154,8 +153,7 @@ def _run_one(entry: dict[str, Any], doc: dict[str, Any], freeze_sha: str, who: t
         pr.trace("proof.run", "refused", "proof_cmd_destructive", who[0], who[1])
         return "refused"
     code, out, err, timed_out = _execute(cmd, float(entry.get("timeout_s") or DEFAULT_TIMEOUT_S))
-    verdict, matched = _judge(entry, doc.get("schema_version"), code, out, timed_out)
-    legacy = doc.get("schema_version") == 1
+    verdict, matched = _judge(entry, code, out, timed_out)
     pr.append(
         path,
         **base,
@@ -163,7 +161,7 @@ def _run_one(entry: dict[str, Any], doc: dict[str, Any], freeze_sha: str, who: t
         exit_code=code,
         stdout_sha256=pr.sha(out),
         stderr_sha256=pr.sha(err),
-        excerpt=(("[expect_unstructured] " if legacy else "") + out + err)[:EXCERPT_CAP],
+        excerpt=(out + err)[:EXCERPT_CAP],
         expect_matched=matched,
         verdict=verdict,
     )
@@ -215,7 +213,7 @@ def cmd_run(state_dir: Path, wanted: str | None) -> int:
         return 2
     status = 0
     for entry, withdrawn in chosen:
-        verdict = _run_one(entry, doc, freezes[-1]["proof_json_sha256"], who, path)
+        verdict = _run_one(entry, freezes[-1]["proof_json_sha256"], who, path)
         print(json.dumps({"id": entry["id"], "verdict": verdict}))
         if verdict != "satisfied" and not withdrawn:
             status = 1
@@ -237,8 +235,11 @@ def cmd_status(state_dir: Path) -> int:
 
 def cmd_disposition(state_dir: Path, code: str, reason: str) -> int:
     """Record a typed no-proof disposition row."""
-    if not code.strip() or not reason.strip():
-        print("proof.py disposition refused: proof_disposition_no_reason", file=sys.stderr)
+    if code.strip() not in pr.DISPOSITION_CODES or not reason.strip():
+        print(
+            f"proof.py disposition refused: proof_disposition_no_reason (code must be one of {pr.DISPOSITION_CODES})",
+            file=sys.stderr,
+        )
         return 2
     who = _identity(state_dir, {})
     pr.append(

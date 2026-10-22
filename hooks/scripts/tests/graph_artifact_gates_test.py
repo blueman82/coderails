@@ -13,6 +13,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.agentic_loop_path import resolve_path
 from hooks.scripts.tests.claude_graph_test_support import ROOT, GraphCase, dispatch, fixture, load
+from scripts.lib import proof_results as pr
 from scripts.post_evals import grade_loop
 
 
@@ -46,8 +47,20 @@ def artifacts(case: GraphCase, state: dict[str, Any]) -> None:
     fixture.write_json(case.path.with_name("evals.json"), suite)
     grade_loop(case.path.with_name("evals.json"))
     fixture.write_json(case.path.with_name("retro.json"), {**identity, "schema_version": 1, "status": "complete"})
-    fixture.write_json(
-        case.path.with_name("proof.json"), {**identity, "schema_version": 1, "proofs": [], "withdrawn_proofs": []}
+    proofs = {**identity, "schema_version": 2, "proofs": [{"id": "P1", "cmd": "true", "expect": {"exit_code": 0}}]}
+    fixture.write_json(case.path.with_name("proof.json"), proofs)
+    results = case.path.with_name(pr.RESULTS_NAME)
+    results.unlink(missing_ok=True)
+    digest = pr.doc_sha(proofs)
+    pr.append(results, kind="freeze", proof_json_sha256=digest, **identity)
+    pr.append(
+        results,
+        kind="run",
+        proof_id="P1",
+        cmd_sha256=pr.sha("true"),
+        proof_json_sha256=digest,
+        verdict="satisfied",
+        **identity,
     )
 
 
@@ -96,7 +109,8 @@ class ArtifactGateTests(GraphCase):
         self.save({**state, "proof_disposition": "none"})
         with self.assertRaisesRegex(ValueError, "no proof_disposition"):
             dispatch.complete(self.path, "fixture-session", write=False)
-        for disposition in ("none: no executable surface", {"kind": "none", "reason_code": "docs", "reason": "docs"}):
+        docs = {"kind": "none", "reason_code": "docs_only", "reason": "docs"}
+        for disposition in ("none: no executable surface", docs):
             self.save({**state, "proof_disposition": disposition})
             dispatch.complete(self.path, "fixture-session", write=False)
         for version in (1, 2):
@@ -151,7 +165,12 @@ class ArtifactGateTests(GraphCase):
         original = json.loads(proof.read_text())
         cases = (
             (original, None, 0, ""),
-            ({**original, "session_id": "foreign"}, None, 2, "another loop"),
+            (
+                {**original, "session_id": "foreign"},
+                None,
+                2,
+                "proof_stale_cmd",
+            ),  # the foreign doc no longer hashes to the freeze row
             (None, None, 2, "no proof_disposition"),
             (None, "none: no executable surface", 0, ""),
         )

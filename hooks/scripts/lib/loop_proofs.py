@@ -9,6 +9,22 @@ from typing import Any, cast
 from scripts.lib import proof_results
 
 
+def _disposition(state: dict[str, Any], results: Path, code: str, why: str) -> str:
+    """Return the disclosure for a valid no-proof disposition, else block with reason code."""
+    try:
+        rows = proof_results.read_rows(results)
+    except proof_results.ChainError:
+        rows = []
+    found = proof_results.find_disposition(state, rows)
+    if found:
+        return f"No-proof disposition: {found}"
+    proof_results.trace("proof.gate", "blocked", code, state.get("session_id"), state.get("loop_id"))
+    raise ValueError(
+        f"{why} ({code}); freeze at least one non-withdrawn proof, or record `proof.py disposition <state-dir> "
+        f"--none --reason-code <{'|'.join(proof_results.DISPOSITION_CODES)}> --reason <text>` or 'none: <reason>'"
+    )
+
+
 def validate_proofs(path: Path, state: dict[str, Any], transcript: str = "") -> str:
     """Return withdrawn-proof disclosure, raising when any frozen proof lacks a satisfied run row.
 
@@ -18,20 +34,10 @@ def validate_proofs(path: Path, state: dict[str, Any], transcript: str = "") -> 
     results = path.with_name(proof_results.RESULTS_NAME)
     try:
         document: object = json.loads(path.read_text())
-    except FileNotFoundError as error:
-        try:
-            rows = proof_results.read_rows(results)
-        except proof_results.ChainError:
-            rows = []
-        code = proof_results.disposition_reason(state, rows)
-        if not code:
-            return ""
-        proof_results.trace("proof.gate", "blocked", code, state.get("session_id"), state.get("loop_id"))
-        raise ValueError(
-            "no proof.json and no proof_disposition explaining why; freeze proof.json, or record "
-            "`proof.py disposition --none --reason-code <code> --reason <text>` or 'none: <reason>' "
-            "(a bare 'none' is rejected)"
-        ) from error
+    except FileNotFoundError:
+        return _disposition(
+            state, results, "proof_disposition_no_reason", "no proof.json and no proof_disposition explaining why"
+        )
     except (OSError, ValueError) as error:
         raise ValueError("proof.json is malformed (not valid JSON)") from error
     if not isinstance(document, dict):
@@ -47,6 +53,8 @@ def validate_proofs(path: Path, state: dict[str, Any], transcript: str = "") -> 
     count = len(cast(list[object], proofs)) + len(cast(list[object], withdrawn))
     if count > 100:
         raise ValueError(f"proof.json has {count} proofs+withdrawn_proofs; cap is 100")
+    if not proofs:
+        return _disposition(state, results, "proof_no_proofs", "proof.json has no non-withdrawn proof")
     offenders, disclosures = proof_results.verify(value, results, state)
     if offenders:
         raise ValueError(

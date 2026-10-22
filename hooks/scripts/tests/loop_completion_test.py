@@ -60,7 +60,10 @@ class CompletionTests(HookTestCase):
 
     def test_absent_retro_and_proof_disposition(self) -> None:
         """Absent proof needs an explicit recorded skip; retro remains mandatory."""
-        self.assertEqual(validate_completion(self.state, str(self.trace)), ["cost not recorded"])
+        self.assertEqual(
+            validate_completion(self.state, str(self.trace)),
+            ["No-proof disposition: legacy: no executable surface", "cost not recorded"],
+        )
         self.state.data.pop("proof_disposition")
         with self.assertRaisesRegex(ValueError, "no proof.json"):
             validate_completion(self.state, str(self.trace))
@@ -69,9 +72,9 @@ class CompletionTests(HookTestCase):
             self.state.data["proof_disposition"] = disposition
             with self.assertRaises(ValueError):
                 validate_proofs(self.proof, self.state.data, str(self.trace))
-        for disposition in ("none: reason", {"kind": "none", "reason_code": "docs", "reason": "docs only"}):
+        for disposition in ("none: reason", {"kind": "none", "reason_code": "docs_only", "reason": "docs only"}):
             self.state.data["proof_disposition"] = disposition
-            self.assertEqual(validate_proofs(self.proof, self.state.data, str(self.trace)), "")
+            self.assertIn("No-proof disposition", validate_proofs(self.proof, self.state.data, str(self.trace)))
         self.retro.unlink()
         with self.assertRaisesRegex(ValueError, "retro.json is absent"):
             validate_completion(self.state, str(self.trace))
@@ -118,7 +121,10 @@ class CompletionTests(HookTestCase):
         with self.assertRaisesRegex(ValueError, "malformed"):
             validate_proofs(self.proof, self.state.data, str(self.trace))
         self.proof.write_text('{"schema_version":1,"proofs":null,"withdrawn_proofs":null}')
-        self.assertEqual(validate_proofs(self.proof, self.state.data, str(self.trace)), "")
+        self.assertIn("No-proof disposition", validate_proofs(self.proof, self.state.data, str(self.trace)))
+        self.state.data.pop("proof_disposition")
+        with self.assertRaisesRegex(ValueError, "proof_no_proofs"):
+            validate_proofs(self.proof, self.state.data, str(self.trace))
 
     def test_matching_transcript_no_longer_satisfies_a_proof(self) -> None:
         """A perfectly matching foreground Bash call in the transcript is ignored: only controller run rows count."""
