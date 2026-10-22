@@ -72,6 +72,39 @@ exact validated acknowledgement; even an unchanged null-source predecessor canno
 explicit record remains available. Publication followed by a lost receipt and then another authored replacement can remain
 honestly pending: the latest source and predecessor do not establish that historical application.
 
+## Retro and handoff (`retro.json` schema 3, `teardown.jsonl`, `handoff_derive.py`)
+
+Final section of the lane D measurement: what changed for the retro and the handoff, with the counters that show it.
+
+| Measure | Before | After | How measured |
+| --- | ---: | ---: | --- |
+| Writers of `retro.json` | the model, by hand from a prose table | 1 (`scripts/lib/retro.py assemble`) | `scripts/tests/retro_test.py`: a hand-written v2 or hash-less v3 retro is refused as `retro_not_assembled` on both providers |
+| Hash checks on retro copies of progress/evals/proof sources | 0 (Codex read only `schema_version >= 1`; Claude the same) | 7 recomputed sources (`progress.decisions_absorbed`, `progress.loop_stop_counts`, `progress.authorising_prompt_raw`, `evals.json`, `proof.json`, `proof_results.jsonl`, `teardown.jsonl`) plus 3 verbatim copies compared (`decisions_absorbed`, `envelope`, `loop_stop_counts`) | `retro_check.source_hashes`; `retro_test.py` (one byte of a decision flipped after assembly is `retro_source_mismatch` naming `progress.decisions_absorbed`); `packages/tests/test_codex_completion.py` for the Codex gate |
+| Decisions chain checked at completion | no | yes, `retro_decisions_chain_broken` names the seq | `retro_test.py`, `test_codex_completion.py` |
+| Teardown steps proven to have run | none (prose "run these five steps in order") | `teardown.jsonl`: `proof_run`, `decisions_flushed`, `orders_prepared`, `retro_assembled` required in that order; `orders_ticked` is a post-completion apply observation and `lessons_written` is optional; a gap is `retro_steps_missing` | `retro_test.py` ordering test and its removed-check control |
+| Proofs satisfied by | exact-string transcript match (before the proof-results unit) | controller run rows on a hash chain; the retro additionally binds `proof_results.jsonl` | `proof_run_test.py`, `retro_test.py` |
+| Handoff Goal/Decisions/Done/Next | re-derived from conversation memory | `handoff_derive.py` JSON skeleton (graph `summarize`/`inspect`, progress and Muninn decisions with K-ids and cites, lessons, proof status); each unreachable source listed in `degraded[]` with a reason code, exit 3 | `scripts/tests/handoff_derive_test.py` |
+| Silent loss when Muninn is down | n/a | 0: completion is not blocked (that would deadlock the loop); the gate prints `Memory degraded: N decision(s) not in Muninn (<reason>: n)` and the handoff lists the reason | `retro_test.py` degrade test, `loop_stall_guard_test.py` |
+
+Counters (after): `retro.assemble`, `teardown.step` and `handoff.derive` trace rows are counted by
+`scripts/lib/memory_counters.py` (prefixes `retro.`, `teardown.`, `handoff.`). Read them with
+`python3 scripts/measure_graph_alignment.py --root . --json`, key `memory`: `rows`, `by_command` (for example
+`teardown.step`, `retro.assemble`, `handoff.derive`) and `by_reason_code` (`ok`, `memory_degraded`, `muninn_absent`, ...).
+`scripts/measure_graph_alignment.py` is not edited. A healthy loop shows one `retro.assemble/assembled/ok` row and at
+least four `teardown.step` rows; a `retro.assemble/degraded/memory_degraded` row means Muninn was unreachable at flush.
+The gate's own refusals are logged as `retro_gate=<code>` lines in the discipline log (`hook=loop_stall_guard`) and are
+reason codes `retro_not_assembled`, `retro_source_mismatch`, `retro_decisions_chain_broken`, `retro_steps_missing`.
+Runbook entry: `docs/RUNBOOK.md` "Retro rejected at completion, or a handoff printed `degraded`".
+
+Limits (written, not hidden): the hashes and chains are a cooperating-agent safeguard (a same-user agent can re-assemble
+over edited sources); completion counter keys are excluded from the source hash because the hook increments the counter
+when it consumes the declaration; a capitalized `Complete` counter added after orders preparation is removed during
+preparation validation only when the remaining source reproduces the bound hash; the `free` section is deliberately unhashed, so a claimed artifact or review theme there is
+only as good as its verifying check; the Codex retro carries empty `cost` and `hook_blocks` (no miners in that package);
+Muninn rows that reach `written` after assembly change the decisions hash, so re-assemble after any late flush; the
+handoff skeleton lists what recorded state shows, not what is true; the closure matrix status for rows 13 and gap5 is the
+matrix owner's to update after merge.
+
 ## Proof results (`proof_results.jsonl`)
 
 | Measure | Before | After | How measured |

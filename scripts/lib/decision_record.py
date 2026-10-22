@@ -40,6 +40,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
 from scripts.lib import memory_adapter as ma  # noqa: E402
+from scripts.lib import teardown_steps  # noqa: E402
 
 GENESIS = "0" * 64
 HASH_EXCLUDED = ("row_sha256", "muninn")
@@ -256,4 +257,12 @@ def flush_pending(
         field = _sync_safely(row, state, session, prompt_raw, cite_quote)
         transition(path, partial(mark_synced, seq=row["seq"], field=field))
         synced.append({"seq": row["seq"], "muninn": field})
+    final = transition(path, lambda s: s)  # evidence = the rows as they stand after the retries
+    teardown_steps.record(
+        path.parent,
+        "decisions_flushed",
+        session,
+        final.get("loop_id"),
+        teardown_steps.sha_json(final.get("decisions_absorbed")),
+    )
     return {"synced": synced, "exit_code": 3 if any(x["muninn"]["state"] == "degraded" for x in synced) else 0}

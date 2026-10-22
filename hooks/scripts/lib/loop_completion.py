@@ -6,6 +6,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any, cast
 
+from scripts.lib import retro_check
+
 from .loop_proofs import validate_proofs
 from .loop_state_common import LoopState, log
 
@@ -94,6 +96,11 @@ def validate_completion(state: LoopState, transcript: str) -> list[str]:
         raise ValueError("retro.json is wrong_schema; schema_version >= 1 required")
     validate_work_units(state.data)
     withdrawn = validate_proofs(state.path.parent / "proof.json", state.data, transcript)
+    try:
+        memory = retro_check.check(state.data, retro, state.path.parent)
+    except retro_check.RetroError as error:
+        log(f"hook=loop_stall_guard session={state.session} retro_gate={error.code} blocked=1")
+        raise
     cost = cost_message(retro)
     outcome = "reported"
     if not cost:
@@ -105,4 +112,4 @@ def validate_completion(state: LoopState, transcript: str) -> list[str]:
     elif cost.startswith("cost recorded but incomplete"):
         outcome = "cost_incomplete"
     log(f"hook=loop_stall_guard session={state.session} cost_report={outcome}")
-    return [message for message in (withdrawn, cost) if message]
+    return [message for message in (withdrawn, cost, *memory) if message]

@@ -3,19 +3,62 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.loop_completion import cost_message, validate_completion
 from hooks.scripts.lib.loop_state_common import LoopState
+from hooks.scripts.tests.lib import assembled_retro
 from hooks.scripts.tests.lib.hook_test_support import HookTestCase
+from scripts.lib import retro, teardown_steps
+
+
+def prepared_retro(state_dir: Path, session: str) -> dict[str, Any]:
+    """Create a real retro whose preparation receipt binds the fixture's current owner and source."""
+    assembled_retro.write(state_dir, session)
+    path = state_dir / "progress.json"
+    state: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    loop_id = str(state["loop_id"])
+    source = dict(state)
+    for key in ("status", "completion", "completed_marker"):
+        source.pop(key, None)
+    if isinstance(source.get("loop_stop_counts"), dict):
+        source["loop_stop_counts"].pop("complete", None)
+    binding = {
+        "repo_dir": str(state_dir.parent.resolve()),
+        "state_dir": str(state_dir.resolve()),
+        "session_id": session,
+        "loop_id": loop_id,
+        "revision": state["revision"],
+        "progress_sha256": teardown_steps.sha_json(source),
+    }
+    prepared: dict[str, Any] = {"schema": 1, "binding": binding, "records": []}
+    prep_path = state_dir / f"orders-prepared-{hashlib.sha256(loop_id.encode()).hexdigest()}.json"
+    prep_path.write_text(json.dumps(prepared), encoding="utf-8")
+    row = {
+        "step": "orders_prepared",
+        "session_id": session,
+        "loop_id": loop_id,
+        "revision": state["revision"],
+        "binding": binding,
+        "evidence_sha256": teardown_steps.sha_json(prepared),
+        "ts": "2026-10-19T00:00:00+00:00",
+    }
+    with (state_dir / teardown_steps.NAME).open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(row) + "\n")
+    with patch.dict(os.environ, {"PATH": "/nonexistent"}):
+        payload, code = retro.assemble(state_dir, session)
+    if code == 2:
+        raise AssertionError(payload)
+    return cast("dict[str, Any]", json.loads((state_dir / "retro.json").read_text(encoding="utf-8")))
 
 
 class CostReportTests(HookTestCase):
@@ -95,19 +138,20 @@ class CostReportTests(HookTestCase):
         """Every report class logs a bounded outcome and no untrusted artifact values."""
         path = self.progress(proof_disposition="none: no executable surface")
         state = LoopState(path, self.session, 1, json.loads(path.read_text()))
+        base = prepared_retro(path.parent, self.session)  # cost is not hashed, so it can vary after assembly
+        absent = {key: value for key, value in base.items() if key != "cost"}
         rows: list[tuple[dict[str, Any], str]] = [
-            ({"schema_version": 1}, "skipped_legacy_or_bad_sv"),
-            ({"schema_version": 2}, "cost_absent"),
-            ({"schema_version": 2, "cost": {}}, "miner_failed_open"),
-            ({"schema_version": 2, "cost": {"total_tokens": 42}}, "cost_incomplete"),
+            (absent, "cost_absent"),
+            ({**base, "cost": {}}, "miner_failed_open"),
+            ({**base, "cost": {"total_tokens": 42}}, "cost_incomplete"),
             (
                 {
-                    "schema_version": 2,
+                    **base,
                     "cost": {"total_tokens": 42, "total_usd_estimate": 1, "prices_as_of": "hostile\nkey=value"},
                 },
                 "reported",
             ),
-        ]
+        ]  # a schema below 2 can no longer reach the reporter: the retro gate refuses it first
         with patch.dict(os.environ, self.environment):
             for retro, outcome in rows:
                 path.with_name("retro.json").write_text(json.dumps(retro))

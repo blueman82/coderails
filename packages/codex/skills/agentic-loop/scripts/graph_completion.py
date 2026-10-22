@@ -42,7 +42,7 @@ def _validate_completion(
     proof_path: Path,
     retro_path: Path,
     transcript_path: Path | None,
-) -> None:
+) -> list[str]:
     if state["session_id"] != session:
         raise GraphError("session does not own this loop")
     eligibility = graph_semantics.can_complete(state)
@@ -50,7 +50,13 @@ def _validate_completion(
         raise GraphError("cannot complete graph: " + ", ".join(eligibility["blockers"]))
     validate_work_units(state)
     validate_worker_evidence(state)
-    validate_completion_evidence(state, revision, evals_path, proof_path, retro_path, transcript_path)
+    return validate_completion_evidence(state, revision, evals_path, proof_path, retro_path, transcript_path)
+
+
+def _result(state: dict[str, Any], disclosures: list[str]) -> dict[str, Any]:
+    """The completion record; `disclosures` (Muninn degrades) appears only when there is something to disclose."""
+    result: dict[str, Any] = {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
+    return {**result, "disclosures": disclosures} if disclosures else result
 
 
 def complete(
@@ -63,12 +69,14 @@ def complete(
             raise GraphError("graph is already complete")
         revision = state["revision"]
         with traced_refusal(path, state, "complete", session):
-            _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
+            disclosures = _validate_completion(
+                state, session, revision, evals_path, proof_path, retro_path, transcript_path
+            )
         state["status"] = "complete"
         state["revision"] += 1
         state["completion"] = {"revision": revision}
         _write(path, state)
-        return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
+        return _result(state, disclosures)
 
 
 def verify_completion(
@@ -83,5 +91,7 @@ def verify_completion(
     if state["status"] != "complete" or revision != state["revision"] - 1:
         raise GraphError("graph has no valid completion record")
     with traced_refusal(path, state, "verify-completion", session):
-        _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
-    return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
+        disclosures = _validate_completion(
+            state, session, revision, evals_path, proof_path, retro_path, transcript_path
+        )
+    return _result(state, disclosures)

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -17,6 +18,49 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from packages.tests.provider_fixture import Provider
 
 LOOP = "fixture-loop"  # the fixture's frozen evals.json is bound to this loop id
+
+
+def artifacts_with_orders_prepared(provider: Provider) -> None:
+    """Run the prepare CLI, then bind its receipt into the final retro assembly."""
+    provider.artifacts()
+    state_dir = provider.path.parent
+    prepared = subprocess.run(
+        [
+            sys.executable,
+            str(provider.plugin / "scripts/lib/orders.py"),
+            "--dir",
+            str(state_dir.parent),
+            "--session",
+            provider.session,
+            "prepare",
+            "--loop",
+            provider.read()["loop_id"],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=provider.environment,
+        cwd=provider.home,
+    )
+    if prepared.returncode:
+        raise AssertionError(prepared.stderr)
+    assembled = subprocess.run(
+        [
+            sys.executable,
+            str(provider.plugin / "scripts/lib/retro.py"),
+            "assemble",
+            str(state_dir),
+            "--session",
+            provider.session,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**provider.environment, "PATH": "/nonexistent"},
+        cwd=provider.home,
+    )
+    if assembled.returncode not in (0, 3):
+        raise AssertionError(assembled.stderr)
 
 
 class AcceptanceTests(unittest.TestCase):
@@ -95,7 +139,7 @@ class AcceptanceTests(unittest.TestCase):
                         "--evidence",
                         "checked",
                     )
-                p.artifacts()
+                artifacts_with_orders_prepared(p)
                 self.run_cli(p, "complete", *self.completion_args(p))
                 self.run_cli(p, "verify-completion", *self.completion_args(p))
 
