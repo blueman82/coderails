@@ -194,12 +194,14 @@ class MuninnSync(Base):
         """A hand-written string or seq-less dict in decisions_absorbed does not crash the teardown flush."""
         with mock.patch.object(ma, "backend", return_value="off"):
             self.rec()
+        hashed = {**self.decisions()[0], "seq": 3, "muninn": {"state": "pending"}}
+        hashed["row_sha256"] = dr.row_digest(hashed)
         rows = [
             "legacy string",
             {"phase": "-1", "decision": "legacy dict"},
-            {**self.decisions()[0], "seq": 3, "muninn": {"state": "pending"}},
+            hashed,
         ]
-        self.put({**self.state(), "decisions_absorbed": rows})
+        self.put({**self.state(), "decisions_absorbed": rows, "chain_started_seq": 3})
         out = dr.flush_pending(self.path, SESSION, transition=claude_transition)
         self.assertEqual([x["seq"] for x in out["synced"]], [3])
         self.assertEqual(self.decisions()[:2], rows[:2])
@@ -226,6 +228,7 @@ class MuninnSync(Base):
         with mock.patch.object(dr, "sync_row", side_effect=RuntimeError("boom")):
             out = self.rec()
         self.assertEqual((out["recorded"], out["exit_code"], out["muninn"]["reason_code"]), (True, 3, "muninn_error"))
+        self.assertEqual(out["muninn"]["state"], "unknown")
         self.assertEqual(self.decisions()[0]["phase"], "2.5")
 
     def test_codex_lock_function_syncs_too(self) -> None:
@@ -254,6 +257,26 @@ class ChainTamper(Base):
     def test_clean_chain(self) -> None:
         """(g) three untouched rows verify."""
         self.assertEqual(dr.verify_chain(self.chain()), [])
+
+    def test_record_refuses_to_extend_a_tampered_chain(self) -> None:
+        """A pre-existing bad digest must stop the writer before it appends another row."""
+        rows = self.chain()
+        rows[1]["decision"] = "tampered"
+        self.put({**self.state(), "decisions_absorbed": rows})
+        with mock.patch.object(ma, "backend", return_value="off"):
+            out = self.rec(phase="4", text="later")
+        self.assertEqual((out["recorded"], out["reason_code"], out["exit_code"]), (False, "decision_invalid_chain", 2))
+        self.assertEqual(len(self.decisions()), 3)
+
+    def test_flush_refuses_to_sync_a_tampered_chain(self) -> None:
+        """Teardown must not turn a tampered pending row into a Muninn write."""
+        rows = self.chain()
+        rows[1]["decision"] = "tampered"
+        rows[1]["muninn"] = {"state": "pending"}
+        self.put({**self.state(), "decisions_absorbed": rows})
+        out = dr.flush_pending(self.path, SESSION, transition=claude_transition)
+        self.assertEqual((out["synced"], out["reason_code"], out["exit_code"]), ([], "decision_invalid_chain", 2))
+        self.assertEqual(self.listed(), [])
 
     def test_edited_middle_row_is_named(self) -> None:
         """(1) editing row 2's text names seq 2 and only seq 2."""
@@ -313,7 +336,7 @@ class MirrorAndSize(unittest.TestCase):
         from scripts.lib import memory_reasons
 
         runbook = (REPO / "docs/RUNBOOK.md").read_text()
-        for code in (f"decision_{x}" for x in (*dr.REFUSALS, "state_error")):
+        for code in (f"decision_{x}" for x in (*dr.REFUSALS, "state_error", "sync_unknown")):
             self.assertIn(code, memory_reasons.REASONS)
             self.assertIn(f"`{code}`", runbook)
 

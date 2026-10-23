@@ -123,7 +123,7 @@ class GateTests(HookCase):
         self.configure("enforce")
         payload = self.payload(MERGE)
         with (
-            mock.patch.object(gate, "read_payload", return_value=payload),
+            mock.patch.object(gate, "read_payload_strict", return_value=payload),
             mock.patch.object(gate, "find_valid", side_effect=RuntimeError("boom")),
             mock.patch.dict("os.environ", {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}),
         ):
@@ -209,7 +209,7 @@ class GateTests(HookCase):
         self.configure("enforce")
         payload = self.payload(MERGE)
         with (
-            mock.patch.object(gate, "read_payload", return_value=payload),
+            mock.patch.object(gate, "read_payload_strict", return_value=payload),
             mock.patch.object(gate, "read_authority", side_effect=ZeroDivisionError("boom")),
             mock.patch.dict("os.environ", {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}),
             mock.patch("sys.stderr") as err,

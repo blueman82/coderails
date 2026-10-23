@@ -70,7 +70,7 @@ the escalation rule (`frontier` resolves to opus, never automatically to fable, 
 capability reason), the effort table (effort is part of every stamp, tuned before escalating the
 model), the investigations-get-`frontier`-first exception, and the fallback-valve discipline.
 
-**Record the assignment set once.** Append one `decisions_absorbed` entry covering
+**Record the assignment set once.** Run `graph.py record-decision` for one `decisions_absorbed` entry covering
 every task's role assignment for this loop — `{phase: "2.8", decision: "<task id:
 role, ...>"}` — not one entry per task. A `<3`-unit loop still writes this entry
 even when it skipped Phase 2.7.
@@ -159,7 +159,7 @@ Before spawning a "bug fix" agent for any reported regression, use a two-agent s
 
 This is a specific application of `/coderails:cite-check` — the same "re-derive from sources only, no recall, no inference" discipline, applied to one claim: "this bug currently reproduces." The source-auditor returns a sourced PASS / FAIL / UNSUPPORTED verdict. **Spawn the fix agent only when the auditor returns PASS.** This split prevents fix work on non-existent bugs and keeps premise verification independent of the fixer.
 
-**Once a fix is diagnosed, before implementing it, run `/coderails:disconfirm` on the diagnosis.** Phase 5 checks whether the bug exists; this checks whether the proposed fix is actually right, before code gets written against it. Argue against the diagnosis — what would falsify it, what edge case breaks it, what did the fix agent assume away. This is cheap (one more tool call) relative to implementing, reviewing, and reverting a fix for the wrong root cause. Skip this step only when the fix is a direct, mechanical application of an already-verified design (e.g. this session's dashboard UX findings — each treatment was already confirmed against source during brainstorming, so there is no fresh diagnosis left to disconfirm). A consciously absorbed disconfirm-skip is an in-scope decision — append it to `progress.json`'s `decisions_absorbed` at the same phase boundary where `progress.json` is already being updated for this work-unit.
+**Once a fix is diagnosed, before implementing it, run `/coderails:disconfirm` on the diagnosis.** Phase 5 checks whether the bug exists; this checks whether the proposed fix is actually right, before code gets written against it. Argue against the diagnosis — what would falsify it, what edge case breaks it, what did the fix agent assume away. This is cheap (one more tool call) relative to implementing, reviewing, and reverting a fix for the wrong root cause. Skip this step only when the fix is a direct, mechanical application of an already-verified design (e.g. this session's dashboard UX findings — each treatment was already confirmed against source during brainstorming, so there is no fresh diagnosis left to disconfirm). A consciously absorbed disconfirm-skip is an in-scope decision — run `graph.py record-decision` at the same phase boundary where the graph is already being updated for this work-unit.
 
 ### Phase 6 — Match confirmation to authorisation envelope
 
@@ -174,7 +174,7 @@ Inside an authorised loop:
 
 Re-asking is more expensive than over-reaching by a small margin within scope. If the user wants to redirect, they will.
 
-A notable in-scope action taken without a check-in under this phase is also a consciously absorbed decision — append it to `progress.json`'s `decisions_absorbed` at the phase boundary where `progress.json` is already updated.
+A notable in-scope action taken without a check-in under this phase is also a consciously absorbed decision — run `graph.py record-decision` at the phase boundary where the graph is already updated.
 
 ### Phases 7 & 8 — stack-specific deploy/push tactics live in a feedback memory, not here
 
@@ -214,7 +214,7 @@ Before unblocking the next dependent task in the chain:
 
 **Re-check at the moment of action, not at the moment the report arrived.** State changes in the gap. If the worker says "PR is CONFLICTING" or "ready to merge" and you queue a corrective instruction (rebase, redo, wait), the artifact may have moved by the time the message lands. Always re-run `gh pr view` (or equivalent) at the moment you act on the report, not when you first read it. Past failure: a CONFLICTING state self-healed via an intervening merge before the queued rebase instruction landed — stale on arrival, it triggered redundant work. One extra `gh pr view` between report and instruction is cheap.
 
-If every spawned worker in the active wave has been silent past a lease, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" recover-wave <state> --session <session_id> [--lease-seconds N] [--report-only]`. It reports each node as `dispatch` (never spawned: spawn it now, nothing is recorded), `record` (finished or launch refused: record it), `waiting` or `stalled`, plus one stable `reason_code`. Only when all nodes are `stalled` does it, in one locked save, record them `stale` with their native `tool_use_id` references and request the respawn. It refuses (`recovery_budget_exhausted`) once a node's respawns reach `retry.max`; a human then decides. Each outcome appends a non-authoritative row to `recovery-trace.jsonl` beside the state (see `docs/recover-wave-runbook.md`). `graph.py summarize <state>` gives a plain-language status.
+If every spawned worker in the active wave has been silent past a lease, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" recover-wave <state> --session <session_id> [--lease-seconds N] [--report-only]`. It reports each node as `dispatch` (never spawned: spawn it now, nothing is recorded), `record` (finished or launch refused: record it), `waiting` or `stalled`, plus one stable `reason_code`. Only when all nodes are `stalled` does it, in one locked save, record them `stale` with their native `tool_use_id` references and request the respawn. It refuses (`recovery_budget_exhausted`) once a node's respawns reach `retry.max`; a human then decides. Each outcome appends a non-authoritative row to `recovery-trace.jsonl` beside the state (see `docs/recover-wave-runbook.md`). `graph.py summarize <state>` gives a plain-language status. The Stop hook runs this recovery itself (at most once per 900s lease per graph state, within a 4s budget) when a blocked Stop finds a silent wave; it can respawn a worker that is alive but silent, so a duplicate is possible (bounded by `retry.max`). A timed-out attempt reports its outcome as unknown.
 
 After independently verifying a deliverable and recording its graph wave, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" record-unit <state> --session <session_id> --unit <id> --status done --evidence "<observed check>"`. For an authorized withdrawal, use `--status dropped --reason "<reason>"`. The command requires a pending registered unit and no active wave and updates state atomically. The graph revision remains unchanged so stored wave evidence stays valid. Do not infer a work-unit decision from graph-node status; grade final evals against the current graph revision.
 

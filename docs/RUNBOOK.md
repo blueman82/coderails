@@ -164,6 +164,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `decision_wrong_session` | the loop state belongs to another session; record only from the owning session. |
 | `decision_blank_phase` | a decision needs a non-blank phase (for example 2.5). |
 | `decision_blank_decision` | a decision needs a non-blank decision text; nothing was written. |
+| `decision_invalid_chain` | the decision chain is damaged; inspect and preserve the loop state before any further sync. |
+| `decision_sync_unknown` | a decision sync may have reached Muninn; inspect the store before any manual retry. |
 | `decision_state_error` | the loop state could not be read, validated or locked; nothing was written. |
 
 - Limits: only the orchestrator session can write (subagent threads are not citable); cites must anchor in a user
@@ -173,8 +175,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Decision recorded locally but Muninn sync degraded
 
-- Symptom: `graph.py record-decision` printed `"exit_code": 3` and a `muninn.reason_code`. The decision is already
-  in `progress.json` `decisions_absorbed` (appended first, under the lock); only the Muninn copy is missing.
+- Symptom: `graph.py record-decision` printed `"exit_code": 3` and a `muninn.reason_code`. The decision was appended
+  to `progress.json` `decisions_absorbed` before the sync attempt. For `unknown` or `syncing`, the Muninn copy may
+  already exist; inspect both stores before any recovery. A loop restarted during sync may no longer contain that row.
   Trace rows: `decision.record/recorded/ok`, then `decision.sync/<written|degraded|disabled>/<reason_code>`.
 - Query: `python3 -c "import json;[print(r['seq'],r['muninn']) for r in json.load(open('progress.json'))['decisions_absorbed']]"`,
   or `grep '"command": "decision\.' <agentic-loop dir>/<session_id>/trace.jsonl`. Chain check:

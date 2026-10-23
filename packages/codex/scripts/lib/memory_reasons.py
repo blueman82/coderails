@@ -82,5 +82,9 @@ REASONS: dict[str, str] = {
     "decision_wrong_session": "the loop state belongs to another session; record only from the owning session.",
     "decision_blank_phase": "a decision needs a non-blank phase (for example 2.5).",
     "decision_blank_decision": "a decision needs a non-blank decision text; nothing was written.",
+    "decision_invalid_chain": (
+        "the decision chain is damaged; inspect and preserve the loop state before any further sync."
+    ),
+    "decision_sync_unknown": "a decision sync may have reached Muninn; inspect the store before any manual retry.",
     "decision_state_error": "the loop state could not be read, validated or locked; nothing was written.",
 }
