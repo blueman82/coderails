@@ -182,7 +182,7 @@ def read_receipt(path: Path) -> dict[str, Any] | None:
         if path.stat().st_size > MAX_RECEIPT_BYTES:
             return None
         raw: object = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # deeply nested "[[[..." raises RecursionError: still malformed
         return None
     return cast("dict[str, Any]", raw) if isinstance(raw, dict) else None
 
@@ -214,6 +214,16 @@ def is_consumed(path: Path) -> bool:
 def consume(path: Path) -> bool:
     """Atomically claim the receipt; exactly one concurrent caller gets True."""
     return _claim(path, ".consumed")
+
+
+def execute(path: Path) -> bool:
+    """Atomically mark the action as about to run (.executed); exactly one caller gets True."""
+    return _claim(path, ".executed")
+
+
+def is_executed(path: Path) -> bool:
+    """True when the executed marker exists."""
+    return path.with_suffix(".executed").exists()
 
 
 def effective(path: Path) -> dict[str, Any] | None:

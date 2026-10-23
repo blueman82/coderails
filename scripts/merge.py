@@ -12,6 +12,7 @@ from scripts.lib import git_common as git
 from scripts.lib import manifest_policy
 from scripts.lib.config import config_path, integrity_machine_user
 from scripts.lib.integrity_status import verify_integrity_status
+from scripts.lib.receipt_gate import require_merge_receipt
 from scripts.lib.wiki_debt import has_wiki_ingest_for_merged_prs
 from scripts.post_evals import smoke_verify
 
@@ -91,6 +92,7 @@ def main(arguments: list[str] | None = None) -> int:
                 raise git.WorkflowError("Not approved")
             sha = verify_gates(number)
             manifest_policy.gate(number)
+            require_merge_receipt(number)  # fail-closed: a signed owner receipt, claimed before the merge runs
             # pin the head the gates verified: GitHub refuses the merge if the PR head moved since
             git.run("gh", "pr", "merge", number, "--merge", "--match-head-commit", sha, check=True)
             print("✓ Merged")

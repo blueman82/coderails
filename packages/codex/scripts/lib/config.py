@@ -123,7 +123,7 @@ def _coerce(entry: dict[str, Any], spec: dict[str, Any]) -> tuple[Any, bool]:
         return int(raw), True
     if "array" in types and raw.startswith("[") and raw.endswith("]"):
         return [item.strip().strip("\"'") for item in raw[1:-1].split(",") if item.strip()], True
-    return raw, "string" in types
+    return raw, "string" in types and raw in spec.get("enum", [raw])
 
 
 def _hint(key: str, known: dict[str, Any]) -> str:

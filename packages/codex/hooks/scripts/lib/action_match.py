@@ -17,6 +17,13 @@ _GIT_OPT = r"(?:-C\s+\S+|-c\s+\S+|--[\w-]+=\S+|--(?:git-dir|work-tree|namespace|
 _GIT = re.compile(r"^git((?:\s+" + _GIT_OPT + r")*)\s+(merge|push)(?:\s|$)")
 
 
+def pr_number(segment: str) -> str:
+    """Read the explicit PR argument of a merge segment while excluding option tokens."""
+    match = re.search(r"gh\s+pr\s+merge(.*)", segment)
+    arguments = match[1] if match else re.sub(r"^.*?merge\.(?:sh|py)", "", segment)
+    return next((token.strip("\"'") for token in arguments.split() if re.match(r"^[0-9]", token.strip("\"'"))), "")
+
+
 def operation(command: str) -> tuple[str, str, str]:
     """Return guarded operation, matched segment, and optional Git target directory."""
     if re.search(r"(^|[^-a-zA-Z0-9])(--dry-run|--help)([^-a-zA-Z0-9]|$)", command) and not re.search(
@@ -92,7 +99,9 @@ def _push_guarded(segment: str) -> bool:
 _SEP = re.compile(r"(&&|\|\||[;|&\n])")
 _WRAPPER = re.compile(r"^(?:[A-Za-z_]\w*=\S*|(?:\S*/)?(?:env|sudo|time|command|exec|nohup))\s+")
 _SHELL_C = re.compile(r"\b(?:(?:bash|sh|zsh)\s+-\w*c|eval)\s+([\"'])(.*?)\1")
-_API_MERGE = re.compile(r"^gh\s+api\s+\S*/pulls/\d+/merge(?:\s|$)")
+_API_MERGE = re.compile(  # the merge endpoint or a GraphQL merge mutation anywhere in argv (flags may come first)
+    r"^gh\s+api\s(?:.*?/pulls/\d+/merge(?![\w-])|.*?\b(?:mergePullRequest|enablePullRequestAutoMerge)\b)"
+)
 _PROGRAMS = {"git", "gh", "bash", "sh", "zsh", "python", "python3"}
 UNBINDABLE = "CODERAILS_UNBINDABLE=1 "  # an env-style prefix: action_binding refuses it, so the segment is denied
 
@@ -126,7 +135,8 @@ def guarded_segments(command: str, cwd: str) -> list[tuple[str, str, str]]:
     receipt hash binds the directory the operation really runs in. A cd that cannot be followed (variable, `cd -`, a
     missing directory, a subshell group) makes every later guard unbindable, as does a cd before `bash -c`/`eval`.
     Quoting and absolute program paths are normalised (`canonical`); wrappers are unwrapped (env/sudo/time prefixes,
-    subshell and brace groups, `bash -c '...'`, `eval '...'`, `gh api .../merge`).
+    subshell and brace groups, `bash -c '...'`, `eval '...'`, `gh api .../merge` with flags first, and the GraphQL
+    mergePullRequest/enablePullRequestAutoMerge mutations, which are unbindable and so never allowed).
     Still unmatched: xargs, aliases, functions, scripts that push, `gh api` ref/contents writes, other branches.
     ponytail: tokens only, no variable or alias expansion (a non-literal destination is guarded and unbindable).
     """

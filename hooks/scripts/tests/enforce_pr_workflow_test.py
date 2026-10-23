@@ -90,5 +90,56 @@ class WorkflowGateTests(HookTestCase):
         self.assertEqual(original_count, 114)
 
 
+class AuthorityEarlyDenialTests(HookTestCase):
+    """enforce_pr_workflow asks authority.permits('merge') first and consumes nothing."""
+
+    def grant(self, **over: object) -> None:
+        """A live authority for session S1."""
+        obj = {
+            "authority_id": "auth-1", "loop_id": None, "session_id": "S1", "scope": ["code"], "denied": [],
+            "max_prs": 2, "expires_at": "2999-01-01T00:00:00+00:00", "revocable": True,
+            "approval_required_for": ["merge"], "granted_by": "command",
+        } | over  # fmt: skip
+        path = self.directory / "state" / "S1" / "authority.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(obj))
+
+    def reason(self, command: str = "gh pr merge 5") -> str:
+        """The denial text for a merge, '' when the hook stands aside (no config, so nothing else gates it)."""
+        payload = {"session_id": "S1", "cwd": str(self.directory), "tool_input": {"command": command}}
+        out = self.run_hook("enforce_pr_workflow", payload).stdout
+        return str(json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]) if out.strip() else ""
+
+    def test_denied_merge_and_spent_max_prs_are_early_denials(self) -> None:
+        """authority_denied and max_prs_exceeded deny; no authority or a live budget stands aside."""
+        self.assertEqual(self.reason(), "")
+        self.grant(denied=["merge"])
+        self.assertIn("authority_denied", self.reason())
+        self.assertIn("authority_denied", self.reason("python3 scripts/merge.py 5"))
+        self.grant(denied=[], max_prs=0)
+        self.assertIn("max_prs_exceeded", self.reason())
+        self.grant(denied=[], max_prs=1)
+        self.assertEqual(self.reason(), "")
+        self.assertEqual(self.reason("gh pr create"), "")
+
+    def test_calls_permits_once_for_merge_only(self) -> None:
+        """Spy: main() calls authority_permits.permits('merge') for merge and not for other operations."""
+        from unittest import mock
+
+        from hooks.scripts import enforce_pr_workflow as hook
+
+        allow = {"allow": True, "reason": "ok", "requires_approval": True, "authority_id": None}
+        for command, calls in (("gh pr merge 5", 1), ("gh pr create", 0)):
+            payload = {"session_id": "S1", "cwd": str(self.directory), "tool_input": {"command": command}}
+            with (
+                mock.patch.object(hook, "read_payload", return_value=payload),
+                mock.patch.object(hook, "permits", return_value=allow) as spy,
+            ):
+                hook.main()
+            self.assertEqual(spy.call_count, calls)
+            if calls:
+                self.assertEqual(spy.call_args.args, ("S1", "merge"))
+
+
 if __name__ == "__main__":
     unittest.main()

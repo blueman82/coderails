@@ -24,6 +24,7 @@ from hooks.scripts.lib.trace_row import append_row
 from scripts.lib import action_receipt as ar
 from scripts.lib import receipt_signing as rs
 from scripts.lib.action_binding import binding, git_out
+from scripts.lib.authority_object import read_authority
 
 KINDS = ("merge", "git_push")
 
@@ -55,9 +56,10 @@ def approve(args: argparse.Namespace) -> int:
         return refuse("receipt_refused_expiry_invalid", str(error), args.session, args.loop)
     proposed = ar.proposed_action(args.kind, args.action_command, cwd, branch, bind)
     receipt_id = str(uuid.uuid4())
+    live = read_authority(args.session)
     obj: dict[str, Any] = {
         "receipt_id": receipt_id,
-        "authority_id": args.authority_id,
+        "authority_id": args.authority_id or (live["authority_id"] if live else None),  # max_prs counts by this id
         "session_id": args.session,
         "loop_id": args.loop,
         "action": args.kind,
