@@ -101,7 +101,7 @@ def _verify_dispatch(
         or record["wave_id"] != wave_id
     ):
         raise graph_contract.DispatchDeniedError("dispatch_foreign", "native spawn does not own this graph attempt")
-    if graph_contract.dispatch_off():
+    if graph_contract.dispatch_off() or record.get("authorized") == {"tool_use_id": None, "mode": "off"}:
         return
     agent_type = request.get("agent_type", "")
     if not isinstance(agent_type, str):

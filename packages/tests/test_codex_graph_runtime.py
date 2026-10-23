@@ -161,6 +161,36 @@ class GraphRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphError, "encrypted native message changed"):
             validate_worker_evidence(read_json(self.path))
 
+    def test_encrypted_dispatch_survives_off_switch_rescue(self) -> None:
+        """A hook-seen off-mode spawn remains verifiable after the switch is unset."""
+        opened = graph.begin_wave(self.path)["dispatches"][0]
+        message = self.path.with_name("message.txt")
+        message.write_text(opened["prompt_prefix"] + "\n" + opened["prompt_sections"], encoding="utf-8")
+        with patch.dict("os.environ", {"CODERAILS_GRAPH_DISPATCH": "off"}):
+            graph.authorize_dispatch(
+                self.path,
+                "parent",
+                opened["dispatch_id"],
+                message,
+                "",
+                opened["task_name"],
+                self.path.with_name("evals.json"),
+            )
+            spawn(self.parent, read_json(self.path))
+            lines = self.parent.read_text(encoding="utf-8").splitlines()
+            call = json.loads(lines[1])
+            arguments = json.loads(call["payload"]["arguments"])
+            arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x00" * 72).decode("ascii")
+            call["payload"]["arguments"] = json.dumps(arguments)
+            lines[1] = json.dumps(call)
+            self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            self.record()
+        current = read_json(self.path)
+        validate_worker_evidence(current)
+        next(iter(current["graph"]["dispatches"].values()))["authorized"] = None
+        with self.assertRaisesRegex(ValueError, "consumed hook authorization"):
+            validate_worker_evidence(current)
+
     def test_retry_exhaustion(self) -> None:
         """Retry failures receive unique native identities and stop at the configured cap."""
         for attempt in (1, 2):

@@ -175,6 +175,9 @@ def authorize_dispatch(
                 raise GraphError(str(error)) from error
             except OSError as error:
                 raise GraphError(f"cannot read the message file: {error}") from error
+            if record["authorized"] is None:
+                record["authorized"] = {"tool_use_id": None, "mode": "off"}
+                _write(path, state)
             trace(
                 path,
                 state,
