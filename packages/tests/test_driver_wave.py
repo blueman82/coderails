@@ -17,10 +17,34 @@ sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
 import graph_driver_evidence  # noqa: E402
 
 from hooks.scripts.tests.graph_convert_test import SCRIPTS, Case  # noqa: E402
+from packages.tests.test_driver_authorize import frozen_evals  # noqa: E402
 
 
 class DriverWaveTests(unittest.TestCase):
     """Exercise the real Claude and Codex graph CLIs on disposable files."""
+
+    def test_public_begin_refuses_root_owned_control_node(self) -> None:
+        """A direct CLI call cannot issue a model dispatch for the proof phase."""
+        with tempfile.TemporaryDirectory() as directory:
+            for provider in ("claude", "codex"):
+                case = Case(provider, Path(directory))
+                state = case.read()
+                state["graph"]["nodes"]["S13-proof"] = state["graph"]["nodes"].pop("U3[1]")
+                state["graph"]["nodes"]["S13-proof"]["label"] = "Run frozen proofs"
+                case.write(state)
+                self.assertEqual(case.graph("convert").returncode, 0)
+                self.assertEqual(case.graph("cutover-driver").returncode, 0)
+                case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+                before = case.path.read_bytes()
+                opened = subprocess.run(
+                    [sys.executable, str(SCRIPTS[provider]), "begin-driver-wave", str(case.path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(opened.returncode, 0, (provider, opened.stderr))
+                self.assertIn("root-owned", opened.stderr)
+                self.assertEqual(case.path.read_bytes(), before)
 
     def test_record_driver_wave_requires_seal_and_final_report(self) -> None:
         """A sealed done result still needs the existing final-report gate."""

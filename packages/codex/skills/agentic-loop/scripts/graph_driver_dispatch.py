@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import graph_contract
 import graph_semantics
+import graph_spec
 
 
 def begin_wave(state: dict[str, Any], progress: Path, push_script: Path) -> dict[str, Any]:
@@ -20,6 +21,12 @@ def begin_wave(state: dict[str, Any], progress: Path, push_script: Path) -> dict
     transition = graph_semantics.begin_wave(state)
     proposed = cast(dict[str, Any], transition["state"])
     active = cast(dict[str, Any], proposed["graph"]["active_wave"])
+    spec = graph_spec.load_spec()
+    control = [
+        node_id for node_id in active["nodes"] if (graph_spec.node_for(spec, node_id) or {}).get("agent_role") is None
+    ]
+    if control:
+        raise ValueError(f"root-owned nodes cannot receive driver worker dispatch: {', '.join(sorted(control))}")
     base = graph_contract.base_ref()
     dispatches: list[dict[str, Any]] = []
     for node_id in active["nodes"]:
