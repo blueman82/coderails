@@ -128,6 +128,26 @@ class CodexBackendTests(unittest.TestCase):
             )
             final.write_text(json.dumps(skipped))
             self.assertEqual(graph_driver_codex.result(output, 0), skipped)
+            status = {
+                "status": "NEEDS_DECISION",
+                "worker": "w1",
+                "summary": "blocked",
+                "confidence": "verified",
+                "question": "Which?",
+                "options": ["a", "b"],
+                "recommended": "a",
+            }
+            self.assertIn(
+                "NEEDS_DECISION", cast(dict[str, Any], graph_driver_codex.SCHEMA)["properties"]["outcome"]["enum"]
+            )
+            typed = {"outcome": "NEEDS_DECISION", "evidence": json.dumps(status), "final_report": None}
+            output.write_text(
+                '{"type":"thread.started","thread_id":"T"}\n'
+                + json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps(typed)}})
+                + '\n{"type":"turn.completed"}\n'
+            )
+            final.write_text(json.dumps(typed))
+            self.assertEqual(graph_driver_codex.result(output, 0), status)
             failed = {**expected, "outcome": "failed"}
             output.write_text(
                 '{"type":"thread.started","thread_id":"T"}\n'

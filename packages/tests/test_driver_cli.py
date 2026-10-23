@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
+sys.path.insert(0, str(ROOT / "skills/agentic-loop/scripts"))
 import graph_driver_control  # noqa: E402
 import graph_driver_controller  # noqa: E402
 import graph_driver_process  # noqa: E402

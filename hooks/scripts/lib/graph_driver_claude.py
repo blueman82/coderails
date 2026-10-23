@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, cast
 
 import graph_driver_controller
+import worker_status
 
 
 def command(
@@ -59,13 +60,23 @@ def result(output: Path, exit_code: int) -> dict[str, Any]:
     parsed = cast(dict[str, Any], raw)
     if (
         set(parsed) != {"outcome", "evidence", "final_report"}
-        or parsed["outcome"] not in {"done", "skipped", "failed"}
+        or parsed["outcome"] not in {"done", "skipped", "failed", *worker_status.STATUSES}
         or not isinstance(parsed["evidence"], str)
         or not parsed["evidence"].strip()
         or (parsed["outcome"] == "done" and not isinstance(parsed["final_report"], dict))
         or (parsed["outcome"] in {"failed", "skipped"} and parsed["final_report"] is not None)
     ):
         return _failed("invalid_final_schema")
+    if parsed["outcome"] in worker_status.STATUSES:
+        if parsed["final_report"] is not None:
+            return _failed("invalid_worker_status")
+        try:
+            status = json.loads(parsed["evidence"])
+        except ValueError:
+            return _failed("invalid_worker_status")
+        if worker_status.validate(status) != "ok" or status["status"] != parsed["outcome"]:
+            return _failed("invalid_worker_status")
+        return cast(dict[str, Any], status)
     return parsed
 
 

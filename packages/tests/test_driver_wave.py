@@ -16,6 +16,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
+sys.path.insert(0, str(ROOT / "skills/agentic-loop/scripts"))
+import graph_driver_controller  # noqa: E402
 import graph_driver_evidence  # noqa: E402
 
 from hooks.scripts.tests.graph_convert_test import SCRIPTS, Case  # noqa: E402
@@ -36,6 +38,67 @@ class DriverWaveTests(unittest.TestCase):
         environment = patch.dict(os.environ, PATH=f"{tool_dir}:{os.environ['PATH']}")
         environment.start()
         self.addCleanup(environment.stop)
+
+    def test_invalid_final_report_records_a_failed_attempt(self) -> None:
+        """A bad report cannot be sealed as done and strand a retryable wave."""
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            case = Case("codex", base)
+            state = case.read()
+            state["work_units"]["1"] = {"status": "pending", "scope": "Build one unit"}
+            case.write(state)
+            self.assertEqual(case.graph("convert").returncode, 0)
+            self.assertEqual(case.graph("cutover-driver").returncode, 0)
+            case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+            checkout = base / "checkout"
+            checkout.mkdir()
+            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(checkout),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=t@example.test",
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    "first",
+                ],
+                check=True,
+            )
+            head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+            self.fake_gh(base, head)
+
+            def command(prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
+                return [sys.executable, "-c", "import sys; print(sys.stdin.readline().strip())"], None, prompt
+
+            def result(output: Path, _code: int) -> dict[str, Any]:
+                parsed: dict[str, Any] = {
+                    "outcome": "done",
+                    "evidence": "bad report",
+                    "final_report": {"claims": [], "did_not_verify": []},
+                }
+                (output.parent / "final.json").write_text(json.dumps(parsed))
+                return parsed
+
+            report: dict[str, Any] = {"status": "unresolved"}
+            for _ in range(20):
+                report = graph_driver_controller.drive_once(
+                    case.path, "S", SCRIPTS["codex"], checkout, "codex", command, result
+                )
+                if report["status"] == "recorded":
+                    break
+            self.assertEqual(report["status"], "recorded")
+            state = case.read()
+            self.assertIsNone(state["graph"]["active_wave"])
+            self.assertEqual(state["graph"]["nodes"]["U3[1]"]["retry"]["attempts"], 1)
+            reference = state["graph"]["nodes"]["U3[1]"]["evidence"][-1]
+            manifest = case.path.parent / "driver-evidence" / reference["dispatch_id"] / "manifest.json"
+            self.assertEqual(json.loads(manifest.read_text())["result"]["outcome"], "failed")
 
     def test_public_begin_reserves_root_control_without_worker_dispatch(self) -> None:
         """A direct CLI call owns the proof wave without issuing a worker."""

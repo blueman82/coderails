@@ -8,12 +8,14 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+import worker_status
+
 MODELS = {"fast-mechanical": "gpt-6-luna", "default": "gpt-6.1-sol", "frontier": "gpt-6-astra"}
 
 SCHEMA = {
     "type": "object",
     "properties": {
-        "outcome": {"type": "string", "enum": ["done", "skipped", "failed"]},
+        "outcome": {"type": "string", "enum": ["done", "skipped", "failed", *worker_status.STATUSES]},
         "evidence": {"type": "string"},
         "final_report": {
             "type": ["object", "null"],
@@ -188,7 +190,7 @@ def result(output: Path, exit_code: int) -> dict[str, Any]:
     parsed = cast(dict[str, Any], final)
     if (
         set(parsed) != {"outcome", "evidence", "final_report"}
-        or parsed["outcome"] not in {"done", "skipped", "failed"}
+        or parsed["outcome"] not in {"done", "skipped", "failed", *worker_status.STATUSES}
         or not isinstance(parsed["evidence"], str)
         or not parsed["evidence"].strip()
         or (parsed["outcome"] == "done" and not isinstance(parsed["final_report"], dict))
@@ -201,4 +203,14 @@ def result(output: Path, exit_code: int) -> dict[str, Any]:
             return _failed("final_output_mismatch")
     except ValueError:
         return _failed("invalid_agent_message")
+    if parsed["outcome"] in worker_status.STATUSES:
+        if parsed["final_report"] is not None:
+            return _failed("invalid_worker_status")
+        try:
+            status = json.loads(parsed["evidence"])
+        except ValueError:
+            return _failed("invalid_worker_status")
+        if worker_status.validate(status) != "ok" or status["status"] != parsed["outcome"]:
+            return _failed("invalid_worker_status")
+        return cast(dict[str, Any], status)
     return parsed

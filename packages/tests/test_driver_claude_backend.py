@@ -59,6 +59,24 @@ class ClaudeBackendTests(unittest.TestCase):
                 + "\n"
             )
             self.assertEqual(graph_driver_claude.result(output, 0), skipped)
+            status = {
+                "status": "NEEDS_DECISION",
+                "worker": "w1",
+                "summary": "blocked",
+                "confidence": "verified",
+                "question": "Which?",
+                "options": ["a", "b"],
+                "recommended": "a",
+            }
+            self.assertIn("NEEDS_DECISION", cast(dict[str, Any], DRIVER_SCHEMA)["properties"]["outcome"]["enum"])
+            typed = {"outcome": "NEEDS_DECISION", "evidence": json.dumps(status), "final_report": None}
+            output.write_text(
+                json.dumps({"type": "system", "subtype": "init", "session_id": "S"})
+                + "\n"
+                + json.dumps({"type": "result", "subtype": "success", "is_error": False, "structured_output": typed})
+                + "\n"
+            )
+            self.assertEqual(graph_driver_claude.result(output, 0), status)
             output.write_text(json.dumps({"type": "result", "subtype": "success", "is_error": False}) + "\n")
             self.assertEqual(graph_driver_claude.result(output, 0)["outcome"], "failed")
             output.write_text(json.dumps({"type": "result", "subtype": "error_during_execution", "is_error": True}))

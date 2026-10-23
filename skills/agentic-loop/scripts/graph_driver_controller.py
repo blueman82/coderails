@@ -19,6 +19,7 @@ import graph_driver_evidence
 import graph_driver_process
 import graph_semantics
 import graph_spec
+import worker_status
 from graph_vocab import decision_pending
 
 Command = Callable[[Path, dict[str, Any]], tuple[list[str], Optional[dict[str, str]], Optional[Path]]]
@@ -207,6 +208,10 @@ def _prompt(
     content += f"Checkout: {checkout}\n"
     content += "Work only in the assigned checkout. Report failed if the task is unclear or incomplete.\n"
     content += "For done, give a final_report with cited claims and explicit did_not_verify items.\n"
+    content += (
+        "For a human request, set outcome to NEEDS_DECISION, OUTSIDE_SCOPE, or IRREVERSIBLE_ACTION. "
+        "Put the matching typed worker status object as JSON in evidence and set final_report null.\n"
+    )
     if implementation or wiki:
         content += "Do not run git add or git commit. The root will commit and open the PR after checking your work.\n"
     if wiki:
@@ -248,6 +253,15 @@ def _publication_pause(checkout: Path, node_id: str, result: dict[str, Any]) -> 
         except ValueError as error:
             return {"status": "paused", "reason": "publication_required", "node": node_id, "detail": str(error)}
     return None
+
+
+def _admit_result(state: dict[str, Any], node_id: str, parsed: dict[str, Any]) -> dict[str, Any]:
+    """Turn a report the graph would refuse into a sealed failed attempt."""
+    try:
+        worker_status.prepare(state, {node_id: parsed})
+    except worker_status.WorkerResultError as error:
+        return {"outcome": "failed", "evidence": f"invalid_worker_result:{error.code}", "final_report": None}
+    return parsed
 
 
 def drive_once(
@@ -332,7 +346,7 @@ def drive_once(
                 observation = graph_driver_process.observe(prompt.parent, 0.05)
                 if observation["status"] != "finished":
                     return {"status": observation["status"], "node": node_id}
-                parsed = result(prompt.parent / "output.jsonl", observation["exit_code"])
+                parsed = _admit_result(state, node_id, result(prompt.parent / "output.jsonl", observation["exit_code"]))
                 if pause := _publication_pause(worker_checkout, node_id, parsed):
                     return pause
                 reference = graph_driver_evidence.seal(
