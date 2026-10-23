@@ -265,7 +265,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Query: `jq -r 'select(.command=="worker_containment" or .command=="sandbox_launch") | [.command,.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`.
   Codes: `containment_fallback_low_risk` (allowed in process, manifest avoids `HIGH_RISK_PREFIXES`), `containment_ack_required` (denied),
   `containment_ack_receipt` (allowed once on an owner receipt), `containment_gate_failed_open` (the hook errored and allowed),
-  `branch_import_refused` (the worker moved a branch other than its own, or rewrote history: nothing imported or pushed, the clone
+  `branch_import_refused` (missing graph-owned manifest, out-of-manifest commit, committed secret, moved branch other than its own, or rewritten history: nothing imported or pushed, the clone
   stays under `$TMPDIR/sw.*/clone` for inspection), `branch_imported`, `branch_pushed`.
 - Remediation: dispatch the unit with `python3 scripts/sandbox/spawn_sandboxed_worker.py <worktree> <prompt_file> <model>`, or the OWNER acknowledges
   the in-process fallback once: `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind worker_fallback --command 'worker_fallback <unit>' --cwd <worktree>`

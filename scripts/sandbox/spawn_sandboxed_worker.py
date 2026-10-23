@@ -8,7 +8,8 @@ The worker never sees the primary repository or inherited environment secrets. T
   3. after a clean exit checks each commit against the graph unit manifest and scans new objects for known secrets,
      then imports exactly the worker's branch (fast-forward only) and pushes it outside the sandbox.
 The launcher is trusted and reads under the real HOME remain possible. GitHub egress is blocked inside the sandbox;
-api.anthropic.com remains reachable. The scratch dir (clone, worker.log) is left in place for audit.
+api.anthropic.com remains reachable. A run without graph identity may execute but cannot import or push commits.
+The scratch dir (clone, worker.log) is left in place for audit.
 """
 
 from __future__ import annotations
@@ -195,15 +196,16 @@ def import_and_push(
         raise refuse("branch_import_refused", f"worker moved {', '.join(other)}; only {branch} may change")
     if not moved:
         return
+    if manifest is None:
+        raise refuse("branch_import_refused", "a graph-owned unit manifest is required before import or push")
     ref = f"refs/heads/{branch}"
-    if manifest is not None:
-        commits = git(clone, "rev-list", "--reverse", f"{before[ref]}..{after[ref]}", hardened=True).splitlines()
-        for commit in commits:
-            diff = git(clone, "diff", "--raw", "-z", "-M", before[ref], commit, hardened=True)
-            verdict = manifest_policy.check(manifest_policy.parse_raw_z(diff), {}, manifest)
-            if not verdict["ok"]:
-                violation = verdict["violations"][0]
-                raise refuse("branch_import_refused", f"{violation['code']}: {violation['path']}; nothing pushed")
+    commits = git(clone, "rev-list", "--reverse", f"{before[ref]}..{after[ref]}", hardened=True).splitlines()
+    for commit in commits:
+        diff = git(clone, "diff", "--raw", "-z", "-M", before[ref], commit, hardened=True)
+        verdict = manifest_policy.check(manifest_policy.parse_raw_z(diff), {}, manifest)
+        if not verdict["ok"]:
+            violation = verdict["violations"][0]
+            raise refuse("branch_import_refused", f"{violation['code']}: {violation['path']}; nothing pushed")
     found = committed_secret(clone, before.get(ref), after[ref], credential_value)
     if found:
         raise refuse("branch_import_refused", f"secret found in the worker's commits ({found}); nothing pushed")

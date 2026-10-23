@@ -149,6 +149,9 @@ class LauncherFlowTests(unittest.TestCase):
         shim = patch.object(shutil, "which", return_value="/fixture/tool")
         shim.start()
         self.addCleanup(shim.stop)
+        manifest = patch.object(spawn_sandboxed_worker, "declared_manifest", return_value=["**"])
+        manifest.start()
+        self.addCleanup(manifest.stop)
 
     def refs(self, repo: Path) -> dict[str, str]:
         """refs/heads name -> object id."""
@@ -204,6 +207,23 @@ class LauncherFlowTests(unittest.TestCase):
         self.assertEqual(git(self.worktree, "status", "--porcelain"), "")
         self.assertEqual(git(self.primary, "rev-parse", "refs/heads/main"), before["main"])
         self.assertFalse(any(call[:1] == ["gh"] for call in self.calls), self.calls)
+
+    def test_missing_graph_identity_cannot_publish(self) -> None:
+        """A direct launcher invocation without graph identity may run, but cannot import or push a commit."""
+        before, pushed = self.refs(self.primary), git(self.origin, "for-each-ref", "refs/heads")
+
+        def worker(clone: Path) -> None:
+            (clone / "unscoped.txt").write_text("unscoped")
+            git(clone, "add", "unscoped.txt")
+            git(clone, "commit", "-q", "-m", "unscoped")
+
+        with (
+            patch.object(spawn_sandboxed_worker, "declared_manifest", return_value=None),
+            self.assertRaisesRegex(ValueError, "branch_import_refused.*manifest"),
+        ):
+            self.run_launcher(worker)
+        self.assertEqual(self.refs(self.primary), before)
+        self.assertEqual(git(self.origin, "for-each-ref", "refs/heads"), pushed)
 
     def test_child_environment_is_an_allowlist(self) -> None:
         """(b) No parent GH_TOKEN/GITHUB_TOKEN/ANTHROPIC_API_KEY, no real HOME, no headless flag."""
