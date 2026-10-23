@@ -40,7 +40,13 @@ class DriverEvidenceTests(unittest.TestCase):
         return serve
 
     def check_pr_revalidation(
-        self, state_path: Path, state: dict[str, Any], ref: dict[str, Any], serve: Callable[[str, str], None], head: str
+        self,
+        state_path: Path,
+        state: dict[str, Any],
+        ref: dict[str, Any],
+        serve: Callable[[str, str], None],
+        head: str,
+        checkout: Path,
     ) -> None:
         """A closed or moved PR invalidates a sealed success; a merged one remains valid."""
         serve("CLOSED", head)
@@ -52,6 +58,11 @@ class DriverEvidenceTests(unittest.TestCase):
         serve("MERGED", head)
         graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
         serve("OPEN", head)
+        dirty = checkout / "unpublished.txt"
+        dirty.write_text("not in the PR")
+        with self.assertRaisesRegex(ValueError, "clean"):
+            graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
+        dirty.unlink()
 
     def commit_empty(self, checkout: Path, message: str) -> None:
         """Advance the disposable worker checkout by one commit."""
@@ -234,7 +245,7 @@ class DriverEvidenceTests(unittest.TestCase):
                     state_path, state, "U3[1]", dispatch_id, checkout, "codex", 0, {"outcome": "done"}
                 )
             graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
-            self.check_pr_revalidation(state_path, state, ref, serve, head)
+            self.check_pr_revalidation(state_path, state, ref, serve, head, checkout)
             self.check_failed_without_final(state_path, state, checkout)
             foreign = deepcopy(state)
             foreign["graph"]["dispatches"][dispatch_id]["authorized"]["prompt_sha256"] = "0" * 64

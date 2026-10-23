@@ -48,8 +48,8 @@ def _merged_on_main(checkout: Path, head: str) -> None:
         raise ValueError("wiki publication is not on origin/main")
 
 
-def publication(checkout: Path, *, require_merged: bool = False) -> dict[str, Any]:
-    """Read the PR for the exact clean checkout HEAD and optional landed wiki update."""
+def _clean(checkout: Path) -> None:
+    """Reject any checkout bytes that were not part of the published commit."""
     try:
         status = subprocess.run(
             ["git", "-C", str(checkout), "status", "--porcelain", "--untracked-files=all"],
@@ -58,8 +58,16 @@ def publication(checkout: Path, *, require_merged: bool = False) -> dict[str, An
             check=False,
             timeout=15,
         )
-        if status.returncode or status.stdout.strip():
-            raise ValueError("publication requires a clean checkout")
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError("publication checkout status failed") from error
+    if status.returncode or status.stdout.strip():
+        raise ValueError("publication requires a clean checkout")
+
+
+def publication(checkout: Path, *, require_merged: bool = False) -> dict[str, Any]:
+    """Read the PR for the exact clean checkout HEAD and optional landed wiki update."""
+    _clean(checkout)
+    try:
         current_head = head(checkout)
         viewed = subprocess.run(
             ["gh", "pr", "view", "--json", "number,state,headRefOid"],
@@ -98,6 +106,7 @@ def publication(checkout: Path, *, require_merged: bool = False) -> dict[str, An
 
 def validate_publication(checkout: Path, number: int, head: str, *, require_merged: bool = False) -> None:
     """Keep sealed publication bound to a live open or merged PR at its head."""
+    _clean(checkout)
     try:
         viewed = subprocess.run(
             ["gh", "pr", "view", str(number), "--json", "number,state,headRefOid"],
