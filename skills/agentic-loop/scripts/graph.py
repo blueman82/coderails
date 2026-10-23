@@ -76,6 +76,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--join", action="store_true")
             command.add_argument("--manifest", action="append", default=[])
             command.add_argument("--base-branch", help="remote branch used for first stacked publication")
+            command.add_argument("--worktree", help="absolute path of this unit's checkout")
             command.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
             command.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
             command.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
@@ -115,9 +116,7 @@ def parser() -> argparse.ArgumentParser:
                 command.add_argument(flag, required=True)
             command.add_argument("--flip-condition", help="what would change this decision")
             command.add_argument("--worker-status-seq", type=int, help="mark this worker_statuses row resolved")
-            command.add_argument(
-                "--human-answer", action="store_true", help="a human answered (approval-gate statuses)"
-            )
+            command.add_argument("--human-answer", action="store_true", help="a human answered")
         if name == "authorize-dispatch":
             command.add_argument("--prompt", required=True)
             command.add_argument("--subagent-type", required=True)
@@ -254,7 +253,7 @@ def main() -> int:
                 args.depends_on,
                 args.join,
                 args.manifest,
-                {**fields, "scope": args.scope, "base_branch": args.base_branch},
+                {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
             )
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)

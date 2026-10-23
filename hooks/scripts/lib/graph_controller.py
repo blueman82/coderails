@@ -194,6 +194,7 @@ def add_unit(
             given.get("lessons", []),
             given.get("scope"),
             given.get("base_branch"),
+            given.get("worktree"),
         )
     except ValueError as error:
         coded = RecoveryRefusedError("add_unit_refused_bad_field", str(error))

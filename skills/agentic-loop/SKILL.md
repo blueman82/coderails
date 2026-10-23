@@ -41,7 +41,7 @@ are joins/cross-cutting guards) are referenced by these names throughout the res
 
 ### Phases -2 through 2.7 — setup, before any delegation
 
-Start the loop state (`graph.py start`, then `graph.py add-unit` per unit), sharpen the authorising prompt, read the envelope, run
+Start the loop state (`graph.py start`, then `graph.py add-unit` per unit, with `--worktree ABSOLUTE_PATH` for each unit's checkout before graph-bound PR publication), sharpen the authorising prompt, read the envelope, run
 pre-flight checks via spawned agents, resolve design forks and disposition, and
 commit the resolved design to `spec.md` and `plan.md`.
 

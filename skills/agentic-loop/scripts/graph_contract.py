@@ -148,6 +148,7 @@ def unit_fields(
     lessons: list[str],
     scope: str | None,
     base_branch: str | None = None,
+    worktree: str | None = None,
 ) -> dict[str, Any]:
     """The optional contract inputs `add-unit` stores on work_units[u]; only values actually given are kept."""
     if model_role is not None and model_role not in MODEL_ROLES:
@@ -157,12 +158,15 @@ def unit_fields(
         or subprocess.run(["git", "check-ref-format", "--branch", base_branch], capture_output=True).returncode
     ):
         raise ValueError("--base-branch must be a valid Git branch")
+    if worktree is not None and not Path(worktree).is_absolute():
+        raise ValueError("--worktree must be an absolute path")
     given = {
         "model_role": model_role,
         "write_scope": write_scope or None,
         "lessons": lessons or None,
         "scope": scope,
         "base_branch": base_branch,
+        "worktree": worktree,
     }
     return {key: value for key, value in given.items() if value is not None}
 
