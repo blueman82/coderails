@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, cast
@@ -26,6 +27,7 @@ CONTRACT_FIELDS = (
     "model_role",
     "base_ref",
     "manifest",
+    "publication_command",
     "disposition",
     "lessons",
     "write_scope",
@@ -46,6 +48,7 @@ CODES = (
     "dispatch_state_unconverted",
     "role_mismatch",
     "dispatch_unauthorized",
+    "dispatch_publication_mismatch",
 )
 OFF_SWITCH = "CODERAILS_GRAPH_DISPATCH"  # off/0/false: bypass policy after v2 ownership (default ON)
 BEGIN, END = "CODERAILS_GRAPH_CONTRACT v2", "END CODERAILS_GRAPH_CONTRACT"
@@ -96,8 +99,9 @@ def validate_contract(contract: object) -> dict[str, Any]:
     if not isinstance(contract, dict):
         raise ValueError("contract must be an object")
     value = cast(dict[str, Any], contract)
-    if set(value) != set(CONTRACT_FIELDS):
-        raise ValueError(f"contract fields must be exactly {list(CONTRACT_FIELDS)}")
+    old_fields = set(CONTRACT_FIELDS) - {"publication_command"}
+    if set(value) not in (old_fields, set(CONTRACT_FIELDS)):
+        raise ValueError(f"contract fields must match the current or historical v2 set: {list(CONTRACT_FIELDS)}")
     if value["role"] not in roles():
         raise ValueError("contract role is not a known agent")
     if value["model_role"] not in MODEL_ROLES:
@@ -111,12 +115,16 @@ def validate_contract(contract: object) -> dict[str, Any]:
             raise ValueError(f"contract {key} must be an array of strings")
     if value["disposition"] is not None and not isinstance(value["disposition"], dict):
         raise ValueError("contract disposition must be an object or null")
+    if value.get("publication_command") is not None and (
+        not isinstance(value["publication_command"], str) or not value["publication_command"].strip()
+    ):
+        raise ValueError("contract publication_command must be a non-empty string or null")
     return value
 
 
 def render_sections(contract: dict[str, Any]) -> str:
     """The deterministic text block a worker prompt must carry verbatim (one JSON value per line)."""
-    lines = [f"{key}: {json.dumps(contract[key], sort_keys=True)}" for key in CONTRACT_FIELDS]
+    lines = [f"{key}: {json.dumps(contract[key], sort_keys=True)}" for key in CONTRACT_FIELDS if key in contract]
     return "\n".join([BEGIN, *lines, END])
 
 
@@ -135,27 +143,66 @@ def base_ref() -> str:
 
 
 def unit_fields(
-    model_role: str | None, write_scope: list[str], lessons: list[str], scope: str | None
+    model_role: str | None,
+    write_scope: list[str],
+    lessons: list[str],
+    scope: str | None,
+    base_branch: str | None = None,
 ) -> dict[str, Any]:
     """The optional contract inputs `add-unit` stores on work_units[u]; only values actually given are kept."""
     if model_role is not None and model_role not in MODEL_ROLES:
         raise ValueError(f"--model-role must be one of {MODEL_ROLES}")
-    given = {"model_role": model_role, "write_scope": write_scope or None, "lessons": lessons or None, "scope": scope}
+    if base_branch is not None and (
+        not base_branch
+        or subprocess.run(["git", "check-ref-format", "--branch", base_branch], capture_output=True).returncode
+    ):
+        raise ValueError("--base-branch must be a valid Git branch")
+    given = {
+        "model_role": model_role,
+        "write_scope": write_scope or None,
+        "lessons": lessons or None,
+        "scope": scope,
+        "base_branch": base_branch,
+    }
     return {key: value for key, value in given.items() if value is not None}
 
 
-def build_contract(state: dict[str, Any], node_id: str, base: str) -> dict[str, Any]:
+def publication_command(node_id: str, progress: Path, push_script: Path) -> str | None:
+    """Render the exact executable publication command for a unit worker."""
+    unit = graph_spec.split_id(node_id)[1]
+    node = graph_spec.node_for(graph_spec.load_spec(), node_id)
+    if unit is None or node is None or node.get("agent_role") != "loop-worker":
+        return None
+    return shlex.join(["python3", str(push_script.resolve()), "--unit", unit, "--progress", str(progress.resolve())])
+
+
+def require_publication(record: dict[str, Any], progress: Path, push_script: Path) -> None:
+    """Reject a stored command that differs from this node's actual publication target."""
+    expected = publication_command(record["node_id"], progress, push_script)
+    contract = validate_contract(record.get("contract"))
+    if contract.get("publication_command") != expected:
+        raise DispatchDeniedError("dispatch_publication_mismatch", "publication command does not bind this unit")
+
+
+def build_contract(
+    state: dict[str, Any], node_id: str, base: str, progress: Path | None = None, push_script: Path | None = None
+) -> dict[str, Any]:
     """The contract for one node: unit inputs (defaults applied), role and skip_phases from the graph spec."""
     spec, policy = graph_spec.load_spec(), graph_spec.load_policy()
     unit = graph_spec.split_id(node_id)[1]
     stored = cast(dict[str, Any], state.get("work_units", {}).get(unit, {})) if unit else {}
     node = graph_spec.node_for(spec, node_id)
     manifest = list(stored.get("manifest", []))
+    if (progress is None) != (push_script is None):
+        raise ValueError("publication needs both progress and push script paths")
     return {
         "role": (node or {}).get("agent_role") or "loop-worker",
         "model_role": stored.get("model_role", "default"),
         "base_ref": base,
         "manifest": manifest,
+        "publication_command": (
+            publication_command(node_id, progress, push_script) if progress and push_script else None
+        ),
         "disposition": stored.get("disposition"),  # null until the disposition-scout record exists
         "lessons": list(stored.get("lessons", [])),
         "write_scope": list(stored.get("write_scope", manifest)),
@@ -279,6 +326,19 @@ def assert_role(contract: dict[str, Any], requested: str, prefix: str, generic: 
 
 def require_converted(state: dict[str, Any]) -> None:
     """begin-wave and authorize need a state converted to the dispatch-contract minor."""
-    minor = state.get("state_minor", 0)
-    if type(minor) is not int or minor < STATE_MINOR_NEEDED or "dispatches" not in state["graph"]:
+    validate_dispatch_state(state)
+    if state.get("state_minor", 0) < STATE_MINOR_NEEDED:
         raise DispatchDeniedError("dispatch_state_unconverted", "run graph.py convert: state predates the contract")
+
+
+def validate_dispatch_state(state: dict[str, Any]) -> None:
+    """Reject malformed current-minor cutoffs that would bypass native evidence revalidation."""
+    minor = state.get("state_minor", 0)
+    if type(minor) is not int or minor < 0 or minor > STATE_MINOR_NEEDED:
+        raise DispatchDeniedError("dispatch_state_unconverted", "state has an invalid dispatch minor")
+    if minor < STATE_MINOR_NEEDED:
+        return
+    graph = state["graph"]
+    start = graph.get("contract_from_revision")
+    if not isinstance(graph.get("dispatches"), dict) or type(start) is not int or not 1 <= start <= state["revision"]:
+        raise DispatchDeniedError("dispatch_state_unconverted", "current state lacks a valid contract cutoff")

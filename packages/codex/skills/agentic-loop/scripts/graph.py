@@ -12,6 +12,7 @@ from typing import Any, cast
 
 import graph_convert
 import graph_ledger
+import graph_repair
 import graph_semantics
 import graph_spec
 import graph_stops
@@ -26,6 +27,8 @@ from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import write as _write
 from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace, traced_refusal
+from graph_summary import budget_spent as _budget_spent
+from graph_summary import summarize
 from graph_vocab import DISPOSITION_KINDS
 
 
@@ -97,6 +100,21 @@ def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str
         graph_semantics.validate(state)
         _write(path, state)
         return {"unit": unit_id, "status": status, "revision": state["revision"]}
+
+
+def record_repair(
+    path: Path, session: str, unit: str, failed_node: str, kind: str, identity: str, diagnosis: str
+) -> dict[str, Any]:
+    """Record one conditional repair under the Codex state lock."""
+    with _locked(path):
+        try:
+            proposed, report = graph_repair.record_repair(
+                _load(path), session, unit, failed_node, kind, identity, diagnosis
+            )
+        except ValueError as error:
+            raise GraphError(str(error)) from error
+        _write(path, proposed)
+        return report
 
 
 def inspect(path: Path) -> dict[str, Any]:
@@ -199,44 +217,6 @@ def recover_wave(
     return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
 
 
-def _budget_spent(node: dict[str, Any]) -> bool:
-    """True when the node's respawn generation has reached its retry max."""
-    return bool(node["respawn"]["generation"] >= node["retry"]["max"])
-
-
-def summarize(path: Path) -> dict[str, Any]:
-    """Plain-language status from graph state alone: done, active, ready, blocked and the human dependency."""
-    state = _load(path)
-    graph = state["graph"]
-    statuses = {node_id: node["status"] for node_id, node in graph["nodes"].items()}
-    pending = sorted(n for n, s in statuses.items() if s not in {"done", "skipped"})
-    ready = [] if graph["active_wave"] or graph["hard_stop"] else graph_semantics.ready(state)
-    if graph["hard_stop"] is not None:
-        phase, detail = (
-            "waiting for human",
-            f"hard stop on {graph['hard_stop']['node']}: {graph['hard_stop']['reason']}",
-        )
-    elif graph["active_wave"] is not None:
-        phase, detail = "waiting for worker", f"wave {graph['active_wave']['wave_id']} dispatched"
-        spent = [n for n in graph["active_wave"]["nodes"] if _budget_spent(graph["nodes"][n])]
-        if spent:
-            detail += f"; recovery budget exhausted for {', '.join(spent)}: recover-wave will refuse, a human decides"
-    elif ready:
-        phase, detail = "ready to dispatch", "begin-wave then spawn the ready nodes"
-    elif not pending:
-        phase, detail = "ready to complete", "run verify-completion"
-    else:
-        phase, detail = "waiting for evidence", "no node is ready; check pending dependencies"
-    return {
-        "phase": phase,
-        "detail": detail,
-        "done": sorted(n for n in statuses if n not in pending),
-        "active": list(graph["active_wave"]["nodes"]) if graph["active_wave"] else [],
-        "ready": ready,
-        "pending": pending,
-    }
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Operate one native Codex agentic-loop graph.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -255,6 +235,7 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--depends-on", action="append", default=[])
             controller.add_argument("--join", action="store_true")
             controller.add_argument("--manifest", action="append", default=[])
+            controller.add_argument("--base-branch", help="remote branch used for first stacked publication")
             controller.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
             controller.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
             controller.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
@@ -291,6 +272,10 @@ def _parser() -> argparse.ArgumentParser:
     detail = unit.add_mutually_exclusive_group(required=True)
     detail.add_argument("--evidence")
     detail.add_argument("--reason")
+    repair = commands.add_parser("record-repair")
+    repair.add_argument("state", type=Path)
+    for field in ("session", "unit", "failed-node", "kind", "identity", "diagnosis"):
+        repair.add_argument(f"--{field}", required=True)
     for name in ("respawn_stale", "hard_stop"):
         transition = commands.add_parser(name.replace("_", "-"))
         transition.add_argument("state", type=Path)
@@ -332,7 +317,7 @@ def main() -> int:
                 args.depends_on,
                 args.join,
                 args.manifest,
-                {**fields, "scope": args.scope},
+                {**fields, "scope": args.scope, "base_branch": args.base_branch},
             )
         elif args.command == "instantiate":
             output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
@@ -344,6 +329,10 @@ def main() -> int:
             if (args.status == "done") != (args.evidence is not None):
                 raise GraphError("done requires --evidence; dropped requires --reason")
             output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
+        elif args.command == "record-repair":
+            output = record_repair(
+                args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis
+            )
         elif args.command in {"stop", "consume-stop"}:
             output = graph_stops.run(args)
         elif args.command in graph_ledger.COMMANDS:

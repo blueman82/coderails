@@ -13,13 +13,21 @@ from hooks.scripts.lib.graph_executor import graph_semantics, load
 from hooks.scripts.lib.trace_row import append_row
 
 READY, PENDING, UNKNOWN, UNREADABLE = "ready", "predecessor_pending", "node_unknown", "state_unreadable"
+NOT_PENDING, GRAPH_BLOCKED, JOIN = "node_not_pending", "graph_blocked", "join_not_dispatchable"
 
 
 def reason_for(state: dict[str, Any], node_id: str) -> str:
     """Return the closed readiness code for a node of a readable state."""
-    if node_id in graph_semantics.ready(state):
-        return READY
-    return PENDING if node_id in state["graph"]["nodes"] else UNKNOWN
+    graph = state["graph"]
+    if node_id not in graph["nodes"]:
+        return UNKNOWN
+    if node_id in graph["joins"]:
+        return JOIN
+    if graph["nodes"][node_id]["status"] != "pending":
+        return NOT_PENDING
+    if graph["active_wave"] is not None or graph["hard_stop"] is not None:
+        return GRAPH_BLOCKED
+    return READY if node_id in graph_semantics.ready(state) else PENDING
 
 
 def main(arguments: list[str] | None = None) -> int:
@@ -32,7 +40,7 @@ def main(arguments: list[str] | None = None) -> int:
     except ValueError:
         state, code = {}, UNREADABLE
     print(json.dumps({"ready": code == READY, "reason_code": code}))
-    if code in {PENDING, UNKNOWN}:
+    if code in {PENDING, UNKNOWN, NOT_PENDING, GRAPH_BLOCKED, JOIN}:
         append_row("graph_readiness", "not_ready", code, str(state.get("session_id") or ""), state.get("loop_id"))
     return 0 if code == READY else 1
 

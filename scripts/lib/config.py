@@ -117,6 +117,7 @@ def _entries(text: str, findings: list[dict[str, str]] | None = None) -> dict[st
     found = findings if findings is not None else []
     top: dict[str, dict[str, Any]] = {}
     current: dict[str, Any] | None = None
+    current_top = ""
     indent = None
 
     def flag(code: str, key: str) -> None:
@@ -130,6 +131,7 @@ def _entries(text: str, findings: list[dict[str, str]] | None = None) -> dict[st
         match = KEY_LINE.fullmatch(line)
         if not line[0].isspace():
             current = {"raw": "", "items": [], "children": {}} if match else None
+            current_top = match[2] if match else ""
             indent = None
             if match and current is not None:
                 current["raw"] = _without_comment(match[3]).strip().strip("\"'")
@@ -143,8 +145,8 @@ def _entries(text: str, findings: list[dict[str, str]] | None = None) -> dict[st
         elif current is not None and match:
             indent = len(match[1]) if indent is None else indent
             kids = cast("list[dict[str, Any]]", list(current["children"].values()))
-            if len(match[1]) > indent and kids and kids[-1]["raw"] == "":
-                continue  # grandchild of a bare parent key (jira.transitions.*): not typed, not a typo
+            if len(match[1]) > indent and current_top == "jira" and kids and kids[-1]["raw"] == "":
+                continue  # Jira's nested mapping is deliberately untyped.
             if len(match[1]) != indent:
                 flag("config_unparseable_line", where)
             else:

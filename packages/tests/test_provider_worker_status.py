@@ -290,6 +290,7 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                 provider.success("begin-wave")
                 report = provider.launch()
                 state = provider.read()
+                state["state_minor"] = 1
                 state["graph"]["dispatches"] = {}
                 state["graph"]["contract_from_revision"] = 99
                 provider.write(state)

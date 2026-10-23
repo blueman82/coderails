@@ -66,7 +66,8 @@ class RevalidationTests(GraphCase):
         del removed["graph"]["dispatches"][identifier]
         altered["graph"]["dispatches"][identifier]["contract"]["scope"] = "widened"
         del retyped["graph"]["dispatches"][identifier]["contract"]["role"]
-        early["graph"]["contract_from_revision"] = 99  # the wave then predates the contract: v1 history stays valid
+        early["state_minor"] = 1
+        early["graph"]["contract_from_revision"] = 99  # only an older minor may predate the contract
         for variant, reason in ((removed, "begin-wave record"), (altered, "sections hash"), (retyped, "contract")):
             with self.subTest(reason=reason):
                 self.save(variant)

@@ -81,7 +81,9 @@ A pending node becomes ready only after every incoming dependency is
 `done` or `skipped`. An open wave or hard stop prevents another wave.
 `blocked` and `stale` are not successful prerequisites. `failed` is a wave
 outcome, never a persisted status: recording it increments `retry.attempts` and
-returns the node to pending, or hard-stops at `retry.max` (1 through 5).
+returns ordinary nodes to pending. FULL-profile `U4`, `U4b-review`, and
+`U4b-merge-gate` become blocked until a distinct diagnosed `record-repair`
+transition requeues verification. Every node hard-stops at `retry.max` (1 through 5).
 A stale result requires an artifact check in that same result:
 `{"checked":true,"method":"<check>","result":"<observation>"}`.
 A bare idle event is insufficient. `respawn-stale` records the reason and a new

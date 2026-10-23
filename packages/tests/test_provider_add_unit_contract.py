@@ -35,6 +35,8 @@ class AddUnitContractTests(ControllerCase):
                 "read the spec",
                 "--scope",
                 "unit two",
+                "--base-branch",
+                "unit-one",
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
@@ -48,6 +50,7 @@ class AddUnitContractTests(ControllerCase):
                         "write_scope": ["src/a.py", "src/b.py"],
                         "lessons": ["read the spec"],
                         "scope": "unit two",
+                        "base_branch": "unit-one",
                     },
                 },
             )
@@ -61,6 +64,15 @@ class AddUnitContractTests(ControllerCase):
             self.refused(result, "add_unit_refused_bad_field")
             self.assertEqual(c.path.read_bytes(), before)
             self.assertEqual(c.codes("add-unit"), ["add_unit_refused_bad_field"])
+
+    def test_bad_publication_base_is_refused_without_a_write(self) -> None:
+        """A malformed remote branch cannot enter a unit record."""
+        for c in self.each():
+            c.start()
+            before = c.path.read_bytes()
+            result = c.add("1", "--base-branch", "../foreign")
+            self.refused(result, "add_unit_refused_bad_field")
+            self.assertEqual(c.path.read_bytes(), before)
 
     def test_stored_inputs_and_defaults_reach_the_begin_wave_contract(self) -> None:
         """begin-wave renders the unit's inputs; unset inputs take the documented defaults (write_scope = manifest)."""

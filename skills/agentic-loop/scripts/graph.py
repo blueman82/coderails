@@ -11,6 +11,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import graph_convert
+import graph_repair
 import graph_spec
 from graph_vocab import DISPOSITION_KINDS, STOP_CATEGORIES, STOP_REASON_CODES, disposition_report
 
@@ -37,6 +38,7 @@ def parser() -> argparse.ArgumentParser:
         "begin-wave",
         "record-wave",
         "record-unit",
+        "record-repair",
         "respawn-stale",
         "hard-stop",
         "stop",
@@ -57,6 +59,9 @@ def parser() -> argparse.ArgumentParser:
             detail = command.add_mutually_exclusive_group(required=True)
             detail.add_argument("--evidence")
             detail.add_argument("--reason")
+        if name == "record-repair":
+            for field in ("session", "unit", "failed-node", "kind", "identity", "diagnosis"):
+                command.add_argument(f"--{field}", required=True)
         if name in {"start", "add-unit", "instantiate"}:
             command.add_argument("--session", required=True)
             command.add_argument("--loop-id", required=True)
@@ -70,6 +75,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--depends-on", action="append", default=[])
             command.add_argument("--join", action="store_true")
             command.add_argument("--manifest", action="append", default=[])
+            command.add_argument("--base-branch", help="remote branch used for first stacked publication")
             command.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
             command.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
             command.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
@@ -216,6 +222,21 @@ def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str
     return output
 
 
+def record_repair(
+    path: Path, session: str, unit: str, failed_node: str, kind: str, identity: str, diagnosis: str
+) -> dict[str, Any]:
+    """Record a bounded, distinct repair under the Claude state lock."""
+    output: dict[str, Any] = {}
+
+    def update(state: dict[str, Any]) -> dict[str, Any]:
+        proposed, report = graph_repair.record_repair(state, session, unit, failed_node, kind, identity, diagnosis)
+        output.update(report)
+        return proposed
+
+    transition(path, update)
+    return output
+
+
 def main() -> int:
     """Run one explicit graph operation with fail-closed CLI status."""
     args = parser().parse_args()
@@ -233,7 +254,7 @@ def main() -> int:
                 args.depends_on,
                 args.join,
                 args.manifest,
-                {**fields, "scope": args.scope},
+                {**fields, "scope": args.scope, "base_branch": args.base_branch},
             )
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
@@ -271,6 +292,10 @@ def main() -> int:
             if (args.status == "done") != (args.evidence is not None):
                 raise ValueError("done requires --evidence; dropped requires --reason")
             output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
+        elif args.command == "record-repair":
+            output = record_repair(
+                args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis
+            )
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = native_transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "stop":

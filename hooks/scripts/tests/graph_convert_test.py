@@ -157,6 +157,18 @@ class GraphConvertTests(unittest.TestCase):
             self.assertEqual(case.path.read_bytes(), before)
             self.assertFalse(case.backup.exists())
 
+    def test_current_minor_missing_contract_stamp_is_not_a_no_op(self) -> None:
+        """A current minor with no contract cutoff cannot silently bypass revalidation."""
+        for case in self.cases:
+            current, _ = graph_convert.convert(v1_state(), SESSION)
+            del current["graph"]["contract_from_revision"]
+            case.write(current)
+            before = case.path.read_bytes()
+            result = case.graph("convert")
+            self.assertNotEqual(result.returncode, 0, case.name)
+            self.assertIn("dispatch_state_unconverted", result.stderr)
+            self.assertEqual(case.path.read_bytes(), before)
+
     def test_every_ambiguity_is_refused_with_bytes_unchanged(self) -> None:
         """Unknown schema, future or bad minor, in-flight wave, torn stops or units and a foreign session all refuse."""
         for case in self.cases:
@@ -172,6 +184,9 @@ class GraphConvertTests(unittest.TestCase):
                 "graph_not_object": {**base, "graph": []},
                 "active_wave_ambiguous": in_flight,
             }
+            current_in_flight = copy.deepcopy(in_flight)
+            current_in_flight["state_minor"] = 1
+            current_in_flight["graph"]["wave_history"] = {}
             for code, state in cases.items():
                 case.write(state)
                 before = case.path.read_bytes()
@@ -181,6 +196,13 @@ class GraphConvertTests(unittest.TestCase):
                 self.assertEqual(case.path.read_bytes(), before, (case.name, code))
                 self.assertFalse(case.backup.exists(), (case.name, code))
                 self.assertEqual(case.reasons()[-1], f"convert_refused_{code}")
+            case.write(current_in_flight)
+            before = case.path.read_bytes()
+            result = case.graph("convert")
+            self.assertNotEqual(result.returncode, 0, case.name)
+            self.assertIn("active_wave_ambiguous", result.stderr)
+            self.assertEqual(case.path.read_bytes(), before)
+            self.assertFalse(case.backup.exists())
             case.write(base)
             before = case.path.read_bytes()
             self.assertIn("foreign_session", case.graph("convert", session="someone-else").stderr)

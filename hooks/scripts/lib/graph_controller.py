@@ -178,7 +178,7 @@ def add_unit(
 ) -> dict[str, Any]:
     """Register one work unit and its graph wiring in one locked, kernel-validated save.
 
-    `contract` holds the optional dispatch inputs model_role, write_scope, lessons and scope, plus `disposition`:
+    `contract` holds optional dispatch inputs, a publication base branch, and `disposition`:
     a (kind, named_blocker, removal_ticket) triple validated by graph_vocab.
     """
     inputs: dict[str, Any] = {"session": session, "loop_id": loop_id, "unit": unit, "deps": deps, "join": join}
@@ -189,7 +189,11 @@ def add_unit(
     given = contract or {}
     try:
         fields = graph_contract.unit_fields(
-            given.get("model_role"), given.get("write_scope", []), given.get("lessons", []), given.get("scope")
+            given.get("model_role"),
+            given.get("write_scope", []),
+            given.get("lessons", []),
+            given.get("scope"),
+            given.get("base_branch"),
         )
     except ValueError as error:
         coded = RecoveryRefusedError("add_unit_refused_bad_field", str(error))

@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TASK = "loop_worker_6c6f6f70_55335b375d"
 
 
-def seeded_state() -> dict[str, Any]:
+def seeded_state(progress: Path) -> dict[str, Any]:
     """A running U3[7] wave with its unused begin-wave dispatch record."""
     node: dict[str, Any] = {
         "label": "Build unit 7",
@@ -45,7 +45,7 @@ def seeded_state() -> dict[str, Any]:
             "contract_from_revision": 1,
         },
     }
-    contract = graph_contract.build_contract(state, "U3[7]", "main")
+    contract = graph_contract.build_contract(state, "U3[7]", "main", progress, ROOT / "packages/codex/scripts/push.py")
     identifier, record = graph_contract.make_record(state, "U3[7]", "wave-2", 1, contract, "native")
     record["task_name"] = TASK
     state["graph"]["dispatches"][identifier] = record
@@ -94,7 +94,7 @@ class NativeDispatchCliTests(unittest.TestCase):
             hook = plugin / "hooks/scripts/loop_dispatch_guard.py"
 
             def seed() -> dict[str, Any]:
-                state = seeded_state()
+                state = seeded_state(state_path)
                 state_path.write_text(json.dumps(state), encoding="utf-8")
                 evals_path.write_text(json.dumps(evals), encoding="utf-8")
                 return state

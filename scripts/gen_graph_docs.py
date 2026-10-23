@@ -31,10 +31,10 @@ THRESHOLD_TEXT = {
         "`loop_state_guard` still hard-code the floor of 1: this key documents it, no hook reads it yet)"
     ),
     "retry_max": "default per-node retry bound (the pure core caps it at 5)",
-    "repair_attempts_max": "distinct repair attempts per failure (`U5-repair[i]` retry bound)",
+    "repair_attempts_max": "distinct repair attempts per failure (`U5-repair[i]` procedure bound)",
     "graph.profile": (
         "what `graph.py instantiate` builds when `--profile` is absent: `units-only` is the unit lane `U3[i]` plus "
-        "`J12-all-units`; `full` is every node in the table"
+        "`J12-all-units`; `full` is every node and join in the table (guards are conditional procedures)"
     ),
 }
 
@@ -49,10 +49,13 @@ def _text(value: str, policy: dict[str, Any]) -> str:
 
 def table(spec: dict[str, Any], policy: dict[str, Any]) -> str:
     """The node table: one row per spec node, in spec order."""
-    rows = ["| ID | Node / true prerequisites | Ready when | Conditional skip or join |", "|---|---|---|---|"]
+    rows = [
+        "| ID | Kind | Node / true prerequisites | Ready when | Conditional skip or join |",
+        "|---|---|---|---|---|",
+    ]
     for node in spec["nodes"]:
         cells = [_text(node[key], policy) for key in ("prereq_text", "ready_when", "skip_text")]
-        rows.append(f"| `{node['id']}` | " + " | ".join(cells) + " |")
+        rows.append(f"| `{node['id']}` | `{node['kind']}` | " + " | ".join(cells) + " |")
     return "\n".join(rows)
 
 

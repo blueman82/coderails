@@ -12,6 +12,7 @@ from .loop_state_common import atomic_progress_update
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loop/scripts"))
 import graph_contract as graph_contract
+import graph_repair as graph_repair
 import graph_semantics as graph_semantics
 import graph_spec as graph_spec
 
@@ -27,6 +28,8 @@ def validate_state(value: object) -> dict[str, Any]:
     if state.get("status") not in {"initialising", "in-progress", "complete"}:
         raise ValueError("invalid loop status")
     graph_spec.check(state)
+    graph_contract.validate_dispatch_state(state)
+    graph_repair.validate_records(state)
     return state
 
 
