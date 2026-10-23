@@ -247,6 +247,10 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--disposition", choices=DISPOSITION_KINDS, help="clean-break | preserve-compat")
             controller.add_argument("--named-blocker", help="what blocks removal (preserve-compat only)")
             controller.add_argument("--removal-ticket", help="ticket that removes it (preserve-compat only)")
+    assignment = commands.add_parser("assign-unit-scope")
+    assignment.add_argument("state", type=Path)
+    for field in ("session", "unit", "scope"):
+        assignment.add_argument(f"--{field}", required=True)
     graph_ledger.add_parsers(commands.add_parser)
     spec = commands.add_parser("instantiate")
     spec.add_argument("state", type=Path)
@@ -331,6 +335,8 @@ def main() -> int:
                 args.manifest,
                 {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
             )
+        elif args.command == "assign-unit-scope":
+            output = graph_dispatch.assign_scope(args.state, args.session, args.unit, args.scope)
         elif args.command == "instantiate":
             output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "begin-wave":

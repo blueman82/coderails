@@ -23,6 +23,28 @@ from packages.tests.test_driver_authorize import frozen_evals  # noqa: E402
 class DriverCliTests(unittest.TestCase):
     """Use fake AI executables, real graph commands and real process wrappers."""
 
+    def test_assign_pending_unit_scope_requires_quiet_graph(self) -> None:
+        """An existing unit can gain a task only before its next wave."""
+        with tempfile.TemporaryDirectory() as directory:
+            for provider in ("claude", "codex"):
+                case = Case(provider, Path(directory))
+                self.assertEqual(case.graph("convert").returncode, 0)
+                command = ("assign-unit-scope", "--session", "S", "--unit", "1", "--scope", "Build unit one")
+                state = case.read()
+                state["work_units"]["1"] = {"status": "pending"}
+                case.write(state)
+                before = case.path.read_bytes()
+                state["graph"]["active_wave"] = {"wave_id": "wave-2", "revision": 2, "nodes": ["U3[1]"]}
+                case.write(state)
+                busy = case.graph(*command)
+                self.assertNotEqual(busy.returncode, 0, (provider, busy.stdout))
+                self.assertEqual(case.read()["work_units"]["1"], {"status": "pending"})
+                case.path.write_bytes(before)
+                assigned = case.graph(*command)
+                self.assertEqual(assigned.returncode, 0, (provider, assigned.stderr))
+                self.assertEqual(case.read()["work_units"]["1"]["scope"], "Build unit one")
+                self.assertNotEqual(case.graph(*command).returncode, 0)
+
     def test_root_control_result_is_sealed_and_revalidated(self) -> None:
         """A root proof step completes through an owned result file, without a worker."""
         with tempfile.TemporaryDirectory() as directory:

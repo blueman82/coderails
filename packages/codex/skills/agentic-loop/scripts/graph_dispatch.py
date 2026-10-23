@@ -8,6 +8,7 @@ from typing import Any, cast
 
 import graph_contract
 import graph_driver_control
+import graph_driver_controller
 import graph_driver_dispatch
 import graph_driver_evidence
 import graph_repair
@@ -23,6 +24,14 @@ from graph_io import write as _write
 from graph_recovery import RecoveryRefusedError, trace, traced_refusal
 from graph_transcript import transcript_cursor
 from json_types import JsonValue
+
+
+def assign_scope(path: Path, session: str, unit: str, scope: str) -> dict[str, Any]:
+    """Save one pending unit assignment through the Codex graph lock."""
+    with _locked(path):
+        proposed = graph_driver_controller.assign_scope(_load(path), session, unit, scope)
+        _write(path, proposed)
+        return {"unit": unit, "scope": proposed["work_units"][unit]["scope"], "revision": proposed["revision"]}
 
 
 def begin_wave(path: Path) -> dict[str, Any]:

@@ -8,7 +8,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import graph_convert
@@ -36,6 +36,7 @@ from hooks.scripts.lib.loop_state_common import atomic_progress_update
 GRAPH_COMMANDS = (
     "start",
     "add-unit",
+    "assign-unit-scope",
     "instantiate",
     "inspect",
     "summarize",
@@ -88,7 +89,7 @@ def parser() -> argparse.ArgumentParser:
             for field in ("session", "dispatch-id", "role", "driver-run-id"):
                 command.add_argument(f"--{field}", required=True)
             command.add_argument("--prompt-file", required=True, type=Path)
-        if name in {"record-driver-control", "drive"}:
+        if name in {"record-driver-control", "drive", "assign-unit-scope"}:
             graph_driver_adapter.add_arguments(name, command)
         if name == "instantiate":
             command.add_argument("--profile", choices=graph_spec.PROFILES, help="default: policy graph.profile")
@@ -253,35 +254,6 @@ def cutover_driver(path: Path, session: str) -> dict[str, Any]:
     return output
 
 
-def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str) -> dict[str, Any]:
-    """Record an independently checked work-unit decision through the Claude lock."""
-    output: dict[str, Any] = {}
-
-    def update(state: dict[str, Any]) -> dict[str, Any]:
-        if state["session_id"] != session:
-            raise ValueError("session does not own this graph")
-        if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
-            raise ValueError("work unit requires an in-progress graph without an active wave")
-        units = cast(object, state.get("work_units"))
-        if not unit_id.strip() or not isinstance(units, dict):
-            raise ValueError("work unit must be registered")
-        unit = cast(dict[str, object], units).get(unit_id)
-        if not isinstance(unit, dict):
-            raise ValueError("work unit must be registered and pending")
-        record = cast(dict[str, object], unit)
-        if record.get("status") != "pending":
-            raise ValueError("work unit must be registered and pending")
-        if status not in {"done", "dropped"} or not detail.strip():
-            raise ValueError("work unit decision requires a status and nonblank evidence or reason")
-        record["status"] = status
-        record["evidence" if status == "done" else "dropped_reason"] = detail.strip()
-        output.update(unit=unit_id, status=status, revision=state["revision"])
-        return state
-
-    transition(path, update)
-    return output
-
-
 def record_repair(
     path: Path, session: str, unit: str, failed_node: str, kind: str, identity: str, diagnosis: str
 ) -> dict[str, Any]:
@@ -316,6 +288,8 @@ def main() -> int:
                 args.manifest,
                 {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
             )
+        elif args.command == "assign-unit-scope":
+            output = graph_driver_adapter.assign_scope(args.state, args.session, args.unit, args.scope)
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "inspect":
@@ -368,7 +342,9 @@ def main() -> int:
         elif args.command == "record-unit":
             if (args.status == "done") != (args.evidence is not None):
                 raise ValueError("done requires --evidence; dropped requires --reason")
-            output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
+            output = graph_controller.record_unit(
+                args.state, args.session, args.unit, args.status, args.evidence or args.reason
+            )
         elif args.command == "record-repair":
             output = record_repair(
                 args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis

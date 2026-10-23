@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
@@ -23,6 +24,27 @@ from graph_vocab import decision_pending
 Command = Callable[[Path, dict[str, Any]], tuple[list[str], Optional[dict[str, str]], Optional[Path]]]
 Result = Callable[[Path, int], dict[str, Any]]
 Checkouts = Union[Path, dict[str, Path]]
+
+
+def assign_scope(state: dict[str, Any], session: str, unit: str, scope: str) -> dict[str, Any]:
+    """Bind an existing pending unit to a task before its next wave."""
+    raw_units: object = state.get("work_units")
+    units = cast(dict[str, object], raw_units) if isinstance(raw_units, dict) else {}
+    record = units.get(unit)
+    if state.get("session_id") != session or state.get("status") != "in-progress":
+        raise ValueError("unit scope belongs to another or inactive session")
+    graph = cast(dict[str, object], state["graph"])
+    if graph.get("active_wave") is not None:
+        raise ValueError("unit scope requires no active wave")
+    if not scope.strip() or not isinstance(record, dict) or cast(dict[str, object], record).get("status") != "pending":
+        raise ValueError("unit scope requires a pending unit and nonblank task")
+    if cast(dict[str, object], record).get("scope"):
+        raise ValueError("unit scope is already assigned")
+    proposed = copy.deepcopy(state)
+    proposed["work_units"][unit]["scope"] = scope.strip()
+    proposed["revision"] += 1
+    graph_semantics.validate(proposed)
+    return proposed
 
 
 def _graph(script: Path, name: str, path: Path, *args: str) -> dict[str, Any]:

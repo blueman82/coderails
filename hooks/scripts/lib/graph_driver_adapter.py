@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import graph_driver_control
+import graph_driver_controller
 import graph_driver_dispatch
 import graph_driver_evidence
 import graph_repair
@@ -21,7 +22,10 @@ from .graph_stops import record_stop
 def add_arguments(name: str, command: argparse.ArgumentParser) -> None:
     """Add the driver-only Claude CLI arguments."""
     command.add_argument("--session", required=True)
-    if name == "drive":
+    if name == "assign-unit-scope":
+        command.add_argument("--unit", required=True)
+        command.add_argument("--scope", required=True)
+    elif name == "drive":
         checkout = command.add_mutually_exclusive_group()
         checkout.add_argument("--checkout", type=Path)
         checkout.add_argument("--checkout-map", type=Path)
@@ -54,6 +58,12 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
 def record_control(path: Path, session: str, node_id: str, result_file: Path) -> dict[str, Any]:
     """Stage a root-owned result bound to the current wave without rewriting progress."""
     return graph_driver_control.stage(path, load(path), session, node_id, result_file)
+
+
+def assign_scope(path: Path, session: str, unit: str, scope: str) -> dict[str, Any]:
+    """Save one pending unit assignment through the Claude graph lock."""
+    saved = transition(path, lambda state: graph_driver_controller.assign_scope(state, session, unit, scope))
+    return {"unit": unit, "scope": saved["work_units"][unit]["scope"], "revision": saved["revision"]}
 
 
 def begin_wave(path: Path) -> dict[str, Any]:
