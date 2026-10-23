@@ -108,10 +108,12 @@ class DriverCliTests(unittest.TestCase):
             }
             for provider in ("claude", "codex"):
                 case = Case(provider, base)
+                state = case.read()
+                state["work_units"]["1"] = {"status": "pending", "scope": "Build the disposable unit"}
+                case.write(state)
                 self.assertEqual(case.graph("convert").returncode, 0)
                 self.assertEqual(case.graph("cutover-driver").returncode, 0)
-                if provider == "codex":
-                    case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+                case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
                 run = subprocess.run(
                     [
                         sys.executable,

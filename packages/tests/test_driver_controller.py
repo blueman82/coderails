@@ -22,6 +22,37 @@ from packages.tests.test_driver_authorize import frozen_evals  # noqa: E402
 class DriverControllerTests(unittest.TestCase):
     """Use the public graph commands with a disposable local worker."""
 
+    @staticmethod
+    def scoped(case: Case) -> None:
+        """Give the disposable worker a real, narrow assignment."""
+        state = case.read()
+        state["work_units"]["1"] = {"status": "pending", "scope": "Build the disposable unit"}
+        case.write(state)
+
+    def test_missing_implementation_task_pauses_before_wave(self) -> None:
+        """An empty graph unit cannot authorize a worker's unscoped done claim."""
+        with tempfile.TemporaryDirectory() as directory:
+            case = Case("codex", Path(directory))
+            self.assertEqual(case.graph("convert").returncode, 0)
+            self.assertEqual(case.graph("cutover-driver").returncode, 0)
+            case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+            before = case.path.read_bytes()
+
+            def command(_prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
+                self.fail("a missing task must not launch a worker")
+
+            report = graph_driver_controller.drive_once(
+                case.path,
+                "S",
+                SCRIPTS["codex"],
+                Path(directory),
+                "codex",
+                command,
+                lambda _path, _code: {"outcome": "done", "evidence": "impossible"},
+            )
+            self.assertEqual(report, {"status": "paused", "reason": "missing_task", "nodes": ["U3[1]"]})
+            self.assertEqual(case.path.read_bytes(), before)
+
     def test_root_owned_proof_node_pauses_before_dispatch(self) -> None:
         """A proof step cannot be satisfied by an external model's done message."""
         with tempfile.TemporaryDirectory() as directory:
@@ -55,6 +86,7 @@ class DriverControllerTests(unittest.TestCase):
         """A crash after authorization leaves an unresolved, single-use attempt."""
         with tempfile.TemporaryDirectory() as directory:
             case = Case("codex", Path(directory))
+            self.scoped(case)
             self.assertEqual(case.graph("convert").returncode, 0)
             self.assertEqual(case.graph("cutover-driver").returncode, 0)
             case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
@@ -68,9 +100,9 @@ class DriverControllerTests(unittest.TestCase):
             issued = json.loads(opened.stdout)["dispatches"][0]
             dispatch_id = issued["dispatch_id"]
             record = case.read()["graph"]["dispatches"][dispatch_id]
-            prompt = case.path.parent / "driver-evidence" / dispatch_id / "prompt.txt"
-            prompt.parent.mkdir(parents=True)
-            prompt.write_text(issued["prompt_prefix"] + "\n" + issued["prompt_sections"] + "\n")
+            prompt = graph_driver_controller._prompt(  # pyright: ignore[reportPrivateUsage]
+                case.path, case.read(), dispatch_id, record
+            )
             authorized = subprocess.run(
                 [
                     sys.executable,
@@ -136,10 +168,10 @@ class DriverControllerTests(unittest.TestCase):
             )
             for provider in ("claude", "codex"):
                 case = Case(provider, base)
+                self.scoped(case)
                 self.assertEqual(case.graph("convert").returncode, 0)
                 self.assertEqual(case.graph("cutover-driver").returncode, 0)
-                if provider == "codex":
-                    case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+                case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
 
                 def command(prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
                     return [sys.executable, "-c", "import sys; print(sys.stdin.readline().strip())"], None, prompt

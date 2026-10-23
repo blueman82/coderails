@@ -74,6 +74,17 @@ def _control_nodes(nodes: list[str]) -> list[str]:
     return sorted(node_id for node_id in nodes if (graph_spec.node_for(spec, node_id) or {}).get("agent_role") is None)
 
 
+def _missing_tasks(state: dict[str, Any], nodes: list[str]) -> list[str]:
+    """Refuse implementation workers without an actual unit assignment."""
+    units = state.get("work_units", {})
+    return sorted(
+        node_id
+        for node_id in nodes
+        if graph_spec.split_id(node_id)[0] == "U3"
+        and not str(units.get(graph_spec.split_id(node_id)[1], {}).get("scope", "")).strip()
+    )
+
+
 def _prompt(path: Path, state: dict[str, Any], identifier: str, record: dict[str, Any]) -> Path:
     """Write the exact envelope and contract once before authorization."""
     artifact = path.parent / "driver-evidence" / identifier
@@ -83,6 +94,14 @@ def _prompt(path: Path, state: dict[str, Any], identifier: str, record: dict[str
     prompt = artifact / "prompt.txt"
     content = graph_contract.prompt_prefix(state, identifier, record) + "\n"
     content += graph_contract.render_sections(record["contract"]) + "\n"
+    node = graph_spec.node_for(graph_spec.load_spec(), record["node_id"])
+    if node is None:
+        raise ValueError("driver task has no graph specification")
+    content += f"\nTask: {node['label']}\n"
+    content += f"Acceptance: {node['ready_when']}\n"
+    content += f"Assigned scope: {record['contract']['scope']}\n"
+    content += "Work only in the assigned checkout. Report failed if the task is unclear or incomplete.\n"
+    content += "Do not push, open a PR, merge, or change progress.json without the owner's explicit go.\n"
     if prompt.exists():
         if prompt.read_text(encoding="utf-8") != content:
             raise ValueError("existing driver prompt differs from its contract")
@@ -131,6 +150,9 @@ def drive_once(
             control = _control_nodes(ready)
             if control:
                 return {"status": "paused", "reason": "control_node", "nodes": control}
+            missing = _missing_tasks(state, ready)
+            if missing:
+                return {"status": "paused", "reason": "missing_task", "nodes": missing}
             if not ready:
                 return {"status": "paused", "reason": "no_ready_nodes"}
             _graph(script, "begin-driver-wave", path)
@@ -138,6 +160,8 @@ def drive_once(
         active = cast(dict[str, Any], state["graph"]["active_wave"])
         if _control_nodes(active["nodes"]):
             return {"status": "unresolved", "reason": "active_control_node", "nodes": active["nodes"]}
+        if _missing_tasks(state, active["nodes"]):
+            return {"status": "unresolved", "reason": "active_missing_task", "nodes": active["nodes"]}
         results: dict[str, Any] = {}
         references: dict[str, Any] = {}
         for identifier, record in _dispatches(state):
