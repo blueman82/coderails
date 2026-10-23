@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import graph_semantics
 from graph_io import load
@@ -21,6 +21,8 @@ def summarize(path: Path) -> dict[str, Any]:
     statuses = {node_id: node["status"] for node_id, node in graph["nodes"].items()}
     pending = sorted(n for n, status in statuses.items() if status not in {"done", "skipped"})
     ready = [] if graph["active_wave"] or graph["hard_stop"] else graph_semantics.ready(state)
+    decisions = cast(list[dict[str, Any]], state.get("worker_statuses") or [])
+    awaiting = [row for row in decisions if row.get("decision_pending") is True]
     if graph["hard_stop"] is not None:
         phase, detail = (
             "waiting for human",
@@ -33,6 +35,11 @@ def summarize(path: Path) -> dict[str, Any]:
             detail += f"; recovery budget exhausted for {', '.join(spent)}: recover-wave will refuse, a human decides"
     elif ready:
         phase, detail = "ready to dispatch", "begin-wave then spawn the ready nodes"
+    elif awaiting:
+        phase = "waiting for human"
+        detail = "; ".join(
+            f"{row['node']} {row['status']}: run record-decision --worker-status-seq {row['seq']}" for row in awaiting
+        )
     elif not pending:
         phase, detail = "ready to complete", "run verify-completion"
     else:
