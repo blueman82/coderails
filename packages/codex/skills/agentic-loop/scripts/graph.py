@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_convert
+import graph_dispatch
+import graph_driver_cutover
 import graph_invalid_dispatch
 import graph_ledger
 import graph_repair
@@ -19,11 +21,6 @@ import graph_spec
 import graph_stops
 from graph_completion import complete, verify_completion
 from graph_controller import add_unit, instantiate, start
-from graph_dispatch import apply_record
-from graph_dispatch import authorize_dispatch as authorize_dispatch
-from graph_dispatch import begin_wave as begin_wave
-from graph_dispatch import record_wave as record_wave
-from graph_driver_cutover import cutover_driver
 from graph_identity import GraphError, next_attempt, task_name
 from graph_io import load as _load
 from graph_io import locked as _locked
@@ -194,7 +191,9 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
         check = {"checked": True, "method": f"lease {lease}s expired", "result": "no worker activity"}
         results = {n: {"outcome": "stale", "evidence": "lease expired", "stale_check": check} for n in nodes}
         with traced_refusal(path, state, "recover-wave", session):
-            proposed, _ = apply_record(state, json.dumps({"wave_id": active["wave_id"], "results": results}))
+            proposed, _ = graph_dispatch.apply_record(
+                state, json.dumps({"wave_id": active["wave_id"], "results": results})
+            )
         for node_id in nodes:
             try:
                 respawned = graph_semantics.respawn_stale(proposed, node_id, "lease expired")
@@ -261,9 +260,6 @@ def _parser() -> argparse.ArgumentParser:
     mode = convert.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="report the conversion without writing")
     mode.add_argument("--write", action="store_true", help="convert in place (the default)")
-    cutover = commands.add_parser("cutover-driver")
-    cutover.add_argument("state", type=Path)
-    cutover.add_argument("--session", required=True)
     recover = commands.add_parser("recover-wave")
     recover.add_argument("state", type=Path)
     recover.add_argument("--session", required=True)
@@ -278,6 +274,7 @@ def _parser() -> argparse.ArgumentParser:
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
+    graph_driver_cutover.add_parsers(commands.add_parser)
     unit = commands.add_parser("record-unit")
     unit.add_argument("state", type=Path)
     unit.add_argument("--session", required=True)
@@ -337,9 +334,11 @@ def main() -> int:
         elif args.command == "instantiate":
             output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "begin-wave":
-            output = begin_wave(args.state)
+            output = graph_dispatch.begin_wave(args.state)
         elif args.command == "record-wave":
-            output = record_wave(args.state, args.results_json)
+            output = graph_dispatch.record_wave(args.state, args.results_json)
+        elif args.command in graph_driver_cutover.COMMANDS:
+            output = graph_driver_cutover.run(args)
         elif args.command == "record-unit":
             if (args.status == "done") != (args.evidence is not None):
                 raise GraphError("done requires --evidence; dropped requires --reason")
@@ -359,8 +358,6 @@ def main() -> int:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "convert":
             output = convert_state(args.state, args.session, args.check)
-        elif args.command == "cutover-driver":
-            output = cutover_driver(args.state, args.session)
         elif args.command == "recover-wave":
             output = recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
         elif args.command == "reject-invalid-dispatch":
@@ -372,7 +369,7 @@ def main() -> int:
         elif args.command == "inspect":
             output = inspect(args.state)
         elif args.command == "authorize-dispatch":
-            output = authorize_dispatch(
+            output = graph_dispatch.authorize_dispatch(
                 args.state,
                 args.session,
                 args.dispatch_id,

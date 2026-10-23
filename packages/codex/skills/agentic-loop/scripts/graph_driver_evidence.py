@@ -9,6 +9,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional, cast
 
+import graph_semantics
+
 _DISPATCH_ID = re.compile(r"[a-zA-Z0-9_-]{1,100}\Z")
 
 
@@ -52,6 +54,8 @@ def _record(state: dict[str, Any], node_id: str, dispatch_id: str) -> dict[str, 
         raise ValueError("dispatch is not driver owned")
     if not isinstance(record.get("authorized"), dict) or not record["authorized"].get("driver_run_id"):
         raise ValueError("driver dispatch was not authorized")
+    if re.fullmatch(r"[0-9a-f]{64}", str(record["authorized"].get("prompt_sha256", ""))) is None:
+        raise ValueError("driver authorization lacks a prompt digest")
     for key in ("wave_id", "revision", "attempt", "task_name"):
         if not record.get(key):
             raise ValueError(f"driver dispatch lacks {key}")
@@ -83,6 +87,9 @@ def seal(
     manifest_path = artifact / "manifest.json"
     if manifest_path.exists() or manifest_path.is_symlink():
         raise ValueError("driver evidence was already sealed")
+    prompt_sha256 = _digest(artifact / "prompt.txt")
+    if prompt_sha256 != record["authorized"]["prompt_sha256"]:
+        raise ValueError("driver prompt differs from its authorization")
     manifest = {
         "session_id": state.get("session_id"),
         "loop_id": state.get("loop_id"),
@@ -96,7 +103,7 @@ def seal(
         "provider": provider,
         "checkout": str(checkout.resolve(strict=True)),
         "head": _head(checkout),
-        "prompt_sha256": _digest(artifact / "prompt.txt"),
+        "prompt_sha256": prompt_sha256,
         "output_sha256": _digest(artifact / "output.jsonl"),
         "exit_code": exit_code,
         "result": result,
@@ -115,7 +122,7 @@ def seal(
     return reference
 
 
-def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: dict[str, Any]) -> None:
+def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: dict[str, Any]) -> dict[str, Any]:
     """Reject changed, missing, replayed or foreign worker evidence."""
     if (
         set(reference) != {"kind", "dispatch_id", "wave_id", "attempt", "manifest_sha256"}
@@ -150,6 +157,8 @@ def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: d
     }
     if any(manifest.get(key) != value for key, value in expected.items()):
         raise ValueError("foreign or replayed driver manifest")
+    if manifest.get("prompt_sha256") != record["authorized"]["prompt_sha256"]:
+        raise ValueError("driver prompt differs from its authorization")
     if _digest(artifact / "prompt.txt") != manifest.get("prompt_sha256"):
         raise ValueError("driver prompt changed")
     if _digest(artifact / "output.jsonl") != manifest.get("output_sha256"):
@@ -157,6 +166,41 @@ def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: d
     checkout = manifest.get("checkout")
     if not isinstance(checkout, str) or _head(Path(checkout)) != manifest.get("head"):
         raise ValueError("worker checkout HEAD changed")
+    return cast(dict[str, Any], manifest)
+
+
+def apply_record(state_path: Path, state: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+    """Apply one complete driver wave only after rechecking each sealed result."""
+    if state["graph"].get("dispatch_mode") != "driver" or set(report) != {"wave_id", "results", "references"}:
+        raise ValueError("driver wave report has invalid mode or fields")
+    validate_backup(state_path, state)
+    active_value: object = state["graph"].get("active_wave")
+    if not isinstance(active_value, dict):
+        raise ValueError("driver graph has no active wave")
+    active = cast(dict[str, Any], active_value)
+    nodes = set(cast(list[str], active["nodes"]))
+    results_value: object = report["results"]
+    references_value: object = report["references"]
+    if not isinstance(results_value, dict) or not isinstance(references_value, dict):
+        raise ValueError("driver wave requires result and reference objects")
+    results = cast(dict[str, Any], results_value)
+    references = cast(dict[str, Any], references_value)
+    if set(results) != nodes or set(references) != nodes:
+        raise ValueError("driver wave requires every result and reference")
+    transition = graph_semantics.record_wave(state, report["wave_id"], results)
+    proposed = cast(dict[str, Any], transition["state"])
+    for node_id in sorted(nodes):
+        reference = references[node_id]
+        if not isinstance(reference, dict):
+            raise ValueError("driver evidence reference must be an object")
+        manifest = validate(state_path, state, node_id, cast(dict[str, Any], reference))
+        if manifest.get("result") != results[node_id]:
+            raise ValueError("driver result differs from sealed worker output")
+        if results[node_id]["outcome"] in {"done", "skipped"} and manifest.get("exit_code") != 0:
+            raise ValueError("successful driver result has a failing process exit")
+        proposed["graph"]["nodes"][node_id]["evidence"].append(reference)
+    validate_history(state_path, proposed)
+    return transition
 
 
 def validate_history(state_path: Path, state: dict[str, Any]) -> None:

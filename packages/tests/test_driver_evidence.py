@@ -104,7 +104,10 @@ class DriverEvidenceTests(unittest.TestCase):
                             "attempt": 1,
                             "dispatch_mode": "driver",
                             "task_name": "worker_one",
-                            "authorized": {"driver_run_id": "run-1"},
+                            "authorized": {
+                                "driver_run_id": "run-1",
+                                "prompt_sha256": hashlib.sha256(b"build one unit\n").hexdigest(),
+                            },
                         }
                     },
                 },
@@ -118,6 +121,10 @@ class DriverEvidenceTests(unittest.TestCase):
                 state_path, state, "U3[1]", dispatch_id, checkout, "codex", 0, {"outcome": "done"}
             )
             graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
+            foreign = deepcopy(state)
+            foreign["graph"]["dispatches"][dispatch_id]["authorized"]["prompt_sha256"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "prompt"):
+                graph_driver_evidence.validate(state_path, foreign, "U3[1]", ref)
             self.check_history(state_path, state, ref)
             self.check_backup(state_path, state)
             foreign = deepcopy(state)

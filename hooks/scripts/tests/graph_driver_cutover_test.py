@@ -155,6 +155,41 @@ class DriverCutoverTests(unittest.TestCase):
                 self.assertIn("driver", result.stderr.lower())
                 self.assertEqual(case.path.read_bytes(), before)
 
+    def test_driver_begin_issues_the_full_ready_wave(self) -> None:
+        """The driver starts every ready node and issues one owned record per node."""
+        with tempfile.TemporaryDirectory() as directory:
+            for provider in ("claude", "codex"):
+                case = Case(provider, Path(directory))
+                self.assertEqual(case.graph("convert").returncode, 0)
+                self.assertEqual(case.graph("cutover-driver").returncode, 0)
+                if provider == "codex":
+                    evals = {
+                        "scope": "loop",
+                        "task_ref": "L",
+                        "session_id": "S",
+                        "loop_id": "L",
+                        "verification_level": 1,
+                        "verification_justification": "test suite",
+                        "frozen_sha": "fixture",
+                        "evals": [{"id": "E1", "priority": "P0", "mode": "agent-run"}],
+                        "result": None,
+                        "grading": None,
+                    }
+                    case.path.with_name("evals.json").write_text(json.dumps(evals))
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPTS[provider]), "begin-driver-wave", str(case.path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, (provider, result.stderr))
+                state = case.read()
+                active = state["graph"]["active_wave"]
+                self.assertTrue(active["nodes"])
+                records = [r for r in state["graph"]["dispatches"].values() if r["wave_id"] == active["wave_id"]]
+                self.assertEqual({r["node_id"] for r in records}, set(active["nodes"]))
+                self.assertTrue(all(r["dispatch_mode"] == "driver" and r["authorized"] is None for r in records))
+
     def test_unmarked_cutover_fields_refuse_without_mutation(self) -> None:
         """A partial mode marker is invalid evidence."""
         with tempfile.TemporaryDirectory() as directory:

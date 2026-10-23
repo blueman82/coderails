@@ -17,7 +17,7 @@ import graph_repair
 import graph_spec
 from graph_vocab import DISPOSITION_KINDS, STOP_CATEGORIES, STOP_REASON_CODES, disposition_report
 
-from hooks.scripts.lib import graph_controller, graph_decisions, graph_recovery, graph_stops
+from hooks.scripts.lib import graph_controller, graph_decisions, graph_driver_adapter, graph_recovery, graph_stops
 from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.graph_evidence import object_value
 from hooks.scripts.lib.graph_evidence_revalidate import revalidate_all
@@ -34,13 +34,16 @@ GRAPH_COMMANDS = (
     "recover-wave",
     "plan",
     "begin-wave",
+    "begin-driver-wave",
     "record-wave",
+    "record-driver-wave",
     "record-unit",
     "record-repair",
     "respawn-stale",
     "hard-stop",
     "stop",
     "authorize-dispatch",
+    "authorize-driver",
     "complete",
     "verify-completion",
     "convert",
@@ -57,7 +60,7 @@ def parser() -> argparse.ArgumentParser:
     for name in GRAPH_COMMANDS:
         command = commands.add_parser(name)
         command.add_argument("state", type=Path)
-        if name == "record-wave":
+        if name in {"record-wave", "record-driver-wave"}:
             command.add_argument("results_json")
         if name == "record-unit":
             command.add_argument("--unit", required=True)
@@ -71,6 +74,10 @@ def parser() -> argparse.ArgumentParser:
         if name in {"start", "add-unit", "instantiate"}:
             command.add_argument("--session", required=True)
             command.add_argument("--loop-id", required=True)
+        if name == "authorize-driver":
+            for field in ("session", "dispatch-id", "role", "driver-run-id"):
+                command.add_argument(f"--{field}", required=True)
+            command.add_argument("--prompt-file", required=True, type=Path)
         if name == "instantiate":
             command.add_argument("--profile", choices=graph_spec.PROFILES, help="default: policy graph.profile")
             command.add_argument("--unit", action="append", default=[], help="work unit id to register (repeatable)")
@@ -329,6 +336,16 @@ def main() -> int:
             output = dispatch.begin_wave(args.state)
         elif args.command == "record-wave":
             output = dispatch.record_wave(args.state, object_value(json.loads(args.results_json), "wave report"))
+        elif args.command == "record-driver-wave":
+            output = graph_driver_adapter.record_wave(
+                args.state, object_value(json.loads(args.results_json), "driver wave report")
+            )
+        elif args.command == "begin-driver-wave":
+            output = graph_driver_adapter.begin_wave(args.state)
+        elif args.command == "authorize-driver":
+            output = graph_driver_adapter.authorize(
+                args.state, args.session, args.dispatch_id, args.prompt_file, args.role, args.driver_run_id
+            )
         elif args.command == "record-unit":
             if (args.status == "done") != (args.evidence is not None):
                 raise ValueError("done requires --evidence; dropped requires --reason")
