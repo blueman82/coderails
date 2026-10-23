@@ -166,7 +166,9 @@ def _checkout_problem(state: dict[str, Any], nodes: list[str], checkouts: Checko
     return None
 
 
-def _prompt(path: Path, state: dict[str, Any], identifier: str, record: dict[str, Any], checkout: Path) -> Path:
+def _prompt(
+    path: Path, state: dict[str, Any], identifier: str, record: dict[str, Any], checkout: Path, provider: str = "claude"
+) -> Path:
     """Write the exact envelope and contract once before authorization."""
     artifact = path.parent / "driver-evidence" / identifier
     if artifact.parent.is_symlink() or artifact.is_symlink():
@@ -179,11 +181,15 @@ def _prompt(path: Path, state: dict[str, Any], identifier: str, record: dict[str
     if node is None:
         raise ValueError("driver task has no graph specification")
     content += f"\nTask: {node['label']}\n"
-    content += f"Acceptance: {node['ready_when']}\n"
+    codex_unit = provider == "codex" and graph_spec.split_id(record["node_id"])[0] == "U3"
+    acceptance = "source edits and checks ready for root publication" if codex_unit else node["ready_when"]
+    content += f"Acceptance: {acceptance}\n"
     content += f"Assigned scope: {record['contract']['scope']}\n"
     content += f"Checkout: {checkout}\n"
     content += "Work only in the assigned checkout. Report failed if the task is unclear or incomplete.\n"
     content += "For done, give a final_report with cited claims and explicit did_not_verify items.\n"
+    if codex_unit:
+        content += "Do not run git add or git commit. The root will commit and open the PR after checking your work.\n"
     content += "Do not push, open a PR, merge, or change progress.json without the owner's explicit go.\n"
     if prompt.exists():
         if prompt.read_text(encoding="utf-8") != content:
@@ -210,6 +216,16 @@ def _reference(
     }
     manifest = graph_driver_evidence.validate(path, state, node_id, reference)
     return reference, manifest
+
+
+def _publication_pause(checkout: Path, node_id: str, result: dict[str, Any]) -> dict[str, Any] | None:
+    """Leave a successful implementation worker open until root publication."""
+    if graph_driver_evidence.needs_publication(node_id, result):
+        try:
+            graph_driver_evidence.publication(checkout)
+        except ValueError as error:
+            return {"status": "paused", "reason": "publication_required", "node": node_id, "detail": str(error)}
+    return None
 
 
 def drive_once(
@@ -262,8 +278,7 @@ def drive_once(
         for identifier, record in _dispatches(state):
             node_id = record["node_id"]
             worker_checkout = checkout_for(checkout, node_id)
-            prompt = _prompt(path, state, identifier, record, worker_checkout)
-            artifact = prompt.parent
+            prompt = _prompt(path, state, identifier, record, worker_checkout, provider)
             newly_authorized = record.get("authorized") is None
             if newly_authorized:
                 _graph(
@@ -282,20 +297,22 @@ def drive_once(
                     secrets.token_hex(16),
                 )
                 state = _load(path, session)
-            if (artifact / "manifest.json").exists():
+            if (prompt.parent / "manifest.json").exists():
                 reference, manifest = _reference(path, state, node_id, identifier)
             else:
-                if not (artifact / "launch.json").exists():
+                if not (prompt.parent / "launch.json").exists():
                     if not newly_authorized:
                         return {"status": "unresolved", "reason": "authorized_without_launch", "node": node_id}
                     argv, environment, input_path = command(prompt, record)
                     graph_driver_process.start(
-                        artifact, argv, worker_checkout, environment=environment, stdin_path=input_path
+                        prompt.parent, argv, worker_checkout, environment=environment, stdin_path=input_path
                     )
-                observation = graph_driver_process.observe(artifact, 0.05)
+                observation = graph_driver_process.observe(prompt.parent, 0.05)
                 if observation["status"] != "finished":
                     return {"status": observation["status"], "node": node_id}
-                parsed = result(artifact / "output.jsonl", observation["exit_code"])
+                parsed = result(prompt.parent / "output.jsonl", observation["exit_code"])
+                if pause := _publication_pause(worker_checkout, node_id, parsed):
+                    return pause
                 reference = graph_driver_evidence.seal(
                     path, state, node_id, identifier, worker_checkout, provider, observation["exit_code"], parsed
                 )

@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional, cast
 
 import graph_driver_control
 import graph_semantics
+import graph_spec
 
 _DISPATCH_ID = re.compile(r"[a-zA-Z0-9_-]{1,100}\Z")
 
@@ -34,6 +35,53 @@ def _head(checkout: Path) -> str:
     if result.returncode or not re.fullmatch(r"[0-9a-f]{40,64}", head):
         raise ValueError("worker checkout HEAD is unavailable")
     return head
+
+
+def needs_publication(node_id: str, result: dict[str, Any]) -> bool:
+    """An implementation terminal state requires a published PR."""
+    return graph_spec.split_id(node_id)[0] == "U3" and result.get("outcome") in {"done", "skipped"}
+
+
+def publication(checkout: Path) -> dict[str, Any]:
+    """Read the open PR for the exact clean checkout HEAD."""
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(checkout), "status", "--porcelain", "--untracked-files=all"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        if status.returncode or status.stdout.strip():
+            raise ValueError("publication requires a clean checkout")
+        head = _head(checkout)
+        viewed = subprocess.run(
+            ["gh", "pr", "view", "--json", "number,state,headRefOid"],
+            cwd=checkout,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError("publication lookup failed") from error
+    if viewed.returncode:
+        raise ValueError("publication requires an open PR")
+    try:
+        raw: object = json.loads(viewed.stdout)
+    except ValueError as error:
+        raise ValueError("publication lookup returned invalid JSON") from error
+    if not isinstance(raw, dict):
+        raise ValueError("publication lookup returned invalid PR")
+    pr = cast(dict[str, Any], raw)
+    if (
+        type(pr.get("number")) is not int
+        or pr["number"] < 1
+        or pr.get("state") != "OPEN"
+        or pr.get("headRefOid") != head
+    ):
+        raise ValueError("publication requires an open PR at checkout HEAD")
+    return {"number": pr["number"], "head": head}
 
 
 def _record(state: dict[str, Any], node_id: str, dispatch_id: str) -> dict[str, Any]:
@@ -115,6 +163,8 @@ def seal(
             manifest["final_sha256"] = _digest(final)
         elif result.get("outcome") != "failed":
             raise ValueError("successful Codex result lacks final.json")
+    if needs_publication(node_id, result):
+        manifest["publication"] = publication(checkout)
     data = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
     with manifest_path.open("xb") as stream:
         stream.write(data)
@@ -180,6 +230,19 @@ def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: d
     checkout = manifest.get("checkout")
     if not isinstance(checkout, str) or _head(Path(checkout)) != manifest.get("head"):
         raise ValueError("worker checkout HEAD changed")
+    if needs_publication(node_id, cast(dict[str, Any], manifest.get("result", {}))):
+        raw_publication: object = manifest.get("publication")
+        if not isinstance(raw_publication, dict):
+            raise ValueError("driver publication evidence is invalid")
+        published = cast(dict[str, object], raw_publication)
+        number = published.get("number")
+        if (
+            set(published) != {"number", "head"}
+            or type(number) is not int
+            or number < 1
+            or published.get("head") != manifest["head"]
+        ):
+            raise ValueError("driver publication evidence is invalid")
     return cast(dict[str, Any], manifest)
 
 

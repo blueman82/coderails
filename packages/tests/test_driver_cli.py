@@ -224,7 +224,13 @@ class DriverCliTests(unittest.TestCase):
             )
             npx.chmod(0o755)
             gh = bindir / "gh"
-            gh.write_text("#!/bin/sh\nprintf 'disposable-token\\n'\n")
+            head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+            response = json.dumps({"number": 42, "state": "OPEN", "headRefOid": head})
+            gh.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = auth ]; then printf 'disposable-token\\n'; "
+                "else printf '%s\\n' '" + response + "'; fi\n"
+            )
             gh.chmod(0o755)
             environment = {
                 **os.environ,

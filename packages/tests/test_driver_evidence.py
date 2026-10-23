@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,7 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
@@ -39,6 +41,28 @@ class DriverEvidenceTests(unittest.TestCase):
             ],
             check=True,
         )
+
+    def test_publication_requires_clean_checkout_and_open_exact_head_pr(self) -> None:
+        """A source worker cannot finish before the root publishes its HEAD."""
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "checkout"
+            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            self.commit_empty(checkout, "first")
+            head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            response = json.dumps({"number": 42, "state": "OPEN", "headRefOid": head})
+            gh.write_text("#!/bin/sh\nprintf '%s\\n' '" + response + "'\n")
+            gh.chmod(0o755)
+            with patch.dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}"):
+                self.assertEqual(graph_driver_evidence.publication(checkout), {"number": 42, "head": head})
+                gh.write_text("#!/bin/sh\nprintf '%s\\n' '" + response.replace(head, "0" * len(head)) + "'\n")
+                with self.assertRaisesRegex(ValueError, "HEAD"):
+                    graph_driver_evidence.publication(checkout)
+                (checkout / "uncommitted.txt").write_text("change")
+                with self.assertRaisesRegex(ValueError, "clean"):
+                    graph_driver_evidence.publication(checkout)
 
     def check_history(self, state_path: Path, state: dict[str, Any], ref: dict[str, Any]) -> None:
         """Check that each finished driver dispatch has one durable reference."""
@@ -141,9 +165,16 @@ class DriverEvidenceTests(unittest.TestCase):
             output.write_text('{"type":"turn.completed"}\n')
             final = artifact / "final.json"
             final.write_text('{"outcome":"done"}')
-            ref = graph_driver_evidence.seal(
-                state_path, state, "U3[1]", dispatch_id, checkout, "codex", 0, {"outcome": "done"}
-            )
+            with self.assertRaisesRegex(ValueError, "open PR"):
+                graph_driver_evidence.seal(
+                    state_path, state, "U3[1]", dispatch_id, checkout, "codex", 0, {"outcome": "done"}
+                )
+            self.assertFalse((artifact / "manifest.json").exists())
+            head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+            with patch.object(graph_driver_evidence, "publication", return_value={"number": 42, "head": head}):
+                ref = graph_driver_evidence.seal(
+                    state_path, state, "U3[1]", dispatch_id, checkout, "codex", 0, {"outcome": "done"}
+                )
             graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
             self.check_failed_without_final(state_path, state, checkout)
             foreign = deepcopy(state)

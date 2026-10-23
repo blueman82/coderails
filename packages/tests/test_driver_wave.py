@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -101,7 +102,11 @@ class DriverWaveTests(unittest.TestCase):
                 (artifact / "output.jsonl").write_text('{"type":"turn.completed"}\n')
                 if provider == "codex":
                     (artifact / "final.json").write_text(json.dumps(result))
-                ref = graph_driver_evidence.seal(case.path, state, node_id, dispatch_id, checkout, provider, 0, result)
+                head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+                with patch.object(graph_driver_evidence, "publication", return_value={"number": 42, "head": head}):
+                    ref = graph_driver_evidence.seal(
+                        case.path, state, node_id, dispatch_id, checkout, provider, 0, result
+                    )
                 report = {"wave_id": wave_id, "results": {node_id: result}, "references": {node_id: ref}}
                 missing = json.dumps({**report, "references": {}})
                 before = case.path.read_bytes()

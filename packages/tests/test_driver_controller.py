@@ -10,12 +10,14 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
 import graph_driver_control  # noqa: E402
 import graph_driver_controller  # noqa: E402
+import graph_driver_evidence  # noqa: E402
 
 from hooks.scripts.tests.graph_convert_test import SCRIPTS, Case  # noqa: E402
 from packages.tests.test_driver_authorize import frozen_evals  # noqa: E402
@@ -23,6 +25,29 @@ from packages.tests.test_driver_authorize import frozen_evals  # noqa: E402
 
 class DriverControllerTests(unittest.TestCase):
     """Use the public graph commands with a disposable local worker."""
+
+    def setUp(self) -> None:
+        """Give fake worker runs a matching disposable PR."""
+
+        def published(checkout: Path) -> dict[str, object]:
+            head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+            return {"number": 42, "head": head}
+
+        publisher = patch.object(
+            graph_driver_evidence,
+            "publication",
+            side_effect=published,
+        )
+        publisher.start()
+        self.addCleanup(publisher.stop)
+
+    def test_unpublished_source_pauses_before_seal(self) -> None:
+        """A completed worker cannot become graph evidence before publication."""
+        with patch.object(graph_driver_evidence, "publication", side_effect=ValueError("no open PR")):
+            report = graph_driver_controller._publication_pause(  # pyright: ignore[reportPrivateUsage]
+                Path("/unused"), "U3[1]", {"outcome": "done"}
+            )
+        self.assertEqual((report or {}).get("reason"), "publication_required")
 
     @staticmethod
     def scoped(case: Case) -> None:
@@ -263,7 +288,7 @@ class DriverControllerTests(unittest.TestCase):
             dispatch_id = issued["dispatch_id"]
             record = case.read()["graph"]["dispatches"][dispatch_id]
             prompt = graph_driver_controller._prompt(  # pyright: ignore[reportPrivateUsage]
-                case.path, case.read(), dispatch_id, record, Path(directory).resolve()
+                case.path, case.read(), dispatch_id, record, Path(directory).resolve(), "codex"
             )
             authorized = subprocess.run(
                 [
