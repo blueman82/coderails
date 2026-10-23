@@ -138,6 +138,18 @@ class DriverProcessTests(unittest.TestCase):
                     break
             self.assertEqual(result, {"status": "finished", "exit_code": 7})
 
+    def test_launch_failure_has_an_empty_output_artifact(self) -> None:
+        """A failed wrapper launch still leaves sealable failed-attempt files."""
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory)
+            with patch("graph_driver_process.subprocess.Popen", side_effect=PermissionError("launch denied")):
+                self.assertEqual(
+                    graph_driver_process.start(artifact, [sys.executable, "-c", "pass"], artifact),
+                    {"status": "finished", "exit_code": 127},
+                )
+            self.assertEqual(graph_driver_process.observe(artifact, 0), {"status": "finished", "exit_code": 127})
+            self.assertEqual((artifact / "output.jsonl").read_bytes(), b"")
+
     def test_worker_receives_prompt_and_private_environment(self) -> None:
         """The prompt enters on stdin and the environment stays out of process records."""
         with tempfile.TemporaryDirectory() as directory:

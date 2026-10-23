@@ -145,6 +145,7 @@ def start(
         )
         _CHILDREN[token] = child
     except OSError:
+        (artifact / "output.jsonl").touch(exist_ok=True)
         _write(artifact / "terminal.json", {"token": token, "exit_code": 127})
         return {"status": "finished", "exit_code": 127}
     deadline = time.monotonic() + 1
