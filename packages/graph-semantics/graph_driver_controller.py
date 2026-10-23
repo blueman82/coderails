@@ -316,7 +316,7 @@ def drive_once(
             else:
                 if not (prompt.parent / "launch.json").exists():
                     if prepared is None:
-                        return {"status": "unresolved", "reason": "authorized_without_launch", "node": node_id}
+                        prepared = command(prompt, record)
                     argv, environment, input_path = prepared
                     graph_driver_process.start(
                         prompt.parent, argv, worker_checkout, environment=environment, stdin_path=input_path

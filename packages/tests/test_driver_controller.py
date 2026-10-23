@@ -276,10 +276,12 @@ class DriverControllerTests(unittest.TestCase):
             self.assertEqual(case.read()["graph"]["active_wave"]["nodes"], ["S13-proof"])
             self.assertFalse(case.read()["graph"]["dispatches"])
 
-    def test_authorized_attempt_without_handle_never_starts_again(self) -> None:
-        """A crash after authorization leaves an unresolved, single-use attempt."""
+    def test_authorized_attempt_without_launch_resumes_setup(self) -> None:
+        """A crash before the launch reservation can safely retry setup."""
         with tempfile.TemporaryDirectory() as directory:
             case = Case("codex", Path(directory))
+            checkout = Path(directory) / "checkout"
+            self.checkout(checkout)
             self.scoped(case)
             self.assertEqual(case.graph("convert").returncode, 0)
             self.assertEqual(case.graph("cutover-driver").returncode, 0)
@@ -299,48 +301,49 @@ class DriverControllerTests(unittest.TestCase):
                     case.path, case.read(), dispatch_id, record, Path(directory).resolve(), "codex", case.path
                 )
             prompt = graph_driver_controller._prompt(  # pyright: ignore[reportPrivateUsage]
-                case.path, case.read(), dispatch_id, record, Path(directory).resolve(), "codex", SCRIPTS["codex"]
+                case.path, case.read(), dispatch_id, record, checkout.resolve(), "codex", SCRIPTS["codex"]
             )
             self.assertIn("Role instructions for loop-worker", prompt.read_text())
             self.assertIn("Acceptance: source edits and checks ready for root publication", prompt.read_text())
-            authorized = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPTS["codex"]),
-                    "authorize-driver",
-                    str(case.path),
-                    "--session",
-                    "S",
-                    "--dispatch-id",
-                    dispatch_id,
-                    "--prompt-file",
-                    str(prompt),
-                    "--role",
-                    record["contract"]["role"],
-                    "--driver-run-id",
-                    "first-run",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
+            authorized = case.graph(
+                "authorize-driver",
+                "--dispatch-id",
+                dispatch_id,
+                "--prompt-file",
+                str(prompt),
+                "--role",
+                record["contract"]["role"],
+                "--driver-run-id",
+                "first-run",
             )
             self.assertEqual(authorized.returncode, 0, authorized.stderr)
             before = case.path.read_bytes()
 
             def command(_prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
-                self.fail("an authorized attempt must not launch twice")
+                raise ValueError("setup was retried")
 
-            report = graph_driver_controller.drive_once(
+            with self.assertRaisesRegex(ValueError, "setup was retried"):
+                graph_driver_controller.drive_once(
+                    case.path,
+                    "S",
+                    SCRIPTS["codex"],
+                    checkout,
+                    "codex",
+                    command,
+                    lambda _path, _code: {"outcome": "done", "evidence": "impossible"},
+                )
+            self.assertEqual(case.path.read_bytes(), before)
+            resumed = graph_driver_controller.drive_wave(
                 case.path,
                 "S",
                 SCRIPTS["codex"],
-                Path(directory),
+                checkout,
                 "codex",
-                command,
-                lambda _path, _code: {"outcome": "done", "evidence": "impossible"},
+                lambda prompt, _record: ([sys.executable, "-c", "print('worker')"], None, prompt),
+                lambda _path, _code: {"outcome": "failed", "evidence": "disposable failure"},
             )
-            self.assertEqual(report["status"], "unresolved")
-            self.assertEqual(case.path.read_bytes(), before)
+            self.assertEqual(resumed["status"], "recorded")
+            self.assertTrue((case.path.parent / "driver-evidence" / dispatch_id / "launch.json").exists())
 
     def test_records_a_complete_wave_after_real_process_exit(self) -> None:
         """The controller issues, authorizes, launches, seals and records one wave."""
