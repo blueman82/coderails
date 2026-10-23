@@ -196,14 +196,21 @@ def _prompt(
     content += f"\nRole instructions for {role}:\n{source.read_text(encoding='utf-8')}\n"
     content += f"\nTask: {node['label']}\n"
     implementation = graph_spec.split_id(record["node_id"])[0] == "U3"
-    acceptance = "source edits and checks ready for root publication" if implementation else node["ready_when"]
+    wiki = record["node_id"] == "S9-wiki"
+    acceptance = (
+        "wiki edits and lint ready for root publication"
+        if wiki
+        else ("source edits and checks ready for root publication" if implementation else node["ready_when"])
+    )
     content += f"Acceptance: {acceptance}\n"
     content += f"Assigned scope: {record['contract']['scope']}\n"
     content += f"Checkout: {checkout}\n"
     content += "Work only in the assigned checkout. Report failed if the task is unclear or incomplete.\n"
     content += "For done, give a final_report with cited claims and explicit did_not_verify items.\n"
-    if implementation:
+    if implementation or wiki:
         content += "Do not run git add or git commit. The root will commit and open the PR after checking your work.\n"
+    if wiki:
+        content += "The root will merge the wiki PR and verify its commit on origin/main before recording done.\n"
     content += "Do not push, open a PR, merge, or change progress.json without the owner's explicit go.\n"
     if prompt.exists():
         if prompt.read_text(encoding="utf-8") != content:
@@ -233,10 +240,10 @@ def _reference(
 
 
 def _publication_pause(checkout: Path, node_id: str, result: dict[str, Any]) -> dict[str, Any] | None:
-    """Leave a successful implementation worker open until root publication."""
+    """Leave a successful source worker open until root publication."""
     if graph_driver_evidence.needs_publication(node_id, result):
         try:
-            graph_driver_evidence.publication(checkout)
+            graph_driver_evidence.publication(checkout, require_merged=node_id == "S9-wiki")
         except ValueError as error:
             return {"status": "paused", "reason": "publication_required", "node": node_id, "detail": str(error)}
     return None

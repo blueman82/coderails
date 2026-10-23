@@ -95,6 +95,32 @@ class DriverEvidenceTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "clean"):
                     graph_driver_evidence.publication(checkout)
 
+    def test_wiki_publication_requires_merged_head_on_origin_main(self) -> None:
+        """A wiki update is done only after its exact commit lands upstream."""
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            remote, checkout = base / "remote.git", base / "wiki"
+            subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            self.commit_empty(checkout, "initial")
+            subprocess.run(["git", "-C", str(checkout), "branch", "-M", "main"], check=True)
+            subprocess.run(["git", "-C", str(checkout), "remote", "add", "origin", str(remote)], check=True)
+            subprocess.run(["git", "-C", str(checkout), "push", "-q", "origin", "main"], check=True)
+            subprocess.run(["git", "-C", str(checkout), "switch", "-q", "-c", "wiki-update"], check=True)
+            self.commit_empty(checkout, "wiki update")
+            head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+            serve = self.fake_gh(base, head)
+            self.assertTrue(graph_driver_evidence.needs_publication("S9-wiki", {"outcome": "done"}))
+            self.assertFalse(graph_driver_evidence.needs_publication("S9-wiki", {"outcome": "skipped"}))
+            serve("MERGED", head)
+            with self.assertRaisesRegex(ValueError, "origin/main"):
+                graph_driver_evidence.publication(checkout, require_merged=True)
+            subprocess.run(["git", "-C", str(checkout), "push", "-q", "origin", "HEAD:main"], check=True)
+            self.assertEqual(graph_driver_evidence.publication(checkout, require_merged=True)["head"], head)
+            serve("OPEN", head)
+            with self.assertRaisesRegex(ValueError, "merged"):
+                graph_driver_evidence.publication(checkout, require_merged=True)
+
     def check_history(self, state_path: Path, state: dict[str, Any], ref: dict[str, Any]) -> None:
         """Check that each finished driver dispatch has one durable reference."""
         state["graph"]["nodes"] = {"U3[1]": {"evidence": ["native note", ref]}}

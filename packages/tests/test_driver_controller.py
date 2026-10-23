@@ -30,7 +30,7 @@ class DriverControllerTests(unittest.TestCase):
     def setUp(self) -> None:
         """Give fake worker runs a matching disposable PR."""
 
-        def published(checkout: Path) -> dict[str, object]:
+        def published(checkout: Path, *, require_merged: bool = False) -> dict[str, object]:
             head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
             return {"number": 42, "head": head}
 

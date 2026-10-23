@@ -5,13 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import subprocess
 from pathlib import Path
 from typing import Any, Callable, Optional, cast
 
 import graph_driver_control
 import graph_semantics
 import graph_spec
+from graph_driver_publication import head as _head
+from graph_driver_publication import publication as publication
+from graph_driver_publication import validate_publication as validate_publication
 
 _DISPATCH_ID = re.compile(r"[a-zA-Z0-9_-]{1,100}\Z")
 
@@ -23,91 +25,11 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _head(checkout: Path) -> str:
-    """Read the exact commit at the worker checkout."""
-    result = subprocess.run(
-        ["git", "-C", str(checkout), "rev-parse", "--verify", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    head = result.stdout.strip()
-    if result.returncode or not re.fullmatch(r"[0-9a-f]{40,64}", head):
-        raise ValueError("worker checkout HEAD is unavailable")
-    return head
-
-
 def needs_publication(node_id: str, result: dict[str, Any]) -> bool:
     """An implementation terminal state requires a published PR."""
-    return graph_spec.split_id(node_id)[0] == "U3" and result.get("outcome") in {"done", "skipped"}
-
-
-def publication(checkout: Path) -> dict[str, Any]:
-    """Read the open PR for the exact clean checkout HEAD."""
-    try:
-        status = subprocess.run(
-            ["git", "-C", str(checkout), "status", "--porcelain", "--untracked-files=all"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=15,
-        )
-        if status.returncode or status.stdout.strip():
-            raise ValueError("publication requires a clean checkout")
-        head = _head(checkout)
-        viewed = subprocess.run(
-            ["gh", "pr", "view", "--json", "number,state,headRefOid"],
-            cwd=checkout,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=15,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise ValueError("publication lookup failed") from error
-    if viewed.returncode:
-        raise ValueError("publication requires an open PR")
-    try:
-        raw: object = json.loads(viewed.stdout)
-    except ValueError as error:
-        raise ValueError("publication lookup returned invalid JSON") from error
-    if not isinstance(raw, dict):
-        raise ValueError("publication lookup returned invalid PR")
-    pr = cast(dict[str, Any], raw)
-    if (
-        type(pr.get("number")) is not int
-        or pr["number"] < 1
-        or pr.get("state") != "OPEN"
-        or pr.get("headRefOid") != head
-    ):
-        raise ValueError("publication requires an open PR at checkout HEAD")
-    return {"number": pr["number"], "head": head}
-
-
-def validate_publication(checkout: Path, number: int, head: str) -> None:
-    """Keep sealed publication bound to a live open or merged PR at its head."""
-    try:
-        viewed = subprocess.run(
-            ["gh", "pr", "view", str(number), "--json", "number,state,headRefOid"],
-            cwd=checkout,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=15,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise ValueError("driver publication lookup failed") from error
-    if viewed.returncode:
-        raise ValueError("driver publication is unavailable")
-    try:
-        raw: object = json.loads(viewed.stdout)
-    except ValueError as error:
-        raise ValueError("driver publication response is invalid") from error
-    if not isinstance(raw, dict):
-        raise ValueError("driver publication response is invalid")
-    pr = cast(dict[str, Any], raw)
-    if pr.get("number") != number or pr.get("headRefOid") != head or pr.get("state") not in {"OPEN", "MERGED"}:
-        raise ValueError("driver publication no longer matches its PR")
+    return (graph_spec.split_id(node_id)[0] == "U3" and result.get("outcome") in {"done", "skipped"}) or (
+        node_id == "S9-wiki" and result.get("outcome") == "done"
+    )
 
 
 def _record(state: dict[str, Any], node_id: str, dispatch_id: str) -> dict[str, Any]:
@@ -190,7 +112,7 @@ def seal(
         elif result.get("outcome") != "failed":
             raise ValueError("successful Codex result lacks final.json")
     if needs_publication(node_id, result):
-        manifest["publication"] = publication(checkout)
+        manifest["publication"] = publication(checkout, require_merged=node_id == "S9-wiki")
     data = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
     with manifest_path.open("xb") as stream:
         stream.write(data)
@@ -269,7 +191,7 @@ def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: d
             or published.get("head") != manifest["head"]
         ):
             raise ValueError("driver publication evidence is invalid")
-        validate_publication(Path(checkout), number, manifest["head"])
+        validate_publication(Path(checkout), number, manifest["head"], require_merged=node_id == "S9-wiki")
     return cast(dict[str, Any], manifest)
 
 
