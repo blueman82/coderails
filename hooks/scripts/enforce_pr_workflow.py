@@ -11,15 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload_strict
 from hooks.scripts.lib.loop_state_common import log
 from hooks.scripts.lib.pr_merge_gate import merge_reason
-from hooks.scripts.lib.pr_workflow_match import (
-    guarded_segments,
-    operation,
-    step_found,
-    targets_main,
-    transcript_entries,
-)
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.lib.pr_workflow_match import operations, repository, step_found, targets_main, transcript_entries
+from hooks.scripts.lib.shell_context import payload_cwd
 from scripts.lib import git_common as git
 from scripts.lib import merge_target, publication_gate
 from scripts.lib.config import config_path
@@ -36,17 +29,17 @@ def main() -> int:
     command = data.get("command") if isinstance(data, dict) else None
     if not isinstance(command, str) or not command:
         return 0
-    name, segment, target = operation(command)
-    cwd = str(payload.get("cwd") or os.getcwd())
-    segments = [(name, segment, cwd)] if name and name != "merge" else []
-    segments += [item for item in guarded_segments(command, cwd) if item[0] == "merge"]
     paths = [
         str(payload[key])
         for key in ("transcript_path", "agent_transcript_path")
         if isinstance(payload.get(key), str) and Path(str(payload[key])).is_file()
     ]
     entries = transcript_entries(paths) if paths else []
-    for name, segment, where in segments:
+    for call in operations(command, payload_cwd(payload)):
+        cwd = repository(call)
+        if not targets_main(call):
+            continue
+        name, segment = call.name, call.segment
         number, unit, progress = "", "", ""
         target_number = ""
         if name == "merge":
@@ -60,7 +53,7 @@ def main() -> int:
                 return 0
             target_number, unit, progress = merge_target.parse(segment)
             try:
-                os.chdir(where)
+                os.chdir(cwd)
                 number = merge_target.resolve(target_number)
             except (OSError, ValueError, RuntimeError):
                 number = ""
@@ -79,7 +72,7 @@ def main() -> int:
                 first = violations[0]
                 deny(f"{first['code']}: Blocked: merge of PR {number} — {first['detail']}")
                 return 0
-        if not paths or not config_path(where) or not targets_main(command, where, target, name):
+        if not paths or not config_path(cwd):
             continue
         if name == "merge" and not target_number:
             number = ""  # preserve the existing transcript gate's no-target behavior after the publication check
@@ -96,7 +89,7 @@ def main() -> int:
             return 0
         if name == "merge":
             try:
-                reason = merge_reason(number, where, unit=unit, progress=progress)
+                reason = merge_reason(number, cwd, unit=unit, progress=progress)
             except (OSError, ValueError, RuntimeError) as error:
                 reason = f"Blocked: gh pr merge — eval artifact verification failed: {error}. Do not bypass."
             if reason:

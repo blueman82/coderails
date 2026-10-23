@@ -22,7 +22,9 @@ tallied by `measure_graph_alignment.py` into `trace.by_reason` keyed
 | `review-passes/refused/<code>` | `<code>` is `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`, `review_artifact_missing` or `review_policy_unreadable` |
 | `eval-level/ok/eval_level_ok` | the selected suite named the current PR head and every P0 passed, its level covered the live diff and declared/posted work-unit floor, the late-freeze stamp matched, and the suite verified with a full frozen SHA at level 1 or 2 |
 | `eval-level/refused/<code>` | `<code>` is `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`, `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, `integrity_stripped`, `not_frozen`, `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed`, `eval_head_mismatch`, `eval_result_mismatch` or `eval_level_diff_unavailable` |
-| `publication/refused/<code>` | the gate refused; `<code>` is `diff_manifest:<code>`, a review or eval-level code, `pr_repo_override`, `pr_base_mutation`, or a later unit's code |
+| `publication/refused/<code>` | the single gate refused; `<code>` is `diff_manifest:<code>`, a review or eval-level code, `pr_repo_override`, or `pr_base_mutation` |
+| `argv/denied/ceiling_exceeded` | the verification-volume ceiling denied a 3rd+ full suite or `post_evals.py post\|validate-structure` in one worktree (keyed by the session that ran it) |
+| `argv/denied/protected_paths_unreadable` | `policy/protected_paths.json` was missing or ill-shaped and an edit on main was refused (fail closed) |
 
 Manifest codes are `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`,
 `special_file_type`, `mode_change`, `status_not_allowed`, `too_many_paths`, `manifest_unreadable` and
@@ -34,7 +36,7 @@ shape and worktree equality; it does not authenticate those owner fields.
 
     python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py
 
-prints `{command: {outcome/reason_code: count}}` for `diff-manifest`, `review-passes`, `eval-level` and `publication`. Add a command name to
+prints `{command: {outcome/reason_code: count}}` for `diff-manifest`, `review-passes`, `eval-level`, `publication` and `argv`. Add a command name to
 `COMMANDS` in that file when a unit adds a new row family; `measure_graph_alignment.py` is at its line limit and is not
 edited.
 
@@ -52,6 +54,18 @@ edited.
 - No `publication/*` rows at all proves nothing: it is also what a disabled hook, an untrusted Codex plugin or
   `diff_manifest: off` look like. Push emits `diff-manifest` rows without `publication` rows. Confirm active registration
   and observe a denial through the relevant installed consumer before claiming installed enforcement.
+
+### Argv rows
+
+- `argv/denied/ceiling_exceeded` should be rare and each traceable to a loop that re-ran a full suite. The count files
+  (`<loop dir>/verification-ceiling/<sha1>__<target>.count`, Codex `$PLUGIN_DATA/verification-ceiling/`) are the
+  authority, the trace rows only tally denials. Optional `work_units[u].verification{run_all,post_evals}` mirrors require
+  an exact payload session and existing `CLAUDE_LOOP_ID`, schema-3 in-progress state, one physical worktree match and
+  its running `U3[<id>]` registration in `active_wave.nodes`. A skipped mirror does not change the ceiling decision.
+  Native producer worktree registration is a separate dependency; supplied fixtures do not prove installed integration.
+- Any `argv/denied/protected_paths_unreadable` means `policy/protected_paths.json` is broken in the installed plugin:
+  edits on main are refused until it is repaired. Commit, push and merge recognition rows are not written; a drop in
+  gated commits after the classifier shipped cannot be told apart from fewer commits.
 
 ## Limits
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -32,7 +33,7 @@ import sys
 args = sys.argv[1:]
 expected = args in [
     ["pr", "view", number, "--json", "headRefOid", "-q", ".headRefOid"]
-    for number in ("12", "13")
+    for number in ("12", "13", "140")
 ]
 with open(os.environ["AUTHORITY_GH_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps({"argv": args, "expected": expected}) + "\\n")
@@ -127,6 +128,9 @@ class MatchParityTests(unittest.TestCase):
         "git push origin feature && git push origin main",
         "cd sub && git push", "gh pr merge 5", "gh -R o/r pr merge 5", "gh pr merge 1 && gh pr merge 2",
         "git push --dry-run origin main", "ls", "git push origin HEAD:main", "git merge main", "bash merge.py 7",
+        "git -C sub push origin main", "git -c a=b push origin main", "git --no-pager push origin main",
+        "/usr/bin/git push origin main", "env A=1 git -C sub merge x", "bash -c 'git -c a=b push origin main'",
+        'echo "git -c a=b push origin main"', "git log --grep push", "git -C sub merge --abort",
     )  # fmt: skip
 
     def test_guarded_segments_identical_on_main_and_feature(self) -> None:
@@ -161,12 +165,13 @@ class HookTests(unittest.TestCase):
         fake_gh.chmod(0o700)
         self.gh_log = self.directory / "gh.jsonl"
         self.environment = os.environ | {
-            "HOME": str(self.directory / "home"),
             "PLUGIN_ROOT": str(ROOT / "packages/codex"),
             "PLUGIN_DATA": str(self.directory / "data"),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "AUTHORITY_GH_LOG": str(self.gh_log),
+            "CODERAILS_AGENTIC_LOOP_DIR": str(self.loop),
+            "CLAUDE_DISCIPLINE_LOG": str(self.directory / "discipline.log"),
         }
 
     def configure(self, value: str | None) -> None:
@@ -217,6 +222,29 @@ class HookTests(unittest.TestCase):
             return False
         return bool(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny")
 
+    def test_effective_target_configuration_is_checked_per_operation(self) -> None:
+        """Target receipt enforcement cannot be skipped by starting in an unconfigured repository."""
+        target = self.directory / "target space"
+        subprocess.run(["git", "init", "-q", "-b", "main", str(target)], check=True)
+        (target / ".coderails").mkdir()
+        (target / ".coderails/workflow.config.yaml").write_text("action_authority: enforce\n")
+        quoted = shlex.quote(str(target))
+        for command in (
+            f"git -C {quoted} push",
+            f"cd {quoted} && git push",
+            f"env --chdir {quoted} git push",
+            f"git --git-dir {shlex.quote(str(target / '.git'))} --work-tree {quoted} push",
+            f"git --git-dir={shlex.quote(str(target / '.git'))} --work-tree={quoted} push",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
+
+    def test_quoted_operations_and_unrelated_help_preserve_receipt_requirement(self) -> None:
+        """Quoted punctuation is inert and only the actual operation's flags can exempt it."""
+        self.configure("enforce")
+        self.assertFalse(self.denied('echo "message ; gh pr merge 12"'))
+        self.assertTrue(self.denied("echo --help; git push origin main"))
+
     def mint(self, command: str = MERGE, kind: str = "merge") -> None:
         """Write a receipt via the Claude library for the hook's view of the command."""
         now = datetime.now(timezone.utc)
@@ -249,7 +277,9 @@ class HookTests(unittest.TestCase):
         """Env prefix, sudo, subshell, bash -c and gh api merge are guarded like the bare command."""
         self.configure("enforce")
         for command in ("FOO=1 gh pr merge 12", "sudo gh pr merge 12", "(gh pr merge 12)",
-                        "bash -c 'git push origin main'", "gh api repos/o/r/pulls/5/merge -X PUT"):  # fmt: skip
+                        "bash -c 'git push origin main'", "gh api repos/o/r/pulls/5/merge -X PUT",
+                        "command bash scripts/merge.sh 140",
+                        "command python3 scripts/merge.py 140"):  # fmt: skip
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
 
@@ -283,6 +313,9 @@ class HookTests(unittest.TestCase):
         self.assertTrue(self.denied("git push origin main"))
         subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/feature/x"], check=True)
         self.assertFalse(self.denied("git push origin feature/x"))
+        for command in ("command -p git push origin main", "env -u UNUSED git push origin main"):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied(command))
 
     def mint_for(self, command: str, kind: str, cwd: Path, rid: str = "r1", **over: object) -> None:
         """Write a receipt for `command` run in `cwd` on main."""
@@ -304,6 +337,8 @@ class HookTests(unittest.TestCase):
         other = self.directory / "other"
         other.mkdir()
         subprocess.run(["git", "init", "-q", "-b", "main", str(other)], check=True)
+        (other / ".coderails").mkdir()
+        (other / ".coderails/workflow.config.yaml").write_text("action_authority: enforce\n")
         self.mint_for("git push origin feature", "git_push", self.repo)
         self.assertTrue(self.denied("git push origin feature && git push origin main"))
         self.mint_for("git push", "git_push", self.repo, rid="r2")

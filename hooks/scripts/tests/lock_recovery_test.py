@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.loop_state_common import atomic_progress_update
+from hooks.scripts.tests.ceiling_source_test import key
 from hooks.scripts.tests.native_hook_test_support import HookCase
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -114,8 +115,8 @@ class CeilingLockRecoveryTests(HookCase):
         self.command = "python3 hooks/scripts/tests/run_all.py"
         self.counts = self.loop / "verification-ceiling"
         self.counts.mkdir(parents=True)
-        self.lock = Path(f"{self.counts}/unit-test__run_all.count.lock")
-        self.count = self.counts / "unit-test__run_all.count"
+        self.count = self.counts / f"{key(self.repo)}__run_all.count"
+        self.lock = Path(f"{self.count}.lock")
 
     def request(self) -> dict[str, Any]:
         """Build a native Bash request."""
