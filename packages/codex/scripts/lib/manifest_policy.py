@@ -202,8 +202,9 @@ def active_graph_unit() -> bool:
     if not session:
         return False
     session = session.replace("/", "_").replace("..", "")
+    plugin = Path(__file__).resolve().parents[2]
     root_key = "CLAUDE_AGENTIC_LOOP_DIR"
-    if Path(__file__).resolve().parents[2].name == "codex":
+    if (plugin / ".codex-plugin/plugin.json").is_file():
         root_key = "CODERAILS_AGENTIC_LOOP_DIR"
     root = Path(os.environ.get(root_key) or Path.home() / ".coderails/agentic-loop")
     common = git.output("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
