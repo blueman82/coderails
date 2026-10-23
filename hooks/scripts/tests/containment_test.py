@@ -93,9 +93,11 @@ class ResolveTableTests(unittest.TestCase):
         values, findings = load_config("")
         self.assertIs(values["sandbox_workers"], True)
         self.assertEqual(findings, [])
-        for relative in ("config.schema.json", "packages/codex/config.schema.json"):
-            spec = json.loads((ROOT / relative).read_text())["properties"]["sandbox_workers"]
-            self.assertEqual((spec["status"], spec["default"]), ("enforced_by_code", True))
+        spec = json.loads((ROOT / "config.schema.json").read_text())["properties"]["sandbox_workers"]
+        self.assertEqual((spec["status"], spec["default"]), ("enforced_by_code", True))
+        codex = json.loads((ROOT / "packages/codex/config.schema.json").read_text())["properties"]["sandbox_workers"]
+        self.assertEqual((codex["status"], codex["default"]), ("unused", None))
+        self.assertNotIn("sandbox_workers: true", (ROOT / "packages/codex/skills/init/SKILL.md").read_text())
 
     def test_loose_credential_or_missing_cache_is_not_ready(self) -> None:
         """A world-readable credential file and an uncached srt pin both keep the fallback."""

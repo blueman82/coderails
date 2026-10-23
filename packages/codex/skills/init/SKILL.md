@@ -61,7 +61,6 @@ jira:
 engineering_principles_paths:
   - "**/container.py"
 engineering_principles_skill: coderails-codex:engineering-principles-python
-sandbox_workers: true
 action_authority: enforce
 integrity_review:
   machine_user: null

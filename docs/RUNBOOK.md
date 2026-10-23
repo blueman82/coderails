@@ -254,7 +254,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Worker containment: sandbox fell back, an in-process worker was denied, or a branch import was refused
 
-- Symptom: workers run in process although `sandbox_workers` is on; an `Agent` dispatch of `coderails:loop-worker` is denied
+- Symptom: workers run in process although `sandbox_workers` is on; a graph U3 `Agent` dispatch is denied
   `containment_ack_required`; or `spawn_sandboxed_worker.py` exits 1 with `branch_import_refused` / `worker_credential_missing`.
   ON by default (`sandbox_workers` true or absent); `false` is `off`.
 - Decision: `python3 scripts/sandbox/containment.py [dir]` prints `{mode, reason_code}` and traces `sandbox_launch/resolved/<code>`.
@@ -271,5 +271,5 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   the in-process fallback once: `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind worker_fallback --command 'worker_fallback <unit>' --cwd <worktree>`
   (signed, single-use, bound to repository + branch + HEAD). Declare the unit's `manifest` so a low-risk unit needs no acknowledgement.
 - Counters: `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/containment_counters.py` (see "Worker containment counters" in docs/graph-alignment-measurement.md).
-- Limits: a cooperating-agent safeguard, not absolute isolation. Reads under the real HOME, github.com and api.anthropic.com egress, the trusted launcher and the
-  unsandboxed orchestrator remain; Codex workers rely on Codex's own `sandbox_mode`; an agent can edit `sandbox_workers`, a unit's manifest and the user-tier receipt trust root.
+- Limits: a cooperating-agent safeguard, not absolute isolation. Reads under the real HOME, api.anthropic.com egress, the trusted launcher and the
+  unsandboxed orchestrator remain; GitHub egress is blocked in the worker. Codex workers rely on Codex's own `sandbox_mode`; an agent can edit `sandbox_workers`, a unit's manifest and the user-tier receipt trust root.

@@ -273,6 +273,59 @@ class LauncherFlowTests(unittest.TestCase):
                 self.assertEqual(self.refs(self.primary), before)
                 self.assertEqual(git(self.origin, "for-each-ref", "refs/heads"), pushed)
 
+    def test_binary_blob_with_worker_credential_is_refused_before_push(self) -> None:
+        """A NUL-bearing blob is still a credential leak even when git log -p omits its bytes."""
+        before, pushed = self.refs(self.primary), git(self.origin, "for-each-ref", "refs/heads")
+
+        def worker(clone: Path) -> None:
+            (clone / "leak.bin").write_bytes(b"\x00sk-worker\x00")
+            git(clone, "add", "leak.bin")
+            git(clone, "commit", "-q", "-m", "binary leak")
+
+        with self.assertRaisesRegex(ValueError, "branch_import_refused.*secret"):
+            self.run_launcher(worker)
+        self.assertEqual(self.refs(self.primary), before)
+        self.assertEqual(git(self.origin, "for-each-ref", "refs/heads"), pushed)
+
+    def test_out_of_manifest_commit_is_refused_before_import(self) -> None:
+        """The launcher checks the committed diff before it becomes a PR branch."""
+        before, pushed = self.refs(self.primary), git(self.origin, "for-each-ref", "refs/heads")
+
+        def worker(clone: Path) -> None:
+            (clone / "allowed.txt").write_text("allowed")
+            (clone / "hooks").mkdir()
+            (clone / "hooks/escape.py").write_text("escape")
+            git(clone, "add", "allowed.txt", "hooks/escape.py")
+            git(clone, "commit", "-q", "-m", "outside manifest")
+
+        with (
+            patch.object(spawn_sandboxed_worker, "declared_manifest", return_value=["allowed.txt"]),
+            self.assertRaisesRegex(ValueError, "branch_import_refused.*out_of_manifest"),
+        ):
+            self.run_launcher(worker)
+        self.assertEqual(self.refs(self.primary), before)
+        self.assertEqual(git(self.origin, "for-each-ref", "refs/heads"), pushed)
+
+    def test_reverted_out_of_manifest_history_is_still_refused(self) -> None:
+        """An out-of-scope path in an intermediate commit cannot be hidden by reverting it at the tip."""
+        before = self.refs(self.primary)
+
+        def worker(clone: Path) -> None:
+            (clone / "escape.txt").write_text("out of scope")
+            git(clone, "add", "escape.txt")
+            git(clone, "commit", "-q", "-m", "outside")
+            (clone / "escape.txt").unlink()
+            (clone / "allowed.txt").write_text("allowed")
+            git(clone, "add", "-A")
+            git(clone, "commit", "-q", "-m", "hide outside")
+
+        with (
+            patch.object(spawn_sandboxed_worker, "declared_manifest", return_value=["allowed.txt"]),
+            self.assertRaisesRegex(ValueError, "branch_import_refused.*out_of_manifest"),
+        ):
+            self.run_launcher(worker)
+        self.assertEqual(self.refs(self.primary), before)
+
     def test_main_worktree_and_rewritten_history_are_refused(self) -> None:
         """A launch on main is refused up front; a worker that rewrites the branch cannot fast-forward the import."""
         with self.assertRaisesRegex(ValueError, "branch_import_refused"):

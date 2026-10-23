@@ -52,8 +52,8 @@
       "description": "Slash command run by the pre-flight; null skips it."
     },
     "sandbox_workers": {
-      "type": ["boolean", "null"], "default": true, "status": "enforced_by_code",
-      "description": "true or absent (default) = implementation workers run as OS-sandboxed processes (isolated HOME, scratch clone, scrubbed env) when the sandbox runtime and an owner-provisioned worker credential exist; otherwise traced fallback to in-process dispatch. While sandboxing is available, an in-process high-risk unit needs an owner-signed worker_fallback receipt. false = off. Read by scripts/sandbox/containment.py; a cooperating-agent safeguard, an agent can edit this file."
+      "type": ["boolean", "null"], "default": null, "status": "unused",
+      "description": "Codex uses native spawn_agent and the harness sandbox_mode. This Claude worker-containment setting is not enforced by the Codex plugin."
     },
     "action_authority": {
       "type": ["string", "null"], "default": "enforce", "enum": ["enforce", "advisory", "off"], "status": "enforced_by_code",

@@ -47,8 +47,7 @@ class SettingsContractTests(ArtifactCase):
             for path in (home / ".claude.json", home / ".claude", home, primary, shared_tmp, workdir):
                 self.assertNotIn(str(path), filesystem["allowWrite"])
             self.assertFalse(filesystem.get("allowGitConfig", False))
-            for domain in ("api.anthropic.com", "github.com"):
-                self.assertIn(domain, data["network"]["allowedDomains"])
+            self.assertEqual(data["network"]["allowedDomains"], ["api.anthropic.com"])
             self.assertNotIn("%%", output.read_text())
             self.assertFalse(any(line.lstrip().startswith("//") for line in output.read_text().splitlines()))
             self.assertFalse(

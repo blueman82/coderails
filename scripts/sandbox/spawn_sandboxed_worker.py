@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""Launch a Claude worker under the pinned OS sandbox, import its branch and push it; preserve its exit status.
+"""Launch a Claude worker under the pinned OS sandbox, check its scope, import its branch and push it.
 
-The worker never sees the primary repository, the real HOME or any inherited secret. The launcher:
+The worker never sees the primary repository or inherited environment secrets. The launcher:
   1. clones the worktree (`git clone --no-hardlinks`) into a per-worker scratch directory and runs the worker there,
      so the primary .git (refs, hooks, config) is not writable at all;
-  2. rebuilds the child environment from an allowlist (PATH, LANG, TERM, the owner-provisioned worker credential,
-     an isolated HOME/CLAUDE_CONFIG_DIR/XDG_*/TMPDIR under the scratch dir); no GH_TOKEN, no `gh auth token`, and
-     CODERAILS_HEADLESS_RUN is never passed;
-  3. after a clean exit imports exactly the worker's branch (fast-forward only; any other moved branch, including
-     main/master, is refused as branch_import_refused) and pushes it from outside the sandbox.
-Cooperating-agent safeguard, not absolute isolation: this launcher is trusted, reads under HOME stay possible, and
-github.com + api.anthropic.com remain reachable. The scratch dir (clone, worker.log) is left in place for audit.
+  2. rebuilds the child environment from an allowlist with a scratch HOME and dedicated worker credential;
+  3. after a clean exit checks each commit against the graph unit manifest and scans new objects for known secrets,
+     then imports exactly the worker's branch (fast-forward only) and pushes it outside the sandbox.
+The launcher is trusted and reads under the real HOME remain possible. GitHub egress is blocked inside the sandbox;
+api.anthropic.com remains reachable. The scratch dir (clone, worker.log) is left in place for audit.
 """
 
 from __future__ import annotations
@@ -25,10 +23,14 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import IO
+from typing import IO, Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.lib.agentic_loop_path import resolve_path
+from hooks.scripts.lib.graph_dispatch import authorize_dispatch
+from hooks.scripts.lib.loop_state_common import read_state
 from hooks.scripts.lib.trace_row import append_row
+from scripts.lib import manifest_policy
 from scripts.sandbox.containment import SRT_VERSION, worker_credential
 from scripts.sandbox.render_settings import render_settings
 
@@ -95,6 +97,30 @@ def branch_heads(clone: Path) -> dict[str, str]:
     return dict(row.split(" ", 1) for row in rows)
 
 
+def declared_manifest(worktree: str, prompt_file: str) -> list[str] | None:
+    """Bind a graph worker's declared scope to the exact active U3 envelope; None outside a graph session."""
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if not session:
+        return None
+    path = resolve_path(worktree, session)
+    state = read_state(path)
+    if "graph" not in state:
+        return None
+    request = authorize_dispatch(path, session, Path(prompt_file).read_text(), "coderails:loop-worker")
+    match = re.fullmatch(r"U3\[([^]]+)\]", request["node_id"])
+    if not match:
+        raise refuse("branch_import_refused", "sandbox launcher requires a U3 implementation envelope")
+    raw_units = state.get("work_units")
+    units = cast(dict[str, Any], raw_units) if isinstance(raw_units, dict) else {}
+    raw_unit = units.get(match[1])
+    unit = cast(dict[str, Any], raw_unit) if isinstance(raw_unit, dict) else {}
+    raw_manifest = unit.get("manifest")
+    manifest = cast(list[object], raw_manifest) if isinstance(raw_manifest, list) else []
+    if not manifest or any(not isinstance(item, str) or not item for item in manifest):
+        raise refuse("branch_import_refused", f"unit {match[1]} has no usable manifest")
+    return cast(list[str], manifest)
+
+
 def worker_environment(scratch: Path, credential: tuple[str, str]) -> dict[str, str]:
     """The allowlisted child environment: isolated dirs under scratch plus the worker credential, nothing inherited."""
     home = scratch / "home"
@@ -134,18 +160,32 @@ def stream_child(arguments: list[str], cwd: str, env: dict[str, str], log: IO[by
 
 
 def committed_secret(clone: Path, old: str | None, new: str, credential_value: str) -> str | None:
-    """Name of the first secret found in any line the worker added between old and new (all commits), else None."""
+    """Scan every new Git object, including binary blobs and intermediate commits, before publication."""
     revisions = f"{old}..{new}" if old else new
-    added = git(clone, "log", "-p", "--format=", "--no-textconv", "--no-ext-diff", revisions, hardened=True)
-    lines = [line[1:] for line in added.splitlines() if line.startswith("+") and not line.startswith("+++")]
-    text = "\n".join(lines)
-    if credential_value and credential_value in text:
-        return "the worker credential"
-    return next((name for name, pattern in SECRET_PATTERNS if pattern.search(text)), None)
+    objects = git(clone, "rev-list", "--objects", revisions, hardened=True).splitlines()
+    for row in objects:
+        oid = row.split(" ", 1)[0]
+        result = subprocess.run(
+            ["git", *GIT_SAFE, "-C", str(clone), "cat-file", "-p", oid], capture_output=True, check=False
+        )
+        if result.returncode:
+            raise refuse("branch_import_refused", f"cannot inspect worker object {oid}")
+        data = result.stdout
+        if credential_value and credential_value.encode() in data:
+            return "the worker credential"
+        for name, pattern in SECRET_PATTERNS:
+            if re.search(pattern.pattern.encode(), data):
+                return name
+    return None
 
 
 def import_and_push(
-    worktree: str, clone: Path, branch: str, before: dict[str, str], credential_value: str = ""
+    worktree: str,
+    clone: Path,
+    branch: str,
+    before: dict[str, str],
+    credential_value: str = "",
+    manifest: list[str] | None = None,
 ) -> None:
     """Fast-forward the worktree branch to the clone's, refusing any other moved branch or committed secret; push it."""
     after = branch_heads(clone)
@@ -156,6 +196,14 @@ def import_and_push(
     if not moved:
         return
     ref = f"refs/heads/{branch}"
+    if manifest is not None:
+        commits = git(clone, "rev-list", "--reverse", f"{before[ref]}..{after[ref]}", hardened=True).splitlines()
+        for commit in commits:
+            diff = git(clone, "diff", "--raw", "-z", "-M", before[ref], commit, hardened=True)
+            verdict = manifest_policy.check(manifest_policy.parse_raw_z(diff), {}, manifest)
+            if not verdict["ok"]:
+                violation = verdict["violations"][0]
+                raise refuse("branch_import_refused", f"{violation['code']}: {violation['path']}; nothing pushed")
     found = committed_secret(clone, before.get(ref), after[ref], credential_value)
     if found:
         raise refuse("branch_import_refused", f"secret found in the worker's commits ({found}); nothing pushed")
@@ -180,6 +228,7 @@ def launch(worktree: str, prompt_file: str, model: str) -> int:
     if not Path(prompt_file).is_file():
         raise ValueError(f"prompt_file is not an existing file: {prompt_file}")
     dispatch_guard(worktree, prompt_file, model)
+    manifest = declared_manifest(worktree, prompt_file)
     try:
         branch = git(worktree, "branch", "--show-current") if git(worktree, "rev-parse", "--git-common-dir") else ""
     except ValueError as error:
@@ -226,7 +275,7 @@ def launch(worktree: str, prompt_file: str, model: str) -> int:
     if code:
         print(f"spawn-sandboxed-worker: worker exited {code}; nothing imported, work left in {clone}", file=sys.stderr)
         return code
-    import_and_push(worktree, clone, branch, before, credential[1])
+    import_and_push(worktree, clone, branch, before, credential[1], manifest)
     return 0
 
 

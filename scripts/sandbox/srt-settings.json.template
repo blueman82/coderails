@@ -43,9 +43,9 @@
     // Required key, present and deliberately empty.
     "denyWrite": [],
     // Read containment is an explicit non-goal (spec): deny-read breaks
-    // toolchains constantly for near-zero marginal safety. Reads under HOME
-    // therefore stay possible (a named residual in AGENTS.md); the worker's
-    // environment carries no GH_TOKEN and its own HOME is the scratch dir.
+    // toolchains constantly. Reads under the real HOME remain possible; GitHub
+    // network egress is blocked below so a readable GitHub token cannot be
+    // used to bypass the launcher publication path.
     // Required key, so it is present and deliberately empty.
     "denyRead": []
     // allowGitConfig deliberately OMITTED (defaults false), so srt emits its
@@ -58,12 +58,6 @@
     // Allow-only: srt denies all egress by default. An incomplete list fails
     // LOUDLY (blocked egress), never silently. Extend only from probe evidence.
     "allowedDomains": [
-      // Kept for read-only fetches and curl-based API reads; the worker holds
-      // no GitHub credential, so it cannot push or write through these.
-      "github.com",
-      "*.github.com",
-      "lfs.github.com",
-      "api.github.com",
       // The worker's own claude -p process talks to the Anthropic API.
       "api.anthropic.com"
     ],

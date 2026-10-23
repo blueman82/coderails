@@ -112,6 +112,12 @@ class GateTests(GateCase):
             self.reasons(), ["containment_ack_required", "containment_ack_receipt", "containment_ack_required"]
         )
 
+    def test_alternate_native_role_cannot_bypass_a_u3_envelope(self) -> None:
+        """A graph-bound implementation node needs containment regardless of its optional native role label."""
+        self.state(["hooks/scripts/x.py"])
+        self.assertTrue(self.denied(HOOK, self.dispatch("general-purpose")))
+        self.assertEqual(self.reasons(), ["containment_ack_required"])
+
     def test_unknown_manifest_is_high_risk_and_foreign_receipts_do_not_ack(self) -> None:
         """No manifest cannot prove low risk; an agent-signed, unsigned or other-unit receipt does not acknowledge."""
         self.state(None)
@@ -152,11 +158,13 @@ class GateTests(GateCase):
         self.assertTrue(self.denied(HOOK, self.dispatch()))
 
     def test_untouched_cases(self) -> None:
-        """Non-graph session, sandbox_workers false, fallback mode, another role or tool: no verdict and no trace."""
+        """Non-graph session, off/fallback mode, non-implementation envelope or other tool are untouched."""
         self.state(["hooks/x.py"], graph=False)
         self.assertFalse(self.denied(HOOK, self.dispatch()))
         self.state(["hooks/x.py"])
-        self.assertFalse(self.denied(HOOK, self.dispatch("coderails:spec-reviewer")))
+        review = self.dispatch("coderails:spec-reviewer")
+        review["tool_input"]["prompt"] = "review this source"
+        self.assertFalse(self.denied(HOOK, review))
         self.assertFalse(self.denied(HOOK, self.dispatch() | {"tool_name": "Bash"}))
         self.credential.unlink()  # mode fallback: worker_credential_missing
         self.assertFalse(self.denied(HOOK, self.dispatch()))

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Containment gate: a high-risk implementation unit may not run as an in-process worker while sandboxing is available.
 
-Acts only when ALL hold: tool_name is Agent, subagent_type is coderails:loop-worker, the session is graph-bound,
+Acts only when ALL hold: tool_name is Agent, its graph envelope names U3, the session is graph-bound,
 and containment.resolve() is `sandboxed` (sandbox_workers true or absent, runtime and worker credential present).
 Then the unit (from the graph dispatch envelope, node U3[<unit>]) is classified from progress.json
 work_units[unit].manifest / write_scope against HIGH_RISK_PREFIXES (an absent manifest cannot prove low risk):
   low risk   allowed, traced containment_fallback_low_risk (the worker should still prefer the sandboxed launcher);
   high risk  denied containment_ack_required unless an owner-signed, single-use `worker_fallback` receipt bound to
              repository + branch + base sha + the unit verifies and is consumed (traced containment_ack_receipt).
-Mode fallback/off, non-graph sessions and every other tool or role are untouched. Any own error fails open, traced
+Mode fallback/off, non-graph sessions and non-U3 dispatches are untouched. Any own error fails open, traced
 containment_gate_failed_open. Separate from loop_dispatch_guard. The owner mints with
 `scripts/action_receipt_cli.py approve-action --kind worker_fallback --command 'worker_fallback <unit>'`.
 Cooperating-agent safeguard: an agent can edit the config key or the manifest it is judged by.
@@ -35,7 +35,6 @@ from scripts.lib import action_receipt as ar
 from scripts.lib.receipt_signing import resolve_trust_root
 from scripts.sandbox import containment
 
-ROLE = "coderails:loop-worker"
 COMMAND = "worker_containment"
 
 
@@ -81,7 +80,7 @@ def main() -> int:
     payload = read_payload()
     request = payload.get("tool_input")
     request = request if isinstance(request, dict) else {}
-    if payload.get("tool_name") != "Agent" or request.get("subagent_type") != ROLE:
+    if payload.get("tool_name") != "Agent":
         return 0
     session = str(payload.get("session_id") or "?")
     cwd = str(payload.get("cwd") or os.getcwd())
@@ -89,7 +88,9 @@ def main() -> int:
         if not graph_bound(session, cwd) or containment.resolve(cwd)["mode"] != "sandboxed":
             return 0
         unit = unit_of(request.get("prompt"))
-        if unit and not containment.is_high_risk(manifest_of(session, cwd, unit)):
+        if not unit:
+            return 0
+        if not containment.is_high_risk(manifest_of(session, cwd, unit)):
             append_row(COMMAND, "allowed", "containment_fallback_low_risk", session)
             return 0
         if unit and acknowledged(session, cwd, unit):
