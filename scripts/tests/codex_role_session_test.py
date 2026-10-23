@@ -51,6 +51,17 @@ class ArgvTests(IsolatedTrace):
         self.assertIn('"source-auditor"', servers[0])
         self.assertIn(str(REPO / "scripts/capability_mcp.py"), servers[0])
         self.assertEqual(argv[-1], "-")  # prompt comes from stdin (a file), never from argv
+        self.assertTrue(
+            any(o.startswith("developer_instructions=") and "citation auditor" in o for o in overrides),
+            "the contained session must load the role contract",
+        )
+
+    def test_guarded_review_skills_use_role_sessions(self) -> None:
+        """Routine review entrypoints must route guarded roles to their usable MCP session."""
+        for skill in ("cite-check", "merge", "workflow", "post-review", "workflow-audit", "docs-sync"):
+            with self.subTest(skill=skill):
+                text = (REPO / "packages/codex/skills" / skill / "SKILL.md").read_text()
+                self.assertIn("codex_role_session.py", text)
 
     def test_every_guarded_role_gets_only_its_own_server(self) -> None:
         """No role's argv names another role's server."""
@@ -61,6 +72,14 @@ class ArgvTests(IsolatedTrace):
                 self.assertEqual(text.count("mcp_servers."), 1)
                 for other in set(GUARDED) - {role}:
                     self.assertNotIn(f"cap-{other}", text.replace(f"cap-{role}", ""))
+
+    def test_package_install_root_loads_its_own_role_contract(self) -> None:
+        """The independent Codex package has the role instructions and server script it launches."""
+        package = REPO / "packages" / "codex"
+        argv = crs.build_argv("source-auditor", package)
+        self.assertTrue(crs.contained(argv, "source-auditor"))
+        self.assertIn(str(package / "scripts/capability_mcp.py"), " ".join(argv))
+        self.assertIn("You are a citation auditor", " ".join(argv))
 
     def test_unknown_and_unguarded_roles_are_refused(self) -> None:
         """A role with raw shell or write access, a read-only agent with no tools, or a typo never launches."""
@@ -76,6 +95,8 @@ class ArgvTests(IsolatedTrace):
         self.assertNotEqual(argv, stripped)
         self.assertFalse(crs.contained(stripped, "design-scout"))
         self.assertTrue(crs.contained(argv, "design-scout"))
+        instruction = next(i for i, token in enumerate(argv) if token.startswith("developer_instructions="))
+        self.assertFalse(crs.contained(argv[: instruction - 1] + argv[instruction + 1 :], "design-scout"))
 
 
 class EnvAndRunTests(IsolatedTrace):

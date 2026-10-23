@@ -114,7 +114,10 @@ before `developer_instructions` would swallow it) and keeps `sandbox_mode = "rea
 `scripts/codex_role_session.py --role <agent> --prompt-file <file> [--cwd <dir>]` (byte-identical copy in the Codex
 package) launches `codex exec --ignore-user-config -s read-only -c features.shell_tool=false -c
 mcp_servers.cap-<role>=... -` with only that role's server, the prompt on stdin from the file and an allowlisted
-environment (PATH, HOME, CODEX_HOME, LANG, LC_ALL, TERM, TMPDIR; no tokens). Use it for `source-auditor`, because
+environment (PATH, HOME, CODEX_HOME, LANG, LC_ALL, TERM, TMPDIR; no tokens). It also loads the tracked role TOML's
+`developer_instructions` into the contained session. The Codex cite-check, merge, workflow, post-review,
+workflow-audit, and docs-sync skills route guarded review roles through this launcher with an exact-head worktree.
+Use it for `source-auditor`, because
 `tests_run`/`cmd_run` must not be reachable by inherited children. It refuses roles that are not guarded profile entries.
 The Codex plugin manifest declares no `mcpServers`: a manifest server would be inherited by every native child, and
 Codex's `mcpServers` handling could not be exercised offline here, so a native Codex child of a guarded role has the
