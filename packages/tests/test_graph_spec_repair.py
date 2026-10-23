@@ -184,7 +184,7 @@ class ConditionalRepairTests(unittest.TestCase):
             self.assertEqual(result["graph"]["nodes"]["U4b-review[1]"]["status"], "hard-stop")
 
     def test_terminal_human_status_does_not_override_repair_limit(self) -> None:
-        """A terminal retry slot is retained before the independent repair bound is applied."""
+        """The schema retry cap and independent repair bound both remain enforced."""
         with tempfile.TemporaryDirectory() as scratch:
             controller, _ = instantiate_loop("claude", scratch, "full", "1")
             state = failed_review(controller.read())
@@ -208,9 +208,10 @@ class ConditionalRepairTests(unittest.TestCase):
                 worker_status.retain_decision_slot(reversed_order["state"], [{"node": "U4b-review[1]"}])
                 worker_status.retain_decision_slot(proposal["state"], [{"node": "U4b-review[1]"}])
                 graph_repair.apply_failed_gates(proposal, result)
-            self.assertIsNone(reversed_order["state"]["graph"]["hard_stop"])
+            self.assertEqual(reversed_order["state"]["graph"]["hard_stop"]["reason"], "retry exhaustion")
+            self.assertEqual(reversed_order["state"]["graph"]["nodes"]["U4b-review[1]"]["retry"]["attempts"], 5)
             graph = proposal["state"]["graph"]
-            self.assertEqual(graph["hard_stop"]["reason"], "repair attempt exhaustion")
+            self.assertEqual(graph["hard_stop"]["reason"], "retry exhaustion")
             self.assertEqual(graph["nodes"]["U4b-review[1]"]["status"], "hard-stop")
 
     def test_malformed_repair_record_is_a_coded_refusal(self) -> None:

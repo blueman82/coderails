@@ -42,6 +42,18 @@ class ValidateTests(unittest.TestCase):
         ws.retain_decision_slot(proposed, [{"node": "U4[1]", "status": "NEEDS_DECISION"}])
         self.assertEqual((node, proposed["graph"]["hard_stop"]), before)
 
+    def test_terminal_decision_slot_keeps_evidence_attempt_numbers(self) -> None:
+        """A pending answer may extend the bound, but never reuse an evidence-backed attempt."""
+        node = {"status": "hard-stop", "outcome": "hard-stop", "retry": {"attempts": 2, "max": 2}}
+        graph = {"nodes": {"U3[1]": node}, "hard_stop": {"node": "U3[1]", "reason": "retry exhaustion"}}
+        ws.retain_decision_slot({"graph": graph}, [{"node": "U3[1]", "status": "NEEDS_DECISION"}])
+        self.assertEqual(node["retry"], {"attempts": 2, "max": 3})
+        self.assertEqual((node["status"], graph["hard_stop"]), ("pending", None))
+        node.update(status="hard-stop", outcome="hard-stop", retry={"attempts": 5, "max": 5})
+        graph["hard_stop"] = {"node": "U3[1]", "reason": "retry exhaustion"}
+        ws.retain_decision_slot({"graph": graph}, [{"node": "U3[1]", "status": "NEEDS_DECISION"}])
+        self.assertEqual((node["retry"], node["status"]), ({"attempts": 5, "max": 5}, "hard-stop"))
+
     def test_valid_each_status(self) -> None:
         """All three statuses validate; recommended may be None."""
         for status in ws.STATUSES:

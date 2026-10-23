@@ -156,8 +156,8 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                 self.assertEqual(provider.success("inspect")["ready"], [NODE])
                 provider.success("begin-wave")
 
-    def test_answer_reopens_terminal_retry_slot(self) -> None:
-        """A valid human-needing status on the last attempt can resume after its answer."""
+    def test_answer_at_retry_cap_keeps_terminal_evidence(self) -> None:
+        """A human answer cannot reuse the fifth native evidence attempt."""
         for provider in self.providers:
             with self.subTest(provider=provider.name):
                 maximum = provider.read()["graph"]["nodes"][NODE]["retry"]["max"]
@@ -167,8 +167,8 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                 result = self.record(provider, typed("NEEDS_DECISION"), "failed")
                 self.assertEqual(result.returncode, 0, result.stderr)
                 blocked = provider.read()
-                self.assertIsNone(blocked["graph"]["hard_stop"])
-                self.assertEqual(blocked["graph"]["nodes"][NODE]["retry"]["attempts"], maximum - 1)
+                self.assertEqual(blocked["graph"]["hard_stop"]["reason"], "retry exhaustion")
+                self.assertEqual(blocked["graph"]["nodes"][NODE]["retry"]["attempts"], maximum)
                 self.assertEqual(provider.success("inspect")["ready"], [])
                 provider.success(
                     "record-decision",
@@ -183,7 +183,40 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                     "--worker-status-seq",
                     "1",
                 )
+                self.assertEqual(provider.success("inspect")["ready"], [])
+
+    def test_terminal_decision_below_cap_uses_next_attempt(self) -> None:
+        """An answered status extends the bound and retains its native attempt reference."""
+        for provider in self.providers:
+            with self.subTest(provider=provider.name):
+                state = provider.read()
+                state["graph"]["nodes"][NODE]["retry"]["max"] = 2
+                provider.write(state)
+                failed = self.record(provider, {"outcome": "failed", "evidence": "prior failure"}, "failed")
+                self.assertEqual(failed.returncode, 0, failed.stderr)
+                result = self.record(provider, typed("NEEDS_DECISION"), "failed")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                current = provider.read()
+                node = current["graph"]["nodes"][NODE]
+                self.assertEqual(node["retry"], {"attempts": 2, "max": 3})
+                status_seq = str(current["worker_statuses"][-1]["seq"])
+                provider.success(
+                    "record-decision",
+                    "--session",
+                    provider.session,
+                    "--phase",
+                    "implementation",
+                    "--decision",
+                    "answer",
+                    "--chosen",
+                    "a",
+                    "--worker-status-seq",
+                    status_seq,
+                )
                 self.assertEqual(provider.success("inspect")["ready"], [NODE])
+                failed = self.record(provider, {"outcome": "failed", "evidence": "next attempt"}, "failed")
+                self.assertEqual(failed.returncode, 0, failed.stderr)
+                self.assertEqual(provider.read()["graph"]["nodes"][NODE]["retry"]["attempts"], 3)
 
     def test_malformed_status_storage_inhibits_readiness(self) -> None:
         """Malformed rows fail closed instead of being mistaken for resolved decisions."""

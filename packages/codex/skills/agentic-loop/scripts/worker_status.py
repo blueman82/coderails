@@ -216,9 +216,9 @@ def retain_decision_slot(proposed: dict[str, Any], statuses: list[dict[str, Any]
     for status in statuses:
         node = graph["nodes"][status["node"]]
         retry = node["retry"]
-        if node["status"] != "hard-stop" or retry["attempts"] < retry["max"]:
+        if node["status"] != "hard-stop" or retry["attempts"] < retry["max"] or retry["max"] >= 5:
             continue
-        retry["attempts"] -= 1
+        retry["max"] += 1
         node.update(status="pending", outcome="pending")
         reopened = True
     if not reopened:

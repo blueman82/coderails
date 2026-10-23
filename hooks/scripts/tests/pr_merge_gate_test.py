@@ -58,7 +58,11 @@ class MergeEvidenceTests(HookTestCase):
         """Missing head, fetch failure, NO-GO, missing embeds and failed verification all deny."""
         before = Path.cwd()
         self.addCleanup(os.chdir, before)
-        with patch(MODULE + ".pr_field", return_value="head"), patch(MODULE + ".integrity_reason", return_value=""):
+        with (
+            patch(MODULE + ".pr_field", return_value="head"),
+            patch(MODULE + ".integrity_reason", return_value=""),
+            patch(MODULE + ".gate_review_summary_for_pr", return_value=(0, "")),
+        ):
             for summary in (
                 EvalSummary(2, "", "", "identity"),
                 EvalSummary(2, "", "", "permission"),
@@ -80,6 +84,32 @@ class MergeEvidenceTests(HookTestCase):
         with patch(MODULE + ".pr_field", return_value=""):
             self.assertIn("head SHA", merge_reason("1", str(self.directory)))
         self.assertIn("valid repo", merge_reason("1", str(self.directory / "missing")))
+
+    def test_direct_merge_refuses_compat_findings(self) -> None:
+        """The direct gh merge hook enforces the same review refusal as merge.py."""
+        before = Path.cwd()
+        self.addCleanup(os.chdir, before)
+        with (
+            patch(MODULE + ".pr_field", return_value="head"),
+            patch(MODULE + ".gate_review_summary_for_pr", return_value=(3, "compat_findings_clean_break")),
+            patch(MODULE + ".gate_eval_summary_for_pr", return_value=EvalSummary(0, "1", "{}", "")),
+            patch(MODULE + ".smoke_verify", return_value=0),
+            patch(MODULE + ".integrity_reason", return_value=""),
+        ):
+            self.assertIn("compat_findings_clean_break", merge_reason("1", str(self.directory)))
+
+    def test_direct_merge_keeps_existing_review_invocation_contract(self) -> None:
+        """An absent artifact is handled by the existing invocation gate; an invalid one is refused here."""
+        before = Path.cwd()
+        self.addCleanup(os.chdir, before)
+        with (
+            patch(MODULE + ".pr_field", return_value="head"),
+            patch(MODULE + ".gate_review_summary_for_pr", return_value=(1, "")),
+            patch(MODULE + ".gate_eval_summary_for_pr", return_value=EvalSummary(0, "1", "{}", "")),
+            patch(MODULE + ".smoke_verify", return_value=0),
+            patch(MODULE + ".integrity_reason", return_value=""),
+        ):
+            self.assertEqual(merge_reason("1", str(self.directory)), "")
 
 
 if __name__ == "__main__":
