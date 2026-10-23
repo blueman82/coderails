@@ -21,7 +21,7 @@ class DriverCompletionTests(unittest.TestCase):
     def test_codex_completion_validates_the_sealed_native_snapshot(self) -> None:
         """Pending old nodes do not become a completed-native requirement."""
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "progress.json"
+            path = Path(directory) / "owned-state.json"
             external = Path(directory) / "external"
             external.mkdir()
             evals_path = external / "evals.json"
@@ -32,7 +32,7 @@ class DriverCompletionTests(unittest.TestCase):
                 "graph": {"nodes": {}, "dispatches": {}},
             }
             raw = json.dumps(old).encode()
-            path.with_name("progress.json.pre-driver").write_bytes(raw)
+            path.with_name(path.name + ".pre-driver").write_bytes(raw)
             state: dict[str, Any] = {
                 "session_id": "S",
                 "loop_id": "L",

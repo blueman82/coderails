@@ -8,6 +8,7 @@ import os
 import secrets
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -53,14 +54,22 @@ def _read(path: Path) -> dict[str, Any] | None:
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
-def _live(pid: int, token: str) -> bool:
+def _live(pid: int, token: str, artifact: Path) -> bool:
     """Check the token in the wrapper's process command to reject PID reuse."""
     try:
         result = subprocess.run(
             ["ps", "-ww", "-p", str(pid), "-o", "command="], capture_output=True, text=True, check=False
         )
     except OSError:
-        return False
+        heartbeat = _read(artifact / "heartbeat.json")
+        seen = heartbeat.get("seen") if heartbeat else None
+        return bool(
+            heartbeat
+            and heartbeat.get("token") == token
+            and heartbeat.get("pid") == pid
+            and isinstance(seen, (int, float))
+            and 0 <= time.time() - seen < 1
+        )
     return result.returncode == 0 and token in result.stdout and "--worker" in result.stdout
 
 
@@ -85,7 +94,7 @@ def observe(artifact: Path, timeout: float) -> dict[str, Any]:
         pid = launch.get("pid")
         owned = _CHILDREN.get(token) if isinstance(token, str) else None
         if (owned is not None and owned.poll() is None) or (
-            type(pid) is int and isinstance(token, str) and _live(pid, token)
+            type(pid) is int and isinstance(token, str) and _live(pid, token, artifact)
         ):
             if time.monotonic() >= deadline:
                 return {"status": "running"}
@@ -150,6 +159,15 @@ def start(
 def _worker(artifact: Path, token: str, cwd: Path, stdin_path: Path | None, command: list[str]) -> int:
     """Write the wrapper identity before starting the child, then retain its exit."""
     _write(artifact / "launch.json", {"status": "started", "token": token, "pid": os.getpid()})
+    stopped = threading.Event()
+
+    def beat() -> None:
+        while not stopped.is_set():
+            _write(artifact / "heartbeat.json", {"token": token, "pid": os.getpid(), "seen": time.time()})
+            stopped.wait(0.1)
+
+    pulse = threading.Thread(target=beat, daemon=True)
+    pulse.start()
     input_stream = None
     try:
         input_stream = stdin_path.open("rb") if stdin_path is not None else None
@@ -165,6 +183,8 @@ def _worker(artifact: Path, token: str, cwd: Path, stdin_path: Path | None, comm
     except (OSError, ValueError):
         code = 127
     finally:
+        stopped.set()
+        pulse.join()
         if input_stream is not None:
             input_stream.close()
     _write(artifact / "terminal.json", {"token": token, "exit_code": code})

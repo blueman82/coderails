@@ -340,7 +340,7 @@ def validate_history(state_path: Path, state: dict[str, Any]) -> None:
 def validate_backup(state_path: Path, state: dict[str, Any]) -> dict[str, Any]:
     """Check the sealed native snapshot and unchanged native history prefix."""
     graph = cast(dict[str, Any], state["graph"])
-    backup = state_path.with_name("progress.json.pre-driver")
+    backup = state_path.with_name(state_path.name + ".pre-driver")
     if _digest(backup) != graph.get("native_backup_sha256"):
         raise ValueError("native backup changed")
     try:

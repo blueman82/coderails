@@ -53,7 +53,7 @@ class DriverProcessTests(unittest.TestCase):
             with patch("graph_driver_process.subprocess.run", side_effect=PermissionError("ps denied")):
                 self.assertEqual(graph_driver_process.observe(artifact, 0)["status"], "running")
                 with patch.dict("graph_driver_process._CHILDREN", {}, clear=True):
-                    self.assertEqual(graph_driver_process.observe(artifact, 0)["status"], "unresolved")
+                    self.assertEqual(graph_driver_process.observe(artifact, 0.5)["status"], "running")
             deadline = time.monotonic() + 5
             result: dict[str, object] = {"status": "unresolved"}
             while time.monotonic() < deadline:
@@ -70,6 +70,19 @@ class DriverProcessTests(unittest.TestCase):
             self.assertEqual(graph_driver_process.observe(artifact, 0)["status"], "unresolved")
             with self.assertRaisesRegex(ValueError, "already"):
                 graph_driver_process.start(artifact, [sys.executable, "-c", "pass"], artifact)
+
+    def test_stale_or_foreign_heartbeat_cannot_prove_a_worker_is_live(self) -> None:
+        """A denied process lookup needs a fresh matching wrapper pulse."""
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory)
+            (artifact / "launch.json").write_text(json.dumps({"status": "started", "token": "owned", "pid": 42}))
+            with patch("graph_driver_process.subprocess.run", side_effect=PermissionError("ps denied")):
+                for pulse in (
+                    {"token": "other", "pid": 42, "seen": time.time()},
+                    {"token": "owned", "pid": 42, "seen": time.time() - 5},
+                ):
+                    (artifact / "heartbeat.json").write_text(json.dumps(pulse))
+                    self.assertEqual(graph_driver_process.observe(artifact, 0)["status"], "unresolved")
 
     def test_second_controller_cannot_own_the_same_graph(self) -> None:
         """The process lease is separate from graph operation locks."""
@@ -99,7 +112,8 @@ class DriverProcessTests(unittest.TestCase):
             )
             launched = subprocess.run([sys.executable, "-c", script, str(artifact)], capture_output=True, text=True)
             self.assertEqual(launched.returncode, 0, launched.stderr)
-            self.assertEqual(graph_driver_process.observe(artifact, 0.01)["status"], "running")
+            with patch("graph_driver_process.subprocess.run", side_effect=PermissionError("ps denied")):
+                self.assertEqual(graph_driver_process.observe(artifact, 0.5)["status"], "running")
             with self.assertRaisesRegex(ValueError, "already"):
                 graph_driver_process.start(artifact, [sys.executable, "-c", "pass"], artifact)
             (artifact / "release").touch()
