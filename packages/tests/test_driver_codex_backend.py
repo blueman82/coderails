@@ -35,7 +35,17 @@ class CodexBackendTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--model") + 1], "gpt-6.1-sol")
             self.assertEqual(stdin_path, prompt)
             self.assertIsNone(environment)
-            self.assertNotIn("--ignore-user-config", argv)
+            self.assertIn("--ignore-user-config", argv)
+
+    def test_unguarded_role_rejects_checkout_codex_config(self) -> None:
+        """A read-only worker cannot inherit a project MCP server outside its sandbox."""
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory)
+            (checkout / ".codex").mkdir()
+            prompt = checkout / "prompt.txt"
+            prompt.write_text("spec task\n")
+            with self.assertRaisesRegex(ValueError, "project Codex config"):
+                graph_driver_codex.command(prompt, checkout, cli="/fake/codex", role="spec-reviewer")
 
     def test_guarded_role_uses_its_capability_server_and_frozen_model(self) -> None:
         """A scout cannot inherit generic shell or write access."""

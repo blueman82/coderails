@@ -110,9 +110,15 @@ def command(
         ]
         return argv, None, prompt
     else:
+        for directory in (checkout.resolve(), *checkout.resolve().parents):
+            if (directory / ".codex").exists():
+                raise ValueError("project Codex config can add an unguarded MCP server")
+            if (directory / ".git").exists():
+                break
         argv = [
             executable,
             "exec",
+            "--ignore-user-config",
             "--sandbox",
             "read-only" if role == "spec-reviewer" else "workspace-write",
             "-C",
