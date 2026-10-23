@@ -120,12 +120,39 @@ class LoadConfigTests(ConfigCase):
         self.assertEqual(findings[0]["key"], "integrity_review.machin_user")
         self.assertEqual(findings[0]["hint"], "integrity_review.machine_user")
 
+    def test_enum_violation_is_a_bad_value_with_closest_hint(self) -> None:
+        """A string outside the property's enum is config_bad_value naming the closest allowed value."""
+        values, findings = load_config(self.write("action_authority: enforse\n"))
+        self.assertEqual(findings, [{"code": "config_bad_value", "key": "action_authority", "hint": "enforce"}])
+        self.assertEqual(values["action_authority"], "enforse")
+
     def test_bad_type_keeps_raw_value(self) -> None:
         """A value of the wrong type is reported and left as written."""
         values, findings = load_config(self.write("sandbox_workers: maybe\nwiki_debt_epoch_pr: null\n"))
         self.assertEqual(self.codes(findings), ["config_bad_type", "config_bad_type"])
         self.assertEqual(values["sandbox_workers"], "maybe")
         self.assertEqual(values["wiki_debt_epoch_pr"], "null")
+
+    def test_hash_is_comment_only_outside_quoted_or_attached_scalars(self) -> None:
+        """A hash attached to a scalar remains data; whitespace-delimited hashes start comments."""
+        text = 'sandbox_workers: false#suffix\naction_authority: off#suffix\nwiki_path: "vault#one" # comment\n'
+        values, findings = load_config(self.write(text))
+        self.assertEqual(values["sandbox_workers"], "false#suffix")
+        self.assertEqual(values["action_authority"], "off#suffix")
+        self.assertEqual(values["wiki_path"], "vault#one")
+        self.assertEqual(
+            [(item["code"], item["key"]) for item in findings],
+            [("config_bad_type", "sandbox_workers"), ("config_bad_value", "action_authority")],
+        )
+        commented, clean = load_config(
+            self.write("sandbox_workers: false # comment\naction_authority: off # comment\n")
+        )
+        self.assertEqual(clean, [])
+        self.assertIs(commented["sandbox_workers"], False)
+        self.assertEqual(commented["action_authority"], "off")
+        self.assertEqual(
+            config_value(self.write("action_authority: off#suffix # comment\n"), "action_authority"), "off#suffix"
+        )
 
     def test_action_authority_enum(self) -> None:
         """enforce|advisory|off are clean, absent defaults to enforce, anything else is config_bad_type."""
@@ -135,7 +162,7 @@ class LoadConfigTests(ConfigCase):
         values, findings = load_config(self.write("project: x\n"))
         self.assertEqual((values["action_authority"], findings), ("enforce", []))
         values, findings = load_config(self.write("action_authority: bogus\n"))
-        self.assertEqual((values["action_authority"], self.codes(findings)), ("bogus", ["config_bad_type"]))
+        self.assertEqual((values["action_authority"], self.codes(findings)), ("bogus", ["config_bad_value"]))
         schema = json.loads((ROOT / "config.schema.json").read_text())["properties"]["action_authority"]
         self.assertEqual((schema["status"], schema["default"]), ("enforced_by_code", "enforce"))
 
@@ -180,8 +207,10 @@ class ReaderTests(ConfigCase):
         self.assertEqual(integrity_machine_user(self.write("integrity_review:\n  machine_user: null\n")), "")
         self.assertEqual(integrity_machine_user("/nonexistent"), "")
         self.assertTrue(require_signatures(self.write("evals:\n  require_signatures: true\n")))
-        self.assertFalse(require_signatures(self.write("evals:\n  require_signatures: yes\n")))
+        self.assertTrue(require_signatures(self.write("evals:\n  require_signatures: yes\n")))  # bad type: fail closed
         self.assertFalse(require_signatures(""))
+        self.assertTrue(require_signatures(self.write("sandbox_workers: true\n")))  # default ON once a config exists
+        self.assertFalse(require_signatures(self.write("evals:\n  require_signatures: false\n")))
 
 
 class CliTests(ConfigCase):
@@ -213,12 +242,19 @@ class CliTests(ConfigCase):
         root = self.repo(text)
         self.assertEqual(self.run_cli("resolve-config", cwd=root).stdout, text)
         result = self.run_cli("resolve-config", "--json", cwd=root)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)  # findings: valid false and exit 1
         data = json.loads(result.stdout)
-        self.assertEqual(sorted(data), ["defaults_applied", "findings", "path", "unknown_keys", "values"])
+        self.assertIs(data["valid"], False)
+        self.assertEqual(sorted(data), ["defaults_applied", "findings", "path", "unknown_keys", "valid", "values"])
         self.assertEqual(data["unknown_keys"], ["wiki_pth"])
         self.assertIn("wiki_path", data["defaults_applied"])
         self.assertNotIn("sandbox_workers", data["defaults_applied"])
+
+    def test_json_clean_config_is_valid(self) -> None:
+        """A clean file: valid true, exit 0, no findings."""
+        result = self.run_cli("resolve-config", "--json", cwd=self.repo("sandbox_workers: false\n"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((json.loads(result.stdout)["valid"], json.loads(result.stdout)["findings"]), (True, []))
 
     def test_json_unreadable_path_never_raises(self) -> None:
         """A discovered path that cannot be read yields JSON with a config_unreadable finding, not a traceback."""
@@ -228,6 +264,26 @@ class CliTests(ConfigCase):
         ):
             data = resolve_config_json()
         self.assertEqual([f["code"] for f in data["findings"]], ["config_unreadable"])
+
+    def test_hash_scalar_behavior_matches_both_provider_clis(self) -> None:
+        """Both published config CLIs preserve attached and quoted hashes while accepting comments."""
+        text = 'sandbox_workers: false#suffix\naction_authority: off#suffix\nwiki_path: "vault#one" # comment\n'
+        for provider in (ROOT, CODEX):
+            with self.subTest(provider=provider.name):
+                root = self.repo(text)
+                result = subprocess.run(
+                    [sys.executable, str(provider / "scripts/lib/config.py"), "resolve-config", "--json"],
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                data = json.loads(result.stdout)
+                self.assertEqual(data["values"]["sandbox_workers"], "false#suffix")
+                self.assertEqual(data["values"]["action_authority"], "off#suffix")
+                self.assertEqual(data["values"]["wiki_path"], "vault#one")
+                self.assertEqual(data["unknown_keys"], [])
 
     def test_json_without_config(self) -> None:
         """NO_CONFIG still yields valid JSON and exit 0."""
@@ -258,7 +314,9 @@ class MirrorTests(unittest.TestCase):
                 walk(spec.get("properties", {}))  # type: ignore[arg-type]
 
         walk(schema["properties"])
-        self.assertEqual(schema["properties"]["sandbox_workers"]["status"], "read_by_prose_only")
+        self.assertEqual(schema["properties"]["sandbox_workers"]["status"], "enforced_by_code")
+        for key in ("action_authority", "diff_manifest", "diff_manifest_policy"):
+            self.assertEqual(schema["properties"][key]["status"], "enforced_by_code", key)
 
 
 if __name__ == "__main__":

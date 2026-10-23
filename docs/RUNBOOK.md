@@ -23,13 +23,36 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 - Symptom: a configured gate (wiki taxonomy, wiki-debt, integrity, eval signing) does nothing, or a config key seems ignored.
 - Query: `python3 scripts/lib/config.py resolve-config --json | jq .unknown_keys` (also `.findings`); counts via
-  `python3 scripts/lib/config_counters.py` for `config_unknown_key`, `config_bad_type`, `config_unreadable`,
+  `python3 scripts/lib/config_counters.py` for `config_unknown_key`, `config_bad_type`, `config_bad_value`, `config_unreadable`,
   `wiki_schema_missing`, `wiki_schema_invalid`, `wiki_schema_legacy` (scope with `--since 2026-10-05T00:00:00`; the same rows
-  also appear in `measure_graph_alignment.py --json` under `trace.by_reason`; trace rows: `config/warned/<code>`, `wiki_taxonomy_gate/failed_open/<code>`).
-- Remediation: fix the key (the finding carries a did-you-mean hint) or the value type; for `wiki_schema_*` restore or
-  repair `wiki.schema.json` (`page_types` non-empty list of directory names). Both are fail-open by design: findings never
-  change a gate's decision, and a stale AGENTS.md Page types table fails the build (`config_docs_drift_test.py`), not the hook. `wiki_schema_legacy` means a vault still has only
+  also appear in `measure_graph_alignment.py --json` under `trace.by_reason`; trace rows: `config/warned/<code>`, `wiki_taxonomy_gate/failed_closed/<code>`).
+- Remediation: fix the key (the finding carries a did-you-mean hint) or the value; `resolve-config --json` prints
+  `valid:false` and exits 1 while any finding remains. Reading is non-authoritative for ordinary gates (they warn and
+  trace), but the guarded actions below fail closed. `wiki_schema_legacy` means a vault still has only
   `AGENTS-wiki-schema.md`: policing continues from its Page types table; add `wiki.schema.json` to retire the fallback.
+
+## Guarded action denied: config_rejected or wiki schema fail-closed
+
+- Symptom: `gh pr merge` or `git push` to main (action-authority hook), `push.py`/`merge.py` (diff-manifest check) or a
+  write inside the wiki vault is denied with `config_rejected` ("did you mean ..."), `wiki_schema_missing` or
+  `wiki_schema_invalid`.
+- Query: trace rows `action_authority/denied/config_rejected`, `diff-manifest/refused/config_rejected`,
+  `wiki_taxonomy_gate/failed_closed/<config_rejected|wiki_schema_missing|wiki_schema_invalid>`; counts via
+  `python3 scripts/lib/config_counters.py` (`config_rejected`, `config_bad_value`, `wiki_schema_fail_closed`).
+- Remediation: run `python3 scripts/lib/config.py resolve-config --json`, fix each finding (typo'd key, wrong type, value
+  outside the enum), or restore `wiki.schema.json` (`page_types` non-empty list of directory names). Only the guarded
+  action is denied; every other command and tool passes. With NO config file nothing is read and every gate stays inert
+  (repos not using coderails), and an ambiguous wiki identity (no `wiki_path`, other repository, vault not a directory)
+  still allows.
+- Limit: the controls are only as strong as the config file. A same-user agent can `mv` it away (every gate goes inert)
+  or edit a control to `off` in place; no hook guards `.coderails/workflow.config.yaml`. Review config diffs like code
+  (the diff-manifest policy can list it as a protected path). `evals.require_signatures` fails closed: only an
+  explicit `false` turns it off. Malformed lines and duplicate keys are `config_unparseable_line` /
+  `config_duplicate_key` findings.
+- Defaults: an existing config with no other keys turns the controls ON (`sandbox_workers: true`,
+  `evals.require_signatures: true`, `diff_manifest: enforce`, inert until `diff_manifest_policy` names a file); each is a
+  one-line opt-out. `action_authority: enforce` is also ON by default now that both providers ship the owner-run receipt
+  CLI; explicit `off` opts out and `advisory` warns without blocking.
 
 ## Discipline lint advisories climbing
 
@@ -200,17 +223,18 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
 - Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a
-  stderr "action_authority (advisory)" warning appears. ON by default: config `action_authority` absent, no config file, or any unrecognised
-  value is `enforce` (an unrecognised value also traces `action_authority_bad_mode`); only an explicit `off` silences it, `advisory` warns without blocking.
+  stderr "action_authority (advisory)" warning appears. ON by default: absent config, no config file, or no key means
+  `enforce`; only an explicit valid `off` silences it, and `advisory` warns without blocking. Any invalid config is
+  refused for guarded actions with `config_rejected`.
 - Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
   `repository_mismatch`, `ref_mismatch`, `sha_mismatch`, `signature_missing`, `signature_invalid`, `signer_unknown`, `trust_root_missing`, `binding_unknown` (repository+ref+sha not computable: fail closed), `state_mutated_before_guard` (a ref/HEAD/remote-moving step precedes the guarded one in the same command), `expired`, `revoked`, `consumed`, `foreign_session`, `foreign_loop`, `kind_mismatch`, `no_session` (payload had no session_id; traced under session dir `_no_session`), `malformed`;
   `receipt_consumed` (allowed); `trust_root_user_tier` (an allow that rested on the agent-writable trust root: cooperating-agent safeguard); `action_authority_failed_open` (the hook itself errored and allowed);
-  `receipt_approved` / `receipt_revoked` / `receipt_refused_no_tty` (CLI).
+  `receipt_approved` / `receipt_revoked` / `receipt_refused_no_tty` (CLI); `config_rejected` (strict workflow config).
   Authority codes (also from `enforce_pr_workflow`, which denies before consuming anything): `denied_authority_denied` (the session's authority lists the category in `denied`; a receipt cannot override it),
   `denied_max_prs_exceeded` (executed merges in the session, counted from `.executed` markers of every merge receipt whatever its `authority_id`, reached `max_prs`; 0 = none; narrow/grant again with `authority.py`), `approval_requirement_missing` (a guarded action's permit verdict omitted its required approval; refused before consuming a receipt), `authority_denied_destructive_shell` (destructive gate, force-with-lease family),
-  `action_authority_bad_mode` (typo in the config value, treated as enforce). `scripts/merge.py` rows are `merge_py_<code>` (refused: `no_receipt`, `no_session`, `binding_unknown`, `sha_mismatch`, `consumed`, ...)
+  `action_authority_bad_mode` (legacy/untyped fallback; guarded hooks now reject invalid config as `config_rejected`). `scripts/merge.py` rows are `merge_py_<code>` (refused: `no_receipt`, `no_session`, `binding_unknown`, `sha_mismatch`, `consumed`, ...)
   and `merge_py_receipt_executed` (allowed). Counters: `scripts/lib/receipt_counters.py` `gate_summary(by_reason)` (the CLI below prints it as `gate`; wiring it into `measure_graph_alignment.py` itself is a handoff to the lane that owns that file).
   Owner mint command for a merge: `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge --command 'python3 scripts/merge.py <N>' --cwd <repo dir>`;
   `gh pr merge <N>` works the same with that exact command text. `max_prs` counts every executed merge receipt in the session, including one minted before the authority was granted.
