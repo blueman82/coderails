@@ -22,6 +22,35 @@ from packages.tests.test_driver_authorize import frozen_evals  # noqa: E402
 class DriverControllerTests(unittest.TestCase):
     """Use the public graph commands with a disposable local worker."""
 
+    def test_root_owned_proof_node_pauses_before_dispatch(self) -> None:
+        """A proof step cannot be satisfied by an external model's done message."""
+        with tempfile.TemporaryDirectory() as directory:
+            case = Case("codex", Path(directory))
+            state = case.read()
+            state["graph"]["nodes"]["S13-proof"] = state["graph"]["nodes"].pop("U3[1]")
+            state["graph"]["nodes"]["S13-proof"]["label"] = "Run frozen proofs"
+            case.write(state)
+            converted = case.graph("convert")
+            self.assertEqual(converted.returncode, 0, converted.stderr)
+            self.assertEqual(case.graph("cutover-driver").returncode, 0)
+            case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+            before = case.path.read_bytes()
+
+            def command(_prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
+                self.fail("a root-owned proof must not launch a worker")
+
+            report = graph_driver_controller.drive_once(
+                case.path,
+                "S",
+                SCRIPTS["codex"],
+                Path(directory),
+                "codex",
+                command,
+                lambda _path, _code: {"outcome": "done", "evidence": "impossible"},
+            )
+            self.assertEqual(report, {"status": "paused", "reason": "control_node", "nodes": ["S13-proof"]})
+            self.assertEqual(case.path.read_bytes(), before)
+
     def test_authorized_attempt_without_handle_never_starts_again(self) -> None:
         """A crash after authorization leaves an unresolved, single-use attempt."""
         with tempfile.TemporaryDirectory() as directory:

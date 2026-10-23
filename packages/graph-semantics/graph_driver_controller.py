@@ -16,6 +16,7 @@ import graph_contract
 import graph_driver_evidence
 import graph_driver_process
 import graph_semantics
+import graph_spec
 from graph_vocab import decision_pending
 
 Command = Callable[[Path, dict[str, Any]], tuple[list[str], Optional[dict[str, str]], Optional[Path]]]
@@ -65,6 +66,12 @@ def _dispatches(state: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     ):
         raise ValueError("driver wave lacks an exact dispatch for each node")
     return sorted(records, key=lambda item: item[1]["node_id"])
+
+
+def _control_nodes(nodes: list[str]) -> list[str]:
+    """Keep root-owned graph steps out of external worker processes."""
+    spec = graph_spec.load_spec()
+    return sorted(node_id for node_id in nodes if (graph_spec.node_for(spec, node_id) or {}).get("agent_role") is None)
 
 
 def _prompt(path: Path, state: dict[str, Any], identifier: str, record: dict[str, Any]) -> Path:
@@ -120,11 +127,17 @@ def drive_once(
                 return {"status": "stopped", "reason": "hard_stop"}
             if any(decision_pending(state, node_id) for node_id in state["graph"]["nodes"]):
                 return {"status": "paused", "reason": "decision_pending"}
-            if not graph_semantics.ready(state):
+            ready = graph_semantics.ready(state)
+            control = _control_nodes(ready)
+            if control:
+                return {"status": "paused", "reason": "control_node", "nodes": control}
+            if not ready:
                 return {"status": "paused", "reason": "no_ready_nodes"}
             _graph(script, "begin-driver-wave", path)
             state = _load(path, session)
         active = cast(dict[str, Any], state["graph"]["active_wave"])
+        if _control_nodes(active["nodes"]):
+            return {"status": "unresolved", "reason": "active_control_node", "nodes": active["nodes"]}
         results: dict[str, Any] = {}
         references: dict[str, Any] = {}
         for identifier, record in _dispatches(state):
