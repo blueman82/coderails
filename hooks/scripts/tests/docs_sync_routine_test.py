@@ -1,5 +1,6 @@
 """Lock docs-sync normative instructions and exercise the real dashboard loader."""
 
+import json
 import re
 import shutil
 import subprocess
@@ -12,27 +13,31 @@ PATTERNS = (
     r"do \*\*not\*\* create a branch",
     r"do \*\*not\*\* open a pull request",
     r"BEFORE any branch or PR is created",
-    r"--name-status",
-    r"never .{0,5}--name-only",
-    r"no line has status .R. or .C. \(rename/copy\) unless its SOURCE path",
-    r"no line has status .D. \(deletion\) for an in-scope doc",
+    r"routine_run\.py",
+    r"RR begin",
+    r"RR finish no_drift",
+    r"RR stage manifest_check",
+    r"RR run-gate push --",
+    r"RR run-gate merge --",
+    r"RR finish ok",
+    r"diff_manifest\.py --policy policy/docs-sync\.policy\.json",
     r"ABORT, never warn-and-continue",
     r"git-tracked `\.md` files only",
-    r"refused=<gate>",
-    r"abort=<reason>",
     r"exits non-zero",
     r"never invent a new marker",
     r"never wait, poll, or retry",
     r"worked example is a .pending. .integrity-review. status",
     r"writes its reason into the run-note",
-    r"There is no dashboard alert and no PR comment",
+    r"dashboard alert and no PR comment",
     r"self-governance deny-list",
-    r"skills/\*\*/SKILL.md.*including this skill.s own file",
-    r"^ *- .AGENTS\.md.$",
-    r"^ *- .docs/routines\.md.$",
-    r"documents that define",
-    r"do not fire.*it reduces the risk of self-governance drift",
+    r"skills/\*\*/SKILL.md.*including this file",
+    r"hooks do not fire",
+    r"reduces the risk of",
 )
+STAGES = [
+    *("fetch_branch", "evals_frozen", "edit_made", "manifest_check", "push"),
+    *("review", "post_review", "post_evals", "merge"),
+]
 NODE_CHECK = r"""
 import {loadConfig} from './skills/dashboard/lib/src/config.ts';
 import {checkForeignSkillExists} from './skills/dashboard/runner/src/escalate.ts';
@@ -56,7 +61,7 @@ class DocsSyncTests(unittest.TestCase):
     """The normative sentence must exist and removing it must defeat its assertion."""
 
     def test_normative_instructions_and_removal_controls(self) -> None:
-        """Cover every original prose assertion and strengthen each with a removal control."""
+        """Pin the script calls and the surviving prohibitions, each with a removal control."""
         text = (ROOT / "skills/docs-sync/SKILL.md").read_text()
         for pattern in PATTERNS:
             with self.subTest(pattern=pattern):
@@ -64,6 +69,26 @@ class DocsSyncTests(unittest.TestCase):
                 self.assertIsNotNone(expression.search(text))
                 stripped = "\n".join(line for line in text.splitlines() if not expression.search(line))
                 self.assertIsNone(expression.search(stripped))
+
+    def test_chain_is_in_the_spec_not_repeated_in_prose(self) -> None:
+        """Both specs carry the ordered stages and policy; each SKILL spells the gate chain once."""
+        for routine, policy in (("docs-sync", "docs-sync"), ("loop-retro-promotion", "retro-promotion")):
+            with self.subTest(routine=routine):
+                spec = json.loads((ROOT / f"routines/{routine}.json").read_text())
+                self.assertEqual(spec["stages"], STAGES)
+                self.assertEqual(spec["policy"], f"policy/{policy}.policy.json")
+                self.assertTrue((ROOT / spec["policy"]).is_file())
+                self.assertEqual(spec["cleanup"], ["close_pr", "delete_local_branch"])
+                text = (ROOT / f"skills/{routine}/SKILL.md").read_text()
+                self.assertEqual(text.count("RR run-gate merge --"), 1, "the chain appears once")
+                self.assertNotIn("/coderails:post-evals", text, "the old prose chain is gone")
+                self.assertNotRegex(text, r"append (a|an) .?(abort|delivery)=")
+
+    def test_deny_list_is_policy_data(self) -> None:
+        """The self-governance deny-list the SKILL names is the docs-sync policy's, including its own file."""
+        deny = json.loads((ROOT / "policy/docs-sync.policy.json").read_text())["docs_sync"]["deny"]
+        for entry in ("skills/**/SKILL.md", "AGENTS.md", "CLAUDE.md", "docs/routines.md", ".claude/**"):
+            self.assertIn(entry, deny)
 
     def test_actual_loader_and_missing_foreign_skill(self) -> None:
         """Run the production TypeScript loader and existence predicate when dependencies exist."""

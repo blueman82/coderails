@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, renameSync, mkdirSync, existsSync, statSync, appendFileSync } from "node:fs";
-import { join, basename, dirname } from "node:path";
+import { readdirSync, readFileSync, renameSync, mkdirSync, existsSync, statSync } from "node:fs";
+import { join, basename } from "node:path";
 import { randomBytes } from "node:crypto";
 import { parseIntent } from "@coderails/dashboard-lib";
 import type { DashboardConfig, RoutineDef } from "@coderails/dashboard-lib";
@@ -7,8 +7,9 @@ import type { ButtonDef } from "../../app/src/lib/config.ts";
 import { buildArgv } from "../../app/src/lib/argv.ts";
 import { runCodex } from "./exec.ts";
 import { appendRun, type RunRecord } from "./runlog.ts";
-import { checkArtifact, resolveArtifactPath, type ArtifactCheckContext } from "./artifactGate.ts";
+import { checkArtifact } from "./artifactGate.ts";
 import { escalate, checkForeignSkillExists, writeRunNote, defaultNotify } from "./escalate.ts";
+import { ensureTerminalRow, localDateIso, recordTimeoutMarker, routineLogBoundary } from "./timeoutMarker.ts";
 
 export interface SweepOptions {
   queueDir: string;
@@ -24,39 +25,6 @@ export interface SweepOptions {
   // LOCAL calendar date, not UTC. Defaults to `() => new Date()`; tests
   // inject a fixed instant to reproduce a local/UTC day-boundary skew.
   clock?: () => Date;
-}
-
-// Local calendar date (YYYY-MM-DD), not UTC — `toISOString()` is always UTC
-// regardless of process.env.TZ, which is exactly the mismatch this
-// resolves: the producer writes the artifact keyed to its local date.
-function localDateIso(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-// A routine killed by the exec timeout (SIGKILL, see exec.ts) never gets to
-// run its own terminal-marker-writing step, so its `last-marker` artifact
-// (e.g. docs-sync's run-{date}.log) is left with no terminal marker at all —
-// indistinguishable from a run that never started. Only `last-marker`
-// artifacts have a defined notion of a "failure marker" line; the other
-// predicate kinds (exists/contains/json-field) have no such convention and
-// this must not blindly append text into e.g. a json-field artifact that
-// expects valid JSON. Best-effort and non-fatal: a failure to record this
-// marker must not mask or replace the exec-error escalation the caller
-// already performs.
-function recordTimeoutMarker(routine: RoutineDef, ctx: ArtifactCheckContext): void {
-  const predicate = routine.expectedArtifact.predicate;
-  if (predicate.kind !== "last-marker") return;
-  const path = resolveArtifactPath(routine.expectedArtifact.artifactPath, ctx);
-  const marker = resolveArtifactPath(predicate.failures[0], ctx);
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    appendFileSync(path, `${new Date().toISOString()} ${marker}runner-timeout-kill\n`);
-  } catch (err) {
-    console.error("recordTimeoutMarker: failed to append terminal marker, continuing:", err);
-  }
 }
 
 export interface SweepResult {
@@ -258,11 +226,18 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
         continue;
       }
 
-      // Pass the same outputPath already recorded in the ledger above so the
-      // run's stdout/stderr is persisted to disk — otherwise a RED routine
-      // leaves no transcript to diagnose (the motivating gap). See exec.ts.
+      const artifactContext = {
+        date: localDateIso(opts.clock?.() ?? new Date()),
+        runId: outputRunId,
+        vault: (opts.config.wikiPaths ?? [])[0] ?? "",
+      };
+      const boundary = routine ? routineLogBoundary(routine, artifactContext) : null;
       const execResult = await runCodexImpl(argv, button.cwd, { outputPath: startRecord.outputPath });
       appendRun({ ...startRecord, endedAt: Date.now(), exitCode: execResult.exitCode }, { runsDir: opts.runsDir });
+
+      const terminalResult = routine && execResult.spawnFailure !== "spawn-failed"
+        ? ensureTerminalRow(routine, artifactContext, boundary, execResult.spawnFailure !== "timeout")
+        : { passed: true, reason: "" };
 
       if (execResult.spawnFailure) {
         // Distinct from a routine's own non-zero exit ("exec-error"): the
@@ -280,11 +255,7 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
           // kill DID claim it and will never write its own terminal marker
           // now, so the runner writes the failure marker on its behalf.
           if (execResult.spawnFailure === "timeout") {
-            recordTimeoutMarker(routine, {
-              date: localDateIso(opts.clock?.() ?? new Date()),
-              runId: outputRunId,
-              vault: (opts.config.wikiPaths ?? [])[0] ?? "",
-            });
+            recordTimeoutMarker(routine, artifactContext);
           }
           escalate({
             routine,
@@ -308,11 +279,7 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
           });
         }
       } else if (routine) {
-        const artifactResult = checkArtifact(routine.expectedArtifact, {
-          date: localDateIso(opts.clock?.() ?? new Date()),
-          runId: outputRunId,
-          vault: (opts.config.wikiPaths ?? [])[0] ?? "",
-        });
+        const artifactResult = terminalResult.passed ? checkArtifact(routine.expectedArtifact, artifactContext) : terminalResult;
         if (artifactResult.passed) {
           result.succeeded++;
           if (opts.vaultNotesDir) {

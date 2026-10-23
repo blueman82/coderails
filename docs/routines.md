@@ -1,110 +1,62 @@
 # Verified routines
 
-A **routine** is a scheduled skill run that isn't considered done just
-because `claude` exited 0. It's done when a specific artifact exists,
-is fresh enough, and satisfies a predicate — the **artifact gate**. Five
-routines ship today: `wiki-lint` (nightly), `sync-docs-nightly` (nightly),
-`memory-consolidation-weekly` (weekly), `loop-retro-promotion-weekly`
-(weekly), `workflow-audit-weekly` (weekly).
+A **routine** is a scheduled skill run whose artifact must exist, be fresh and
+satisfy a predicate before the runner calls it complete. Exit 0 alone is insufficient.
+Five examples ship: nightly `wiki-lint` and `sync-docs-nightly`; weekly
+`memory-consolidation-weekly`, `loop-retro-promotion-weekly` and `workflow-audit-weekly`.
 
-This doc is the operator-facing guide: how the queue/runner architecture
-works, how to define a routine, how to install/uninstall the scheduler,
-and where to look when a routine fails silently instead of loudly. The
-schema-level contract (the `Intent` type, the queue lifecycle, the
-`RoutineDef`/config shape) lives in
-[`skills/dashboard/lib/README.md`](../skills/dashboard/lib/README.md) —
-read that first if you need the exact field-by-field contract; this doc
-assumes it and focuses on operating the system.
-
-**Read the security warning before enabling anything beyond the shipped
-read-only routines.**
+This is the operator guide. The exact `Intent`, queue lifecycle and `RoutineDef`
+contract is in [the dashboard library README](../skills/dashboard/lib/README.md).
+**Read the security warning before enabling routines that write or execute commands.**
 
 ## Prerequisites for a cold clone
 
-A fresh `git clone` is not runnable as-is — both TypeScript packages need
-their dependencies installed before anything under `skills/dashboard/`
-will import:
+Install both packages' dependencies from the repository root:
 
 ```bash
-cd skills/dashboard/lib && npm install
-cd skills/dashboard/runner && npm install
+(cd skills/dashboard/lib && npm install)
+(cd skills/dashboard/runner && npm install)
 ```
 
-`node_modules` is gitignored in both packages and nothing in this repo
-builds it for you; the launchd jobs described below import through it
-directly (Node 24's built-in TypeScript type-stripping runs `src/*.ts`
-with no build step), so a missing `npm install` in either package
-surfaces as a `MODULE_NOT_FOUND` the first time a routine fires, not at
-clone time.
+Both `node_modules` directories are gitignored; cloning does not populate them.
+Launchd imports `src/*.ts` using Node 24's built-in type stripping, without a build
+step. Missing dependencies surface as `MODULE_NOT_FOUND` when a routine runs.
 
-The dashboard's data directory (`~/.claude/coderails-dashboard/` in every
-path in this doc) is derived from `$HOME` at runtime (see `BASE_DIR` in
-`skills/dashboard/runner/src/main.ts` and `seedMain.ts`) — there is no
-flag or config option to relocate it. Redirecting `HOME` (e.g. `HOME=
-/tmp/fake-home node src/main.ts`) is the supported lever for a sandboxed
-or test run that shouldn't touch a real machine's dashboard state.
+The Claude dashboard data directory is `~/.claude/coderails-dashboard/`, derived
+from `$HOME` by `runner/src/main.ts` and `seedMain.ts`. No flag/config relocates it.
+Redirecting `HOME` is the documented test/sandbox lever for that dashboard state
+(for example, `HOME=/tmp/fake-home node src/main.ts`).
 
-The `claude` binary itself is resolved from a short, hard-coded candidate
-list (`KNOWN_CLAUDE_PATHS` in `skills/dashboard/runner/src/exec.ts`), not
-`$PATH` — `launchd` invokes these jobs with no `PATH` set at all
-(verified via `launchctl print gui/$UID`), so a bare `"claude"` command
-string would fail to spawn under the scheduler even though it works fine
-in an interactive shell. The candidate list is machine-specific by
-design (documented as YAGNI in that file's own comments — no
-multi-machine deployment exists yet to justify making it configurable):
-on a different machine, edit `KNOWN_CLAUDE_PATHS` in
-`skills/dashboard/runner/src/exec.ts` to add that machine's `claude`
-install path.
+The Claude binary is resolved from `KNOWN_CLAUDE_PATHS` in
+`skills/dashboard/runner/src/exec.ts`, rather than `$PATH`. Launchd supplies no
+`PATH`; its scripts/plists use absolute paths. On another machine, update that
+candidate list to include its Claude installation. The configuration is deliberately
+machine-specific. The independent Codex scripts, routine specs, runner and skills
+live under `packages/codex/`; docs-sync's Codex log default is under `~/.codex/`.
 
 ## Architecture: intent producers, one runner
 
-Every run — a dashboard button press, an Obsidian command, or a scheduled
-routine — starts as an **intent**: a small JSON file dropped into
-`~/.claude/coderails-dashboard/queue/`. Producers only ever write intent
-files; they never execute `claude` directly as part of this contract (the
-Obsidian plugin's current interim direct-exec behaviour is a known,
-temporary exception documented in the lib README, not something new
-producers should copy).
+Every button press or scheduled run starts as a JSON intent in
+`~/.claude/coderails-dashboard/queue/`. Producers write intents; the runner executes.
+The Obsidian plugin's interim direct-exec path is a documented exception in the
+library README, and new producers must follow the queue contract.
 
-- **Obsidian / web / cli** — a button press writes `{ button, input?,
-  requestedAt, source: "obsidian" | "web" | "cli" }`.
-- **Scheduler (routines)** — the seed step (`seedMain.ts` →
-  `seed.ts`'s `seedDueRoutines`) writes `{ button, requestedAt, source:
-  "scheduler" }` for every routine that's due, using the same `Intent`
-  shape and the same `queue/` directory as any other producer. Scheduled
-  routines are intent **producers**, nothing more — the runner has no
-  concept of cadence or "this came from a routine" once an intent is
-  queued; it just executes buttons.
-- **The runner** (`skills/dashboard/runner`) is the sole consumer. It
-  claims an intent by atomically renaming it `queue/<id>.json` →
-  `processing/<id>.json`, spawns `claude` via the one shared
-  `buildArgv`/profile→flag mapping, records the run, and — only if the
-  claimed intent's button resolves to a `RoutineDef` — evaluates that
-  routine's artifact gate and escalates on failure. A plain button press
-  with no matching routine just gates on exit code, same as before
-  routines existed.
+- Obsidian/web/CLI write `{button, input?, requestedAt, source: "obsidian" | "web" | "cli"}`.
+- `seedMain.ts` → `seed.ts:seedDueRoutines` writes
+  `{button, requestedAt, source: "scheduler"}` for due routines.
+- The runner atomically claims `queue/<id>.json` as `processing/<id>.json`, spawns
+  through the shared `buildArgv`/profile mapping and records the run. When the
+  button resolves to a `RoutineDef`, it checks the artifact and escalates failures.
+  Other buttons gate on exit code. Cadence belongs to the seeder.
 
 ## Defining a routine
 
-Routines live in the `routines` array of
-`~/.claude/coderails-dashboard.json`, alongside the pre-existing
-`buttons` array. A routine either names a `skillCommand` directly or
-points at an existing button via `buttonRef` — never both — and every
-routine needs `cadence`, `expectedArtifact`, and `escalation`. Full
-validation rules are in `skills/dashboard/lib/src/config.ts`; this is the
-shipped `wiki-lint` example from
-[`examples/dashboard-config.json`](../examples/dashboard-config.json):
-
-**`~/.claude/coderails-dashboard.json` is per-machine, `$HOME`-local, and
-not checked into this repo** — every `cwd` and `artifactPath` in it is an
-absolute path specific to the machine it lives on (same caveat as the
-launchd plists and `KNOWN_CLAUDE_PATHS` above). `examples/dashboard-config.json`
-is the checked-in reference copy, kept in sync by hand; it is not itself
-read by anything. To arm a routine on a given machine, copy its
-button+routine block from the example file into that machine's own
-`~/.claude/coderails-dashboard.json` and rewrite every absolute path
-(`cwd`, `artifactPath`) to match that machine's actual checkout
-location — do not copy the example's paths verbatim.
+Put routines in `~/.claude/coderails-dashboard.json` beside `buttons`. Validation
+is in `skills/dashboard/lib/src/config.ts`. This configuration is per-machine and
+untracked. [examples/dashboard-config.json](../examples/dashboard-config.json) is a
+reference copy maintained by hand; the runner does not read it. To enable an example,
+copy its button/routine into the machine's config and replace every absolute
+`cwd`/`artifactPath` with the correct local path.
 
 ```json
 {
@@ -121,375 +73,285 @@ location — do not copy the example's paths verbatim.
 }
 ```
 
-Field by field:
+- `name` identifies the routine. Seeder and runner resolve the button using
+  `buttonRef ?? name`; specify `buttonRef` when the names differ.
+- Choose exactly one of `skillCommand` and `buttonRef`. The latter reuses a
+  button's command, cwd and profile; all five examples use it.
+- Optional `foreignSkillPath` is an absolute external skill path. The runner
+  checks existence before spawning and escalates `skill-missing` if absent.
+  None of the five current examples need it.
+- Seeder cadence is only `nightly` (due after 20 hours) or `weekly` (6.5 days).
+  The shorter thresholds let late runs catch the next calendar tick. Unknown
+  cadence escalates `runner-error` for that routine while other routines continue.
+- `expectedArtifact.artifactPath` supports `{date}` (`YYYY-MM-DD`), `{runId}`
+  and `{vault}` (first `wikiPaths` entry). Paths are trusted configuration:
+  **never template them from untrusted routine/intent content**.
+- `maxAgeSeconds` must comfortably exceed cadence: the nightly example uses
+  129600 (36 hours); weekly examples use 691200 (8 days).
+- `escalation` selects `notification` and/or `vault-note`. Both are enabled in
+  all five examples. An empty array leaves failure visible only in run records;
+  there is no separate escalation-off switch or deduplication.
 
-- **`name`** — the routine's own identifier. If it differs from the
-  button it drives, set `buttonRef` to the button's `name`; if it's the
-  same string, `buttonRef` is optional (both the seeder and the runner
-  resolve a routine to a button by `buttonRef ?? name`).
-- **`skillCommand` / `buttonRef`** — exactly one. `buttonRef` reuses an
-  existing button's `command`/`cwd`/`profile` (all five shipped
-  routines do this). `foreignSkillPath` (optional) names an absolute
-  path to a skill that lives outside this repo — the runner checks the
-  path exists before spawning and escalates `skill-missing` if it
-  doesn't, rather than spawning `claude` and letting it fail inside the
-  sandbox. None of the five shipped example routines use it today (see
-  the `sync-docs-nightly` section below for why); it remains available
-  for any routine whose skill genuinely lives outside this repo.
-- **`cadence`** — only `"nightly"` or `"weekly"` are understood by the
-  seed step today. Nightly is due after **20 hours** since the routine's
-  last recorded run; weekly after **6.5 days**. Both thresholds are
-  intentionally shorter than the nominal cadence so a routine that's a
-  few hours late (e.g. the machine was asleep) still fires on the next
-  calendar tick rather than sliding a full extra day. An unrecognised
-  cadence string doesn't crash seeding — it escalates a `runner-error`
-  for that routine and the rest of the routines still get considered.
-- **`expectedArtifact`** — the gate. `artifactPath` may contain
-  `{date}` (`YYYY-MM-DD`), `{runId}`, and `{vault}` (the first entry of
-  `wikiPaths`) template tokens, substituted at check time.
-  `artifactPath` is trusted, config-authored input — it must never be
-  templated from routine/intent content that isn't config itself.
-  `maxAgeSeconds`
-  is how old the artifact is allowed to be — set it comfortably above the
-  cadence interval (the `wiki-lint` example above uses 129600s = 36h for
-  a nightly routine; the three weekly routines use 691200s = 8 days) so a
-  slightly-late run doesn't fail its own gate. `predicate` is one of:
-  - `{ kind: "exists" }` — file present and fresh, nothing more.
-  - `{ kind: "contains", marker }` — file present, fresh, and contains
-    `marker` (itself `{date}`/`{runId}`/`{vault}`-substituted).
-  - `{ kind: "last-marker", success, failures }` — file present, fresh,
-    and its terminal markers read in order — for append-only logs where
-    every run adds a line. Only the **last** terminal marker in the
-    file decides: the run passes if that marker contains `success`, and
-    fails if it contains any entry of `failures` — or if the file holds no
-    terminal marker at all. A whole-file `contains` check would false-green
-    here, because an earlier run's success line survives a later run's
-    failure.
-  - `{ kind: "json-field", path, value }` — file parses as JSON and the
-    dotted `path` resolves to exactly `value`.
-- **`escalation`** — an array drawn from `["notification",
-  "vault-note"]`. Both shipped channels are enabled on all five
-  example routines; there's no "off" option today — a routine either
-  escalates through the channels it lists or (if the array is empty)
-  fails silently except in the runlog, which is rarely what you want.
+Artifact predicates all require a present, fresh artifact:
 
-A run isn't "done" until the runner sees a passing `checkArtifact()`
-result for the routine it resolved — an exit-0 `claude` process that
-never wrote the expected artifact is a **failure**, not a success. This
-is deliberate: it's the whole reason routines exist instead of a bare
-cron job piping into `claude -p`.
+| Predicate | Additional requirement |
+|---|---|
+| `{kind: "exists"}` | None. |
+| `{kind: "contains", marker}` | Contains the marker after date/runId/vault substitution. |
+| `{kind: "last-marker", success, failures}` | The last terminal marker contains success; a failure marker or no terminal marker fails. |
+| `{kind: "json-field", path, value}` | Parses as JSON and the dotted path equals value. |
+
+Use `last-marker` for append-only run logs: whole-file `contains` could pass on
+an earlier success surviving a later failure. A routine completes only when
+`checkArtifact()` passes, even if its child exited 0.
 
 ## `workflow-audit-weekly`: transcript mining with queue-mode proposals
 
-This routine mines transcripts from the last 7 days, clusters repeated tool-use patterns, judges them as skill candidates, and writes any `propose` verdicts as queue entries in the dashboard approval queue. It runs in **queue-mode mandatory**: in-session skill creation is forbidden, and every proposal appears as a queue entry awaiting the owner's Approve click, never auto-built.
+The routine mines seven days of transcripts, groups repeated tool-use patterns
+and writes `propose` verdicts to the dashboard approval queue. **Queue mode is
+mandatory**: no in-session skill creation; every proposal waits for the owner's
+Approve click.
 
-The routine's run note lives at `~/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md` and records `proposals_written: <N>` (count of queue entries actually written this run). The artifact gate checks for the completion marker `## [{date}] workflow-audit complete`, which the routine emits **only** if it finishes cleanly **and** `proposals_written == proposals_attempted` (no queue write failures). A week with zero proposals (`proposals_written: 0` with no failures) is a **successful run** — the marker is emitted and the gate passes. A crash, or a shortfall where some proposals failed to write, causes the marker to be omitted and the gate to fail.
-
-The 8-day artifact-gate freshness window (`maxAgeSeconds: 691200`) provides catch-up grace for a run that fires late (e.g. the machine was asleep at the scheduled time) — a run inside that window still passes the gate. Read `proposals_written: 0` plainly: no repeated patterns reached the proposal threshold this week, and zero proposals is not a failure or a request to lower the threshold — it's the expected norm in a healthy workflow. Report it as a green, completed run just like any other passing gate.
+Its note, `~/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md`,
+records `proposals_written: <N>`. The gate checks
+`## [{date}] workflow-audit complete`, emitted only after clean completion with
+`proposals_written == proposals_attempted`. A crash or failed queue write omits
+the marker and fails. Zero attempted/written proposals is a green completed run;
+it is expected in a healthy workflow, not a reason to lower the proposal threshold.
+The 691200-second freshness window gives late weekly runs eight-day catch-up grace.
 
 ## `sync-docs-nightly`: self-merging documentation drift fixer
 
-Every night, this routine's skill (`skills/docs-sync/SKILL.md`) audits
-the repo's git-tracked documentation (`README.md`, `AGENTS.md`,
-`CLAUDE.md`, tracked `docs/*.md`) for drift against the actual codebase,
-using `/coderails:sync-docs`'s own audit. If nothing needs fixing, it
-logs `no-drift` and stops — no branch, no PR — before any git state is
-touched, which keeps a healthy night from ever producing an empty or
-no-op PR. If drift is found, it fixes it and drives the fix through the
-full gate chain (task-evals frozen before the edit, a
-`git diff origin/main...HEAD --name-status` manifest assertion — three-dot,
-because a sibling PR merging into `main` mid-run must not make a clean
-branch look contaminated — review, post-review, post-evals, merge) and
-merges its own PR with no human in the loop.
+`skills/docs-sync/SKILL.md` invokes the `/coderails:sync-docs` audit against
+tracked documentation and actual source. No drift means `no-drift`, no branch
+and no PR before changing Git state. Drift triggers the complete delivery chain:
+freeze task evals before editing, check the manifest, push, review, post review,
+post evals and merge. The routine's intended flow merges its own PR without a
+human step; configured publication/authority/integrity checks can still refuse it.
 
-It replaces the former `sync-docs-weekly` routine, whose
-`foreignSkillPath` pointed at a path under `~/.claude/skills/` that
-never existed (the real skill lives in-repo), and `loadConfig()`'s own
-validator only checks that `foreignSkillPath` is a non-empty absolute
-string, never that the path exists on disk — so the broken config
-loaded clean. The routine's escalation machinery itself worked as
-designed: it ran green on 2026-07-08, then correctly escalated a red
-`skill-missing` run via vault-note on 2026-07-15
-(`dashboard-runs/sync-docs-weekly.md`). The actual defect was that the
-dead path then sat unfixed for 9 days, because that escalation landed
-on a channel — a vault run-note nobody was reading — rather than
-anywhere the owner would actually see it. `sync-docs-nightly` needs no
-`foreignSkillPath` at all: its skill ships in-repo, same as
-`loop-retro-promotion`.
+The manifest uses `git diff origin/main...HEAD --name-status`: three dots avoid
+treating a sibling PR's intervening merge as this branch's changes. Changes must
+be git-tracked `.md` files. Any other path (hooks, scripts, settings or code)
+aborts by closing any opened PR and cleaning up the current local branch; the
+remote branch stays intact.
 
-Its manifest is hard-scoped to git-tracked `.md` files. If the diff ever
-contains anything else — a hook script, `scripts/`, `.claude/settings.json`,
-any code — the skill aborts with cleanup (closes the PR if one was
-opened, deletes the branch locally and on the remote) rather than
-warning and continuing.
+The self-governance deny-list also rejects `skills/**/SKILL.md` (including this
+routine), `AGENTS.md`, `CLAUDE.md`, `docs/routines.md` and `.claude/**`.
+Report drift there; **do not fix it through this routine**. The list is data in
+`policy/docs-sync.policy.json`, enforced by `routine_run.py`'s manifest check.
+The Codex policy is a byte mirror and also names `.claude/**`, not `.codex/**`.
+These same-user editable controls reduce self-authored governance risk without
+providing an independent security boundary.
 
-**The manifest check also carries a self-governance deny-list**, not
-just a file-extension check: `skills/**/SKILL.md` (including this
-routine's own), `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`, and
-anything under `.claude/` abort the run the same way a non-`.md` path
-does, even though every one of them IS `.md`. Without this, the routine
-could legally "fix" its own governing contract — every subsequent night
-would then run from a self-weakened rulebook, and the one entity
-authoring the edit is the same one that reviews and merges it
-headlessly. A drift finding against one of these files is reported,
-never fixed, by this routine. **Be clear about the limit:** this
-deny-list lives in the skill's own prompt and is honoured inside
-`claude -p`, where `PreToolUse` hooks do not fire (see the security
-warning below) — it reduces the risk of a self-authored governance edit,
-it does not eliminate it the way a hook-level or server-side check
-would.
+Both notification and vault-note escalation remain enabled. Look at the transient
+macOS notification, `dashboard-runs/sync-docs.md` history, then the routine log's
+`abort=`/`refused=` lines. Aborts/refusals retain their reason in the note and
+log; there is no separate dashboard alert or failed-run PR comment.
 
-**Failure visibility.** This routine's config keeps both shipped
-escalation channels (`["notification", "vault-note"]`) — no new
-notification infrastructure was built for it. What the skill itself
-additionally guarantees: any abort-with-cleanup or gate refusal writes
-its reason into the run-note (the vault-note escalation channel above)
-**and** appends a durable, greppable marker line (`abort=<reason>` or
-`refused=<gate>`) to this routine's own run log, so a later audit can
-find every failed night without replaying the whole log. Concretely,
-where a human should look after this routine has been running
-unattended for a while: the macOS notification (transient, easy to
-miss), then `dashboard-runs/sync-docs.md` (the vault-note history,
-one entry per run), then the run log's `abort=`/`refused=` lines for a
-grep-able summary across many nights at once. There is no dashboard
-alert and no PR comment for a failed run — those two channels are the
-whole surface.
-
-**Security note.** See the security warning below —
-`sync-docs-nightly` is the **second** routine in this repo (after
-`loop-retro-promotion-weekly`) to use a non-`read-only` button profile
-(`bypass`). Its mitigation is the same shape as that routine's: no hook
-protects a `claude -p` run, so the entire merge rail is the manifest
-lock (docs-only, three-dot-scoped) plus `scripts/merge.py`'s own
-script-internal artifact gates and `/pr-review-toolkit:review-pr` — not
-any hook or server-side check.
+This replaces `sync-docs-weekly`, whose nonexistent external skill path still
+passed config validation (absolute/nonempty is checked there; existence is checked
+by the runner). The July 2026 rollout recorded a red `skill-missing` vault note
+after an earlier green run, then nine days before repair. That historical incident
+explains the visibility rules; it is not evidence of current installed behavior.
+The current skill ships in-repo and needs no `foreignSkillPath`.
 
 ## `loop-retro-promotion-weekly`: a dormant-by-default routine
 
-Unlike the other three read-only routines, `loop-retro-promotion-weekly`'s own
-skill (`skills/loop-retro-promotion/SKILL.md`) evaluates a 3-part
-graduation predicate every time it runs, before doing anything else: (1)
-at least 10 distinct completed `retro.json` records have owned validated progress and matching source hashes, (2)
-the typed ledger `orders.json` has at least one order whose `last_recurred` differs
-from its `created` date (one lesson has recurred at least once), and (3)
-at least one order has `status: decayed` (one lesson has
-completed a full create → recur → decay lifecycle). The routine evaluates
-this with `scripts/lib/lessons.py --dir <repo-key dir> --session <known native caller id> predicate` (code, not
-prose; the same result also lists the promotion candidates). Until all three
-hold, the routine is dormant.
+The run first resolves its repo-key directory and calls `routine_run.py begin`.
+This writes a provisional `run_incomplete` row. Before mining, branching or
+editing, it calls `scripts/lib/lessons.py predicate` with the caller's native
+session id. The typed predicate requires at least ten distinct completed
+retros with owned progress and matching source hashes, one recurred order in
+`orders.json`, and one order with `status: decayed`.
 
-Only a successful predicate read can declare dormancy. Refused or degraded reads are unknown; report their reason
-and leave a failure marker, never a `run=ok` marker. Schema3 history requires the matching `retro_check` validator.
+A refused read (exit 2) ends with `RR abort predicate_refused`. A degraded
+read (exit 3) ends with `predicate_degraded`. Malformed output or another
+unexpected result ends with `predicate_unavailable`. These results are
+unknown; none can declare a dormant success. Schema 3 history requires its
+matching `retro_check` validator. Do not count files or read a generated
+Markdown view as a substitute for the typed predicate.
 
-A dormant run appends its predicate line to `promotion-runs.log`
-(`<ISO8601> predicate=unmet retros=<n> lifecycle=<0|1> decay=<0|1>`),
-then appends a `run=ok` terminal marker and stops — no branch, no PR, no
-gate chain. That `run=ok` is what passes the gate, and it is written
-deliberately: dormancy is the expected steady state for a long while
-after this routine ships, not a failure, so the routine shouldn't
-escalate every week just because the graduation bar hasn't been met yet.
+For a valid unmet result, append the predicate line to `promotion-runs.log`,
+then run `RR finish no_drift`. It writes the terminal `run=ok` marker. The
+routine opens no branch or PR and runs no delivery gate. Dormancy is the
+expected steady state.
 
-The gate is a `last-marker` predicate (`success: "run=ok"`, `failures:
-["abort=", "delivery=started"]`), not `exists` — `promotion-runs.log` is
-append-only, so a file-present check would keep reading green off an old
-run's line forever. Keying on the last terminal marker makes each run's
-own outcome decide. `delivery=started` is a failure marker because the
-met-path writes it immediately after `predicate=met`, before mining: any
-death anywhere in mining, drafting, or delivery leaves it as the last
-marker and the gate reads that run RED, without having to enumerate every
-failure exit.
+For a valid met result, the provisional `run_incomplete` row stays in place
+through mining, drafting and delivery. A stopped run remains red until all
+gates pass and `RR finish ok` writes the terminal success row. Promotion may
+change only `skills/agentic-loop/learned-failure-modes.md`; the manifest,
+review and merge gates check that scope. The source-bound predicate does not
+by itself prove that a full promotion run has completed.
 
-**Its full self-merge chain has never actually fired.** As of this
-writing `promotion-runs.log` holds exactly one line
-(`2026-07-12T23:32:06Z predicate=unmet retros=14 lifecycle=1 decay=0`),
-which predates the `run=ok` terminal-marker write described above and so
-carries no marker of its own
-— the predicate has stayed unmet since this routine shipped, so it has
-never gone past step 1 to open, review, or merge a PR headlessly.
-`sync-docs-nightly` (above) follows this routine's pattern — same
-gate-chain shape, same manifest-lock idea — but that makes
-`sync-docs-nightly` the **first** actual production exercise of the
-full headless chain (task-evals → push → review-pr → post-review →
-post-evals → merge inside one `claude -p` run), not a repeat of a
-proven path. Treat the pattern as sound by construction, not as
-battle-tested.
+## Routine state machine and event log (`docs-sync`, `loop-retro-promotion`)
 
-**Security note.** This was the first routine in this repo to use a
-non-`read-only` button profile (`bypass`, i.e.
-`--dangerously-skip-permissions` — see the security warning below);
-`sync-docs-nightly` (above) is the second. Once
-the predicate graduates, the routine opens and merges its own PR with no
-human in the loop, and — as that warning documents — `PreToolUse` hooks
-do not fire under `claude -p`, so `test_gate`/`enforce_pr_workflow` do
-not protect this run either. Its merge rail is entirely
-`scripts/merge.py`'s own script-internal artifact gates, plus
-`/pr-review-toolkit:review-pr` and the manifest assertion the skill
-itself runs before pushing (abort-with-cleanup if the diff isn't exactly
-`skills/agentic-loop/learned-failure-modes.md`) — no hook and no
-server-side check backs any of this up. This repo deliberately does not
-enable GitHub branch protection (2026-07-15) — that's a standing
-decision, not a TODO — so this routine's merge rail rests entirely, by
-design, on the script-internal gates named above.
+Both delivery routines use `scripts/routine_run.py` (independent Codex copy:
+`packages/codex/scripts/`). The script needs no hooks. Each `routines/*.json`
+spec supplies policy, log path, cleanup, closed reason codes and ordered stages:
+`fetch_branch`, `evals_frozen`, `edit_made`, `manifest_check`, `push`, `review`,
+`post_review`, `post_evals`, `merge`. Use the provider's SKILL for the exact chain.
+
+Commands are `begin`, `stage NAME`, `run-gate STAGE -- ARGV`, `abort CODE`,
+`refuse GATE` and `finish ok|no_drift`. Docs-sync's default is
+`~/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log` (Codex:
+`~/.codex/coderails-dashboard/routines/docs-sync/run-{date}.log`).
+Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
+
+- `begin` writes state and a provisional `run_incomplete` row, deriving
+  `abort=incomplete-run`. A mid-sequence exit is red and distinguishable from
+  never-started. `finish ok` requires every stage; `finish no_drift` requires
+  none started. Only a valid finish emits `run_ok`.
+- Stage order is strict: a repeated, skipped or out-of-order stage aborts with
+  `stage_out_of_order`. Gate stages must use `run-gate`.
+- `stage manifest_check` executes `scripts/diff_manifest.py --policy <spec policy>`.
+  Violations abort; dirty/untracked work fails with `dirty_worktree`.
+  `run-gate push` rechecks the manifest before executing its command.
+- Gate argv must resolve to the configured script under the provider's shipped
+  `scripts/` directory, directly or through the active Python interpreter.
+  Same-basename files elsewhere are refused with `gate_argv_not_allowed`.
+- A nonzero gate exit becomes `run_refused` for that gate, including a command
+  that cannot spawn (`gate_spawn_failed` on stderr).
+- `abort`, `refuse` and failed checks clean up once using Git/gh: close the PR
+  and delete the current local branch, never a remote or default branch. No
+  `rm`. Cleanup proceeds only while still on the branch recorded at
+  `fetch_branch`; a changed checkout is left untouched. Failed cleanup prints
+  `cleanup_failed: <step>`; a dirty tree is not force-switched.
+- `begin` refuses an open run even across midnight, or a same-day abort/refusal,
+  unless `--new`. Explicit replacement first closes an open previous id/log
+  with `run_abort incomplete-run`, then starts today's run in today's log.
+  State includes the routine name; another routine is refused with
+  `routine_mismatch`. State is keyed by the log template, with paths pinned
+  at begin so a run crossing midnight keeps its log.
+- State uses atomic replacement. A state flock covers load/handler/child gate/
+  cleanup; the separate JSONL flock is acquired inside it, never in reverse.
+
+`routine_log.py emit --log PATH --run-id ID --routine NAME --stage S --outcome O
+[--reason-code C]` appends JSONL
+`{v,ts,run_id,routine,stage,outcome,reason_code}` and a derived human-log marker
+under its log lock. Outcomes are `stage_ok`, `run_ok`, `run_abort`,
+`run_refused`, `run_incomplete`; reason codes are closed per routine. Unknown
+outcomes/codes exit 2 and append nothing. The human marker is `run=ok`,
+`abort=<code>`, `refused=<gate>`, `abort=incomplete-run` or `stage=<name>`,
+so the existing last-marker predicate is unchanged. Both files open before either
+append. A failed write returns `log_unwritable` without advancing/ending state.
+The files are **not a transaction**: write/close errors or a crash can leave
+partial output. Inspect both logs and persisted state after a write error.
+
+After a child exit, including exit 0, `sweep.ts`/`timeoutMarker.ts` check JSONL
+for a terminal `run_ok`, `run_abort` or `run_refused` row. Without one they
+append `run_abort runner_exit_no_terminal` and its human `abort=` marker.
+An agent that never calls the state machine is caught by the runner check;
+a begun run also has its provisional row. Invocation itself is not forced.
+
+The runner captures the existing JSONL bytes before child launch and accepts
+only appended rows with that prefix intact. A changed prefix, read/write error,
+missing terminal, abort or refusal returns failed evidence and cannot pass via
+an old human `run=ok`. It pins the artifact date/context for that invocation.
+Among new rows it chooses the latest run id, falling back to its own id; it does
+not hand an id to the child. Fallback appends do not take the Python log lock or
+perform branch/PR cleanup. Concurrent producers remain an integration limit.
+An editable state/log, redirected `--log`, or manual `routine_log.py emit` can
+forge success under the same user. This is a cooperating-agent safeguard.
+
+There is no separate routine-state off switch. Events emit non-authoritative
+`routine/<outcome>/<reason_code>` trace/counter rows; see
+[workflow-gates-measurement.md](workflow-gates-measurement.md) and the RUNBOOK
+entry “A routine run ended incomplete, aborted or refused.” The runner is an
+integrity-review policy path. GitHub Actions checks the current head SHA
+before a merge; the required rule must be active on `main`.
 
 ## Install / uninstall
 
-Two launchd jobs drive the runner, both installed by
-`launchd/install_routines.py` (idempotent — safe to re-run):
+Two jobs are managed by the idempotent `launchd/install_routines.py`:
 
-- **`com.coderails.routine-sweeper.calendar`** — fires daily at 03:00,
-  runs `skills/dashboard/runner/bin/seed_and_sweep.py`, which seeds any
-  due routines into `queue/` and then sweeps. The seed step's own exit
-  code never blocks the sweep that follows it — a seeding failure still
-  lets any already-queued (e.g. button-pressed) intents get processed.
-- **`com.coderails.routine-sweeper.watch`** — fires on any write under
-  `~/.claude/coderails-dashboard/queue`, runs
-  `skills/dashboard/runner/bin/sweeper.py` (sweep only, no seed step —
-  a button press already wrote its own intent, nothing to seed).
+| Job | Trigger and action |
+|---|---|
+| `com.coderails.routine-sweeper.calendar` | Daily 03:00; `runner/bin/seed_and_sweep.py` seeds due intents then sweeps. Seed failure never prevents sweeping queued work. |
+| `com.coderails.routine-sweeper.watch` | Queue-directory writes; `runner/bin/sweeper.py` sweeps without seeding. |
+
+Both bin paths are under `skills/dashboard/`. Operator commands:
 
 ```bash
-launchd/install_routines.py     # copy both plists into ~/Library/LaunchAgents and bootstrap into gui/$UID
-launchd/uninstall_routines.py   # bootout both plists and remove the LaunchAgents copies
+launchd/install_routines.py
+launchd/uninstall_routines.py
 ```
 
-Install **copies** each plist into `~/Library/LaunchAgents/` and bootstraps
-from that copy, not from the repo path. This is what makes the jobs survive a
-reboot: a `launchctl bootstrap` from an arbitrary path lasts only until
-logout/reboot, and launchd only auto-loads plists that live in
-`~/Library/LaunchAgents/`. Bootstrapping straight from the repo directory
-silently unloads the entire routines system on the next reboot — observed live
-on 2026-07-08, when the 03:00 run succeeded, the machine rebooted at 07:34, and
-afterwards no `com.coderails` jobs were loaded and no copies existed in
-`~/Library/LaunchAgents/`. Uninstall boots out both labels and removes those
-copies.
+Install copies plists to `~/Library/LaunchAgents/` and bootstraps those copies
+in `gui/$UID`; uninstall boots out the labels and removes the copies. Launchd
+auto-loads only those installed copies after reboot. Bootstrapping a repo-path
+plist lasts only until logout/reboot; the July 2026 rollout exposed this failure.
 
-Both plists hard-code this machine's absolute paths (checkout location,
-log path, `/opt/homebrew/bin/node`) at authoring time — they are **not
-portable** to a different checkout location or a different user's
-machine without hand-editing the plist files first. `launchd`'s
-environment carries no `PATH` (confirmed via `launchctl print
-gui/$UID`), which is why both bin scripts and the plists use absolute
-paths throughout rather than relying on a shell's PATH resolution.
+Plists embed this machine's checkout/log paths and `/opt/homebrew/bin/node`.
+Edit them for another checkout/user/machine. Launchd has no `PATH` (the historical
+check was `launchctl print gui/$UID`), so the absolute paths are required.
 
 ## Where to look when something fails
 
-Four places, roughest signal to most precise:
-
-1. **`~/.claude/coderails-dashboard/routines/sweeper.log`** — both
-   plists' stdout/stderr. First stop for "did the job even run" —
-   launchd scheduling failures, node crashes before a `SweepResult`
-   exists, and the seed step's own stderr (seed failures print to
-   stderr but don't block the sweep) all land here.
-2. **`~/.claude/coderails-dashboard/runs/runs.jsonl`** — one JSONL
-   record per run (start line, then a finish line with `exitCode` and
-   `endedAt` folded in), across every button and routine. This is the
-   ground truth for "did this run, when, with what argv, what exit
-   code" — read via `readRuns()`, the same reader the merged dashboard
-   app itself uses. Every record carries an `outputPath` field, but only
-   a dashboard-triggered button run (via `POST /run` in
-   `skills/dashboard/app/src/app/api/run/route.ts`) actually writes its
-   captured stdout/stderr there as it streams, and exposes it via `GET
-   /api/run/output` and the COMMAND DECK's Run Output viewer. A
-   **routine** run (the scheduler's `sweep.ts`) still only computes and
-   stores the path — it captures stdout/stderr in memory via
-   `runClaudeImpl` but never writes them to `outputPath`, so reading a
-   routine's `outputPath` gets you a path to a file that doesn't exist.
-   For a routine's captured output, this runlog is not yet the place to
-   look — see the `sweeper.log` and vault-note entries above and below
-   instead.
-3. **Vault run notes** — `<first wikiPath>/dashboard-runs/<routine or
-   button name>.md`, one file per routine/button, append-only, one `##
-   [YYYY-MM-DD] run <id> — green|red` section per run with a reason on
-   red. This is the human-readable failure history and is written for
-   both routine successes (green) and failures (red) — it is not just
-   an error log. **This is a distinct vault note type from the wiki
-   schema in `AGENTS.md`** (`type: routine-run`, not one of
-   `command|hook|skill|design|investigation|source`) — it is not
-   ingested by `/wiki-ingest` and does not follow the wiki page-format
-   contract; treat it as operational output, not a wiki page. Note the
-   `dashboard-runs/` folder holds two note conventions side by side: the
-   runner's `writeRunNote` (described above) writes one rolling
-   `<routine>.md` per routine with `type: routine-run` frontmatter, while
-   the Obsidian plugin's direct-exec path (pressing a button in the
-   vault) writes a separate `<YYYY-MM-DD>-<button>.md` per run, with
-   `status: running|done|failed` frontmatter and no `type` field at all.
-4. **macOS notification** — fired synchronously on every escalation via
-   `osascript`, titled `Routine failed: <routine name>`, body
-   `<failure class>: <reason>`. Transient — if you miss it, the vault
-   note and runlog are the durable record.
+1. **`~/.claude/coderails-dashboard/routines/sweeper.log`**: both plists'
+   stdout/stderr, scheduler failures, Node crashes and seed failures.
+2. **`~/.claude/coderails-dashboard/runs/runs.jsonl`**: start/finish records across
+   buttons and routines with argv, cwd, `startedAt`, `endedAt`, `exitCode` and
+   `outputPath`; consumed by `readRuns()` and the dashboard. The runner passes
+   `outputPath` to execution for stdout/stderr capture. The dashboard button
+   endpoint is `skills/dashboard/app/src/app/api/run/route.ts`, and
+   `GET /api/run/output` serves output to COMMAND DECK's Run Output viewer.
+   Missing/failed capture still requires checking sweeper output and vault notes.
+3. **Vault notes**: `<first wikiPath>/dashboard-runs/<routine or button>.md`,
+   append-only `## [YYYY-MM-DD] run <id> — green|red` entries, including success
+   and failure reasons. The runner's `writeRunNote` uses `type: routine-run`;
+   these are operational output, excluded from wiki ingest/lint/page conventions.
+   Obsidian direct execution instead writes `<YYYY-MM-DD>-<button>.md` with
+   `status: running|done|failed` and no type. Treat both forms as non-wiki.
+4. **macOS notification**: synchronous `osascript`, title
+   `Routine failed: <routine name>`, body `<failure class>: <reason>`.
+   Notifications are transient; notes/run records provide durable history.
 
 ## Escalation taxonomy
 
-Every escalation carries a `failureClass`, always paired with a `reason`
-string, in both the notification body and the vault note:
+Every escalation carries `failureClass` and `reason` in notification and note.
 
-| Failure class | Fires when |
+| Failure class | Trigger |
 |---|---|
-| `skill-missing` | The routine's `foreignSkillPath` doesn't exist on disk — checked before spawning `claude` at all. |
-| `claude-spawn-failed` | `resolveClaudePath()` found no `claude` binary, or `execFile` itself failed to spawn the process (e.g. bad `cwd`). The process never started. |
-| `exec-error` | `claude` spawned and exited non-zero, or the process was killed for exceeding the 30-minute timeout (the reason text says "timeout" explicitly in that case). |
-| `artifact-gate-failed` | `claude` exited 0 but `checkArtifact()` failed — missing, stale, or predicate mismatch. The routine "succeeded" by exit code and still failed. |
-| `runner-error` | A failure in the runner's own bookkeeping around a claimed intent (or a seed-time misconfiguration — unrecognised cadence, unresolvable `buttonRef` — see below), not the routine's execution itself. Also used for orphan recovery (a `processing/` file abandoned by a crashed sweep, reclaimed after 60 minutes). |
+| `skill-missing` | Referenced external skill is absent; child has not spawned. |
+| `claude-spawn-failed` | No binary or failed spawn, including bad cwd. |
+| `exec-error` | Spawned child exits nonzero or exceeds the 30-minute timeout; timeout is explicit in reason. |
+| `artifact-gate-failed` | Child exits 0 but artifact is missing, stale or fails its predicate. |
+| `runner-error` | Runner bookkeeping, unknown cadence, unresolved button, or recovery of processing work abandoned for 60 minutes. |
 
-**No deduplication.** Escalation has no "already told you about this"
-memory. A permanently misconfigured routine (bad cadence, dangling
-`buttonRef`) re-escalates in full on every calendar fire, forever. This
-is deliberate — a silently-swallowed misconfiguration is worse than
-repeated noise, and dedup adds state (what counts as "the same"
-failure, when to expire it) not worth building until the noise itself
-becomes the problem in practice.
+Escalation has no deduplication. Bad cadence/dangling buttons are reported on every
+calendar fire; do not mistake repeated notices for distinct root causes.
 
 ## Security warning: bypass-profile routines run outside the hook safety net
 
-**Empirically verified in this repo (2026-07-07):** under `claude -p`
-(the non-interactive mode the runner always uses), `SessionStart`,
-`UserPromptSubmit`, and `Stop` hooks fire normally, but **`PreToolUse`
-hooks do not fire**. This was confirmed directly: with a `test_gate`
-trigger file configured to force a deny, a `-p` invocation ran `git
-commit` and it succeeded — the gate never engaged.
+The July 7, 2026 Claude `-p` probe observed `SessionStart`,
+`UserPromptSubmit` and `Stop`, but no `PreToolUse`: a forced test-gate denial
+did not stop a commit. This is historical evidence, not a fresh activation check.
+Consequently the headless contract does not rely on `test_gate` or
+`enforce_pr_workflow` to protect routine actions.
 
-Concretely, `test_gate` and `enforce_pr_workflow` — the hooks that
-block untested commits and direct pushes to `main` in an interactive
-session — **do not protect a routine run**. A routine configured with
-`"profile": "bypass"` on its button (via `--dangerously-skip-permissions`,
-see `buildArgv` in `skills/dashboard/app/src/lib/argv.ts`) runs headless
-with neither the CLI's own tool allowlist (a `read-only`-profile
-routine gets `--allowedTools Read Grep Glob`; `bypass` gets no
-allowlist at all) nor the hook-based safety net an interactive terminal
-session gets.
+`bypass` selects `--dangerously-skip-permissions` through `buildArgv` in
+`skills/dashboard/app/src/lib/argv.ts`. It has no tool allowlist; `read-only`
+uses `--allowedTools Read Grep Glob`. **Ship read-only routines unless writing
+and execution have been explicitly accepted.** Three examples are read-only;
+docs-sync and retro-promotion are the two deliberate bypass exceptions.
 
-**Ship read-only routines unless you have explicitly accepted this.**
-Three of the five shipped example routines use `"profile": "read-only"`
-for exactly this reason. `sync-docs-nightly` and
-`loop-retro-promotion-weekly` are
-the deliberate, documented exceptions — see the sections above for what
-backs up each one's merge instead of a hook. If a routine's skill needs to
-write files or run commands, understand that its actions are gated only
-by the artifact check after the fact, not by any hook before the fact.
+Their merge rail is the scripted manifest/publication checks and review artifacts,
+subject to the same-user limits above. General branch protection remains disabled
+by the standing July 15, 2026 decision. The separate configured `integrity-review`
+mechanism/ruleset is the sole opt-in exception; do not assume it is installed or
+replace it with another route. See [INTEGRITY-GATE.md](INTEGRITY-GATE.md).
+Native Codex hook trust and installed enforcement need their own verification.
 
-**Write surfaces for unattended routines.** `workflow-audit-weekly` runs
-headless in `read-only` profile; its write surface is restricted to two
-directories: `~/.claude/coderails-dashboard/routines/workflow-audit/`
-(its own run note, containing `proposals_written: N` and optionally the
-completion marker) and `~/.claude/coderails-dashboard/approvals/`
-(queue entries for each proposed skill, carrying only the judge's D2-whitelisted
-fields, never full transcript content). The scan's privacy boundary — structural
-extraction only, no full-text content — is enforced at the `scan_transcripts.py`
-level and is unchanged by this routine.
+Workflow-audit's read-only write surfaces are restricted to
+`~/.claude/coderails-dashboard/routines/workflow-audit/` (note/count/marker) and
+`~/.claude/coderails-dashboard/approvals/` (queue entries with D2-whitelisted fields).
+`scan_transcripts.py` enforces structural extraction only: no full transcript
+content in proposals. Each proposal still requires owner approval.
 
 ## See also
 
-- [`skills/dashboard/lib/README.md`](../skills/dashboard/lib/README.md)
-  — the `Intent`/`RoutineDef` schema contract and queue lifecycle in
-  full.
-- [`skills/memory-consolidation/SKILL.md`](../skills/memory-consolidation/SKILL.md)
-  — one of the five shipped routines; a good template for a routine
-  whose own skill writes its artifact-gate report natively.
-- [`skills/docs-sync/SKILL.md`](../skills/docs-sync/SKILL.md)
-  — the fourth shipped routine; self-merging, docs-only, manifest-locked,
-  see the dedicated section above.
-- [`skills/loop-retro-promotion/SKILL.md`](../skills/loop-retro-promotion/SKILL.md)
-  — the fifth shipped routine; dormant by default, see the
-  dedicated section above for its graduation predicate and security
-  posture.
-- [`examples/dashboard-config.json`](../examples/dashboard-config.json)
-  — the full five-routine config this doc's examples are drawn from.
+- [Dashboard library contract](../skills/dashboard/lib/README.md)
+- [Memory-consolidation skill](../skills/memory-consolidation/SKILL.md)
+- [Docs-sync skill](../skills/docs-sync/SKILL.md)
+- [Loop-retro-promotion skill](../skills/loop-retro-promotion/SKILL.md)
+- [All five example routines](../examples/dashboard-config.json)

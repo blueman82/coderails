@@ -164,6 +164,8 @@
   "scripts/quality/check.py": "100755",
   "scripts/quality/quality_tools.py": "100644",
   "scripts/quality/source_kind.py": "100644",
+  "scripts/routine_log.py": "100755",
+  "scripts/routine_run.py": "100755",
   "scripts/sandbox/render_settings.py": "100755",
   "scripts/sandbox/sandbox_probe.py": "100755",
   "scripts/sandbox/spawn_sandboxed_worker.py": "100755",
