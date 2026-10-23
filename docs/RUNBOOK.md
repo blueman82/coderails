@@ -226,6 +226,14 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Limit: absent `wave_history` reads as `{}` only for a graph that never dispatched; a node holding bound
   evidence refs with no history entry still fails completion by design.
 
+## Driver mode pauses or cannot observe a worker
+
+- Use `graph.py inspect <state>` before each action. A graph with an active native wave cannot cut over. Resolve that wave with its supported native command, then run `graph.py cutover-driver <state> --session <id>` once. This writes `<state>.pre-driver` and pins the old history. Do not edit either file or switch back to native dispatch after driver evidence exists.
+- Start the foreground controller with `graph.py drive <state> --session <id> --checkout <worker-checkout>`. For a wave with multiple workers, use `--checkout-map <json-file>` to give each node a distinct retained checkout. The owner starts the first live run. Codex uses the current ChatGPT OAuth login through `codex exec`; no API key is needed.
+- `active_missing_task` means an existing pending unit has no task scope. Use `graph.py assign-unit-scope <state> --session <id> --unit <number> --scope '<task>'` while no wave is active, then run `drive` again. A root-owned control step pauses for `graph.py record-driver-control <state> --session <id> --node <id> --result-file <file>`; retain that result file.
+- `publication_required` means a successful implementation worker has left source edits for the root. Review the checkout, commit through the normal gate, open the unit's PR with the existing push authority, then run `drive` again. The controller requires a clean checkout and an OPEN PR whose head equals local HEAD before it records `done`. Review, eval and integrity evidence still govern acceptance and merge.
+- The foreground controller waits while the same wrapper is live. After interruption, run `drive` again. When process listing is denied, a restarted controller uses a fresh token and PID heartbeat from the wrapper. A missing, stale or foreign heartbeat is `unresolved`; it never authorizes a duplicate launch. Wait for the retained terminal record or investigate the preserved attempt files before retrying under the graph's retry budget.
+
 ## Diff-manifest check warned or refused
 
 For a graph unit's exact `push.py --unit N --progress PATH` command, the unit
