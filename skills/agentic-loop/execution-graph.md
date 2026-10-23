@@ -68,7 +68,7 @@ transcript parser and independently installed pure graph semantics.
 2. Run `begin-wave <path-to-progress.json>` immediately before dispatch. It
    records exactly the ready nodes as running, captures the native transcript
    cursor, stores one single-use dispatch record per node in `graph.dispatches`
-   (its closed contract: role, model_role, base_ref, manifest, disposition,
+   (its closed contract: role, model_role, base_ref, manifest, publication_command, disposition,
    lessons, write_scope, skip_phases, scope) and returns each dispatch's
    `dispatch_id`, `prompt_prefix` and `prompt_sections`. A failure means no
    dispatch is authorized; a state older than `state_minor` 2 must be converted
@@ -87,7 +87,15 @@ transcript parser and independently installed pure graph semantics.
    deploy-safety-reviewer) accept only that typed agent; other roles also accept
    `general-purpose`; anything else is `role_mismatch`. Resolution is a correct
    `begin-wave` paste, never hand-edited ownership or a substituted role. A
-   plugin agent that is not installed in the session cannot run a guarded
+   unit worker's `publication_command` names its concrete unit and resolved
+   `progress.json`; the guard checks that command against the active state
+   path. For a first push on a stacked branch, register the parent with
+   `add-unit --base-branch <parent>`; later pushes use the live PR base.
+   The push script validates those flags, the registered manifest, both paths
+   of any rename in the PR diff, and any recorded worktree before transport.
+   Historical v2 records retain
+   their original rendered sections and digest. A plugin agent that is not
+   installed in the session cannot run a guarded
    scout, and the sandboxed Bash launcher carries no agent type (handoff H3).
 4. Collect every node's result before recording. Run
    `record-wave <path-to-progress.json> '{"wave_id":"<wave>","results":{"<node>":{"outcome":"done","evidence":"<artifact result>"}}}'`

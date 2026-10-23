@@ -62,14 +62,14 @@ def wave_record(state: dict[str, Any], node_id: str) -> tuple[str, dict[str, Any
     )
 
 
-def add_records(proposed: dict[str, Any], base: str, mode: str) -> None:
+def add_records(proposed: dict[str, Any], base: str, mode: str, path: Path) -> None:
     """Store one dispatch record (contract, sections digest, single-use slot) per node of the just-opened wave."""
     graph = proposed["graph"]
     wave = graph["active_wave"]
     for node_id in wave["nodes"]:
         node = graph["nodes"][node_id]
         attempt = node["retry"]["attempts"] + node["respawn"]["generation"] + 1
-        contract = graph_contract.build_contract(proposed, node_id, base)
+        contract = graph_contract.build_contract(proposed, node_id, base, path, ROOT / "scripts/push.py")
         identifier, record = graph_contract.make_record(
             proposed, node_id, wave["wave_id"], attempt, contract, mode if contract["role"] == "loop-worker" else None
         )
@@ -130,7 +130,7 @@ def begin_wave(path: Path) -> dict[str, Any]:
             "nodes": list(active["nodes"]),
             "revision": active["revision"],
         }
-        add_records(proposed, base, mode)
+        add_records(proposed, base, mode, path)
         return proposed
 
     state = transition(path, update)
@@ -181,7 +181,8 @@ def authorize_dispatch(
         try:
             graph_contract.require_converted(state)
             request = graph_contract.parse_envelope(prompt)
-            graph_contract.check_ownership(state, request, live=True)
+            record = graph_contract.check_ownership(state, request, live=True)
+            graph_contract.require_publication(record, path, ROOT / "scripts/push.py")
             validate_dispatch_evals(path, state, request["node_id"], role == "coderails:loop-worker")
         except graph_contract.DispatchDeniedError as error:
             trace(path, state, "refused", error.code, inputs, [(None, None, None)], "authorize-dispatch")
@@ -206,6 +207,7 @@ def authorize_dispatch(
             request = graph_contract.parse_envelope(prompt)
             named[0] = request["node_id"]
             record = graph_contract.check_dispatch(current, request, prompt, live=True)
+            graph_contract.require_publication(record, path, ROOT / "scripts/push.py")
             graph_contract.assert_role(record["contract"], role, "coderails:", graph_contract.CLAUDE_TYPES)
             validate_dispatch_evals(path, current, request["node_id"], role == "coderails:loop-worker")
             used = record["authorized"]

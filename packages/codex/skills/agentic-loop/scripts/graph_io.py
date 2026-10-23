@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
+import graph_contract
 import graph_repair
 import graph_semantics
 import graph_spec
@@ -31,6 +32,7 @@ def load(path: Path) -> dict[str, Any]:
             raise GraphError("state has invalid status")
         try:
             graph_spec.check(state)
+            graph_contract.validate_dispatch_state(state)
             graph_repair.validate_records(state)
         except graph_spec.SpecError as error:
             from graph_recovery import trace  # lazy: graph_recovery is a sibling that never imports this module

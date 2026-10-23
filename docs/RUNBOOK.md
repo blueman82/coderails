@@ -228,6 +228,13 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Diff-manifest check warned or refused
 
+For a graph unit's exact `push.py --unit N --progress PATH` command, the unit
+record needs a nonempty manifest. Register `--base-branch <parent>` with
+`graph.py add-unit` before the first push of a stacked branch; once a PR exists,
+its live base must match that recorded branch. The command checks staged files
+and the complete PR diff, including both rename paths, against the unit manifest
+before transport. A recorded worktree must match the current checkout.
+
 - Symptom: `push.py` or `merge.py` prints `! diff_manifest <code>: <path>`, or refuses with `diff_manifest:<code>`
   (config `diff_manifest: enforce`). `scripts/diff_manifest.py --policy FILE` shows the same verdict without hooks.
 - Query: `trace.by_reason` for `diff-manifest/ok/diff_manifest_ok`, `diff-manifest/warned|refused/<code>` (rows are keyed by
@@ -356,8 +363,11 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   out: paste `prompt_sections` verbatim), `role_mismatch` (dispatch a guarded scout as `coderails:<role>` / Codex
   `agent_type: <role>`; other roles accept their own type or `general-purpose` on Claude, and their own type or omitted
   `agent_type` on Codex; a different named native role such as `explorer` is refused),
-  `dispatch_state_unconverted` (`state_minor` < 2: run `graph.py convert --check` then `convert`; it refuses while a wave
-  is open, `convert_refused_active_wave_in_flight`, so finish or `recover-wave` first), `dispatch_unauthorized` (Claude
+  `dispatch_state_unconverted` (`state_minor` < 2 or a malformed current-minor contract cutoff: run
+  `graph.py convert --check` then `convert` for old state; inspect malformed current state without editing frozen evidence;
+  conversion refuses while a wave is open, `convert_refused_active_wave_in_flight`),
+  `dispatch_publication_mismatch` (the stored unit worker command names a different unit, push script or progress path:
+  use the exact `publication_command` returned by `begin-wave`), `dispatch_unauthorized` (Claude
   `record-wave` / completion found a bound spawn whose record the PreToolUse guard never consumed, i.e. a spawn the hook did
   not see: re-dispatch it through the guard via `recover-wave`). A Claude graph-bound `Agent` call with no
   `subagent_type` is refused as `role_mismatch` before native dispatch.

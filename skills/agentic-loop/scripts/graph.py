@@ -73,6 +73,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--depends-on", action="append", default=[])
             command.add_argument("--join", action="store_true")
             command.add_argument("--manifest", action="append", default=[])
+            command.add_argument("--base-branch", help="remote branch used for first stacked publication")
             command.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
             command.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
             command.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
@@ -238,7 +239,7 @@ def main() -> int:
                 args.depends_on,
                 args.join,
                 args.manifest,
-                {**fields, "scope": args.scope},
+                {**fields, "scope": args.scope, "base_branch": args.base_branch},
             )
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)

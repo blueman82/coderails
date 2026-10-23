@@ -39,7 +39,9 @@ def begin_wave(path: Path) -> dict[str, Any]:
         }
         dispatches: list[dict[str, Any]] = []
         for node_id in wave["nodes"]:
-            contract = graph_contract.build_contract(proposed, node_id, base)
+            contract = graph_contract.build_contract(
+                proposed, node_id, base, path, Path(__file__).resolve().parents[3] / "scripts/push.py"
+            )
             mode = "native" if contract["role"] == "loop-worker" else None
             attempt = next_attempt(proposed["graph"]["nodes"][node_id])
             identifier, record = graph_contract.make_record(proposed, node_id, wave["wave_id"], attempt, contract, mode)
@@ -137,6 +139,9 @@ def authorize_dispatch(
                         "dispatch_unknown_id", "--dispatch-id is not the envelope's"
                     )
                 record = graph_contract.check_ownership(state, request, live=True)
+                graph_contract.require_publication(
+                    record, path, Path(__file__).resolve().parents[3] / "scripts/push.py"
+                )
                 if record.get("task_name") != task:
                     raise graph_contract.DispatchDeniedError(
                         "dispatch_foreign", "task_name is not the record's task name"
@@ -165,6 +170,7 @@ def authorize_dispatch(
             if request["dispatch_id"] != dispatch_id:
                 raise graph_contract.DispatchDeniedError("dispatch_unknown_id", "--dispatch-id is not the envelope's")
             record = graph_contract.check_dispatch(state, request, message, live=True)
+            graph_contract.require_publication(record, path, Path(__file__).resolve().parents[3] / "scripts/push.py")
             if record.get("task_name") != task:
                 raise graph_contract.DispatchDeniedError("dispatch_foreign", "task_name is not the record's task name")
             graph_contract.assert_role(record["contract"], agent_type, "", None)

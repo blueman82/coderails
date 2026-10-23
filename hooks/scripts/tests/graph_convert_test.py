@@ -157,6 +157,18 @@ class GraphConvertTests(unittest.TestCase):
             self.assertEqual(case.path.read_bytes(), before)
             self.assertFalse(case.backup.exists())
 
+    def test_current_minor_missing_contract_stamp_is_not_a_no_op(self) -> None:
+        """A current minor with no contract cutoff cannot silently bypass revalidation."""
+        for case in self.cases:
+            current, _ = graph_convert.convert(v1_state(), SESSION)
+            del current["graph"]["contract_from_revision"]
+            case.write(current)
+            before = case.path.read_bytes()
+            result = case.graph("convert")
+            self.assertNotEqual(result.returncode, 0, case.name)
+            self.assertIn("dispatch_state_unconverted", result.stderr)
+            self.assertEqual(case.path.read_bytes(), before)
+
     def test_every_ambiguity_is_refused_with_bytes_unchanged(self) -> None:
         """Unknown schema, future or bad minor, in-flight wave, torn stops or units and a foreign session all refuse."""
         for case in self.cases:

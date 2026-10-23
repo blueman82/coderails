@@ -364,6 +364,22 @@ class DispatchEnvelopeTests(unittest.TestCase):
                 self.assertNotEqual(provider.call("begin-wave").returncode, 0)
                 self.assertEqual(provider.path.read_bytes(), before)
 
+    def test_current_minor_requires_a_bounded_contract_stamp(self) -> None:
+        """A v2 state cannot evade native dispatch checks by losing or advancing the cutoff."""
+        for name in ("claude", "codex"):
+            for stamp in (None, "2", 0, 10**9):
+                with self.subTest(provider=name, stamp=stamp):
+                    provider = self.opened(name)
+                    state = provider.read()
+                    if stamp is None:
+                        del state["graph"]["contract_from_revision"]
+                    else:
+                        state["graph"]["contract_from_revision"] = stamp
+                    provider.write(state)
+                    result = provider.call("inspect")
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("dispatch_state_unconverted", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

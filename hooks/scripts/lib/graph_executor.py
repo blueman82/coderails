@@ -28,6 +28,7 @@ def validate_state(value: object) -> dict[str, Any]:
     if state.get("status") not in {"initialising", "in-progress", "complete"}:
         raise ValueError("invalid loop status")
     graph_spec.check(state)
+    graph_contract.validate_dispatch_state(state)
     graph_repair.validate_records(state)
     return state
 

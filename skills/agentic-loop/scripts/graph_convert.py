@@ -11,6 +11,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
+import graph_contract
+
 STATE_MINOR = 2
 CODES = (
     "state_not_object",
@@ -101,6 +103,11 @@ def convert(state: object, session: str | None = None) -> tuple[dict[str, Any], 
         raise ConvertRefusedError("minor_invalid", "state_minor must be a non-negative integer")
     if minor > STATE_MINOR:
         raise ConvertRefusedError("minor_future", f"state_minor {minor} is newer than this tool ({STATE_MINOR})")
+    if minor == STATE_MINOR:
+        try:
+            graph_contract.validate_dispatch_state(source)
+        except graph_contract.DispatchDeniedError as error:
+            raise ConvertRefusedError(error.code, str(error)) from error
     _check_active_wave(_graph(source))
     stops, units = source.get("stops", []), source.get("work_units", {})
     if not isinstance(stops, list) or not all(isinstance(row, dict) for row in cast(list[object], stops)):

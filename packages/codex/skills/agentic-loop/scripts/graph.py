@@ -269,6 +269,7 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--depends-on", action="append", default=[])
             controller.add_argument("--join", action="store_true")
             controller.add_argument("--manifest", action="append", default=[])
+            controller.add_argument("--base-branch", help="remote branch used for first stacked publication")
             controller.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
             controller.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
             controller.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
@@ -345,7 +346,7 @@ def main() -> int:
                 args.depends_on,
                 args.join,
                 args.manifest,
-                {**fields, "scope": args.scope},
+                {**fields, "scope": args.scope, "base_branch": args.base_branch},
             )
         elif args.command == "instantiate":
             output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
