@@ -10,6 +10,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "graph-semantics"))
 import graph_driver_process  # noqa: E402
@@ -42,6 +43,24 @@ class DriverProcessTests(unittest.TestCase):
                     break
             self.assertEqual(result, {"status": "finished", "exit_code": 0})
             self.assertEqual((artifact / "output.jsonl").read_text().strip(), "finished")
+
+    def test_denied_process_lookup_uses_owned_child_and_terminal_record(self) -> None:
+        """A sandbox denial cannot crash observation or lose a completed worker."""
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory)
+            command = [sys.executable, "-c", "import time; time.sleep(1)"]
+            graph_driver_process.start(artifact, command, artifact)
+            with patch("graph_driver_process.subprocess.run", side_effect=PermissionError("ps denied")):
+                self.assertEqual(graph_driver_process.observe(artifact, 0)["status"], "running")
+                with patch.dict("graph_driver_process._CHILDREN", {}, clear=True):
+                    self.assertEqual(graph_driver_process.observe(artifact, 0)["status"], "unresolved")
+            deadline = time.monotonic() + 5
+            result: dict[str, object] = {"status": "unresolved"}
+            while time.monotonic() < deadline:
+                result = graph_driver_process.observe(artifact, 0.05)
+                if result["status"] == "finished":
+                    break
+            self.assertEqual(result, {"status": "finished", "exit_code": 0})
 
     def test_unresolved_launch_marker_never_relaunches(self) -> None:
         """An uncertain crash window must fail closed."""

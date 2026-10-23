@@ -9,7 +9,7 @@ import secrets
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
@@ -18,7 +18,7 @@ _CHILDREN: dict[str, subprocess.Popen[bytes]] = {}
 
 
 @contextmanager
-def lease(state_path: Path, suffix: str = ".driver.lock") -> Iterator[None]:
+def lease(state_path: Path, suffix: str = ".driver.lock") -> Generator[None, None, None]:
     """Allow one controller without nesting the provider's graph state lock."""
     if suffix not in {".driver.lock", ".controller.lock"}:
         raise ValueError("unknown driver lease")
@@ -55,9 +55,12 @@ def _read(path: Path) -> dict[str, Any] | None:
 
 def _live(pid: int, token: str) -> bool:
     """Check the token in the wrapper's process command to reject PID reuse."""
-    result = subprocess.run(
-        ["ps", "-ww", "-p", str(pid), "-o", "command="], capture_output=True, text=True, check=False
-    )
+    try:
+        result = subprocess.run(
+            ["ps", "-ww", "-p", str(pid), "-o", "command="], capture_output=True, text=True, check=False
+        )
+    except OSError:
+        return False
     return result.returncode == 0 and token in result.stdout and "--worker" in result.stdout
 
 
@@ -80,7 +83,10 @@ def observe(artifact: Path, timeout: float) -> dict[str, Any]:
                     child.wait(timeout=1)
                 return {"status": "finished", "exit_code": code}
         pid = launch.get("pid")
-        if type(pid) is int and isinstance(token, str) and _live(pid, token):
+        owned = _CHILDREN.get(token) if isinstance(token, str) else None
+        if (owned is not None and owned.poll() is None) or (
+            type(pid) is int and isinstance(token, str) and _live(pid, token)
+        ):
             if time.monotonic() >= deadline:
                 return {"status": "running"}
         elif time.monotonic() >= deadline:
