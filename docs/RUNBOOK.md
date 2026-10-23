@@ -164,6 +164,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `decision_wrong_session` | the loop state belongs to another session; record only from the owning session. |
 | `decision_blank_phase` | a decision needs a non-blank phase (for example 2.5). |
 | `decision_blank_decision` | a decision needs a non-blank decision text; nothing was written. |
+| `decision_invalid_chain` | the decision chain is damaged; inspect and preserve the loop state before any further sync. |
+| `decision_sync_unknown` | a decision sync may have reached Muninn; inspect the store before any manual retry. |
 | `decision_state_error` | the loop state could not be read, validated or locked; nothing was written. |
 | `order_chain_broken` | orders.json was edited by hand (the hash chain names the order); restore it from backup or review the named order, then re-seal by recording through orders.py. |
 | `order_blank_field` | an order needs a non-blank failure mode and lesson; nothing was written. |
@@ -186,6 +188,15 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
 | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
 | `lesson_not_current` | no unambiguous current cited claim exists; inspect conflicting current evidence, or explicitly re-record a retracted/expired lesson with a fresh quote. |
+| `retro_not_assembled` | Assemble schema-3 retro.json with `retro.py assemble`; preserve the source artifacts. |
+| `retro_source_mismatch` | A named source changed after assembly; finish that source and re-assemble. |
+| `retro_decisions_chain_broken` | Restore the damaged decision row; record decisions through the graph CLI. |
+| `retro_steps_missing` | Run the missing proof, decision flush or orders preparation step, then re-assemble. |
+| `retro_state_error` | Restore the owned, readable progress.json before assembly. |
+| `retro_wrong_session` | Use the session that owns progress.json. |
+| `retro_free_invalid` | Supply one JSON object in the free-file. |
+| `handoff_state_unreadable` | Pass the readable, owned progress.json to handoff_derive. |
+| `graph_unavailable` | Run graph.py summarize and inspect to diagnose the unavailable graph. |
 
 - Limits: only the orchestrator session can write (subagent threads are not citable); cites must anchor in a user
   prompt; the hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Measurement note: compare
@@ -194,8 +205,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Decision recorded locally but Muninn sync degraded
 
-- Symptom: `graph.py record-decision` printed `"exit_code": 3` and a `muninn.reason_code`. The decision is already
-  in `progress.json` `decisions_absorbed` (appended first, under the lock); only the Muninn copy is missing.
+- Symptom: `graph.py record-decision` printed `"exit_code": 3` and a `muninn.reason_code`. The decision was appended
+  to `progress.json` `decisions_absorbed` before the sync attempt. For `unknown` or `syncing`, the Muninn copy may
+  already exist; inspect both stores before any recovery. A loop restarted during sync may no longer contain that row.
   Trace rows: `decision.record/recorded/ok`, then `decision.sync/<written|degraded|disabled>/<reason_code>`.
 - Query: `python3 -c "import json;[print(r['seq'],r['muninn']) for r in json.load(open('progress.json'))['decisions_absorbed']]"`,
   or `grep '"command": "decision\.' <agentic-loop dir>/<session_id>/trace.jsonl`. Chain check:
@@ -321,7 +333,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `proof_unexecuted`: run `proof.py run <state-dir> --all`. `proof_failed`: the latest run exited nonzero or timed
   out; fix the cause, re-run. `proof_expect_mismatch`: exit code or stdout did not match the frozen `expect`.
   `proof_stale_cmd`: proof.json changed after the freeze row, or the run row hashes a different cmd; run
-  `proof.py freeze` then `run`. `proof_chain_broken`: `proof_results.jsonl` was edited or lost rows; never hand-edit it,
+  `proof.py freeze` then `run`. `proof_stale_head`: the run belongs to another checkout or an earlier HEAD; run it
+  again from the current repository checkout. `proof_chain_broken`: `proof_results.jsonl` was edited or lost rows; never hand-edit it,
   re-freeze and re-run (a fresh file). `proof_cmd_destructive`: the cmd matches the destructive classifier and was never
   executed; reword the proof. `proof_disposition_no_reason`: with no proof.json record `proof.py disposition <state-dir>
   --none --reason-code <code> --reason <text>`; a bare `none` or a code outside `DISPOSITION_CODES` (`docs_only`,
@@ -333,8 +346,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Limit: a same-user agent can forge rows and recompute the chain, as it could forge a transcript; this is a
   cooperating-agent safeguard, not a trust boundary. Also not covered: the destructive classifier is literal-pattern,
   not a sandbox, so obfuscated or interpreter-wrapped deletes (`python3 -c 'shutil.rmtree(...)'`, quote-split `rm`) still
-  run; run rows are not bound to the current HEAD (`head_sha` is recorded, not compared), so a satisfied row from an
-  earlier commit still releases the gate; the latest freeze wins, so an agent can weaken a cmd or move a failing proof
+  run; the latest freeze wins, so an agent can weaken a cmd or move a failing proof
   to `withdrawn_proofs` and re-freeze (only the frozen set is checked, not the loop's first one); schema 1 is refused at
   freeze; a disposition's reason is checked for presence and an enum code, not truth.
 - Off-switch: none, by design. The proof gate is intentionally non-disableable on both providers (default ON, no config

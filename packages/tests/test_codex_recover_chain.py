@@ -141,6 +141,8 @@ class RecoverChainTests(unittest.TestCase):
             cmd_sha256=pr.sha("true"),
             proof_json_sha256=pr.doc_sha(document),
             verdict="satisfied",
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
             **identity,
         )
         self._assemble_retro()  # last: the retro binds every source above

@@ -128,6 +128,77 @@ def evals_section(state_dir: Path) -> dict[str, Any]:
     return {"result": evals.get("result"), "amendments": evals.get("amendments", [])}
 
 
+def _prepared_sources(state: dict[str, Any], revision: int) -> list[dict[str, Any]]:
+    """Allow only the final complete Stop and hook counter added after D4 preparation."""
+    source = copy.deepcopy(state)
+    root = Path(__file__).resolve().parents[2]
+    if (root / ".codex-plugin/plugin.json").is_file() and source.get("status") == "complete":
+        completion = source.get("completion")
+        if not isinstance(completion, dict):
+            return []
+        completion_record = cast("dict[str, Any]", completion)
+        if (
+            type(completion_record.get("revision")) is not int
+            or completion_record["revision"] != source.get("revision", 0) - 1
+        ):
+            return []
+        source["revision"] = completion_record["revision"]
+    elif "completion" in source:
+        return []
+    for key in ("status", "completion", "completed_marker"):
+        source.pop(key, None)
+    counts = source.get("loop_stop_counts")
+    if isinstance(counts, dict):
+        typed_counts = cast("dict[str, Any]", counts)
+        source["loop_stop_counts"] = {k: v for k, v in typed_counts.items() if k != "complete"}
+    if revision != source.get("revision"):
+        return []
+    candidates = [source]
+    if isinstance(counts, dict) and "Complete" in counts:
+        # The Stop hook records this display spelling after the D4 preparation
+        # receipt. Accept its removal only when it makes the bound source hash
+        # match; a pre-existing counter remains part of the source otherwise.
+        without_complete_counter = copy.deepcopy(source)
+        without_complete_counter["loop_stop_counts"].pop("Complete", None)
+        if not without_complete_counter["loop_stop_counts"]:
+            without_complete_counter.pop("loop_stop_counts")
+        candidates.append(without_complete_counter)
+    for candidate in tuple(candidates):
+        stops = candidate.get("stops")
+        if (
+            not isinstance(stops, list)
+            or not stops
+            or not all(isinstance(s, dict) for s in cast("list[object]", stops))
+        ):
+            continue
+        typed_stops = cast("list[dict[str, Any]]", stops)
+        last = typed_stops[-1]
+        previous = typed_stops[:-1]
+        prior_sequences = [s.get("seq") for s in previous]
+        if not all(type(seq) is int for seq in prior_sequences):
+            continue
+        prior_seq = max(cast("list[int]", prior_sequences), default=0)
+        if (
+            set(last) != {"seq", "category", "reason_code", "reason", "revision", "consumed"}
+            or last.get("category") != "complete"
+            or last.get("revision") != revision
+            or type(last.get("consumed")) is not bool
+            or type(last.get("seq")) is not int
+            or last["seq"] != prior_seq + 1
+            or not isinstance(last.get("reason"), str)
+            or not last["reason"].strip()
+            or not isinstance(last.get("reason_code"), str)
+            or not last["reason_code"].strip()
+        ):
+            continue
+        before_stop = copy.deepcopy(candidate)
+        before_stop["stops"].pop()
+        if not before_stop["stops"]:
+            before_stop.pop("stops")
+        candidates.append(before_stop)
+    return candidates
+
+
 def _preparation_evidence(state: dict[str, Any], state_dir: Path, rows: list[dict[str, Any]]) -> str | None:
     """Validate D4's latest source-bound preparation receipt and return its evidence hash."""
     prepared_rows = [row for row in rows if row.get("step") == "orders_prepared"]
@@ -156,41 +227,9 @@ def _preparation_evidence(state: dict[str, Any], state_dir: Path, rows: list[dic
         or not re.fullmatch(r"[0-9a-f]{64}", bound["progress_sha256"])
     ):
         return None
-
-    source = copy.deepcopy(state)
-    root = Path(__file__).resolve().parents[2]
-    if (root / ".codex-plugin/plugin.json").is_file() and source.get("status") == "complete":
-        completion = source.get("completion")
-        if not isinstance(completion, dict):
-            return None
-        completion_record = cast("dict[str, Any]", completion)
-        if (
-            type(completion_record.get("revision")) is not int
-            or completion_record["revision"] != source.get("revision", 0) - 1
-        ):
-            return None
-        source["revision"] = completion_record["revision"]
-    elif "completion" in source:
-        return None
-    for key in ("status", "completion", "completed_marker"):
-        source.pop(key, None)
-    counts = source.get("loop_stop_counts")
-    if isinstance(counts, dict):
-        typed_counts = cast("dict[str, Any]", counts)
-        source["loop_stop_counts"] = {k: v for k, v in typed_counts.items() if k != "complete"}
-    if bound["revision"] != source.get("revision"):
-        return None
-    progress_hash = teardown_steps.sha_json(source)
-    if bound["progress_sha256"] != progress_hash and isinstance(counts, dict) and "Complete" in counts:
-        # The Stop hook records this display spelling after the D4 preparation
-        # receipt. Accept its removal only when it makes the bound source hash
-        # match; a pre-existing counter remains part of the source otherwise.
-        without_complete_counter = copy.deepcopy(source)
-        without_complete_counter["loop_stop_counts"].pop("Complete", None)
-        if not without_complete_counter["loop_stop_counts"]:
-            without_complete_counter.pop("loop_stop_counts")
-        progress_hash = teardown_steps.sha_json(without_complete_counter)
-    if bound["progress_sha256"] != progress_hash:
+    if not any(
+        bound["progress_sha256"] == teardown_steps.sha_json(s) for s in _prepared_sources(state, bound["revision"])
+    ):
         return None
 
     path = state_dir / f"orders-prepared-{hashlib.sha256(str(loop).encode()).hexdigest()}.json"

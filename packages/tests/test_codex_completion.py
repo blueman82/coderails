@@ -21,6 +21,7 @@ from graph_artifacts import validate_evals
 from graph_completion import complete, verify_completion
 from graph_identity import GraphError
 
+from packages.tests.codex_completion_head_case import assert_changed_head, assert_empty_proof_disposition
 from packages.tests.codex_fixture import append, frozen_evals, read_json, spawn, state, transcripts, write_json
 from scripts.lib import proof_results as pr
 from scripts.lib import retro, retro_check, teardown_steps
@@ -138,6 +139,8 @@ class CompletionTests(unittest.TestCase):
             cmd_sha256=pr.sha(cmd),
             proof_json_sha256=pr.doc_sha(self.document),
             verdict=verdict,
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
             **(IDENTITY | identity),
         )
 
@@ -186,6 +189,10 @@ class CompletionTests(unittest.TestCase):
         artifact.write_text(json.dumps(prepared))
         with self.assertRaises(GraphError):
             verify_completion(*self.arguments)
+
+    def test_changed_head_invalidates_codex_completion(self) -> None:
+        """Revalidation refuses a proof that passed before this worktree advanced."""
+        assert_changed_head(self, assemble_test_retro)
 
     def test_unsatisfied_foreign_or_stale_rows_cannot_pass(self) -> None:
         """Failed, mismatched, foreign-loop, wrong-cmd and status-only proofs never complete the graph."""
@@ -298,6 +305,10 @@ class CompletionTests(unittest.TestCase):
             verify_completion(*self.arguments)
         with patch.object(retro_check, "check", return_value=[]):
             verify_completion(*self.arguments)  # control: reverting the wiring lets the hand-written retro through
+
+    def test_empty_proof_file_uses_a_valid_disposition(self) -> None:
+        """An owned empty proof document follows the same disposition rule as Claude."""
+        assert_empty_proof_disposition(self, assemble_test_retro)
 
     def test_eval_stamp_revision_and_identity(self) -> None:
         """Bind completion to the current suite, checksum, amendments, and loop."""

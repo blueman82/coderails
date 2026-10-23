@@ -64,6 +64,23 @@ class Derive(StoreCase):
         self.assertEqual({d["source"] for d in got["decisions"]}, {"progress"})
         self.assertEqual(got["goal"], PROMPT)
 
+    def test_skipped_graph_node_is_not_reported_done(self) -> None:
+        """The graph summary includes skipped nodes, but the handoff must not call them done."""
+        got, code = self.derive()
+        self.assertEqual(code, 0)
+        self.assertNotIn("U3[1]", got["done"])
+        self.assertIn("skipped", " ".join(got["next_steps"] + got["open_questions"]).lower())
+
+    def test_broken_decision_chain_is_degraded_without_a_false_cite(self) -> None:
+        """An edited progress decision cannot inherit its old Muninn citation."""
+        state = json.loads(self.path.read_text())
+        state["decisions_absorbed"][0]["decision"] = "forged choice"
+        self.path.write_text(json.dumps(state))
+        got, code = self.derive()
+        self.assertEqual(code, 3)
+        self.assertIn({"source": "decisions", "reason": "decision_invalid_chain"}, got["degraded"])
+        self.assertFalse(any(d["source"] == "progress" for d in got["decisions"]))
+
     def test_muninn_only_decision_is_added(self) -> None:
         """A store decision that progress.json does not name is still listed, marked as from muninn."""
         state = json.loads(self.path.read_text())

@@ -82,7 +82,7 @@ class Provider:
             text=True,
             check=False,
             env=self.environment,
-            cwd=self.home,
+            cwd=ROOT if operation in ("complete", "verify-completion") else self.home,
         )
 
     def success(self, operation: str, *arguments: str) -> dict[str, Any]:
@@ -172,6 +172,8 @@ class Provider:
             cmd_sha256=proof_results.sha("true"),
             proof_json_sha256=digest,
             verdict="satisfied",
+            cwd=str(ROOT),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
             **identity,
         )
         assembled_retro.write(self.path.parent, identity["session_id"])  # last: the retro binds every source above
@@ -217,5 +219,5 @@ class Provider:
             text=True,
             check=False,
             env=self.environment,
-            cwd=self.home,
+            cwd=ROOT if name == "graph_completion_guard" else self.home,
         )

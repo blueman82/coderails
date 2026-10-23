@@ -189,12 +189,12 @@ class RefusalMapping(Base):
         with mock.patch.object(ma, "_refusal", collapse):
             self.assertEqual(self.short_alone(), "muninn_error")
 
-    def test_other_nonzero_exit_stays_muninn_error(self) -> None:
-        """Only rc 2 JSON refusals map; the rc 1 store constraint of a pre-v2 kind CHECK stays muninn_error."""
+    def test_old_kind_schema_is_rejected_by_the_schema_probe(self) -> None:
+        """The D1 schema probe names an incompatible kind CHECK before attempting a write."""
         self.assertEqual(self.reason(ma.add(self.record("x", valid_until="2020-01-01"))), "refused_bad_valid_until")
         fs.create(self.tmp / "oldkind", old_kind=True)
         with mock.patch.dict(os.environ, {"MUNINN_HOME": str(self.tmp / "oldkind")}):
-            self.assertEqual(self.reason(ma.add(self.record("lesson on a pre-v2 CHECK"))), "muninn_error")
+            self.assertEqual(self.reason(ma.add(self.record("lesson on a pre-v2 CHECK"))), "muninn_schema_incomplete")
 
     def test_cli_approval_resolves_reply_from_session(self) -> None:
         """`--approval REF` finds the preceding reply via `muninn session`; a reply as the anchor is cite_not_user."""

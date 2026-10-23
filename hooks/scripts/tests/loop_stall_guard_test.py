@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Exercise native Stop lifecycle counters and completion gates with explicit v3 fixtures."""
 
 from __future__ import annotations
@@ -6,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -208,7 +208,6 @@ class StallGuardTests(HookTestCase):
         self.assertEqual(after["loop_stop_counts"], {"approval-gate": 1})
         self.assertTrue(after["stops"][0]["consumed"])
         self.assertEqual(self.trace_reasons(), [])
-        # repeated Stop: the row is consumed, so the text path runs and its hard-stop is counted instead
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
         self.assertEqual(json.loads(path.read_text())["loop_stop_counts"], {"approval-gate": 1, "hard-stop": 1})
         self.assertEqual(self.trace_reasons(), ["legacy_text_parse"])
@@ -374,6 +373,8 @@ class StallGuardTests(HookTestCase):
             cmd_sha256=pr.sha(cmd),
             proof_json_sha256=digest,
             verdict="satisfied",
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
             **identity,
         )
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)  # old retro binds old proof files

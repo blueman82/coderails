@@ -104,7 +104,7 @@ def _flush(state_dir: Path, state: dict[str, Any], session: str) -> dict[str, An
     for item in teardown_steps.as_list(value):
         row = cast("dict[str, Any]", item) if isinstance(item, dict) else {}
         field: object = row.get("muninn") or {}
-        pending = cast("dict[str, Any]", field).get("state", "pending") in ("pending", "degraded")
+        pending = cast("dict[str, Any]", field).get("state", "pending") in ("pending", "degraded", "syncing", "unknown")
         todo += bool(row.get("row_sha256")) and pending
     if todo:
         return decision_record.flush_pending(state_dir / "progress.json", session, transition=provider_transition())
@@ -129,6 +129,8 @@ def assemble(state_dir: Path, session: str, free: dict[str, Any] | None = None) 
     flushed = _flush(state_dir, state, session)
     if flushed.get("exit_code") == 2:
         return {"reason_code": flushed.get("reason_code", "retro_state_error")}, 2
+    if flushed.get("reason_code") == "decision_sync_unknown":
+        return {"reason_code": "decision_sync_unknown"}, 3
     state = _load(state_dir / "progress.json")
     loop_id = state.get("loop_id")
     pre = retro_check.retro_step_hashes(state, state_dir)

@@ -82,6 +82,10 @@ REASONS: dict[str, str] = {
     "decision_wrong_session": "the loop state belongs to another session; record only from the owning session.",
     "decision_blank_phase": "a decision needs a non-blank phase (for example 2.5).",
     "decision_blank_decision": "a decision needs a non-blank decision text; nothing was written.",
+    "decision_invalid_chain": (
+        "the decision chain is damaged; inspect and preserve the loop state before any further sync."
+    ),
+    "decision_sync_unknown": "a decision sync may have reached Muninn; inspect the store before any manual retry.",
     "decision_state_error": "the loop state could not be read, validated or locked; nothing was written.",
     "order_chain_broken": (
         "orders.json was edited by hand (the hash chain names the order); restore it from backup or review the "
@@ -151,7 +155,7 @@ REASONS: dict[str, str] = {
     ),
     "retro_steps_missing": (
         "a teardown step is missing or out of order in teardown.jsonl; run proof.py run --all (or proof.py "
-        "disposition), orders.py tick and retro.py assemble, in that order."
+        "disposition), flush decisions, orders.py prepare and retro.py assemble, in that order."
     ),
     "retro_state_error": "progress.json is unreadable, so nothing was assembled.",
     "retro_wrong_session": "the loop state belongs to another session; assemble only from the owning session.",

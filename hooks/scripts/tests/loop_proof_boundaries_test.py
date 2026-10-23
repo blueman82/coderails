@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -46,6 +47,8 @@ class ProofBoundaryTests(HookTestCase):
                     session_id="s",
                     loop_id="l",
                     verdict=verdict,
+                    cwd=str(Path.cwd()),
+                    head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                 )
 
     def test_missing_failed_and_untrusted_rows_do_not_pass(self) -> None:

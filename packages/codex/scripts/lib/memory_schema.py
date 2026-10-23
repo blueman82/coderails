@@ -9,12 +9,15 @@ mode=ro.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 
 SCHEMA_VERSION = 2
 TYPED_COLUMNS = ("confidence", "valid_until", "sensitivity", "contradicts", "tags")
 TABLES = ("knowledge_fts", "citation", "knowledge_log")
+TRIGGERS = ("knowledge_ai", "knowledge_ad", "knowledge_au")
+KINDS = {"decision", "fact", "preference", "procedure", "lesson", "constraint"}
 DB_NAME = "muninn.sqlite"
 
 
@@ -35,12 +38,24 @@ def check(data_home: str | Path | None = None) -> str | None:
             if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
                 return "muninn_schema_old"
             columns = {r[1] for r in conn.execute("PRAGMA table_info(knowledge)")}
-            names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")}
+            schema = {r[0]: (r[1], r[2] or "") for r in conn.execute("SELECT name, type, sql FROM sqlite_master")}
         finally:
             conn.close()
     except sqlite3.Error:
         return "muninn_schema_incomplete"  # unreadable or not sqlite: not a usable v2 store
-    if not set(TYPED_COLUMNS) <= columns or not set(TABLES) <= names:
+    kind_check = re.search(
+        r"\bkind\s+TEXT\s+NOT\s+NULL\s+CHECK\s*\(\s*kind\s+IN\s*\(([^)]*)\)",
+        schema.get("knowledge", ("", ""))[1],
+        re.I,
+    )
+    allowed_kinds: set[str] = set(re.findall(r"'([^']+)'", kind_check.group(1))) if kind_check else set()
+    triggers = all(
+        schema.get(name, ("", ""))[0] == "trigger"
+        and f"AFTER {event} ON KNOWLEDGE" in " ".join(schema[name][1].split()).upper()
+        and "knowledge_fts" in schema[name][1]
+        for name, event in zip(TRIGGERS, ("INSERT", "DELETE", "UPDATE"))
+    )
+    if not (set(TYPED_COLUMNS) <= columns and set(TABLES) <= schema.keys() and allowed_kinds >= KINDS and triggers):
         return "muninn_schema_incomplete"
     return None
 

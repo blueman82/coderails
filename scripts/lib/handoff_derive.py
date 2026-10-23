@@ -23,7 +23,7 @@ from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))  # plugin root, so `scripts.lib` resolves as a script
-from scripts.lib import lessons, proof_results, teardown_steps  # noqa: E402
+from scripts.lib import decision_record, lessons, proof_results, teardown_steps  # noqa: E402
 from scripts.lib import memory_adapter as ma  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
 
@@ -68,6 +68,11 @@ def decisions(
     else:
         records = {str(r.id): r for r in listed}
     rows: object = state.get("decisions_absorbed")
+    try:
+        decision_record.ensure_chain(state)
+    except ValueError:
+        degraded.append({"source": "decisions", "reason": "decision_invalid_chain"})
+        rows = []
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for index, item in enumerate(teardown_steps.as_list(rows), start=1):
@@ -141,14 +146,24 @@ def derive(state_path: Path, session: str) -> tuple[dict[str, Any], int]:
         if got is None:
             degraded.append({"source": name, "reason": "graph_unavailable"})
     summary, inspected = summary or {}, inspected or {}
+    graph: object = state.get("graph")
+    nodes_value: object = cast("dict[str, Any]", graph).get("nodes") if isinstance(graph, dict) else None
+    nodes = cast("dict[str, Any]", nodes_value) if isinstance(nodes_value, dict) else {}
+    skipped = sorted(
+        name
+        for name, node in nodes.items()
+        if isinstance(node, dict) and cast("dict[str, Any]", node).get("status") == "skipped"
+    )
+    completed = [name for name in _names(summary.get("done")) if name not in skipped]
     prompt = " ".join(str(state.get("authorising_prompt_raw") or "").split())
     hard_stop: object = inspected.get("hard_stop")
     skeleton: dict[str, Any] = {
         "goal": prompt[:GOAL_MAX],
         "decisions": decisions(state, str(state.get("loop_id") or ""), session, degraded),
-        "done": [*_names(summary.get("done")), *proof_lines(state_path.parent, degraded)],
+        "done": [*completed, *proof_lines(state_path.parent, degraded)],
         "next_steps": [*_names(summary.get("active")), *_names(summary.get("ready")), *_names(summary.get("pending"))],
-        "open_questions": [f"hard stop: {json.dumps(hard_stop, sort_keys=True)}"] if hard_stop else [],
+        "open_questions": ([f"hard stop: {json.dumps(hard_stop, sort_keys=True)}"] if hard_stop else [])
+        + (["skipped work: " + ", ".join(skipped)] if skipped else []),
         "lessons": lesson_rows(state_path.parent.parent, degraded),
         "degraded": degraded,
     }

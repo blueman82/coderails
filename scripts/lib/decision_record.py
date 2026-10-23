@@ -9,17 +9,19 @@ recompute the whole chain; this is tamper-evidence, not a security boundary, and
 The `muninn` field is OUTSIDE the hash: a same-user agent can set `{state: written}` by hand and `flush_pending`
 will not retry it, so "synced to Muninn" is unauthenticated here; check the id against Muninn `list_records`.
 
-Entry point for lane A (`graph.py record-decision`), `transition(path, fn)` being the provider's lock wrapper
+Entry point for both graph CLIs (`graph.py record-decision`), `transition(path, fn)` being the provider's lock wrapper
 (Claude `hooks.scripts.lib.graph_executor.transition`; Codex `graph_io.locked/load/write` wrapped to the same shape):
 
     out = record(path, session, phase, decision, transition=transition, flip_condition=fc, unit=unit)
     print(json.dumps(out))
     return out["exit_code"]
 
-`record` appends the local row first under the lock (the authoritative loop record is never lost), calls Muninn outside
-the lock, then patches the row's `muninn` field under the lock again. exit_code: 0 written or disabled, 3 degraded
-(reason code printed, trace row decision.sync/degraded/<code>, local row kept), 2 refused (nothing written).
-`flush_pending` retries rows left pending or degraded at teardown. Muninn refuses an approval-only citation and an
+`record` appends a local `syncing` row first under the lock (the authoritative loop record is never lost), calls
+Muninn outside the lock, then patches `muninn` under the lock again. exit_code: 0 written or disabled, 3 degraded
+or unknown (reason code printed, local row kept), 2 refused (nothing written). `flush_pending` claims only pending
+or safely degraded rows under the lock before retry. A crash or ambiguous external result leaves `syncing`/`unknown`;
+automatic retry stops with `decision_sync_unknown` until a human reconciles the Muninn store. Muninn refuses an
+approval-only citation and an
 agent cannot cite itself, so the cite is a quote of `authorising_prompt_raw` unless the caller passes a substantive
 user `cite_quote`; a short prompt such as "yes" stays a visible degrade. Never falls back to Markdown.
 """
@@ -45,7 +47,7 @@ from scripts.lib import teardown_steps  # noqa: E402
 GENESIS = "0" * 64
 HASH_EXCLUDED = ("row_sha256", "muninn")
 QUOTE_MIN, QUOTE_MAX, CLAIM_MAX = 12, 300, 500  # muninn's quote and claim length rules
-REFUSALS = ("wrong_session", "blank_phase", "blank_decision")
+REFUSALS = ("wrong_session", "blank_phase", "blank_decision", "invalid_chain")
 Transition = Callable[[Path, Callable[[dict[str, Any]], dict[str, Any]]], dict[str, Any]]
 
 
@@ -88,6 +90,7 @@ def add_decision(
         raise ValueError("blank_decision")
     stamp = now.isoformat(timespec="seconds") if isinstance(now, datetime.datetime) else now
     rows = _rows(state)
+    ensure_chain(state)
     last = _as_row(rows[-1]) if rows else {}
     row: dict[str, Any] = {
         "seq": len(rows) + 1,
@@ -100,7 +103,7 @@ def add_decision(
         "prev_sha256": last.get("row_sha256") or GENESIS,
     }
     row["row_sha256"] = row_digest(row)
-    row["muninn"] = {"state": "pending"}
+    row["muninn"] = {"state": "syncing"}
     new = copy.deepcopy(state)
     new["decisions_absorbed"] = [*rows, row]
     new.setdefault("chain_started_seq", row["seq"])  # first hashed row of this loop; see verify_chain
@@ -135,6 +138,15 @@ def verify_chain(rows: list[Any], chain_start: int | None = None) -> list[dict[s
     return bad
 
 
+def ensure_chain(state: dict[str, Any]) -> None:
+    """Refuse a damaged decision chain before another local or external write."""
+    marker = state.get("chain_started_seq")
+    if marker is not None and (type(marker) is not int or marker < 1):
+        raise ValueError("invalid_chain")
+    if verify_chain(_rows(state), marker):
+        raise ValueError("invalid_chain")
+
+
 def pick_quote(prompt_raw: str) -> str:
     """The first line, else first sentence, of 12-300 chars from the prompt (whitespace-collapsed, still verbatim)."""
     lines = [_collapse(x) for x in prompt_raw.splitlines() if x.strip()]
@@ -162,29 +174,58 @@ def sync_row(
     tag = "run-" + re.sub(r"[^a-z0-9_-]", "-", loop_id.lower())[:28]
     claim = _collapse(f"{row['phase']}: {row['decision']}")
     rec = ma.Record("loop", "decision", claim[:CLAIM_MAX], "", quote, [tag], loop_id, "inferred")
-    res: ma.Degraded | ma.Written = ma.resolve_cite(rec, False, session_id) or ma.add(rec, session_id)
+    refused = ma.resolve_cite(rec, False, session_id)
+    res: ma.Degraded | ma.Written = refused or ma.add(rec, session_id)
     field: dict[str, Any]
     if isinstance(res, ma.Written):
         field = {"state": "written", "id": res.id, "reason_code": "ok"}
     else:
         off = res.reason == "memory_backend_off"
-        field = {"state": "disabled" if off else "degraded", "id": None, "reason_code": res.reason}
+        uncertain = refused is None and res.reason in {"muninn_error", "muninn_timeout", "muninn_bad_output"}
+        field = {
+            "state": "disabled" if off else "unknown" if uncertain else "degraded",
+            "id": None,
+            "reason_code": res.reason,
+        }
     _trace("decision.sync", field["state"], field["reason_code"], session_id, loop_id)
     return field
 
 
-def mark_synced(state: dict[str, Any], seq: int, field: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of state with row `seq`'s muninn field replaced; ValueError when no such row."""
+def _owned_row(state: dict[str, Any], session: str, loop_id: str, row_sha256: str) -> dict[str, Any]:
+    if state.get("session_id") != session or state.get("loop_id") != loop_id:
+        raise ValueError("sync_unavailable")
+    for row in map(_as_row, _rows(state)):
+        if row.get("row_sha256") == row_sha256:
+            return row
+    raise ValueError("sync_unavailable")
+
+
+def mark_synced(
+    state: dict[str, Any], session: str, loop_id: str, row_sha256: str, field: dict[str, Any]
+) -> dict[str, Any]:
+    """Patch only the row owned by the original session and loop under the graph lock."""
+    ensure_chain(state)
     new = copy.deepcopy(state)
-    for row in map(_as_row, _rows(new)):
-        if row.get("seq") == seq:
-            row["muninn"] = dict(field)
-            return new
-    raise ValueError("no_such_seq")
+    row = _owned_row(new, session, loop_id, row_sha256)
+    if _as_row(row.get("muninn")).get("state") != "syncing":
+        raise ValueError("sync_unavailable")
+    row["muninn"] = dict(field)
+    return new
 
 
 def _exit_code(field: dict[str, Any]) -> int:
-    return 3 if field["state"] == "degraded" else 0
+    return 0 if field["state"] in {"written", "disabled"} else 3
+
+
+def claim_sync(state: dict[str, Any], session: str, loop_id: str, row_sha256: str) -> dict[str, Any]:
+    """Claim a retry under the graph lock before contacting Muninn."""
+    ensure_chain(state)
+    new = copy.deepcopy(state)
+    row = _owned_row(new, session, loop_id, row_sha256)
+    if _as_row(row.get("muninn")).get("state") not in {"pending", "degraded"}:
+        raise ValueError("sync_unavailable")
+    row["muninn"] = {"state": "syncing", "id": None, "reason_code": "sync_in_flight"}
+    return new
 
 
 def _sync_safely(
@@ -197,7 +238,7 @@ def _sync_safely(
         return sync_row(row, loop_id, session, str(raw or ""), cite)
     except Exception:  # noqa: BLE001
         _trace("decision.sync", "degraded", "muninn_error", session, loop_id)
-        return {"state": "degraded", "id": None, "reason_code": "muninn_error"}
+        return {"state": "unknown", "id": None, "reason_code": "muninn_error"}
 
 
 def record(
@@ -231,7 +272,20 @@ def record(
     _trace("decision.record", "recorded", "ok", session, str(state.get("loop_id")))
     field = _sync_safely(held, state, session, prompt_raw, cite_quote)
     seq = held["seq"]
-    transition(path, lambda s: mark_synced(s, seq, field))
+    try:
+        transition(
+            path,
+            partial(
+                mark_synced,
+                session=session,
+                loop_id=str(state.get("loop_id")),
+                row_sha256=held["row_sha256"],
+                field=field,
+            ),
+        )
+    except ValueError:
+        _trace("decision.record", "degraded", "decision_sync_unknown", session, str(state.get("loop_id")))
+        return {"recorded": True, "seq": seq, "muninn": field, "reason_code": "decision_sync_unknown", "exit_code": 3}
     return {"recorded": True, "seq": seq, "muninn": field, "exit_code": _exit_code(field)}
 
 
@@ -248,14 +302,43 @@ def flush_pending(
     if state.get("session_id") != session:
         _trace("decision.flush", "refused", "decision_wrong_session", session, None)
         return {"synced": [], "reason_code": "decision_wrong_session", "exit_code": 2}
+    try:
+        ensure_chain(state)
+    except ValueError:
+        _trace("decision.flush", "refused", "decision_invalid_chain", session, str(state.get("loop_id")))
+        return {"synced": [], "reason_code": "decision_invalid_chain", "exit_code": 2}
+    if any(_as_row(row.get("muninn")).get("state") in {"syncing", "unknown"} for row in map(_as_row, _rows(state))):
+        _trace("decision.flush", "degraded", "decision_sync_unknown", session, str(state.get("loop_id")))
+        return {"synced": [], "reason_code": "decision_sync_unknown", "exit_code": 3}
     synced: list[dict[str, Any]] = []
     for row in map(_as_row, _rows(state)):
         if not row.get("row_sha256") or not isinstance(row.get("seq"), int):
             continue  # legacy or hand-written row: not ours to sync
         if _as_row(row.get("muninn")).get("state", "pending") not in ("pending", "degraded"):
             continue
+        try:
+            transition(
+                path,
+                partial(claim_sync, session=session, loop_id=str(state.get("loop_id")), row_sha256=row["row_sha256"]),
+            )
+        except ValueError:
+            _trace("decision.flush", "degraded", "decision_sync_unknown", session, str(state.get("loop_id")))
+            return {"synced": synced, "reason_code": "decision_sync_unknown", "exit_code": 3}
         field = _sync_safely(row, state, session, prompt_raw, cite_quote)
-        transition(path, partial(mark_synced, seq=row["seq"], field=field))
+        try:
+            transition(
+                path,
+                partial(
+                    mark_synced,
+                    session=session,
+                    loop_id=str(state.get("loop_id")),
+                    row_sha256=row["row_sha256"],
+                    field=field,
+                ),
+            )
+        except ValueError:
+            _trace("decision.flush", "degraded", "decision_sync_unknown", session, str(state.get("loop_id")))
+            return {"synced": synced, "reason_code": "decision_sync_unknown", "exit_code": 3}
         synced.append({"seq": row["seq"], "muninn": field})
     final = transition(path, lambda s: s)  # evidence = the rows as they stand after the retries
     teardown_steps.record(
@@ -265,4 +348,4 @@ def flush_pending(
         final.get("loop_id"),
         teardown_steps.sha_json(final.get("decisions_absorbed")),
     )
-    return {"synced": synced, "exit_code": 3 if any(x["muninn"]["state"] == "degraded" for x in synced) else 0}
+    return {"synced": synced, "exit_code": 3 if any(_exit_code(x["muninn"]) == 3 for x in synced) else 0}
