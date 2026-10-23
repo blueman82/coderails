@@ -14,7 +14,6 @@ from __future__ import annotations
 import os
 import re
 import sys
-from datetime import datetime, timezone
 from typing import Any, cast
 
 from hook_common import append_trace_row, deny, payload_object, read_input, text_field
@@ -88,7 +87,7 @@ def main() -> int:
             append_trace_row("action_authority", "allowed", "receipt_consumed", trace_id, {"loop_id": loop})
 
         missing = check_and_consume(
-            session, [proposal(*segment) for segment in segments], datetime.now(timezone.utc), loop, signers,
+            session, [proposal(*segment) for segment in segments], None, loop, signers,
             consume=mode_ == "enforce", stale=state_mutated_before_guard(command), on_claim=claimed,
         )  # fmt: skip
         if missing is None:

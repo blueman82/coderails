@@ -213,6 +213,16 @@ class GateTests(ReceiptHookCase):
         self.mint(f"gh pr merge 2 {PIN}", "merge", rid="r3")
         self.assertFalse(self.denied("action_authority_gate", self.payload(chain)))
 
+    def test_two_merge_segments_cannot_spend_one_budget_twice(self) -> None:
+        """A denied shell line cannot consume a receipt or spend the session budget."""
+        self.grant(max_prs=1)
+        first, second = f"gh pr merge 1 {PIN}", f"gh pr merge 2 {PIN}"
+        self.mint(first, "merge", rid="r1")
+        self.mint(second, "merge", rid="r2")
+        self.assertTrue(self.denied("action_authority_gate", self.payload(f"{first} && {second}")))
+        self.assertEqual(self.reasons().count("receipt_consumed"), 0)
+        self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
+
     def test_cd_into_other_repo_binds_the_real_directory(self) -> None:
         """A receipt for `git push` in repoA does not authorise `cd repoB && git push`; one minted for repoB does."""
         self.configure("enforce")

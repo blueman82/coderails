@@ -29,6 +29,7 @@
   "scripts/lib/action_receipt.py": "100644",
   "scripts/lib/authority_permits.py": "100644",
   "scripts/lib/receipt_gate.py": "100644",
+  "scripts/lib/merge_budget.py": "100644",
   "scripts/lib/artifact_io.py": "100644",
   "scripts/lib/receipt_counters.py": "100644",
   "scripts/lib/authority_object.py": "100644",

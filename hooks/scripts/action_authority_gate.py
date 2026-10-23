@@ -19,7 +19,6 @@ from __future__ import annotations
 import os
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -94,7 +93,7 @@ def main() -> int:
             append_row("action_authority", "allowed", "receipt_consumed", trace_id, loop_id)
 
         missing = check_and_consume(
-            session, [proposal(*segment) for segment in segments], datetime.now(timezone.utc), loop_id, signers,
+            session, [proposal(*segment) for segment in segments], None, loop_id, signers,
             consume=mode_ == "enforce", stale=state_mutated_before_guard(command), on_claim=claimed,
         )  # fmt: skip
         if missing is None:
