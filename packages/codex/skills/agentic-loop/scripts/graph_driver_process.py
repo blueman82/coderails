@@ -18,9 +18,11 @@ _CHILDREN: dict[str, subprocess.Popen[bytes]] = {}
 
 
 @contextmanager
-def lease(state_path: Path) -> Iterator[None]:
+def lease(state_path: Path, suffix: str = ".driver.lock") -> Iterator[None]:
     """Allow one controller without nesting the provider's graph state lock."""
-    lock = state_path.with_name(state_path.name + ".driver.lock")
+    if suffix not in {".driver.lock", ".controller.lock"}:
+        raise ValueError("unknown driver lease")
+    lock = state_path.with_name(state_path.name + suffix)
     with lock.open("a+b") as stream:
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)

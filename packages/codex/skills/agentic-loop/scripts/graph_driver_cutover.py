@@ -11,6 +11,8 @@ from typing import Any, cast
 import graph_contract
 import graph_convert
 import graph_dispatch
+import graph_driver_codex
+import graph_driver_controller
 import graph_driver_mode
 import graph_semantics
 from graph_evidence import validate_worker_evidence
@@ -18,7 +20,7 @@ from graph_identity import GraphError
 from graph_io import load, locked, write
 from graph_recovery import trace
 
-COMMANDS = frozenset({"cutover-driver", "begin-driver-wave", "record-driver-wave", "authorize-driver"})
+COMMANDS = frozenset({"cutover-driver", "begin-driver-wave", "record-driver-wave", "authorize-driver", "drive"})
 
 
 def cutover_driver(path: Path, session: str) -> dict[str, Any]:
@@ -62,6 +64,10 @@ def add_parsers(add_parser: Callable[[str], argparse.ArgumentParser]) -> None:
     for field in ("session", "dispatch-id", "role", "driver-run-id"):
         authorize.add_argument(f"--{field}", required=True)
     authorize.add_argument("--prompt-file", required=True, type=Path)
+    drive = add_parser("drive")
+    drive.add_argument("state", type=Path)
+    drive.add_argument("--session", required=True)
+    drive.add_argument("--checkout", required=True, type=Path)
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -70,6 +76,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         return cutover_driver(args.state, args.session)
     if args.command == "begin-driver-wave":
         return graph_dispatch.begin_driver_wave(args.state)
+    if args.command == "drive":
+        try:
+            return graph_driver_controller.drive_wave(
+                args.state,
+                args.session,
+                Path(__file__).with_name("graph.py"),
+                args.checkout,
+                "codex",
+                lambda prompt, _record: graph_driver_codex.command(prompt, args.checkout),
+                graph_driver_codex.result,
+            )
+        except (ValueError, OSError, TypeError, KeyError) as error:
+            raise GraphError(str(error)) from error
     if args.command == "record-driver-wave":
         return graph_dispatch.record_driver_wave(args.state, args.results_json)
     return graph_dispatch.authorize_driver(

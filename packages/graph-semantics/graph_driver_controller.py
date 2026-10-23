@@ -8,6 +8,7 @@ import re
 import secrets
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, Optional, cast
 
@@ -17,7 +18,7 @@ import graph_driver_process
 import graph_semantics
 from graph_vocab import decision_pending
 
-Command = Callable[[Path], tuple[list[str], Optional[dict[str, str]], Optional[Path]]]
+Command = Callable[[Path, dict[str, Any]], tuple[list[str], Optional[dict[str, str]], Optional[Path]]]
 Result = Callable[[Path, int], dict[str, Any]]
 
 
@@ -154,7 +155,7 @@ def drive_once(
                 if not (artifact / "launch.json").exists():
                     if not newly_authorized:
                         return {"status": "unresolved", "reason": "authorized_without_launch", "node": node_id}
-                    argv, environment, input_path = command(prompt)
+                    argv, environment, input_path = command(prompt, record)
                     graph_driver_process.start(artifact, argv, checkout, environment=environment, stdin_path=input_path)
                 observation = graph_driver_process.observe(artifact, 0.05)
                 if observation["status"] != "finished":
@@ -173,3 +174,21 @@ def drive_once(
             json.dumps({"wave_id": active["wave_id"], "results": results, "references": references}),
         )
         return {"status": "recorded", "wave_id": active["wave_id"], "nodes": sorted(results)}
+
+
+def drive_wave(
+    path: Path,
+    session: str,
+    script: Path,
+    checkout: Path,
+    provider: str,
+    command: Command,
+    result: Result,
+) -> dict[str, Any]:
+    """Hold one foreground lease until the current complete wave is recorded or paused."""
+    with graph_driver_process.lease(path, ".controller.lock"):
+        while True:
+            report = drive_once(path, session, script, checkout, provider, command, result)
+            if report["status"] != "running":
+                return report
+            time.sleep(0.5)

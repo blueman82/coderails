@@ -10,12 +10,19 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.sandbox.render_settings import render_settings
 
 SRT_VERSION = "0.0.65"
+DRIVER_SCHEMA = {
+    "type": "object",
+    "properties": {"outcome": {"type": "string", "enum": ["done", "failed"]}, "evidence": {"type": "string"}},
+    "required": ["outcome", "evidence"],
+    "additionalProperties": False,
+}
 
 
 def dispatch_guard(worktree: str, prompt_file: str, model: str) -> None:
@@ -39,13 +46,14 @@ def dispatch_guard(worktree: str, prompt_file: str, model: str) -> None:
         raise ValueError(str(output.get("permissionDecisionReason", "loop dispatch denied")))
 
 
-def launch(worktree: str, prompt_file: str, model: str) -> int:
+def launch(worktree: str, prompt_file: str, model: str, *, driver: bool = False) -> int:
     """Prepare containment, acquire credentials externally, and stream the pinned child."""
     if not Path(worktree).is_dir():
         raise ValueError(f"worktree is not an existing directory: {worktree}")
     if not Path(prompt_file).is_file():
         raise ValueError(f"prompt_file is not an existing file: {prompt_file}")
-    dispatch_guard(worktree, prompt_file, model)
+    if not driver:
+        dispatch_guard(worktree, prompt_file, model)
     result = subprocess.run(
         ["git", "-C", worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"],
         capture_output=True,
@@ -73,33 +81,51 @@ def launch(worktree: str, prompt_file: str, model: str) -> int:
         str(settings),
         "claude",
         "-p",
-        Path(prompt_file).read_text().rstrip("\n"),
-        "--model",
-        model,
-        "--dangerously-skip-permissions",
     ]
+    if driver:
+        arguments.extend(
+            [
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--json-schema",
+                json.dumps(DRIVER_SCHEMA, sort_keys=True),
+                "--disallowedTools",
+                "Agent",
+            ]
+        )
+    else:
+        arguments.append(Path(prompt_file).read_text().rstrip("\n"))
+    arguments.extend(["--model", model, "--dangerously-skip-permissions"])
     header = (
         f"spawn-sandboxed-worker: npx --yes @anthropic-ai/sandbox-runtime@{SRT_VERSION} "
         f"--settings {settings} claude -p <{prompt_file}> --model {model} --dangerously-skip-permissions\n"
     )
     with (scratch / "worker.log").open("wb") as log:
-        log.write(header.encode())
-        log.flush()
-        print(header, end="", flush=True)
-        child = subprocess.Popen(
-            arguments, cwd=worktree, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-        )
-        if child.stdout is None:
-            raise RuntimeError("sandbox stdout pipe was not created")
-        while True:
-            chunk = os.read(child.stdout.fileno(), 65536)
-            if not chunk:
-                break
-            log.write(chunk)
+        if not driver:
+            log.write(header.encode())
             log.flush()
-            sys.stdout.buffer.write(chunk)
-            sys.stdout.buffer.flush()
-        code = child.wait()
+            print(header, end="", flush=True)
+        with Path(prompt_file).open("rb") if driver else nullcontext(None) as worker_input:
+            child = subprocess.Popen(
+                arguments,
+                cwd=worktree,
+                env=environment,
+                stdin=worker_input,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL if driver else subprocess.STDOUT,
+            )
+            if child.stdout is None:
+                raise RuntimeError("sandbox stdout pipe was not created")
+            while True:
+                chunk = os.read(child.stdout.fileno(), 65536)
+                if not chunk:
+                    break
+                log.write(chunk)
+                log.flush()
+                sys.stdout.buffer.write(chunk)
+                sys.stdout.buffer.flush()
+            code = child.wait()
     return code if code >= 0 else 128 - code
 
 
@@ -107,6 +133,8 @@ def main(arguments: list[str] | None = None) -> int:
     """Dispatch a contained worker and report preparation failures."""
     arguments = sys.argv[1:] if arguments is None else arguments
     try:
+        if arguments[:1] == ["--driver"] and len(arguments) == 4:
+            return launch(*arguments[1:], driver=True)
         if len(arguments) != 3:
             raise ValueError(f"expected 3 args (worktree prompt_file model), got {len(arguments)}")
         return launch(*arguments)

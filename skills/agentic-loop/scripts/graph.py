@@ -12,12 +12,20 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import graph_convert
+import graph_driver_controller
 import graph_driver_mode
 import graph_repair
 import graph_spec
 from graph_vocab import DISPOSITION_KINDS, STOP_CATEGORIES, STOP_REASON_CODES, disposition_report
 
-from hooks.scripts.lib import graph_controller, graph_decisions, graph_driver_adapter, graph_recovery, graph_stops
+from hooks.scripts.lib import (
+    graph_controller,
+    graph_decisions,
+    graph_driver_adapter,
+    graph_driver_claude,
+    graph_recovery,
+    graph_stops,
+)
 from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.graph_evidence import object_value
 from hooks.scripts.lib.graph_evidence_revalidate import revalidate_all
@@ -35,6 +43,7 @@ GRAPH_COMMANDS = (
     "plan",
     "begin-wave",
     "begin-driver-wave",
+    "drive",
     "record-wave",
     "record-driver-wave",
     "record-unit",
@@ -78,6 +87,9 @@ def parser() -> argparse.ArgumentParser:
             for field in ("session", "dispatch-id", "role", "driver-run-id"):
                 command.add_argument(f"--{field}", required=True)
             command.add_argument("--prompt-file", required=True, type=Path)
+        if name == "drive":
+            command.add_argument("--session", required=True)
+            command.add_argument("--checkout", required=True, type=Path)
         if name == "instantiate":
             command.add_argument("--profile", choices=graph_spec.PROFILES, help="default: policy graph.profile")
             command.add_argument("--unit", action="append", default=[], help="work unit id to register (repeatable)")
@@ -342,6 +354,10 @@ def main() -> int:
             )
         elif args.command == "begin-driver-wave":
             output = graph_driver_adapter.begin_wave(args.state)
+        elif args.command == "drive":
+            output = graph_driver_claude.run_wave(
+                args.state, args.session, args.checkout, Path(__file__), graph_driver_controller.drive_wave
+            )
         elif args.command == "authorize-driver":
             output = graph_driver_adapter.authorize(
                 args.state, args.session, args.dispatch_id, args.prompt_file, args.role, args.driver_run_id

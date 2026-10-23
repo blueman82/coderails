@@ -66,7 +66,7 @@ class DriverControllerTests(unittest.TestCase):
             self.assertEqual(authorized.returncode, 0, authorized.stderr)
             before = case.path.read_bytes()
 
-            def command(_prompt: Path) -> tuple[list[str], None, Path]:
+            def command(_prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
                 self.fail("an authorized attempt must not launch twice")
 
             report = graph_driver_controller.drive_once(
@@ -112,7 +112,7 @@ class DriverControllerTests(unittest.TestCase):
                 if provider == "codex":
                     case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
 
-                def command(prompt: Path) -> tuple[list[str], None, Path]:
+                def command(prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
                     return [sys.executable, "-c", "import sys; print(sys.stdin.readline().strip())"], None, prompt
 
                 def result(output: Path, _code: int, current: str = provider) -> dict[str, Any]:
