@@ -134,7 +134,7 @@ def dispatch_message(parent: Path, graph: dict[str, Any], node_id: str, task: st
         if len(matches) != 1:
             raise AssertionError("fixture spawn requires one owned progress.json")
         state_path, saved = matches[0]
-        saved["graph"]["dispatches"][identifier]["authorized"] = {"tool_use_id": None}
+        saved["graph"]["dispatches"][identifier]["authorized"] = {"tool_use_id": f"call-{task}"}
         write_json(state_path, saved)
     return message
 

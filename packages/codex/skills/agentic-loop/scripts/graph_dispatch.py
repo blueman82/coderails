@@ -99,7 +99,10 @@ def apply_record(state: dict[str, Any], raw_results: str, typed: bool = False) -
     transition = graph_semantics.record_wave(state, envelope.get("wave_id"), results)
     proposed = cast(dict[str, Any], transition["state"])
     worker_status.retain_decision_slot(proposed, statuses)
-    graph_repair.apply_failed_gates(transition, results)
+    status_nodes = {status["node"] for status in statuses}
+    graph_repair.apply_failed_gates(
+        transition, {node: result for node, result in results.items() if node not in status_nodes}
+    )
     stale_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "stale")
     failed_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "failed")
     references, identifiers = bind_worker_evidence(state, active, stale_nodes, failed_nodes)
@@ -138,7 +141,14 @@ def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
 
 
 def authorize_dispatch(
-    path: Path, session: str, dispatch_id: str, message_file: Path, agent_type: str, task: str, evals_path: Path
+    path: Path,
+    session: str,
+    dispatch_id: str,
+    message_file: Path,
+    agent_type: str,
+    task: str,
+    evals_path: Path,
+    tool_use_id: str = "",
 ) -> dict[str, Any]:
     """Check a spawn_agent message against its begin-wave record, assert agent_type == role, consume the id.
 
@@ -209,7 +219,7 @@ def authorize_dispatch(
             raise GraphError(str(error)) from error
         except OSError as error:
             raise GraphError(f"cannot read the message file: {error}") from error
-        record["authorized"] = {"tool_use_id": None}
+        record["authorized"] = {"tool_use_id": tool_use_id or None}
         _write(path, state)
         trace(path, state, "authorized", "dispatch_authorized", inputs, [(named, None, None)], "authorize-dispatch")
         return {

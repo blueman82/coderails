@@ -80,6 +80,10 @@ def main() -> int:
         if enveloped:
             deny("Graph worker dispatch requires this session's progress.json. Start the native graph first.")
         return 0  # no loop owns this session: nothing to bind the spawn to
+    tool_use_id = text_field(payload, "tool_use_id")
+    if not tool_use_id:
+        deny("Graph worker dispatch requires a native tool-call id.")
+        return 0
     graph = graph_path()
     if not graph.is_file():
         deny("Graph worker dispatch requires the provider-local graph helper.")
@@ -115,6 +119,8 @@ def main() -> int:
                 agent_type if isinstance(agent_type, str) else "",
                 "--task-name",
                 task,
+                "--tool-use-id",
+                tool_use_id,
             )
         except HostResourceError:
             deny(RESOURCE_MESSAGE)

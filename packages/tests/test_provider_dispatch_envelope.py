@@ -110,7 +110,8 @@ class DispatchEnvelopeTests(unittest.TestCase):
             self.assertFalse(self.verdict(provider, provider.request()))
             state = provider.read()
             record = next(iter(state["graph"]["dispatches"].values()))
-            self.assertEqual(record["authorized"], {"tool_use_id": None})
+            expected_id = None if provider.name == "claude" else provider.request()["tool_use_id"]
+            self.assertEqual(record["authorized"], {"tool_use_id": expected_id})
             self.assertEqual(record["envelope_version"], 2)
             self.assertEqual(record["contract"]["role"], "loop-worker")
             self.assertEqual(self.reason(provider), "dispatch_authorized")

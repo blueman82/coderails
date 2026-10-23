@@ -403,7 +403,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent` and `spawn_agent` only, so `SendMessage` on
   Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
   (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
-  `spawn_agent` function-call message with its v2 record, role and consumed authorization; a task-name-only legacy event
+  `spawn_agent` function-call message with its v2 record, role and consumed authorization; encrypted messages also require
+  the PreToolUse `tool_use_id` to equal the native function-call id, so off-mode receipts cannot bind them. A task-name-only legacy event
   cannot bind a contract-era wave. Claude matches a non-null hook `tool_use_id` to the native Agent call; when the hook
   supplies no id, it retains the consumed flag and one-spawn-per-id check without claiming call-id proof. Historical
   pre-contract attempts retain their original evidence rules. Claude hooks can still fail open if the hook times out

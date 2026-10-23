@@ -159,7 +159,10 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
         references = bind_wave(state, core)
         proposed = object_value(proposal["state"], "proposed graph")
         worker_status.retain_decision_slot(proposed, statuses)
-        graph_repair.apply_failed_gates(proposal, core)
+        status_nodes = {status["node"] for status in statuses}
+        graph_repair.apply_failed_gates(
+            proposal, {node: result for node, result in core.items() if node not in status_nodes}
+        )
         for node_id, refs in references.items():
             proposed["graph"]["nodes"][node_id]["evidence"].extend(refs)
         worker_status.record_into(proposed, report["wave_id"], statuses, reports)

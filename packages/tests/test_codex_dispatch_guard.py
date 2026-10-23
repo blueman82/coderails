@@ -42,6 +42,7 @@ class DispatchGuardTests(unittest.TestCase):
         }
         self.payload: dict[str, Any] = {
             "tool_name": "spawn_agent",
+            "tool_use_id": "call-spawn",
             "session_id": "parent",
             "cwd": str(self.state.parent),
             "tool_input": self.tool_input,
@@ -116,6 +117,12 @@ class DispatchGuardTests(unittest.TestCase):
             ],
         )
         self.assertEqual(self.message_file_text, self.tool_input["message"])
+        self.assertEqual(self.sent[0][-2:], ("--tool-use-id", "call-spawn"))
+
+    def test_graph_spawn_without_native_call_id_is_denied(self) -> None:
+        """An opaque transcript cannot be joined to a hook approval without the native call id."""
+        del self.payload["tool_use_id"]
+        self.assertEqual(self._run(), (True, 0))
 
     def test_arbitrary_task_name_without_an_envelope_is_denied(self) -> None:
         """The old regex let any non-graph-looking spawn through; in a graph-bound session it is now denied."""

@@ -143,7 +143,10 @@ class GraphRuntimeTests(unittest.TestCase):
         dispatch["authorized"] = None
         write_json(self.path, current)
         self.assert_unchanged(self.record)
-        dispatch["authorized"] = {"tool_use_id": None}
+        dispatch["authorized"] = {"tool_use_id": "wrong-call"}
+        write_json(self.path, current)
+        self.assert_unchanged(self.record)
+        dispatch["authorized"] = {"tool_use_id": call["payload"]["call_id"]}
         write_json(self.path, current)
         arguments["message"] = "not encrypted"
         call["payload"]["arguments"] = json.dumps(arguments)
@@ -165,8 +168,8 @@ class GraphRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphError, "encrypted native message changed"):
             validate_worker_evidence(read_json(self.path))
 
-    def test_encrypted_dispatch_survives_off_switch_rescue(self) -> None:
-        """A hook-seen off-mode spawn remains verifiable after the switch is unset."""
+    def test_encrypted_dispatch_refuses_off_switch_receipt(self) -> None:
+        """An off-mode receipt cannot bind an opaque native prompt to an approved call."""
         opened = graph.begin_wave(self.path)["dispatches"][0]
         message = self.path.with_name("message.txt")
         message.write_text(opened["prompt_prefix"] + "\n" + opened["prompt_sections"], encoding="utf-8")
@@ -193,12 +196,7 @@ class GraphRuntimeTests(unittest.TestCase):
             call["payload"]["arguments"] = json.dumps(arguments)
             lines[1] = json.dumps(call)
             self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            self.record()
-        current = read_json(self.path)
-        validate_worker_evidence(current)
-        next(iter(current["graph"]["dispatches"].values()))["authorized"] = None
-        with self.assertRaisesRegex(ValueError, "consumed hook authorization"):
-            validate_worker_evidence(current)
+            self.assert_unchanged(self.record)
 
     def test_plaintext_dispatch_survives_off_switch_rescue(self) -> None:
         """A v2-only plaintext rescue stays valid after normal policy resumes."""

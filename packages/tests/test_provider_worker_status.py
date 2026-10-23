@@ -218,6 +218,35 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                 self.assertEqual(failed.returncode, 0, failed.stderr)
                 self.assertEqual(provider.read()["graph"]["nodes"][NODE]["retry"]["attempts"], 3)
 
+    def test_full_verification_status_resumes_after_answer(self) -> None:
+        """A human decision on U4 is not an ordinary review failure needing record-repair."""
+        verification = "U4[1]"
+        for provider in self.providers:
+            with self.subTest(provider=provider.name):
+                state = provider.state((verification,))
+                state["graph"]["spec_profile"] = "full"
+                provider.write(state)
+                provider.success("begin-wave")
+                report = provider.launch("failed")
+                report["results"] = {verification: typed("NEEDS_DECISION")}
+                result = provider.call("record-wave", json.dumps(report))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(provider.read()["graph"]["nodes"][verification]["status"], "pending")
+                provider.success(
+                    "record-decision",
+                    "--session",
+                    provider.session,
+                    "--phase",
+                    "verification",
+                    "--decision",
+                    "answer",
+                    "--chosen",
+                    "a",
+                    "--worker-status-seq",
+                    "1",
+                )
+                self.assertEqual(provider.success("inspect")["ready"], [verification])
+
     def test_malformed_status_storage_inhibits_readiness(self) -> None:
         """Malformed rows fail closed instead of being mistaken for resolved decisions."""
         cases: list[Any] = [None, {}, [None], [{}], [{"node": NODE, "decision_pending": "false"}]]
