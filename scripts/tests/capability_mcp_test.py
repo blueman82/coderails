@@ -219,6 +219,27 @@ class McpCase(unittest.TestCase):
                 self.assertTrue(done.stderr.strip())
         self.assertGreaterEqual(self.codes().count("capability_mcp_refused"), 5)
 
+    def test_malformed_role_grants_refuse_startup(self) -> None:
+        """A string or mixed grant list must not be treated as a set of tools."""
+        path = self.tree / "capabilities/profiles.json"
+        original = json.loads(path.read_text(encoding="utf-8"))
+        for granted in ("repo.inspect diff.read", ["repo.inspect", 7]):
+            with self.subTest(granted=granted):
+                data = dict(original)
+                data["agents"] = {**original["agents"], "design-scout": granted}
+                path.write_text(json.dumps(data), encoding="utf-8")
+                done = subprocess.run(
+                    [sys.executable, str(self.tree / "scripts/capability_mcp.py"), "--role", "design-scout"],
+                    cwd=self.repo,
+                    env={"PATH": os.environ["PATH"], "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)},
+                    input="",
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(done.returncode, 2, done.stdout)
+                self.assertIn("malformed", done.stderr)
+
     def test_negative_control_hard_coded_tools_ignore_profile_edit(self) -> None:
         """Control: a server with a hard-coded tool set fails the drift assertion above."""
         doctor = {"scripts/capability_mcp.py": ('profile["agents"][role]', '["repo.inspect", "diff.read"]')}
@@ -241,6 +262,23 @@ class McpCase(unittest.TestCase):
         env = server.envelope("repo_inspect", {"op": "sha256", "path": "\ud800x"})
         self.assertEqual(env["refusal"], "capability_args_invalid")
         self.assertIn("repo_inspect", server.tools())
+
+    def test_lone_surrogate_tool_name_is_refused_and_server_survives(self) -> None:
+        """A malformed wrong-role name must not kill tracing or the MCP process."""
+        server = self.start("design-scout")
+        self.assertIn("error", server.call("\ud800", {}))
+        self.assertIn("repo_inspect", server.tools())
+
+    def test_unknown_named_command_placeholder_refuses_without_crash(self) -> None:
+        """A bad profile template must return a typed refusal and leave MCP alive."""
+        path = self.tree / "capabilities/profiles.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["named_commands"]["file-lines"]["argv"] = ["wc", "-l", "{missing}"]
+        path.write_text(json.dumps(data), encoding="utf-8")
+        server = self.start("source-auditor")
+        env = server.envelope("cmd_run", {"name": "file-lines", "args": {"path": "a.txt"}})
+        self.assertEqual(env["refusal"], "capability_profiles_invalid")
+        self.assertIn("cmd_run", server.tools())
 
     def test_python39_syntax_and_import(self) -> None:
         """(g) the three new modules parse as 3.9 and import under this interpreter."""
