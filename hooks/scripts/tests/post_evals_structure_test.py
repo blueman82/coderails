@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.tests.lib.post_evals_fixture import ArtifactCase, entry
@@ -91,6 +92,9 @@ class StructureTests(ArtifactCase):
     def test_freeze_ancestry_and_explicit_disclosure(self) -> None:
         """Use real Git history to distinguish the branch base from a late freeze."""
         base = self.repository()
+        base_reply = patch("scripts.lib.git_common.pr_field", return_value=base)
+        base_reply.start()
+        self.addCleanup(base_reply.stop)
         self.git("update-ref", "refs/remotes/origin/main", base)
         self.git("checkout", "-b", "feature")
         self.git("commit", "--allow-empty", "-m", "implementation")

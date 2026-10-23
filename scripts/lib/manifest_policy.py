@@ -148,13 +148,20 @@ def trace(label: str, outcome: str, code: str, command: str = "diff-manifest") -
         return
 
 
-def diff_changes(head: str, fetch: str = "") -> Changes | None:
-    """Return parsed raw -z changes for origin/<main>...head, or None when the diff cannot be computed."""
+def diff_changes(head: str, fetch: str = "", base: str = "") -> Changes | None:
+    """Return parsed raw -z changes for the PR base SHA (or local main) to head."""
     if fetch and git.run("git", "cat-file", "-e", head).returncode:
         git.run("git", "fetch", "-q", "origin", fetch)
     if not head:
         return None  # an unresolved PR head must never fall back to diffing the local HEAD
-    result = git.run("git", "diff", "--raw", "-z", "-M", f"origin/{git.main()}...{head}")
+    if base:
+        if not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", base):
+            return None
+        if git.run("git", "cat-file", "-e", base).returncode:
+            git.run("git", "fetch", "-q", "origin", base)
+        if git.run("git", "cat-file", "-e", base).returncode:
+            return None
+    result = git.run("git", "diff", "--raw", "-z", "-M", f"{base or f'origin/{git.main()}'}...{head}")
     return None if result.returncode else parse_raw_z(result.stdout)
 
 
@@ -215,7 +222,12 @@ def _evaluate(pr: str, head: str, policy_file: str, unit: str, progress: str, la
     """Check the diff against the policy; unusable inputs yield one manifest_unreadable violation."""
     policy = load_json(policy_file)
     default = load_json(DEFAULT_POLICY)
-    changes = diff_changes(head or (git.pr_field(pr, "headRefOid") if pr else "HEAD"), f"pull/{pr}/head" if pr else "")
+    base = git.pr_field(pr, "baseRefOid") if pr else ""
+    changes = (
+        diff_changes(head or (git.pr_field(pr, "headRefOid") if pr else "HEAD"), f"pull/{pr}/head" if pr else "", base)
+        if not pr or base
+        else None
+    )
     if policy is None or default is None or changes is None or not isinstance(policy.get("manifest", []), list):
         return [{"code": "manifest_unreadable", "path": policy_file}]
     policy["deny"] = strings(default.get("deny")) + strings(policy.get("deny"))

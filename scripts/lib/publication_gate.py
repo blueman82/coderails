@@ -33,7 +33,8 @@ def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list
         return [{"code": "review_passes_malformed", "detail": ""}]
     try:
         policy = review_passes.load_policy()
-        changes = manifest_policy.diff_changes(sha, f"pull/{number}/head")
+        base = git.pr_field(number, "baseRefOid")
+        changes = manifest_policy.diff_changes(sha, f"pull/{number}/head", base) if base else None
     except ValueError:
         return [{"code": "review_policy_unreadable", "detail": ""}]
     if changes is None:
@@ -79,7 +80,7 @@ def eval_level_check(number: str, sha: str, unit: str, progress: str) -> list[Vi
     if changes is None:
         return [{"code": "eval_level_diff_unavailable", "detail": ""}]
     _, minimum = eval_level.derive(changes, eval_level.progress_units(progress), data, eval_level.load_policy())
-    late = eval_level.suite_late(data, eval_level.branch_base(sha))
+    late = eval_level.suite_late(data, eval_level.branch_base(sha, pr=number))
     codes: list[str] = []
     if data.get("head_sha") != sha:
         codes.append("eval_head_mismatch")
@@ -121,6 +122,11 @@ def remediation(code: str) -> str:
     if code.startswith(("eval_", "level_", "late_freeze", "suite_", "chain_", "integrity_", "not_frozen")):
         return "Re-run and re-post the evals: post_evals.py post <PR> <evals.json> (record an oracle edit with amend)."
     return "Resolve the reported publication-check refusal, then retry."
+
+
+def trace_preflight(code: str) -> None:
+    """Count a repository or base retarget refusal before PR evidence can be trusted."""
+    manifest_policy.trace("merge-preflight", "refused", code, command="publication")
 
 
 def evaluate(number: str, sha: str, unit: str = "", progress: str = "") -> list[Violation]:

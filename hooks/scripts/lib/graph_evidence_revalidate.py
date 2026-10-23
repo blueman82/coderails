@@ -14,7 +14,7 @@ def revalidate_all(state: dict[str, Any]) -> None:
     path = transcript(session)
     rows, notices = spawns(path, session), notifications(path, session)
     used_references(state)
-    history = object_value(state["graph"].get("wave_history"), "native wave history")
+    history = object_value(state["graph"].get("wave_history", {}), "native wave history")
     for node_id, node in state["graph"]["nodes"].items():
         if node_id in state["graph"]["joins"]:
             continue
