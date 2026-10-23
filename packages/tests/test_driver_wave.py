@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,18 @@ from packages.tests.test_driver_authorize import frozen_evals  # noqa: E402
 
 class DriverWaveTests(unittest.TestCase):
     """Exercise the real Claude and Codex graph CLIs on disposable files."""
+
+    def fake_gh(self, base: Path, head: str) -> None:
+        """Let the child graph CLIs find a disposable open PR at this HEAD."""
+        tool_dir = base / "bin"
+        tool_dir.mkdir()
+        gh = tool_dir / "gh"
+        response = json.dumps({"number": 42, "state": "OPEN", "headRefOid": head})
+        gh.write_text("#!/bin/sh\nprintf '%s\\n' '" + response + "'\n")
+        gh.chmod(0o755)
+        environment = patch.dict(os.environ, PATH=f"{tool_dir}:{os.environ['PATH']}")
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def test_public_begin_reserves_root_control_without_worker_dispatch(self) -> None:
         """A direct CLI call owns the proof wave without issuing a worker."""
@@ -70,6 +83,8 @@ class DriverWaveTests(unittest.TestCase):
                 ],
                 check=True,
             )
+            head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+            self.fake_gh(base, head)
             for provider in ("claude", "codex"):
                 case = Case(provider, base)
                 self.assertEqual(case.graph("convert").returncode, 0)

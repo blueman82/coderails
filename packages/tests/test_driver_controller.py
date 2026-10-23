@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -40,6 +41,18 @@ class DriverControllerTests(unittest.TestCase):
         )
         publisher.start()
         self.addCleanup(publisher.stop)
+        tool_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tool_dir.cleanup)
+        gh = Path(tool_dir.name) / "gh"
+        gh.write_text(
+            "#!/usr/bin/env python3\nimport json, subprocess\n"
+            "head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()\n"
+            "print(json.dumps({'number': 42, 'state': 'OPEN', 'headRefOid': head}))\n"
+        )
+        gh.chmod(0o755)
+        environment = patch.dict(os.environ, PATH=f"{tool_dir.name}:{os.environ['PATH']}")
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def test_unpublished_source_pauses_before_seal(self) -> None:
         """A completed worker cannot become graph evidence before publication."""

@@ -84,6 +84,32 @@ def publication(checkout: Path) -> dict[str, Any]:
     return {"number": pr["number"], "head": head}
 
 
+def validate_publication(checkout: Path, number: int, head: str) -> None:
+    """Keep sealed publication bound to a live open or merged PR at its head."""
+    try:
+        viewed = subprocess.run(
+            ["gh", "pr", "view", str(number), "--json", "number,state,headRefOid"],
+            cwd=checkout,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError("driver publication lookup failed") from error
+    if viewed.returncode:
+        raise ValueError("driver publication is unavailable")
+    try:
+        raw: object = json.loads(viewed.stdout)
+    except ValueError as error:
+        raise ValueError("driver publication response is invalid") from error
+    if not isinstance(raw, dict):
+        raise ValueError("driver publication response is invalid")
+    pr = cast(dict[str, Any], raw)
+    if pr.get("number") != number or pr.get("headRefOid") != head or pr.get("state") not in {"OPEN", "MERGED"}:
+        raise ValueError("driver publication no longer matches its PR")
+
+
 def _record(state: dict[str, Any], node_id: str, dispatch_id: str) -> dict[str, Any]:
     """Require an authorized driver record owned by this graph and node."""
     if not _DISPATCH_ID.fullmatch(dispatch_id):
@@ -243,6 +269,7 @@ def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: d
             or published.get("head") != manifest["head"]
         ):
             raise ValueError("driver publication evidence is invalid")
+        validate_publication(Path(checkout), number, manifest["head"])
     return cast(dict[str, Any], manifest)
 
 

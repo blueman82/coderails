@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +21,37 @@ import graph_driver_evidence  # noqa: E402
 
 class DriverEvidenceTests(unittest.TestCase):
     """Use real files and a disposable Git repository for SHA revalidation."""
+
+    def fake_gh(self, base: Path, head: str) -> Callable[[str, str], None]:
+        """Serve mutable PR responses from a disposable executable."""
+        bin_dir = base / "bin"
+        bin_dir.mkdir()
+        gh = bin_dir / "gh"
+
+        def serve(state: str, pr_head: str) -> None:
+            response = json.dumps({"number": 42, "state": state, "headRefOid": pr_head})
+            gh.write_text("#!/bin/sh\nprintf '%s\\n' '" + response + "'\n")
+            gh.chmod(0o755)
+
+        serve("OPEN", head)
+        environment = patch.dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
+        environment.start()
+        self.addCleanup(environment.stop)
+        return serve
+
+    def check_pr_revalidation(
+        self, state_path: Path, state: dict[str, Any], ref: dict[str, Any], serve: Callable[[str, str], None], head: str
+    ) -> None:
+        """A closed or moved PR invalidates a sealed success; a merged one remains valid."""
+        serve("CLOSED", head)
+        with self.assertRaisesRegex(ValueError, "publication"):
+            graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
+        serve("OPEN", "0" * len(head))
+        with self.assertRaisesRegex(ValueError, "publication"):
+            graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
+        serve("MERGED", head)
+        graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
+        serve("OPEN", head)
 
     def commit_empty(self, checkout: Path, message: str) -> None:
         """Advance the disposable worker checkout by one commit."""
@@ -171,11 +202,13 @@ class DriverEvidenceTests(unittest.TestCase):
                 )
             self.assertFalse((artifact / "manifest.json").exists())
             head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+            serve = self.fake_gh(base, head)
             with patch.object(graph_driver_evidence, "publication", return_value={"number": 42, "head": head}):
                 ref = graph_driver_evidence.seal(
                     state_path, state, "U3[1]", dispatch_id, checkout, "codex", 0, {"outcome": "done"}
                 )
             graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
+            self.check_pr_revalidation(state_path, state, ref, serve, head)
             self.check_failed_without_final(state_path, state, checkout)
             foreign = deepcopy(state)
             foreign["graph"]["dispatches"][dispatch_id]["authorized"]["prompt_sha256"] = "0" * 64
