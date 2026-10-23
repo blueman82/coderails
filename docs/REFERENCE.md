@@ -669,8 +669,9 @@ and readers without installed provider accounts.
 
 | Module | Responsibility |
 |---|---|
-| `hooks/scripts/hook_common.py` | Bounded payload reads and native hook responses. |
+| `hooks/scripts/hook_common.py` | Bounded payload reads and native hook responses. `read_payload` fails open on host exhaustion (logged); `read_payload_strict` raises `HostResourceError` and is used only by the gates that deny on it (`action_authority_gate`, `destructive_bash_gate`, `enforce_pr_workflow`, `no_edit_on_main`). |
 | `hooks/scripts/lib/agentic_loop_path.py` | Resolve the repository/session-owned loop state path. |
+| `hooks/scripts/lib/hook_telemetry.py` | Content-free, fail-open JSONL hook telemetry (`hook_telemetry.jsonl`): exit cause, duration, open fds, native-signal children, `deny` vs `ok` cause (set by `deny()`). Byte-identical copy in `packages/codex/hooks/scripts/lib/`. |
 | `hooks/scripts/lib/discipline_common.py` | Read native Claude transcript tools, final text and edited-file count. |
 | `hooks/scripts/lib/loop_state_common.py` | Loop detection, ownership, atomic state update behind the `dir_lock` mkdir lock; live completion marker. |
 | `hooks/scripts/lib/dir_lock.py` | Stdlib-only mkdir lock with owner pid and start time; steals a dead owner's lock atomically (see `docs/graph-alignment-measurement.md`, stale-lock policy). |
@@ -795,25 +796,22 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 
 The loop's `spec.md`, `plan.md`, and `progress.json` live in `~/.coderails/agentic-loop/` — **outside** the code repo and Claude's configuration tree. They are loop state keyed to this orchestrator run, not shareable design records. If work needs handing to a human, `coderails:handoff` is the right tool. Durable records belong in the wiki or an explicitly authorized repository document, not these session-local scratch files.
 
-### Record-decision entry point (lane A wiring)
+### Record-decision entry point
 
-`decision_record.record(path, session, phase, decision, *, transition, ...)` is the one call behind a
-`graph.py record-decision` subcommand. `transition(path, fn)` is the provider's lock wrapper: Claude passes
-`hooks.scripts.lib.graph_executor.transition`; Codex wraps `graph_io.locked/load/write` into the same shape
-(`with locked(path): new = fn(load(path)); write(path, new); return new`). The exact six lines lane A adds to graph.py:
+Both provider graph CLIs call `decision_record.record` through their native state locks:
 
-```python
-from scripts.lib import decision_record
-...
-def record_decision(args):
-    out = decision_record.record(args.path, args.session, args.phase, args.decision, transition=transition,
-                                 flip_condition=args.flip_condition, unit=args.unit, cite_quote=args.cite_quote)
-    print(json.dumps(out)); return out["exit_code"]
+```text
+graph.py record-decision <progress.json> --session <id> --phase <phase> --decision <text> [--flip-condition <text>] [--unit <id>] [--cite-quote <verbatim user quote>]
+graph.py flush-decisions <progress.json> --session <id> [--cite-quote <verbatim user quote>]
 ```
 
-Order: (1) under the lock the local row is appended (`seq`, `prev_sha256`, `row_sha256`, `muninn: {state: pending}`);
+Use these commands for decisions; never append rows to `progress.json` by hand. `record-decision` verifies the
+existing hash chain before appending. `flush-decisions` verifies it before retrying pending or degraded rows.
+
+Order: (1) under the lock the local row is appended (`seq`, `prev_sha256`, `row_sha256`, `muninn: {state: syncing}`);
 (2) outside the lock Muninn is written; (3) under the lock again the row's `muninn` field is patched. Return
-`{recorded, seq, muninn: {state, id, reason_code}, exit_code}`; exit 0 written or disabled, 3 degraded (loud reason
+`{recorded, seq, muninn: {state, id, reason_code}, exit_code}`; exit 0 written or disabled, 3 degraded or unknown (loud reason
 code, trace `decision.sync/degraded/<code>`, local row kept), 2 refused (wrong session, blank phase or decision: nothing
-written). Teardown calls `flush_pending(path, session, transition=transition, cite_quote=...)` to retry pending and
-degraded rows. Trace commands: `decision.record`, `decision.sync` (counted by `memory_counters.memory_counts`).
+written). Teardown runs `flush-decisions` to retry pending and safely degraded rows. An in-flight or uncertain sync
+returns `decision_sync_unknown` and must be reconciled against Muninn before any manual retry. Trace commands: `decision.record`,
+`decision.sync` (counted by `memory_counters.memory_counts`).
