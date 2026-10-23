@@ -5,11 +5,19 @@ import tempfile
 from pathlib import Path
 
 PROVIDER_SCRIPT_DIRS = ("skills/agentic-loop/scripts", "packages/codex/skills/agentic-loop/scripts")
-SHARED_MODULES = ("graph_semantics", "graph_vocab", "graph_convert")  # packages/graph-semantics/<name>.py
+SHARED_MODULES = (  # packages/graph-semantics/<file>: shared modules plus the spec and policy data they read
+    "graph_semantics.py",
+    "graph_vocab.py",
+    "graph_convert.py",
+    "graph_spec.py",
+    "graph_repair.py",
+    "graph-spec.yaml",
+    "policy.yaml",
+)
 SEMANTIC_TARGETS = tuple(
-    (f"packages/graph-semantics/{name}.py", tuple(f"{directory}/{name}.py" for directory in PROVIDER_SCRIPT_DIRS))
+    (f"packages/graph-semantics/{name}", tuple(f"{directory}/{name}" for directory in PROVIDER_SCRIPT_DIRS))
     for name in SHARED_MODULES
-)  # (canonical source, provider copies); extend SHARED_MODULES to materialize another shared module
+)  # (canonical source, provider copies); extend SHARED_MODULES to materialize another shared file
 
 
 def atomic_bytes(path: Path, data: bytes, mode: int = 0o644) -> None:

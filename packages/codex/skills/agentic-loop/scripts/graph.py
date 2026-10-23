@@ -11,10 +11,12 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_convert
+import graph_repair
 import graph_semantics
+import graph_spec
 import graph_stops
 from graph_completion import complete, verify_completion
-from graph_controller import add_unit, start
+from graph_controller import add_unit, instantiate, start
 from graph_dispatch import apply_record, authorize_dispatch, begin_wave, record_wave
 from graph_identity import GraphError, next_attempt, task_name
 from graph_io import load as _load
@@ -91,6 +93,21 @@ def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str
         graph_semantics.validate(state)
         _write(path, state)
         return {"unit": unit_id, "status": status, "revision": state["revision"]}
+
+
+def record_repair(
+    path: Path, session: str, unit: str, failed_node: str, kind: str, identity: str, diagnosis: str
+) -> dict[str, Any]:
+    """Record one conditional repair under the Codex state lock."""
+    with _locked(path):
+        try:
+            proposed, report = graph_repair.record_repair(
+                _load(path), session, unit, failed_node, kind, identity, diagnosis
+            )
+        except ValueError as error:
+            raise GraphError(str(error)) from error
+        _write(path, proposed)
+        return report
 
 
 def inspect(path: Path) -> dict[str, Any]:
@@ -249,6 +266,12 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--depends-on", action="append", default=[])
             controller.add_argument("--join", action="store_true")
             controller.add_argument("--manifest", action="append", default=[])
+    spec = commands.add_parser("instantiate")
+    spec.add_argument("state", type=Path)
+    spec.add_argument("--session", required=True)
+    spec.add_argument("--loop-id", required=True)
+    spec.add_argument("--profile", choices=graph_spec.PROFILES, help="default: policy graph.profile")
+    spec.add_argument("--unit", action="append", default=[], help="work unit id to register (repeatable)")
     convert = commands.add_parser("convert")
     convert.add_argument("state", type=Path)
     convert.add_argument("--session", required=True)
@@ -271,6 +294,10 @@ def _parser() -> argparse.ArgumentParser:
     detail = unit.add_mutually_exclusive_group(required=True)
     detail.add_argument("--evidence")
     detail.add_argument("--reason")
+    repair = commands.add_parser("record-repair")
+    repair.add_argument("state", type=Path)
+    for field in ("session", "unit", "failed-node", "kind", "identity", "diagnosis"):
+        repair.add_argument(f"--{field}", required=True)
     for name in ("respawn_stale", "hard_stop"):
         transition = commands.add_parser(name.replace("_", "-"))
         transition.add_argument("state", type=Path)
@@ -303,6 +330,8 @@ def main() -> int:
             output = add_unit(
                 args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest
             )
+        elif args.command == "instantiate":
+            output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "begin-wave":
             output = begin_wave(args.state)
         elif args.command == "record-wave":
@@ -311,6 +340,10 @@ def main() -> int:
             if (args.status == "done") != (args.evidence is not None):
                 raise GraphError("done requires --evidence; dropped requires --reason")
             output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
+        elif args.command == "record-repair":
+            output = record_repair(
+                args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis
+            )
         elif args.command in {"stop", "consume-stop"}:
             output = graph_stops.run(args)
         elif args.command in {"respawn-stale", "hard-stop"}:
