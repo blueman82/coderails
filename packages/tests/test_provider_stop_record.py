@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
 from subprocess import CompletedProcess
+from typing import Any
 
 from packages.tests.provider_fixture import Provider
 
@@ -50,6 +52,8 @@ class ProviderStopRecordTests(unittest.TestCase):
             self.assertEqual(self.stop(provider, "hard-stop", "node_hard_stop", "boom").returncode, 0)
             after = provider.read()
             self.assertEqual(after["revision"], before["revision"])
+            for row in after["stops"]:  # `at` is the wall-clock turn binding the Claude guard reads
+                self.assertIsInstance(row.pop("at"), float)
             self.assertEqual(
                 after["stops"],
                 [
@@ -116,6 +120,19 @@ class ProviderStopRecordTests(unittest.TestCase):
         self.assertNotEqual(self.stop(claude).returncode, 0)
         self.assertEqual(claude.path.read_bytes(), before)
 
+    @staticmethod
+    def row(seq: int, category: str) -> dict[str, Any]:
+        """A same-revision unconsumed row as `graph.py stop` would write it."""
+        return {
+            "seq": seq,
+            "category": category,
+            "reason_code": "other",
+            "reason": "r",
+            "revision": 1,
+            "consumed": False,
+            "at": 1.0e9,
+        }
+
     def guard(self, provider: Provider, message: str = "stopping") -> str:
         """Run the Codex Stop guard and return its stdout."""
         payload = {"session_id": provider.session, "cwd": str(provider.home), "last_assistant_message": message}
@@ -130,18 +147,57 @@ class ProviderStopRecordTests(unittest.TestCase):
         self.assertEqual(self.guard(provider), "")
         self.assertTrue(provider.read()["stops"][0]["consumed"])
         self.assertEqual(json.loads(self.guard(provider))["decision"], "block")  # consumed: no second free pass
-        self.assertEqual(self.guard(provider, "LOOP-STOP: waiting-on-human"), "")  # legacy text fallback still works
-        trace = (
-            provider.home / "state" / provider.session / "trace.jsonl"
-        )  # and is observable, like Claude's (finding 2)
-        rows = [json.loads(line) for line in trace.read_text().splitlines()]
+        text = "LOOP-STOP: complete - x\nLOOP-STOP: stopped"
+        self.assertEqual(json.loads(self.guard(provider, text))["decision"], "block")  # text alone never releases
+        rows = self.trace_rows(provider)
         self.assertEqual(
-            [(r["command"], r["reason_code"]) for r in rows], [("graph_completion_guard", "legacy_text_parse")]
+            {(r["command"], r["reason_code"]) for r in rows}, {("graph_completion_guard", "stop_row_missing")}
         )
+        self.assertNotIn("legacy_text_parse", json.dumps(rows))
         self.assertTrue(rows[0]["event_id"])
 
-    def test_codex_guard_ignores_foreign_stale_and_non_hard_rows(self) -> None:
-        """Stops for another revision or category never release the guard."""
+    def trace_rows(self, provider: Provider) -> list[dict[str, Any]]:
+        """Rows the Codex guard appended to the session trace."""
+        trace = provider.home / "state" / provider.session / "trace.jsonl"
+        return [json.loads(line) for line in trace.read_text().splitlines()] if trace.is_file() else []
+
+    def test_codex_guard_releases_approval_and_input_rows_once_without_a_hard_stop(self) -> None:
+        """approval-gate and awaiting-input rows release a pending graph (no graph.hard_stop needed), once each."""
+        provider = self.providers[1]
+        for category, code in (("approval-gate", "needs_approval"), ("awaiting-input", "needs_human_input")):
+            self.assertEqual(json.loads(self.guard(provider))["decision"], "block")
+            self.assertEqual(self.stop(provider, category, code, "asking").returncode, 0)
+            self.assertEqual(self.guard(provider), "", category)
+            self.assertEqual(json.loads(self.guard(provider))["decision"], "block")  # consumed: one release only
+        self.assertEqual([r["consumed"] for r in provider.read()["stops"]], [True, True])
+
+    def test_complete_row_is_never_consumed_by_the_codex_guard(self) -> None:
+        """`complete` goes through verify-completion; the guard leaves the row and still blocks without evidence."""
+        provider = self.providers[1]
+        provider.finish_wave()
+        self.assertEqual(self.stop(provider, "complete", "work_complete", "all done").returncode, 0)
+        self.assertEqual(json.loads(self.guard(provider, "LOOP-STOP: complete"))["decision"], "block")
+        self.assertFalse(provider.read()["stops"][0]["consumed"])
+
+    def test_both_providers_share_one_vocabulary_file(self) -> None:
+        """Both stop modules import graph_vocab, define no local tuple, and the three copies are byte-identical."""
+        root = Path(__file__).resolve().parents[2]
+        modules = (
+            root / "hooks/scripts/lib/graph_stops.py",
+            root / "hooks/scripts/lib/loop_state_common.py",
+            root / "packages/codex/skills/agentic-loop/scripts/graph_stops.py",
+        )
+        for module in modules:
+            source = module.read_text()
+            self.assertIn("from graph_vocab import", source, module.name)
+            self.assertIsNone(re.search(r"^STOP_(CATEGORIES|REASON_CODES)\s*=", source, re.M), module.name)
+        for name in ("graph_vocab", "graph_convert", "graph_semantics"):
+            canonical = (root / f"packages/graph-semantics/{name}.py").read_bytes()
+            for provider in ("skills/agentic-loop/scripts", "packages/codex/skills/agentic-loop/scripts"):
+                self.assertEqual((root / provider / f"{name}.py").read_bytes(), canonical, (provider, name))
+
+    def test_codex_guard_ignores_foreign_stale_and_complete_rows(self) -> None:
+        """Stops for another revision or a `complete` category never release the guard."""
         provider = self.providers[1]
         state = provider.read()
         state["stops"] = [
@@ -150,7 +206,7 @@ class ProviderStopRecordTests(unittest.TestCase):
         provider.write(state)
         provider.success("hard-stop", "--node", "U3[1]", "--session", provider.session, "--reason", "owner decision")
         self.assertEqual(json.loads(self.guard(provider))["decision"], "block")
-        self.assertEqual(self.stop(provider, "awaiting-input").returncode, 0)
+        provider.write({**provider.read(), "stops": provider.read()["stops"] + [self.row(2, "complete")]})
         self.assertEqual(json.loads(self.guard(provider))["decision"], "block")
 
 

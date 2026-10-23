@@ -10,86 +10,17 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+import graph_convert
 import graph_semantics
 import graph_stops
 from graph_completion import complete, verify_completion
 from graph_controller import add_unit, start
-from graph_evidence import bind_worker_evidence, transcript_cursor, validate_evals
-from graph_identity import GraphError, classify_worker_evidence, next_attempt, task_name, task_node
+from graph_dispatch import apply_record, authorize_dispatch, begin_wave, record_wave
+from graph_identity import GraphError, next_attempt, task_name
 from graph_io import load as _load
 from graph_io import locked as _locked
-from graph_io import object_value as _object
 from graph_io import write as _write
 from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace, traced_refusal
-from json_types import JsonValue
-
-
-def begin_wave(path: Path) -> dict[str, Any]:
-    """Start one core wave under the native state lock and frozen eval gate."""
-    with _locked(path):
-        state = _load(path)
-        validate_evals(state, None, path.with_name("evals.json"))
-        transition = graph_semantics.begin_wave(state)
-        proposed = cast(dict[str, Any], transition["state"])
-        wave = cast(dict[str, Any], transition["wave"])
-        proposed["graph"]["active_wave"]["transcript_cursor"] = transcript_cursor(proposed["session_id"])
-        task_names = {
-            node_id: task_name(proposed["loop_id"], node_id, next_attempt(proposed["graph"]["nodes"][node_id]))
-            for node_id in wave["nodes"]
-        }
-        graph_semantics.validate(proposed)
-        _write(path, proposed)
-        return {
-            "wave_id": wave["wave_id"],
-            "nodes": wave["nodes"],
-            "task_names": task_names,
-            "revision": proposed["revision"],
-        }
-
-
-def _apply_record(state: dict[str, Any], raw_results: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Bind native evidence and compute the post-record state for exactly the active wave; writes nothing."""
-    try:
-        parsed_results: JsonValue = cast(JsonValue, json.loads(raw_results))
-    except json.JSONDecodeError as error:
-        raise GraphError(f"results are not valid JSON: {error}") from error
-    graph = state["graph"]
-    if graph["active_wave"] is None:
-        raise GraphError("no active wave exists")
-    active = cast(dict[str, Any], graph["active_wave"])
-    envelope = _object(cast(object, parsed_results), "results")
-    if set(envelope) != {"wave_id", "results"}:
-        raise GraphError("results must contain exactly wave_id and results")
-    results = _object(envelope.get("results"), "results.results")
-    transition = graph_semantics.record_wave(state, envelope.get("wave_id"), results)
-    stale_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "stale")
-    failed_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "failed")
-    references, identifiers = bind_worker_evidence(state, active, stale_nodes, failed_nodes)
-    if any(
-        classify_worker_evidence(cast(dict[str, Any], result).get("evidence"), identifiers)[0]
-        for result in results.values()
-        if isinstance(result, dict)
-    ):
-        raise GraphError("result evidence must not contain worker evidence")
-    proposed = cast(dict[str, Any], transition["state"])
-    for node_id, reference in references.items():
-        proposed["graph"]["nodes"][node_id]["evidence"].append(reference)
-    return proposed, transition
-
-
-def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
-    """Bind native evidence and atomically record exactly the active wave."""
-    with _locked(path):
-        state = _load(path)
-        with traced_refusal(path, state, "record-wave"):
-            proposed, transition = _apply_record(state, raw_results)
-        graph_semantics.validate(proposed)
-        _write(path, proposed)
-        return {
-            "revision": proposed["revision"],
-            "released_joins": transition["released_joins"],
-            "ready": transition["ready"],
-        }
 
 
 def transition(path: Path, session: str, operation: str, node: str, reason: str) -> dict[str, Any]:
@@ -107,6 +38,33 @@ def transition(path: Path, session: str, operation: str, node: str, reason: str)
         _write(path, proposed)
         key = "respawn" if operation == "respawn_stale" else "hard_stop"
         return cast(dict[str, Any], transition[key])
+
+
+def convert_state(path: Path, session: str, check: bool) -> dict[str, Any]:
+    """Convert progress.json to the current minor under the state lock; refuse ambiguity, never guess."""
+    inputs: dict[str, Any] = {"session": session, "check": check}
+    backup: Path | None = None
+    report: dict[str, Any] = {}
+    try:
+        with _locked(path):
+            try:
+                raw: object = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as error:
+                raise GraphError(f"cannot read state: {error}") from error
+            converted, report = graph_convert.convert(raw, session)
+            if report["changed"] and not check:
+                try:
+                    graph_semantics.validate(converted)
+                except ValueError as error:
+                    raise graph_convert.ConvertRefusedError("invalid_result", str(error)) from error
+                backup = graph_convert.write_backup(path)
+                _write(path, converted)
+                _load(path)  # re-validate what was just written; the .pre-convert backup remains for manual recovery
+    except graph_convert.ConvertRefusedError as error:
+        trace(path, {"session_id": session}, "refused", f"convert_refused_{error.code}", inputs, [], "convert")
+        raise GraphError(str(error)) from error
+    trace(path, {"session_id": session}, "ok", "convert_ok", inputs, [], "convert")
+    return {**report, "check": check, "backup": backup.name if backup else None}
 
 
 def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str) -> dict[str, Any]:
@@ -208,7 +166,7 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
         check = {"checked": True, "method": f"lease {lease}s expired", "result": "no worker activity"}
         results = {n: {"outcome": "stale", "evidence": "lease expired", "stale_check": check} for n in nodes}
         with traced_refusal(path, state, "recover-wave", session):
-            proposed, _ = _apply_record(state, json.dumps({"wave_id": active["wave_id"], "results": results}))
+            proposed, _ = apply_record(state, json.dumps({"wave_id": active["wave_id"], "results": results}))
         for node_id in nodes:
             try:
                 respawned = graph_semantics.respawn_stale(proposed, node_id, "lease expired")
@@ -273,32 +231,6 @@ def summarize(path: Path) -> dict[str, Any]:
     }
 
 
-def authorize_dispatch(path: Path, session: str, task: str, evals_path: Path) -> dict[str, Any]:
-    """Require session, active attempt, and frozen eval authority before dispatch."""
-    state = _load(path)
-    if state["session_id"] != session:
-        raise GraphError("session does not own this loop")
-    if state["status"] == "complete":
-        raise GraphError("completed graph does not own worker dispatch")
-    loop_id, node_id = task_node(task)
-    if loop_id != state["loop_id"]:
-        raise GraphError("graph worker task name belongs to another loop")
-    active_wave = state["graph"]["active_wave"]
-    if active_wave is None or node_id not in active_wave["nodes"]:
-        raise GraphError("graph worker node is not in the active wave")
-    attempt = next_attempt(state["graph"]["nodes"][node_id])
-    if task_name(state["loop_id"], node_id, attempt) != task:
-        raise GraphError("graph worker task name does not match the active attempt")
-    validate_evals(state, None, evals_path)
-    return {
-        "loop_id": state["loop_id"],
-        "node": node_id,
-        "task_name": task,
-        "wave_id": active_wave["wave_id"],
-        "revision": state["revision"],
-    }
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Operate one native Codex agentic-loop graph.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -317,6 +249,12 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--depends-on", action="append", default=[])
             controller.add_argument("--join", action="store_true")
             controller.add_argument("--manifest", action="append", default=[])
+    convert = commands.add_parser("convert")
+    convert.add_argument("state", type=Path)
+    convert.add_argument("--session", required=True)
+    mode = convert.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="report the conversion without writing")
+    mode.add_argument("--write", action="store_true", help="convert in place (the default)")
     recover = commands.add_parser("recover-wave")
     recover.add_argument("state", type=Path)
     recover.add_argument("--session", required=True)
@@ -377,6 +315,8 @@ def main() -> int:
             output = graph_stops.run(args)
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
+        elif args.command == "convert":
+            output = convert_state(args.state, args.session, args.check)
         elif args.command == "recover-wave":
             output = recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
         elif args.command == "summarize":

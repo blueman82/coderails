@@ -48,6 +48,26 @@ class ProviderLifecycleTests(unittest.TestCase):
             result = provider.complete()
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_never_dispatched_graph_started_by_start_can_complete(self) -> None:
+        """`start` then complete with graded evidence succeeds on both providers; a pending node still blocks."""
+        for provider in self.providers:
+            provider.path.unlink()
+            prompt = provider.home / "prompt.txt"
+            prompt.write_text("go")
+            provider.success(
+                "start", "--session", provider.session, "--loop-id", "fixture-loop", "--prompt-file", str(prompt)
+            )
+            state = provider.read()
+            self.assertEqual((state["stops"], state["state_minor"]), ([], 1))
+            self.assertEqual(state["graph"]["wave_history"], {})
+            state["graph"].pop("wave_history")  # a graph written by the old `start`, before the key existed
+            provider.write(state)
+            provider.freeze()
+            provider.artifacts()
+            result = provider.complete()
+            self.assertEqual(result.returncode, 0, (provider.name, result.stderr))
+            self.assertEqual(provider.read()["status"], "complete")
+
     def test_dispatch_exact_owner_scope_and_retry_name(self) -> None:
         """Foreign ownership and old attempt names cannot authorize a new native worker."""
         for provider in self.providers:
@@ -163,9 +183,13 @@ class ProviderLifecycleTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["decision"], "block")
         provider.write(provider.state())
         provider.success("hard-stop", "--node", "U3[1]", "--session", provider.session, "--reason", "owner decision")
-        result = provider.hook(
-            "graph_completion_guard", {**payload, "last_assistant_message": "LOOP-STOP: waiting-on-human"}
-        )
+        text = {**payload, "last_assistant_message": "LOOP-STOP: waiting-on-human"}
+        self.assertEqual(json.loads(provider.hook("graph_completion_guard", text).stdout)["decision"], "block")
+        provider.success(
+            "stop", "--session", provider.session, "--category", "hard-stop",
+            "--reason-code", "node_hard_stop", "--reason", "owner decision",
+        )  # fmt: skip
+        result = provider.hook("graph_completion_guard", payload)
         self.assertEqual(result.stdout, "", result.stderr)
         result = provider.hook("inject_bootstrap", {**payload, "hook_event_name": "SessionStart"})
         context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]

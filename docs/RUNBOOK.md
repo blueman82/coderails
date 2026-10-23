@@ -195,16 +195,36 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `loop_stop_counts` disagrees with the declared turn category. Stops are model-written intent rows
   (`progress.stops[]`, written by `graph.py stop`); `loop_stop_counts` stays the hook-owned count of consumed stops.
 - Query: `python3 scripts/graph_alignment_stops.py --json` gives `stops_recorded`, `stops_consumed`,
-  `legacy_text_parse` (the hook fell back to the final-line text, trace `loop_stall_guard/fallback/legacy_text_parse`)
-  and `legacy_log_parse` (history only: no longer emitted; absent-state grace now reads `hook_state.json` alone and a
+  `stop_row_missing` (a Stop blocked because no recorded row existed; trace `loop_stall_guard/blocked/stop_row_missing`
+  or `graph_completion_guard/blocked/stop_row_missing`), `stale_stop_row`, and the history-only `legacy_text_parse`
+  (final text is no longer read, so it is no longer emitted) and `legacy_log_parse` (history only: no longer emitted; absent-state grace now reads `hook_state.json` alone and a
   missing or torn file is `hook_state_unreadable`, never a log fallback). Inspect one loop with `python3 -c "import json;print(json.load(open('<progress.json>')).get('stops'))"`.
-- Remediation: a high `legacy_text_parse` against `stops_consumed` means agents are not running `graph.py stop`: fix
-  the prompt, and if it persists tighten the text parse rather than retiring it. An unconsumed row at the current
-  revision releases the next Stop once, and only when `graph.py stop` ran after the last user prompt (an older row is
+- Remediation: a high `stop_row_missing` against `stops_consumed` means agents are ending turns without running
+  `graph.py stop`: fix the prompt (the block message names the exact command); there is no text parse left to tighten. An unconsumed row at the current
+  revision releases the next Stop once, and only when the row's own `at` time is not before the last user prompt's transcript timestamp (an older row is
   ignored with trace `stale_stop_row`, so recording a stop early cannot excuse later undeclared turns); a row at an older revision is ignored by design. A refused `graph.py stop`
   prints the refusal on stderr (foreign session, unknown category or reason code, `complete` while the graph is
-  unresolved); fix the argument, never edit `stops` by hand. Codex records the same row but only a `hard-stop` row on a
-  typed hard-stopped graph releases its guard (`consume-stop`); other categories are recorded and ignored there.
+  unresolved); fix the argument, never edit `stops` by hand. Codex releases on the same `hard-stop`, `approval-gate` and `awaiting-input` rows
+  (`consume-stop`, once each, no `graph.hard_stop` needed); a `complete` row is never consumed there and goes through
+  `complete` / `verify-completion`. Both providers import one vocabulary file (`graph_vocab.py`).
+  Limit (same-user boundary): stop rows are self-attested. Claude binds a row to its turn by timestamp, but Codex has no
+  per-turn binding: a Codex agent can record a row (including `approval-gate` or `awaiting-input`) and have the next Stop
+  released without a human request, and rows recorded early at an unchanged revision stay releasable until a state change bumps
+  the revision. Each row is released once and is visible in `progress.stops` and the `stops_recorded`/`stops_consumed`
+  counters; this is an audit boundary, not a privilege boundary.
+
+## progress.json is older than the tools (convert, or a never-dispatched loop cannot complete)
+
+- Symptom: completion fails with `native wave history must be an object` (state written before `wave_history`
+  existed), or `graph.py convert` prints `convert_refused_<code>`.
+- Query: `python3 scripts/lib/stop_counters.py [--since <ISO ts>]` counts `convert_ok`, `convert_refused_<code>`,
+  `stop_row_missing` and `stale_stop_row`. Preview with `graph.py convert <state> --session <id> --check` (never writes).
+- Remediation: run `graph.py convert <state> --session <id>`; it writes `progress.json.pre-convert` once and a second
+  run is a no-op. Refusals are deliberate and leave the file untouched: `active_wave_ambiguous` (record or recover the
+  wave first), `minor_future` (upgrade the tool), `malformed_stops` / `malformed_work_units` / `graph_not_object`
+  (repair by hand), `backup_exists` (inspect and move the old backup yourself; convert never deletes).
+- Limit: absent `wave_history` reads as `{}` only for a graph that never dispatched; a node holding bound
+  evidence refs with no history entry still fails completion by design.
 
 ## Diff-manifest check warned or refused
 
