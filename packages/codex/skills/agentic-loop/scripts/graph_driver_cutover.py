@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any, cast
 
@@ -23,14 +24,14 @@ def cutover_driver(path: Path, session: str) -> dict[str, Any]:
             raise GraphError("session does not own this loop")
         try:
             graph_contract.require_converted(state)
-            result = graph_driver_mode.cutover(state)
+            result = graph_driver_mode.cutover(state, hashlib.sha256(path.read_bytes()).hexdigest())
             graph = state["graph"]
             fresh = not graph.get("wave_history") and all(
                 node["status"] == "pending" and node["retry"]["attempts"] == 0 and not node["evidence"]
                 for node in graph["nodes"].values()
             )
             if not fresh:
-                validate_worker_evidence(state)
+                validate_worker_evidence(state, require_complete=False)
             proposed = cast(dict[str, Any], result["state"])
             graph_semantics.validate(proposed)
             graph_convert.write_backup(path, ".pre-driver")

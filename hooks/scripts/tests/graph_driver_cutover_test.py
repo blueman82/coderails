@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -32,6 +33,7 @@ class DriverCutoverTests(unittest.TestCase):
                 self.assertEqual(report["driver_from_revision"], after["revision"] + 1)
                 self.assertEqual(after["graph"]["dispatch_mode"], "driver")
                 self.assertEqual(after["graph"]["native_last_revision"], before["revision"])
+                self.assertEqual(after["graph"]["native_backup_sha256"], hashlib.sha256(original_bytes).hexdigest())
                 backup = case.path.with_name("progress.json.pre-driver")
                 self.assertEqual(backup.read_bytes(), original_bytes)
                 once = case.path.read_bytes()
@@ -118,6 +120,33 @@ class DriverCutoverTests(unittest.TestCase):
                     ]
                 result = subprocess.run(
                     [sys.executable, str(SCRIPTS[provider]), "authorize-dispatch", str(case.path), *flags],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("driver", result.stderr.lower())
+                self.assertEqual(case.path.read_bytes(), before)
+
+    def test_native_record_wave_refuses_driver_graph(self) -> None:
+        """The old recorder cannot accept an unbound result after cutover."""
+        with tempfile.TemporaryDirectory() as directory:
+            for provider in ("claude", "codex"):
+                case = Case(provider, Path(directory))
+                self.assertEqual(case.graph("convert").returncode, 0)
+                self.assertEqual(case.graph("cutover-driver").returncode, 0)
+                state = case.read()
+                state["revision"] += 1
+                wave_id = f"wave-{state['revision']}"
+                state["graph"]["active_wave"] = {"wave_id": wave_id, "revision": state["revision"], "nodes": ["U3[1]"]}
+                state["graph"]["nodes"]["U3[1]"].update(status="running", outcome="running")
+                case.write(state)
+                before = case.path.read_bytes()
+                report = json.dumps(
+                    {"wave_id": wave_id, "results": {"U3[1]": {"outcome": "done", "evidence": "forged"}}}
+                )
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPTS[provider]), "record-wave", str(case.path), report],
                     capture_output=True,
                     text=True,
                     check=False,

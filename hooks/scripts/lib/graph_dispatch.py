@@ -28,6 +28,7 @@ from .loop_evals import EvalStatus, read_loop_evals
 from .loop_state_common import LoopState, read_state
 
 sys.path.insert(0, str(ROOT))
+import graph_driver_evidence  # noqa: E402
 import worker_status  # noqa: E402
 
 from scripts.lib.config import config_path, load_config  # noqa: E402
@@ -152,6 +153,8 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
     recorded: list[list[dict[str, Any]]] = []
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
+        if state["graph"].get("dispatch_mode") == "driver":
+            raise ValueError("driver graph refuses native record-wave")
         try:
             core, statuses, reports = worker_status.prepare(state, results)
         except worker_status.WorkerResultError as error:
@@ -281,7 +284,7 @@ def validate_graph_shape(path: Path) -> None:
     load(path)
 
 
-def validate_graph_state_completion(state: dict[str, Any], session: str) -> None:
+def validate_graph_state_completion(path: Path, state: dict[str, Any], session: str) -> None:
     """Check pure graph eligibility and re-derive every native worker reference."""
     validate_state(state)
     if state["session_id"] != session:
@@ -289,13 +292,18 @@ def validate_graph_state_completion(state: dict[str, Any], session: str) -> None
     eligibility = graph_semantics.can_complete(state)
     if not eligibility["eligible"]:
         raise ValueError("graph cannot complete: " + ", ".join(eligibility["blockers"]))
-    revalidate_all(state)
+    if state["graph"].get("dispatch_mode") == "driver":
+        native = graph_driver_evidence.validate_backup(path, state)
+        revalidate_all(native)
+        graph_driver_evidence.validate_history(path, state)
+    else:
+        revalidate_all(state)
 
 
 def validate_graph_completion(path: Path, session: str) -> None:
     """Read and validate graph completion for the native Stop hook."""
     try:
-        validate_graph_state_completion(load(path), session)
+        validate_graph_state_completion(path, load(path), session)
     except (KeyError, TypeError, AttributeError) as error:
         raise ValueError(f"malformed native graph evidence: {error}") from error
 
@@ -329,7 +337,7 @@ def complete(path: Path, session: str, write: bool = True) -> dict[str, Any]:
     """Validate all native gates under the state lock before completion is written."""
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
-        validate_graph_state_completion(state, session)
+        validate_graph_state_completion(path, state, session)
         validate_artifacts(path, state)
         proposed = copy.deepcopy(state)
         proposed["status"] = "complete"

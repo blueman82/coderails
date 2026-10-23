@@ -124,6 +124,8 @@ def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
     """Bind native evidence and atomically record exactly the active wave, typed worker results included."""
     with _locked(path):
         state = _load(path)
+        if state["graph"].get("dispatch_mode") == "driver":
+            raise GraphError("driver graph refuses native record-wave")
         with traced_refusal(path, state, "record-wave"):
             proposed, transition = apply_record(state, raw_results, typed=True)
         statuses = transition["statuses"]

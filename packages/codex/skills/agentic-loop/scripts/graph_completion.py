@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+import graph_driver_evidence
 import graph_semantics
 from graph_evidence import validate_completion_evidence, validate_worker_evidence
 from graph_identity import GraphError
@@ -37,7 +38,7 @@ def validate_work_units(state: dict[str, Any]) -> None:
         raise GraphError("work units have an illegal disposition: " + ", ".join(bad))
 
 
-def _validate_completion(
+def validate_completion_state(
     state: dict[str, Any],
     session: str,
     revision: int,
@@ -46,13 +47,19 @@ def _validate_completion(
     retro_path: Path,
     transcript_path: Path | None,
 ) -> None:
+    """Check graph, native or driver history, and current completion artifacts."""
     if state["session_id"] != session:
         raise GraphError("session does not own this loop")
     eligibility = graph_semantics.can_complete(state)
     if not eligibility["eligible"]:
         raise GraphError("cannot complete graph: " + ", ".join(eligibility["blockers"]))
     validate_work_units(state)
-    validate_worker_evidence(state)
+    if state["graph"].get("dispatch_mode") == "driver":
+        native = graph_driver_evidence.validate_backup(evals_path.with_name("progress.json"), state)
+        validate_worker_evidence(native, require_complete=False)
+        graph_driver_evidence.validate_history(evals_path.with_name("progress.json"), state)
+    else:
+        validate_worker_evidence(state)
     validate_completion_evidence(state, revision, evals_path, proof_path, retro_path, transcript_path)
 
 
@@ -66,7 +73,7 @@ def complete(
             raise GraphError("graph is already complete")
         revision = state["revision"]
         with traced_refusal(path, state, "complete", session):
-            _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
+            validate_completion_state(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
         state["status"] = "complete"
         state["revision"] += 1
         state["completion"] = {"revision": revision}
@@ -86,5 +93,5 @@ def verify_completion(
     if state["status"] != "complete" or revision != state["revision"] - 1:
         raise GraphError("graph has no valid completion record")
     with traced_refusal(path, state, "verify-completion", session):
-        _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
+        validate_completion_state(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
     return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}

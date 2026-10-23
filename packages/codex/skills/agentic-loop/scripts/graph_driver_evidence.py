@@ -40,6 +40,10 @@ def _record(state: dict[str, Any], node_id: str, dispatch_id: str) -> dict[str, 
     if state.get("graph") is None:
         raise ValueError("driver graph is missing")
     graph = cast(dict[str, Any], state["graph"])
+    first = graph.get("driver_from_revision")
+    last = graph.get("native_last_revision")
+    if graph.get("dispatch_mode") != "driver" or type(first) is not int or type(last) is not int or first != last + 2:
+        raise ValueError("driver cutover is missing or invalid")
     dispatches = cast(dict[str, Any], graph.get("dispatches", {}))
     record = cast(Optional[dict[str, Any]], dispatches.get(dispatch_id))
     if not isinstance(record, dict) or record.get("node_id") != node_id:
@@ -51,6 +55,8 @@ def _record(state: dict[str, Any], node_id: str, dispatch_id: str) -> dict[str, 
     for key in ("wave_id", "revision", "attempt", "task_name"):
         if not record.get(key):
             raise ValueError(f"driver dispatch lacks {key}")
+    if type(record["revision"]) is not int or record["revision"] < first:
+        raise ValueError("driver dispatch precedes cutover")
     return record
 
 
@@ -111,7 +117,10 @@ def seal(
 
 def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: dict[str, Any]) -> None:
     """Reject changed, missing, replayed or foreign worker evidence."""
-    if reference.get("kind") != "driver_worker":
+    if (
+        set(reference) != {"kind", "dispatch_id", "wave_id", "attempt", "manifest_sha256"}
+        or reference.get("kind") != "driver_worker"
+    ):
         raise ValueError("invalid driver evidence reference")
     dispatch_id = reference.get("dispatch_id")
     if not isinstance(dispatch_id, str):
@@ -148,3 +157,75 @@ def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: d
     checkout = manifest.get("checkout")
     if not isinstance(checkout, str) or _head(Path(checkout)) != manifest.get("head"):
         raise ValueError("worker checkout HEAD changed")
+
+
+def validate_history(state_path: Path, state: dict[str, Any]) -> None:
+    """Re-read each retained driver attempt and require one reference per finished dispatch."""
+    graph = cast(dict[str, Any], state["graph"])
+    if graph.get("dispatch_mode") != "driver":
+        raise ValueError("driver cutover is missing")
+    first = graph["driver_from_revision"]
+    dispatches = cast(dict[str, Any], graph.get("dispatches", {}))
+    seen: set[str] = set()
+    for node_id, node in cast(dict[str, Any], graph["nodes"]).items():
+        for item in cast(list[Any], node["evidence"]):
+            if not isinstance(item, dict):
+                continue
+            reference = cast(dict[str, Any], item)
+            if reference.get("kind") != "driver_worker":
+                continue
+            dispatch_id = reference.get("dispatch_id")
+            if not isinstance(dispatch_id, str) or dispatch_id in seen:
+                raise ValueError("duplicate or invalid driver evidence")
+            seen.add(dispatch_id)
+            validate(state_path, state, node_id, reference)
+    active = cast(Optional[dict[str, Any]], graph.get("active_wave"))
+    for dispatch_id, value in dispatches.items():
+        record = cast(dict[str, Any], value)
+        revision = record.get("revision")
+        if type(revision) is not int or revision < first:
+            continue
+        if record.get("dispatch_mode") != "driver":
+            raise ValueError("native dispatch exists after driver cutover")
+        if active is not None and record.get("wave_id") == active.get("wave_id"):
+            if dispatch_id in seen:
+                raise ValueError("active driver dispatch already has stored evidence")
+            continue
+        if dispatch_id not in seen:
+            raise ValueError("finished driver dispatch is missing evidence")
+
+
+def validate_backup(state_path: Path, state: dict[str, Any]) -> dict[str, Any]:
+    """Check the sealed native snapshot and unchanged native history prefix."""
+    graph = cast(dict[str, Any], state["graph"])
+    backup = state_path.with_name("progress.json.pre-driver")
+    if _digest(backup) != graph.get("native_backup_sha256"):
+        raise ValueError("native backup changed")
+    try:
+        parsed: object = json.loads(backup.read_bytes())
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ValueError("native backup is invalid JSON") from error
+    if not isinstance(parsed, dict):
+        raise ValueError("native backup is not an object")
+    old = cast(dict[str, Any], parsed)
+    if (
+        old.get("session_id") != state.get("session_id")
+        or old.get("loop_id") != state.get("loop_id")
+        or old.get("revision") != graph.get("native_last_revision")
+    ):
+        raise ValueError("native backup belongs to another graph")
+    old_graph_value: object = old.get("graph")
+    if not isinstance(old_graph_value, dict):
+        raise ValueError("native backup has an invalid graph")
+    old_graph = cast(dict[str, Any], old_graph_value)
+    if old_graph.get("dispatch_mode") is not None:
+        raise ValueError("native backup has an invalid graph")
+    for dispatch_id, record in cast(dict[str, Any], old_graph.get("dispatches", {})).items():
+        if graph.get("dispatches", {}).get(dispatch_id) != record:
+            raise ValueError("native dispatch history changed")
+    for node_id, node in cast(dict[str, Any], old_graph["nodes"]).items():
+        current = cast(dict[str, Any], graph["nodes"].get(node_id, {}))
+        prior_evidence = cast(list[Any], node["evidence"])
+        if current.get("evidence", [])[: len(prior_evidence)] != prior_evidence:
+            raise ValueError("native evidence history changed")
+    return old

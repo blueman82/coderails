@@ -393,6 +393,6 @@ def bind_worker_evidence(
     return references, _stored_references(state, False, used)
 
 
-def validate_worker_evidence(state: dict[str, Any]) -> None:
-    """Validate all stored worker evidence against native transcripts."""
-    _stored_references(state, True)
+def validate_worker_evidence(state: dict[str, Any], require_complete: bool = True) -> None:
+    """Validate stored native evidence, requiring all nodes complete only at completion."""
+    _stored_references(state, require_complete)

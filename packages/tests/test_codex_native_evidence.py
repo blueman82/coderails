@@ -20,6 +20,12 @@ from graph_identity import GraphError, task_name
 class NativeEvidenceTests(unittest.TestCase):
     """Exercise transcript binding without mutating graph state."""
 
+    def test_native_history_check_allows_pending_nodes_for_cutover(self) -> None:
+        """Cutover rechecks past native evidence without requiring graph completion."""
+        with patch("graph_evidence._stored_references", return_value=set()) as check:
+            validate_worker_evidence({}, require_complete=False)
+        check.assert_called_once_with({}, False)
+
     def setUp(self) -> None:
         """Create independent parent and child transcript fixtures."""
         self.scratch = tempfile.TemporaryDirectory()
