@@ -142,7 +142,7 @@ The harness choice itself — which loop skill drives this (`/coderails:agentic-
 
 Pre-planning skills (`/coderails:planning-sequence`, `/coderails:premortem`, `/coderails:assumptions`, `/coderails:notchecked`, `/coderails:wiki-query`) belong in a delegated agent, not in main context.
 
-Spawn a single pre-flight agent, `subagent_type: general-purpose` with explicit instructions from `agents/preflight-scout.md`, whose prompt includes:
+Spawn a single pre-flight agent, `subagent_type: coderails:preflight-scout` (a guarded role: `general-purpose` is refused as `role_mismatch`), after pasting its `begin-wave` envelope and sections, whose prompt includes:
 - The plan from Phase 1
 - An instruction to invoke each relevant skill via its `Skill` tool call
 - An instruction to return one consolidated report (plan-sequence findings + premortem failure modes + assumptions inventory + wiki findings)
@@ -172,7 +172,7 @@ releasing `S2.7a`.
 
 If the plan contains an unresolved architectural choice (which primitive, which topology, which of several viable shapes), resolve it BEFORE entering Phase 3 — not through live back-and-forth once workers are spawning.
 
-Spawn one design agent, `subagent_type: general-purpose` with explicit instructions from `agents/design-scout.md`, role assigned per Phase 2.8's table: `default` when the fork is a bounded choice between well-understood shapes; `frontier` from the start when the fork is a genuinely ambiguous investigation (Phase 2.8's "Investigations get frontier FIRST" states why). This agent runs before Phase 2.8's per-loop task routing, so it gets its role inline, here, using the same table. Its prompt requires:
+Spawn one design agent, `subagent_type: coderails:design-scout` (guarded role; its `begin-wave` envelope and sections are pasted first), role assigned per Phase 2.8's table: `default` when the fork is a bounded choice between well-understood shapes; `frontier` from the start when the fork is a genuinely ambiguous investigation (Phase 2.8's "Investigations get frontier FIRST" states why). This agent runs before Phase 2.8's per-loop task routing, so it gets its role inline, here, using the same table. Its prompt requires:
 - Read the actual code paths the alternatives touch — not assumptions about them.
 - Build a head-to-head of the viable shapes with the real constraint each one hits.
 - Return ONE recommended shape, the rejected alternatives with the reason each lost, and the single fact that would flip the recommendation.
@@ -192,7 +192,7 @@ Either way the fork is closed by ONE design artifact before building starts — 
 
 When the Phase 1 plan contains a work-unit that **retires an existing code path** — there is a *named thing being replaced* (a function, module, endpoint, schema, or flag the change removes from use) — resolve its **disposition** once, up front, before the first spawn. This is the migration analogue of Phase 2.5's design fork: asked once, not re-litigated.
 
-When triggered, run the disposition scout as the `S2.6` sibling of `S2.5`,
+When triggered, run the disposition scout (`subagent_type: coderails:disposition-scout`, a guarded role) as the `S2.6` sibling of `S2.5`,
 giving it the Phase 1 plan and named retirement paths. It returns one result per
 retirement unit and writes no loop state. If no path is retired, record the
 conditional skip and let `J2` release without this branch.

@@ -71,7 +71,8 @@ class DependencyTests(GraphCase):
             graph = self.opened()
             self.assertNotIn(join, graph["graph"]["active_wave"]["nodes"])
             for identifier in (first, second):
-                fixture.spawn(self.parent, graph, identifier)
+                role = next(r for r in graph["graph"]["dispatches"].values() if r["node_id"] == identifier)
+                fixture.spawn(self.parent, graph, identifier, role="coderails:" + role["contract"]["role"])
             result = dispatch.record_wave(self.path, fixture.report(graph))
             self.assertEqual(result["released_joins"], [join])
             self.assertEqual(ready_nodes(self.path), [downstream])

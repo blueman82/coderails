@@ -50,6 +50,7 @@ class ArgvTests(IsolatedTrace):
         self.assertIn("--role", servers[0])
         self.assertIn('"source-auditor"', servers[0])
         self.assertIn(str(REPO / "scripts/capability_mcp.py"), servers[0])
+        self.assertIn('default_tools_approval_mode = "approve"', servers[0])
         self.assertEqual(argv[-1], "-")  # prompt comes from stdin (a file), never from argv
 
     def test_every_guarded_role_gets_only_its_own_server(self) -> None:
@@ -59,7 +60,9 @@ class ArgvTests(IsolatedTrace):
                 text = " ".join(crs.build_argv(role, REPO))
                 self.assertIn(f"mcp_servers.cap-{role}=", text)
                 self.assertEqual(text.count("mcp_servers."), 1)
-                for other in set(GUARDED) - {role}:
+                for other in GUARDED:
+                    if other == role:
+                        continue
                     self.assertNotIn(f"cap-{other}", text.replace(f"cap-{role}", ""))
 
     def test_unknown_and_unguarded_roles_are_refused(self) -> None:
@@ -76,6 +79,15 @@ class ArgvTests(IsolatedTrace):
         self.assertNotEqual(argv, stripped)
         self.assertFalse(crs.contained(stripped, "design-scout"))
         self.assertTrue(crs.contained(argv, "design-scout"))
+
+    def test_approval_mode_is_required_by_the_containment_check(self) -> None:
+        """A missing or downgraded MCP approval setting cannot count as contained."""
+        argv = crs.build_argv("source-auditor", REPO)
+        self.assertTrue(crs.contained(argv, "source-auditor"))
+        for replacement in ("", 'default_tools_approval_mode = "prompt"'):
+            with self.subTest(replacement=replacement):
+                altered = [value.replace('default_tools_approval_mode = "approve"', replacement) for value in argv]
+                self.assertFalse(crs.contained(altered, "source-auditor"))
 
 
 class EnvAndRunTests(IsolatedTrace):

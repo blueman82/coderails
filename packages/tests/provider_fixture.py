@@ -94,6 +94,10 @@ class Provider:
     def launch(self, outcome: str = "done") -> dict[str, Any]:
         """Emit actual provider-shaped local fixture authority for every active node."""
         state = self.read()
+        if self.name == "claude":  # the PreToolUse guard consumes each record before the spawn; completion re-checks it
+            for record in state["graph"]["dispatches"].values():
+                record["authorized"] = record["authorized"] or {"tool_use_id": None}
+            self.write(state)
         for identifier in state["graph"]["active_wave"]["nodes"]:
             if self.name == "claude":
                 claude.spawn(self.parent, state, identifier, completed=outcome == "done")
@@ -218,23 +222,13 @@ class Provider:
         """Build provider-native dispatch labels with a separate graph correlation marker."""
         state = self.read()
         identifier = state["graph"]["active_wave"]["nodes"][0]
+        prompt = claude.dispatch_prompt(state, identifier, "Worker instructions.")
         request: dict[str, Any] = {"session_id": self.session, "cwd": str(self.home)}
         if self.name == "claude":
-            owner = {key: state[key] for key in ("session_id", "loop_id", "revision")}
-            owner.update(wave_id=state["graph"]["active_wave"]["wave_id"], node_id=identifier)
-            request.update(
-                tool_name="Agent",
-                tool_input={
-                    "subagent_type": "general-purpose",
-                    "prompt": "CODERAILS_GRAPH_DISPATCH=" + json.dumps(owner) + "\nWorker instructions.",
-                },
-            )
+            request.update(tool_name="Agent", tool_input={"subagent_type": "general-purpose", "prompt": prompt})
         else:
             task = self.success("inspect")["task_names"][identifier]
-            request.update(
-                tool_name="spawn_agent",
-                tool_input={"task_name": task, "message": "CODERAILS_GRAPH_TASK=" + task + "\nWorker instructions."},
-            )
+            request.update(tool_name="spawn_agent", tool_input={"task_name": task, "message": prompt})
         return request
 
     def hook(self, name: str, payload: dict[str, Any]) -> subprocess.CompletedProcess[str]:

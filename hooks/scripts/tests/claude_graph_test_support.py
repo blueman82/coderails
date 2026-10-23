@@ -18,7 +18,17 @@ from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.graph_executor import load
 from hooks.scripts.tests.lib import claude_transcript_fixture as fixture
 
-__all__ = ["ROOT", "GraphCase", "dispatch", "fixture", "load", "node", "read_records", "write_records"]
+__all__ = [
+    "ROOT",
+    "GraphCase",
+    "consume_records",
+    "dispatch",
+    "fixture",
+    "load",
+    "node",
+    "read_records",
+    "write_records",
+]
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -62,8 +72,18 @@ def write_records(path: Path, values: list[dict[str, Any]]) -> None:
     path.write_text("".join(json.dumps(value) + "\n" for value in values))
 
 
+def consume_records(path: Path) -> None:
+    """Mark every dispatch record consumed, as the PreToolUse guard does before a real spawn."""
+    state = load(path)
+    for record in state["graph"].get("dispatches", {}).values():
+        record["authorized"] = record["authorized"] or {"tool_use_id": None}
+    fixture.write_json(path, state)
+
+
 class GraphCase(unittest.TestCase):
     """Give every safety case independent native ownership and durable state."""
+
+    consume_on_begin = True  # guard tests set False: they exercise the consumption themselves
 
     def setUp(self) -> None:
         """Allocate provider-owned transcript paths and fast isolated lock settings."""
@@ -83,6 +103,18 @@ class GraphCase(unittest.TestCase):
         )
         environment.start()
         self.addCleanup(environment.stop)
+        begin_wave = dispatch.begin_wave
+
+        def begin_and_consume(path: Path) -> dict[str, Any]:
+            """Open the wave, then consume its records the way the guard does before a native spawn."""
+            opened = begin_wave(path)
+            if self.consume_on_begin:
+                self.authorize_records()
+            return opened
+
+        wrapper = patch.object(dispatch, "begin_wave", begin_and_consume)
+        wrapper.start()
+        self.addCleanup(wrapper.stop)
         self.path = self.home / "loop/progress.json"
         self.parent = fixture.parent(self.home)
         self.save(fixture.state())
@@ -95,6 +127,10 @@ class GraphCase(unittest.TestCase):
         """Open a real wave, verifying the adapter's saved state."""
         dispatch.begin_wave(self.path)
         return load(self.path)
+
+    def authorize_records(self) -> None:
+        """Consume every dispatch record, as the PreToolUse guard does before a real spawn."""
+        consume_records(self.path)
 
     def finish(self, outcome: str = "done") -> dict[str, Any]:
         """Drive actual native fixture launches and a whole-wave record."""

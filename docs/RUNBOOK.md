@@ -228,6 +228,13 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Diff-manifest check warned or refused
 
+For a graph unit's exact `push.py --unit N --progress PATH` command, the unit
+record needs a nonempty manifest. Register `--base-branch <parent>` with
+`graph.py add-unit` before the first push of a stacked branch; once a PR exists,
+its live base must match that recorded branch. The command checks staged files
+and the complete PR diff, including both rename paths, against the unit manifest
+before transport. A recorded worktree must match the current checkout.
+
 - Symptom: `push.py` or `merge.py` prints `! diff_manifest <code>: <path>`, or refuses with `diff_manifest:<code>`
   (config `diff_manifest: enforce`). `scripts/diff_manifest.py --policy FILE` shows the same verdict without hooks.
 - Query: `trace.by_reason` for `diff-manifest/ok/diff_manifest_ok`, `diff-manifest/warned|refused/<code>` (rows are keyed by
@@ -338,33 +345,58 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Graph refused with `spec_*`, or `instantiate` refused
 
-- Symptom: any graph command (`inspect`, `begin-wave`, `add-unit`, `complete`, ...) fails with `spec_edge_missing`,
-  `spec_unknown_node`, `spec_node_missing` or `spec_hash_mismatch`; or `graph.py instantiate` fails with
-  `instantiate_refused_<foreign|state|nonempty|bad_id>`.
-- Query: `python3 scripts/lib/spec_counters.py [--since <ISO ts>]` counts those codes plus `instantiate_ok`,
-  `instantiate_noop` and `skip_when_met` (one count per `plan` call in which a node's skip predicate held). Each refused
-  load also leaves a `load/refused/<code>` row in the loop's `recovery-trace.jsonl`.
-- Remediation: `spec_edge_missing` names the missing edge (for example `J2.8 -> U3[2]`): the spec requires it whenever both
-  nodes exist, so add the edge by registering units with `graph.py add-unit` (which wires it) rather than editing
-  `progress.json`. For a graph stamped by `instantiate`: `spec_hash_mismatch` means `graph-spec.yaml` changed after the
-  graph was built (finish that loop on the old spec checkout, or start a new loop); `spec_unknown_node` /
-  `spec_node_missing` mean nodes were added or removed by hand. `instantiate` builds only into an empty started loop
-  (`instantiate_refused_nonempty` otherwise); a re-run with the same profile and units is `instantiate_noop`.
-- Edit the graph structure in `packages/graph-semantics/graph-spec.yaml` / `policy.yaml` (JSON syntax) and run
-  `python3 scripts/gen_graph_docs.py`; `scripts/tests/gen_graph_docs_test.py` fails the run when the generated tables drift.
-  The installer materializes both files next to `graph_spec.py` in each provider's `agentic-loop/scripts`.
-- Off-switch: `CODERAILS_GRAPH_SPEC=off` (also `0` or `false`) in the environment skips the whole spec check on load
-  (default ON; unset to re-enable). Use it only to rescue a loop whose graph a spec change has stranded, then rebuild it.
-  `spec_join_inputs` (a stamped graph's join is missing or lacks a unit's input) and `spec_profile_downgrade` (the stamp is
-  below `policy.yaml` `graph.profile`) are the other refusal codes.
-- Limits: `policy.yaml` default `graph.profile` is `full`; `units-only` (the unit lane `U3[i]` plus `J12-all-units`)
-  is available only by explicitly choosing `instantiate --profile units-only`. Spec edges are
-  enforced only between nodes that exist, so an unstamped (hand-built or `start`-built) graph that never creates `J2.8` or
-  the prep nodes is not refused: making `start` stamp via `instantiate`, or having `plan`/`begin-wave` refuse an unstamped
-  graph once `full` is chosen, is an open owner decision. Join inputs are enforced on stamped graphs only. Downgrade path:
-  a hand-editing agent can delete `graph.spec_sha256` (back to the weaker unstamped check) or rewrite `spec_profile` and drop
-  the extra nodes, edges and joins; the policy profile floor refuses the second only while `policy.yaml` says `full`.
-  `loop_evals_min_units` is documented but not read by any hook yet. Judgement skip rules (irreversible-surface triggers,
-  `no PR` units) stay prose: `skip_when_met` is only the machine predicate and is a hint, not a recorded skip. Same-user
-  boundary: the spec, policy and `progress.json` are plain files the session user can edit; this is drift detection for a
-  cooperating agent, not tamper evidence.
+See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
+
+## Dispatch refused: `dispatch_*` or `role_mismatch`
+
+- Symptom: `loop_dispatch_guard` (Claude `Agent`, Codex `spawn_agent`) denies a spawn in a graph-bound session, or
+  `begin-wave` / `graph.py authorize-dispatch` fails. The hook message names the failure; the reason code is a row in the
+  loop's `recovery-trace.jsonl` (`authorize-dispatch/refused/<code>`, allowed spawns are `authorized/dispatch_authorized`).
+- Query: `python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]` counts `dispatch_authorized` and every refusal code.
+- Codes and fixes: `dispatch_missing_envelope` (no/old/garbled first-line `CODERAILS_GRAPH_DISPATCH` envelope: paste the
+  `prompt_prefix` from `plan` or `begin-wave`; on Codex this includes a spawn with any `task_name` and no envelope),
+  `dispatch_unknown_id` (the id was never issued: run `begin-wave`), `dispatch_foreign` (session, loop, node, wave or Codex
+  `task_name` is not the record's), `dispatch_stale_revision` (the envelope predates the graph's current revision:
+  re-run `begin-wave` after `recover-wave`), `dispatch_replayed` (the id was already used: one spawn per id; a retry needs a
+  new wave), `dispatch_contract_altered` (the stored contract no longer matches its digest or lost a field: the state was
+  edited, restart the wave via `recover-wave`), `dispatch_sections_missing` (the pasted contract block was edited or left
+  out: paste `prompt_sections` verbatim), `role_mismatch` (dispatch a guarded scout as `coderails:<role>` / Codex
+  `agent_type: <role>`; other roles accept their own type or `general-purpose` on Claude, and their own type or omitted
+  `agent_type` on Codex; a different named native role such as `explorer` is refused),
+  `dispatch_state_unconverted` (`state_minor` < 2 or a malformed current-minor contract cutoff: run
+  `graph.py convert --check` then `convert` for old state; inspect malformed current state without editing frozen evidence;
+  conversion refuses while a wave is open, `convert_refused_active_wave_in_flight`),
+  `dispatch_publication_mismatch` (the stored unit worker command names a different unit, push script or progress path:
+  use the exact `publication_command` returned by `begin-wave`), `dispatch_unauthorized` (Claude
+  `record-wave` / completion found a bound spawn whose record the PreToolUse guard never consumed, i.e. a spawn the hook did
+  not see: re-dispatch it through the guard via `recover-wave`). A Claude graph-bound `Agent` call with no
+  `subagent_type` is refused as `role_mismatch` before native dispatch.
+- Off-switch: `CODERAILS_GRAPH_DISPATCH=off` (also `0` or `false`) in the hooks and graph CLI bypasses the contract hash,
+  rendered sections, role and single-use checks. A graph-bound spawn still needs the current v2 envelope issued by
+  `begin-wave`, the recorded task name on Codex, and frozen evals; native evidence still binds its node, wave and attempt.
+  An absent or v1 envelope is refused. Claude graph-bound Agent calls must include a nonblank `subagent_type`, including
+  `general-purpose` for unguarded roles; a missing type cannot be bound to native evidence. An ordinary Agent outside a
+  graph is unaffected. Each allowed spawn leaves an
+  `authorize-dispatch/reported/dispatch_check_off` trace row. Default ON; unset to re-enable. Use it only to rescue a
+  loop wedged by a bad contract or an uninstalled plugin agent.
+- Bad `add-unit --model-role` is `add_unit_refused_bad_field` (allowed: `fast-mechanical`, `default`, `frontier`).
+- Limits: a plugin agent that is not installed in the session cannot run a guarded scout (refused, never downgraded); the
+  sandboxed Bash launcher carries no agent type, so the role is asserted on the `Agent` and `spawn_agent` routes only
+  (handoff H3); single use is keyed on the PreToolUse `tool_use_id` when the payload has one (unverified) and otherwise on
+  a consumed flag, so a hook retried without an id reads as a replay; Codex role containment (no shell, per-role MCP) is
+  not asserted, only `agent_type == role`; `progress.json` and the sections are plain same-user data, so this is drift and
+  substitution detection for a cooperating agent, not tamper evidence.
+- Limits, coverage: (1) the contract is advisory to the worker: the envelope proves the dispatch was authorized and the
+  rendered block is present as a substring, not that the rest of the prompt is faithful; text before, after or around the
+  block is unconstrained and `write_scope` is prompt text only, not enforced. (2) Only the five capability-guarded roles
+  (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `source-auditor`) are role-contained;
+  `spec-reviewer` (empty capability list), the `shell.raw` roles (`docs-auditor`, `wiki-writer`, `proof-author`) and nodes
+  with no `agent_role` (default `loop-worker`) may run as explicit `general-purpose` on Claude, or with omitted or exact
+  role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent` and `spawn_agent` only, so `SendMessage` on
+  Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
+  (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
+  `spawn_agent` function-call message with its v2 record, role and consumed authorization; a task-name-only legacy event
+  cannot bind a contract-era wave. Claude matches a non-null hook `tool_use_id` to the native Agent call; when the hook
+  supplies no id, it retains the consumed flag and one-spawn-per-id check without claiming call-id proof. Historical
+  pre-contract attempts retain their original evidence rules. Claude hooks can still fail open if the hook times out
+  (10 s in `hooks.json`) before it denies.

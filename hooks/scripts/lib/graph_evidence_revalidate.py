@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .graph_evidence import child_identity, notifications, object_value, spawns, transcript
-from .graph_evidence_bind import provenance, terminal, used_references
+from .graph_evidence_bind import check_record, provenance, terminal, used_references
 
 
 def revalidate_all(state: dict[str, Any]) -> None:
@@ -71,4 +71,5 @@ def validate_reference(
         or wave.get("revision") != row["revision"]
     ):
         raise ValueError("native bound spawn is outside its original wave cursor or node set")
+    check_record(state, row)
     return row

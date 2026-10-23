@@ -11,7 +11,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-STATE_MINOR = 1
+import graph_contract
+
+STATE_MINOR = 2
 CODES = (
     "state_not_object",
     "unknown_schema",
@@ -22,6 +24,7 @@ CODES = (
     "malformed_stops",
     "malformed_work_units",
     "active_wave_ambiguous",
+    "active_wave_in_flight",
     "backup_exists",
     "invalid_result",
 )
@@ -69,7 +72,21 @@ def _v0_to_v1(state: dict[str, Any]) -> None:
         state["updated_at"] = state["created"]
 
 
-CONVERSIONS: tuple[tuple[int, Callable[[dict[str, Any]], None]], ...] = ((0, _v0_to_v1),)
+def _v1_to_v2(state: dict[str, Any]) -> None:
+    """Add dispatch records: waves from this revision on must carry a begin-wave envelope. Refuse an open wave."""
+    graph = _graph(state)
+    if graph.get("active_wave") is not None:
+        raise ConvertRefusedError(
+            "active_wave_in_flight", "a wave is in flight and its v1 dispatches are ambiguous: finish or recover it"
+        )
+    revision = state.get("revision")
+    if type(revision) is not int or revision < 1:
+        raise ConvertRefusedError("invalid_result", "revision must be a positive integer")
+    graph.setdefault("dispatches", {})
+    graph.setdefault("contract_from_revision", revision)
+
+
+CONVERSIONS: tuple[tuple[int, Callable[[dict[str, Any]], None]], ...] = ((0, _v0_to_v1), (1, _v1_to_v2))
 
 
 def convert(state: object, session: str | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -86,6 +103,11 @@ def convert(state: object, session: str | None = None) -> tuple[dict[str, Any], 
         raise ConvertRefusedError("minor_invalid", "state_minor must be a non-negative integer")
     if minor > STATE_MINOR:
         raise ConvertRefusedError("minor_future", f"state_minor {minor} is newer than this tool ({STATE_MINOR})")
+    if minor == STATE_MINOR:
+        try:
+            graph_contract.validate_dispatch_state(source)
+        except graph_contract.DispatchDeniedError as error:
+            raise ConvertRefusedError(error.code, str(error)) from error
     _check_active_wave(_graph(source))
     stops, units = source.get("stops", []), source.get("work_units", {})
     if not isinstance(stops, list) or not all(isinstance(row, dict) for row in cast(list[object], stops)):
