@@ -58,6 +58,14 @@ class CodexBackendTests(unittest.TestCase):
             output.write_text(valid)
             final.write_text(json.dumps(expected))
             self.assertEqual(graph_driver_codex.result(output, 0), expected)
+            failed = {**expected, "outcome": "failed"}
+            output.write_text(
+                '{"type":"thread.started","thread_id":"T"}\n'
+                + json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps(failed)}})
+                + '\n{"type":"turn.completed"}\n'
+            )
+            final.write_text(json.dumps(failed))
+            self.assertEqual(graph_driver_codex.result(output, 0), failed)
             output.write_text('{"type":"thread.started","thread_id":"T"}\n')
             self.assertEqual(graph_driver_codex.result(output, 0)["outcome"], "failed")
             output.write_text('{"type":"turn.failed"}\n')

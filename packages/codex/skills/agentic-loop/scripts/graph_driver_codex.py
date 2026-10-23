@@ -139,7 +139,7 @@ def result(output: Path, exit_code: int) -> dict[str, Any]:
         or not isinstance(parsed["evidence"], str)
         or not parsed["evidence"].strip()
         or (parsed["outcome"] == "done" and not isinstance(parsed["final_report"], dict))
-        or (parsed["outcome"] == "failed" and parsed["final_report"] is not None)
+        or (parsed["final_report"] is not None and not isinstance(parsed["final_report"], dict))
     ):
         return _failed("invalid_final_schema")
     try:
