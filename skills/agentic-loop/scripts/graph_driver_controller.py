@@ -293,8 +293,8 @@ def drive_once(
             node_id = record["node_id"]
             worker_checkout = checkout_for(checkout, node_id)
             prompt = _prompt(path, state, identifier, record, worker_checkout, provider, script)
-            newly_authorized = record.get("authorized") is None
-            if newly_authorized:
+            prepared = command(prompt, record) if record.get("authorized") is None else None
+            if prepared is not None:
                 _graph(
                     script,
                     "authorize-driver",
@@ -315,9 +315,9 @@ def drive_once(
                 reference, manifest = _reference(path, state, node_id, identifier)
             else:
                 if not (prompt.parent / "launch.json").exists():
-                    if not newly_authorized:
+                    if prepared is None:
                         return {"status": "unresolved", "reason": "authorized_without_launch", "node": node_id}
-                    argv, environment, input_path = command(prompt, record)
+                    argv, environment, input_path = prepared
                     graph_driver_process.start(
                         prompt.parent, argv, worker_checkout, environment=environment, stdin_path=input_path
                     )

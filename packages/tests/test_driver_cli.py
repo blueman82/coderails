@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
 import graph_driver_control  # noqa: E402
+import graph_driver_controller  # noqa: E402
 import graph_driver_process  # noqa: E402
 
 from hooks.scripts.tests.graph_convert_test import SCRIPTS, Case  # noqa: E402
@@ -22,6 +23,34 @@ from packages.tests.test_driver_authorize import frozen_evals  # noqa: E402
 
 class DriverCliTests(unittest.TestCase):
     """Use fake AI executables, real graph commands and real process wrappers."""
+
+    def test_command_setup_failure_does_not_consume_dispatch(self) -> None:
+        """A missing worker CLI can be fixed and retried before authorization."""
+        with tempfile.TemporaryDirectory() as directory:
+            case = Case("codex", Path(directory))
+            state = case.read()
+            state["work_units"]["1"] = {"status": "pending", "scope": "Build unit one"}
+            case.write(state)
+            self.assertEqual(case.graph("convert").returncode, 0)
+            self.assertEqual(case.graph("cutover-driver").returncode, 0)
+            case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+
+            def unavailable(_prompt: Path, _record: dict[str, object]) -> tuple[list[str], None, Path]:
+                raise ValueError("codex exec is not installed")
+
+            with self.assertRaisesRegex(ValueError, "not installed"):
+                graph_driver_controller.drive_once(
+                    case.path,
+                    "S",
+                    SCRIPTS["codex"],
+                    Path(directory),
+                    "codex",
+                    unavailable,
+                    lambda _output, _code: {"outcome": "failed"},
+                )
+            records = list(case.read()["graph"]["dispatches"].values())
+            self.assertEqual(len(records), 1)
+            self.assertIsNone(records[0]["authorized"])
 
     def test_assign_pending_unit_scope_requires_quiet_graph(self) -> None:
         """An existing unit can gain a task only before its next wave."""
