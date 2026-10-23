@@ -35,6 +35,13 @@ class CodexAuthorityParityTests(unittest.TestCase):
             with self.subTest(relative=relative):
                 self.assertEqual((ROOT / relative).read_bytes(), (CODEX / relative).read_bytes())
 
+    def test_bare_authorize_skill_has_usable_safe_defaults(self) -> None:
+        """The user-facing entrypoint must supply the CLI's required limit and a nonempty scope."""
+        skill = (CODEX / "skills/authorize/SKILL.md").read_text()
+        self.assertIn("--max-prs 0", skill)
+        self.assertIn("--scope autonomous_decisions", skill)
+        self.assertIn("--denied destructive_shell", skill)
+
     def test_mirrored_cli_resolves_trace_row_inside_the_codex_layout(self) -> None:
         """A copy of only packages/codex grants, traces and inspects: hooks.scripts.lib.trace_row resolves there."""
         with tempfile.TemporaryDirectory() as raw:
