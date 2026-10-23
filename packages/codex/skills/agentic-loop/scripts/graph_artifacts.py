@@ -88,7 +88,13 @@ def _validate_proofs(state: dict[str, Any], proof_path: Path) -> None:
     _matching(proof, state, "proof")
     proofs = array_value(proof.get("proofs"), "proof.proofs")
     if not proofs:
-        raise GraphError("proof evidence is missing or not passing")
+        try:
+            rows = proof_results.read_rows(results)
+        except proof_results.ChainError:
+            rows = []
+        if proof_results.disposition_reason(state, rows):
+            raise GraphError("proof evidence is missing or not passing (proof_no_proofs)")
+        return
     for index, raw_proof in enumerate(proofs):
         item = object_value(raw_proof, f"proof.proofs[{index}]")
         nonempty(item.get("id"), f"proof.proofs[{index}].id")

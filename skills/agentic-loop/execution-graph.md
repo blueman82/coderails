@@ -145,7 +145,7 @@ ambiguous.
 | `S0.5` | Operating rules | confidence, verification, and `LOOP-STOP` rules are active | never skipped |
 | `S1` | Plan | work-unit list, dependencies, and success criteria exist | Phase 1 confirmation may be `awaiting-input` |
 | `S2` | Plan | pre-flight agent result, wiki/theme intake, retro lessons, and clean-base check exist | never spawn implementation before this node |
-| `S2.5` | `S2` | design scout returned a recommendation and flip-condition | skip when no unresolved design fork |
+| `S2.5` | `S2` | design scout returned a recommendation and flip-condition | skip when no unresolved design fork, or when the human approved a `non_independent` fallback after a scout refusal (evidence says so) |
 | `S2.6` | `S2` | disposition scout returned a result for every retirement unit | skip when no named existing path is retired |
 | `J2` | `S2.5` and `S2.6` | all triggered scouts returned; orchestrator validated and absorbed both results in one state write | skipped branches contribute an explicit skip record |
 | `S2.7a` | `J2` | durable `spec.md` exists | only if `work_units >= 3` or a cross-unit dependency exists |

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -88,6 +89,8 @@ class RecoverChainTests(unittest.TestCase):
             cmd_sha256=pr.sha("true"),
             proof_json_sha256=pr.doc_sha(document),
             verdict="satisfied",
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
             **identity,
         )
         complete(self.path, "parent", suite, proof, retro, log)

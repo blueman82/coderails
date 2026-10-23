@@ -27,7 +27,7 @@ def main() -> int:
     probe = path.parent
     while not probe.is_dir() and probe != probe.parent:
         probe = probe.parent
-    root = git_output(str(probe), "rev-parse", "--show-toplevel")
+    root = git_output(str(probe), "rev-parse", "--show-toplevel", hook="wiki_taxonomy_gate")
     if not root:
         return 0
     absolute = probe.resolve() / path.relative_to(probe)
@@ -67,4 +67,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("wiki_taxonomy_gate", main))

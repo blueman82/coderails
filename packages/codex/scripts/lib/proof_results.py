@@ -3,9 +3,8 @@
 Rows sit beside proof.json. kind is freeze (sha256 of the canonical proof.json), run (the controller executed one
 frozen cmd) or disposition (a typed no-proof decision). Each row carries prev_sha256 and row_sha256, so deleting or
 editing any row breaks the chain. Honest limit: a same-user agent can forge rows the way it can forge a transcript;
-this is a cooperating-agent safeguard, not a trust boundary. Also not enforced: run rows are not bound to the
-current HEAD (head_sha is recorded only), the latest freeze wins (an agent can re-freeze a weakened proof set), and
-the destructive classifier is literal-pattern, not a sandbox.
+this is a cooperating-agent safeguard, not a trust boundary. The latest freeze wins (an agent can re-freeze a
+weakened proof set), and the destructive classifier is literal-pattern, not a sandbox.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ import hashlib
 import json
 import os
 import runpy
+import subprocess
 from pathlib import Path
 from typing import Any, cast
 
@@ -23,6 +23,7 @@ REASONS: dict[str, str] = {
     "proof_failed": "the latest run exited nonzero or timed out; fix the cause and re-run the same proof.",
     "proof_expect_mismatch": "the run's exit code or stdout did not match the frozen expect; fix and re-run.",
     "proof_stale_cmd": "proof.json changed after the freeze row, or the run row hashes a different cmd; re-freeze.",
+    "proof_stale_head": "the proof ran outside this repository or before HEAD changed; run it again at current HEAD.",
     "proof_chain_broken": "proof_results.jsonl is torn, edited or missing rows; never edit it by hand.",
     "proof_cmd_destructive": "the frozen cmd matches the destructive-command classifier and was never run.",
     "proof_no_proofs": "proof.json holds no non-withdrawn proof and no valid disposition; add a proof or record one.",
@@ -150,8 +151,27 @@ def _item(entry: object) -> dict[str, Any]:
     return cast(dict[str, Any], entry) if isinstance(entry, dict) else {}
 
 
+def _git_context(cwd: Path) -> tuple[Path, str] | None:
+    """Resolve the repository and HEAD through Git, without trusting a recorded row's cwd as authority."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel", "HEAD"], cwd=cwd, capture_output=True, text=True, check=False
+        )
+    except (OSError, ValueError):
+        return None
+    lines = result.stdout.splitlines()
+    if result.returncode or len(lines) != 2 or not lines[1].strip():
+        return None
+    return Path(lines[0]).resolve(), lines[1].strip()
+
+
 def _check(
-    item: dict[str, Any], withdrawn: bool, freeze: dict[str, Any], runs: dict[str, Any], state: dict[str, Any]
+    item: dict[str, Any],
+    withdrawn: bool,
+    freeze: dict[str, Any],
+    runs: dict[str, Any],
+    state: dict[str, Any],
+    current: tuple[Path, str] | None,
 ) -> str:
     """Return the reason code a single proof fails with, or '' when its latest run row satisfies it."""
     cmd, run = item.get("cmd"), runs.get(_label(item, ""))
@@ -164,6 +184,10 @@ def _check(
         return "proof_withdrawn_unobserved" if withdrawn else "proof_unexecuted"
     if run["cmd_sha256"] != sha(cmd.strip()) or run["proof_json_sha256"] != freeze["proof_json_sha256"]:
         return "proof_stale_cmd"
+    recorded_cwd = run.get("cwd")
+    recorded = _git_context(Path(recorded_cwd)) if isinstance(recorded_cwd, str) and recorded_cwd else None
+    if current is None or recorded is None or recorded[0] != current[0] or run.get("head_sha") != current[1]:
+        return "proof_stale_head"
     if withdrawn:
         return "" if run["verdict"] in {"failed", "timeout"} else "proof_withdrawn_unobserved"
     return "" if run["verdict"] == "satisfied" else VERDICT_REASON.get(run["verdict"], "proof_failed")
@@ -184,13 +208,14 @@ def verify(proof_doc: dict[str, Any], results_path: Path, state: dict[str, Any])
         return [f"{name}(proof_chain_broken)" for name, _, _ in everything], []
     freezes = [r for r in rows if r["kind"] == "freeze" and (r["session_id"], r["loop_id"]) == (session, loop)]
     runs = {r["proof_id"]: r for r in rows if r["kind"] == "run"}
+    current = _git_context(Path.cwd())
     offenders: list[str] = []
     disclosures: list[str] = []
     for name, item, is_withdrawn in everything:
         if not freezes or freezes[-1]["proof_json_sha256"] != doc_sha(proof_doc):
             code = "proof_stale_cmd"
         else:
-            code = _check(item, is_withdrawn, freezes[-1], runs, state)
+            code = _check(item, is_withdrawn, freezes[-1], runs, state, current)
         if code:
             offenders.append(f"{name}({code})")
             trace("proof.gate", "blocked", code, session, loop)

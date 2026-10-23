@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -310,6 +311,8 @@ class StallGuardTests(HookTestCase):
             cmd_sha256=pr.sha(cmd),
             proof_json_sha256=digest,
             verdict="satisfied",
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
             **identity,
         )
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)

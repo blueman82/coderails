@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -37,16 +38,14 @@ class ProofRunTests(unittest.TestCase):
         body = {"schema_version": 2, "session_id": SESSION, "loop_id": LOOP, "proofs": list(proofs)} | extra
         self.proof.write_text(json.dumps(body))
 
-    def cli(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def cli(self, *args: str, cwd: Path = REPO) -> subprocess.CompletedProcess[str]:
         """Run proof.py from the state dir."""
-        return subprocess.run(
-            [sys.executable, str(PROOF), *args], cwd=self.dir, capture_output=True, text=True, check=False
-        )
+        return subprocess.run([sys.executable, str(PROOF), *args], cwd=cwd, capture_output=True, text=True, check=False)
 
-    def freeze_run(self, *flags: str) -> list[dict[str, Any]]:
+    def freeze_run(self, *flags: str, cwd: Path = REPO) -> list[dict[str, Any]]:
         """Freeze, run everything, and return the run rows."""
-        self.assertEqual(self.cli("freeze", str(self.dir)).returncode, 0)
-        self.cli("run", str(self.dir), *flags)
+        self.assertEqual(self.cli("freeze", str(self.dir), cwd=cwd).returncode, 0)
+        self.cli("run", str(self.dir), *flags, cwd=cwd)
         return [r for r in pr.read_rows(self.results) if r["kind"] == "run"]
 
     def gate(self) -> str:
@@ -68,6 +67,40 @@ class ProofRunTests(unittest.TestCase):
         self.assertNotEqual(row["cmd_sha256"], pr.sha(cmd))
         self.assertEqual((row["exit_code"], row["verdict"], row["expect_matched"]), (0, "satisfied", True))
         self.assertEqual(self.gate(), "")
+
+    def test_changed_head_invalidates_a_satisfied_proof(self) -> None:
+        """A passing run from the previous commit cannot release completion on a new HEAD."""
+        subprocess.run(["git", "-C", str(self.dir), "init", "-q"], check=True)
+
+        def commit(message: str) -> None:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(self.dir),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    message,
+                ],
+                check=True,
+            )
+
+        commit("first")
+        self.doc({"id": "P1", "cmd": "true", "expect": {"exit_code": 0}})
+        self.freeze_run(cwd=self.dir)
+        before = Path.cwd()
+        try:
+            os.chdir(self.dir)
+            self.assertEqual(self.gate(), "")
+            commit("second")
+            self.blocked(r"P1\(proof_stale_head\)")
+        finally:
+            os.chdir(before)
 
     def test_verbatim_execution(self) -> None:
         """(b) Nested quotes and $() run exactly as written: exit 3, verdict failed, cmd hash unchanged."""

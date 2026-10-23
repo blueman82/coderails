@@ -87,6 +87,8 @@ class CompletionTests(unittest.TestCase):
             cmd_sha256=pr.sha(cmd),
             proof_json_sha256=pr.doc_sha(self.document),
             verdict=verdict,
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
             **(IDENTITY | identity),
         )
 
@@ -97,6 +99,40 @@ class CompletionTests(unittest.TestCase):
         self.proof_result("failed")
         with self.assertRaises(GraphError):
             verify_completion(*self.arguments)
+
+    def test_changed_head_invalidates_codex_completion(self) -> None:
+        """Revalidation refuses a proof that passed before this worktree advanced."""
+        subprocess.run(["git", "-C", str(self.directory), "init", "-q"], check=True)
+
+        def commit(message: str) -> None:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(self.directory),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    message,
+                ],
+                check=True,
+            )
+
+        commit("first")
+        before = Path.cwd()
+        try:
+            os.chdir(self.directory)
+            self.proof_result("satisfied")
+            complete(*self.arguments)
+            commit("second")
+            with self.assertRaisesRegex(GraphError, r"P1\(proof_stale_head\)"):
+                verify_completion(*self.arguments)
+        finally:
+            os.chdir(before)
 
     def test_unsatisfied_foreign_or_stale_rows_cannot_pass(self) -> None:
         """Failed, mismatched, foreign-loop, wrong-cmd and status-only proofs never complete the graph."""
@@ -134,6 +170,18 @@ class CompletionTests(unittest.TestCase):
             write_json(self.path, current | {"proof_disposition": disposition})
             complete(*self.arguments)
             write_json(self.path, current)
+
+    def test_empty_proof_file_uses_a_valid_disposition(self) -> None:
+        """An owned empty proof document follows the same disposition rule as Claude."""
+        self.document["proofs"] = []
+        write_json(self.proof, self.document)
+        current = read_json(self.path)
+        write_json(
+            self.path,
+            current
+            | {"proof_disposition": {"kind": "none", "reason_code": "docs_only", "reason": "no executable proof"}},
+        )
+        complete(*self.arguments)
 
     def test_eval_stamp_revision_and_identity(self) -> None:
         """Bind completion to the current suite, checksum, amendments, and loop."""

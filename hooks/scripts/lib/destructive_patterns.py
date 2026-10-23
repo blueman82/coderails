@@ -4,7 +4,19 @@ from __future__ import annotations
 
 import re
 import subprocess
+from contextlib import suppress
 from pathlib import Path
+
+try:
+    from hooks.scripts.lib.hook_telemetry import note_child
+except ImportError:  # telemetry must never be able to break the hook
+    with suppress(Exception):  # record the loss once per process instead of silently disabling telemetry
+        from hooks.scripts.hook_common import log
+
+        log("hook_telemetry unavailable (ImportError); telemetry disabled for this process")
+
+    def note_child(hook: str, returncode: int) -> None:
+        """Telemetry unavailable: no-op."""
 
 
 def normalize_ifs(command: str) -> str:
@@ -17,12 +29,13 @@ def normalize_ifs(command: str) -> str:
     return "\n".join(lines)
 
 
-def git_output(cwd: str, *arguments: str) -> str:
+def git_output(cwd: str, *arguments: str, hook: str = "destructive_patterns") -> str:
     """Read a Git property, returning empty on repository or command failures."""
     try:
         result = subprocess.run(["git", "-C", cwd, *arguments], capture_output=True, text=True, check=False)
     except OSError:
         return ""
+    note_child(hook, result.returncode)
     return result.stdout.strip() if result.returncode == 0 else ""
 
 

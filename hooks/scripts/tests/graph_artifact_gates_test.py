@@ -60,6 +60,8 @@ def artifacts(case: GraphCase, state: dict[str, Any]) -> None:
         cmd_sha256=pr.sha("true"),
         proof_json_sha256=digest,
         verdict="satisfied",
+        cwd=str(Path.cwd()),
+        head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
         **identity,
     )
 

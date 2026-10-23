@@ -3,20 +3,23 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import deny, read_payload
+from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, output, read_payload_strict
 from hooks.scripts.lib.destructive_patterns import normalize_ifs, permanent_pattern, source_write, workflow_substitution
 from hooks.scripts.lib.destructive_routes import ROUTES
 
 
 def main() -> int:
     """Evaluate the input command without running any of its contents."""
-    payload = read_payload()
+    try:
+        payload = read_payload_strict()
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)  # fail closed: a gate that cannot read its input must not allow the action
+        return 0
     tool_input = payload.get("tool_input")
     raw = tool_input.get("command") if isinstance(tool_input, dict) else None
     if not isinstance(raw, str) or not raw:
@@ -26,19 +29,13 @@ def main() -> int:
     cwd = cwd_value if isinstance(cwd_value, str) and cwd_value else os.getcwd()
     pattern, identifier = permanent_pattern(command, cwd)
     if pattern:
-        print(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "patternId": identifier,
-                        "permissionDecisionReason": f"Destructive pattern detected: {pattern}\n"
-                        f"Full command: {command}\n"
-                        f"This command is permanently blocked. {ROUTES[identifier]}",
-                    }
-                }
-            )
+        output(
+            "PreToolUse",
+            permissionDecision="deny",
+            patternId=identifier,
+            permissionDecisionReason=f"Destructive pattern detected: {pattern}\n"
+            f"Full command: {command}\n"
+            f"This command is permanently blocked. {ROUTES[identifier]}",
         )
         return 0
     if reason := source_write(command, cwd):
@@ -57,4 +54,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("destructive_bash_gate", main))
