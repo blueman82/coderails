@@ -54,9 +54,10 @@ def main() -> int:
                 return 0
             if violations := publication_gate.evaluate(number, git.pr_field(number, "headRefOid"), unit, progress):
                 first = violations[0]
+                fix = publication_gate.remediation(first["code"])
                 deny(
                     f"{first['code']}: Blocked: merge of PR {number} — the publication gate refused this head "
-                    f"({first['detail'] or 'no detail'}). Fix the diff or the policy; diff_manifest: off is the switch."
+                    f"({first['detail'] or 'no detail'}). {fix}"
                 )
                 return 0
     except Exception as error:  # noqa: BLE001 - fail closed: an erroring gate must not allow a merge

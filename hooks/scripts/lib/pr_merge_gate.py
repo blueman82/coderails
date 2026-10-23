@@ -136,8 +136,7 @@ def merge_reason(number: str, cwd: str, unit: str = "", progress: str = "") -> s
         )
     if violations := publication_gate.evaluate(number, sha, unit=unit, progress=progress):
         first = violations[0]
-        return (
-            f"{first['code']}: {prefix}the publication gate refused this head ({first['detail'] or 'no detail'}). "
-            "Fix the diff or the policy; set diff_manifest: off only on purpose."
-        )
+        fix = publication_gate.remediation(first["code"])
+        detail = first["detail"] or "no detail"
+        return f"{first['code']}: {prefix}the publication gate refused this head ({detail}). {fix}"
     return integrity_reason(number, sha, cwd)

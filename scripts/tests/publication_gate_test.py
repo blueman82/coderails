@@ -39,6 +39,8 @@ MERGE_DRIVER = (
     "import sys; sys.path.insert(0, %r)\n"
     "from scripts import merge\n"
     "merge.verify_gates = lambda number: merge.git.pr_field(number, 'headRefOid')\n"
+    "from scripts.lib import git_common\n"
+    "git_common.review_passes_for_pr = lambda number, sha: git_common.ReviewPasses(0, ())  # manifest under test\n"
     "merge.cleanup = lambda number, default: None\n"
     "raise SystemExit(merge.main(['7']))\n"
 )
@@ -100,6 +102,7 @@ class EvaluateTests(unittest.TestCase):
         for mode, expected in (("enforce", ["diff_manifest:manifest_internal_error"]), ("advisory", [])):
             with (
                 self.subTest(mode=mode),
+                mock.patch.object(publication_gate, "CHECKS", [publication_gate.manifest_check]),
                 mock.patch.object(manifest_policy, "settings", return_value=(mode, "policy.json", False)),
                 mock.patch.object(git, "repo", side_effect=RuntimeError("metadata failure")),
             ):
@@ -237,8 +240,12 @@ class HeadlessTests(RepoCase):
         self.assertIn("publication/refused/diff_manifest:denied_path", self.rows())
 
     def test_merge_off_control_merges(self) -> None:
-        """Negative control: diff_manifest off lets the same diff reach gh pr merge."""
-        self.config("diff_manifest: off\n")
+        """Negative control: diff_manifest off lets the same diff reach gh pr merge.
+
+        The config file is itself a committed control file (.coderails/** needs security-review), so the review
+        check is switched off too; this test is about the manifest only.
+        """
+        self.config("diff_manifest: off\nreview_passes: off\n")
         result = self.merge(self.commit_secret())
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(self.ghlog.exists())
@@ -328,10 +335,12 @@ class CounterTests(unittest.TestCase):
 
         by_reason = {"publication/refused/diff_manifest:denied_path": 2, "diff-manifest/ok/diff_manifest_ok": 1}
         by_reason["x/y/z"] = 9
+        by_reason["review-passes/refused/required_review_missing:security-review"] = 3
         self.assertEqual(
             workflow_gate_counters.counts(by_reason),
             {
                 "diff-manifest": {"ok/diff_manifest_ok": 1},
+                "review-passes": {"refused/required_review_missing:security-review": 3},
                 "publication": {"refused/diff_manifest:denied_path": 2},
             },
         )

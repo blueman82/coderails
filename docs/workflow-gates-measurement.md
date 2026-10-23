@@ -18,7 +18,9 @@ tallied by `measure_graph_alignment.py` into `trace.by_reason` keyed
 | `diff-manifest/failed_open/<manifest_unreadable\|manifest_internal_error>` | advisory could not evaluate |
 | `diff-manifest/legacy/manifest_legacy_absent` | the policy has no `manifest` key |
 | `diff-manifest/warned/diff_manifest_mode_invalid` | an unknown `diff_manifest` value was treated as enforce |
-| `publication/refused/<code>` | the gate refused; `<code>` is `diff_manifest:<code>`, `pr_repo_override`, `pr_base_mutation`, or a later unit's code |
+| `review-passes/ok/review_passes_ok` | the artifact's passes covered every pass the diff requires |
+| `review-passes/refused/<code>` | `<code>` is `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`, `review_artifact_missing` or `review_policy_unreadable` |
+| `publication/refused/<code>` | the gate refused; `<code>` is `diff_manifest:<code>`, a review code, `pr_repo_override`, `pr_base_mutation`, or a later unit's code |
 
 Manifest codes are `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`,
 `special_file_type`, `mode_change`, `status_not_allowed`, `too_many_paths`, `manifest_unreadable` and
@@ -30,7 +32,7 @@ shape and worktree equality; it does not authenticate those owner fields.
 
     python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py
 
-prints `{command: {outcome/reason_code: count}}` for `diff-manifest` and `publication`. Add a command name to
+prints `{command: {outcome/reason_code: count}}` for `diff-manifest`, `review-passes` and `publication`. Add a command name to
 `COMMANDS` in that file when a unit adds a new row family; `measure_graph_alignment.py` is at its line limit and is not
 edited.
 

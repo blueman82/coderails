@@ -749,6 +749,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `integrity_review` | object/null | `null` | enforced_by_code | Integrity attestation settings. |
 | `integrity_review.machine_user` | string/null | `null` | enforced_by_code | GitHub login that must post the integrity-review status; null or absent = local gate inactive. |
 | `diff_manifest` | string | `"enforce"` | enforced_by_code | Diff-manifest publication gate run by push.py, merge.py and the direct-merge hooks: off, advisory or enforce (default). Any other value is treated as enforce and reported as diff_manifest_mode_invalid. |
+| `review_passes` | string | `"enforce"` | enforced_by_code | Required-reviewer check in the publication gate (policy/review_policy.json): off skips it; enforce (default) and any other value apply it. |
 | `diff_manifest_policy` | string/null | `null` | enforced_by_code | Path to a diff policy JSON file; null = the shipped policy/diff-policy.default.json. |
 | `evals` | object/null | `null` | enforced_by_code | Eval settings. |
 | `evals.require_signatures` | boolean/null | `false` | enforced_by_code | true = eval artifacts must be signed; refuse when signing is impossible. |

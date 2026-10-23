@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -20,6 +21,21 @@ from scripts.lib import action_receipt as ar
 ROOT = Path(__file__).resolve().parents[3]
 MERGE = "gh pr merge 12 --squash"
 PUSH = "git push origin main"
+GH_FIXTURE = """#!/usr/bin/env python3
+import json
+import os
+import sys
+
+args = sys.argv[1:]
+expected = args in [
+    ["pr", "view", number, "--json", "headRefOid", "-q", ".headRefOid"]
+    for number in ("1", "2", "5", "12", "13", "https://github.com/o/r/pull/5")
+]
+with open(os.environ["AUTHORITY_GH_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps({"argv": args, "expected": expected}) + "\\n")
+print("fixture: PR head unavailable" if expected else "fixture: unexpected gh query", file=sys.stderr)
+raise SystemExit(1 if expected else 95)
+"""
 
 
 class GateTests(HookCase):
@@ -31,6 +47,33 @@ class GateTests(HookCase):
         self.repo = self.directory / "repo"
         self.repo.mkdir()
         subprocess.run(["git", "init", "-q", "-b", "main", str(self.repo)], check=True)
+        binary = self.directory / "bin"
+        binary.mkdir()
+        gh = binary / "gh"
+        gh.write_text(GH_FIXTURE)
+        gh.chmod(0o700)
+        self.gh_log = self.directory / "gh.jsonl"
+        self.environment.update(
+            PATH=f"{binary}{os.pathsep}{self.environment['PATH']}", AUTHORITY_GH_LOG=str(self.gh_log)
+        )
+
+    def tearDown(self) -> None:
+        """Refuse hidden fixture queries even when the hook tolerates an unavailable head."""
+        if self.gh_log.exists():
+            self.assertTrue(all(json.loads(line)["expected"] for line in self.gh_log.read_text().splitlines()))
+        super().tearDown()
+
+    def test_gh_fixture_refuses_unavailable_head_and_unexpected_query(self) -> None:
+        """The exact head lookup fails locally; an unrelated query never reaches GitHub."""
+        log = self.directory / "control-gh.jsonl"
+        environment = self.environment | {"AUTHORITY_GH_LOG": str(log)}
+        for args, expected_code in (
+            (["pr", "view", "12", "--json", "headRefOid", "-q", ".headRefOid"], 1),
+            (["api", "user"], 95),
+        ):
+            result = subprocess.run(["gh", *args], env=environment, capture_output=True, text=True, check=False)
+            self.assertEqual((result.returncode, result.stdout), (expected_code, ""))
+        self.assertEqual([json.loads(line)["expected"] for line in log.read_text().splitlines()], [True, False])
 
     def configure(self, value: str | None) -> None:
         """Write (or skip) the action_authority config line."""
@@ -125,7 +168,7 @@ class GateTests(HookCase):
         with (
             mock.patch.object(gate, "read_payload_strict", return_value=payload),
             mock.patch.object(gate, "find_valid", side_effect=RuntimeError("boom")),
-            mock.patch.dict("os.environ", {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}),
+            mock.patch.dict("os.environ", self.environment),
         ):
             self.assertEqual(gate.main(), 0)
         self.assertEqual(self.reasons(), ["action_authority_failed_open"])

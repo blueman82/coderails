@@ -16,7 +16,14 @@ sys.path.insert(0, str(REPO))
 from hooks.scripts.lib.capability_profiles import guarded_agents, load_profiles  # noqa: E402
 from scripts.capability_profiles_validate import validate  # noqa: E402
 
-OLD_GUARDED = {"deploy-safety-reviewer", "design-scout", "disposition-scout", "preflight-scout", "source-auditor"}
+OLD_GUARDED = {
+    "deploy-safety-reviewer",
+    "design-scout",
+    "disposition-scout",
+    "preflight-scout",
+    "security-reviewer",
+    "source-auditor",
+}
 
 
 def drop_tools(text: str) -> str:
@@ -59,18 +66,20 @@ class ProfileTests(unittest.TestCase):
 
     def test_missing_profile_is_red(self) -> None:
         """Negative control: deleting a profile is reported for both harnesses."""
-        broken = copy.deepcopy(self.profiles)
-        del broken["agents"]["design-scout"]
-        errors = validate(REPO, broken)
-        self.assertTrue(any("design-scout" in e and "no profile" in e for e in errors), errors)
+        for name in ("design-scout", "security-reviewer"):
+            broken = copy.deepcopy(self.profiles)
+            del broken["agents"][name]
+            errors = validate(REPO, broken)
+            self.assertTrue(any(name in e and "no profile" in e for e in errors), errors)
 
     def test_write_on_read_only_agent_is_red(self) -> None:
         """Negative control: granting worktree.write to a read-only agent disagrees with frontmatter and sandbox."""
-        broken = copy.deepcopy(self.profiles)
-        broken["agents"]["design-scout"].append("worktree.write")
-        errors = validate(REPO, broken)
-        self.assertTrue(any("design-scout" in e and "claude" in e for e in errors), errors)
-        self.assertTrue(any("design-scout" in e and "codex" in e for e in errors), errors)
+        for name in ("design-scout", "security-reviewer"):
+            broken = copy.deepcopy(self.profiles)
+            broken["agents"][name].append("worktree.write")
+            errors = validate(REPO, broken)
+            self.assertTrue(any(name in e and "claude" in e for e in errors), errors)
+            self.assertTrue(any(name in e and "codex" in e for e in errors), errors)
 
     def test_unknown_capability_and_missing_instruction_are_red(self) -> None:
         """A made-up capability, or tests.run without agent text naming capability.py, fails."""

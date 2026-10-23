@@ -128,6 +128,8 @@
   "scripts/lib/merge_target.py": "100644",
   "packages/codex/scripts/lib/merge_target.py": "100644",
   "scripts/lib/workflow_gate_counters.py": "100644",
+  "scripts/lib/review_passes.py": "100644",
+  "packages/codex/scripts/lib/review_passes.py": "100644",
   "packages/codex/scripts/lib/publication_gate.py": "100644",
   "packages/codex/hooks/scripts/pr_publication_gate.py": "100755",
   "scripts/lib/config_counters.py": "100644",

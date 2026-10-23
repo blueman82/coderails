@@ -15,6 +15,7 @@ READ_ONLY = {
     "design-scout",
     "disposition-scout",
     "preflight-scout",
+    "security-reviewer",
     "source-auditor",
     "spec-reviewer",
 }
@@ -131,7 +132,7 @@ class ProviderInstallerTests(unittest.TestCase):
         self.assertIn("Codex skips plugin hooks until you review and trust them.", output)
         self.assertIn("Start a fresh Codex session, run /hooks", output)
         agents = self.home / ".codex/agents"
-        self.assertEqual(len(list(agents.glob("*.toml"))), 10)
+        self.assertEqual(len(list(agents.glob("*.toml"))), 11)
         for source in (self.root / "packages/codex/agents").glob("*.toml"):
             text = source.read_text()
             target = agents / source.name
