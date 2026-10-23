@@ -24,6 +24,29 @@ from graph_evidence import validate_worker_evidence  # noqa: E402
 class DriverEvidenceTests(unittest.TestCase):
     """Use real files and a disposable Git repository for SHA revalidation."""
 
+    def test_native_wave_history_survives_cutover(self) -> None:
+        """Completion rejects a changed native wave outcome after the backup is sealed."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "progress.json"
+            old: dict[str, Any] = {
+                "session_id": "S",
+                "loop_id": "L",
+                "revision": 1,
+                "graph": {"nodes": {}, "dispatches": {}, "wave_history": {"wave-1": {"outcome": "failed"}}},
+            }
+            raw = json.dumps(old).encode()
+            path.with_name("progress.json.pre-driver").write_bytes(raw)
+            state = deepcopy(old)
+            state["revision"] = 3
+            state["graph"].update(native_last_revision=1, native_backup_sha256=hashlib.sha256(raw).hexdigest())
+            graph_driver_evidence.validate_backup(path, state)
+            state["graph"]["wave_history"]["wave-1"]["outcome"] = "done"
+            with self.assertRaisesRegex(ValueError, "native wave history"):
+                graph_driver_evidence.validate_backup(path, state)
+            state["graph"]["wave_history"] = {}
+            with self.assertRaisesRegex(ValueError, "native wave history"):
+                graph_driver_evidence.validate_backup(path, state)
+
     def test_native_history_check_allows_pending_nodes_for_cutover(self) -> None:
         """Cutover rechecks past native evidence without requiring graph completion."""
         with patch("graph_evidence._stored_references", return_value=set()) as check:

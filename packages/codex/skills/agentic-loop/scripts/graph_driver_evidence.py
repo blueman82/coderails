@@ -314,6 +314,9 @@ def validate_backup(state_path: Path, state: dict[str, Any]) -> dict[str, Any]:
     for dispatch_id, record in cast(dict[str, Any], old_graph.get("dispatches", {})).items():
         if graph.get("dispatches", {}).get(dispatch_id) != record:
             raise ValueError("native dispatch history changed")
+    for wave_id, record in cast(dict[str, Any], old_graph.get("wave_history", {})).items():
+        if graph.get("wave_history", {}).get(wave_id) != record:
+            raise ValueError("native wave history changed")
     for node_id, node in cast(dict[str, Any], old_graph["nodes"]).items():
         current = cast(dict[str, Any], graph["nodes"].get(node_id, {}))
         prior_evidence = cast(list[Any], node["evidence"])
