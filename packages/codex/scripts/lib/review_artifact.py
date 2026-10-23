@@ -1,5 +1,9 @@
 """Construct and match SHA-bound review artifact markers."""
 
+from __future__ import annotations
+
+import re
+
 REVIEW_ARTIFACT_MARKER_VERSION = "v1"
 
 
@@ -11,6 +15,41 @@ def marker(pr: str, head_sha: str) -> str:
 def matches_marker(line: str, pr: str, head_sha: str) -> bool:
     """Match literal identity and exact line boundaries."""
     return line == marker(pr, head_sha)
+
+
+COMPAT_PREFIX = "<!-- coderails-compat-findings"
+COMPAT_DISPOSITIONS = ("clean-break", "preserve-compat")  # mirrors graph_vocab.DISPOSITION_KINDS
+_COMPAT = re.compile(
+    r"<!-- coderails-compat-findings v1 pr=(\S+) head_sha=(\S+) count=(\d+)"
+    r" disposition=(clean-break|preserve-compat) -->"
+)
+
+
+def compat_line(pr: str, head_sha: str, count: int, disposition: str) -> str:
+    """The second typed line of a review artifact. `count` is the reviewer's own judgement, not a measurement."""
+    if count < 0 or disposition not in COMPAT_DISPOSITIONS:
+        raise ValueError(f"count must be >= 0 and disposition one of {COMPAT_DISPOSITIONS}")
+    return f"{COMPAT_PREFIX} v1 pr={pr} head_sha={head_sha} count={count} disposition={disposition} -->"
+
+
+def parse_compat_line(line: str, pr: str, head_sha: str) -> tuple[int, str] | None:
+    """(count, disposition) when `line` is an exact compat line for this PR head, else None."""
+    found = _COMPAT.fullmatch(line)
+    if found is None or (found[1], found[2]) != (pr, head_sha):
+        return None
+    return int(found[3]), found[4]
+
+
+def compat_problem(bodies: list[str], pr: str, head_sha: str) -> str | None:
+    """The merge-gate reason code, or None. Absent lines pass (legacy artifacts); any refusing line wins."""
+    refusing = None
+    for line in (line for body in bodies for line in body.splitlines() if line.startswith(COMPAT_PREFIX)):
+        if _COMPAT.fullmatch(line) is None:
+            return "compat_findings_malformed"
+        parsed = parse_compat_line(line, pr, head_sha)
+        if parsed and parsed[1] == "clean-break" and parsed[0] > 0:
+            refusing = "compat_findings_nonzero"
+    return refusing
 
 
 def main() -> int:

@@ -17,7 +17,17 @@ from graph_evidence import validate_worker_evidence
 from graph_identity import GraphError, is_legacy_task_name, task_node
 from graph_recovery import RecoveryRefusedError, traced_refusal
 
-from packages.tests.codex_fixture import append, frozen_evals, node, read_json, spawn, state, transcripts, write_json
+from packages.tests.codex_fixture import (
+    append,
+    done_result,
+    frozen_evals,
+    node,
+    read_json,
+    spawn,
+    state,
+    transcripts,
+    write_json,
+)
 
 CODE = "legacy_task_identity_refused"
 LEGACY = "loop_worker_55335b315d"  # node U3[1], attempt 1, no loop scope: a literal, no helper may mint it
@@ -226,7 +236,7 @@ class LegacyRefusalTraceTests(unittest.TestCase):
             append(parent, record)
         for record in _child_records("legacy-child", LEGACY_U2, "legacy-turn"):
             append(self.directory / ".codex/sessions/fixture-legacy-child.jsonl", record)
-        envelope = {"wave_id": wave["wave_id"], "results": {"U3[1]": {"outcome": "done", "evidence": "ok"}}}
+        envelope = {"wave_id": wave["wave_id"], "results": {"U3[1]": done_result("ok")}}
         self.results = json.dumps(envelope)
 
     def _rows(self) -> list[dict[str, Any]]:

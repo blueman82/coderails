@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import unicodedata
 from typing import Any, Union, cast
@@ -23,10 +24,18 @@ REFERENCE_KEYS = {
 # A failed attempt whose spawn_agent call was refused has a call but no child thread or completion.
 REFUSED_KEYS = {"kind", "attempt", "wave_id", "spawn_call_id", "outcome"}
 REFUSED_OUTCOME = "launch_refused"
+INVALID_DISPATCH_KEYS = REFERENCE_KEYS | {"outcome"}
+INVALID_DISPATCH_OUTCOME = "invalid_dispatch"
+ENCRYPTED_REFERENCE_KEYS = REFERENCE_KEYS | {"message_sha256"}
 IDENTIFIER_KEYS = {"spawn_call_id", "agent_thread_id", "task_complete_turn_id"}
 RESERVED_TOKENS = REFERENCE_KEYS | {"codex_agent"}
 _MAX_EVIDENCE_INPUT_UNITS = 1 << 20
 _MAX_EVIDENCE_WORK_UNITS = 8 << 20
+
+
+def new_evidence_writes_enabled() -> bool:
+    """Keep new persisted evidence off until the installed reader is verified."""
+    return os.environ.get("CODERAILS_A6_EVIDENCE_WRITE") == "on"
 
 
 def _normalized(value: str) -> str:

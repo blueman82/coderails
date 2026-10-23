@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from hooks.scripts.lib.loop_state_common import atomic_progress_update
+from scripts.lib import review_artifact
 from scripts.lib.artifact_io import JsonObject
 
 
@@ -66,9 +67,11 @@ def write_cache(path: str | Path, pr: str, head_sha: str, url: str, author: str,
 def main(arguments: list[str] | None = None) -> int:
     """Dispatch summary validation and best-effort cache writes."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("validate", "write-cache"))
-    parser.add_argument("path")
+    parser.add_argument("operation", choices=("validate", "write-cache", "compat-line"))
+    parser.add_argument("path", help="summary or progress.json path; the PR number for compat-line")
     parser.add_argument("arguments", nargs="*")
+    parser.add_argument("--count", type=int, help="compat-line: compat findings the reviewer reported")
+    parser.add_argument("--disposition", help="compat-line: clean-break | preserve-compat")
     try:
         args = parser.parse_args(arguments)
     except SystemExit as error:
@@ -76,6 +79,11 @@ def main(arguments: list[str] | None = None) -> int:
     try:
         if args.operation == "validate":
             validate_summary(args.path)
+            return 0
+        if args.operation == "compat-line":
+            if len(args.arguments) != 1 or args.count is None or args.disposition is None:
+                raise ValueError("compat-line requires <pr> <sha> --count K --disposition D")
+            print(review_artifact.compat_line(args.path, args.arguments[0], args.count, args.disposition))
             return 0
         if len(args.arguments) != 5:
             raise ValueError("write-cache requires <path> <pr> <sha> <url> <author> <iso8601>")

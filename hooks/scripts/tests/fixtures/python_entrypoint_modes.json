@@ -78,6 +78,7 @@
   "hooks/scripts/lib/dir_lock.py": "100644",
   "hooks/scripts/lib/discipline_common.py": "100755",
   "hooks/scripts/lib/graph_controller.py": "100644",
+  "hooks/scripts/lib/graph_decisions.py": "100644",
   "hooks/scripts/lib/graph_dispatch.py": "100644",
   "hooks/scripts/lib/graph_evidence.py": "100644",
   "hooks/scripts/lib/graph_evidence_bind.py": "100644",
@@ -144,6 +145,7 @@
   "scripts/lib/config_schema_docs.py": "100644",
   "scripts/lib/state_counters.py": "100644",
   "scripts/lib/dispatch_counters.py": "100644",
+  "scripts/lib/worker_counters.py": "100644",
   "scripts/lib/spec_counters.py": "100644",
   "scripts/gen_graph_docs.py": "100755",  "scripts/lib/integrity_attestation.py": "100644",
   "hooks/scripts/lib/hook_state.py": "100644"

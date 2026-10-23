@@ -99,9 +99,10 @@ a consumer. Those four lines are superseded by the next section; the user direct
   receipt is honoured by a subagent. `scripts/merge.py` cannot see the shell's command text; when no hook ran it binds PR number + repository+ref+SHA instead of the text hash, and a hook-consumed receipt must be
   within 300 s. `action_authority: off` and the user-tier trust root are agent-writable: cooperating-agent safeguard, not a boundary.
 - Worker statuses `NEEDS_DECISION | OUTSIDE_SCOPE | IRREVERSIBLE_ACTION` ship as a standalone validator
-  (`skills/agentic-loop/scripts/worker_status.py`, Codex copy byte-identical). Wiring into `record-wave` was
-  rejected: it changes record-wave evidence demands and `graph_semantics.py` has three synced copies. Wiring point:
-  the orchestrator's U4 step and the SKILL.md report-back contract.
+  (`skills/agentic-loop/scripts/worker_status.py`, Codex copy byte-identical). Both providers' `record_wave` now call
+  `worker_status.prepare()` before the pure core, so typed statuses consume one retry and write one typed stop row in
+  the same locked write. A `done` result with `final_report_required` needs a valid `final_report`; its content remains
+  worker supplied. Orchestrator confidence and verify lints remain advisory.
 
 ## Superseded again: grant moves off prose matching to a typed command
 

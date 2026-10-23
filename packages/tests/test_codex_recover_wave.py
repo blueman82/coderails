@@ -20,6 +20,7 @@ from graph_evidence import validate_worker_evidence
 from graph_identity import GraphError
 from graph_io import write as write_state
 
+from packages.tests.codex_fixture import done_result as done
 from packages.tests.codex_fixture import frozen_evals, node, read_json, refuse, spawn, state, transcripts, write_json
 
 LAST_ACTIVITY = 1_789_948_802.0  # 2026-09-21T00:00:02Z, the fixture child's last record
@@ -66,7 +67,7 @@ class RecoverWaveTests(unittest.TestCase):
         wave = graph.begin_wave(self.path)
         self.assertTrue(all(name.endswith("_a2") for name in wave["task_names"].values()))
         self._spawn_all(terminal=True)
-        results = {unit: {"outcome": "done", "evidence": "ok"} for unit in ("U3[1]", "U3[2]")}
+        results = {unit: done("ok") for unit in ("U3[1]", "U3[2]")}
         graph.record_wave(self.path, json.dumps({"wave_id": wave["wave_id"], "results": results}))
         validate_worker_evidence(read_json(self.path))
 
@@ -119,7 +120,7 @@ class RecoverWaveTests(unittest.TestCase):
         active = graph.summarize(self.path)
         self.assertEqual((active["phase"], active["active"]), ("waiting for worker", ["U3[1]", "U3[2]"]))
         self._spawn_all(terminal=True)
-        results = {unit: {"outcome": "done", "evidence": "ok"} for unit in ("U3[1]", "U3[2]")}
+        results = {unit: done("ok") for unit in ("U3[1]", "U3[2]")}
         wave = read_json(self.path)["graph"]["active_wave"]["wave_id"]
         graph.record_wave(self.path, json.dumps({"wave_id": wave, "results": results}))
         finished = graph.summarize(self.path)

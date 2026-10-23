@@ -22,11 +22,14 @@ from .graph_executor import (
 )
 from .graph_recovery import recover_wave as recover_wave
 from .graph_recovery import trace
+from .graph_stops import record_stop
 from .loop_completion import validate_completion
 from .loop_evals import EvalStatus, read_loop_evals
 from .loop_state_common import LoopState, read_state
 
 sys.path.insert(0, str(ROOT))
+import worker_status  # noqa: E402
+
 from scripts.lib.config import config_path, load_config  # noqa: E402
 from scripts.lib.config_strict import sandbox_mode, strict_settings  # noqa: E402
 
@@ -143,20 +146,54 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("wave report must contain exactly wave_id and results")
     results = object_value(report["results"], "wave results")
     response: dict[str, Any] = {}
+    refusal: list[worker_status.WorkerResultError] = []
+    recorded: list[list[dict[str, Any]]] = []
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
-        proposal = graph_semantics.record_wave(state, report["wave_id"], results)
-        graph_repair.apply_failed_gates(proposal, results)
-        references = bind_wave(state, results)
+        try:
+            core, statuses, reports = worker_status.prepare(state, results)
+        except worker_status.WorkerResultError as error:
+            refusal.append(error)
+            raise
+        proposal = graph_semantics.record_wave(state, report["wave_id"], core)
+        references = bind_wave(state, core)
         proposed = object_value(proposal["state"], "proposed graph")
+        worker_status.retain_decision_slot(proposed, statuses)
+        graph_repair.apply_failed_gates(proposal, core)
         for node_id, refs in references.items():
             proposed["graph"]["nodes"][node_id]["evidence"].extend(refs)
+        worker_status.record_into(proposed, report["wave_id"], statuses, reports)
+        if statuses:  # one typed stop row on the post-record state, in the same locked write
+            category, code, reason = worker_status.stop_for(statuses)
+            proposed = object_value(
+                record_stop(proposed, state["session_id"], category, code, reason)["state"], "stops"
+            )
+        recorded.append(statuses + [{"node": node, "status": "FINAL_REPORT"} for node in reports])
         response.update(
-            {"revision": proposed["revision"], "released_joins": proposal["released_joins"], "ready": proposal["ready"]}
+            {
+                "revision": proposed["revision"],
+                "released_joins": proposal["released_joins"],
+                "ready": graph_semantics.ready(proposed),
+            }
         )
         return proposed
 
-    transition(path, update)
+    try:
+        transition(path, update)
+    except ValueError:
+        if refusal:
+            trace(path, load(path), "refused", refusal[0].code, {}, [(refusal[0].node, None, None)], "record-wave")
+            raise refusal[0] from None
+        raise
+    if recorded[0]:
+        state = load(path)
+        for item in recorded[0]:
+            code = (
+                "final_report_recorded"
+                if item["status"] == "FINAL_REPORT"
+                else f"worker_status_{item['status'].lower()}"
+            )
+            trace(path, state, "recorded", code, {}, [(item["node"], None, None)], "record-wave")
     return response
 
 

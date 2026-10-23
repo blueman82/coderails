@@ -381,3 +381,41 @@ PYTHONPATH=. python3 -m unittest packages.tests.test_graph_spec
 ## Structured dispatch envelope and role assertion (measurement note)
 
 See [dispatch envelope measurements](graph-dispatch-measurement.md).
+
+## Disposition, compat findings and typed worker statuses (measurement note)
+
+Row 7 gives the disposition fields a code reader. `graph.py add-unit --disposition clean-break|preserve-compat
+[--named-blocker X --removal-ticket Y]` validates through one function in `packages/graph-semantics/graph_vocab.py`
+(preserve-compat needs both non-blank, clean-break neither) and stores `work_units[u].disposition`, which the dispatch
+contract already carried; `disposition-audit` and both providers' completion gates re-check a hand-edited state. The
+review artifact gains a second typed line `<!-- coderails-compat-findings v1 pr=N head_sha=S count=K disposition=D -->`
+(`post_review.py compat-line`); `merge.py` refuses `clean-break` with `K > 0` (`compat_findings_nonzero`), a malformed
+line (`compat_findings_malformed`), and passes an artifact without the line. The root-owned daemon's v1 marker line is
+byte-identical. Row 22 puts `worker_status.prepare()` in front of the untouched core in both `record_wave` paths: a
+result with a `status` key is validated or the whole report is rejected (`worker_status_<code>`), a valid one is recorded
+in `worker_statuses[]`, spends one retry and writes one typed stop row; a `done` result for a dispatch with
+`final_report_required` needs a valid `final_report` (`final_report_invalid`).
+
+What to count: `python3 scripts/lib/worker_counters.py` tallies `worker_status_<reason>` / `final_report_invalid`
+(refusals), `worker_status_<status>` / `final_report_recorded` (accepted) from `recovery-trace.jsonl`, and
+`pending_statuses` from `progress.json`. Disposition refusals are `add-unit/refused/add_unit_refused_disposition` rows.
+Flip condition: refusal codes above zero mean workers return unshaped results (fix the worker prompt, not the gate);
+`pending_statuses` that never falls means typed stops were asked about but never logged with `record-decision
+--worker-status-seq`; `decision_recorded` counts the ledger rows written (`record-decision/recorded` trace rows), the
+`record_decision_refused_*` refusals appear as `record-decision/refused` rows; three typed stops on one node exhaust its retries, so a high `worker_status_*` per node means the unit needs a human
+decision up front. Negative controls: delete the `prepare()` call from `record_wave`, skip the preserve-compat pair
+check, ignore the compat line in `merge.py`, drop the `final_report_required` branch, or touch `graph_semantics.py`; each
+fails its row in `packages/tests/test_provider_disposition.py`, `packages/tests/test_provider_worker_status.py`,
+`scripts/tests/compat_findings_test.py` or `hooks/scripts/tests/worker_status_test.py`. Limits: the compat count and
+disposition are the reviewer's judgement (an observable-requirement limit, not a measurement), the status spends a retry
+because the core has no needs-a-human outcome, `final_report` shape is checked and its truth is not, and merge refusals
+leave no trace row (merge.py has no loop session); `measure_graph_alignment.py` does not load `worker_counters`
+(handoff H1).
+
+**Reproduce.**
+
+```
+python3 scripts/lib/worker_counters.py
+python3 hooks/scripts/tests/worker_status_test.py
+PYTHONPATH=. python3 -m unittest packages.tests.test_provider_disposition packages.tests.test_provider_worker_status packages.tests.test_provider_record_decision scripts.tests.compat_findings_test
+```
