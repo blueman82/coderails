@@ -20,7 +20,8 @@ from hooks.scripts.lib.pr_workflow_match import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.lib import merge_target
+from scripts.lib import git_common as git
+from scripts.lib import merge_target, publication_gate
 from scripts.lib.config import config_path
 
 
@@ -44,22 +45,44 @@ def main() -> int:
         for key in ("transcript_path", "agent_transcript_path")
         if isinstance(payload.get(key), str) and Path(str(payload[key])).is_file()
     ]
-    if not paths:
-        return 0
-    entries = transcript_entries(paths)
+    entries = transcript_entries(paths) if paths else []
     for name, segment, where in segments:
-        if not config_path(where) or not targets_main(command, where, target, name):
-            continue
-        number, unit, progress = merge_target.parse(segment) if name == "merge" else ("", "", "")
-        if name == "merge" and number:
+        number, unit, progress = "", "", ""
+        target_number = ""
+        if name == "merge":
+            if merge_target.has_repo_override(command):
+                publication_gate.trace_preflight("pr_repo_override")
+                deny("pr_repo_override: Blocked: merge — GH_REPO can retarget publication outside this repository.")
+                return 0
+            if merge_target.has_base_mutation(command):
+                publication_gate.trace_preflight("pr_base_mutation")
+                deny("pr_base_mutation: Blocked: merge — edit the PR and re-run the checked merge separately.")
+                return 0
+            target_number, unit, progress = merge_target.parse(segment)
             try:
                 os.chdir(where)
-                number = merge_target.resolve(number)
+                number = merge_target.resolve(target_number)
             except (OSError, ValueError, RuntimeError):
                 number = ""
             if not number:
                 deny("pr_number_invalid: Blocked: gh pr merge — could not resolve the target PR.")
                 return 0
+            try:
+                head = git.pr_field(number, "headRefOid")
+                if not head:
+                    raise ValueError("missing head SHA")
+                violations = publication_gate.evaluate(number, head, unit, progress)
+            except (OSError, ValueError, RuntimeError) as error:
+                deny(f"manifest_internal_error: Blocked: merge — publication check failed ({type(error).__name__}).")
+                return 0
+            if violations:
+                first = violations[0]
+                deny(f"{first['code']}: Blocked: merge of PR {number} — {first['detail']}")
+                return 0
+        if not paths or not config_path(where) or not targets_main(command, where, target, name):
+            continue
+        if name == "merge" and not target_number:
+            number = ""  # preserve the existing transcript gate's no-target behavior after the publication check
         if not step_found(entries, name, number):
             required = "/coderails:push" if name == "create" else "/pr-review-toolkit:review-pr"
             action = {

@@ -62,6 +62,7 @@ class MergeContractTests(unittest.TestCase):
             stack.enter_context(patch.object(git, "gate_review_summary_for_pr", return_value=review))
             eval_reader = stack.enter_context(patch.object(git, "gate_eval_summary_for_pr", return_value=summary))
             stack.enter_context(patch.object(merge, "smoke_verify", return_value=smoke))
+            stack.enter_context(patch("scripts.merge.publication_gate.enforce"))
             stack.enter_context(patch.object(merge, "config_path", return_value=""))
             stack.enter_context(patch.object(merge, "has_wiki_ingest_for_merged_prs"))
             if temporary_failure:

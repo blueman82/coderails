@@ -165,9 +165,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   metadata lookup fails. Set `diff_manifest: off` to disable. Invalid modes, including an empty mode, enforce and report
   `diff_manifest_mode_invalid`. A null policy value selects the shipped default; the typed config grammar also coerces
   an empty nullable scalar to null.
-- Limits: a cooperating-agent safeguard. A same-user agent can edit the config to `off`; the Codex hook only sees merges
-  `guarded_segments` can match; Codex hooks need `/hooks` trust before they run; Claude's direct arm needs a
-  `workflow.config.yaml` in the repo.
+- Limits: a cooperating-agent safeguard. A same-user agent can edit the config to `off`; direct hooks only see merges
+  `guarded_segments` can match; Codex hooks need `/hooks` trust before they run. Claude checks the manifest even without
+  config or a transcript; its review/eval sequence still needs both.
 - Hardening notes: `mode_change` refuses a chmod (100644 to 100755). The default denylist is best-effort secret shapes
   (`.env*`, `*.pem`, `*.key`, `*.p12`, `credentials*.json`, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa|dsa|ecdsa|ed25519*`)
   and the gate's own files (`.coderails/workflow.config.yaml`, `policy/diff-policy*.json`, the Codex copy), so a PR that
@@ -181,13 +181,17 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   manifests both apply, so a unit cannot widen policy scope. Custom policies retain the default denylist. An unreadable config
   refuses `manifest_internal_error` and emits its refusal trace. Direct-merge hooks parse
   the target with `scripts/lib/merge_target.py` (flag values skipped, URL and branch resolved through gh); `-R/--repo`, another
-  repo's URL, multiple targets or an unknown branch deny `pr_number_invalid`. `merge.py` accepts one number, URL or branch
+  repo's URL, multiple targets or an unknown branch deny `pr_number_invalid`; `GH_REPO` retargeting denies `pr_repo_override`.
+  A same-call `gh pr edit` or `gh api .../pulls/N` plus merge denies `pr_base_mutation`; make the edit in a separate call so the next check sees
+  the new base.
+  The diff uses the PR's live `baseRefOid` and checked head, not the local default branch. `merge.py` accepts one number, URL or branch
   and pins all gates and the merge to the same head
   with `--match-head-commit`; a hook
-  cannot pin the agent's own `gh pr merge`, so a push between the hook check and that merge is a known gap. Unit metadata
+  cannot pin the agent's own `gh pr merge`, so a push or out-of-band base retarget between the hook check and that merge
+  is a known gap. Unit metadata
   is a shape and worktree check, not publisher authentication: a same-user actor can forge owner fields for the same
-  worktree. It does not compare a worker's session with its parent's. Claude's direct arm also requires a readable transcript;
-  `NO_CONFIG`, raw Git operations and unseen aliases remain outside this manifest arm.
+  worktree. It does not compare a worker's session with its parent's. Raw Git operations and unseen aliases remain
+  outside this manifest arm.
 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 

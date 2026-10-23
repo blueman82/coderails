@@ -25,6 +25,11 @@ def manifest_check(number: str, sha: str, unit: str, progress: str) -> list[Viol
 CHECKS: list[Check] = [manifest_check]
 
 
+def trace_preflight(code: str) -> None:
+    """Count a repository or base retarget refusal before PR evidence can be trusted."""
+    manifest_policy.trace("merge-preflight", "refused", code, command="publication")
+
+
 def evaluate(number: str, sha: str, unit: str = "", progress: str = "") -> list[Violation]:
     """Run every registered check; a check that raises is a refusal, never a pass."""
     found: list[Violation] = []
