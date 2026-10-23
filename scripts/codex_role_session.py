@@ -51,6 +51,21 @@ def project_codex_dir(start: Path) -> Path | None:
     return None
 
 
+def role_instructions(root: Path, role: str) -> str:
+    """Read the tracked role contract from either the package install or this source checkout."""
+    path = root / "agents" / f"{role}.toml"
+    if not path.is_file():
+        path = root / "packages" / "codex" / "agents" / f"{role}.toml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ValueError(f"role instructions unavailable: {error}") from error
+    found = re.search(r'(?ms)^developer_instructions = """\n(.*?)^"""$', text)
+    if not found:
+        raise ValueError(f"role instructions malformed: {path}")
+    return found.group(1)
+
+
 def build_argv(role: str, root: Path, cwd: str | None = None) -> list[str]:
     """The exact command line; refuses any role that is not a guarded profile entry."""
     if not ROLE.match(role) or role not in guarded_roles(root):
@@ -62,6 +77,7 @@ def build_argv(role: str, root: Path, cwd: str | None = None) -> list[str]:
     args = json.dumps([str(root / "scripts" / "capability_mcp.py"), "--role", role])
     # JSON string syntax is valid TOML basic-string syntax, so json.dumps quotes the inline table safely.
     argv = ["codex", "exec", "--ignore-user-config", "-s", "read-only", "-c", "features.shell_tool=false"]
+    argv += ["-c", f"developer_instructions={json.dumps(role_instructions(root, role))}"]
     argv += ["-c", f"mcp_servers.cap-{role}={{command = {command}, args = {args}}}"]
     if cwd:
         argv += ["-C", cwd]
@@ -72,12 +88,14 @@ def contained(argv: list[str], role: str) -> bool:
     """True only when argv carries every containment setting and exactly this role's one MCP server."""
     overrides = [argv[i + 1] for i, token in enumerate(argv[:-1]) if token == "-c"]
     servers = [o for o in overrides if o.startswith("mcp_servers.")]
+    instructions = [o for o in overrides if o.startswith("developer_instructions=")]
     sandbox = [argv[i + 1] for i, token in enumerate(argv[:-1]) if token == "-s"]
     return (
         argv[:2] == ["codex", "exec"]
         and "--ignore-user-config" in argv
         and sandbox == ["read-only"]
         and "features.shell_tool=false" in overrides
+        and len(instructions) == 1
         and len(servers) == 1
         and servers[0].startswith(f"mcp_servers.cap-{role}=")
         and argv[-1] == "-"
