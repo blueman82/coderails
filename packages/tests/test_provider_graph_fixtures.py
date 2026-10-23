@@ -224,6 +224,7 @@ class ProviderGraphFixtureTests(unittest.TestCase):
                         continue
                     with self.subTest(provider=name, fixture=path.name):
                         provider = Provider(fixture_home, name)
+                        provider.environment["CODERAILS_A6_EVIDENCE_WRITE"] = "on"
                         state = native_state(provider, fixture)
                         state["graph"]["active_wave"]["transcript_cursor"] = 0 if name == "claude" else 1
                         provider.write(state)

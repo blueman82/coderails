@@ -329,10 +329,7 @@ def bind_worker_evidence(
     stale_nodes: frozenset[str] = frozenset(),
     failed_nodes: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, dict[str, Any]], set[str]]:
-    """Bind current-wave transcript records to each dispatched worker node.
-
-    A node declared failed with no activity-backed spawn may instead bind its latest refused spawn_agent call.
-    """
+    """Bind wave records; a failed node may use its last refused spawn_agent call."""
     used: set[str] = set()
     parent = read_records(thread_transcript(state["session_id"]), "parent transcript")
     indexes, refusals = parent_indexes(parent), refused_launches(parent)
@@ -381,7 +378,8 @@ def bind_worker_evidence(
             "agent_thread_id": agent_thread_id,
             "task_complete_turn_id": terminal,
         }
-        message = cast(dict[str, Any], requests[call_id][0]).get("message")
+        request = next(iter(requests.get(call_id, ())), None)
+        message = request.get("message") if isinstance(request, dict) else None
         if isinstance(message, str) and not message.startswith(graph_contract.ENVELOPE_KEY + "="):
             if not new_evidence_writes_enabled():
                 raise GraphError("set CODERAILS_A6_EVIDENCE_WRITE=on after reader verification")
