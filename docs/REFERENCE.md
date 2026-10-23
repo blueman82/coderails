@@ -669,8 +669,9 @@ and readers without installed provider accounts.
 
 | Module | Responsibility |
 |---|---|
-| `hooks/scripts/hook_common.py` | Bounded payload reads and native hook responses. |
+| `hooks/scripts/hook_common.py` | Bounded payload reads and native hook responses. `read_payload` fails open on host exhaustion (logged); `read_payload_strict` raises `HostResourceError` and is used only by the gates that deny on it (`action_authority_gate`, `destructive_bash_gate`, `enforce_pr_workflow`, `no_edit_on_main`). |
 | `hooks/scripts/lib/agentic_loop_path.py` | Resolve the repository/session-owned loop state path. |
+| `hooks/scripts/lib/hook_telemetry.py` | Content-free, fail-open JSONL hook telemetry (`hook_telemetry.jsonl`): exit cause, duration, open fds, native-signal children, `deny` vs `ok` cause (set by `deny()`). Byte-identical copy in `packages/codex/hooks/scripts/lib/`. |
 | `hooks/scripts/lib/discipline_common.py` | Read native Claude transcript tools, final text and edited-file count. |
 | `hooks/scripts/lib/loop_state_common.py` | Loop detection, ownership, atomic state update behind the `dir_lock` mkdir lock; live completion marker. |
 | `hooks/scripts/lib/dir_lock.py` | Stdlib-only mkdir lock with owner pid and start time; steals a dead owner's lock atomically (see `docs/graph-alignment-measurement.md`, stale-lock policy). |

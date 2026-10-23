@@ -8,6 +8,7 @@ Used by the Claude and Codex direct-merge hooks so both gate the PR that is actu
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 from collections.abc import Iterator
@@ -21,6 +22,21 @@ _VALUE_FLAGS = {
     "--unit", "--progress", "-R", "--repo",
 }  # fmt: skip
 _URL = re.compile(r"https?://github\.com/([^/]+/[^/]+)/pull/(\d+)/?$", re.IGNORECASE)
+
+
+def has_repo_override(command: str = "") -> bool:
+    """A GH_REPO override can retarget gh after the hook has resolved a local PR number."""
+    return bool(os.environ.get("GH_REPO") or re.search(r"(?:^|[\s;&|({])(?:export\s+)?GH_REPO\s*=", command))
+
+
+def has_base_mutation(command: str) -> bool:
+    """A same-call PR edit or API update can invalidate the base checked by the hook."""
+    if re.search(r"\bgh\s+pr\s+edit(?:\s|$)", command):
+        return True
+    return any(
+        re.search(r"\brepos/[^/\s]+/[^/\s]+/pulls/\d+(?:['\"\s]|$)", api[1])
+        for api in re.finditer(r"\bgh\s+api\b([^;&|]*)", command)
+    )
 
 
 def _option_items(tokens: list[str]) -> Iterator[tuple[str, str]]:

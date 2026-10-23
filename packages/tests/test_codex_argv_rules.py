@@ -209,6 +209,8 @@ class DestructiveTests(CodexHookCase):
             "git commit -n",
             "git -c a=b commit -nm x",
             "env A=1 git commit -n",
+            'echo "$(git commit --no-verify -m x)"',
+            'echo "`git commit --no-verify -m x`"',
         )
         for command in denied:
             with self.subTest(command=command):

@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-GH_SHIM = '#!/bin/sh\necho "$@" >> "$GH_LOG"\n[ "$1 $2" = "pr list" ] && echo 7\nexit 0\n'
+GH_SHIM = (REPO / "scripts/tests/fixtures/routine_gh.sh").read_text()
 STAGES = ("fetch_branch", "evals_frozen", "edit_made", "manifest_check", "push", "review")
 LATER = ("post_review", "post_evals", "merge")
 BRANCH = "docs/fix"
@@ -82,7 +82,7 @@ class RoutineCase(unittest.TestCase):
             gate.write_text(
                 "#!/usr/bin/env python3\nimport pathlib, sys\n"
                 "(pathlib.Path(__file__).parent / 'ran').open('a').write('ran\\n')\n"
-                "raise SystemExit(int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 0)\n"
+                "raise SystemExit(1 if len(sys.argv) > 1 and sys.argv[1] == '1' else 0)\n"
             )
             gate.chmod(0o755)
         self.ran = self.plugin / "scripts" / "ran"
@@ -123,7 +123,8 @@ class RoutineCase(unittest.TestCase):
         """Perform a stage: gates through run-gate with `true`, the rest through stage."""
         gates = ("push", *LATER)
         if name in gates:
-            return self.run_tool("run-gate", name, "--", str(self.plugin / "scripts" / f"{name}.py"))
+            args = ("7",) if name == "merge" else ()
+            return self.run_tool("run-gate", name, "--", str(self.plugin / "scripts" / f"{name}.py"), *args)
         return self.run_tool("stage", name)
 
     def advance_to_manifest_check(self) -> subprocess.CompletedProcess[str]:
@@ -155,7 +156,7 @@ class DocsSyncRunTests(RoutineCase):
         self.assertEqual(self.run_tool("finish", "ok").returncode, 0)
         self.assertEqual(self.rows()[-1]["outcome"], "run_ok")
         self.assertTrue(last_marker_is_green(self.log))
-        self.assertEqual(self.gh_calls(), [])
+        self.assertEqual([call for call in self.gh_calls() if not call.startswith("pr view")], [])
         # killed: a later run on the same log that ends after begin leaves the provisional row standing
         self.assertEqual(self.run_tool("begin").returncode, 0)
         self.assertFalse(last_marker_is_green(self.log))

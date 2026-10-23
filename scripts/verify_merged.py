@@ -2,8 +2,8 @@
 """Confirm a PR really landed: `verify_merged.py <PR> [--grep STR --path P] [--repo DIR]` prints a JSON verdict.
 
 One rule set for merge commits and squash merges: state MERGED plus mergedAt; fetch the base; the mergeCommit is
-reachable from origin/<base>; then content (`git grep` finds the needle at origin/<base> and not at the merge commit's
-first parent, so the needle must be unique to the change; a pre-existing string is refused as content_preexisting).
+reachable from origin/<base>; then content (`git grep` finds the needle at the merge commit and current base tip,
+but not at the merge commit's first parent, so it is unique to the change; a pre-existing string is refused).
 Ancestry of the PR head is trusted only for a true merge commit (two parents) and only when no content check was
 given; a squash rewrites the SHA, so it is never required of one.
 Exit 0 when confirmed, 1 otherwise. `method` is `content` or `merge-commit-ancestry`.
@@ -68,19 +68,20 @@ def verify(repo: Path, number: str, needle: str, path: str) -> dict[str, object]
     parents = run(repo, "git", "rev-list", "--parents", "-n", "1", oid).stdout.split()[1:]
     verdict["parents"] = len(parents)
     if needle:
-        found = run(repo, "git", "grep", "-q", "-F", "-e", needle, tip, *(["--", path] if path else []))
-        verdict["content_found"] = found.returncode == 0
+        found = run(repo, "git", "grep", "-q", "-F", "-e", needle, oid, *(["--", path] if path else []))
+        current = run(repo, "git", "grep", "-q", "-F", "-e", needle, tip, *(["--", path] if path else []))
+        verdict["content_found"] = found.returncode == 0 and current.returncode == 0
         # the needle must be new in this PR: present at the base parent means it proves nothing about the change
         before = run(repo, "git", "grep", "-q", "-F", "-e", needle, f"{oid}^1", *(["--", path] if path else []))
-        if found.returncode not in (0, 1) or before.returncode not in (0, 1):
+        if found.returncode not in (0, 1) or current.returncode not in (0, 1) or before.returncode not in (0, 1):
             reasons.append("content_check_failed")
-        elif found.returncode == 0 and before.returncode == 0:
+        elif found.returncode == 0 and current.returncode == 0 and before.returncode == 0:
             reasons.append("content_preexisting")
-        elif found.returncode == 0:
+        elif found.returncode == 0 and current.returncode == 0:
             verdict.update(confirmed=True, method="content")
         else:
             reasons.append("content_absent")
-    elif len(parents) == 2 and head and run(repo, "git", "merge-base", "--is-ancestor", head, tip).returncode == 0:
+    elif len(parents) == 2 and head and run(repo, "git", "merge-base", "--is-ancestor", head, oid).returncode == 0:
         verdict.update(confirmed=True, method="merge-commit-ancestry")
     else:
         reasons.append("content_check_required")

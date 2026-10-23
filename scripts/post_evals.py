@@ -201,9 +201,11 @@ def post(number: str, path: str, progress: str) -> int:
     validate_structure(path, number, head, progress=progress)
     validate_discriminating(path)
     data = read_object(path)
-    changes = eval_level.pr_changes(number, head) or []
+    changes = eval_level.pr_changes(number, head)
+    if changes is None:
+        raise ValueError("eval_level_diff_unavailable")
     facts, minimum = eval_level.derive(changes, eval_level.progress_units(progress), data, eval_level.load_policy())
-    late = eval_level.suite_late(data, eval_level.branch_base(head))
+    late = eval_level.suite_late(data, eval_level.branch_base(head, pr=number))
     suite = suite_hash(data)
     gate = {**facts, "derived_min_level": minimum, "late_freeze": late, "suite_hash": suite}
     top = [marker(number, head, "NO-GO", str(data["verification_level"])), facts_line(minimum, late, suite[:16])]

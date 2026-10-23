@@ -133,6 +133,9 @@ def main(arguments: list[str] | None = None) -> int:
         if len(arguments) > 1 or (arguments and arguments[0].startswith("-")):
             raise git.WorkflowError("pr_number_invalid: specify one PR number, URL or branch")
         argument = arguments[0] if arguments else "auto"
+        if merge_target.has_repo_override():
+            publication_gate.trace_preflight("pr_repo_override")
+            raise git.WorkflowError("pr_repo_override: unset GH_REPO before merging")
         git.require_repo()
         default = git.main()
         if argument == "auto":

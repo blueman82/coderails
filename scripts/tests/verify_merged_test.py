@@ -144,6 +144,32 @@ class VerifyMergedTests(VerifyMergedCase):
         self.assertEqual((code, verdict["confirmed"]), (1, False))
         self.assertIn("content_absent", verdict["reasons"])
 
+    def test_later_commit_cannot_supply_content_for_earlier_pr(self) -> None:
+        """Content added after a PR merged cannot be attributed to that PR."""
+        merge_commit = self.land(squash=True)
+        (self.work / "later.txt").write_text("later-only-token\n")
+        git(self.work, "add", "later.txt")
+        git(self.work, "commit", "-q", "-m", "later content")
+        git(self.work, "push", "-q", "origin", "HEAD:main")
+        code, verdict = self.verify(merge_commit, "MERGED", "2026-10-01T00:00:00Z", "--grep", "later-only-token")
+        self.assertEqual((code, verdict["confirmed"]), (1, False))
+        self.assertIn("content_absent", verdict["reasons"])
+
+    def test_later_merge_cannot_supply_head_ancestry_for_earlier_pr(self) -> None:
+        """A PR head merged after the advertised merge commit proves nothing about that commit."""
+        git(self.work, "switch", "-q", "-c", "unrelated")
+        (self.work / "unrelated.txt").write_text("unrelated\n")
+        git(self.work, "add", "unrelated.txt")
+        git(self.work, "commit", "-q", "-m", "unrelated")
+        git(self.work, "switch", "-q", "main")
+        git(self.work, "merge", "--no-ff", "-q", "-m", "merge unrelated", "unrelated")
+        unrelated_merge = git(self.work, "rev-parse", "HEAD")
+        git(self.work, "merge", "--no-ff", "-q", "-m", "merge feature later", "feature")
+        git(self.work, "push", "-q", "origin", "HEAD:main")
+        code, verdict = self.verify(unrelated_merge)
+        self.assertEqual((code, verdict["confirmed"]), (1, False))
+        self.assertIn("content_check_required", verdict["reasons"])
+
     def test_needle_already_on_the_base_parent_is_not_proof_of_this_pr(self) -> None:
         """A string present before the PR (here `base`, in a.txt) must not confirm a MERGED PR."""
         for squash in (True, False):
