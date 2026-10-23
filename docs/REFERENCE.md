@@ -188,6 +188,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 |---|---|---|---|---|---|
 | `project` | string/null | `null` | - | read_by_prose_only | Project name written by /coderails:init; read by command prose only. |
 | `wiki_path` | string/null | `null` | - | enforced_by_code | LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate. |
+| `wiki_stale_days` | integer | `30` | - | read_by_prose_only | Page age in days before wiki-lint considers staleness; age alone does not mark a page stale. |
 | `wiki_supervision` | string/null | `"discuss"` | - | read_by_prose_only | wiki-ingest mode: discuss (pause before writing) or autonomous. |
 | `wiki_git_worktree` | boolean/null | `true` | - | read_by_prose_only | true = PR flow for wiki commits; false = commit directly to the vault. |
 | `wiki_git_bypass_flag` | string/null | `null` | - | read_by_prose_only | Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1. |
@@ -199,6 +200,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `engineering_principles_paths` | array/null | `null` | - | read_by_prose_only | Glob patterns that trigger the engineering-principles pre-flight in /coderails:push. |
 | `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | - | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
 | `sandbox_workers` | boolean/null | `true` | `true` | enforced_by_code | Default ON. Claude graph_dispatch.plan() reports sandboxed or in-process-fallback:<reason> for U3 nodes, and the Claude worker launcher consumes that mode. Codex native workers inherit the parent session sandbox; this setting does not configure or prove per-worker Codex containment. |
+| `subagent_identity_gate` | string | `"on"` | `"on"` | enforced_by_code | on (default) denies an untyped Bash subagent in a graph-bound Claude session; off disables that hook. |
 | `action_authority` | string/null | `"enforce"` | `"enforce"` | enforced_by_code | enforce (default, also with no config or no key) = gh pr merge, scripts/merge.py and git push to main/master need an owner-signed single-use receipt and honour the session authority; advisory = trace and warn only; off = switch the gate off. |
 | `diff_manifest` | string/null | `"enforce"` | `"enforce"` | enforced_by_code | off \| advisory \| enforce, read by scripts/push.py and scripts/merge.py. Default enforce but inert until diff_manifest_policy names a policy file (the default policy is a Phase 4 deliverable). |
 | `diff_manifest_policy` | string/null | `null` | - | enforced_by_code | Path to the diff-manifest policy JSON; null or absent = the diff check is inactive. |

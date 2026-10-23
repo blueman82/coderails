@@ -315,7 +315,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   never on `TAMPERED:<code>` text. A blocked completion writes trace `loop_state_guard/blocked/eval_verdict_<status>`.
   The cost line in the retro is a `CostReport{state, message}` whose state is logged as `cost_report=<state>`.
 - Readiness: `graph_readiness.py <progress.json> <node>` prints JSON `{"ready": bool, "reason_code": ...}` (exit 0 iff
-  ready): `ready`, `predecessor_pending`, `node_unknown`, `state_unreadable`. A missing script or non-JSON output is a
+  ready): `ready`, `predecessor_pending`, `node_unknown`, `node_not_pending`, `graph_blocked`,
+  `join_not_dispatchable`, `state_unreadable`. A missing script or non-JSON output is a
   resolution failure, not a not-ready verdict. Not-ready verdicts on a readable state write trace
   `graph_readiness/not_ready/<code>`; `state_unreadable` has no session to trace under. Every `progress.json` write now
   carries `updated_at` (Claude `atomic_progress_update`, Codex `graph_io.write`); a refused transition leaves bytes unchanged.

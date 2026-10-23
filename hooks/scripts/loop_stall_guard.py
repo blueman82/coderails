@@ -135,8 +135,6 @@ def main() -> int:
                 emit_human_request(state)
                 raise ValueError("Native graph unresolved; stopping remains blocked.")
             messages = complete(state, transcript) if category == "complete" else []
-            if messages:
-                print(json.dumps({"systemMessage": "\n".join(messages)}))
 
             seq = recorded["seq"]
 
@@ -151,6 +149,9 @@ def main() -> int:
 
             if not atomic_progress_update(state.path, increment):
                 log(f"hook=loop_stall_guard session={session} counter_write=json_failed category={category}")
+                raise ValueError("Recorded stop could not be consumed; stopping remains blocked.")
+            if messages:
+                print(json.dumps({"systemMessage": "\n".join(messages)}))
             log(f"hook=loop_stall_guard session={session} invocations={count} declared=1 blocked=0")
             return 0
         if state.complete:

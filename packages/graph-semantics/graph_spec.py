@@ -3,7 +3,7 @@
 `graph-spec.yaml` and `policy.yaml` are JSON-syntax YAML (valid YAML 1.2) read with `json.loads`, so the runtime stays
 standard-library only. This module validates them (closed vocabulary, resolving references, acyclic), expands them into
 nodes/edges/joins, enforces the spec's edges on a loaded graph (`check`) and builds the `instantiate` state. The pure
-core `graph_semantics.py` is untouched: the spec must agree with its label registry, a test asserts it.
+core `graph_semantics.py` is unchanged; a test checks agreement with its label registry.
 """
 
 from __future__ import annotations
@@ -346,14 +346,15 @@ def instantiate(
     report = {"session_id": session, "loop_id": loop_id, "profile": profile}
     if state["session_id"] != session or state["loop_id"] != loop_id:
         raise SpecError("instantiate_refused_foreign", "session or loop does not own this graph")
-    if profile not in PROFILES or any(not UNIT_ID.fullmatch(unit) for unit in units):
+    if profile not in PROFILES or len(set(units)) != len(units) or any(not UNIT_ID.fullmatch(unit) for unit in units):
         raise SpecError(
-            "instantiate_refused_bad_id", f"profile must be one of {PROFILES}; units must match [1-9][0-9]*"
+            "instantiate_refused_bad_id",
+            f"profile must be one of {PROFILES}; units must be distinct and match [1-9][0-9]*",
         )
     if (
         graph.get("spec_sha256") == digest
         and graph.get("spec_profile") == profile
-        and set(units) <= set(state["work_units"])
+        and set(units) == set(state["work_units"])
     ):
         return state, {**report, "status": "noop", "reason_code": "instantiate_noop", "revision": state["revision"]}
     if state["status"] != "in-progress" or graph["active_wave"] is not None:

@@ -37,7 +37,11 @@ def _shape(data: dict[str, Any], allow_new_state: bool = False) -> dict[str, Any
     if not isinstance(version, int) or isinstance(version, bool) or version != SCHEMA_VERSION:
         raise ValueError("unsupported schema_version")
     for key, kind in (("ordinals", dict), ("arms", list), ("nudged", dict)):
-        if not isinstance(data.setdefault(key, kind()), kind):
+        if key not in data:
+            if not allow_new_state:
+                raise ValueError(f"{key} is missing")
+            data[key] = kind()
+        if not isinstance(data[key], kind):
             raise ValueError(f"{key} has the wrong type")
     ordinals = cast(dict[str, Any], data["ordinals"])
     if any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in ordinals.values()):

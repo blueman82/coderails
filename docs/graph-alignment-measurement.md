@@ -313,7 +313,7 @@ python3 scripts/lib/state_counters.py
 `hook_state.json` (hooks/scripts/lib/hook_state.py) replaces `discipline.log` greps for grace and nudge dedupe:
 `hook_state_unreadable` (outcome `missing` | `torn`), `nudge_first` and `nudge_suppressed` are trace rows; `arms[]` records
 each absent-state block. `EvalVerdict` blocked completions write `eval_verdict_<status>`; graph readiness writes
-`predecessor_pending` / `node_unknown`. All tally with `python3 scripts/lib/state_counters.py` (own module because
+`predecessor_pending` / `node_unknown` / `node_not_pending` / `graph_blocked` / `join_not_dispatchable`. All tally with `python3 scripts/lib/state_counters.py` (own module because
 `scripts/measure_graph_alignment.py` is at its line limit; integration into that script is a handoff). Flip condition:
 `hook_state_unreadable` with outcome `torn` above zero means a state write is failing (grace can no longer release);
 `nudge_suppressed` far above `nudge_first` is normal (one nudge per session). Limits: GO verdicts and `state_unreadable`

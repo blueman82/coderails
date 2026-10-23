@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_convert
+import graph_repair
 import graph_semantics
 import graph_spec
 import graph_stops
@@ -95,6 +96,21 @@ def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str
         graph_semantics.validate(state)
         _write(path, state)
         return {"unit": unit_id, "status": status, "revision": state["revision"]}
+
+
+def record_repair(
+    path: Path, session: str, unit: str, failed_node: str, kind: str, identity: str, diagnosis: str
+) -> dict[str, Any]:
+    """Record one conditional repair under the Codex state lock."""
+    with _locked(path):
+        try:
+            proposed, report = graph_repair.record_repair(
+                _load(path), session, unit, failed_node, kind, identity, diagnosis
+            )
+        except ValueError as error:
+            raise GraphError(str(error)) from error
+        _write(path, proposed)
+        return report
 
 
 def inspect(path: Path) -> dict[str, Any]:
@@ -285,6 +301,10 @@ def _parser() -> argparse.ArgumentParser:
     detail = unit.add_mutually_exclusive_group(required=True)
     detail.add_argument("--evidence")
     detail.add_argument("--reason")
+    repair = commands.add_parser("record-repair")
+    repair.add_argument("state", type=Path)
+    for field in ("session", "unit", "failed-node", "kind", "identity", "diagnosis"):
+        repair.add_argument(f"--{field}", required=True)
     for name in ("respawn_stale", "hard_stop"):
         transition = commands.add_parser(name.replace("_", "-"))
         transition.add_argument("state", type=Path)
@@ -337,6 +357,10 @@ def main() -> int:
             if (args.status == "done") != (args.evidence is not None):
                 raise GraphError("done requires --evidence; dropped requires --reason")
             output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
+        elif args.command == "record-repair":
+            output = record_repair(
+                args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis
+            )
         elif args.command in {"stop", "consume-stop"}:
             output = graph_stops.run(args)
         elif args.command in {"respawn-stale", "hard-stop"}:

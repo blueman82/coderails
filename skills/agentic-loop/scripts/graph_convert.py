@@ -45,9 +45,8 @@ def _graph(state: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], graph)
 
 
-def _v0_to_v1(state: dict[str, Any]) -> None:
-    """Add the typed containers v1 readers rely on; an in-flight wave has no recoverable history, so refuse."""
-    graph = _graph(state)
+def _check_active_wave(graph: dict[str, Any]) -> None:
+    """Never accept an in-flight wave without its recorded history, even at the current minor version."""
     history = graph.get("wave_history", {})
     active = graph.get("active_wave")
     if not isinstance(history, dict):
@@ -58,6 +57,11 @@ def _v0_to_v1(state: dict[str, Any]) -> None:
         raise ConvertRefusedError(
             "active_wave_ambiguous", "a wave is in flight with no wave_history entry: record or recover it first"
         )
+
+
+def _v0_to_v1(state: dict[str, Any]) -> None:
+    """Add the typed containers v1 readers rely on."""
+    graph = _graph(state)
     graph.setdefault("wave_history", {})
     state.setdefault("stops", [])
     if not isinstance(state["stops"], list):
@@ -97,7 +101,7 @@ def convert(state: object, session: str | None = None) -> tuple[dict[str, Any], 
         raise ConvertRefusedError("minor_invalid", "state_minor must be a non-negative integer")
     if minor > STATE_MINOR:
         raise ConvertRefusedError("minor_future", f"state_minor {minor} is newer than this tool ({STATE_MINOR})")
-    _graph(source)
+    _check_active_wave(_graph(source))
     stops, units = source.get("stops", []), source.get("work_units", {})
     if not isinstance(stops, list) or not all(isinstance(row, dict) for row in cast(list[object], stops)):
         raise ConvertRefusedError("malformed_stops", "stops must be an array of objects")
