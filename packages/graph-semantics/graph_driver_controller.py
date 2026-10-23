@@ -167,7 +167,13 @@ def _checkout_problem(state: dict[str, Any], nodes: list[str], checkouts: Checko
 
 
 def _prompt(
-    path: Path, state: dict[str, Any], identifier: str, record: dict[str, Any], checkout: Path, provider: str = "claude"
+    path: Path,
+    state: dict[str, Any],
+    identifier: str,
+    record: dict[str, Any],
+    checkout: Path,
+    provider: str,
+    script: Path,
 ) -> Path:
     """Write the exact envelope and contract once before authorization."""
     artifact = path.parent / "driver-evidence" / identifier
@@ -184,16 +190,8 @@ def _prompt(
     if role not in graph_contract.roles():
         raise ValueError("driver task has no valid role")
     suffix = ".toml" if provider == "codex" else ".md"
-    roots = [
-        root
-        for parent in Path(__file__).resolve().parents
-        for root in ((parent, parent / "codex", parent / "packages/codex") if provider == "codex" else (parent,))
-    ]
-    source = next(
-        (root / "agents" / f"{role}{suffix}" for root in roots if (root / "agents" / f"{role}{suffix}").is_file()),
-        None,
-    )
-    if source is None:
+    source = script.resolve().parents[3] / "agents" / f"{role}{suffix}"
+    if source.is_symlink() or not source.is_file():
         raise ValueError("driver role instructions are missing")
     content += f"\nRole instructions for {role}:\n{source.read_text(encoding='utf-8')}\n"
     content += f"\nTask: {node['label']}\n"
@@ -294,7 +292,7 @@ def drive_once(
         for identifier, record in _dispatches(state):
             node_id = record["node_id"]
             worker_checkout = checkout_for(checkout, node_id)
-            prompt = _prompt(path, state, identifier, record, worker_checkout, provider)
+            prompt = _prompt(path, state, identifier, record, worker_checkout, provider, script)
             newly_authorized = record.get("authorized") is None
             if newly_authorized:
                 _graph(

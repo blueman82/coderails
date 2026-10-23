@@ -294,8 +294,12 @@ class DriverControllerTests(unittest.TestCase):
             issued = json.loads(opened.stdout)["dispatches"][0]
             dispatch_id = issued["dispatch_id"]
             record = case.read()["graph"]["dispatches"][dispatch_id]
+            with self.assertRaisesRegex(ValueError, "role instructions"):
+                graph_driver_controller._prompt(  # pyright: ignore[reportPrivateUsage]
+                    case.path, case.read(), dispatch_id, record, Path(directory).resolve(), "codex", case.path
+                )
             prompt = graph_driver_controller._prompt(  # pyright: ignore[reportPrivateUsage]
-                case.path, case.read(), dispatch_id, record, Path(directory).resolve(), "codex"
+                case.path, case.read(), dispatch_id, record, Path(directory).resolve(), "codex", SCRIPTS["codex"]
             )
             self.assertIn("Role instructions for loop-worker", prompt.read_text())
             self.assertIn("Acceptance: source edits and checks ready for root publication", prompt.read_text())
