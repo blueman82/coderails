@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
+import graph_driver_control  # noqa: E402
 import graph_driver_process  # noqa: E402
 
 from hooks.scripts.tests.graph_convert_test import SCRIPTS, Case  # noqa: E402
@@ -21,6 +22,70 @@ from packages.tests.test_driver_authorize import frozen_evals  # noqa: E402
 
 class DriverCliTests(unittest.TestCase):
     """Use fake AI executables, real graph commands and real process wrappers."""
+
+    def test_root_control_result_is_sealed_and_revalidated(self) -> None:
+        """A root proof step completes through an owned result file, without a worker."""
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            for provider in ("claude", "codex"):
+                case = Case(provider, base)
+                state = case.read()
+                state["graph"]["nodes"]["S13-proof"] = state["graph"]["nodes"].pop("U3[1]")
+                state["graph"]["nodes"]["S13-proof"]["label"] = "Run frozen proofs"
+                case.write(state)
+                self.assertEqual(case.graph("convert").returncode, 0)
+                self.assertEqual(case.graph("cutover-driver").returncode, 0)
+                case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+                drive = [sys.executable, str(SCRIPTS[provider]), "drive", str(case.path), "--session", "S"]
+                opened = subprocess.run(drive, capture_output=True, text=True, check=False)
+                self.assertEqual(opened.returncode, 0, (provider, opened.stderr))
+                self.assertEqual(json.loads(opened.stdout)["reason"], "control_node")
+                active = case.read()["graph"]["active_wave"]
+                self.assertEqual(active["nodes"], ["S13-proof"])
+                self.assertFalse(case.read()["graph"]["dispatches"])
+                result_file = base / f"{provider}-proof-result.json"
+                original = json.dumps({"outcome": "done", "evidence": "disposable root proof"})
+                result_file.write_text(original)
+                staged = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SCRIPTS[provider]),
+                        "record-driver-control",
+                        str(case.path),
+                        "--session",
+                        "S",
+                        "--node",
+                        "S13-proof",
+                        "--result-file",
+                        str(result_file),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(staged.returncode, 0, (provider, staged.stderr))
+                foreign = case.read()
+                foreign["graph"]["active_wave"]["wave_id"] = "wave-999"
+                with self.assertRaisesRegex(ValueError, "another wave"):
+                    graph_driver_control.validate(case.path, foreign, "S13-proof", json.loads(staged.stdout))
+                before = case.path.read_bytes()
+                result_file.write_text(original + " ")
+                denied = subprocess.run(drive, capture_output=True, text=True, check=False)
+                self.assertNotEqual(denied.returncode, 0, (provider, denied.stdout, denied.stderr))
+                self.assertEqual(case.path.read_bytes(), before)
+                result_file.write_text(original)
+                recorded = subprocess.run(drive, capture_output=True, text=True, check=False)
+                self.assertEqual(recorded.returncode, 0, (provider, recorded.stderr))
+                self.assertEqual(json.loads(recorded.stdout)["status"], "recorded")
+                node = case.read()["graph"]["nodes"]["S13-proof"]
+                self.assertEqual(node["status"], "done")
+                self.assertEqual(node["evidence"][-1]["kind"], "root_control")
+                recorded_bytes = case.path.read_bytes()
+                result_file.write_text(original + " ")
+                stale = subprocess.run(drive, capture_output=True, text=True, check=False)
+                self.assertNotEqual(stale.returncode, 0, (provider, stale.stdout, stale.stderr))
+                self.assertEqual(case.path.read_bytes(), recorded_bytes)
+                result_file.write_text(original)
 
     def test_checkout_map_option_refuses_wrong_node_without_mutation(self) -> None:
         """Both public CLIs parse the map and bind it to the full ready set."""

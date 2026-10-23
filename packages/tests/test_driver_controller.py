@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
+import graph_driver_control  # noqa: E402
 import graph_driver_controller  # noqa: E402
 
 from hooks.scripts.tests.graph_convert_test import SCRIPTS, Case  # noqa: E402
@@ -143,6 +145,76 @@ class DriverControllerTests(unittest.TestCase):
                 "checkout_already_used",
             )
 
+    def test_mixed_root_and_worker_wave_joins_both_results(self) -> None:
+        """A root result and a worker result complete the same full-ready-set wave."""
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            case = Case("codex", base)
+            self.scoped(case)
+            state = case.read()
+            proof = copy.deepcopy(state["graph"]["nodes"]["U3[1]"])
+            proof["label"] = "Run frozen proofs"
+            state["graph"]["nodes"]["S13-proof"] = proof
+            case.write(state)
+            self.assertEqual(case.graph("convert").returncode, 0)
+            self.assertEqual(case.graph("cutover-driver").returncode, 0)
+            case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+            checkout = base / "checkout"
+            checkout.mkdir()
+            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(checkout),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=t@example.test",
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    "first",
+                ],
+                check=True,
+            )
+
+            def command(prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
+                return [sys.executable, "-c", "import sys; print(sys.stdin.readline().strip())"], None, prompt
+
+            def result(output: Path, _code: int) -> dict[str, Any]:
+                parsed = {
+                    "outcome": "done",
+                    "evidence": "disposable worker",
+                    "final_report": {
+                        "claims": [{"text": "Disposable result", "label": "verified", "source": "scratch checkout"}],
+                        "did_not_verify": [],
+                    },
+                }
+                (output.parent / "final.json").write_text(json.dumps(parsed))
+                return parsed
+
+            first = graph_driver_controller.drive_once(
+                case.path, "S", SCRIPTS["codex"], checkout, "codex", command, result
+            )
+            self.assertEqual(first, {"status": "paused", "reason": "control_node", "nodes": ["S13-proof"]})
+            result_file = base / "root-result.json"
+            result_file.write_text(json.dumps({"outcome": "done", "evidence": "disposable root proof"}))
+            graph_driver_control.stage(case.path, case.read(), "S", "S13-proof", result_file)
+            report: dict[str, Any] = {"status": "unresolved"}
+            for _attempt in range(20):
+                report = graph_driver_controller.drive_once(
+                    case.path, "S", SCRIPTS["codex"], checkout, "codex", command, result
+                )
+                if report["status"] == "recorded":
+                    break
+                self.assertEqual(report["status"], "running")
+            self.assertEqual(report["nodes"], ["S13-proof", "U3[1]"])
+            state = case.read()
+            self.assertEqual(state["graph"]["nodes"]["S13-proof"]["evidence"][-1]["kind"], "root_control")
+            self.assertEqual(state["graph"]["nodes"]["U3[1]"]["evidence"][-1]["kind"], "driver_worker")
+
     def test_root_owned_proof_node_pauses_before_dispatch(self) -> None:
         """A proof step cannot be satisfied by an external model's done message."""
         with tempfile.TemporaryDirectory() as directory:
@@ -155,7 +227,6 @@ class DriverControllerTests(unittest.TestCase):
             self.assertEqual(converted.returncode, 0, converted.stderr)
             self.assertEqual(case.graph("cutover-driver").returncode, 0)
             case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
-            before = case.path.read_bytes()
 
             def command(_prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
                 self.fail("a root-owned proof must not launch a worker")
@@ -170,7 +241,8 @@ class DriverControllerTests(unittest.TestCase):
                 lambda _path, _code: {"outcome": "done", "evidence": "impossible"},
             )
             self.assertEqual(report, {"status": "paused", "reason": "control_node", "nodes": ["S13-proof"]})
-            self.assertEqual(case.path.read_bytes(), before)
+            self.assertEqual(case.read()["graph"]["active_wave"]["nodes"], ["S13-proof"])
+            self.assertFalse(case.read()["graph"]["dispatches"])
 
     def test_authorized_attempt_without_handle_never_starts_again(self) -> None:
         """A crash after authorization leaves an unresolved, single-use attempt."""

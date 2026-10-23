@@ -25,11 +25,11 @@ def begin_wave(state: dict[str, Any], progress: Path, push_script: Path) -> dict
     control = [
         node_id for node_id in active["nodes"] if (graph_spec.node_for(spec, node_id) or {}).get("agent_role") is None
     ]
-    if control:
-        raise ValueError(f"root-owned nodes cannot receive driver worker dispatch: {', '.join(sorted(control))}")
     base = graph_contract.base_ref()
     dispatches: list[dict[str, Any]] = []
     for node_id in active["nodes"]:
+        if node_id in control:
+            continue
         node = proposed["graph"]["nodes"][node_id]
         attempt = node["retry"]["attempts"] + node["respawn"]["generation"] + 1
         contract = graph_contract.build_contract(proposed, node_id, base, progress, push_script)
@@ -48,7 +48,7 @@ def begin_wave(state: dict[str, Any], progress: Path, push_script: Path) -> dict
             }
         )
     graph_semantics.validate(proposed)
-    return {"state": proposed, "wave": active, "dispatches": dispatches}
+    return {"state": proposed, "wave": active, "dispatches": dispatches, "control_nodes": sorted(control)}
 
 
 def authorize(

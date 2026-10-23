@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Union, cast
 
 import graph_contract
+import graph_driver_control
 import graph_driver_evidence
 import graph_driver_process
 import graph_semantics
@@ -60,9 +61,10 @@ def _dispatches(state: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         if record.get("wave_id") == active["wave_id"]
     ]
     nodes = [record["node_id"] for _, record in records]
+    workers = set(active["nodes"]) - set(_control_nodes(active["nodes"]))
     if (
-        len(nodes) != len(active["nodes"])
-        or set(nodes) != set(active["nodes"])
+        len(nodes) != len(workers)
+        or set(nodes) != workers
         or any(re.fullmatch(r"[A-Za-z0-9_-]{1,100}", identifier) is None for identifier, _ in records)
     ):
         raise ValueError("driver wave lacks an exact dispatch for each node")
@@ -107,7 +109,7 @@ def select_checkouts(checkout: Path | None, map_path: Path | None) -> Checkouts:
         return parse_checkout_map(map_path)
     if checkout is not None:
         return checkout
-    raise ValueError("one checkout option is required")
+    return {}
 
 
 def checkout_for(checkouts: Checkouts, node_id: str) -> Path:
@@ -120,6 +122,8 @@ def checkout_for(checkouts: Checkouts, node_id: str) -> Path:
 
 def _checkout_problem(state: dict[str, Any], nodes: list[str], checkouts: Checkouts, path: Path) -> str | None:
     """Keep each worker attempt on its own retained checkout."""
+    if not nodes:
+        return None
     if isinstance(checkouts, dict):
         if set(checkouts) != set(nodes):
             return "checkout_map_mismatch"
@@ -204,29 +208,35 @@ def drive_once(
             if any(decision_pending(state, node_id) for node_id in state["graph"]["nodes"]):
                 return {"status": "paused", "reason": "decision_pending"}
             ready = graph_semantics.ready(state)
-            control = _control_nodes(ready)
-            if control:
-                return {"status": "paused", "reason": "control_node", "nodes": control}
-            missing = _missing_tasks(state, ready)
+            workers = sorted(set(ready) - set(_control_nodes(ready)))
+            missing = _missing_tasks(state, workers)
             if missing:
                 return {"status": "paused", "reason": "missing_task", "nodes": missing}
             if not ready:
                 return {"status": "paused", "reason": "no_ready_nodes"}
-            problem = _checkout_problem(state, ready, checkout, path)
+            problem = _checkout_problem(state, workers, checkout, path)
             if problem:
                 return {"status": "paused", "reason": problem, "nodes": ready}
             _graph(script, "begin-driver-wave", path)
             state = _load(path, session)
         active = cast(dict[str, Any], state["graph"]["active_wave"])
-        if _control_nodes(active["nodes"]):
-            return {"status": "unresolved", "reason": "active_control_node", "nodes": active["nodes"]}
-        if _missing_tasks(state, active["nodes"]):
-            return {"status": "unresolved", "reason": "active_missing_task", "nodes": active["nodes"]}
-        problem = _checkout_problem(state, active["nodes"], checkout, path)
+        workers = sorted(set(active["nodes"]) - set(_control_nodes(active["nodes"])))
+        if _missing_tasks(state, workers):
+            return {"status": "unresolved", "reason": "active_missing_task", "nodes": workers}
+        problem = _checkout_problem(state, workers, checkout, path)
         if problem:
-            return {"status": "unresolved", "reason": problem, "nodes": active["nodes"]}
+            return {"status": "unresolved", "reason": problem, "nodes": workers}
         results: dict[str, Any] = {}
         references: dict[str, Any] = {}
+        missing_controls: list[str] = []
+        for node_id in _control_nodes(active["nodes"]):
+            staged = graph_driver_control.load(path, state, node_id)
+            if staged is None:
+                missing_controls.append(node_id)
+            else:
+                results[node_id], references[node_id] = staged
+        if missing_controls:
+            return {"status": "paused", "reason": "control_node", "nodes": missing_controls}
         for identifier, record in _dispatches(state):
             node_id = record["node_id"]
             worker_checkout = checkout_for(checkout, node_id)

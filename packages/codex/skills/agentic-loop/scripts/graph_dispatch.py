@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_contract
+import graph_driver_control
 import graph_driver_dispatch
 import graph_driver_evidence
 import graph_repair
@@ -203,6 +204,23 @@ def record_driver_wave(path: Path, raw_report: str) -> dict[str, Any]:
         graph_semantics.validate(proposed)
         _write(path, proposed)
         return {"revision": proposed["revision"], "ready": graph_semantics.ready(proposed)}
+
+
+def record_driver_control(path: Path, session: str, node_id: str, result_file: Path) -> dict[str, Any]:
+    """Stage one root-owned result under the Codex graph lock."""
+    with _locked(path):
+        state = _load(path)
+        reference = graph_driver_control.stage(path, state, session, node_id, result_file)
+        trace(
+            path,
+            state,
+            "ok",
+            "driver_control_staged",
+            {"node": node_id},
+            [(node_id, None, None)],
+            "record-driver-control",
+        )
+        return reference
 
 
 def authorize_dispatch(

@@ -46,6 +46,7 @@ GRAPH_COMMANDS = (
     "drive",
     "record-wave",
     "record-driver-wave",
+    "record-driver-control",
     "record-unit",
     "record-repair",
     "respawn-stale",
@@ -87,11 +88,8 @@ def parser() -> argparse.ArgumentParser:
             for field in ("session", "dispatch-id", "role", "driver-run-id"):
                 command.add_argument(f"--{field}", required=True)
             command.add_argument("--prompt-file", required=True, type=Path)
-        if name == "drive":
-            command.add_argument("--session", required=True)
-            checkout = command.add_mutually_exclusive_group(required=True)
-            checkout.add_argument("--checkout", type=Path)
-            checkout.add_argument("--checkout-map", type=Path)
+        if name in {"record-driver-control", "drive"}:
+            graph_driver_adapter.add_arguments(name, command)
         if name == "instantiate":
             command.add_argument("--profile", choices=graph_spec.PROFILES, help="default: policy graph.profile")
             command.add_argument("--unit", action="append", default=[], help="work unit id to register (repeatable)")
@@ -354,6 +352,8 @@ def main() -> int:
             output = graph_driver_adapter.record_wave(
                 args.state, object_value(json.loads(args.results_json), "driver wave report")
             )
+        elif args.command == "record-driver-control":
+            output = graph_driver_adapter.record_control(args.state, args.session, args.node, args.result_file)
         elif args.command == "begin-driver-wave":
             output = graph_driver_adapter.begin_wave(args.state)
         elif args.command == "drive":

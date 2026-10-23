@@ -20,7 +20,9 @@ from graph_identity import GraphError
 from graph_io import load, locked, write
 from graph_recovery import trace
 
-COMMANDS = frozenset({"cutover-driver", "begin-driver-wave", "record-driver-wave", "authorize-driver", "drive"})
+COMMANDS = frozenset(
+    {"cutover-driver", "begin-driver-wave", "record-driver-wave", "record-driver-control", "authorize-driver", "drive"}
+)
 
 
 def cutover_driver(path: Path, session: str) -> dict[str, Any]:
@@ -59,6 +61,11 @@ def add_parsers(add_parser: Callable[[str], argparse.ArgumentParser]) -> None:
         command.add_argument("state", type=Path)
         if name == "record-driver-wave":
             command.add_argument("results_json")
+    control = add_parser("record-driver-control")
+    control.add_argument("state", type=Path)
+    control.add_argument("--session", required=True)
+    control.add_argument("--node", required=True)
+    control.add_argument("--result-file", required=True, type=Path)
     authorize = add_parser("authorize-driver")
     authorize.add_argument("state", type=Path)
     for field in ("session", "dispatch-id", "role", "driver-run-id"):
@@ -67,7 +74,7 @@ def add_parsers(add_parser: Callable[[str], argparse.ArgumentParser]) -> None:
     drive = add_parser("drive")
     drive.add_argument("state", type=Path)
     drive.add_argument("--session", required=True)
-    checkout = drive.add_mutually_exclusive_group(required=True)
+    checkout = drive.add_mutually_exclusive_group()
     checkout.add_argument("--checkout", type=Path)
     checkout.add_argument("--checkout-map", type=Path)
 
@@ -96,6 +103,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             raise GraphError(str(error)) from error
     if args.command == "record-driver-wave":
         return graph_dispatch.record_driver_wave(args.state, args.results_json)
+    if args.command == "record-driver-control":
+        return graph_dispatch.record_driver_control(args.state, args.session, args.node, args.result_file)
     return graph_dispatch.authorize_driver(
         args.state, args.session, args.dispatch_id, args.prompt_file, args.role, args.driver_run_id
     )

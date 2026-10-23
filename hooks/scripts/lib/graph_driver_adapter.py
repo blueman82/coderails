@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 from typing import Any
 
+import graph_driver_control
 import graph_driver_dispatch
 import graph_driver_evidence
 import graph_repair
@@ -12,8 +14,20 @@ import worker_status
 
 from .graph_dispatch import validate_dispatch_evals
 from .graph_evidence import object_value
-from .graph_executor import ROOT, graph_semantics, transition
+from .graph_executor import ROOT, graph_semantics, load, transition
 from .graph_stops import record_stop
+
+
+def add_arguments(name: str, command: argparse.ArgumentParser) -> None:
+    """Add the driver-only Claude CLI arguments."""
+    command.add_argument("--session", required=True)
+    if name == "drive":
+        checkout = command.add_mutually_exclusive_group()
+        checkout.add_argument("--checkout", type=Path)
+        checkout.add_argument("--checkout-map", type=Path)
+    else:
+        command.add_argument("--node", required=True)
+        command.add_argument("--result-file", required=True, type=Path)
 
 
 def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
@@ -35,6 +49,11 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
 
     saved = transition(path, update)
     return {"revision": saved["revision"], "ready": graph_semantics.ready(saved)}
+
+
+def record_control(path: Path, session: str, node_id: str, result_file: Path) -> dict[str, Any]:
+    """Stage a root-owned result bound to the current wave without rewriting progress."""
+    return graph_driver_control.stage(path, load(path), session, node_id, result_file)
 
 
 def begin_wave(path: Path) -> dict[str, Any]:

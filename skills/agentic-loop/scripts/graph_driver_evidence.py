@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Optional, cast
 
+import graph_driver_control
 import graph_semantics
 
 _DISPATCH_ID = re.compile(r"[a-zA-Z0-9_-]{1,100}\Z")
@@ -200,11 +201,15 @@ def apply_record(
         reference = references[node_id]
         if not isinstance(reference, dict):
             raise ValueError("driver evidence reference must be an object")
-        manifest = validate(state_path, state, node_id, cast(dict[str, Any], reference))
+        owned = cast(dict[str, Any], reference)
+        if node_id in active["nodes"] and owned.get("kind") == "root_control":
+            manifest = graph_driver_control.validate(state_path, state, node_id, owned)
+        else:
+            manifest = validate(state_path, state, node_id, owned)
         if manifest.get("result") != results[node_id]:
             raise ValueError("driver result differs from sealed worker output")
         outcome = results[node_id].get("outcome") if isinstance(results[node_id], dict) else None
-        if outcome in {"done", "skipped"} and manifest.get("exit_code") != 0:
+        if owned.get("kind") == "driver_worker" and outcome in {"done", "skipped"} and manifest.get("exit_code") != 0:
             raise ValueError("successful driver result has a failing process exit")
     core, statuses, reports = prepare(state, results)
     transition = graph_semantics.record_wave(state, report["wave_id"], core)
@@ -224,11 +229,19 @@ def validate_history(state_path: Path, state: dict[str, Any]) -> None:
     first = graph["driver_from_revision"]
     dispatches = cast(dict[str, Any], graph.get("dispatches", {}))
     seen: set[str] = set()
+    control_seen: set[tuple[str, str]] = set()
     for node_id, node in cast(dict[str, Any], graph["nodes"]).items():
         for item in cast(list[Any], node["evidence"]):
             if not isinstance(item, dict):
                 continue
             reference = cast(dict[str, Any], item)
+            if reference.get("kind") == "root_control":
+                key = (str(reference.get("wave_id")), node_id)
+                if key in control_seen:
+                    raise ValueError("duplicate root control evidence")
+                control_seen.add(key)
+                graph_driver_control.validate(state_path, state, node_id, reference)
+                continue
             if reference.get("kind") != "driver_worker":
                 continue
             dispatch_id = reference.get("dispatch_id")
