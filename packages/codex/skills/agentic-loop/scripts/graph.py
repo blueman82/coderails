@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_convert
+import graph_invalid_dispatch
 import graph_ledger
 import graph_repair
 import graph_semantics
@@ -30,6 +31,8 @@ from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace, 
 from graph_summary import budget_spent as _budget_spent
 from graph_summary import summarize
 from graph_vocab import DISPOSITION_KINDS
+
+reject_invalid_dispatch = graph_invalid_dispatch.reject_invalid_dispatch
 
 
 def transition(path: Path, session: str, operation: str, node: str, reason: str) -> dict[str, Any]:
@@ -261,6 +264,12 @@ def _parser() -> argparse.ArgumentParser:
     recover.add_argument("--session", required=True)
     recover.add_argument("--lease-seconds", type=int, default=900)
     recover.add_argument("--report-only", action="store_true")
+    reject = commands.add_parser("reject-invalid-dispatch")
+    reject.add_argument("state", type=Path)
+    reject.add_argument("--session", required=True)
+    reject.add_argument("--node", required=True)
+    reject.add_argument("--wave-id", required=True)
+    reject.add_argument("--report-only", action="store_true")
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
@@ -346,6 +355,10 @@ def main() -> int:
             output = convert_state(args.state, args.session, args.check)
         elif args.command == "recover-wave":
             output = recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
+        elif args.command == "reject-invalid-dispatch":
+            output = reject_invalid_dispatch(
+                args.state, args.session, args.node, args.wave_id, apply=not args.report_only
+            )
         elif args.command == "summarize":
             output = summarize(args.state)
         elif args.command == "inspect":

@@ -23,6 +23,8 @@ REFERENCE_KEYS = {
 # A failed attempt whose spawn_agent call was refused has a call but no child thread or completion.
 REFUSED_KEYS = {"kind", "attempt", "wave_id", "spawn_call_id", "outcome"}
 REFUSED_OUTCOME = "launch_refused"
+INVALID_DISPATCH_KEYS = REFERENCE_KEYS | {"outcome"}
+INVALID_DISPATCH_OUTCOME = "invalid_dispatch"
 IDENTIFIER_KEYS = {"spawn_call_id", "agent_thread_id", "task_complete_turn_id"}
 RESERVED_TOKENS = REFERENCE_KEYS | {"codex_agent"}
 _MAX_EVIDENCE_INPUT_UNITS = 1 << 20

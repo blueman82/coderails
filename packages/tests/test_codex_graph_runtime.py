@@ -94,6 +94,36 @@ class GraphRuntimeTests(unittest.TestCase):
         validate_worker_evidence(read_json(self.path))
         self.assertEqual(graph.inspect(self.path)["ready"], [])
 
+    def test_reject_invalid_native_dispatch_and_retry(self) -> None:
+        """A finished spawn with no envelope is a failed attempt, never accepted worker work."""
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path))
+        self.assert_unchanged(graph.reject_invalid_dispatch, self.path, "parent", "U3[1]", "wave-2")
+        lines = self.parent.read_text(encoding="utf-8").splitlines()
+        call = json.loads(lines[1])
+        arguments = json.loads(call["payload"]["arguments"])
+        arguments["message"] = "encrypted_content"
+        call["payload"]["arguments"] = json.dumps(arguments)
+        lines[1] = json.dumps(call)
+        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        current = read_json(self.path)
+        for record in current["graph"]["dispatches"].values():
+            record["authorized"] = None
+        write_json(self.path, current)
+        self.assert_unchanged(graph.reject_invalid_dispatch, self.path, "foreign", "U3[1]", "wave-2")
+        self.assert_unchanged(graph.reject_invalid_dispatch, self.path, "parent", "U3[2]", "wave-2")
+        before = self.path.read_bytes()
+        self.assertFalse(graph.reject_invalid_dispatch(self.path, "parent", "U3[1]", "wave-2", apply=False)["applied"])
+        self.assertEqual(self.path.read_bytes(), before)
+        report = graph.reject_invalid_dispatch(self.path, "parent", "U3[1]", "wave-2")
+        self.assertEqual(report["reason_code"], "dispatch_missing_envelope")
+        self.assertEqual(read_json(self.path)["graph"]["nodes"]["U3[1]"]["retry"]["attempts"], 1)
+        wave = graph.begin_wave(self.path)
+        self.assertEqual(wave["task_names"]["U3[1]"], task_name("loop", "U3[1]", 2))
+        spawn(self.parent, read_json(self.path))
+        self.record()
+        validate_worker_evidence(read_json(self.path))
+
     def test_retry_exhaustion(self) -> None:
         """Retry failures receive unique native identities and stop at the configured cap."""
         for attempt in (1, 2):

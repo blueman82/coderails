@@ -10,6 +10,8 @@ from graph_artifacts import validate_completion_evidence as validate_completion_
 from graph_artifacts import validate_evals as validate_evals
 from graph_data import nonempty, object_value, read_records
 from graph_identity import (
+    INVALID_DISPATCH_KEYS,
+    INVALID_DISPATCH_OUTCOME,
     REFERENCE_KEYS,
     REFUSED_KEYS,
     REFUSED_OUTCOME,
@@ -46,7 +48,8 @@ def _legacy_refusal(node_id: str, attempt: object) -> RecoveryRefusedError:
 def _reference(value: object, label: str) -> dict[str, Any]:
     reference = object_value(value, label)
     refused = set(reference) == REFUSED_KEYS and reference.get("outcome") == REFUSED_OUTCOME
-    if (set(reference) != REFERENCE_KEYS and not refused) or reference.get("kind") != "codex_agent":
+    invalid = set(reference) == INVALID_DISPATCH_KEYS and reference.get("outcome") == INVALID_DISPATCH_OUTCOME
+    if (set(reference) != REFERENCE_KEYS and not refused and not invalid) or reference.get("kind") != "codex_agent":
         raise GraphError(f"{label} has invalid transcript reference fields")
     attempt = reference.get("attempt")
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
@@ -119,7 +122,25 @@ def _verify_reference(
     spawn_line, observed_task, observed_agent, nickname, expected_path, expected_role = spawns[call_id][0]
     if observed_task != expected_task or observed_agent != reference["agent_thread_id"]:
         raise GraphError(f"node {node_id} spawn reference has the wrong task")
-    _verify_dispatch(state, node_id, reference["attempt"], reference["wave_id"], call_id, requests)
+    if reference.get("outcome") == INVALID_DISPATCH_OUTCOME:
+        issued = [
+            record
+            for record in state["graph"].get("dispatches", {}).values()
+            if record.get("node_id") == node_id
+            and record.get("attempt") == reference["attempt"]
+            and record.get("wave_id") == reference["wave_id"]
+        ]
+        if len(issued) != 1 or issued[0].get("authorized") is not None:
+            raise GraphError(f"node {node_id} invalid dispatch has no unconsumed issued record")
+        try:
+            _verify_dispatch(state, node_id, reference["attempt"], reference["wave_id"], call_id, requests)
+        except graph_contract.DispatchDeniedError as error:
+            if error.code != "dispatch_missing_envelope":
+                raise GraphError(f"node {node_id} invalid dispatch has a different refusal") from error
+        else:
+            raise GraphError(f"node {node_id} invalid dispatch now has a valid envelope")
+    else:
+        _verify_dispatch(state, node_id, reference["attempt"], reference["wave_id"], call_id, requests)
     child_terminal(
         state["session_id"],
         reference["agent_thread_id"],
@@ -129,6 +150,41 @@ def _verify_reference(
         reference["task_complete_turn_id"],
     )
     return spawn_line
+
+
+def bind_invalid_dispatch(state: dict[str, Any], node_id: str) -> dict[str, Any]:
+    """Bind one completed native spawn whose issued dispatch lacks a plaintext envelope."""
+    active = state["graph"]["active_wave"]
+    if active is None or active["nodes"] != [node_id]:
+        raise GraphError("invalid dispatch recovery requires a single-node active wave")
+    parent = read_records(thread_transcript(state["session_id"]), "parent transcript")
+    indexes, refusals = parent_indexes(parent), refused_launches(parent)
+    requests = native_dispatch_requests(parent)
+    attempt = next_attempt(state["graph"]["nodes"][node_id])
+    expected = task_name(state["loop_id"], node_id, attempt)
+    matches = [
+        (call, rows[0])
+        for call, rows in indexes.items()
+        if len(rows) == 1 and rows[0][0] > active["transcript_cursor"] and rows[0][1] == expected
+    ]
+    if len(matches) != 1 or any(
+        line > active["transcript_cursor"] and task == expected for line, task in refusals.values()
+    ):
+        raise GraphError("invalid dispatch recovery requires one unique native spawn")
+    call, (_, _, child, nickname, path, role) = matches[0]
+    terminal = child_terminal(state["session_id"], child, nickname, path, role)
+    reference = {
+        "kind": "codex_agent",
+        "attempt": attempt,
+        "wave_id": active["wave_id"],
+        "spawn_call_id": call,
+        "agent_thread_id": child,
+        "task_complete_turn_id": terminal,
+        "outcome": INVALID_DISPATCH_OUTCOME,
+    }
+    _verify_reference(state, node_id, reference, indexes, refusals, requests)
+    _stored_references(state, False, {call, child, terminal})
+    return reference
 
 
 def _validate_missing_attempts(
