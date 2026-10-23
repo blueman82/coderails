@@ -11,7 +11,7 @@ from typing import Any
 from .graph_evidence import ENVELOPE_KEY, cursor, envelope, object_value, transcript
 from .graph_evidence_bind import bind_wave
 from .graph_evidence_revalidate import revalidate_all
-from .graph_executor import ROOT, graph_semantics, graph_spec, load, transition, validate_state
+from .graph_executor import ROOT, graph_repair, graph_semantics, graph_spec, load, transition, validate_state
 from .graph_recovery import recover_wave as recover_wave
 from .graph_recovery import trace
 from .loop_completion import validate_completion
@@ -116,6 +116,7 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
         proposal = graph_semantics.record_wave(state, report["wave_id"], results)
+        graph_repair.apply_failed_gates(proposal, results)
         references = bind_wave(state, results)
         proposed = object_value(proposal["state"], "proposed graph")
         for node_id, refs in references.items():

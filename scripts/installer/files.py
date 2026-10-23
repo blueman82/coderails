@@ -10,6 +10,7 @@ SHARED_MODULES = (  # packages/graph-semantics/<file>: shared modules plus the s
     "graph_vocab.py",
     "graph_convert.py",
     "graph_spec.py",
+    "graph_repair.py",
     "graph-spec.yaml",
     "policy.yaml",
 )
