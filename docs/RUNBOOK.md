@@ -379,6 +379,31 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `awaiting-input` or `approval-gate` row while graph work is pending. `complete` needs a resolved graph and its evidence.
   See `docs/graph-alignment-measurement.md` for limits and commands.
 
+## A routine run ended incomplete, aborted or refused
+
+- Symptom: the dashboard gate for `docs-sync` or `loop-retro-promotion` reads red; the run log's last marker is
+  `abort=incomplete-run`, `abort=<code>` or `refused=<gate>`.
+- Query: the JSONL beside the run log (`run-{date}.jsonl`, `promotion-runs.jsonl`): the last row for the newest
+  `run_id` gives `stage`, `outcome` (`stage_ok`, `run_ok`, `run_abort`, `run_refused`, `run_incomplete`) and
+  `reason_code`. Counters: `trace.by_reason` keys `routine/<outcome>/<reason_code>`, tallied by
+  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py` (key `routine`).
+- Codes: `incomplete-run` (the session ended after `begin`), `stage_out_of_order`, `runner_exit_no_terminal` (the runner
+  saw the child exit with no terminal row), `audit_failed`/`mining_failed`, the diff-manifest codes from the
+  `manifest_check` stage (`out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `special_file_type`,
+  `status_not_allowed`, `too_many_paths`, `manifest_unreadable`, `manifest_internal_error`), and a gate name
+  (`push`, `review`, `post_review`, `post_evals`, `merge`) for `run_refused`.
+- Remediation: `incomplete-run` and `runner_exit_no_terminal` mean the agent session stopped early; read the run
+  output under the runner's runs dir and fix the cause. `begin` refuses an open run even across midnight, or a same-day
+  abort/refusal. Use `begin --new` explicitly to replace it; an open previous run first gets `run_abort incomplete-run`.
+  A refusal names the gate that exited non-zero or could not start (`gate_spawn_failed` on stderr). Cleanup prints
+  `cleanup_failed: <step>` when a PR, remote branch or local branch could not be removed; delete it with `gh pr close`
+  and `git push origin --delete` / `git branch -D`. `routine_unknown`/`reason_code_invalid`/`outcome_invalid` (exit 2)
+  mean a caller used a value outside the closed lists.
+- `log_unwritable` refuses advancement or terminal state: inspect both event logs and the persisted state for partial
+  output from an interrupted/failed write, then repair the destination. `routine_mismatch` means the log belongs to a
+  different routine; select the correct routine log. Do not finish or replace another routine's state.
+- Limits: see `docs/routines.md` "Routine state machine and event log".
+
 ## Diff-manifest check warned or refused
 
 - Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)
