@@ -7,6 +7,7 @@ from pathlib import Path
 PROVIDER_SCRIPT_DIRS = ("skills/agentic-loop/scripts", "packages/codex/skills/agentic-loop/scripts")
 SHARED_MODULES = (  # packages/graph-semantics/<file>: shared modules plus the spec and policy data they read
     "graph_driver_mode.py",
+    "graph_driver_evidence.py",
     "graph_semantics.py",
     "graph_vocab.py",
     "graph_convert.py",
