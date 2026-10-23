@@ -21,7 +21,8 @@ def receipt_summary(by_reason: dict[str, int]) -> dict[str, dict[str, int]]:
         outcome, _, code = rest.partition("/")
         if command in RECEIPT_COMMANDS:
             codes[code] = codes.get(code, 0) + count
-            outcomes[outcome] = outcomes.get(outcome, 0) + count
+            if code != "trust_root_user_tier":
+                outcomes[outcome] = outcomes.get(outcome, 0) + count
     return {"by_reason_code": dict(sorted(codes.items())), "by_outcome": dict(sorted(outcomes.items()))}
 
 
@@ -56,6 +57,7 @@ def trust_summary(by_reason: dict[str, int]) -> dict[str, int]:
 
 GATE_CODES = (
     "authority_denied",
+    "approval_requirement_missing",
     "max_prs_exceeded",
     "action_authority_bad_mode",
     "authority_denied_destructive_shell",

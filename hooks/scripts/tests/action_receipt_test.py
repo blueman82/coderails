@@ -146,6 +146,13 @@ class StoreTests(Base):
         again = ar.find_valid("s1", self.proposed(), NOW, None, self.base, True, self.signers)
         self.assertEqual(again, (None, "consumed"))
 
+    def test_renamed_receipt_cannot_escape_its_consumed_marker(self) -> None:
+        """Moving signed JSON to another filename cannot give it a fresh claim marker."""
+        path = store(self.base, self.receipt())
+        self.assertEqual(ar.find_valid("s1", self.proposed(), NOW, None, self.base, True, self.signers)[1], "ok")
+        path.rename(path.with_name("renamed.json"))
+        self.assertNotEqual(ar.find_valid("s1", self.proposed(), NOW, None, self.base, True, self.signers)[1], "ok")
+
     def test_peek_does_not_consume_and_revoke_stays_inspectable(self) -> None:
         """Advisory callers peek; a revoked receipt keeps its file but is refused."""
         path = store(self.base, self.receipt())
@@ -160,7 +167,7 @@ class StoreTests(Base):
         for sid, rid in (("../x", "r"), ("s", "../r"), ("", "r"), ("s", ""), ("s", "a/b")):
             self.assertIsNone(ar.receipt_path(sid, rid, self.base))
         rec = self.receipt()
-        copy = ar.receipt_path("s2", "r1", self.base)
+        copy = ar.receipt_path("s2", rec["receipt_id"], self.base)
         assert copy is not None
         ar.write_receipt(copy, rec)
         self.assertEqual(

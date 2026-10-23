@@ -14,7 +14,7 @@ from __future__ import annotations
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import action_receipt as ar
@@ -22,28 +22,35 @@ from scripts.lib.authority_object import authority_path, read_authority
 
 ALWAYS_APPROVED = ("merge", "push_main")
 CATEGORY = {"git_push": "push_main"}  # the hook's operation name -> the authority category
+_MISSING = object()
 
 
 def executed_merges(session_id: str, base: Path | None = None) -> int:
-    """Count `.executed` markers whose receipt is a merge, whatever authority_id it carries (or none).
-
-    A receipt minted before the authority was granted, or under another one, still executes through merge.py, so
-    filtering on authority_id would let a pre-minted receipt walk around max_prs.
-    """
+    """Count executed merges for the session across grant renewals."""
     auth = authority_path(session_id, base)
     if auth is None:
         return 0
     count = 0
     for marker in (auth.parent / "receipts").glob("*.executed"):
         data = ar.read_receipt(marker.with_suffix(".json"))
-        count += bool(data and data.get("action") == "merge")
+        count += bool(
+            data
+            and data.get("action") == "merge"
+            and marker.with_suffix(".json") == ar.receipt_path(session_id, data.get("receipt_id", ""), base)
+        )
     return count
 
 
-def permits(session_id: str, action: str, now: datetime | None = None, base: Path | None = None) -> dict[str, Any]:
+def permits(
+    session_id: str, action: str, now: datetime | None = None, base: Path | None = None,
+    snapshot: dict[str, Any] | None | object = _MISSING,
+) -> dict[str, Any]:  # fmt: skip
     """Decide one action for one session; a missing, torn or expired authority is simply none."""
     action = CATEGORY.get(action, action)
-    live = read_authority(session_id, base, now)
+    if snapshot is _MISSING:
+        live = read_authority(session_id, base, now)
+    else:
+        live = None if snapshot is None else cast(dict[str, Any], snapshot)
     needs = action in ALWAYS_APPROVED
     if live is None:
         return {"allow": True, "reason": "no_authority", "requires_approval": needs, "authority_id": None}

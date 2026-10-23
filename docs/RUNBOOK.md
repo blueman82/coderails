@@ -209,7 +209,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `receipt_consumed` (allowed); `trust_root_user_tier` (an allow that rested on the agent-writable trust root: cooperating-agent safeguard); `action_authority_failed_open` (the hook itself errored and allowed);
   `receipt_approved` / `receipt_revoked` / `receipt_refused_no_tty` (CLI).
   Authority codes (also from `enforce_pr_workflow`, which denies before consuming anything): `denied_authority_denied` (the session's authority lists the category in `denied`; a receipt cannot override it),
-  `denied_max_prs_exceeded` (executed merges in the session, counted from `.executed` markers of every merge receipt whatever its `authority_id`, reached `max_prs`; 0 = none; narrow/grant again with `authority.py`), `authority_denied_destructive_shell` (destructive gate, force-with-lease family),
+  `denied_max_prs_exceeded` (executed merges in the session, counted from `.executed` markers of every merge receipt whatever its `authority_id`, reached `max_prs`; 0 = none; narrow/grant again with `authority.py`), `approval_requirement_missing` (a guarded action's permit verdict omitted its required approval; refused before consuming a receipt), `authority_denied_destructive_shell` (destructive gate, force-with-lease family),
   `action_authority_bad_mode` (typo in the config value, treated as enforce). `scripts/merge.py` rows are `merge_py_<code>` (refused: `no_receipt`, `no_session`, `binding_unknown`, `sha_mismatch`, `consumed`, ...)
   and `merge_py_receipt_executed` (allowed). Counters: `scripts/lib/receipt_counters.py` `gate_summary(by_reason)` (the CLI below prints it as `gate`; wiring it into `measure_graph_alignment.py` itself is a handoff to the lane that owns that file).
   Owner mint command for a merge: `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge --command 'python3 scripts/merge.py <N>' --cwd <repo dir>`;
@@ -233,7 +233,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `gh pr merge <n> --match-head-commit <live head sha>` (or `gh api .../merge -f sha=<sha>`; `scripts/merge.py` pins the sha its gates
   verified). Run ref-moving steps (`commit`, `branch -f`, `reset`, `config`, ...) as separate commands before the guarded one.
 - Counters: `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py` prints `receipts`,
-  `trust` (signature, trust-root, binding and `state_mutated_before_guard` counts) and `gate` (`authority_denied`, `max_prs_exceeded`, `action_authority_bad_mode`, `authority_denied_destructive_shell`, `no_receipt`, `merge_py_receipt_executed`; see "Gate counters" in docs/graph-alignment-measurement.md). Measurement: one hook run is well under 1 s
+  `trust` (signature, trust-root, binding and `state_mutated_before_guard` counts) and `gate` (`authority_denied`, `approval_requirement_missing`, `max_prs_exceeded`, `action_authority_bad_mode`, `authority_denied_destructive_shell`, `no_receipt`, `merge_py_receipt_executed`; see "Gate counters" in docs/graph-alignment-measurement.md). Measurement: one hook run is well under 1 s
   with one receipt (single run, not a benchmark; 50 receipts could approach the 10 s hook timeout).
 - Residuals (docs/decisions/p3-human-only-minting.md): `.consumed`/`.revoked` markers are agent-writable files, so unlinking one
   replays or un-revokes a receipt until it expires; junk files can crowd the 50-receipt cap (deny, not allow); the hook fails open on

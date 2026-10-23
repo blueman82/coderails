@@ -127,6 +127,7 @@ class CodexRoleSessionLiveTest(unittest.TestCase):
         self.assertNotIn("SHELL_RAN", fixture.outputs())
         self.assertTrue(any(n.endswith("cmd_run") for n in names), names)
         self.assertTrue(any(n.endswith("tests_run") for n in names), names)
+        self.assertIn("You are a citation auditor", json.dumps(fixture.bodies[0]))
 
     def test_negative_control_without_the_switch_the_shell_runs(self) -> None:
         """The same argv minus features.shell_tool=false offers the shell and the command executes."""

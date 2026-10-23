@@ -36,7 +36,7 @@ MERGE = f"gh pr merge 12 --squash {PIN}"
 MIRRORS = (
     "scripts/lib/action_receipt.py", "scripts/lib/receipt_signing.py", "scripts/lib/action_binding.py",
     "scripts/action_receipt_cli.py", "scripts/authority_keys.py", "scripts/lib/authority_permits.py",
-    "scripts/lib/receipt_gate.py",
+    "scripts/lib/receipt_gate.py", "scripts/lib/merge_budget.py",
 )  # fmt: skip
 
 

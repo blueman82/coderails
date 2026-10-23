@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -27,6 +28,16 @@ class RepositoryTests(unittest.TestCase):
         ):
             self.assertEqual(ab.normalise_repository(url), REPOSITORY, url)
         for url in ("/tmp/x/y.git", "origin", "", "file:///tmp/x/y.git"):
+            self.assertIsNone(ab.normalise_repository(url), url)
+
+    def test_ports_and_path_segments_are_canonical(self) -> None:
+        """An SSH port is not a path component, and traversal cannot name a repository."""
+        self.assertEqual(ab.normalise_repository("ssh://git@github.com:2222/acme/widgets.git"), REPOSITORY)
+        for url in (
+            "https://github.com/acme/../widgets.git",
+            "https://github.com/acme/x/../widgets.git",
+            "git@github.com:22/acme/widgets.git",
+        ):
             self.assertIsNone(ab.normalise_repository(url), url)
 
 
@@ -93,6 +104,19 @@ class PushTests(unittest.TestCase):
         ):  # fmt: skip
             self.assertIsNone(self.bind(command), command)
 
+    def test_destination_and_transport_overrides_are_unbindable(self) -> None:
+        """A transport or destination override may change the actual push target."""
+        for command in (
+            "git push --repo evil origin main",
+            "git push --repo=evil origin main",
+            "git push --receive-pack=evil origin main",
+            "git push --exec=evil origin main",
+            "git push --mirror=true origin main",
+            "git push --delete=true origin main",
+        ):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bind(command))
+
     def test_push_url_redirect_is_seen(self) -> None:
         """remote.<n>.pushurl is where the push really goes, so the repository follows it (negative control)."""
         git(self.repo, "config", "remote.origin.pushurl", "git@github.com:evil/widgets.git")
@@ -120,6 +144,12 @@ class MergeTests(unittest.TestCase):
             got = ab.binding("merge", f"gh pr merge 12 --squash --match-head-commit {a}", str(self.repo))
         self.assertEqual(got, {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": a})
         view.assert_called_once_with("12", str(self.repo), None)
+
+    def test_nonzero_gh_json_cannot_supply_a_binding(self) -> None:
+        """A failed gh process can print JSON, but it did not establish a live PR head."""
+        done = subprocess.CompletedProcess([], 1, '{"baseRefName":"main","headRefOid":"' + "a" * 40 + '"}', "failed")
+        with mock.patch("scripts.lib.action_binding.subprocess.run", return_value=done):
+            self.assertIsNone(ab.pr_view("12", str(self.repo)))
 
     def test_head_must_be_pinned(self) -> None:
         """No --match-head-commit, or a stale one, is unknowable (a head that moves later merges unreviewed code)."""

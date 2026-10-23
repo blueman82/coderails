@@ -58,6 +58,11 @@ class SignatureTests(unittest.TestCase):
         self.assertEqual(rs.check("body", block, None), "trust_root_missing")
         self.assertEqual(rs.check("body", block, Path(self.tmp.name) / "nope"), "trust_root_missing")
 
+    def test_malformed_unicode_armor_is_refused_without_crashing(self) -> None:
+        """A JSON signature string can contain a lone surrogate; it is not valid SSH armor."""
+        block = {**rs.sign("body", self.key), "sig": "\ud800"}
+        self.assertEqual(rs.check("body", block, self.signers), "signature_invalid")
+
 
 class TrustRootTests(unittest.TestCase):
     """Two tiers: a genuinely root-owned file wins; otherwise the user tier, labelled; otherwise missing."""
@@ -157,6 +162,19 @@ class CounterTests(unittest.TestCase):
             {"signature_missing": 2, "signer_unknown": 1, "trust_root_user_tier": 4, "sha_mismatch": 3,
              "receipt_refused_no_tty": 5},
         )  # fmt: skip
+
+    def test_user_tier_annotation_does_not_count_as_another_allow(self) -> None:
+        """One receipt claim and its trust annotation are one successful action."""
+        from scripts.lib.receipt_counters import receipt_summary
+
+        got = receipt_summary(
+            {
+                "action_authority/allowed/trust_root_user_tier": 1,
+                "action_authority/allowed/receipt_consumed": 1,
+            }
+        )
+        self.assertEqual(got["by_outcome"], {"allowed": 1})
+        self.assertEqual(got["by_reason_code"], {"trust_root_user_tier": 1, "receipt_consumed": 1})
 
 
 class CounterCliTests(unittest.TestCase):

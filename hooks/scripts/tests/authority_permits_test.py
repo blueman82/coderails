@@ -85,13 +85,14 @@ class PermitsTests(unittest.TestCase):
         self.assertTrue(self.permits("deploy")["requires_approval"])
         self.assertFalse(self.permits("destructive_shell")["requires_approval"])
 
-    def test_max_prs_counts_every_executed_merge_whatever_its_authority_id(self) -> None:
-        """Executed merge markers count even when minted before (null id) or under another authority; pushes do not."""
-        self.grant(max_prs=2)
+    def test_max_prs_counts_all_executed_merges_in_the_session(self) -> None:
+        """A renewed grant cannot reset the session budget; pushes do not spend it."""
+        self.grant(max_prs=3)
         self.execute("r3", action="git_push")
         self.execute("r1", authority_id=None)  # type: ignore[arg-type]
-        self.assertTrue(self.permits("merge")["allow"])
         self.execute("r2", authority_id="other")
+        self.assertTrue(self.permits("merge")["allow"])
+        self.execute("r3", authority_id="auth-1")
         refused = self.permits("merge")
         self.assertEqual((refused["allow"], refused["reason"]), (False, "max_prs_exceeded"))
         self.assertTrue(self.permits("push_main")["allow"])
@@ -119,12 +120,14 @@ class PermitsTests(unittest.TestCase):
         aa = "action_authority"
         got = gate_summary({
             f"{aa}/denied/denied_authority_denied": 2, f"{aa}/denied/merge_py_authority_denied": 1,
+            f"{aa}/denied/approval_requirement_missing": 1,
             f"{aa}/denied/denied_max_prs_exceeded": 1, f"{aa}/advisory/action_authority_bad_mode": 3,
             f"{aa}/denied/authority_denied_destructive_shell": 1, f"{aa}/denied/merge_py_no_receipt": 4,
             f"{aa}/allowed/merge_py_receipt_executed": 5, "capability/denied/authority_denied": 9,
         })  # fmt: skip
         self.assertEqual(got, {
-            "authority_denied": 3, "max_prs_exceeded": 1, "action_authority_bad_mode": 3,
+            "authority_denied": 3, "approval_requirement_missing": 1, "max_prs_exceeded": 1,
+            "action_authority_bad_mode": 3,
             "authority_denied_destructive_shell": 1, "no_receipt": 4, "merge_py_receipt_executed": 5,
         })  # fmt: skip
 

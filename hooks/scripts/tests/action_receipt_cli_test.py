@@ -123,6 +123,15 @@ class CliTests(unittest.TestCase):
         )
         self.assertFalse(list((self.base / "s1").glob("receipts/*.json")))
 
+    def test_invalid_expiry_is_refused_before_signing(self) -> None:
+        """Nonpositive, nonfinite and overflowing durations never create a receipt."""
+        for hours in ("0", "-1", "nan", "inf", "1e300"):
+            with self.subTest(hours=hours):
+                code, _, err = self.approve("--expires-in-hours", hours)
+                self.assertEqual(code, 2, err)
+                self.assertIn("receipt_refused_expiry_invalid", err)
+        self.assertFalse(list((self.base / "s1").glob("receipts/*.json")))
+
     def test_receipt_cap(self) -> None:
         """The 51st receipt of a session is refused."""
         for _ in range(ar.MAX_RECEIPTS):

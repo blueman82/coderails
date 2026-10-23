@@ -24,12 +24,16 @@ import shlex
 import subprocess
 from typing import Any
 
-_URL = re.compile(r"^(?:[a-z][a-z0-9+.-]*://)?(?:[^@/\s]+@)?([^:/\s]+)[:/]([^/\s]+/[^\s]+?)(?:\.git)?/?$", re.I)
+_SCHEME_URL = re.compile(
+    r"^[a-z][a-z0-9+.-]*://(?:[^@/\s]+@)?([^:/\s]+)(?::[0-9]+)?/([^/\s]+/[^/?#\s]+?)(?:\.git)?/?$", re.I
+)
+_SCP_URL = re.compile(r"^(?:[^@/\s]+@)?([^:/\s]+):([^/\s]+/[^/?#\s]+?)(?:\.git)?/?$", re.I)
+_BARE_URL = re.compile(r"^([^:/\s]+)/([^/\s]+/[^/?#\s]+?)(?:\.git)?/?$", re.I)
 _PR_URL = re.compile(r"^https://([^/\s]+)/([^/\s]+/[^/\s]+)/pull/(\d+)/?$")
 _SCRIPT = re.compile(r"(?:^|/)merge\.(?:py|sh)$")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _NON_LITERAL = re.compile(r"[$`*?\[\]{}()\\]")
-_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
+_VALUE_OPTS = {"-o", "--push-option"}
 _REFUSED = {"--all", "--mirror", "--tags", "--delete", "-d", "--prune"}
 _MERGE_VALUE_OPTS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject", "-A", "--author-email"}
 
@@ -45,16 +49,19 @@ def git_out(cwd: str, *args: str) -> str:
 
 def normalise_repository(url: str) -> str | None:
     """host/owner/name in lower case from an https, ssh or scp-style URL; None for anything else."""
-    match = _URL.match(url.strip())
-    return f"{match[1]}/{match[2]}".lower() if match else None
+    value = url.strip()
+    match = next((match for pattern in (_SCHEME_URL, _SCP_URL, _BARE_URL) if (match := pattern.match(value))), None)
+    return f"{match[1]}/{match[2]}".lower() if match and not {".", ".."} & set(match[2].split("/")) else None
 
 
 def pr_view(number: str, cwd: str, repo: str | None = None) -> tuple[str, str] | None:
     """(base branch, head sha) of a PR from the live `gh pr view`; None on any failure."""
     cmd = ["gh", "pr", "view", number, "--json", "baseRefName,headRefOid"] + (["-R", repo] if repo else [])
     try:
-        out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=4, check=False).stdout
-        data: Any = json.loads(out)
+        done = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=4, check=False)
+        if done.returncode:
+            return None
+        data: Any = json.loads(done.stdout)
         return str(data["baseRefName"]), str(data["headRefOid"])
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
@@ -76,7 +83,7 @@ def _push(tokens: list[str], cwd: str) -> dict[str, str] | None:
     for token in tokens[at + 1 :]:
         if skip:
             skip = False
-        elif token in _REFUSED:
+        elif token.partition("=")[0] in _REFUSED | {"--repo", "--receive-pack", "--exec"}:
             return None
         elif token in _VALUE_OPTS:
             skip = True

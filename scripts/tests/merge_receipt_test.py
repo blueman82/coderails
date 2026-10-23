@@ -7,8 +7,6 @@ Only the evidence gates (review/eval/manifest) and GitHub plumbing are stubbed; 
 
 from __future__ import annotations
 
-import contextlib
-import io
 import json
 import os
 import subprocess
@@ -19,7 +17,6 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -32,9 +29,7 @@ from hooks.scripts.tests.receipt_test_support import (  # noqa: E402
 )
 
 _loaded = set(sys.modules)
-from scripts import merge  # noqa: E402
-from scripts.lib import git_common as git  # noqa: E402
-from scripts.lib import manifest_policy, receipt_gate  # noqa: E402
+from scripts.lib import receipt_gate  # noqa: E402
 
 for _name in set(sys.modules) - _loaded:  # keep Claude's scripts.* out of the cache: the Codex suites import their own
     if _name.startswith("scripts."):
@@ -44,14 +39,14 @@ for _name in set(sys.modules) - _loaded:  # keep Claude's scripts.* out of the c
             vars(sys.modules[_parent]).pop(_leaf, None)
 
 SHA = "f" * 40
-DENIED = {"allow": False, "reason": "authority_denied"}
 DRIVER = """
-import os, sys, time
+import contextlib, os, sys, time
 from pathlib import Path
 from unittest import mock
 sys.path.insert(0, os.environ["REPO_ROOT"])
 from scripts import merge
 from scripts.lib import action_receipt as ar
+from scripts.lib import receipt_gate
 from scripts.lib import git_common as git
 
 fields = {"state": "OPEN", "headRefOid": os.environ["SHA"], "title": "t", "headRefName": "feature"}
@@ -62,8 +57,17 @@ patches = [
     mock.patch.object(merge, "verify_gates"), mock.patch.object(merge.manifest_policy, "gate"),
     mock.patch.object(merge, "cleanup"),
 ]
+if os.environ.get("DELAY_PERMITS"):
+    real_permits = receipt_gate.permits
+    def delayed_permits(*args, **kwargs):
+        verdict = real_permits(*args, **kwargs)
+        time.sleep(0.3)
+        return verdict
+    patches.append(mock.patch.object(receipt_gate, "permits", side_effect=delayed_permits))
 if os.environ.get("NO_SEAM"):  # negative control: the seam call removed
     patches.append(mock.patch.object(merge, "require_merge_receipt"))
+if os.environ.get("BARRIER"):  # isolate the O_EXCL claim from the separate session-budget lock
+    patches.append(mock.patch.object(receipt_gate.merge_budget, "lock", return_value=contextlib.nullcontext(True)))
 def rendezvous(tag):  # both processes arrive before either goes on
     if not os.environ.get("BARRIER"):
         return
@@ -197,6 +201,23 @@ class MergeReceiptTests(unittest.TestCase):
         self.assertTrue((base / "r1.consumed").exists() and (base / "r1.executed").exists())
         self.refused_after_one("consumed")
 
+    def test_direct_merge_refuses_renamed_signed_receipt(self) -> None:
+        """The direct merge path must bind a receipt's filename to its signed ID too."""
+        self.mint()
+        base = self.loop / "s1" / "receipts"
+        (base / "r1.json").rename(base / "r2.json")
+        self.refused("malformed")
+
+    def test_two_receipts_cannot_exceed_one_merge_budget(self) -> None:
+        """Distinct receipts must not let concurrent direct merges pass the same session cap."""
+        self.grant(max_prs=1)
+        self.mint("r1")
+        self.mint("r2")
+        children = [self.spawn(DELAY_PERMITS="1") for _ in range(2)]
+        results = [child.communicate(timeout=60)[1] for child in children]
+        self.assertEqual(self.merges(), 1, results)
+        self.assertEqual(sorted(child.returncode for child in children), [0, 1], results)
+
     def refused_after_one(self, code: str, **env: str) -> None:
         """A further run is refused with `code` and does not add a second gh pr merge."""
         rc, err = self.run_merge(**env)
@@ -228,8 +249,8 @@ class MergeReceiptTests(unittest.TestCase):
         self.grant(denied=["merge"])
         self.refused("authority_denied")
         self.grant(denied=[], max_prs=1)
+        self.mint("done")
         executed = self.loop / "s1" / "receipts" / "done.json"
-        executed.write_text(json.dumps({"action": "merge", "authority_id": "auth-1"}))
         executed.with_suffix(".executed").write_text("")
         self.refused("max_prs_exceeded")
         self.assertFalse((self.loop / "s1" / "receipts" / "r1.consumed").exists())
@@ -321,58 +342,6 @@ class MergeReceiptTests(unittest.TestCase):
         codes = sorted(child.wait(timeout=60) for child in children)
         self.close(children)
         self.assertEqual((codes[0], codes[1] != 0, self.merges()), (0, True, 1))
-
-
-class SeamSpyTests(unittest.TestCase):
-    """merge.py reaches authority_permits.permits through the shared gate, and calls the gate exactly once."""
-
-    def test_merge_main_calls_the_seam_once_before_gh_pr_merge(self) -> None:
-        """The order is: seam, then gh pr merge; a refusal from the seam stops before gh."""
-        order: list[str] = []
-        fields: dict[str, str] = {"state": "OPEN", "headRefOid": SHA, "title": "t", "headRefName": "feature"}
-
-        def run(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
-            del check
-            order.append("gh" if args[:3] == ("gh", "pr", "merge") else "other")
-            return subprocess.CompletedProcess(args, 0, "", "")
-
-        def field(number: str, name: str, fallback: str = "") -> str:
-            del number
-            return fields.get(name, fallback)
-
-        def seam_call(number: str) -> None:
-            del number
-            order.append("seam")
-
-        with (
-            mock.patch.object(git, "require_repo"), mock.patch.object(git, "main", return_value="main"),
-            mock.patch.object(git, "protected", return_value=False), mock.patch.object(git, "run", side_effect=run),
-            mock.patch.object(git, "pr_field", side_effect=field),
-            mock.patch.object(merge, "verify_gates"), mock.patch.object(manifest_policy, "gate"),
-            mock.patch.object(merge, "cleanup"),
-            mock.patch.object(merge, "require_merge_receipt", side_effect=seam_call) as seam,
-            contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()),
-        ):  # fmt: skip
-            self.assertEqual(merge.main(["7"]), 0)
-            seam.assert_called_once_with("7")
-            self.assertEqual(order, ["seam", "gh"])
-            order.clear()
-            seam.side_effect = receipt_gate.ReceiptRefusedError("no_receipt")
-            self.assertEqual(merge.main(["7"]), 1)
-            self.assertEqual(order, [])
-
-    def test_the_gate_asks_permits_about_merge(self) -> None:
-        """require_merge_receipt consults authority_permits.permits('merge') for the session first."""
-        with (
-            mock.patch.dict(os.environ, {"CLAUDE_SESSION_ID": "spy-session"}),
-            mock.patch.object(receipt_gate, "permits", return_value=DENIED) as spy,
-            mock.patch.object(receipt_gate, "append_row"),
-            mock.patch.object(receipt_gate, "resolve_mode", return_value=("enforce", False)),
-            self.assertRaises(receipt_gate.ReceiptRefusedError) as caught,
-        ):  # fmt: skip
-            receipt_gate.require_merge_receipt("7", "/nowhere")
-        self.assertIn("authority_denied", str(caught.exception))
-        self.assertEqual(spy.call_args.args[:2], ("spy-session", "merge"))
 
 
 if __name__ == "__main__":

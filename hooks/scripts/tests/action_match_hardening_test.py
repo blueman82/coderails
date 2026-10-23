@@ -99,6 +99,12 @@ class MatchHardeningTests(unittest.TestCase):
         found = match.guarded_segments("cd /tmp | cat; git push origin HEAD:main", self.repo)  # pipeline: no move
         self.assertEqual([where for _, _, where in found], [self.repo])
 
+    def test_background_cd_cannot_move_parent_shell_directory(self) -> None:
+        """A background cd runs in a child; the guarded push remains in the original repo."""
+        target = str(self.root / "x y")
+        found = match.guarded_segments(f'cd "{target}" & git push origin HEAD:main', self.repo)
+        self.assertEqual([where for _, _, where in found], [self.repo])
+
 
 class MultiplePushUrlTests(unittest.TestCase):
     """A remote with several push urls pushes to all of them: the receipt can name only one, so it is unbindable."""

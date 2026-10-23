@@ -251,12 +251,16 @@ def find_valid(
     paths = sorted((auth.parent / "receipts").glob("*.json"))[:MAX_RECEIPTS]
     refusals: list[str] = []
     for path in paths:
-        data = effective(path)
+        data = read_receipt(path)
+        if data is None or path != receipt_path(session_id, data.get("receipt_id", ""), base):
+            refusals.append("malformed")
+            continue
+        data["revoked"] = data.get("revoked") is True or is_revoked(path)
         ok, code = verify(data, proposed, now, session_id, loop_id, is_consumed(path), signers)
         if not ok:
             refusals.append(code)
-        elif data is not None and consume_it and not consume(path):
+        elif consume_it and not consume(path):
             refusals.append("consumed")
-        elif data is not None:
+        else:
             return data, "ok"
     return None, next((c for c in refusals if c != "malformed"), refusals[0] if refusals else "no_receipt")

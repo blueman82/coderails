@@ -153,8 +153,8 @@ def guarded_segments(command: str, cwd: str) -> list[tuple[str, str, str]]:
                 move = []
             target = os.path.normpath(os.path.join(cwd, os.path.expanduser(move[1]))) if len(move) == 2 else ""
             grouped = raw.lstrip().startswith("(")
-            if not grouped and (before == "|" or after[:1] == ["|"]):
-                continue  # a pipeline element is a subshell: the cwd does not move
+            if not grouped and (before in {"|", "&"} or after[:1] in (["|"], ["&"])):
+                continue  # pipeline/background commands run in children; the parent cwd does not move
             if len(move) == 2 and not re.search(r"[$`*?\[]", move[1]) and os.path.isdir(target) and not grouped:
                 cwd = target
             elif grouped:
