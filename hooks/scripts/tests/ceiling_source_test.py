@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.tests.native_hook_test_support import HookCase
+from hooks.scripts.verification_volume_ceiling import counted_invocations
 
 RUN_ALL = "python3 hooks/scripts/tests/run_all.py"
 POST = "python3 scripts/post_evals.py post 5 abc123"
@@ -127,6 +128,31 @@ class CeilingSourceTests(HookCase):
         self.assertEqual(self.run_times(RUN_ALL, target, 1), [True])
         self.assertEqual(self.counter(target, "run_all").read_text().strip(), "3")
         self.assertFalse(self.counter(origin, "run_all").exists())
+
+    def test_each_invocation_in_one_bash_call_is_counted(self) -> None:
+        """A later full suite in the same call cannot evade its own worktree ceiling."""
+        origin, target = self.repository("origin", "origin"), self.repository("target", "target")
+        self.assertEqual(self.run_times(RUN_ALL, target, 2), [False, False])
+        command = f"{RUN_ALL}; cd {shlex.quote(str(target))} && {RUN_ALL}"
+        self.assertTrue(self.denied("verification_volume_ceiling", self.request(command, origin)))
+        self.assertEqual(self.counter(target, "run_all").read_text().strip(), "3")
+        self.assertEqual(self.counter(origin, "run_all").read_text().strip(), "1")
+
+    def test_three_invocations_in_one_bash_call_reach_the_ceiling(self) -> None:
+        """Repeated same-worktree suite calls cannot count as only one run."""
+        repo = self.repository("repo", "unit-test")
+        self.assertTrue(self.denied("verification_volume_ceiling", self.request("; ".join([RUN_ALL] * 3), repo)))
+        self.assertEqual(self.counter(repo, "run_all").read_text().strip(), "3")
+
+    def test_shell_body_substitution_is_counted_once(self) -> None:
+        """A double-quoted shell body traverses its suite only once."""
+        repo = self.repository("repo", "unit-test")
+        command = f'bash -c "echo $({RUN_ALL})"'
+        self.assertEqual(len(counted_invocations(command, str(repo))), 1)
+        self.assertEqual(len(counted_invocations(f'{command} "$( {RUN_ALL} )"', str(repo))), 2)
+        self.assertEqual(self.run_times(command, repo, 2), [False, False])
+        self.assertEqual(self.counter(repo, "run_all").read_text().strip(), "2")
+        self.assertEqual(self.run_times(command, repo, 1), [True])
 
     def test_foreign_unknown_or_ambiguous_mirror_is_not_written(self) -> None:
         """Optional mirroring requires a live owned loop and one current matching work unit."""

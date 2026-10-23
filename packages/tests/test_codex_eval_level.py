@@ -24,7 +24,9 @@ HOOK = CODEX / "hooks/scripts/pr_publication_gate.py"
 POST = CODEX / "scripts/post_evals.py"
 HOOK_SHIM = """#!/bin/sh
 case "$1 $2" in
-  "pr view") [ "$5" = headRefOid ] && echo "$FAKE_SHA" ;;
+  "pr view")
+    [ "$5" = headRefOid ] && echo "$FAKE_SHA"
+    [ "$5" = baseRefOid ] && echo "$FAKE_BASE_SHA" ;;
   "api user") echo me ;;
   "repo view") echo WRITE ;;
   "api repos/"*)
@@ -42,7 +44,7 @@ a = sys.argv[1:]
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(" ".join(a) + "\\n")
 if a[:2] == ["pr", "view"]:
-    print(os.environ["FAKE_SHA"])
+    print(os.environ["FAKE_BASE_SHA"] if "baseRefOid" in a else os.environ["FAKE_SHA"])
 elif a[:2] == ["api", "user"]:
     print("me")
 elif a[0] == "api" and "-F" in a:
@@ -118,6 +120,7 @@ class HookRepo(Repo):
         env = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
         env |= {
             "FAKE_SHA": self.sha,
+            "FAKE_BASE_SHA": self.base,
             "FAKE_EVAL_FILE": str(eval_file),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.tmp),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp),
@@ -142,6 +145,8 @@ class HookTests(HookRepo):
                 reason = self.reason(level=level)
                 self.assertTrue(reason.startswith("level_below_derived"), reason)
                 self.assertIn("post_evals.py post", reason)
+        git_cmd(self.dir, "update-ref", "refs/remotes/origin/main", self.sha)
+        self.assertTrue(self.reason(level=0).startswith("level_below_derived"))
 
     def test_install_py_at_level_two_proceeds(self) -> None:
         """Negative control 1: the same hook call allows at level 2, so the denial came from the derived level."""
@@ -202,7 +207,7 @@ class PostTests(Repo):
         log, posted = self.tmp / "gh.log", self.tmp / "posted.md"
         log.write_text("")
         env = {**os.environ, "PATH": f"{shim(self.tmp, POST_SHIM)}{os.pathsep}{os.environ['PATH']}"}
-        env |= {"FAKE_SHA": self.sha, "FAKE_LOG": str(log), "FAKE_POSTED": str(posted)}
+        env |= {"FAKE_SHA": self.sha, "FAKE_BASE_SHA": self.base, "FAKE_LOG": str(log), "FAKE_POSTED": str(posted)}
         env["CODERAILS_KEYS_DIR"] = str(self.tmp / "keys")
         result = subprocess.run(
             [sys.executable, str(POST), "post", *arguments], cwd=self.dir, env=env, capture_output=True, text=True
@@ -213,6 +218,11 @@ class PostTests(Repo):
         """Acceptance 1: level_below_derived, and no POST reached gh."""
         result, log, posted = self.post("7", str(self.smoke_run(0)))
         self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("level_below_derived", result.stderr)
+        self.assertFalse(posted.exists())
+        self.assertNotIn("-F", log.read_text())
+        git_cmd(self.dir, "update-ref", "refs/remotes/origin/main", self.sha)
+        result, log, posted = self.post("7", str(self.dir / "evals.json"))
         self.assertIn("level_below_derived", result.stderr)
         self.assertFalse(posted.exists())
         self.assertNotIn("-F", log.read_text())

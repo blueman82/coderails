@@ -215,6 +215,7 @@ class CheckTests(unittest.TestCase):
         """Run the check against a canned artifact and diff."""
         with (
             mock.patch.object(git, "review_passes_for_pr", return_value=reply),
+            mock.patch.object(git, "pr_field", return_value="base-sha"),
             mock.patch.object(manifest_policy, "diff_changes", return_value=changes),
         ):
             return [v["code"] for v in publication_gate.review_passes_check("7", SHA, "", "")]
@@ -222,6 +223,20 @@ class CheckTests(unittest.TestCase):
     def test_hooks_pr_with_only_review_pr_is_refused(self) -> None:
         """hooks/ diff and a review-pr pass alone: required_review_missing:security-review."""
         self.assertEqual(self.codes(found([entry("review-pr")])), ["required_review_missing:security-review"])
+
+    def test_required_passes_use_the_pr_base(self) -> None:
+        """A release PR needs security review for hooks/ changes already present on newer main."""
+
+        def changes(_sha: str, _fetch: str, base: str = "") -> manifest_policy.Changes:
+            return HOOKS if base == "release-sha" else DOCS
+
+        with (
+            mock.patch.object(git, "pr_field", return_value="release-sha"),
+            mock.patch.object(git, "review_passes_for_pr", return_value=found([entry("review-pr")])),
+            mock.patch.object(manifest_policy, "diff_changes", side_effect=changes),
+        ):
+            codes = [v["code"] for v in publication_gate.review_passes_check("7", SHA, "", "")]
+        self.assertEqual(codes, ["required_review_missing:security-review"])
 
     def test_security_pass_present_proceeds(self) -> None:
         """Negative control: with the pass the same PR is accepted, so the refusal came from the policy."""

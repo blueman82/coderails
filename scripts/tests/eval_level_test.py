@@ -265,7 +265,10 @@ class MergeCheckTests(RepoCase):
     def check(self, summary: EvalSummary, progress: str = "") -> list[str]:
         """Codes the eval_level check returns for this summary on the current branch head."""
         head = self.git("rev-parse", "HEAD")
-        with mock.patch.object(git, "gate_eval_summary_for_pr", return_value=summary):
+        with (
+            mock.patch.object(git, "gate_eval_summary_for_pr", return_value=summary),
+            mock.patch.object(git, "pr_field", return_value=self.base),
+        ):
             return [v["code"] for v in publication_gate.eval_level_check("7", head, "", progress)]
 
     def test_registered_last(self) -> None:
@@ -350,6 +353,7 @@ class PathTests(RepoCase):
                 self.subTest(level=level),
                 mock.patch.object(publication_gate, "CHECKS", [publication_gate.eval_level_check]),
                 mock.patch.object(git, "gate_eval_summary_for_pr", return_value=summary),
+                mock.patch.object(git, "pr_field", return_value=self.base),
                 mock.patch.object(pr_merge_gate, "gate_eval_summary_for_pr", return_value=summary),
                 mock.patch.object(pr_merge_gate, "pr_field", return_value=head),
                 mock.patch.object(pr_merge_gate, "smoke_verify", return_value=0),

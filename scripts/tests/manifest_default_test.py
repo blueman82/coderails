@@ -128,6 +128,24 @@ class DefaultGateTests(RepoCase):
         self.commit(SECRET, "k=v\n")
         self.assertEqual(self.refusal(), "diff_manifest:denied_path")
 
+    def test_pr_diff_uses_target_base_not_main(self) -> None:
+        """A release-targeted PR includes a denied path already present on newer main."""
+        release = git_cmd(self.dir, "rev-parse", "origin/main").strip()
+        self.commit(SECRET, "k=v\n")
+        git_cmd(self.dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.commit("docs.md", "doc\n")
+        head = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+
+        def field(_number: str, name: str, fallback: str = "") -> str:
+            return {"baseRefOid": release, "headRefOid": head}.get(name, fallback)
+
+        with (
+            mock.patch.object(git, "pr_field", side_effect=field),
+            mock.patch.object(manifest_policy, "config_path", return_value=""),
+        ):
+            codes = [item["code"] for item in manifest_policy.violations("7", head=head)]
+        self.assertIn("diff_manifest:denied_path", codes)
+
     def test_symlink_refused_by_default(self) -> None:
         """No config at all: a symlink is refused with special_file_type."""
         (self.dir / "link").symlink_to("README.md")
