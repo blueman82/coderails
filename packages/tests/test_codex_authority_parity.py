@@ -144,7 +144,9 @@ class CodexCrackOnGateTests(unittest.TestCase):
         source = (CODEX / "hooks/scripts/hook_common.py").read_text(encoding="utf-8")
         for name in ("authority_state", "write_authority", "parse_expiry"):
             self.assertNotIn(f"def {name}(", source, name)
-        self.assertIn("from scripts.lib.authority_object import", source)
+        # hook_common used to import parse_time from the mirrored lib only for its vendored receipt verify; that code
+        # now lives in the mirrored scripts/lib/action_receipt.py, which the gate imports directly.
+        self.assertNotIn("def receipt_verify(", source)
 
 
 if __name__ == "__main__":
