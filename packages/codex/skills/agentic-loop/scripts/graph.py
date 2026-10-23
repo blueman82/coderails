@@ -21,6 +21,10 @@ import graph_spec
 import graph_stops
 from graph_completion import complete, verify_completion
 from graph_controller import add_unit, instantiate, start
+from graph_dispatch import apply_record as apply_record
+from graph_dispatch import authorize_dispatch as authorize_dispatch
+from graph_dispatch import begin_wave as begin_wave
+from graph_dispatch import record_wave as record_wave
 from graph_identity import GraphError, next_attempt, task_name
 from graph_io import load as _load
 from graph_io import locked as _locked
@@ -210,11 +214,7 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
 def recover_wave(
     path: Path, session: str, lease_seconds: int, now: float | None = None, apply: bool = True
 ) -> dict[str, Any]:
-    """Recover an active wave whose every spawned worker is silent past the lease, in one locked save.
-
-    A node with no spawn is only reported ("spawn it now"): nothing is recorded for it. Bounded: a node whose
-    respawn generation has reached retry.max refuses recovery (fail closed, human decides).
-    """
+    """Recover silent workers under one lock; report unspawned nodes and refuse exhausted retries."""
     if lease_seconds <= 0:  # a non-positive lease marks every live worker stalled
         raise RecoveryRefusedError("invalid_lease", "lease_seconds must be positive")
     return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
