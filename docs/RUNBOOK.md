@@ -381,7 +381,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   loop wedged by a bad contract or an uninstalled plugin agent.
 - Codex evidence rollout: `CODERAILS_A6_EVIDENCE_WRITE` defaults OFF. While OFF, the new reader can validate old and new
   references, `reject-invalid-dispatch --report-only` works, and attempts to persist invalid-dispatch or encrypted-message
-  evidence fail without changing `progress.json`. After installing and trusting this reader, check active old graphs with
+  evidence fail without changing `progress.json`; the dispatch off-switch also keeps its old no-receipt behavior. After
+  installing and trusting this reader, check active old graphs with
   `inspect` and completed ones with `verify-completion` before setting the variable to `on` for new writes. Once either
   new reference shape is stored, turn writing OFF to stop further new records, but keep this reader installed for later
   completion and verification. The prior plugin reader cannot verify those histories, even after a loop is complete;

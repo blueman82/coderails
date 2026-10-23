@@ -12,7 +12,7 @@ import graph_semantics
 import graph_stops
 import worker_status
 from graph_evidence import bind_worker_evidence, validate_evals
-from graph_identity import GraphError, classify_worker_evidence, next_attempt, task_name
+from graph_identity import GraphError, classify_worker_evidence, new_evidence_writes_enabled, next_attempt, task_name
 from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import object_value as _object
@@ -176,7 +176,7 @@ def authorize_dispatch(
                 raise GraphError(str(error)) from error
             except OSError as error:
                 raise GraphError(f"cannot read the message file: {error}") from error
-            if record["authorized"] is None:
+            if record["authorized"] is None and new_evidence_writes_enabled():
                 record["authorized"] = {"tool_use_id": None, "mode": "off"}
                 _write(path, state)
             trace(

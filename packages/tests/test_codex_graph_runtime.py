@@ -170,7 +170,7 @@ class GraphRuntimeTests(unittest.TestCase):
         opened = graph.begin_wave(self.path)["dispatches"][0]
         message = self.path.with_name("message.txt")
         message.write_text(opened["prompt_prefix"] + "\n" + opened["prompt_sections"], encoding="utf-8")
-        with patch.dict("os.environ", {"CODERAILS_GRAPH_DISPATCH": "off"}):
+        with patch.dict("os.environ", {"CODERAILS_GRAPH_DISPATCH": "off", "CODERAILS_A6_EVIDENCE_WRITE": "on"}):
             graph.authorize_dispatch(
                 self.path,
                 "parent",
@@ -193,8 +193,7 @@ class GraphRuntimeTests(unittest.TestCase):
             call["payload"]["arguments"] = json.dumps(arguments)
             lines[1] = json.dumps(call)
             self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": "on"}):
-                self.record()
+            self.record()
         current = read_json(self.path)
         validate_worker_evidence(current)
         next(iter(current["graph"]["dispatches"].values()))["authorized"] = None
@@ -206,7 +205,7 @@ class GraphRuntimeTests(unittest.TestCase):
         opened = graph.begin_wave(self.path)["dispatches"][0]
         message = self.path.with_name("message.txt")
         message.write_text(opened["prompt_prefix"], encoding="utf-8")
-        with patch.dict("os.environ", {"CODERAILS_GRAPH_DISPATCH": "off"}):
+        with patch.dict("os.environ", {"CODERAILS_GRAPH_DISPATCH": "off", "CODERAILS_A6_EVIDENCE_WRITE": "on"}):
             graph.authorize_dispatch(
                 self.path,
                 "parent",
@@ -230,6 +229,23 @@ class GraphRuntimeTests(unittest.TestCase):
             self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
             self.record()
         validate_worker_evidence(read_json(self.path))
+
+    def test_off_switch_keeps_old_receipt_shape_while_new_writer_is_off(self) -> None:
+        """A reader-first install does not persist the new off-mode receipt."""
+        opened = graph.begin_wave(self.path)["dispatches"][0]
+        message = self.path.with_name("message.txt")
+        message.write_text(opened["prompt_prefix"], encoding="utf-8")
+        with patch.dict("os.environ", {"CODERAILS_GRAPH_DISPATCH": "off", "CODERAILS_A6_EVIDENCE_WRITE": ""}):
+            graph.authorize_dispatch(
+                self.path,
+                "parent",
+                opened["dispatch_id"],
+                message,
+                "",
+                opened["task_name"],
+                self.path.with_name("evals.json"),
+            )
+        self.assertIsNone(next(iter(read_json(self.path)["graph"]["dispatches"].values()))["authorized"])
 
     def test_retry_exhaustion(self) -> None:
         """Retry failures receive unique native identities and stop at the configured cap."""
