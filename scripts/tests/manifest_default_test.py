@@ -175,19 +175,19 @@ class DefaultGateTests(RepoCase):
                 }
             )
         )
-        contexts = (
-            {"CLAUDE_CODE_SESSION_ID": session, "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)},
+        with mock.patch.dict(
+            os.environ, {"CLAUDE_CODE_SESSION_ID": session, "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}
+        ):
+            self.assertEqual(self.refusal(), "diff_manifest:manifest_unreadable")
+        with mock.patch.dict(
+            os.environ,
             {
-                "CLAUDE_CODE_SESSION_ID": "",
-                "CODEX_SESSION_ID": session,
-                "CODEX_THREAD_ID": "different-thread",
+                "CLAUDE_CODE_SESSION_ID": session,
                 "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop / "other-root"),
                 "CODERAILS_AGENTIC_LOOP_DIR": str(self.loop),
             },
-        )
-        for context in contexts:
-            with mock.patch.dict(os.environ, context), self.subTest(context=context):
-                self.assertEqual(self.refusal(), "diff_manifest:manifest_unreadable")
+        ):
+            self.gate()
 
     def test_off_passes_the_violating_diff(self) -> None:
         """Negative control: diff_manifest off proves the refusal comes from the gate."""

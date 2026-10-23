@@ -202,27 +202,17 @@ def active_graph_unit() -> bool:
     if not session:
         return False
     session = session.replace("/", "_").replace("..", "")
-    roots = list(
-        dict.fromkeys(
-            Path(value)
-            for value in (
-                os.environ.get("CLAUDE_AGENTIC_LOOP_DIR"),
-                os.environ.get("CODERAILS_AGENTIC_LOOP_DIR"),
-            )
-            if value
-        )
-    )
-    if not roots:
-        roots = [Path.home() / ".coderails/agentic-loop"]
+    root_key = "CLAUDE_AGENTIC_LOOP_DIR"
+    if Path(__file__).resolve().parents[2].name == "codex":
+        root_key = "CODERAILS_AGENTIC_LOOP_DIR"
+    root = Path(os.environ.get(root_key) or Path.home() / ".coderails/agentic-loop")
     common = git.output("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
     current = git.output("git", "rev-parse", "--show-toplevel")
     if not common or not current:
         return False
-    paths: list[Path] = []
-    for root in roots:
-        paths.append(root / common.replace("/", "-") / session / "progress.json")
-        with suppress(OSError):
-            paths += [directory / session / "progress.json" for directory in root.iterdir() if directory.is_dir()]
+    paths = [root / common.replace("/", "-") / session / "progress.json"]
+    with suppress(OSError):
+        paths += [directory / session / "progress.json" for directory in root.iterdir() if directory.is_dir()]
     for path in paths:
         if not path.is_file():
             continue

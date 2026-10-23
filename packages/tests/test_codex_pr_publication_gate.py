@@ -160,6 +160,9 @@ class CodexPublicationGateTests(unittest.TestCase):
         )
         self.env["CLAUDE_AGENTIC_LOOP_DIR"] = str(self.loop / "other-root")
         self.assertTrue(self.reason("gh pr merge 1").startswith("diff_manifest:manifest_unreadable"))
+        self.env["CLAUDE_AGENTIC_LOOP_DIR"] = str(self.loop)
+        self.env["CODERAILS_AGENTIC_LOOP_DIR"] = str(self.loop / "other-root")
+        self.assertEqual(self.reason("gh pr merge 1"), "")
 
     def test_gh_repo_retarget_refuses_even_clean_diff(self) -> None:
         """A same-number PR in another repository cannot borrow this repository's clean result."""
