@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import json
 import sys
@@ -123,6 +124,42 @@ class GraphRuntimeTests(unittest.TestCase):
         spawn(self.parent, read_json(self.path))
         self.record()
         validate_worker_evidence(read_json(self.path))
+
+    def test_hook_authorized_encrypted_native_dispatch(self) -> None:
+        """A consumed plaintext hook receipt can bind an opaque native transcript message."""
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path))
+        lines = self.parent.read_text(encoding="utf-8").splitlines()
+        call = json.loads(lines[1])
+        arguments = json.loads(call["payload"]["arguments"])
+        arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x00" * 72).decode("ascii")
+        call["payload"]["arguments"] = json.dumps(arguments)
+        lines[1] = json.dumps(call)
+        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        current = read_json(self.path)
+        dispatch = next(iter(current["graph"]["dispatches"].values()))
+        dispatch["authorized"] = None
+        write_json(self.path, current)
+        self.assert_unchanged(self.record)
+        dispatch["authorized"] = {"tool_use_id": None}
+        write_json(self.path, current)
+        arguments["message"] = "not encrypted"
+        call["payload"]["arguments"] = json.dumps(arguments)
+        lines[1] = json.dumps(call)
+        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.assert_unchanged(self.record)
+        arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x00" * 72).decode("ascii")
+        call["payload"]["arguments"] = json.dumps(arguments)
+        lines[1] = json.dumps(call)
+        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.record()
+        validate_worker_evidence(read_json(self.path))
+        arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x01" * 72).decode("ascii")
+        call["payload"]["arguments"] = json.dumps(arguments)
+        lines[1] = json.dumps(call)
+        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(GraphError, "encrypted native message changed"):
+            validate_worker_evidence(read_json(self.path))
 
     def test_retry_exhaustion(self) -> None:
         """Retry failures receive unique native identities and stop at the configured cap."""

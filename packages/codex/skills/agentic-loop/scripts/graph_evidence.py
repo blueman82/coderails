@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any, Optional, cast
 
 import graph_contract
+import graph_encrypted_content
 from graph_artifacts import validate_completion_evidence as validate_completion_evidence
 from graph_artifacts import validate_evals as validate_evals
 from graph_data import nonempty, object_value, read_records
 from graph_identity import (
+    ENCRYPTED_REFERENCE_KEYS,
     INVALID_DISPATCH_KEYS,
     INVALID_DISPATCH_OUTCOME,
     REFERENCE_KEYS,
@@ -49,13 +52,17 @@ def _reference(value: object, label: str) -> dict[str, Any]:
     reference = object_value(value, label)
     refused = set(reference) == REFUSED_KEYS and reference.get("outcome") == REFUSED_OUTCOME
     invalid = set(reference) == INVALID_DISPATCH_KEYS and reference.get("outcome") == INVALID_DISPATCH_OUTCOME
-    if (set(reference) != REFERENCE_KEYS and not refused and not invalid) or reference.get("kind") != "codex_agent":
+    encrypted = set(reference) == ENCRYPTED_REFERENCE_KEYS
+    valid = refused or invalid or encrypted or set(reference) == REFERENCE_KEYS
+    if not valid or reference.get("kind") != "codex_agent":
         raise GraphError(f"{label} has invalid transcript reference fields")
     attempt = reference.get("attempt")
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
         raise GraphError(f"{label}.attempt must be a positive integer")
     for key in set(reference) - {"kind", "attempt"}:
         nonempty(reference.get(key), f"{label}.{key}")
+    if encrypted and not re.fullmatch(r"[0-9a-f]{64}", reference["message_sha256"]):
+        raise GraphError(f"{label}.message_sha256 must be a SHA-256 digest")
     return reference
 
 
@@ -72,16 +79,22 @@ def _verify_dispatch(
         raise graph_contract.DispatchDeniedError("dispatch_missing_envelope", "native spawn has no unique request")
     request = calls[0]
     message = request.get("message")
-    envelope = graph_contract.parse_envelope(message)
     if not isinstance(message, str):
         raise graph_contract.DispatchDeniedError("dispatch_missing_envelope", "native spawn has no message")
     if request.get("task_name") != task_name(state["loop_id"], node_id, attempt):
         raise graph_contract.DispatchDeniedError("dispatch_foreign", "native spawn task name differs from its attempt")
-    record = (
-        graph_contract.check_ownership(state, envelope, live=False)
-        if graph_contract.dispatch_off()
-        else graph_contract.check_dispatch(state, envelope, message, live=False)
-    )
+    try:
+        envelope = graph_contract.parse_envelope(message)
+    except graph_contract.DispatchDeniedError as error:
+        if error.code != "dispatch_missing_envelope":
+            raise
+        record = graph_encrypted_content.check(state, node_id, attempt, wave_id, message)
+    else:
+        record = (
+            graph_contract.check_ownership(state, envelope, live=False)
+            if graph_contract.dispatch_off()
+            else graph_contract.check_dispatch(state, envelope, message, live=False)
+        )
     if (
         record.get("task_name") != request["task_name"]
         or record.get("attempt") != attempt
@@ -141,6 +154,10 @@ def _verify_reference(
             raise GraphError(f"node {node_id} invalid dispatch now has a valid envelope")
     else:
         _verify_dispatch(state, node_id, reference["attempt"], reference["wave_id"], call_id, requests)
+    if "message_sha256" in reference:
+        message = cast(dict[str, Any], requests[call_id][0]).get("message")
+        if not isinstance(message, str) or hashlib.sha256(message.encode()).hexdigest() != reference["message_sha256"]:
+            raise GraphError(f"node {node_id} encrypted native message changed")
     child_terminal(
         state["session_id"],
         reference["agent_thread_id"],
@@ -366,14 +383,16 @@ def bind_worker_evidence(
             "agent_thread_id": agent_thread_id,
             "task_complete_turn_id": terminal,
         }
+        message = cast(dict[str, Any], requests[call_id][0]).get("message")
+        if isinstance(message, str) and not message.startswith(graph_contract.ENVELOPE_KEY + "="):
+            reference["message_sha256"] = hashlib.sha256(message.encode()).hexdigest()
         identifiers = {call_id, agent_thread_id, terminal}
         if used & identifiers:
             raise GraphError(f"node {node_id} reuses transcript evidence")
         _verify_reference(state, node_id, reference, indexes, refusals, requests)
         used.update(identifiers)
         references[node_id] = reference
-    used = _stored_references(state, False, used)
-    return references, used
+    return references, _stored_references(state, False, used)
 
 
 def validate_worker_evidence(state: dict[str, Any]) -> None:
