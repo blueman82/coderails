@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -45,6 +46,13 @@ def approve(args: argparse.Namespace) -> int:
     if bind is None:
         return refuse("receipt_refused_binding_unknown", "cannot compute repository+ref+sha", args.session, args.loop)
     branch = args.branch if args.branch is not None else git_out(cwd, "branch", "--show-current")
+    try:
+        hours = args.expires_in_hours
+        if not math.isfinite(hours) or hours <= 0:
+            raise ValueError("expiry must be finite and positive")
+        expires = (now + timedelta(hours=hours)).isoformat(timespec="seconds")
+    except (OverflowError, ValueError) as error:
+        return refuse("receipt_refused_expiry_invalid", str(error), args.session, args.loop)
     proposed = ar.proposed_action(args.kind, args.action_command, cwd, branch, bind)
     receipt_id = str(uuid.uuid4())
     obj: dict[str, Any] = {
@@ -60,7 +68,7 @@ def approve(args: argparse.Namespace) -> int:
         "nonce": uuid.uuid4().hex,
         "scope": args.scope,
         "issued_at": now.isoformat(timespec="seconds"),
-        "expires_at": (now + timedelta(hours=args.expires_in_hours)).isoformat(timespec="seconds"),
+        "expires_at": expires,
         "single_use": True,
         "revoked": False,
         "signature": None,

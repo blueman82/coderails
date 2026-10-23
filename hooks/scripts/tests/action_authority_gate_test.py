@@ -280,9 +280,11 @@ class GateTests(HookCase):
         chained = f"echo x; {PUSH} && {PUSH}"
         self.assertTrue(self.denied("action_authority_gate", self.payload(chained)))
         self.assertNotIn("denied_no_receipt", self.reasons())
+        self.assertEqual(self.reasons().count("receipt_consumed"), 1)
         self.mint(PUSH, "git_push", rid="r2")
         self.mint(PUSH, "git_push", rid="r3")
         self.assertFalse(self.denied("action_authority_gate", self.payload(chained)))
+        self.assertEqual(self.reasons().count("receipt_consumed"), 3)
 
     def test_concurrent_hooks_one_receipt_exactly_one_allowed(self) -> None:
         """Four parallel hook processes on one receipt: the O_EXCL claim decides, so one allows and three deny."""

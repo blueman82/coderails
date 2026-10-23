@@ -76,11 +76,10 @@ def main() -> int:
                 if found is None:
                     missing = (name, code)
                     break
-        if missing is None:
-            if mode_ == "enforce":
-                if tier == USER_TIER:  # the allow rests on the agent-writable tier: a cooperating-agent safeguard
+                if tier == USER_TIER:
                     append_row("action_authority", "allowed", USER_TIER, trace_id, loop_id)
                 append_row("action_authority", "allowed", "receipt_consumed", trace_id, loop_id)
+        if missing is None:
             return 0
         name, code = missing
         if mode_ == "advisory":
