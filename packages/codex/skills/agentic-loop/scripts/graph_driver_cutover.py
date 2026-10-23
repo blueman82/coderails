@@ -95,7 +95,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 checkouts,
                 "codex",
                 lambda prompt, record: graph_driver_codex.command(
-                    prompt, graph_driver_controller.checkout_for(checkouts, record["node_id"])
+                    prompt,
+                    graph_driver_controller.checkout_for(checkouts, record["node_id"]),
+                    role=record["contract"]["role"],
+                    model_role=record["contract"]["model_role"],
                 ),
                 graph_driver_codex.result,
             )

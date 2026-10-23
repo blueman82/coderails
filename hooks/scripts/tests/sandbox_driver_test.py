@@ -63,8 +63,22 @@ class SandboxDriverTests(unittest.TestCase):
             self.assertIn("@anthropic-ai/sandbox-runtime@0.0.65", argv)
             self.assertIn("--json-schema", argv)
             self.assertIn("stream-json", argv)
-            self.assertIn("Agent", argv)
+            self.assertIn("Agent", argv[argv.index("--disallowedTools") + 1])
+            self.assertIn("Bash", argv[argv.index("--allowedTools") + 1])
             self.assertNotIn("owned worker prompt", " ".join(argv))
+            guarded = subprocess.run(
+                [sys.executable, str(launcher), "--driver", str(checkout), str(prompt), "sonnet", "preflight-scout"],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            self.assertEqual(guarded.returncode, 0, guarded.stderr)
+            scout_argv = json.loads(capture.read_text())
+            self.assertNotIn("Bash", scout_argv[scout_argv.index("--allowedTools") + 1])
+            self.assertIn("Bash", scout_argv[scout_argv.index("--disallowedTools") + 1])
 
 
 if __name__ == "__main__":

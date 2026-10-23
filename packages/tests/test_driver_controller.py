@@ -297,6 +297,8 @@ class DriverControllerTests(unittest.TestCase):
             prompt = graph_driver_controller._prompt(  # pyright: ignore[reportPrivateUsage]
                 case.path, case.read(), dispatch_id, record, Path(directory).resolve(), "codex"
             )
+            self.assertIn("Role instructions for loop-worker", prompt.read_text())
+            self.assertIn("Acceptance: source edits and checks ready for root publication", prompt.read_text())
             authorized = subprocess.run(
                 [
                     sys.executable,
@@ -350,6 +352,8 @@ class DriverControllerTests(unittest.TestCase):
                 case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
 
                 def command(prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
+                    self.assertIn("Role instructions for loop-worker", prompt.read_text())
+                    self.assertIn("Acceptance: source edits and checks ready for root publication", prompt.read_text())
                     return [sys.executable, "-c", "import sys; print(sys.stdin.readline().strip())"], None, prompt
 
                 def result(output: Path, _code: int, current: str = provider) -> dict[str, Any]:

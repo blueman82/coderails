@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 from typing import Any, cast
+
+MODELS = {"fast-mechanical": "gpt-6-luna", "default": "gpt-6.1-sol", "frontier": "gpt-6-astra"}
 
 SCHEMA = {
     "type": "object",
@@ -51,13 +54,22 @@ SCHEMA = {
 }
 
 
-def command(prompt: Path, checkout: Path, cli: str | None = None) -> tuple[list[str], None, Path]:
+def command(
+    prompt: Path,
+    checkout: Path,
+    cli: str | None = None,
+    *,
+    role: str = "loop-worker",
+    model_role: str = "default",
+) -> tuple[list[str], dict[str, str] | None, Path]:
     """Use the installed OAuth CLI with a fixed sandbox and a result schema."""
     if prompt.is_symlink() or not prompt.is_file() or not checkout.is_dir():
         raise ValueError("Codex prompt or checkout is invalid")
     executable = cli or shutil.which("codex")
     if not executable:
         raise ValueError("codex exec is not installed")
+    if model_role not in MODELS:
+        raise ValueError("driver model role is invalid")
     artifact = prompt.parent
     schema_path = artifact / "result.schema.json"
     data = json.dumps(SCHEMA, sort_keys=True, separators=(",", ":"))
@@ -67,21 +79,56 @@ def command(prompt: Path, checkout: Path, cli: str | None = None) -> tuple[list[
     else:
         with schema_path.open("x", encoding="utf-8") as stream:
             stream.write(data)
-    argv = [
-        executable,
-        "exec",
+    root = Path(__file__).resolve().parents[3]
+    try:
+        agents: dict[str, list[str]] = json.loads((root / "capabilities/profiles.json").read_text())["agents"]
+        capabilities = set(agents[role])
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ValueError("driver role capability profile is invalid") from error
+    guarded = bool(capabilities & {"repo.inspect", "diff.read", "tests.run", "pr.comment", "cmd.run"}) and not bool(
+        capabilities & {"shell.raw", "worktree.write"}
+    )
+    if guarded:
+        wrapper = root / "scripts/codex_role_session.py"
+        if not wrapper.is_file():
+            raise ValueError("guarded Codex role launcher is missing")
+        argv = [
+            sys.executable,
+            str(wrapper),
+            "--role",
+            role,
+            "--prompt-file",
+            str(prompt),
+            "--cwd",
+            str(checkout),
+            "--schema",
+            str(schema_path),
+            "--final",
+            str(artifact / "final.json"),
+            "--model",
+            MODELS[model_role],
+        ]
+        return argv, None, prompt
+    else:
+        argv = [
+            executable,
+            "exec",
+            "--sandbox",
+            "read-only" if role == "spec-reviewer" else "workspace-write",
+            "-C",
+            str(checkout),
+            "-",
+        ]
+    argv[-1:-1] = [
         "--json",
-        "--sandbox",
-        "workspace-write",
+        "--model",
+        MODELS[model_role],
         "--output-schema",
         str(schema_path),
         "--output-last-message",
         str(artifact / "final.json"),
         "-c",
         "features.multi_agent=false",
-        "-C",
-        str(checkout),
-        "-",
     ]
     return argv, None, prompt
 

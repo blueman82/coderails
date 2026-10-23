@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT))
 TOOLS = {"repo.inspect", "diff.read", "tests.run", "pr.comment", "cmd.run"}
 ENV_ALLOW = ("PATH", "HOME", "CODEX_HOME", "LANG", "LC_ALL", "TERM", "TMPDIR")
 ROLE = re.compile(r"^[a-z][a-z0-9-]{0,60}$")
-OPTIONS = {"--role", "--prompt-file", "--cwd"}
+OPTIONS = {"--role", "--prompt-file", "--cwd", "--schema", "--final", "--model"}
 APPROVAL = 'default_tools_approval_mode = "approve"'
 
 
@@ -126,6 +126,32 @@ def main(argv: list[str]) -> int:
         print(f"codex_role_session: prompt file {prompt} not found", file=sys.stderr)
         emit("refused", "codex_role_session_no_prompt", role)
         return 2
+    driver_options = {"--schema", "--final", "--model"}
+    if driver_options & set(args):
+        schema = Path(args.get("--schema", ""))
+        final = Path(args.get("--final", ""))
+        model = args.get("--model", "")
+        if (
+            not driver_options <= set(args)
+            or schema.is_symlink()
+            or not schema.is_file()
+            or schema.parent.resolve() != prompt.parent.resolve()
+            or final.parent.resolve() != prompt.parent.resolve()
+            or not re.fullmatch(r"[A-Za-z0-9._-]+", model)
+        ):
+            print("codex_role_session: invalid driver output controls", file=sys.stderr)
+            return 2
+        command[-1:-1] = [
+            "--json",
+            "--model",
+            model,
+            "--output-schema",
+            str(schema),
+            "--output-last-message",
+            str(final),
+            "-c",
+            "features.multi_agent=false",
+        ]
     emit("ok", "codex_role_session_launched", role)
     with prompt.open("rb") as stream:
         return subprocess.run(command, stdin=stream, env=scrubbed_env(), check=False).returncode

@@ -180,15 +180,31 @@ def _prompt(
     node = graph_spec.node_for(graph_spec.load_spec(), record["node_id"])
     if node is None:
         raise ValueError("driver task has no graph specification")
+    role = record["contract"]["role"]
+    if role not in graph_contract.roles():
+        raise ValueError("driver task has no valid role")
+    suffix = ".toml" if provider == "codex" else ".md"
+    roots = [
+        root
+        for parent in Path(__file__).resolve().parents
+        for root in ((parent, parent / "codex", parent / "packages/codex") if provider == "codex" else (parent,))
+    ]
+    source = next(
+        (root / "agents" / f"{role}{suffix}" for root in roots if (root / "agents" / f"{role}{suffix}").is_file()),
+        None,
+    )
+    if source is None:
+        raise ValueError("driver role instructions are missing")
+    content += f"\nRole instructions for {role}:\n{source.read_text(encoding='utf-8')}\n"
     content += f"\nTask: {node['label']}\n"
-    codex_unit = provider == "codex" and graph_spec.split_id(record["node_id"])[0] == "U3"
-    acceptance = "source edits and checks ready for root publication" if codex_unit else node["ready_when"]
+    implementation = graph_spec.split_id(record["node_id"])[0] == "U3"
+    acceptance = "source edits and checks ready for root publication" if implementation else node["ready_when"]
     content += f"Acceptance: {acceptance}\n"
     content += f"Assigned scope: {record['contract']['scope']}\n"
     content += f"Checkout: {checkout}\n"
     content += "Work only in the assigned checkout. Report failed if the task is unclear or incomplete.\n"
     content += "For done, give a final_report with cited claims and explicit did_not_verify items.\n"
-    if codex_unit:
+    if implementation:
         content += "Do not run git add or git commit. The root will commit and open the PR after checking your work.\n"
     content += "Do not push, open a PR, merge, or change progress.json without the owner's explicit go.\n"
     if prompt.exists():

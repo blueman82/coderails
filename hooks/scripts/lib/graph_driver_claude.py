@@ -10,14 +10,16 @@ from typing import Any, Callable, cast
 import graph_driver_controller
 
 
-def command(prompt: Path, checkout: Path, model: str = "sonnet") -> tuple[list[str], None, Path]:
+def command(
+    prompt: Path, checkout: Path, model: str = "sonnet", role: str = "loop-worker"
+) -> tuple[list[str], None, Path]:
     """Build one contained Claude worker command without another launch path."""
     if prompt.is_symlink() or not prompt.is_file() or not checkout.is_dir():
         raise ValueError("Claude prompt or checkout is invalid")
     launcher = Path(__file__).resolve().parents[3] / "scripts/sandbox/spawn_sandboxed_worker.py"
     if not launcher.is_file():
         raise ValueError("Claude sandbox launcher is missing")
-    return [sys.executable, str(launcher), "--driver", str(checkout), str(prompt), model], None, prompt
+    return [sys.executable, str(launcher), "--driver", str(checkout), str(prompt), model, role], None, prompt
 
 
 def _failed(code: str) -> dict[str, str]:
@@ -80,7 +82,7 @@ def run_wave(
     def select(prompt: Path, record: dict[str, Any]) -> tuple[list[str], None, Path]:
         """Pin the model to the frozen dispatch role."""
         worker_checkout = graph_driver_controller.checkout_for(checkout, record["node_id"])
-        return command(prompt, worker_checkout, models[record["contract"]["model_role"]])
+        return command(prompt, worker_checkout, models[record["contract"]["model_role"]], record["contract"]["role"])
 
     return runner(
         path,
