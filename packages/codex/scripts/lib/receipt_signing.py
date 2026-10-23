@@ -92,14 +92,16 @@ def check(text: str, block: object, signers: Path | None) -> str:
         return MISSING
     with tempfile.TemporaryDirectory() as scratch:
         sig = Path(scratch) / "body.sig"
-        sig.write_text(armored)
         try:
+            sig.write_bytes(armored.encode("ascii"))
             if _run(["ssh-keygen", "-Y", "check-novalidate", "-n", NAMESPACE, "-s", str(sig)], text).returncode:
                 return "signature_invalid"
             trusted = _run(
                 ["ssh-keygen", "-Y", "verify", "-f", str(signers), "-I", signer, "-n", NAMESPACE, "-s", str(sig)],
                 text,
             )
+        except UnicodeEncodeError:
+            return "signature_invalid"
         except SigningError:
             return MISSING
     return "signer_unknown" if trusted.returncode else "ok"

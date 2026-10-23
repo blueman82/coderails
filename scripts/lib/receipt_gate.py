@@ -19,7 +19,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import action_receipt as ar
@@ -63,6 +63,7 @@ def check_and_consume(
     signers: Path | None,
     consume: bool = True,
     stale: bool = False,
+    on_claim: Callable[[str], None] | None = None,
 ) -> tuple[str, str] | None:
     """None when every (name, proposed) segment is allowed, else (name, reason code). consume=False only verifies.
 
@@ -91,6 +92,8 @@ def check_and_consume(
         if path is None:
             return name, code
         _record(path, name, proposed)
+        if on_claim is not None:
+            on_claim(name)
     return None
 
 

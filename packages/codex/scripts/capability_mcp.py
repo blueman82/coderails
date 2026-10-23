@@ -156,7 +156,9 @@ def main(argv: list[str]) -> int:
         profile = json.loads((ROOT / "capabilities" / "profiles.json").read_text(encoding="utf-8"))
         if role not in profile["agents"]:
             return refuse_start(role, f"role {role!r} is not in capabilities/profiles.json")
-        granted = profile["agents"][role]
+        granted = cast("list[object]", profile["agents"][role])
+        if type(granted) is not list or any(type(tool) is not str for tool in granted):
+            return refuse_start(role, "capabilities/profiles.json has malformed role grants")
     except (OSError, ValueError, KeyError, TypeError):
         return refuse_start(role, "capabilities/profiles.json unreadable or malformed")
     allowed = {name: tool for name, tool in ALL_TOOLS.items() if tool in granted}

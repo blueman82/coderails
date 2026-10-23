@@ -149,7 +149,10 @@ def cmd_run(cap: ModuleType, raw: object) -> Result:
             values[key] = value
         else:
             raise cap.RefusalError("capability_bad_ref" if kind == "ref" else "capability_profiles_invalid", key)
-    argv = [values[t[1:-1]] if t[:1] == "{" and t[-1:] == "}" else t for t in entry["argv"]]
+    try:
+        argv = [values[t[1:-1]] if t[:1] == "{" and t[-1:] == "}" else t for t in entry["argv"]]
+    except KeyError:
+        raise cap.RefusalError("capability_profiles_invalid", "unknown named command placeholder") from None
     env = {k: os.environ[k] for k in ("PATH", "LANG", "TMPDIR") if k in os.environ}
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:

@@ -81,15 +81,17 @@ def main() -> int:
         if bad:
             append_trace_row("action_authority", "advisory", "action_authority_bad_mode", trace_id, {"loop_id": loop})
         signers, tier = resolve_trust_root()
+
+        def claimed(_name: str) -> None:
+            if tier == USER_TIER:
+                append_trace_row("action_authority", "allowed", USER_TIER, trace_id, {"loop_id": loop})
+            append_trace_row("action_authority", "allowed", "receipt_consumed", trace_id, {"loop_id": loop})
+
         missing = check_and_consume(
             session, [proposal(*segment) for segment in segments], datetime.now(timezone.utc), loop, signers,
-            consume=mode_ == "enforce", stale=state_mutated_before_guard(command),
+            consume=mode_ == "enforce", stale=state_mutated_before_guard(command), on_claim=claimed,
         )  # fmt: skip
         if missing is None:
-            if mode_ == "enforce":
-                if tier == USER_TIER:  # the allow rests on the agent-writable tier: a cooperating-agent safeguard
-                    append_trace_row("action_authority", "allowed", USER_TIER, trace_id, {"loop_id": loop})
-                append_trace_row("action_authority", "allowed", "receipt_consumed", trace_id, {"loop_id": loop})
             return 0
         name, code = missing
         if mode_ == "advisory":

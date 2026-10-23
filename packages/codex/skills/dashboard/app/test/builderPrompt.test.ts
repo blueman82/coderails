@@ -76,6 +76,9 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("MUST NOT put verbatim transcript prose");
     expect(prompt).not.toContain("$coderails-codex:push");
     expect(prompt).toContain("spawn_agent");
+    expect(prompt).toContain("codex_role_session.py");
+    expect(prompt).not.toContain("Do not spawn further headless codex sessions or agent teams.");
+    expect(prompt).not.toContain("use spawn_agent to run the installed spec-reviewer, source-auditor");
     expect(prompt).not.toContain("pr-review-toolkit");
   });
 
