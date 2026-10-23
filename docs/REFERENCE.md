@@ -754,7 +754,8 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `evals.require_signatures` | boolean/null | `false` | enforced_by_code | true = eval artifacts must be signed; refuse when signing is impossible. |
 <!-- config-schema:end -->
 
-Publication unit scope is opt-in through paired `--unit N --progress PATH` flags, including equals syntax. The requested
+Publication uses paired `--unit N --progress PATH` flags, including equals syntax, when this session owns a graph unit
+in the current worktree. Standalone publication without a matching graph unit uses the policy alone. The requested
 unit needs a string-list manifest and an absolute worktree matching the real repository root; progress needs nonblank
 string session and loop ids. Missing or mismatched metadata refuses `manifest_unreadable`; `manifest: []` permits no
 changed paths. This validates shape and worktree, not publisher identity: same-worktree forged owner fields remain a

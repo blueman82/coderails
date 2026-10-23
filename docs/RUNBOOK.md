@@ -177,7 +177,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   forms are supported; empty or repeated flag values refuse. A requested unit must exist and carry a string-list `manifest`
   and a nonblank absolute `worktree` whose real path equals the current Git repository root. The progress object must carry
   nonblank string `session_id` and `loop_id` fields. Missing, malformed or mismatched metadata refuses `manifest_unreadable`;
-  `manifest: []` allows no changed paths. With no paired flags, standalone publication uses the policy alone. Unit and policy
+  `manifest: []` allows no changed paths. A session that owns a graph unit in this worktree must supply both flags.
+  Without a matching graph unit, standalone publication uses the policy alone. Unit and policy
   manifests both apply, so a unit cannot widen policy scope. Custom policies retain the default denylist. An unreadable config
   refuses `manifest_internal_error` and emits its refusal trace. Direct-merge hooks parse
   the target with `scripts/lib/merge_target.py` (flag values skipped, URL and branch resolved through gh); `-R/--repo`, another

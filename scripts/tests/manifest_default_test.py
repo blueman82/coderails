@@ -158,6 +158,28 @@ class DefaultGateTests(RepoCase):
         self.commit("docs/guide.md", "hello\n")
         self.gate()
 
+    def test_graph_publication_without_unit_refuses(self) -> None:
+        """A session-owned graph unit cannot publish without its manifest binding."""
+        self.commit("docs/guide.md", "hello\n")
+        session = "manifest-test-session"
+        common = git_cmd(self.dir, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        progress = self.loop / common.replace("/", "-") / session / "progress.json"
+        progress.parent.mkdir(parents=True)
+        progress.write_text(
+            json.dumps(
+                {
+                    "schema_version": 3,
+                    "session_id": session,
+                    "loop_id": "manifest-test-loop",
+                    "work_units": {"C1": {"worktree": str(self.dir), "manifest": ["docs/**"]}},
+                }
+            )
+        )
+        with mock.patch.dict(
+            os.environ, {"CLAUDE_CODE_SESSION_ID": session, "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}
+        ):
+            self.assertEqual(self.refusal(), "diff_manifest:manifest_unreadable")
+
     def test_off_passes_the_violating_diff(self) -> None:
         """Negative control: diff_manifest off proves the refusal comes from the gate."""
         self.commit(SECRET, "k=v\n")

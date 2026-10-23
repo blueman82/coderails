@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import re
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
@@ -188,6 +190,47 @@ def unit_manifest(progress: str, unit: str) -> list[str]:
     return strings(cast(list[object], manifest))
 
 
+def active_graph_unit() -> bool:
+    """True when this session owns a graph unit in the current worktree."""
+    session = (
+        os.environ.get("CODERAILS_PUBLICATION_SESSION_ID")
+        or os.environ.get("CLAUDE_CODE_SESSION_ID")
+        or os.environ.get("CODEX_THREAD_ID")
+        or ""
+    )
+    if not session:
+        return False
+    session = session.replace("/", "_").replace("..", "")
+    root = Path(
+        os.environ.get("CLAUDE_AGENTIC_LOOP_DIR")
+        or os.environ.get("CODERAILS_AGENTIC_LOOP_DIR")
+        or Path.home() / ".coderails/agentic-loop"
+    )
+    common = git.output("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
+    current = git.output("git", "rev-parse", "--show-toplevel")
+    if not common or not current:
+        return False
+    paths = [root / common.replace("/", "-") / session / "progress.json"]
+    with suppress(OSError):
+        paths += [directory / session / "progress.json" for directory in root.iterdir() if directory.is_dir()]
+    for path in paths:
+        if not path.is_file():
+            continue
+        state = load_json(path)
+        if state is None:
+            return True
+        if state.get("session_id") != session or not isinstance(state.get("work_units"), dict):
+            continue
+        units = cast(dict[str, Any], state["work_units"])
+        for entry in units.values():
+            if not isinstance(entry, dict):
+                continue
+            worktree = cast(dict[str, Any], entry).get("worktree")
+            if isinstance(worktree, str) and Path(worktree).resolve() == Path(current).resolve():
+                return True
+    return False
+
+
 def unit_flags(arguments: list[str]) -> tuple[list[str], str, str]:
     """Split `--unit N --progress PATH` out of an argument list: (remaining arguments, unit, progress)."""
     rest: list[str] = []
@@ -246,6 +289,8 @@ def _evaluate(pr: str, head: str, policy_file: str, unit: str, progress: str, la
     found = cast(list[dict[str, str]], check(changes, policy, manifest, linked)["violations"])
     if scoped is not None:
         found += [v for v in check(changes, {}, scoped)["violations"] if v not in found]
+    if not unit and not progress and active_graph_unit():
+        found.append({"code": "manifest_unreadable", "path": "graph unit requires --unit and --progress"})
     return found
 
 

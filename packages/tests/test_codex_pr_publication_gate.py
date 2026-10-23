@@ -143,6 +143,23 @@ class CodexPublicationGateTests(unittest.TestCase):
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
         self.assertEqual(self.reason("gh pr merge 7"), "")
 
+    def test_owned_graph_unit_needs_manifest_binding(self) -> None:
+        """The direct hook uses its session ID to refuse an unbound graph publication."""
+        common = git_cmd(self.dir, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        progress = self.loop / common.replace("/", "-") / "s1" / "progress.json"
+        progress.parent.mkdir(parents=True)
+        progress.write_text(
+            json.dumps(
+                {
+                    "schema_version": 3,
+                    "session_id": "s1",
+                    "loop_id": "test-loop",
+                    "work_units": {"C1": {"worktree": str(self.dir), "manifest": ["docs/**"]}},
+                }
+            )
+        )
+        self.assertTrue(self.reason("gh pr merge 1").startswith("diff_manifest:manifest_unreadable"))
+
     def test_gh_repo_retarget_refuses_even_clean_diff(self) -> None:
         """A same-number PR in another repository cannot borrow this repository's clean result."""
         git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")

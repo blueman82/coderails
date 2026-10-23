@@ -36,6 +36,9 @@ def main() -> int:
     command = data.get("command") if isinstance(data, dict) else None
     if not isinstance(command, str) or not command:
         return 0
+    session = payload.get("session_id")
+    if isinstance(session, str) and session:
+        os.environ["CODERAILS_PUBLICATION_SESSION_ID"] = session
     name, segment, target = operation(command)
     cwd = str(payload.get("cwd") or os.getcwd())
     segments = [(name, segment, cwd)] if name and name != "merge" else []
