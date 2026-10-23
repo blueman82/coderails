@@ -77,8 +77,9 @@ Build the second typed line, the compat-findings line. `COMPAT_COUNT` is the num
 `review-pr` output that flag retained backward-compatibility code (shims, aliases, fallbacks kept for old callers);
 `DISPOSITION` is `preserve-compat` when a work unit of this change was registered with
 `add-unit --disposition preserve-compat`, otherwise `clean-break`. Both are the reviewer's own judgement: nothing
-measures the count, and `/coderails:merge` refuses only `clean-break` with a count above zero
-(`compat_findings_nonzero`). An artifact without this line still passes (legacy artifacts).
+measures the count, and `/coderails:merge` refuses `clean-break` with a count above zero
+(`compat_findings_nonzero`). A missing current-head line blocks with `compat_findings_missing`; regenerate and post
+the review artifact, including a zero count when the review found no compatibility code.
 
 ```bash
 COMPAT=$(./scripts/post_review.py compat-line "$ARGUMENTS" "$HEAD_SHA" --count "$COMPAT_COUNT" --disposition "$DISPOSITION")

@@ -267,12 +267,24 @@ def append_decision(
         row["worker_status_seq"] = worker_status_seq
         statuses = _items(proposed.get("worker_statuses") or []) or []
         named = [status for status in statuses if status.get("seq") == worker_status_seq]
-        if not named or named[0].get("decision_pending") is not True:
+        if (
+            len(named) != 1
+            or type(named[0].get("seq")) is not int
+            or named[0].get("decision_pending") is not True
+            or named[0].get("status") not in STATUSES
+        ):
             raise WorkerResultError("record_decision_refused_status", f"no pending worker status {worker_status_seq}")
         status = named[0]
         if status.get("status") == "NEEDS_DECISION":
-            payload = cast("dict[str, Any]", status.get("payload") or {})
-            if row["chosen"] not in payload.get("options", []):
+            payload = cast("dict[str, Any] | None", status.get("payload"))
+            options = payload.get("options") if isinstance(payload, dict) else None
+            if (
+                not isinstance(options, list)
+                or len(cast("list[object]", options)) < 2
+                or not all(_text(option) for option in cast("list[object]", options))
+            ):
+                raise WorkerResultError("record_decision_refused_status", "pending status has malformed options")
+            if row["chosen"] not in options:
                 raise WorkerResultError("record_decision_refused_chosen", "--chosen is not one of the status options")
         elif status.get("status") in STOP_FOR and not human_answer:
             raise WorkerResultError("record_decision_refused_human", "approval-gate status needs --human-answer")

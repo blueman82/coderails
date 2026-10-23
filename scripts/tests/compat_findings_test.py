@@ -90,7 +90,7 @@ class CompatLineCliTests(unittest.TestCase):
 
 
 class MergeGateTests(unittest.TestCase):
-    """merge.py refuses a clean-break unit whose review reported compat findings; legacy artifacts pass."""
+    """merge.py requires current-head compatibility findings and refuses incompatible clean breaks."""
 
     def verdict(self, root: Path, *lines: str) -> str:
         """The WorkflowError message verify_gates raises for a trusted comment holding these lines."""
@@ -109,8 +109,8 @@ class MergeGateTests(unittest.TestCase):
                 self.assertIn("compat_findings_nonzero", self.verdict(root, compat(3, "clean-break")))
                 self.assertIn(passes, self.verdict(root, compat(0, "clean-break")))
                 self.assertIn(passes, self.verdict(root, compat(3, "preserve-compat")))
-                self.assertIn(passes, self.verdict(root))  # legacy artifact: no marker
-                self.assertIn(passes, self.verdict(root, compat(3, "clean-break", "otherhead")))
+                self.assertIn("compat_findings_missing", self.verdict(root))
+                self.assertIn("compat_findings_missing", self.verdict(root, compat(3, "clean-break", "otherhead")))
                 broken = self.verdict(root, "<!-- coderails-compat-findings v1 pr=42 -->")
                 self.assertIn("compat_findings_malformed", broken)
                 mixed = self.verdict(root, compat(0, "clean-break"), compat(3, "clean-break"))

@@ -422,8 +422,9 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   `post_review.py compat-line <pr> <sha> --count K --disposition D`) with `disposition=clean-break` and `K > 0`. Remove the
   retained compatibility code, creating a new head SHA, and post a fresh review; or register the unit `preserve-compat`
   with a blocker and ticket. Posting a passing review on the same SHA cannot override an earlier refusing compat line.
-  `compat_findings_malformed` means a line with that prefix is not exactly the typed form; an artifact with no such line
-  passes (legacy). The v1 review marker the root-owned integrity daemon matches is unchanged. Any refusing line for the
+  `compat_findings_malformed` means a line with that prefix is not exactly the typed form. `compat_findings_missing`
+  means no line matches this PR and head; post a fresh artifact including the line, even for a zero count.
+  The v1 review marker the root-owned integrity daemon matches is unchanged. Any refusing line for the
   head wins; the merge refusal is a stderr reason code, not a trace row (merge.py has no loop session).
 - Limits: `K` and `D` are the reviewer's own judgement, not a measurement, and a same-user agent can write any line, so
   this is drift detection for a cooperating reviewer, not tamper evidence. The gate reads the PR's artifact only; it does
@@ -445,8 +446,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   `pending_statuses` (rows still `decision_pending`) and `decision_recorded`.
 - `record-decision` says `record_decision_refused_<foreign|field|state|status|chosen|human>`: the session does not own the
   graph, a flag is blank, `decisions_absorbed` is not an array of objects, `--worker-status-seq` names no pending status
-  (unknown or already resolved), `--chosen` is not one of a `NEEDS_DECISION` status's options, or the status is an
-  approval gate (`OUTSIDE_SCOPE`, `IRREVERSIBLE_ACTION`) and `--human-answer` was not passed. Nothing is written. It does
+  (unknown, already resolved, duplicated, or malformed), `--chosen` is not one of a `NEEDS_DECISION` status's options,
+  or the status is an approval gate (`OUTSIDE_SCOPE`, `IRREVERSIBLE_ACTION`) and `--human-answer` was not passed. Nothing is written. It does
   not bump the revision. Limits: `phase`, `decision` and `chosen` are free text outside a status-linked answer (no enum,
   no check against the graph); hand-appended `{phase, decision}` rows stay valid and unnumbered. There is no caller
   authentication: `--session` and `--human-answer` are self-asserted, so a same-user agent can still forge a human

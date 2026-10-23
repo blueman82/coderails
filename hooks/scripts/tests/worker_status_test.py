@@ -192,7 +192,9 @@ class FinalReportAndPrepareTests(unittest.TestCase):
         state: dict[str, Any] = {
             "session_id": "s",
             "revision": 4,
-            "worker_statuses": [{"seq": 1, "decision_pending": True}],
+            "worker_statuses": [
+                {"seq": 1, "status": "NEEDS_DECISION", "payload": {"options": ["c", "d"]}, "decision_pending": True}
+            ],
         }
         fields: dict[str, str | None] = {"phase": " 2.6 ", "decision": "d", "chosen": "c", "flip_condition": None}
         proposed, row = ws.append_decision(state, "s", fields, 1)
@@ -201,7 +203,8 @@ class FinalReportAndPrepareTests(unittest.TestCase):
         )
         self.assertEqual((row["seq"], row["phase"], row["revision"]), (1, "2.6", 4))
         self.assertEqual(
-            proposed["worker_statuses"][0], {"seq": 1, "decision_pending": False, "resolved_by_decision": 1}
+            proposed["worker_statuses"][0],
+            {**state["worker_statuses"][0], "decision_pending": False, "resolved_by_decision": 1},
         )
         self.assertNotIn("decisions_absorbed", state)
         bad: list[tuple[dict[str, Any], str, dict[str, str | None], int | None]] = [

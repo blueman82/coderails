@@ -140,6 +140,26 @@ class RecordDecisionTests(ControllerCase):
             self.assertEqual(sorted(row["seq"] for row in rows), [1, 2, 3, 4, 5, 6])
             self.assertEqual({row["chosen"] for row in rows}, {f"c{n}" for n in range(6)})
 
+    def test_malformed_or_ambiguous_pending_status_cannot_be_resolved(self) -> None:
+        """Unknown status kinds, duplicate ids and malformed options cannot clear the decision gate."""
+        pending = {"seq": 1, "status": "NEEDS_DECISION", "payload": {"options": ["a", "b"]}, "decision_pending": True}
+        cases = [
+            [{**pending, "status": "UNKNOWN"}],
+            [pending, pending],
+            [{**pending, "payload": {"options": "abc"}}],
+            [{**pending, "payload": {"options": ["a"]}}],
+            [{**pending, "seq": True}],
+        ]
+        for c in self.each():
+            self.started(c)
+            original = c.read()
+            for statuses in cases:
+                state = {**original, "worker_statuses": statuses}
+                c.path.write_text(json.dumps(state), encoding="utf-8")
+                before = c.path.read_bytes()
+                self.refused(decide(c, "--chosen", "a", "--worker-status-seq", "1"), "record_decision_refused_status")
+                self.assertEqual(c.path.read_bytes(), before)
+
     def test_loop_identity_is_untouched(self) -> None:
         """The command writes only the ledger (and the resolved flag): session, loop and graph keep their values."""
         for c in self.each():

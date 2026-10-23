@@ -390,7 +390,7 @@ Row 7 gives the disposition fields a code reader. `graph.py add-unit --dispositi
 contract already carried; `disposition-audit` and both providers' completion gates re-check a hand-edited state. The
 review artifact gains a second typed line `<!-- coderails-compat-findings v1 pr=N head_sha=S count=K disposition=D -->`
 (`post_review.py compat-line`); `merge.py` refuses `clean-break` with `K > 0` (`compat_findings_nonzero`), a malformed
-line (`compat_findings_malformed`), and passes an artifact without the line. The root-owned daemon's v1 marker line is
+line (`compat_findings_malformed`), and a missing current-head line (`compat_findings_missing`). The root-owned daemon's v1 marker line is
 byte-identical. Row 22 puts `worker_status.prepare()` in front of the untouched core in both `record_wave` paths: a
 result with a `status` key is validated or the whole report is rejected (`worker_status_<code>`), a valid one is recorded
 in `worker_statuses[]`, spends one retry and writes one typed stop row; a `done` result for a dispatch with

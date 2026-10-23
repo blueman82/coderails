@@ -190,6 +190,11 @@ def has_coderails_review_for_head(number: str, sha: str) -> int:
 
 def compat_failure_message(reason: str) -> str:
     """Explain a status-3 review gate result; the closed reason code is part of the text."""
+    if reason == "compat_findings_missing":
+        return (
+            "The review artifact needs a compat-findings line for the current PR head "
+            "[reason_code=compat_findings_missing]"
+        )
     if reason == "compat_findings_malformed":
         return "A compat-findings line on the review artifact is malformed [reason_code=compat_findings_malformed]"
     return (

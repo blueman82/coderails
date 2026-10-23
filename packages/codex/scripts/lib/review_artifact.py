@@ -41,15 +41,17 @@ def parse_compat_line(line: str, pr: str, head_sha: str) -> tuple[int, str] | No
 
 
 def compat_problem(bodies: list[str], pr: str, head_sha: str) -> str | None:
-    """The merge-gate reason code, or None. Absent lines pass (legacy artifacts); any refusing line wins."""
+    """Require current-head findings; any malformed or refusing line wins."""
     refusing = None
+    matched = False
     for line in (line for body in bodies for line in body.splitlines() if line.startswith(COMPAT_PREFIX)):
         if _COMPAT.fullmatch(line) is None:
             return "compat_findings_malformed"
         parsed = parse_compat_line(line, pr, head_sha)
+        matched = matched or parsed is not None
         if parsed and parsed[1] == "clean-break" and parsed[0] > 0:
             refusing = "compat_findings_nonzero"
-    return refusing
+    return refusing or (None if matched else "compat_findings_missing")
 
 
 def main() -> int:
