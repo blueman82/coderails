@@ -128,6 +128,21 @@ class DefaultGateTests(RepoCase):
         self.commit(SECRET, "k=v\n")
         self.assertEqual(self.refusal(), "diff_manifest:denied_path")
 
+    def test_protected_policy_deletion_refused_by_default(self) -> None:
+        """Deleting a policy file from the real diff is still denied."""
+        git_cmd(self.dir, "checkout", "-q", "main")
+        policy = self.dir / "policy/diff-policy.default.json"
+        policy.parent.mkdir()
+        policy.write_text("{}\n")
+        git_cmd(self.dir, "add", "-A")
+        git_cmd(self.dir, "commit", "-qm", "base policy")
+        git_cmd(self.dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git_cmd(self.dir, "checkout", "-qB", "feature/x", "origin/main")
+        policy.unlink()
+        git_cmd(self.dir, "add", "-u")
+        git_cmd(self.dir, "commit", "-qm", "remove policy")
+        self.assertEqual(self.refusal(), "diff_manifest:denied_path")
+
     def test_pr_diff_uses_target_base_not_main(self) -> None:
         """A release-targeted PR includes a denied path already present on newer main."""
         release = git_cmd(self.dir, "rev-parse", "origin/main").strip()

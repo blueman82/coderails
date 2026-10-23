@@ -171,7 +171,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Hardening notes: `mode_change` refuses a chmod (100644 to 100755). The default denylist is best-effort secret shapes
   (`.env*`, `*.pem`, `*.key`, `*.p12`, `credentials*.json`, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa|dsa|ecdsa|ed25519*`)
   and the gate's own files (`.coderails/workflow.config.yaml`, `policy/diff-policy*.json`, the Codex copy), so a PR that
-  edits them is refused; deleting a denied path is not. It cannot catch a secret under another name. The gate reads config
+  edits or deletes them is refused; deleting a secret-shaped path is allowed. It cannot catch a secret under another name. The gate reads config
   and policy from the local checkout: a same-user boundary, not a defence against someone who controls that checkout.
   `--unit` without `--progress` (or the reverse) refuses `manifest_unreadable`. Both separated and `--unit=N`/`--progress=PATH`
   forms are supported; empty or repeated flag values refuse. A requested unit must exist and carry a string-list `manifest`

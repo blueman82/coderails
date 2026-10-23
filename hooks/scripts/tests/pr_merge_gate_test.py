@@ -265,6 +265,15 @@ class MergeEvidenceTests(HookTestCase):
                     )
             self.assertEqual(guarded_segments(f"gh pr merge 42 {value}", str(self.directory)), [])
 
+    def test_api_merge_with_leading_options_is_guarded(self) -> None:
+        """A valid API merge keeps its gate when method options precede the endpoint."""
+        from hooks.scripts.lib.pr_workflow_match import guarded_segments
+
+        command = "gh api -X PUT repos/o/r/pulls/42/merge"
+        self.assertEqual(guarded_segments(command, str(self.directory)), [("merge", command, str(self.directory))])
+        unrelated = "gh api -f note=repos/o/r/pulls/42/merge repos/o/r/issues/42"
+        self.assertEqual(guarded_segments(unrelated, str(self.directory)), [])
+
     def test_lifecycle_body_values_are_guarded(self) -> None:
         """Git lifecycle text in an option value cannot exempt a PR merge."""
         from hooks.scripts.lib.pr_workflow_match import guarded_segments, operation

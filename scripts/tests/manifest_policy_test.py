@@ -47,6 +47,19 @@ class CheckTests(unittest.TestCase):
         self.assertIn({"code": "out_of_manifest", "path": "docs/x.md"}, result["violations"])
         self.assertIn({"code": "denied_path", "path": "secrets/k"}, result["violations"])
 
+    def test_protected_gate_deletion_is_denied_but_secret_deletion_is_allowed(self) -> None:
+        """Removing a protected policy file remains guarded; removing a secret is allowed."""
+        policy = {"deny": ["**/.env*", ".coderails/workflow.config.yaml", "policy/diff-policy*.json"]}
+        changes = [
+            ("D", [".env"]),
+            ("D", [".coderails/workflow.config.yaml"]),
+            ("D", ["policy/diff-policy.default.json"]),
+        ]
+        self.assertEqual(
+            codes(manifest_policy.check(changes, policy)),
+            ["denied_path", "denied_path"],
+        )
+
     def test_rename_checks_source_and_destination(self) -> None:
         """A rename of scripts/gate.sh to evil.md is caught through its source path."""
         policy = {"docs_sync": {"allow": ["**/*.md"], "deny": ["scripts/**"]}}

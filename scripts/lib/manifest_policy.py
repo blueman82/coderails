@@ -23,6 +23,11 @@ from .config import config_path, load_config
 
 DEFAULT_POLICY = Path(__file__).resolve().parents[2] / "policy" / "diff-policy.default.json"
 MODES = ("off", "advisory", "enforce")
+PROTECTED_POLICY_PATHS = [
+    ".coderails/workflow.config.yaml",
+    "policy/diff-policy*.json",
+    "packages/codex/policy/diff-policy*.json",
+]
 Changes = list[tuple[str, list[str]]]
 
 
@@ -106,7 +111,7 @@ def check(
         if statuses and status[0] not in statuses:
             add("status_not_allowed", paths[-1])
         for path in paths:
-            if matches(path, deny) and not status.startswith("D"):  # removing a secret is the safe direction
+            if matches(path, deny) and (not status.startswith("D") or matches(path, PROTECTED_POLICY_PATHS)):
                 add("denied_path", path)
             if (manifest is not None and not matches(path, manifest)) or (allow and not matches(path, allow)):
                 add("out_of_manifest", path)

@@ -19,7 +19,8 @@ from .manifest_policy import unit_flags
 AMBIGUOUS = "?"
 _VALUE_FLAGS = {
     "-b", "--body", "-F", "--body-file", "-t", "--subject", "-A", "--author-email", "--match-head-commit",
-    "--unit", "--progress", "-R", "--repo",
+    "--unit", "--progress", "-R", "--repo", "-X", "--method", "-H", "--header", "-f", "--field",
+    "--raw-field", "--input", "--jq", "-q", "--template", "--hostname", "--cache", "--preview",
 }  # fmt: skip
 _URL = re.compile(r"https?://github\.com/([^/]+/[^/]+)/pull/(\d+)/?$", re.IGNORECASE)
 
@@ -65,7 +66,7 @@ def parse(segment: str) -> tuple[str, str, str]:
     except ValueError:
         return AMBIGUOUS, "", ""
     if tokens[:2] == ["gh", "api"]:
-        endpoint = tokens[2] if len(tokens) > 2 else ""
+        endpoint = next((token for token, _ in _option_items(tokens[2:]) if not token.startswith("-")), "")
         if api := re.fullmatch(r"/?repos/([^/]+/[^/]+)/pulls/(\d+)/merge", endpoint):
             return f"https://github.com/{api[1]}/pull/{api[2]}", "", ""
         return AMBIGUOUS, "", ""

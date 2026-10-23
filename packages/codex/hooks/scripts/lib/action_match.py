@@ -60,7 +60,16 @@ def targets_main(command: str, cwd: str, target: str, name: str) -> bool:
 
 _WRAPPER = re.compile(r"^(?:[A-Za-z_]\w*=\S*|env|sudo|time|command|exec|nohup)\s+")
 _SHELL_C = re.compile(r"\b(?:bash|sh|zsh)\s+-\w*c\s+([\"'])(.*?)\1")
-_API_MERGE = re.compile(r"^gh\s+api\s+\S*/pulls/\d+/merge(?:\s|$)")
+
+
+def api_merge(segment: str) -> bool:
+    """Recognize an API merge after its option values are consumed."""
+    if not re.match(r"^gh\s+api(?:\s|$)", segment):
+        return False
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from scripts.lib.merge_target import parse
+
+    return parse(segment)[0].startswith("https://github.com/")
 
 
 def unwrap(segment: str) -> str:
@@ -97,7 +106,7 @@ def guarded_segments(command: str, cwd: str) -> list[tuple[str, str, str]]:
             for inner in _SHELL_C.finditer(segment):
                 found.extend(guarded_segments(inner[2], cwd))
             segment = _SHELL_C.sub(" ", segment)
-            if _API_MERGE.match(segment):
+            if api_merge(segment):
                 found.append(("merge", segment, cwd))
             else:
                 name, matched, target = operation(segment)

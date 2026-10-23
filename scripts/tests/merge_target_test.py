@@ -48,11 +48,15 @@ class ParseTests(unittest.TestCase):
         """No positional means the current branch; the api form carries the number in the path."""
         self.assertEqual(self.target("gh pr merge --merge"), "")
         self.assertEqual(self.target("gh api repos/o/r/pulls/9/merge -X PUT"), "https://github.com/o/r/pull/9")
+        self.assertEqual(self.target("gh api -X PUT repos/o/r/pulls/9/merge"), "https://github.com/o/r/pull/9")
 
     def test_endpoint_text_in_body_is_not_a_target(self) -> None:
         """Only the API endpoint argument selects an API merge target."""
         self.assertEqual(self.target("gh pr merge --body '/pulls/1/merge' 42"), "42")
         self.assertEqual(self.target("gh api repos/x/y/pulls/9/merge -X PUT"), "https://github.com/x/y/pull/9")
+        self.assertEqual(
+            self.target("gh api -f note=repos/x/y/pulls/9/merge repos/x/y/issues/9"), merge_target.AMBIGUOUS
+        )
 
     def test_ambiguous_is_marked(self) -> None:
         """-R/--repo and two positionals cannot be resolved against the local repo."""
