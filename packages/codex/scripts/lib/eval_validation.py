@@ -20,7 +20,7 @@ def git_output(directory: Path, *arguments: str) -> subprocess.CompletedProcess[
     return subprocess.run(["git", "-C", str(directory), *arguments], capture_output=True, text=True, check=False)
 
 
-def validate_freeze(path: str | Path, head: str = "HEAD") -> None:
+def validate_freeze(path: str | Path, head: str = "HEAD", pr: str = "") -> None:
     """Require a pre-branch freeze for the operation's target head or an explicit late-freeze disclosure."""
     data = read_object(path)
     frozen = str(data.get("frozen_sha") or "").strip()
@@ -31,7 +31,7 @@ def validate_freeze(path: str | Path, head: str = "HEAD") -> None:
         return
     if git_output(directory, "cat-file", "-e", f"{frozen}^{{commit}}").returncode:
         raise ValueError(f"frozen_sha {frozen} does not resolve to a commit in this repository")
-    base = branch_base(head, str(directory))
+    base = branch_base(head, str(directory), pr)
     if not base or not late_freeze(frozen, base, str(directory)):
         return
     disclosure = " ".join(
@@ -79,7 +79,7 @@ def validate_structure(
         raise ValueError("verification_level>=1 requires at least one P0 eval in .evals")
     if scope != "loop":
         validate_level(data, level, pr, current_head_sha, progress)
-        validate_freeze(path, current_head_sha or "HEAD")
+        validate_freeze(path, current_head_sha or "HEAD", pr)
         validate_smoke(data)
         verify_execution(data)
     new_cases = data.get("new_cases", [])

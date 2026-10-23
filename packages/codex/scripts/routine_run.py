@@ -17,6 +17,8 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -30,7 +32,10 @@ from typing import Any, cast
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from scripts import routine_log  # noqa: E402
-from scripts.lib import artifact_io  # noqa: E402
+from scripts.lib import (  # noqa: E402
+    artifact_io,
+    merge_target,
+)
 from scripts.lib import git_common as git  # noqa: E402
 
 
@@ -147,12 +152,15 @@ def report(step: str, done: subprocess.CompletedProcess[str]) -> None:
         print(f"cleanup_failed: {step}: {done.stderr.strip()}", file=sys.stderr)
 
 
-def manifest_code(run: Run) -> str:
+def manifest_code(run: Run, base: str = "", head: str = "") -> str:
     """Run diff_manifest.py with the spec's policy over a clean tree; '' when it passes, else the reason code."""
     if git.output("git", "status", "--porcelain"):
         return "dirty_worktree"
     policy = ROOT / str(run.spec.get("policy", ""))
-    done = git.run(sys.executable, str(Path(__file__).with_name("diff_manifest.py")), "--policy", str(policy))
+    command = [sys.executable, str(Path(__file__).with_name("diff_manifest.py")), "--policy", str(policy)]
+    if base and head:
+        command += ["--base", base, "--head", head]
+    done = git.run(*command)
     code, ok = "", False
     try:
         verdict = cast(dict[str, Any], json.loads(done.stdout.strip().splitlines()[-1]))
@@ -235,6 +243,30 @@ def gate_allowed(script: str, argv: list[str]) -> bool:
     )
 
 
+def merge_scope_code(run: Run, argv: list[str]) -> str:
+    """Bind a merge gate to this run's branch and check that PR's exact diff with the routine policy."""
+    target, _, _ = merge_target.parse(shlex.join(argv))
+    branch, head = git.branch(), git.output("git", "rev-parse", "HEAD")
+    if not target.isdecimal() or not branch or branch != run.state.get("branch") or not head:
+        return "gate_argv_not_allowed"
+    done = git.run("gh", "pr", "view", target, "--json", "number,headRefName,headRefOid,baseRefOid")
+    try:
+        pr = cast(dict[str, Any], json.loads(done.stdout))
+        base = pr["baseRefOid"]
+        if (
+            done.returncode
+            or pr["number"] != int(target)
+            or pr["headRefName"] != branch
+            or pr["headRefOid"] != head
+            or not isinstance(base, str)
+            or not re.fullmatch(r"[0-9a-fA-F]{40}", base)
+        ):
+            return "gate_argv_not_allowed"
+    except (ValueError, KeyError, TypeError):
+        return "gate_argv_not_allowed"
+    return manifest_code(run, base, head)
+
+
 def cmd_run_gate(run: Run, args: argparse.Namespace) -> int:
     """Run a gate command in order; any non-zero exit is a refusal for that gate."""
     argv = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
@@ -252,6 +284,10 @@ def cmd_run_gate(run: Run, args: argparse.Namespace) -> int:
         return 2
     if args.stage == "push" and manifest_check(run, "push"):  # a late edit is caught before it is pushed
         return 1
+    if args.stage == "merge" and (scope_code := merge_scope_code(run, argv)):
+        print(f"merge_scope_refused: {scope_code}", file=sys.stderr)
+        run.end(args.stage, "run_abort", scope_code)
+        return 2
     try:
         code = subprocess.run(argv, check=False).returncode
     except OSError as error:

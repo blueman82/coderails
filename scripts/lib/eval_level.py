@@ -107,19 +107,28 @@ def suite_late(data: JsonObject, base: str, directory: str = ".") -> bool:
     return late_freeze(frozen, base, directory)
 
 
-def branch_base(head: str, directory: str = ".") -> str:
-    """merge-base of origin/<default> and head, or empty text."""
+def branch_base(head: str, directory: str = ".", pr: str = "") -> str:
+    """merge-base of the PR target (or local default branch) and head, or empty text."""
     from . import git_common as git
 
-    result = _git("merge-base", f"origin/{git.main()}", head, directory=directory)
+    target = git.pr_field(pr, "baseRefOid") if pr else f"origin/{git.main()}"
+    if pr and not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", target):
+        raise ValueError("eval_level_diff_unavailable: PR base SHA unavailable")
+    result = _git("merge-base", target, head, directory=directory)
+    if pr and result.returncode:
+        raise ValueError("eval_level_diff_unavailable: PR base merge-base unavailable")
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def pr_changes(pr: str, head: str) -> Changes | None:
-    """Diff rows of the PR head against origin/<default> (fetching pull/<pr>/head when absent); None if unavailable."""
+    """Diff the PR base to head, or local default to head without a PR; None if unavailable."""
+    from . import git_common as git
     from . import manifest_policy
 
-    return manifest_policy.diff_changes(head or "HEAD", f"pull/{pr}/head" if pr else "")
+    base = git.pr_field(pr, "baseRefOid") if pr else ""
+    if pr and (not base or not head):
+        return None
+    return manifest_policy.diff_changes(head or "HEAD", f"pull/{pr}/head" if pr else "", base)
 
 
 def progress_units(progress: str) -> int:

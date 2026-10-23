@@ -34,6 +34,7 @@ class FakeGh:
         self.heads, self.existing = list(heads), existing or []
         self.calls: list[tuple[str, ...]] = []
         self.posted: list[str] = []
+        self.base = ""
 
     def __call__(self, *argv: str, check: bool = False) -> subprocess.CompletedProcess[str]:
         """Answer one argv list."""
@@ -42,7 +43,7 @@ class FakeGh:
         if argv[0] == "git":
             return subprocess.run(argv, capture_output=True, text=True, check=False)
         if argv[:3] == ("gh", "pr", "view"):
-            out = self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]
+            out = self.base if "baseRefOid" in argv else self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]
         elif argv[:3] == ("gh", "repo", "view"):
             out = "o/r"
         elif argv[:3] == ("gh", "api", "user"):
@@ -92,6 +93,7 @@ class PostCase(ArtifactCase):
 
     def post(self, fake: FakeGh, *arguments: str) -> tuple[int, str, str]:
         """Run main(['post', ...]) over the fake gh; returns (rc, stdout, stderr)."""
+        fake.base = self.base
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(git, "run", side_effect=fake), redirect_stdout(out), redirect_stderr(err):
             code = post_evals.main(["post", *(arguments or ("7", str(self.path)))])
