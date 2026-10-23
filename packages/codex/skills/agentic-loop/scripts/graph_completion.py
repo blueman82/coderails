@@ -39,6 +39,7 @@ def validate_work_units(state: dict[str, Any]) -> None:
 
 
 def validate_completion_state(
+    state_path: Path,
     state: dict[str, Any],
     session: str,
     revision: int,
@@ -55,9 +56,9 @@ def validate_completion_state(
         raise GraphError("cannot complete graph: " + ", ".join(eligibility["blockers"]))
     validate_work_units(state)
     if state["graph"].get("dispatch_mode") == "driver":
-        native = graph_driver_evidence.validate_backup(evals_path.with_name("progress.json"), state)
+        native = graph_driver_evidence.validate_backup(state_path, state)
         validate_worker_evidence(native, require_complete=False)
-        graph_driver_evidence.validate_history(evals_path.with_name("progress.json"), state)
+        graph_driver_evidence.validate_history(state_path, state)
     else:
         validate_worker_evidence(state)
     validate_completion_evidence(state, revision, evals_path, proof_path, retro_path, transcript_path)
@@ -73,7 +74,9 @@ def complete(
             raise GraphError("graph is already complete")
         revision = state["revision"]
         with traced_refusal(path, state, "complete", session):
-            validate_completion_state(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
+            validate_completion_state(
+                path, state, session, revision, evals_path, proof_path, retro_path, transcript_path
+            )
         state["status"] = "complete"
         state["revision"] += 1
         state["completion"] = {"revision": revision}
@@ -93,5 +96,5 @@ def verify_completion(
     if state["status"] != "complete" or revision != state["revision"] - 1:
         raise GraphError("graph has no valid completion record")
     with traced_refusal(path, state, "verify-completion", session):
-        validate_completion_state(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
+        validate_completion_state(path, state, session, revision, evals_path, proof_path, retro_path, transcript_path)
     return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}

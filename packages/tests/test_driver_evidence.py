@@ -78,6 +78,28 @@ class DriverEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "native"):
             graph_driver_evidence.validate_backup(state_path, foreign)
 
+    def check_failed_without_final(self, state_path: Path, state: dict[str, Any], checkout: Path) -> None:
+        """A process failure can be sealed when Codex writes no final file."""
+        failed_id = "disp_failed_attempt"
+        original = state["graph"]["dispatches"]["disp_0123456789abcdef"]
+        state["graph"]["dispatches"][failed_id] = deepcopy(original)
+        artifact = state_path.parent / "driver-evidence" / failed_id
+        artifact.mkdir()
+        (artifact / "prompt.txt").write_text("build one unit\n")
+        (artifact / "output.jsonl").write_text('{"type":"turn.failed"}\n')
+        ref = graph_driver_evidence.seal(
+            state_path,
+            state,
+            "U3[1]",
+            failed_id,
+            checkout,
+            "codex",
+            1,
+            {"outcome": "failed", "evidence": "codex:process_exit_1"},
+        )
+        graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
+        state["graph"]["dispatches"].pop(failed_id)
+
     def test_changed_output_or_head_invalidates_a_sealed_result(self) -> None:
         """A past pass cannot survive changed worker bytes or changed source."""
         with tempfile.TemporaryDirectory() as directory:
@@ -123,6 +145,7 @@ class DriverEvidenceTests(unittest.TestCase):
                 state_path, state, "U3[1]", dispatch_id, checkout, "codex", 0, {"outcome": "done"}
             )
             graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
+            self.check_failed_without_final(state_path, state, checkout)
             foreign = deepcopy(state)
             foreign["graph"]["dispatches"][dispatch_id]["authorized"]["prompt_sha256"] = "0" * 64
             with self.assertRaisesRegex(ValueError, "prompt"):
