@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -103,6 +104,28 @@ class DriverProcessTests(unittest.TestCase):
                 if result["status"] == "finished":
                     break
             self.assertEqual(result, {"status": "finished", "exit_code": 7})
+
+    def test_worker_receives_prompt_and_private_environment(self) -> None:
+        """The prompt enters on stdin and the environment stays out of process records."""
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory)
+            prompt = artifact / "prompt.txt"
+            prompt.write_text("owned prompt\n")
+            environment = {**os.environ, "CODERAILS_TEST_TOKEN": "disposable-marker"}
+            worker = "import os, sys; print(sys.stdin.read().strip()); print(bool(os.getenv('CODERAILS_TEST_TOKEN')))"
+            graph_driver_process.start(
+                artifact, [sys.executable, "-c", worker], artifact, environment=environment, stdin_path=prompt
+            )
+            deadline = time.monotonic() + 5
+            result: dict[str, object] = {"status": "unresolved"}
+            while time.monotonic() < deadline:
+                result = graph_driver_process.observe(artifact, 0.05)
+                if result["status"] == "finished":
+                    break
+            self.assertEqual(result, {"status": "finished", "exit_code": 0})
+            self.assertEqual((artifact / "output.jsonl").read_text().splitlines(), ["owned prompt", "True"])
+            self.assertNotIn("disposable-marker", (artifact / "launch.json").read_text())
+            self.assertNotIn("disposable-marker", (artifact / "terminal.json").read_text())
 
 
 if __name__ == "__main__":

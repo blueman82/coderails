@@ -108,6 +108,8 @@ def seal(
         "exit_code": exit_code,
         "result": result,
     }
+    if provider == "codex":
+        manifest["final_sha256"] = _digest(artifact / "final.json")
     data = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
     with manifest_path.open("xb") as stream:
         stream.write(data)
@@ -163,6 +165,8 @@ def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: d
         raise ValueError("driver prompt changed")
     if _digest(artifact / "output.jsonl") != manifest.get("output_sha256"):
         raise ValueError("driver output changed")
+    if manifest.get("provider") == "codex" and _digest(artifact / "final.json") != manifest.get("final_sha256"):
+        raise ValueError("driver final result changed")
     checkout = manifest.get("checkout")
     if not isinstance(checkout, str) or _head(Path(checkout)) != manifest.get("head"):
         raise ValueError("worker checkout HEAD changed")

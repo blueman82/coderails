@@ -66,7 +66,7 @@ class DriverControllerTests(unittest.TestCase):
             self.assertEqual(authorized.returncode, 0, authorized.stderr)
             before = case.path.read_bytes()
 
-            def command(_prompt: Path) -> list[str]:
+            def command(_prompt: Path) -> tuple[list[str], None, Path]:
                 self.fail("an authorized attempt must not launch twice")
 
             report = graph_driver_controller.drive_once(
@@ -112,11 +112,15 @@ class DriverControllerTests(unittest.TestCase):
                 if provider == "codex":
                     case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
 
-                def command(_prompt: Path) -> list[str]:
-                    return [sys.executable, "-c", "print('worker output')"]
+                def command(prompt: Path) -> tuple[list[str], None, Path]:
+                    return [sys.executable, "-c", "import sys; print(sys.stdin.readline().strip())"], None, prompt
 
-                def result(_output: Path, _code: int) -> dict[str, Any]:
-                    return {"outcome": "done", "evidence": "disposable worker"}
+                def result(output: Path, _code: int, current: str = provider) -> dict[str, Any]:
+                    self.assertTrue(output.read_text().startswith("CODERAILS_GRAPH_DISPATCH="))
+                    parsed = {"outcome": "done", "evidence": "disposable worker"}
+                    if current == "codex":
+                        (output.parent / "final.json").write_text(json.dumps(parsed))
+                    return parsed
 
                 deadline = 20
                 report: dict[str, Any] = {"status": "unresolved"}

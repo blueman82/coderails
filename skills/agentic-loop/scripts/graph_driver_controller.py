@@ -9,7 +9,7 @@ import secrets
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, Callable, Optional, cast
 
 import graph_contract
 import graph_driver_evidence
@@ -17,7 +17,7 @@ import graph_driver_process
 import graph_semantics
 from graph_vocab import decision_pending
 
-Command = Callable[[Path], list[str]]
+Command = Callable[[Path], tuple[list[str], Optional[dict[str, str]], Optional[Path]]]
 Result = Callable[[Path, int], dict[str, Any]]
 
 
@@ -154,7 +154,8 @@ def drive_once(
                 if not (artifact / "launch.json").exists():
                     if not newly_authorized:
                         return {"status": "unresolved", "reason": "authorized_without_launch", "node": node_id}
-                    graph_driver_process.start(artifact, command(prompt), checkout)
+                    argv, environment, input_path = command(prompt)
+                    graph_driver_process.start(artifact, argv, checkout, environment=environment, stdin_path=input_path)
                 observation = graph_driver_process.observe(artifact, 0.05)
                 if observation["status"] != "finished":
                     return {"status": observation["status"], "node": node_id}

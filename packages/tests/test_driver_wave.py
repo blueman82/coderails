@@ -75,6 +75,8 @@ class DriverWaveTests(unittest.TestCase):
                 artifact.mkdir(parents=True)
                 (artifact / "prompt.txt").write_text("CODERAILS_GRAPH_DISPATCH=test\n")
                 (artifact / "output.jsonl").write_text('{"type":"turn.completed"}\n')
+                if provider == "codex":
+                    (artifact / "final.json").write_text(json.dumps(result))
                 ref = graph_driver_evidence.seal(case.path, state, node_id, dispatch_id, checkout, provider, 0, result)
                 report = {"wave_id": wave_id, "results": {node_id: result}, "references": {node_id: ref}}
                 missing = json.dumps({**report, "references": {}})

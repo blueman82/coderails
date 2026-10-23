@@ -117,6 +117,8 @@ class DriverEvidenceTests(unittest.TestCase):
             (artifact / "prompt.txt").write_text("build one unit\n")
             output = artifact / "output.jsonl"
             output.write_text('{"type":"turn.completed"}\n')
+            final = artifact / "final.json"
+            final.write_text('{"outcome":"done"}')
             ref = graph_driver_evidence.seal(
                 state_path, state, "U3[1]", dispatch_id, checkout, "codex", 0, {"outcome": "done"}
             )
@@ -141,6 +143,10 @@ class DriverEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "output"):
                 graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
             output.write_text('{"type":"turn.completed"}\n')
+            final.write_text('{"outcome":"failed"}')
+            with self.assertRaisesRegex(ValueError, "final"):
+                graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
+            final.write_text('{"outcome":"done"}')
             with self.assertRaisesRegex(ValueError, "already sealed"):
                 graph_driver_evidence.seal(
                     state_path, state, "U3[1]", dispatch_id, checkout, "codex", 0, {"outcome": "done"}
