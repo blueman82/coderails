@@ -2,6 +2,7 @@
 """Provide native process-boundary GitHub responses for offline hook verification."""
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -39,14 +40,19 @@ def main() -> int:
                 "head_sha": sha,
                 "evals": [],
             }
+            # The frozen hash follows the documented definition of suite_hash.
+            oracle = {"task_ref": None, "scope": None, "verification_level": 0, "evals": []}
+            canonical = json.dumps(oracle, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            suite["frozen_hash"] = hashlib.sha256(canonical.encode()).hexdigest()
             body = (
-                f"<!-- coderails-eval-summary v1 pr={number[1]} head_sha={sha} result=GO verification_level=1 -->\n"
+                f"<!-- coderails-eval-summary v1 pr={number[1]} head_sha={sha} "
+                f"result=GO verification_level={suite['verification_level']} -->\n"
                 f"```json\n{json.dumps(suite)}\n```\n"
             )
         if body:
             print(base64.b64encode(body.encode()).decode())
         if number and not os.environ.get("MOCK_GH_NO_REVIEW"):
-            # the review artifact (v1 marker, no passes line: enough for the empty fixture diff) the publication gate reads
+            # A v1 review marker without a passes line suffices for the empty fixture diff.
             review = f"<!-- coderails-review-summary v1 pr={number[1]} head_sha={sha} -->\n## No findings\n"
             print(base64.b64encode(review.encode()).decode())
     elif "/statuses" in arguments:

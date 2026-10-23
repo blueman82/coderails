@@ -40,6 +40,7 @@ class ArtifactCase(unittest.TestCase):
     """Create an artifact in a directory outside the source repository."""
 
     temporary_parent: str | None = None
+    stub_level_gate = True  # real-repository tests of the level gate set this False
 
     def setUp(self) -> None:
         """Allocate a fresh suite for every test."""
@@ -49,12 +50,22 @@ class ArtifactCase(unittest.TestCase):
         keys = patch.dict(os.environ, {"CODERAILS_KEYS_DIR": str(Path(self.temporary.name) / "keys")})
         keys.start()
         self.addCleanup(keys.stop)
+        # These fixtures are unfrozen suites on a fake PR head: the derived-level and frozen-suite gate has no diff
+        # to read here and is covered with real repositories in scripts/tests/eval_level_test.py.
+        if self.stub_level_gate:
+            level_gate = patch("scripts.lib.eval_validation.validate_level")
+            level_gate.start()
+            self.addCleanup(level_gate.stop)
         self.directory = Path(self.temporary.name)
+        previous = Path.cwd()
+        os.chdir(self.directory)
+        self.addCleanup(os.chdir, previous)
         self.path = self.directory / "evals.json"
         self.data: JsonObject = {
             "verification_level": 1,
             "verification_justification": "Exercise real commands and their controls",
             "head_sha": "head",
+            "frozen_sha": "a" * 40,  # level >= 1 needs a full sha; no repository here, so it is never resolved
             "task_ref": "192",
             "evals": [entry()],
         }
@@ -95,6 +106,34 @@ class ArtifactCase(unittest.TestCase):
         self.git("config", "core.hooksPath", str(self.directory / "no-hooks"))
         self.git("commit", "--allow-empty", "-m", "base")
         return self.git("rev-parse", "HEAD")
+
+    def pr_history(self, present: bool) -> tuple[str, str]:
+        """Create divergent private main/PR commits; expose the PR solely through a local Git peer if absent."""
+        peer = self.directory / "peer"
+        self.git("clone", "-q", str(self.directory), str(peer))
+        for key, value in (
+            ("user.name", "Eval test"),
+            ("user.email", "eval@example.invalid"),
+            ("core.hooksPath", str(self.directory / "no-hooks")),
+        ):
+            self.git("-C", str(peer), "config", key, value)
+        (peer / "surface.py").write_text("PR surface\n")
+        self.git("-C", str(peer), "add", "surface.py")
+        self.git("-C", str(peer), "commit", "-qm", "PR change")
+        head = self.git("-C", str(peer), "rev-parse", "HEAD")
+        self.git("-C", str(peer), "update-ref", "refs/pull/7/head", head)
+        self.git("remote", "add", "origin", str(peer))
+        self.git("checkout", "main")
+        (self.directory / "advance.md").write_text("main advance\n")
+        self.git("add", "advance.md")
+        self.git("commit", "-qm", "main advance")
+        advanced = self.git("rev-parse", "HEAD")
+        self.git("update-ref", "refs/remotes/origin/main", advanced)
+        if present:
+            self.git("fetch", "-q", "origin", "pull/7/head")
+        exists = subprocess.run(["git", "-C", str(self.directory), "cat-file", "-e", head], capture_output=True)
+        self.assertEqual(exists.returncode == 0, present)
+        return head, advanced
 
     def body(self, level: int, block: object) -> Path:
         """Create a marker and a literal JSON fence for embed validation."""

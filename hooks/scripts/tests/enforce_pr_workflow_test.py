@@ -95,11 +95,18 @@ class WorkflowGateTests(HookTestCase):
                     "command bash scripts/merge.sh 140",
                     "command python3 scripts/merge.py 140",
                 )
+                # The original no-config case allowed a merge without an eval artifact;
+                # the default-on C3 gate now denies that historical input.
+                missing_eval = case["fixture_index"] == 91
                 self.assertEqual(
-                    '"deny"' in result.stdout, case["denied"] or wrapped_merge, result.stdout + result.stderr
+                    '"deny"' in result.stdout,
+                    case["denied"] or wrapped_merge or missing_eval,
+                    result.stdout + result.stderr,
                 )
                 if wrapped_merge:
                     self.assertIn("requires /pr-review-toolkit:review-pr", result.stdout)
+                if missing_eval:
+                    self.assertIn("eval_artifact_missing", result.stdout)
         self.assertEqual(original_count, 114)
 
 

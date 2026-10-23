@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,8 +15,10 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.lib.artifact_io import array_value, object_value, read_object, write_object
-from scripts.lib.eval_artifact import compute_go, grading_checksum
+from scripts.lib import eval_level
+from scripts.lib import git_common as git
+from scripts.lib.artifact_io import JsonObject, array_value, object_value, read_object, write_object
+from scripts.lib.eval_artifact import compute_go, facts_line, grading_checksum, marker, matches_marker
 from scripts.lib.eval_execution import record_smoke, scripted_evals, verify_execution
 from scripts.lib.eval_integrity import (
     LEGACY_UNHASHED,
@@ -25,6 +29,7 @@ from scripts.lib.eval_integrity import (
     append_amendment,
     sign_suite,
     stamp,
+    suite_hash,
     verify_suite,
 )
 from scripts.lib.eval_signing import KEY_MISSING, remember, report
@@ -146,6 +151,93 @@ def smoke_verify(path: str | Path, head_sha: str) -> int:
         return 1
 
 
+def pr_number(text: str) -> str:
+    """A positive decimal integer only, checked in code before any gh call."""
+    if not re.fullmatch(r"[1-9][0-9]*", text):
+        raise ValueError("pr_number_invalid")
+    return text
+
+
+def _inline(value: object) -> str:
+    """One line with no backticks or comment openers, so narrative text cannot start a fence or a marker."""
+    return re.sub(r"\s+", " ", str(value)).replace("`", "'").replace("<!--", "<!-")
+
+
+def summary_of(data: JsonObject) -> str:
+    """Per-priority pass/fail counts and the amendments (narrative, never validated; flattened to one line each)."""
+    evals = [cast(JsonObject, x) for x in cast(list[object], data.get("evals", [])) if isinstance(x, dict)]
+    lines = ["## Eval summary"]
+    for priority in ("P0", "P1"):
+        group = [item for item in evals if item.get("priority") == priority]
+        passed = sum(item.get("status") == "pass" for item in group)
+        lines.append(f"- {priority}: {passed} pass, {len(group) - passed} fail")
+    notes = [cast(JsonObject, x) for x in cast(list[object], data.get("amendments", [])) if isinstance(x, dict)]
+    lines += [f"- amendment {_inline(note.get('eval'))}: {_inline(note.get('why'))}" for note in notes]
+    return "\n".join(lines)
+
+
+def comment_for(repo: str, number: str, login: str, head: str, body: str) -> dict[str, str] | None:
+    """Reuse only this login's latest recognized PR/head artifact when its entire body is identical."""
+    listing = git.run(
+        "gh", "api", f"repos/{repo}/issues/{number}/comments", "--paginate",
+        "--jq", ".[] | {url:.html_url,author:.user.login,body:.body}",
+        check=True,
+    )  # fmt: skip
+    latest = None
+    for line in filter(None, listing.stdout.splitlines()):
+        comment = cast(dict[str, str], json.loads(line))
+        if comment["author"] == login and any(
+            matches_marker(line, number, head) for line in comment["body"].splitlines()
+        ):
+            latest = comment
+    return latest if latest and latest["body"] == body else None
+
+
+def post(number: str, path: str, progress: str) -> int:
+    """Validate, stamp gate facts in code and post (or reuse) the artifact for the PR's current head."""
+    head = git.pr_field(number, "headRefOid")
+    if not head:
+        raise ValueError("could not resolve the PR head SHA")
+    validate_structure(path, number, head, progress=progress)
+    validate_discriminating(path)
+    data = read_object(path)
+    changes = eval_level.pr_changes(number, head)
+    if changes is None:
+        raise ValueError("eval_level_diff_unavailable")
+    facts, minimum = eval_level.derive(changes, eval_level.progress_units(progress), data, eval_level.load_policy())
+    late = eval_level.suite_late(data, eval_level.branch_base(head, pr=number))
+    suite = suite_hash(data)
+    gate = {**facts, "derived_min_level": minimum, "late_freeze": late, "suite_hash": suite}
+    top = [marker(number, head, "NO-GO", str(data["verification_level"])), facts_line(minimum, late, suite[:16])]
+    embed = json.dumps({**data, "gate_facts": gate}, indent=2, ensure_ascii=False)
+    body = "\n".join([*top, summary_of(data), "", "```json", embed, "```", ""])
+    with tempfile.TemporaryDirectory(prefix="coderails-evals-") as directory:
+        body_path = Path(directory) / "body.md"
+        body_path.write_text(body)
+        validate_embed(path, body_path)
+        result = compute_and_validate_result(path)
+        top[0] = marker(number, head, result, str(data["verification_level"]))
+        body = top[0] + "\n" + body.partition("\n")[2]
+        body_path.write_text(body)
+        repo = git.repo()
+        existing = comment_for(repo, number, git.output("gh", "api", "user", "-q", ".login", check=True), head, body)
+        if git.pr_field(number, "headRefOid") != head:
+            raise ValueError(f"stale: PR head moved from {head} before posting; re-run the evals on the new head")
+        if existing:
+            print(f"Artifact already posted for SHA {head} — skipping duplicate post.\nExisting: {existing['url']}")
+        else:
+            reply = git.run(
+                "gh", "api", f"repos/{repo}/issues/{number}/comments", "-F", f"body=@{body_path}",
+                "--jq", "{url:.html_url}",
+                check=True,
+            )  # fmt: skip
+            print(f"Posted: {json.loads(reply.stdout)['url']}")
+    if git.pr_field(number, "headRefOid") != head:
+        raise ValueError(f"stale: PR head moved from {head} during posting; this artifact must not be used")
+    print(f"result={result} verification_level={data['verification_level']} derived_min_level={minimum} head={head}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Dispatch existing workflow operations with fail-closed status codes."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -160,10 +252,12 @@ def main(argv: list[str] | None = None) -> int:
             "validate-embed",
             "grade-loop",
             "amend",
+            "post",
         ),
     )
     parser.add_argument("path")
     parser.add_argument("arguments", nargs="*")
+    parser.add_argument("--progress", default="", help="progress.json whose work_units raise the derived level")
     try:
         args = parser.parse_args(argv)
     except SystemExit as error:
@@ -172,7 +266,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.operation == "validate-structure":
             if len(args.arguments) != 2:
                 raise ValueError("validate-structure requires <path> <pr> <sha>")
-            validate_structure(args.path, *args.arguments)
+            validate_structure(args.path, args.arguments[0], args.arguments[1], progress=args.progress)
+        elif args.operation == "post":
+            if len(args.arguments) != 1:
+                raise ValueError("post requires <pr_number> <evals.json>")
+            return post(pr_number(args.path), args.arguments[0], args.progress)
         elif args.operation == "validate-discriminating":
             validate_discriminating(args.path)
         elif args.operation == "smoke-run":
@@ -202,7 +300,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, TypeError, subprocess.SubprocessError) as error:
         print(f"post_evals: {error}", file=sys.stderr)
         if isinstance(error, IntegrityError):
-            emit(args.path, args.operation, "refuse", error.code)
+            subject = args.arguments[0] if args.operation == "post" and args.arguments else args.path
+            emit(subject, args.operation, "refuse", error.code)
         return 1
 
 

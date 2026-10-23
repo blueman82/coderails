@@ -322,6 +322,7 @@ class MergeEvidenceTests(HookTestCase):
         with (
             patch(MODULE + ".pr_field", return_value="head"),
             patch(MODULE + ".gate_eval_summary_for_pr", return_value=summary),
+            patch(MODULE + ".publication_gate.git.gate_eval_summary_for_pr", return_value=summary),
             patch(MODULE + ".smoke_verify", return_value=0),
             patch(MODULE + ".publication_gate.manifest_policy.violations", return_value=[]),
             patch(MODULE + ".publication_gate.git.review_passes_for_pr", return_value=ReviewPasses(0, (), "")),

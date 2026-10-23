@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import subprocess
 import sys
 import unittest
@@ -14,6 +15,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts import merge
 from scripts.lib import git_common as git
 from scripts.lib import manifest_policy
+from scripts.lib.eval_artifact import facts_line
+from scripts.lib.eval_integrity import suite_hash
+
+
+def frozen_eval(level: int) -> git.EvalSummary:
+    """A trusted eval artifact as post_evals.py post writes it: frozen suite, matching facts line, no late freeze."""
+    data: dict[str, object] = {
+        "verification_level": level,
+        "task_ref": "1",
+        "evals": [],
+        "frozen_sha": "a" * 40,
+        "head_sha": "deadbeef",
+    }
+    data["frozen_hash"] = suite_hash(data)
+    stamp = facts_line(level, False, suite_hash(data)[:16])
+    return git.EvalSummary(0, str(level), json.dumps(data), facts=stamp)
 
 
 class MergeContractTests(unittest.TestCase):
@@ -33,7 +50,7 @@ class MergeContractTests(unittest.TestCase):
     ) -> tuple[int, str, bool, bool]:
         """Run the real merge entrypoint over controlled provider and evidence replies."""
         if summary is None:
-            summary = git.EvalSummary(0, "0", "{}")
+            summary = frozen_eval(0)
         merged: list[tuple[str, ...]] = []
 
         def command(*arguments: str, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -77,6 +94,8 @@ class MergeContractTests(unittest.TestCase):
             eval_reader = stack.enter_context(patch.object(git, "gate_eval_summary_for_pr", return_value=summary))
             stack.enter_context(patch.object(merge, "smoke_verify", return_value=smoke))
             stack.enter_context(patch.object(manifest_policy, "violations", return_value=[]))
+            stack.enter_context(patch("scripts.lib.eval_level.branch_base", return_value="a" * 40))
+            stack.enter_context(patch("scripts.lib.eval_level.suite_late", return_value=False))
             stack.enter_context(patch.object(merge, "config_path", return_value=""))
             stack.enter_context(patch.object(merge, "has_wiki_ingest_for_merged_prs"))
             if temporary_failure:
@@ -107,14 +126,21 @@ class MergeContractTests(unittest.TestCase):
         hooks_diff = [("M", ["hooks/x.py"])]
         review_pr = {"name": "review-pr", "verdict": "pass", "blocking": False, "summary_sha256": "0" * 64}
         security = {**review_pr, "name": "security-review"}
-        code, text, merged, _ = self.invoke(passes=git.ReviewPasses(0, (review_pr,)), changes=hooks_diff)
+        level_one = frozen_eval(1)  # a hooks/ diff is an outward surface: derived minimum level 1
+        code, text, merged, _ = self.invoke(
+            passes=git.ReviewPasses(0, (review_pr,)), changes=hooks_diff, summary=level_one
+        )
         self.assertEqual(code, 1)
         self.assertIn("required_review_missing:security-review", text)
         self.assertFalse(merged)
-        code, _, merged, _ = self.invoke(passes=git.ReviewPasses(0, (review_pr, security)), changes=hooks_diff)
+        code, _, merged, _ = self.invoke(
+            passes=git.ReviewPasses(0, (review_pr, security)), changes=hooks_diff, summary=level_one
+        )
         self.assertEqual((code, merged), (0, True))
         failed = {**security, "verdict": "fail", "blocking": False}
-        code, text, merged, _ = self.invoke(passes=git.ReviewPasses(0, (review_pr, failed)), changes=hooks_diff)
+        code, text, merged, _ = self.invoke(
+            passes=git.ReviewPasses(0, (review_pr, failed)), changes=hooks_diff, summary=level_one
+        )
         self.assertIn("required_review_failed:security-review", text)
         self.assertFalse(merged)
 

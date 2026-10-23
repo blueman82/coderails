@@ -311,6 +311,7 @@ class PathTests(unittest.TestCase):
         reply = found([entry("review-pr")])
         with (
             mock.patch.object(git, "review_passes_for_pr", return_value=reply),
+            mock.patch.object(git, "gate_eval_summary_for_pr", return_value=git.EvalSummary(1)),
             mock.patch.object(manifest_policy, "diff_changes", return_value=HOOKS),
             mock.patch.object(manifest_policy, "violations", return_value=[]),
             self.assertRaises(git.WorkflowError) as caught,

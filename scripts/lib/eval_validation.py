@@ -12,6 +12,7 @@ from .artifact_io import JsonObject, array_value, object_value, read_object
 from .eval_artifact import parse_verification_level
 from .eval_execution import is_environmental_rc, run_recorded, scripted_evals, validate_smoke, verify_execution
 from .eval_integrity import FIXTURE_FORMULA_NOT_IN_CMD, IntegrityError
+from .eval_level import branch_base, check_suite, derive, late_freeze, load_policy, pr_changes, progress_units
 
 
 def git_output(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -19,23 +20,19 @@ def git_output(directory: Path, *arguments: str) -> subprocess.CompletedProcess[
     return subprocess.run(["git", "-C", str(directory), *arguments], capture_output=True, text=True, check=False)
 
 
-def validate_freeze(path: str | Path) -> None:
-    """Require a resolvable pre-branch freeze or an explicit late-freeze disclosure."""
+def validate_freeze(path: str | Path, head: str = "HEAD", pr: str = "") -> None:
+    """Require a pre-branch freeze for the operation's target head or an explicit late-freeze disclosure."""
     data = read_object(path)
     frozen = str(data.get("frozen_sha") or "").strip()
-    directory = Path(path).resolve().parent
+    directory = Path.cwd()
+    if str(data.get("verification_level", "")) != "0" and not re.fullmatch(r"[0-9a-f]{40}", frozen):
+        raise ValueError("verification_level >= 1 requires a full 40-hex frozen_sha (the freeze commit)")
     if not frozen or git_output(directory, "rev-parse", "--is-inside-work-tree").returncode:
         return
     if git_output(directory, "cat-file", "-e", f"{frozen}^{{commit}}").returncode:
         raise ValueError(f"frozen_sha {frozen} does not resolve to a commit in this repository")
-    base = ""
-    for ref in ("origin/HEAD", "origin/main", "origin/master", "main", "master"):
-        if git_output(directory, "rev-parse", "--verify", "--quiet", ref).returncode == 0:
-            result = git_output(directory, "merge-base", "HEAD", ref)
-            if result.returncode == 0 and result.stdout.strip():
-                base = result.stdout.strip()
-                break
-    if not base or git_output(directory, "merge-base", "--is-ancestor", frozen, base).returncode == 0:
+    base = branch_base(head, str(directory), pr)
+    if not base or not late_freeze(frozen, base, str(directory)):
         return
     disclosure = " ".join(
         [str(data.get("verification_justification", ""))]
@@ -45,9 +42,25 @@ def validate_freeze(path: str | Path) -> None:
         raise ValueError(f"frozen_sha {frozen} is not an ancestor of the branch base {base} — disclose the late freeze")
 
 
-def validate_structure(path: str | Path, pr: str = "", current_head_sha: str = "", scope: str = "pr") -> None:
-    """Apply structural, evidence, freeze and execution refusals to an artifact."""
-    del pr
+def validate_level(data: JsonObject, level: str, pr: str, head: str, progress: str = "") -> None:
+    """Refuse an altered or unfrozen suite and a verification_level below the minimum derived from the PR diff."""
+    if level not in ("0", "1", "2"):
+        raise ValueError(f"verification_level {level!r} must be 0, 1 or 2")
+    check_suite(data, level)
+    changes = pr_changes(pr, head)
+    if changes is None:
+        raise IntegrityError("eval_level_diff_unavailable", "cannot compute the PR diff to derive the minimum level")
+    facts, minimum = derive(changes, progress_units(progress), data, load_policy())
+    if int(level) < minimum:
+        raise IntegrityError(
+            "level_below_derived", f"verification_level {level} is below the derived minimum {minimum} (facts {facts})"
+        )
+
+
+def validate_structure(
+    path: str | Path, pr: str = "", current_head_sha: str = "", scope: str = "pr", progress: str = ""
+) -> None:
+    """Apply structural, evidence, freeze, level, integrity and execution refusals to an artifact."""
     data = read_object(path)
     level = str(data.get("verification_level", ""))
     justification = data.get("verification_justification")
@@ -65,7 +78,8 @@ def validate_structure(path: str | Path, pr: str = "", current_head_sha: str = "
     if level != "0" and not any(item.get("priority") == "P0" for item in evals):
         raise ValueError("verification_level>=1 requires at least one P0 eval in .evals")
     if scope != "loop":
-        validate_freeze(path)
+        validate_level(data, level, pr, current_head_sha, progress)
+        validate_freeze(path, current_head_sha or "HEAD", pr)
         validate_smoke(data)
         verify_execution(data)
     new_cases = data.get("new_cases", [])
@@ -111,10 +125,12 @@ def validate_embed(path: str | Path, body_path: str | Path) -> None:
     level = parse_verification_level(body.splitlines()[0] if body else "")
     if not level:
         raise ValueError("body marker line does not parse (missing or malformed marker)")
+    if len(re.findall(r"^```json\s*$", body, re.MULTILINE)) != 1:
+        raise ValueError("body must contain exactly one fenced json block")
+    if any(line.lstrip().startswith("<!--") for line in body.splitlines()[2:]):
+        raise ValueError("body carries a marker-like line after the marker and facts lines")
     if level != "0":
         return
-    if len(re.findall(r"^```json\s*$", body, re.MULTILINE)) != 1:
-        raise ValueError("verification_level-0 body must contain exactly one fenced json block")
     block: object = json.loads(extract_json_block(body))
     block = object_value(block)
     if str(block.get("verification_level", "")) != level:
