@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from hooks.scripts.lib.trace_row import append_row
 from scripts.lib.config import config_path, integrity_machine_user
 from scripts.lib.git_common import branch, gate_eval_summary_for_pr, pr_field, pr_num, repo, run
+from scripts.lib.integrity_attestation import parse_attestation
 from scripts.post_evals import smoke_verify
 
 
-def integrity_reason(number: str, sha: str, cwd: str) -> str:
+def integrity_reason(number: str, sha: str, cwd: str, session: str = "") -> str:
     """Require the newest exact-SHA success from the configured machine login."""
     machine = integrity_machine_user(config_path(cwd))
     if not machine:
@@ -38,40 +39,18 @@ def integrity_reason(number: str, sha: str, cwd: str) -> str:
             )
         statuses = json.loads(result.stdout)
         status = cast(dict[str, Any], statuses[0]) if isinstance(statuses, list) and statuses else {}
-        state = status.get("state", "")
-        creator = status.get("creator", {}).get("login", "")
-        description = status.get("description", "")
     except (OSError, ValueError, AttributeError, TypeError):
         return (
             prefix + f"no integrity-review status found for {sha}. The integrity daemon has not attested this SHA yet."
         )
-    if not state:
-        return (
-            prefix + f"no integrity-review status found for {sha}. The integrity daemon has not attested this SHA yet."
-        )
-    if state != "success":
-        return (
-            prefix + f"integrity-review status for {sha} is '{state}' (not success). The integrity "
-            f"daemon has not attested this SHA."
-        )
-    if creator != machine:
-        return (
-            prefix + f"integrity-review status for {sha} was posted by '{creator}', not the "
-            f"configured machine user '{machine}'."
-        )
-    if (
-        not isinstance(description, str)
-        or not re.search(r"(^|\s)integrity=pass(\s|$)", description)
-        or not re.search(r"(^|\s)sha=" + re.escape(sha) + r"(\s|$)", description)
-    ):
-        return (
-            prefix + f"integrity-review status for {sha} is not a valid SHA-bound pass attestation. "
-            f"Do not bypass; investigate."
-        )
+    verdict = parse_attestation(status, sha, machine)
+    if not verdict.ok:
+        append_row("pr_merge_gate", "denied", verdict.reason_code, session, inputs={"sha": sha})
+        return prefix + f"{verdict.reason_code}: {verdict.detail}. The integrity daemon has not attested this SHA."
     return ""
 
 
-def merge_reason(number: str, cwd: str) -> str:
+def merge_reason(number: str, cwd: str, session: str = "") -> str:
     """Return the fail-closed merge denial, or empty after live evidence re-execution."""
     try:
         os.chdir(cwd)
@@ -133,4 +112,4 @@ def merge_reason(number: str, cwd: str) -> str:
             prefix + "local temporary file allocation failed for the smoke-verify gate. Check /tmp "
             "disk space or permissions, then retry."
         )
-    return integrity_reason(number, sha, cwd)
+    return integrity_reason(number, sha, cwd, session)

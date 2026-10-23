@@ -62,7 +62,9 @@ class HookPrimitivesTests(unittest.TestCase):
             self.assertEqual(path.read_text(), '{"revision":1}')
             self.assertFalse(lock.exists())
             self.assertTrue(atomic_progress_update(path, lambda state: {**state, "revision": 2}))
-            self.assertEqual(json.loads(path.read_text()), {"revision": 2})
+            written = json.loads(path.read_text())
+            self.assertRegex(written.pop("updated_at"), r"^\d{4}-\d\d-\d\dT")  # stamped on progress.json writes
+            self.assertEqual(written, {"revision": 2})
 
     def test_completion_cli_uses_native_invocation_ordinal_and_atomic_writer(self) -> None:
         """Direct teardown CLI preserves state and stamps actual transcript invocation count."""
@@ -95,8 +97,10 @@ class HookPrimitivesTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
+            written = json.loads(path.read_text())
+            written.pop("updated_at")
             self.assertEqual(
-                json.loads(path.read_text()),
+                written,
                 {
                     "schema_version": 3,
                     "session_id": "S1",

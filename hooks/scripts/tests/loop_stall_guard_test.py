@@ -8,9 +8,12 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from hooks.scripts.lib.loop_state_common import count_invocations
+from hooks.scripts.lib.loop_evals import EvalStatus, EvalVerdict
+from hooks.scripts.lib.loop_state_common import LoopState, count_invocations
+from hooks.scripts.loop_stall_guard import complete
 from hooks.scripts.tests.lib.hook_test_support import HookTestCase
 from scripts.lib.eval_artifact import grading_checksum
 
@@ -60,6 +63,24 @@ class StallGuardTests(HookTestCase):
         suite_path.write_text(json.dumps(suite))
         return path
 
+    def test_complete_matches_on_eval_verdict_status(self) -> None:
+        """complete() branches on EvalVerdict.status and renders tamper_code as a field."""
+        path = self.complete_fixture()
+        state = LoopState(path, self.session, 1, json.loads(path.read_text()))
+        base = "hooks.scripts.loop_stall_guard."
+        with patch(base + "validate_completion", return_value=[]), patch(base + "validate_graph_completion"):
+            for verdict, fragment in (
+                (EvalVerdict(EvalStatus.TAMPERED, "x"), "TAMPERED:x"),
+                (EvalVerdict(EvalStatus.FROZEN), "FROZEN"),
+            ):
+                with (
+                    patch(base + "read_loop_evals", return_value=verdict),
+                    self.assertRaisesRegex(ValueError, fragment),
+                ):
+                    complete(state, "unused")
+            with patch(base + "read_loop_evals", return_value=EvalVerdict(EvalStatus.GO)):
+                self.assertEqual(complete(state, "unused"), [])
+
     def test_skips_and_declared_categories(self) -> None:
         """Non-loop/recursive stops pass; only anchored vocabulary declarations authorize release."""
         self.assertEqual(self.run_hook("loop_stall_guard", {}).returncode, 0)
@@ -84,6 +105,8 @@ class StallGuardTests(HookTestCase):
             self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
             after = json.loads(path.read_text())
             self.assertEqual(after.pop("loop_stop_counts"), {"awaiting-input": count})
+            self.assertIn("updated_at", after)  # every progress.json write is stamped
+            after.pop("updated_at")
             self.assertEqual(after, before)
         payload = self.payload(self.transcript("LOOP-STOP: approval-gate"))
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
@@ -189,7 +212,8 @@ class StallGuardTests(HookTestCase):
         """Absent/corrupt/locked/unwritable state leaves declared-stop release advisory."""
         payload = self.payload(self.transcript("LOOP-STOP: hard-stop"))
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
-        self.assertFalse((self.directory / "state").exists())
+        fabricated = [p.name for p in (self.directory / "state").rglob("*") if p.is_file() and p.name != "trace.jsonl"]
+        self.assertEqual(fabricated, [])  # only the hook_state_unreadable trace row may appear, never state
         path = self.progress()
         for contents in ("{malformed", '{"loop_stop_counts":"wrong"}'):
             path.write_text(contents)
@@ -290,7 +314,9 @@ class StallGuardTests(HookTestCase):
         payload = self.payload(self.transcript("no declaration"))
         log = self.directory / "discipline.log"
         log.write_text("hook=loop_state_guard session=S1 invocations=1 reason=absent blocked=1\n")
-        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
+        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)  # a forged log line releases nothing
+        self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 2)  # the real block records the ordinal
+        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)  # shared hook_state.json releases
         self.progress()
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)
         self.progress("complete", 1)

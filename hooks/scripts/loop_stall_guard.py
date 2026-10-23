@@ -16,8 +16,9 @@ from hooks.scripts.hook_common import read_payload
 from hooks.scripts.lib.agentic_loop_path import sanitise_session_id
 from hooks.scripts.lib.discipline_common import stable_text
 from hooks.scripts.lib.graph_dispatch import validate_graph_completion, validate_graph_shape
+from hooks.scripts.lib.hook_state import unstubbed_grace
 from hooks.scripts.lib.loop_completion import validate_completion
-from hooks.scripts.lib.loop_evals import read_loop_evals_result
+from hooks.scripts.lib.loop_evals import EvalStatus, EvalVerdict, read_loop_evals
 from hooks.scripts.lib.loop_state_common import (
     LOOP_STOP_VOCAB,
     LoopState,
@@ -30,7 +31,6 @@ from hooks.scripts.lib.loop_state_common import (
     stable_invocations,
     stop_category,
     stop_ran_this_turn,
-    unstubbed_grace,
 )
 from hooks.scripts.lib.trace_row import append_row
 
@@ -89,11 +89,11 @@ def complete(state: LoopState, transcript: str) -> list[str]:
         raise ValueError("graph shape is missing or malformed")
     validate_graph_completion(state.path, state.session)
     suite = read_state(state.path.parent / "evals.json")
-    verdict = read_loop_evals_result(state.path.parent)
+    verdict = read_loop_evals(state.path.parent)
     if any(suite.get(key) != state.data.get(key) for key in ("session_id", "loop_id", "revision")):
-        verdict = "STALE"
-    if verdict not in {"GO", "VERIFICATION_LEVEL0"}:
-        raise ValueError(f"loop evals are {verdict}; run and grade the frozen suite via post_evals.py grade-loop")
+        verdict = EvalVerdict(EvalStatus.STALE)
+    if verdict.status not in {EvalStatus.GO, EvalStatus.VERIFICATION_LEVEL0}:
+        raise ValueError(f"loop evals are {verdict.label}; run and grade the frozen suite via post_evals.py grade-loop")
     for name in ("proof.json", "retro.json"):
         path = state.path.parent / name
         if name == "proof.json" and not path.is_file():

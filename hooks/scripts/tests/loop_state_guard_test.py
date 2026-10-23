@@ -4,12 +4,17 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from hooks.scripts.lib.loop_evals import EvalStatus, EvalVerdict
+from hooks.scripts.lib.loop_state_common import LoopState
+from hooks.scripts.loop_state_guard import completion_evals
 from hooks.scripts.tests.lib.hook_test_support import HookTestCase
 from scripts.lib.eval_artifact import grading_checksum
 
@@ -49,8 +54,8 @@ class LoopStateGuardTests(HookTestCase):
         self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 2)
 
     def hook_state(self) -> Path:
-        """Return the typed hook-state path beside the session's progress file."""
-        return self.directory / "state/-work-project" / self.session / "hook_state.json"
+        """Return the typed hook-state path in the session's loop directory."""
+        return self.directory / "state" / self.session / "hook_state.json"
 
     def trace_reasons(self) -> list[str]:
         """Return trace reason codes written for this session."""
@@ -58,19 +63,25 @@ class LoopStateGuardTests(HookTestCase):
         return [json.loads(row)["reason_code"] for row in path.read_text().splitlines()] if path.is_file() else []
 
     def test_absent_grace_reads_typed_state_not_the_log(self) -> None:
-        """The absent block is recorded as ordinals.absent_blocked; grace needs no log (negative control)."""
+        """The absent block is recorded as ordinals.absent_blocked plus an arms row; grace needs no log."""
         payload = self.payload(self.transcript())
         self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 2)
-        self.assertEqual(json.loads(self.hook_state().read_text()), {"ordinals": {"absent_blocked": 1}})
+        armed = {"hook": "loop_state_guard", "ordinal": 1}
+        self.assertEqual(
+            json.loads(self.hook_state().read_text()),
+            {"schema_version": 1, "ordinals": {"absent_blocked": 1}, "arms": [armed], "nudged": {}},
+        )
         (self.directory / "discipline.log").unlink()
         self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 0)
-        self.assertEqual(self.trace_reasons(), [])
+        self.assertEqual(self.trace_reasons(), ["hook_state_unreadable"])  # only the first lookup: no record yet
         payload = self.payload(self.transcript(invocations=2))
         self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 2)
-        self.assertEqual(json.loads(self.hook_state().read_text())["ordinals"]["absent_blocked"], 2)
+        state = json.loads(self.hook_state().read_text())
+        self.assertEqual(state["ordinals"]["absent_blocked"], 2)
+        self.assertEqual(state["arms"], [armed, {"hook": "loop_state_guard", "ordinal": 2}])
 
-    def test_torn_or_missing_hook_state_falls_back_to_the_log_with_a_trace(self) -> None:
-        """No usable state means the legacy log regex decides, and the fallback is traced."""
+    def test_torn_or_missing_hook_state_never_releases_grace(self) -> None:
+        """Without a usable record the log cannot stand in: still blocked, and the unreadable state is traced."""
         payload = self.payload(self.transcript())
         for contents in (None, "{torn", '{"ordinals": "x"}', '{"ordinals": {"absent_blocked": "1"}}'):
             self.hook_state().parent.mkdir(parents=True, exist_ok=True)
@@ -81,8 +92,8 @@ class LoopStateGuardTests(HookTestCase):
             (self.directory / "discipline.log").write_text(
                 "hook=loop_state_guard session=S1 invocations=1 reason=absent blocked=1\n"
             )
-            self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 0)
-        self.assertEqual(self.trace_reasons(), ["legacy_log_parse"] * 4)
+            self.assertEqual(self.run_hook("loop_state_guard", payload).returncode, 2, contents)
+        self.assertEqual(self.trace_reasons(), ["hook_state_unreadable"] * 4)
 
     def test_wrong_owner_and_rearmed_completion_never_get_absent_grace(self) -> None:
         """Wrong session and completion ordinal mismatch block repeatedly."""
@@ -141,6 +152,24 @@ class LoopStateGuardTests(HookTestCase):
         )
         suite_path.write_text(json.dumps(suite))
         self.assertIn("FROZEN", self.run_hook("loop_state_guard", payload).stderr)
+
+    def test_eval_verdict_fields_not_sliced_strings(self) -> None:
+        """tamper_code 'x' reaches the message as a field; every status gets a typed trace row."""
+        data = {"schema_version": 3, "session_id": "S1", "status": "complete", "completed_marker": 1}
+        state = LoopState(self.directory / "progress.json", "S1", 1, {**data, "work_units": {"U1": {}}})
+        with patch.dict(os.environ, self.environment):
+            with patch(
+                "hooks.scripts.loop_state_guard.read_loop_evals", return_value=EvalVerdict(EvalStatus.TAMPERED, "x")
+            ):
+                message = completion_evals(state)
+            self.assertIn("reason=x.", message)
+            self.assertNotIn("reason=None", message)
+            verdict = EvalVerdict(EvalStatus.NO_GO)
+            with patch("hooks.scripts.loop_state_guard.read_loop_evals", return_value=verdict):
+                self.assertIn("no passing loop-scope evals.json (NO-GO)", completion_evals(state))
+            with patch("hooks.scripts.loop_state_guard.read_loop_evals", return_value=EvalVerdict(EvalStatus.GO)):
+                self.assertEqual(completion_evals(state), "")
+        self.assertEqual(self.trace_reasons(), ["eval_verdict_tampered", "eval_verdict_no_go"])
 
     def test_completed_loop_without_work_units_and_malformed_state(self) -> None:
         """Absent work-unit rosters do not require loop evals; malformed ownership blocks."""

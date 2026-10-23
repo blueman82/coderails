@@ -196,8 +196,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   (`progress.stops[]`, written by `graph.py stop`); `loop_stop_counts` stays the hook-owned count of consumed stops.
 - Query: `python3 scripts/graph_alignment_stops.py --json` gives `stops_recorded`, `stops_consumed`,
   `legacy_text_parse` (the hook fell back to the final-line text, trace `loop_stall_guard/fallback/legacy_text_parse`)
-  and `legacy_log_parse` (absent-state grace fell back to the discipline.log regex because `hook_state.json` was
-  missing or torn). Inspect one loop with `python3 -c "import json;print(json.load(open('<progress.json>')).get('stops'))"`.
+  and `legacy_log_parse` (history only: no longer emitted; absent-state grace now reads `hook_state.json` alone and a
+  missing or torn file is `hook_state_unreadable`, never a log fallback). Inspect one loop with `python3 -c "import json;print(json.load(open('<progress.json>')).get('stops'))"`.
 - Remediation: a high `legacy_text_parse` against `stops_consumed` means agents are not running `graph.py stop`: fix
   the prompt, and if it persists tighten the text parse rather than retiring it. An unconsumed row at the current
   revision releases the next Stop once, and only when `graph.py stop` ran after the last user prompt (an older row is
@@ -275,3 +275,43 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   (docs/decisions/p3-human-only-minting.md). The hash covers only the command text the hook sees, not aliases, functions, eval/xargs or scripts that
   push (sudo/time/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped; an env assignment prefix is kept and makes the command unbindable). Limits: scope 500 chars, 8 KB per receipt,
   50 receipts per session (`receipt_refused_scope_too_long`, `receipt_refused_too_many`). Protected branches are main and master only.
+
+## Typed state, verdicts and attestation (merge blocked by `attest_*`, eval verdict, hook state)
+
+- Symptom: `gh pr merge` or `merge.py` is refused with `attest_missing`, `attest_not_success`, `attest_wrong_creator`
+  or `attest_not_bound`. One parser (`scripts/lib/integrity_attestation.py`, mirrored byte-identically into
+  `packages/codex/scripts/lib/`) is the only code that knows `integrity=pass` / `sha=`; `integrity_status.py` (merge.py)
+  and `pr_merge_gate.py` (hook) fetch with `gh` and render the message from its closed code.
+- Query: `python3 scripts/lib/state_counters.py [--since <ISO ts>]` counts `attest_*` (trace `pr_merge_gate/denied/<code>`,
+  written when the hook payload carries a session id), `hook_state_unreadable`, `nudge_first`/`nudge_suppressed` and
+  `eval_verdict_<status>`.
+- Remediation: `attest_missing`/`attest_not_success` mean the root-owned daemon has not attested this head yet (wait or
+  push a fresh head); `attest_wrong_creator` means `integrity_review.machine_user` disagrees with the status poster;
+  `attest_not_bound` means the description is not exactly `integrity=pass sha=<head>` as whole tokens. Never bypass.
+- Limit: the daemon (`scripts/integrity-gate`, root-installed separately) does not import the parser; a test asserts the
+  daemon's real success description parses. Codex has no PreToolUse merge hook; only `integrity_status.py` applies there.
+- Eval verdicts: `loop_evals.read_loop_evals()` returns a frozen `EvalVerdict{status, tamper_code}` (`status` is one of
+  GO, VERIFICATION_LEVEL0, FROZEN, NO-GO, ABSENT, UNJUSTIFIED, UNSTAMPED, STALE, TAMPERED); callers match on the fields,
+  never on `TAMPERED:<code>` text. A blocked completion writes trace `loop_state_guard/blocked/eval_verdict_<status>`.
+  The cost line in the retro is a `CostReport{state, message}` whose state is logged as `cost_report=<state>`.
+- Readiness: `graph_readiness.py <progress.json> <node>` prints JSON `{"ready": bool, "reason_code": ...}` (exit 0 iff
+  ready): `ready`, `predecessor_pending`, `node_unknown`, `node_not_pending`, `graph_blocked`,
+  `join_not_dispatchable`, `state_unreadable`. A missing script or non-JSON output is a
+  resolution failure, not a not-ready verdict. Not-ready verdicts on a readable state write trace
+  `graph_readiness/not_ready/<code>`; `state_unreadable` has no session to trace under. Every `progress.json` write now
+  carries `updated_at` (Claude `atomic_progress_update`, Codex `graph_io.write`); a refused transition leaves bytes unchanged.
+- Hook state: `<loop dir>/<session>/hook_state.json` `{schema_version, ordinals{absent_blocked}, arms[{hook,ordinal}],
+  nudged{<hook>:true}}` is the only source for absent-state grace and `offload_push_guard` / `unregistered_loop_guard`
+  nudge dedupe (exact session directory, so session `ab` never matches `abc`). `discipline.log` is audit output and is
+  never read for these decisions. A missing or torn file never releases grace and is traced
+  `hook_state_unreadable` (outcome `missing` on the first Stop of a session, which is expected once; `torn` is a fault).
+  A torn file also suppresses the nudge, traced the same way: an advisory must not repeat unrecorded. Nudges trace
+  `nudge_first` / `nudge_suppressed`. Remediation for `torn`: delete the file by hand (the hook will not repair it).
+  Limit (same-user boundary): `hook_state.json` is a plain file owned by the session user, so state is advisory, not
+  tamper-evident. An agent with Bash/Write can pre-create it (an `ordinals.absent_blocked` equal to the current
+  invocation count releases absent-state grace with no prior block) or set `nudged.<hook>=true` to silence a nudge.
+  Grace and nudge dedupe are guard-rails against accident, not a defence against a hostile same-user agent.
+- Limits: Codex has no corresponding hooks (`hooks.json` carries no `loop_state_guard`, `offload_push_guard` or
+  `unregistered_loop_guard`), so hook state, `EvalVerdict` and `CostReport` are Claude-side; Codex gets the shared
+  attestation parser and the `updated_at` stamp. `mine_hook_blocks` still counts the log's exact `session=` token;
+  moving it to trace rows needs every gate to emit rows (Phase 6).

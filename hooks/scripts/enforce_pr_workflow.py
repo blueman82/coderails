@@ -56,7 +56,7 @@ def main() -> int:
         return 0
     if name == "merge":
         try:
-            reason = merge_reason(number, cwd)
+            reason = merge_reason(number, cwd, str(payload.get("session_id") or ""))
         except (OSError, ValueError, RuntimeError) as error:
             reason = f"Blocked: gh pr merge — eval artifact verification failed: {error}. Do not bypass."
         if reason:
