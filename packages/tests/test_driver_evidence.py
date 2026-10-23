@@ -16,11 +16,19 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
+sys.path.insert(0, str(ROOT / "packages/codex/skills/agentic-loop/scripts"))
 import graph_driver_evidence  # noqa: E402
+from graph_evidence import validate_worker_evidence  # noqa: E402
 
 
 class DriverEvidenceTests(unittest.TestCase):
     """Use real files and a disposable Git repository for SHA revalidation."""
+
+    def test_native_history_check_allows_pending_nodes_for_cutover(self) -> None:
+        """Cutover rechecks past native evidence without requiring graph completion."""
+        with patch("graph_evidence._stored_references", return_value=set()) as check:
+            validate_worker_evidence({}, require_complete=False)
+        check.assert_called_once_with({}, False)
 
     def fake_gh(self, base: Path, head: str) -> Callable[[str, str], None]:
         """Serve mutable PR responses from a disposable executable."""
