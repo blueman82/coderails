@@ -101,6 +101,7 @@ def _prompt(path: Path, state: dict[str, Any], identifier: str, record: dict[str
     content += f"Acceptance: {node['ready_when']}\n"
     content += f"Assigned scope: {record['contract']['scope']}\n"
     content += "Work only in the assigned checkout. Report failed if the task is unclear or incomplete.\n"
+    content += "For done, give a final_report with cited claims and explicit did_not_verify items.\n"
     content += "Do not push, open a PR, merge, or change progress.json without the owner's explicit go.\n"
     if prompt.exists():
         if prompt.read_text(encoding="utf-8") != content:

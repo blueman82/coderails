@@ -178,7 +178,16 @@ class DriverControllerTests(unittest.TestCase):
 
                 def result(output: Path, _code: int, current: str = provider) -> dict[str, Any]:
                     self.assertTrue(output.read_text().startswith("CODERAILS_GRAPH_DISPATCH="))
-                    parsed = {"outcome": "done", "evidence": "disposable worker"}
+                    parsed = {
+                        "outcome": "done",
+                        "evidence": "disposable worker",
+                        "final_report": {
+                            "claims": [
+                                {"text": "Disposable result", "label": "verified", "source": "scratch checkout"}
+                            ],
+                            "did_not_verify": [],
+                        },
+                    }
                     if current == "codex":
                         (output.parent / "final.json").write_text(json.dumps(parsed))
                     return parsed

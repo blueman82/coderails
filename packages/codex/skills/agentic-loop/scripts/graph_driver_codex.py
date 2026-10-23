@@ -12,8 +12,41 @@ SCHEMA = {
     "properties": {
         "outcome": {"type": "string", "enum": ["done", "failed"]},
         "evidence": {"type": "string"},
+        "final_report": {
+            "type": ["object", "null"],
+            "properties": {
+                "claims": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "label": {"type": "string", "enum": ["verified", "inferred", "guess"]},
+                            "source": {"type": "string"},
+                        },
+                        "required": ["text", "label", "source"],
+                        "additionalProperties": False,
+                    },
+                },
+                "did_not_verify": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "item": {"type": "string"},
+                            "tag": {"type": "string", "enum": ["resolved", "unverifiable"]},
+                            "reason": {"type": "string"},
+                        },
+                        "required": ["item", "tag", "reason"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["claims", "did_not_verify"],
+            "additionalProperties": False,
+        },
     },
-    "required": ["outcome", "evidence"],
+    "required": ["outcome", "evidence", "final_report"],
     "additionalProperties": False,
 }
 
@@ -101,10 +134,12 @@ def result(output: Path, exit_code: int) -> dict[str, Any]:
         return _failed("invalid_final_schema")
     parsed = cast(dict[str, Any], final)
     if (
-        set(parsed) != {"outcome", "evidence"}
+        set(parsed) != {"outcome", "evidence", "final_report"}
         or parsed["outcome"] not in {"done", "failed"}
         or not isinstance(parsed["evidence"], str)
         or not parsed["evidence"].strip()
+        or (parsed["outcome"] == "done" and not isinstance(parsed["final_report"], dict))
+        or (parsed["outcome"] == "failed" and parsed["final_report"] is not None)
     ):
         return _failed("invalid_final_schema")
     try:

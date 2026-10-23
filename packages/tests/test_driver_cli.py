@@ -81,7 +81,9 @@ class DriverCliTests(unittest.TestCase):
                 "#!/usr/bin/env python3\n"
                 "import json, sys\nfrom pathlib import Path\n"
                 "if not sys.stdin.read().startswith('CODERAILS_GRAPH_DISPATCH='): sys.exit(9)\n"
-                "value = {'outcome':'done','evidence':'disposable worker'}\n"
+                "value = {'outcome':'done','evidence':'disposable worker','final_report':"
+                "{'claims':[{'text':'Disposable result','label':'verified','source':'scratch checkout'}],"
+                "'did_not_verify':[]}}\n"
                 "Path(sys.argv[sys.argv.index('--output-last-message')+1]).write_text(json.dumps(value))\n"
                 "print(json.dumps({'type':'thread.started','thread_id':'fake'}))\n"
                 "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':json.dumps(value)}}))\n"
@@ -95,7 +97,9 @@ class DriverCliTests(unittest.TestCase):
                 "if not sys.stdin.read().startswith('CODERAILS_GRAPH_DISPATCH='): sys.exit(9)\n"
                 "print(json.dumps({'type':'system','subtype':'init','session_id':'fake'}))\n"
                 "print(json.dumps({'type':'result','subtype':'success','is_error':False,"
-                "'structured_output':{'outcome':'done','evidence':'disposable worker'}}))\n"
+                "'structured_output':{'outcome':'done','evidence':'disposable worker','final_report':"
+                "{'claims':[{'text':'Disposable result','label':'verified','source':'scratch checkout'}],"
+                "'did_not_verify':[]}}}))\n"
             )
             npx.chmod(0o755)
             gh = bindir / "gh"
@@ -135,6 +139,7 @@ class DriverCliTests(unittest.TestCase):
                 self.assertEqual(run.returncode, 0, (provider, run.stderr))
                 self.assertEqual(json.loads(run.stdout)["status"], "recorded")
                 self.assertIsNone(case.read()["graph"]["active_wave"])
+                self.assertEqual(case.read()["final_reports"]["U3[1]"]["claims"][0]["source"], "scratch checkout")
 
 
 if __name__ == "__main__":

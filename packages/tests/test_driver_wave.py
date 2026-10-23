@@ -22,8 +22,8 @@ from hooks.scripts.tests.graph_convert_test import SCRIPTS, Case  # noqa: E402
 class DriverWaveTests(unittest.TestCase):
     """Exercise the real Claude and Codex graph CLIs on disposable files."""
 
-    def test_record_driver_wave_requires_a_sealed_reference(self) -> None:
-        """An exact, SHA-bound result advances one wave; a missing reference does not."""
+    def test_record_driver_wave_requires_seal_and_final_report(self) -> None:
+        """A sealed done result still needs the existing final-report gate."""
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             checkout = base / "checkout"
@@ -64,6 +64,7 @@ class DriverWaveTests(unittest.TestCase):
                     "attempt": 1,
                     "task_name": "test-worker",
                     "dispatch_mode": "driver",
+                    "final_report_required": True,
                     "authorized": {
                         "driver_run_id": "test-run",
                         "prompt_sha256": hashlib.sha256(b"CODERAILS_GRAPH_DISPATCH=test\n").hexdigest(),
@@ -101,16 +102,15 @@ class DriverWaveTests(unittest.TestCase):
                 self.assertNotEqual(corrupted.returncode, 0, (provider, corrupted.stderr))
                 self.assertEqual(case.path.read_bytes(), before)
                 backup.write_bytes(original_backup)
-                accepted = subprocess.run(
+                unreviewed = subprocess.run(
                     [sys.executable, str(SCRIPTS[provider]), "record-driver-wave", str(case.path), json.dumps(report)],
                     capture_output=True,
                     text=True,
                     check=False,
                 )
-                self.assertEqual(accepted.returncode, 0, (provider, accepted.stderr))
-                node = case.read()["graph"]["nodes"][node_id]
-                self.assertEqual(node["status"], "done")
-                self.assertEqual(node["evidence"][-1], ref)
+                self.assertNotEqual(unreviewed.returncode, 0, (provider, unreviewed.stderr))
+                self.assertIn("final_report_invalid", unreviewed.stderr)
+                self.assertEqual(case.path.read_bytes(), before)
 
 
 if __name__ == "__main__":

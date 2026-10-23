@@ -7,7 +7,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Callable, Optional, cast
 
 import graph_semantics
 
@@ -173,7 +173,12 @@ def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: d
     return cast(dict[str, Any], manifest)
 
 
-def apply_record(state_path: Path, state: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+def apply_record(
+    state_path: Path,
+    state: dict[str, Any],
+    report: dict[str, Any],
+    prepare: Callable[[dict[str, Any], dict[str, Any]], tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]],
+) -> dict[str, Any]:
     """Apply one complete driver wave only after rechecking each sealed result."""
     if state["graph"].get("dispatch_mode") != "driver" or set(report) != {"wave_id", "results", "references"}:
         raise ValueError("driver wave report has invalid mode or fields")
@@ -191,8 +196,6 @@ def apply_record(state_path: Path, state: dict[str, Any], report: dict[str, Any]
     references = cast(dict[str, Any], references_value)
     if set(results) != nodes or set(references) != nodes:
         raise ValueError("driver wave requires every result and reference")
-    transition = graph_semantics.record_wave(state, report["wave_id"], results)
-    proposed = cast(dict[str, Any], transition["state"])
     for node_id in sorted(nodes):
         reference = references[node_id]
         if not isinstance(reference, dict):
@@ -200,11 +203,17 @@ def apply_record(state_path: Path, state: dict[str, Any], report: dict[str, Any]
         manifest = validate(state_path, state, node_id, cast(dict[str, Any], reference))
         if manifest.get("result") != results[node_id]:
             raise ValueError("driver result differs from sealed worker output")
-        if results[node_id]["outcome"] in {"done", "skipped"} and manifest.get("exit_code") != 0:
+        outcome = results[node_id].get("outcome") if isinstance(results[node_id], dict) else None
+        if outcome in {"done", "skipped"} and manifest.get("exit_code") != 0:
             raise ValueError("successful driver result has a failing process exit")
+    core, statuses, reports = prepare(state, results)
+    transition = graph_semantics.record_wave(state, report["wave_id"], core)
+    proposed = cast(dict[str, Any], transition["state"])
+    for node_id in sorted(nodes):
+        reference = references[node_id]
         proposed["graph"]["nodes"][node_id]["evidence"].append(reference)
     validate_history(state_path, proposed)
-    return transition
+    return {**transition, "core_results": core, "statuses": statuses, "reports": reports}
 
 
 def validate_history(state_path: Path, state: dict[str, Any]) -> None:

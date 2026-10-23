@@ -187,8 +187,19 @@ def record_driver_wave(path: Path, raw_report: str) -> dict[str, Any]:
     with _locked(path):
         state = _load(path)
         with traced_refusal(path, state, "record-driver-wave"):
-            transition = graph_driver_evidence.apply_record(path, state, report)
+            try:
+                transition = graph_driver_evidence.apply_record(path, state, report, worker_status.prepare)
+            except worker_status.WorkerResultError as error:
+                nodes = (error.node,) if error.node else ()
+                raise RecoveryRefusedError(error.code, error.message, nodes) from error
         proposed = cast(dict[str, Any], transition["state"])
+        statuses, reports = transition["statuses"], transition["reports"]
+        worker_status.retain_decision_slot(proposed, statuses)
+        graph_repair.apply_failed_gates(transition, transition["core_results"])
+        worker_status.record_into(proposed, report["wave_id"], statuses, reports)
+        if statuses:
+            category, code, reason = worker_status.stop_for(statuses)
+            proposed = graph_stops.record_stop(proposed, state["session_id"], category, code, reason)["state"]
         graph_semantics.validate(proposed)
         _write(path, proposed)
         return {"revision": proposed["revision"], "ready": graph_semantics.ready(proposed)}

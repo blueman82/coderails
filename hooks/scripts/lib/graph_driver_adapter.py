@@ -7,18 +7,33 @@ from typing import Any
 
 import graph_driver_dispatch
 import graph_driver_evidence
+import graph_repair
+import worker_status
 
 from .graph_dispatch import validate_dispatch_evals
 from .graph_evidence import object_value
 from .graph_executor import ROOT, graph_semantics, transition
+from .graph_stops import record_stop
 
 
 def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
     """Record a sealed driver wave through the Claude graph lock."""
-    saved = transition(
-        path,
-        lambda state: object_value(graph_driver_evidence.apply_record(path, state, report)["state"], "driver state"),
-    )
+
+    def update(state: dict[str, Any]) -> dict[str, Any]:
+        result = graph_driver_evidence.apply_record(path, state, report, worker_status.prepare)
+        proposed = object_value(result["state"], "driver state")
+        statuses, reports = result["statuses"], result["reports"]
+        worker_status.retain_decision_slot(proposed, statuses)
+        graph_repair.apply_failed_gates(result, result["core_results"])
+        worker_status.record_into(proposed, report["wave_id"], statuses, reports)
+        if statuses:
+            category, code, reason = worker_status.stop_for(statuses)
+            proposed = object_value(
+                record_stop(proposed, state["session_id"], category, code, reason)["state"], "stops"
+            )
+        return proposed
+
+    saved = transition(path, update)
     return {"revision": saved["revision"], "ready": graph_semantics.ready(saved)}
 
 

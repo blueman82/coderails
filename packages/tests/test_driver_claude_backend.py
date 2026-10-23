@@ -33,7 +33,14 @@ class ClaudeBackendTests(unittest.TestCase):
         """Prose or an error result cannot finish a graph node."""
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output.jsonl"
-            expected = {"outcome": "done", "evidence": "PR and tests"}
+            expected = {
+                "outcome": "done",
+                "evidence": "PR and tests",
+                "final_report": {
+                    "claims": [{"text": "Disposable result", "label": "verified", "source": "scratch checkout"}],
+                    "did_not_verify": [],
+                },
+            }
             output.write_text(
                 json.dumps({"type": "system", "subtype": "init", "session_id": "S"})
                 + "\n"

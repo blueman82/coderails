@@ -54,10 +54,12 @@ def result(output: Path, exit_code: int) -> dict[str, Any]:
         return _failed("missing_structured_output")
     parsed = cast(dict[str, Any], raw)
     if (
-        set(parsed) != {"outcome", "evidence"}
+        set(parsed) != {"outcome", "evidence", "final_report"}
         or parsed["outcome"] not in {"done", "failed"}
         or not isinstance(parsed["evidence"], str)
         or not parsed["evidence"].strip()
+        or (parsed["outcome"] == "done" and not isinstance(parsed["final_report"], dict))
+        or (parsed["outcome"] == "failed" and parsed["final_report"] is not None)
     ):
         return _failed("invalid_final_schema")
     return parsed

@@ -40,7 +40,14 @@ class CodexBackendTests(unittest.TestCase):
             artifact = Path(directory)
             output = artifact / "output.jsonl"
             final = artifact / "final.json"
-            expected = {"outcome": "done", "evidence": "PR and test details"}
+            expected = {
+                "outcome": "done",
+                "evidence": "PR and test details",
+                "final_report": {
+                    "claims": [{"text": "Disposable result", "label": "verified", "source": "scratch checkout"}],
+                    "did_not_verify": [],
+                },
+            }
             valid = (
                 '{"type":"thread.started","thread_id":"T"}\n'
                 + json.dumps(
