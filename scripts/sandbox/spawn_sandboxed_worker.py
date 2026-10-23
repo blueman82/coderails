@@ -21,7 +21,7 @@ SRT_VERSION = "0.0.65"
 DRIVER_SCHEMA = {
     "type": "object",
     "properties": {
-        "outcome": {"type": "string", "enum": ["done", "failed"]},
+        "outcome": {"type": "string", "enum": ["done", "skipped", "failed"]},
         "evidence": {"type": "string"},
         "final_report": {
             "type": ["object", "null"],

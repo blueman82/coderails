@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, cast
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -118,6 +119,15 @@ class CodexBackendTests(unittest.TestCase):
             output.write_text(valid)
             final.write_text(json.dumps(expected))
             self.assertEqual(graph_driver_codex.result(output, 0), expected)
+            self.assertIn("skipped", cast(dict[str, Any], graph_driver_codex.SCHEMA)["properties"]["outcome"]["enum"])
+            skipped = {"outcome": "skipped", "evidence": "wiki update is out of scope", "final_report": None}
+            output.write_text(
+                '{"type":"thread.started","thread_id":"T"}\n'
+                + json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps(skipped)}})
+                + '\n{"type":"turn.completed"}\n'
+            )
+            final.write_text(json.dumps(skipped))
+            self.assertEqual(graph_driver_codex.result(output, 0), skipped)
             failed = {**expected, "outcome": "failed"}
             output.write_text(
                 '{"type":"thread.started","thread_id":"T"}\n'

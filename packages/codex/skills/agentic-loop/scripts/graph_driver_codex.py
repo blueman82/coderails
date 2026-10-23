@@ -13,7 +13,7 @@ MODELS = {"fast-mechanical": "gpt-6-luna", "default": "gpt-6.1-sol", "frontier":
 SCHEMA = {
     "type": "object",
     "properties": {
-        "outcome": {"type": "string", "enum": ["done", "failed"]},
+        "outcome": {"type": "string", "enum": ["done", "skipped", "failed"]},
         "evidence": {"type": "string"},
         "final_report": {
             "type": ["object", "null"],
@@ -188,10 +188,11 @@ def result(output: Path, exit_code: int) -> dict[str, Any]:
     parsed = cast(dict[str, Any], final)
     if (
         set(parsed) != {"outcome", "evidence", "final_report"}
-        or parsed["outcome"] not in {"done", "failed"}
+        or parsed["outcome"] not in {"done", "skipped", "failed"}
         or not isinstance(parsed["evidence"], str)
         or not parsed["evidence"].strip()
         or (parsed["outcome"] == "done" and not isinstance(parsed["final_report"], dict))
+        or (parsed["outcome"] == "skipped" and parsed["final_report"] is not None)
         or (parsed["final_report"] is not None and not isinstance(parsed["final_report"], dict))
     ):
         return _failed("invalid_final_schema")

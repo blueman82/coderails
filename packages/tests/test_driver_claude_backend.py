@@ -7,10 +7,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from hooks.scripts.lib import graph_driver_claude  # noqa: E402
+from scripts.sandbox.spawn_sandboxed_worker import DRIVER_SCHEMA  # noqa: E402
 
 
 class ClaudeBackendTests(unittest.TestCase):
@@ -48,6 +50,15 @@ class ClaudeBackendTests(unittest.TestCase):
                 + "\n"
             )
             self.assertEqual(graph_driver_claude.result(output, 0), expected)
+            self.assertIn("skipped", cast(dict[str, Any], DRIVER_SCHEMA)["properties"]["outcome"]["enum"])
+            skipped = {"outcome": "skipped", "evidence": "wiki update is out of scope", "final_report": None}
+            output.write_text(
+                json.dumps({"type": "system", "subtype": "init", "session_id": "S"})
+                + "\n"
+                + json.dumps({"type": "result", "subtype": "success", "is_error": False, "structured_output": skipped})
+                + "\n"
+            )
+            self.assertEqual(graph_driver_claude.result(output, 0), skipped)
             output.write_text(json.dumps({"type": "result", "subtype": "success", "is_error": False}) + "\n")
             self.assertEqual(graph_driver_claude.result(output, 0)["outcome"], "failed")
             output.write_text(json.dumps({"type": "result", "subtype": "error_during_execution", "is_error": True}))

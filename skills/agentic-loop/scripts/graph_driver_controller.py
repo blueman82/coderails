@@ -210,6 +210,7 @@ def _prompt(
     if implementation or wiki:
         content += "Do not run git add or git commit. The root will commit and open the PR after checking your work.\n"
     if wiki:
+        content += "If no wiki update is in scope, report skipped with final_report null.\n"
         content += "The root will merge the wiki PR and verify its commit on origin/main before recording done.\n"
     content += "Do not push, open a PR, merge, or change progress.json without the owner's explicit go.\n"
     if prompt.exists():

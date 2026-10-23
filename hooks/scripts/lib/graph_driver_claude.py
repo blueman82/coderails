@@ -59,11 +59,11 @@ def result(output: Path, exit_code: int) -> dict[str, Any]:
     parsed = cast(dict[str, Any], raw)
     if (
         set(parsed) != {"outcome", "evidence", "final_report"}
-        or parsed["outcome"] not in {"done", "failed"}
+        or parsed["outcome"] not in {"done", "skipped", "failed"}
         or not isinstance(parsed["evidence"], str)
         or not parsed["evidence"].strip()
         or (parsed["outcome"] == "done" and not isinstance(parsed["final_report"], dict))
-        or (parsed["outcome"] == "failed" and parsed["final_report"] is not None)
+        or (parsed["outcome"] in {"failed", "skipped"} and parsed["final_report"] is not None)
     ):
         return _failed("invalid_final_schema")
     return parsed
