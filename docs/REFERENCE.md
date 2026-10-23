@@ -721,7 +721,7 @@ Trash; it never silently overwrites user values.
 
 ### Workflow config keys
 
-`config.schema.json` (repo root, mirrored at `packages/codex/config.schema.json`) is the source of truth for
+`config.schema.json` (repo root; the Codex copy differs only at its unused `sandbox_workers` entry) is the source of truth for
 `.coderails/workflow.config.yaml`. `load_config(path)` in `scripts/lib/config.py` applies the defaults, coerces
 types and returns reason-coded findings (`config_unknown_key` with a did-you-mean hint, `config_bad_type`,
 `config_unreadable`); findings are non-authoritative trace rows plus one stderr line and never change a gate's
@@ -745,7 +745,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `jira` | object/null | `null` | read_by_prose_only | Jira settings (project, epic, component_name, component_id, epic_field, points_field, fix_version, mcp_namespace, transitions). Nested keys are not type-checked. |
 | `engineering_principles_paths` | array/null | `null` | read_by_prose_only | Glob patterns that trigger the engineering-principles pre-flight in /coderails:push. |
 | `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
-| `sandbox_workers` | boolean/null | `false` | read_by_prose_only | true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md). |
+| `sandbox_workers` | boolean/null | `true` | enforced_by_code | true or absent (default) = implementation workers run as OS-sandboxed processes (isolated HOME, scratch clone, scrubbed env) when the sandbox runtime and an owner-provisioned worker credential exist; otherwise traced fallback to in-process dispatch. While sandboxing is available, an in-process high-risk unit needs an owner-signed worker_fallback receipt. false = off. Read by scripts/sandbox/containment.py; a cooperating-agent safeguard, an agent can edit this file. |
 | `action_authority` | string/null | `"enforce"` | enforced_by_code | enforce (default, also with no config or no key) = gh pr merge, scripts/merge.py and git push to main/master need an owner-signed single-use receipt and honour the session authority (denied, approval_required_for, max_prs); advisory = trace and warn only; off = switch the gate off. Any other value is treated as enforce and traced action_authority_bad_mode. |
 | `integrity_review` | object/null | `null` | enforced_by_code | Integrity attestation settings. |
 | `integrity_review.machine_user` | string/null | `null` | enforced_by_code | GitHub login that must post the integrity-review status; null or absent = local gate inactive. |
@@ -763,8 +763,10 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `scripts/lib/{config,review_artifact,eval_artifact,artifact_io}.py` | Shared root-provider config and structured artifact operations. |
 | `scripts/lib/memory_adapter.py` (+ byte-identical `packages/codex/scripts/lib/` mirror), `memory_counters.py` | Optional typed-memory adapter over the `muninn` CLI (subprocess only; never imported, muninn needs py3.12). `add\|list\|render\|probe`; probes `know add --help` for the Part A flags (`--scope-loop --confidence --valid-until --sensitivity --contradicts --tag`, kinds `lesson`/`constraint`) and returns a reason-coded `Degraded` (exit 3) instead of failing, so callers keep the Markdown memory path. Writes need `--cite` and a verbatim `--quote`; reads drop restricted/expired rows; `render --memory-md\|--standing-orders` prints to stdout and `--write PATH` only replaces an absent or marker-stamped file. The ledger upgrade (schema v2) is one-way, done by muninn, not Coderails. The Codex copy cannot trace (no `trace_row.py` ships there) and has no teardown doc; both fail open. `remember_inject_cap_guard` is untouched (third-party plugin patch, unrelated). |
 | `scripts/lib/{eval_validation,eval_execution}.py` | Eval criteria and command/control verification. Gate smoke runs in a detached worktree at the trusted SHA. |
-| `scripts/sandbox/spawn_sandboxed_worker.py` | Guard dispatch before scratch allocation; run a separate Claude process through pinned srt and retain its exit status. |
-| `scripts/sandbox/{render_settings,sandbox_probe}.py` | Render explicit write containment and discriminate allowed versus forbidden filesystem writes. |
+| `scripts/sandbox/containment.py` | `resolve()` -> `{mode: sandboxed\|fallback\|off, reason_code}` from `sandbox_workers` (default true), the sandbox runtime and the owner's `~/.coderails/worker_credential`; `HIGH_RISK_PREFIXES`; CLI prints and traces the decision. |
+| `scripts/sandbox/spawn_sandboxed_worker.py` | Guard dispatch, bind graph U3 manifest, clone into per-worker scratch, run Claude through pinned srt with an isolated HOME and allowlisted environment, then check every commit against the manifest and for known secrets before importing exactly the worker's branch (fast-forward only) and pushing outside the sandbox. |
+| `scripts/sandbox/{render_settings,sandbox_probe}.py` | Render the scratch-only write policy; probe writes to `~/.claude.json`, the primary `.git/refs/heads/main` and the real HOME plus `GH_TOKEN` presence (all must fail). |
+| `hooks/scripts/worker_containment_gate.py`, `scripts/lib/containment_counters.py` | `PreToolUse` `Agent` gate: a high-risk in-process graph U3 dispatch needs an owner-signed `worker_fallback` receipt while sandboxing is available, regardless of native role; counters over the trace rows. |
 | `scripts/integrity-gate/integrity_gate_runner.py` | Root-owned mechanical review/eval/diff attestation; no LLM classifier. Deployed with its root-owned HTTP and policy modules. |
 | `scripts/integrity-gate/{install,setup}.py` | Reviewable owner-run promotion, credential handling and GitHub ruleset setup. |
 | `install.py`, `uninstall.py` | Independent provider installation/removal with preserved user data, preflight checks and read-only dry-run. |

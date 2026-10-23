@@ -251,3 +251,25 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   (docs/decisions/p3-human-only-minting.md). The hash covers only the command text the hook sees, not aliases, functions, eval/xargs or scripts that
   push (sudo/time/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped; an env assignment prefix is kept and makes the command unbindable). Limits: scope 500 chars, 8 KB per receipt,
   50 receipts per session (`receipt_refused_scope_too_long`, `receipt_refused_too_many`). Protected branches are main and master only.
+
+## Worker containment: sandbox fell back, an in-process worker was denied, or a branch import was refused
+
+- Symptom: workers run in process although `sandbox_workers` is on; a graph U3 `Agent` dispatch is denied
+  `containment_ack_required`; or `spawn_sandboxed_worker.py` exits 1 with `branch_import_refused` / `worker_credential_missing`.
+  ON by default (`sandbox_workers` true or absent); `false` is `off`.
+- Decision: `python3 scripts/sandbox/containment.py [dir]` prints `{mode, reason_code}` and traces `sandbox_launch/resolved/<code>`.
+  `sandboxed`; `fallback` with `sandbox_unavailable` (needs `sandbox-exec` + `rg` on macOS or `bwrap` on Linux, `npx`, and the pinned srt
+  in the npx cache: prime it once with `npx --yes @anthropic-ai/sandbox-runtime@0.0.65 --version`) or `worker_credential_missing`
+  (OWNER creates `~/.coderails/worker_credential`, mode 0600, one line `ANTHROPIC_API_KEY=...` or `CLAUDE_CODE_OAUTH_TOKEN=...` from
+  `claude setup-token`; a looser mode, another variable name or an empty value counts as missing); `off` with `sandbox_workers_off`.
+- Query: `jq -r 'select(.command=="worker_containment" or .command=="sandbox_launch") | [.command,.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`.
+  Codes: `containment_fallback_low_risk` (allowed in process, manifest avoids `HIGH_RISK_PREFIXES`), `containment_ack_required` (denied),
+  `containment_ack_receipt` (allowed once on an owner receipt), `containment_gate_failed_open` (the hook errored and allowed),
+  `branch_import_refused` (missing graph-owned manifest, out-of-manifest commit, committed secret, moved branch other than its own, or rewritten history: nothing imported or pushed, the clone
+  stays under `$TMPDIR/sw.*/clone` for inspection), `branch_imported`, `branch_pushed`.
+- Remediation: dispatch the unit with `python3 scripts/sandbox/spawn_sandboxed_worker.py <worktree> <prompt_file> <model>`, or the OWNER acknowledges
+  the in-process fallback once: `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind worker_fallback --command 'worker_fallback <unit>' --cwd <worktree>`
+  (signed, single-use, bound to repository + branch + HEAD). Declare the unit's `manifest` so a low-risk unit needs no acknowledgement.
+- Counters: `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/containment_counters.py` (see "Worker containment counters" in docs/graph-alignment-measurement.md).
+- Limits: a cooperating-agent safeguard, not absolute isolation. Reads under the real HOME, api.anthropic.com egress, the trusted launcher and the
+  unsandboxed orchestrator remain; GitHub egress is blocked in the worker. Codex workers rely on Codex's own `sandbox_mode`; an agent can edit `sandbox_workers`, a unit's manifest and the user-tier receipt trust root.

@@ -9,7 +9,9 @@ are None (push.default, branch.*.remote, pushurl and GIT_* could redirect them).
 gh pr merge / gh api .../merge: ref = the PR base, sha = the live PR headRefOid, repository = origin, -R, the PR URL or
 the api path. The command must pin that sha (`--match-head-commit <sha>` / `sha=<sha>`) so a head that moves after the
 hook is refused by GitHub; the merge.py script pins it itself. Option values are skipped when finding the PR argument.
-Used by the hook and the receipt CLI; merge.py is not a binding() caller (it pins the sha it verified).
+worker_fallback (the containment gate's owner acknowledgement, never a guarded command): origin + current branch + HEAD
+of the directory the orchestrator runs in. Used by the hook and the receipt CLI;
+merge.py is not a binding() caller (it pins the sha it verified).
 Refuses (None) --all/--mirror/--tags/--delete, several refspecs, deletes, and remotes that are not host/owner/name.
 """
 
@@ -155,14 +157,23 @@ def _merge(tokens: list[str], segment: str, cwd: str) -> dict[str, str] | None:
     return {"repository": repository, "ref": _full_ref(view[0]), "sha": view[1]} if repository else None
 
 
+def _worker_fallback(cwd: str) -> dict[str, str] | None:
+    """worker_fallback: repository = origin, ref = the current branch, sha = HEAD (the worker's base)."""
+    repository = normalise_repository(git_out(cwd, "remote", "get-url", "origin"))
+    branch, sha = git_out(cwd, "branch", "--show-current"), git_out(cwd, "rev-parse", "--verify", "--quiet", "HEAD")
+    return {"repository": repository, "ref": _full_ref(branch), "sha": sha} if repository and branch and sha else None
+
+
 def binding(kind: str, segment: str, cwd: str) -> dict[str, str] | None:
-    """{repository, ref, sha} for one guarded segment (kind merge | git_push), or None when unknowable."""
+    """{repository, ref, sha} for one guarded segment (kind merge | git_push | worker_fallback), None if unknowable."""
     try:
         tokens = shlex.split(segment)
     except ValueError:
         return None
     if tokens and re.match(r"^[A-Za-z_]\w*=", tokens[0]):
         return None  # an env assignment prefix (also the matcher's UNBINDABLE marker) can retarget the action
+    if kind == "worker_fallback":
+        return _worker_fallback(cwd)
     if kind == "git_push" and "push" in tokens:
         return _push(tokens, cwd)
     if kind == "merge":

@@ -238,13 +238,16 @@ class CliTests(ConfigCase):
 
 
 class MirrorTests(unittest.TestCase):
-    """The Codex package ships the same parser and schema."""
+    """The Codex package ships the same parser and an explicit containment-schema exception."""
 
     def test_byte_identical(self) -> None:
-        """Parser and schema copies must not drift."""
-        for relative in ("scripts/lib/config.py", "config.schema.json"):
-            with self.subTest(relative):
-                self.assertEqual((ROOT / relative).read_bytes(), (CODEX / relative).read_bytes())
+        """Parser and shared schema fields must not drift; Codex has no Claude sandbox launcher."""
+        self.assertEqual((ROOT / "scripts/lib/config.py").read_bytes(), (CODEX / "scripts/lib/config.py").read_bytes())
+        root_schema = json.loads((ROOT / "config.schema.json").read_text())
+        codex_schema = json.loads((CODEX / "config.schema.json").read_text())
+        root_schema["properties"].pop("sandbox_workers")
+        codex_schema["properties"].pop("sandbox_workers")
+        self.assertEqual(root_schema, codex_schema)
 
     def test_schema_shape(self) -> None:
         """Every key has type, default, description and a valid status; sandbox_workers is not called dead."""
@@ -258,7 +261,7 @@ class MirrorTests(unittest.TestCase):
                 walk(spec.get("properties", {}))  # type: ignore[arg-type]
 
         walk(schema["properties"])
-        self.assertEqual(schema["properties"]["sandbox_workers"]["status"], "read_by_prose_only")
+        self.assertEqual(schema["properties"]["sandbox_workers"]["status"], "enforced_by_code")
 
 
 if __name__ == "__main__":

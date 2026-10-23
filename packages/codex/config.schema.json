@@ -52,8 +52,8 @@
       "description": "Slash command run by the pre-flight; null skips it."
     },
     "sandbox_workers": {
-      "type": ["boolean", "null"], "default": false, "status": "read_by_prose_only",
-      "description": "true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md)."
+      "type": ["boolean", "null"], "default": null, "status": "unused",
+      "description": "Codex uses native spawn_agent and the harness sandbox_mode. This Claude worker-containment setting is not enforced by the Codex plugin."
     },
     "action_authority": {
       "type": ["string", "null"], "default": "enforce", "enum": ["enforce", "advisory", "off"], "status": "enforced_by_code",
