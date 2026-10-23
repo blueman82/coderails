@@ -53,6 +53,96 @@ class DriverControllerTests(unittest.TestCase):
             self.assertEqual(report, {"status": "paused", "reason": "missing_task", "nodes": ["U3[1]"]})
             self.assertEqual(case.path.read_bytes(), before)
 
+    def test_two_workers_need_distinct_checkouts_before_wave(self) -> None:
+        """One mutable checkout cannot preserve both workers' HEAD evidence."""
+        with tempfile.TemporaryDirectory() as directory:
+            case = Case("codex", Path(directory))
+            self.scoped(case)
+            self.assertEqual(case.graph("convert").returncode, 0)
+            added = case.graph("add-unit", "--loop-id", "L", "--unit", "2", "--scope", "Build second unit")
+            self.assertEqual(added.returncode, 0, added.stderr)
+            self.assertEqual(case.graph("cutover-driver").returncode, 0)
+            case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+            before = case.path.read_bytes()
+
+            def command(_prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
+                self.fail("a shared checkout must not start either worker")
+
+            report = graph_driver_controller.drive_once(
+                case.path,
+                "S",
+                SCRIPTS["codex"],
+                Path(directory),
+                "codex",
+                command,
+                lambda _path, _code: {"outcome": "done", "evidence": "impossible"},
+            )
+            self.assertEqual(report["reason"], "checkout_map_required")
+            self.assertEqual(case.path.read_bytes(), before)
+            checkouts: dict[str, Path] = {}
+            for node_id in ("U3[1]", "U3[2]"):
+                worker = Path(directory) / node_id.replace("[", "-").replace("]", "")
+                worker.mkdir()
+                subprocess.run(["git", "init", "-q", str(worker)], check=True)
+                subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(worker),
+                        "-c",
+                        "user.name=Test",
+                        "-c",
+                        "user.email=t@example.test",
+                        "commit",
+                        "-q",
+                        "--allow-empty",
+                        "-m",
+                        "first",
+                    ],
+                    check=True,
+                )
+                checkouts[node_id] = worker
+            mapping = Path(directory) / "checkout-map.json"
+            mapping.write_text(json.dumps({node_id: str(worker) for node_id, worker in checkouts.items()}))
+            checkouts = graph_driver_controller.parse_checkout_map(mapping)
+
+            def run_worker(prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
+                return [sys.executable, "-c", "import sys; print(sys.stdin.readline().strip())"], None, prompt
+
+            def result(output: Path, _code: int) -> dict[str, Any]:
+                self.assertTrue(output.read_text().startswith("CODERAILS_GRAPH_DISPATCH="))
+                parsed = {
+                    "outcome": "done",
+                    "evidence": "disposable worker",
+                    "final_report": {
+                        "claims": [{"text": "Disposable result", "label": "verified", "source": "scratch checkout"}],
+                        "did_not_verify": [],
+                    },
+                }
+                (output.parent / "final.json").write_text(json.dumps(parsed))
+                return parsed
+
+            for _attempt in range(20):
+                report = graph_driver_controller.drive_once(
+                    case.path, "S", SCRIPTS["codex"], checkouts, "codex", run_worker, result
+                )
+                if report["status"] == "recorded":
+                    break
+                self.assertEqual(report["status"], "running")
+            self.assertEqual(report["status"], "recorded")
+            self.assertEqual(report["nodes"], ["U3[1]", "U3[2]"])
+            state = case.read()
+            for node_id in checkouts:
+                ref = state["graph"]["nodes"][node_id]["evidence"][-1]
+                manifest = case.path.parent / "driver-evidence" / ref["dispatch_id"] / "manifest.json"
+                self.assertEqual(json.loads(manifest.read_text())["checkout"], str(checkouts[node_id].resolve()))
+            self.assertEqual(
+                graph_driver_controller._checkout_problem(  # pyright: ignore[reportPrivateUsage]
+                    state, ["U3[1]"], checkouts["U3[1]"], case.path
+                ),
+                "checkout_already_used",
+            )
+
     def test_root_owned_proof_node_pauses_before_dispatch(self) -> None:
         """A proof step cannot be satisfied by an external model's done message."""
         with tempfile.TemporaryDirectory() as directory:
@@ -101,7 +191,7 @@ class DriverControllerTests(unittest.TestCase):
             dispatch_id = issued["dispatch_id"]
             record = case.read()["graph"]["dispatches"][dispatch_id]
             prompt = graph_driver_controller._prompt(  # pyright: ignore[reportPrivateUsage]
-                case.path, case.read(), dispatch_id, record
+                case.path, case.read(), dispatch_id, record, Path(directory).resolve()
             )
             authorized = subprocess.run(
                 [

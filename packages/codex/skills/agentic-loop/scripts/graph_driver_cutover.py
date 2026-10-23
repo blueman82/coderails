@@ -67,7 +67,9 @@ def add_parsers(add_parser: Callable[[str], argparse.ArgumentParser]) -> None:
     drive = add_parser("drive")
     drive.add_argument("state", type=Path)
     drive.add_argument("--session", required=True)
-    drive.add_argument("--checkout", required=True, type=Path)
+    checkout = drive.add_mutually_exclusive_group(required=True)
+    checkout.add_argument("--checkout", type=Path)
+    checkout.add_argument("--checkout-map", type=Path)
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -78,13 +80,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         return graph_dispatch.begin_driver_wave(args.state)
     if args.command == "drive":
         try:
+            checkouts = graph_driver_controller.select_checkouts(args.checkout, args.checkout_map)
             return graph_driver_controller.drive_wave(
                 args.state,
                 args.session,
                 Path(__file__).with_name("graph.py"),
-                args.checkout,
+                checkouts,
                 "codex",
-                lambda prompt, _record: graph_driver_codex.command(prompt, args.checkout),
+                lambda prompt, record: graph_driver_codex.command(
+                    prompt, graph_driver_controller.checkout_for(checkouts, record["node_id"])
+                ),
                 graph_driver_codex.result,
             )
         except (ValueError, OSError, TypeError, KeyError) as error:

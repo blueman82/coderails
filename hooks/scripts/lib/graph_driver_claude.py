@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, cast
 
+import graph_driver_controller
+
 
 def command(prompt: Path, checkout: Path, model: str = "sonnet") -> tuple[list[str], None, Path]:
     """Build one contained Claude worker command without another launch path."""
@@ -66,14 +68,19 @@ def result(output: Path, exit_code: int) -> dict[str, Any]:
 
 
 def run_wave(
-    path: Path, session: str, checkout: Path, script: Path, runner: Callable[..., dict[str, Any]]
+    path: Path,
+    session: str,
+    checkout: graph_driver_controller.Checkouts,
+    script: Path,
+    runner: Callable[..., dict[str, Any]],
 ) -> dict[str, Any]:
     """Select Claude's role model and call the shared foreground controller."""
     models = {"fast-mechanical": "haiku", "default": "sonnet", "frontier": "opus"}
 
     def select(prompt: Path, record: dict[str, Any]) -> tuple[list[str], None, Path]:
         """Pin the model to the frozen dispatch role."""
-        return command(prompt, checkout, models[record["contract"]["model_role"]])
+        worker_checkout = graph_driver_controller.checkout_for(checkout, record["node_id"])
+        return command(prompt, worker_checkout, models[record["contract"]["model_role"]])
 
     return runner(
         path,

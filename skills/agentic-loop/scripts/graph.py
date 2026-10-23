@@ -89,7 +89,9 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--prompt-file", required=True, type=Path)
         if name == "drive":
             command.add_argument("--session", required=True)
-            command.add_argument("--checkout", required=True, type=Path)
+            checkout = command.add_mutually_exclusive_group(required=True)
+            checkout.add_argument("--checkout", type=Path)
+            checkout.add_argument("--checkout-map", type=Path)
         if name == "instantiate":
             command.add_argument("--profile", choices=graph_spec.PROFILES, help="default: policy graph.profile")
             command.add_argument("--unit", action="append", default=[], help="work unit id to register (repeatable)")
@@ -355,8 +357,9 @@ def main() -> int:
         elif args.command == "begin-driver-wave":
             output = graph_driver_adapter.begin_wave(args.state)
         elif args.command == "drive":
+            checkouts = graph_driver_controller.select_checkouts(args.checkout, args.checkout_map)
             output = graph_driver_claude.run_wave(
-                args.state, args.session, args.checkout, Path(__file__), graph_driver_controller.drive_wave
+                args.state, args.session, checkouts, Path(__file__), graph_driver_controller.drive_wave
             )
         elif args.command == "authorize-driver":
             output = graph_driver_adapter.authorize(

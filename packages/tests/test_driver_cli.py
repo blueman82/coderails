@@ -22,6 +22,40 @@ from packages.tests.test_driver_authorize import frozen_evals  # noqa: E402
 class DriverCliTests(unittest.TestCase):
     """Use fake AI executables, real graph commands and real process wrappers."""
 
+    def test_checkout_map_option_refuses_wrong_node_without_mutation(self) -> None:
+        """Both public CLIs parse the map and bind it to the full ready set."""
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            mapping = base / "checkouts.json"
+            mapping.write_text(json.dumps({"U3[2]": str(base)}))
+            for provider in ("claude", "codex"):
+                case = Case(provider, base)
+                state = case.read()
+                state["work_units"]["1"] = {"status": "pending", "scope": "Build the disposable unit"}
+                case.write(state)
+                self.assertEqual(case.graph("convert").returncode, 0)
+                self.assertEqual(case.graph("cutover-driver").returncode, 0)
+                case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+                before = case.path.read_bytes()
+                run = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SCRIPTS[provider]),
+                        "drive",
+                        str(case.path),
+                        "--session",
+                        "S",
+                        "--checkout-map",
+                        str(mapping),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(run.returncode, 0, (provider, run.stderr))
+                self.assertEqual(json.loads(run.stdout)["reason"], "checkout_map_mismatch")
+                self.assertEqual(case.path.read_bytes(), before)
+
     def test_foreground_lease_refuses_second_controller_without_mutation(self) -> None:
         """A second foreground driver cannot issue a wave while the first owns it."""
         with tempfile.TemporaryDirectory() as directory:

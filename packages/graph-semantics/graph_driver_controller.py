@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Optional, cast
+from typing import Any, Callable, Optional, Union, cast
 
 import graph_contract
 import graph_driver_evidence
@@ -21,6 +21,7 @@ from graph_vocab import decision_pending
 
 Command = Callable[[Path, dict[str, Any]], tuple[list[str], Optional[dict[str, str]], Optional[Path]]]
 Result = Callable[[Path, int], dict[str, Any]]
+Checkouts = Union[Path, dict[str, Path]]
 
 
 def _graph(script: Path, name: str, path: Path, *args: str) -> dict[str, Any]:
@@ -85,7 +86,61 @@ def _missing_tasks(state: dict[str, Any], nodes: list[str]) -> list[str]:
     )
 
 
-def _prompt(path: Path, state: dict[str, Any], identifier: str, record: dict[str, Any]) -> Path:
+def parse_checkout_map(path: Path) -> dict[str, Path]:
+    """Read one explicit node-to-checkout map for a foreground wave."""
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("checkout map is missing or a symlink")
+    parsed: object = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(parsed, dict) or not parsed:
+        raise ValueError("checkout map must bind node ids to absolute paths")
+    entries = cast(dict[object, object], parsed)
+    if not all(
+        isinstance(key, str) and isinstance(value, str) and Path(value).is_absolute() for key, value in entries.items()
+    ):
+        raise ValueError("checkout map must bind node ids to absolute paths")
+    return {key: Path(value) for key, value in cast(dict[str, str], entries).items()}
+
+
+def select_checkouts(checkout: Path | None, map_path: Path | None) -> Checkouts:
+    """Choose the single or mapped checkout form exposed by the CLI."""
+    if map_path is not None:
+        return parse_checkout_map(map_path)
+    if checkout is not None:
+        return checkout
+    raise ValueError("one checkout option is required")
+
+
+def checkout_for(checkouts: Checkouts, node_id: str) -> Path:
+    """Select one existing, real checkout for an issued node."""
+    path = checkouts[node_id] if isinstance(checkouts, dict) else checkouts
+    if path.is_symlink() or not path.is_dir():
+        raise ValueError(f"worker checkout is missing or a symlink: {node_id}")
+    return path.resolve(strict=True)
+
+
+def _checkout_problem(state: dict[str, Any], nodes: list[str], checkouts: Checkouts, path: Path) -> str | None:
+    """Keep each worker attempt on its own retained checkout."""
+    if isinstance(checkouts, dict):
+        if set(checkouts) != set(nodes):
+            return "checkout_map_mismatch"
+    elif len(nodes) != 1:
+        return "checkout_map_required"
+    paths = [checkout_for(checkouts, node_id) for node_id in nodes]
+    if len(set(paths)) != len(paths):
+        return "checkout_reused_in_wave"
+    nodes_data = cast(dict[str, dict[str, Any]], state["graph"]["nodes"])
+    for node_id, node in nodes_data.items():
+        for item in cast(list[Any], node["evidence"]):
+            if isinstance(item, dict):
+                reference = cast(dict[str, Any], item)
+                if reference.get("kind") == "driver_worker":
+                    manifest = graph_driver_evidence.validate(path, state, node_id, reference)
+                    if Path(manifest["checkout"]) in paths:
+                        return "checkout_already_used"
+    return None
+
+
+def _prompt(path: Path, state: dict[str, Any], identifier: str, record: dict[str, Any], checkout: Path) -> Path:
     """Write the exact envelope and contract once before authorization."""
     artifact = path.parent / "driver-evidence" / identifier
     if artifact.parent.is_symlink() or artifact.is_symlink():
@@ -100,6 +155,7 @@ def _prompt(path: Path, state: dict[str, Any], identifier: str, record: dict[str
     content += f"\nTask: {node['label']}\n"
     content += f"Acceptance: {node['ready_when']}\n"
     content += f"Assigned scope: {record['contract']['scope']}\n"
+    content += f"Checkout: {checkout}\n"
     content += "Work only in the assigned checkout. Report failed if the task is unclear or incomplete.\n"
     content += "For done, give a final_report with cited claims and explicit did_not_verify items.\n"
     content += "Do not push, open a PR, merge, or change progress.json without the owner's explicit go.\n"
@@ -134,7 +190,7 @@ def drive_once(
     path: Path,
     session: str,
     script: Path,
-    checkout: Path,
+    checkout: Checkouts,
     provider: str,
     command: Command,
     result: Result,
@@ -156,6 +212,9 @@ def drive_once(
                 return {"status": "paused", "reason": "missing_task", "nodes": missing}
             if not ready:
                 return {"status": "paused", "reason": "no_ready_nodes"}
+            problem = _checkout_problem(state, ready, checkout, path)
+            if problem:
+                return {"status": "paused", "reason": problem, "nodes": ready}
             _graph(script, "begin-driver-wave", path)
             state = _load(path, session)
         active = cast(dict[str, Any], state["graph"]["active_wave"])
@@ -163,11 +222,15 @@ def drive_once(
             return {"status": "unresolved", "reason": "active_control_node", "nodes": active["nodes"]}
         if _missing_tasks(state, active["nodes"]):
             return {"status": "unresolved", "reason": "active_missing_task", "nodes": active["nodes"]}
+        problem = _checkout_problem(state, active["nodes"], checkout, path)
+        if problem:
+            return {"status": "unresolved", "reason": problem, "nodes": active["nodes"]}
         results: dict[str, Any] = {}
         references: dict[str, Any] = {}
         for identifier, record in _dispatches(state):
             node_id = record["node_id"]
-            prompt = _prompt(path, state, identifier, record)
+            worker_checkout = checkout_for(checkout, node_id)
+            prompt = _prompt(path, state, identifier, record, worker_checkout)
             artifact = prompt.parent
             newly_authorized = record.get("authorized") is None
             if newly_authorized:
@@ -194,15 +257,19 @@ def drive_once(
                     if not newly_authorized:
                         return {"status": "unresolved", "reason": "authorized_without_launch", "node": node_id}
                     argv, environment, input_path = command(prompt, record)
-                    graph_driver_process.start(artifact, argv, checkout, environment=environment, stdin_path=input_path)
+                    graph_driver_process.start(
+                        artifact, argv, worker_checkout, environment=environment, stdin_path=input_path
+                    )
                 observation = graph_driver_process.observe(artifact, 0.05)
                 if observation["status"] != "finished":
                     return {"status": observation["status"], "node": node_id}
                 parsed = result(artifact / "output.jsonl", observation["exit_code"])
                 reference = graph_driver_evidence.seal(
-                    path, state, node_id, identifier, checkout, provider, observation["exit_code"], parsed
+                    path, state, node_id, identifier, worker_checkout, provider, observation["exit_code"], parsed
                 )
                 manifest = graph_driver_evidence.validate(path, state, node_id, reference)
+            if Path(manifest["checkout"]) != worker_checkout:
+                return {"status": "unresolved", "reason": "checkout_changed", "node": node_id}
             results[node_id] = manifest["result"]
             references[node_id] = reference
         _graph(
@@ -218,7 +285,7 @@ def drive_wave(
     path: Path,
     session: str,
     script: Path,
-    checkout: Path,
+    checkout: Checkouts,
     provider: str,
     command: Command,
     result: Result,
