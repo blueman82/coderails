@@ -109,10 +109,12 @@ class MergeEvidenceTests(HookTestCase):
                 "tool_input": {"command": f"gh pr merge {target}"},
             }
             with (
-                patch(module + ".read_payload", return_value=payload),
+                patch(module + ".read_payload_strict", return_value=payload),
                 patch(module + ".config_path", return_value="config"),
                 patch(module + ".transcript_entries", return_value=[]),
                 patch(module + ".merge_target.resolve", return_value="42"),
+                patch(module + ".git.pr_field", return_value="head"),
+                patch(module + ".publication_gate.evaluate", return_value=[]),
                 patch(module + ".step_found", return_value=True) as prerequisite,
                 patch(module + ".merge_reason", return_value=""),
                 patch(module + ".deny") as deny,
@@ -137,14 +139,118 @@ class MergeEvidenceTests(HookTestCase):
             payload = {"cwd": cwd, "transcript_path": __file__, "tool_input": {"command": text}}
             with (
                 self.subTest(command=text),
-                patch(module + ".read_payload", return_value=payload),
+                patch(module + ".read_payload_strict", return_value=payload),
                 patch(module + ".config_path", return_value="config"),
                 patch(module + ".transcript_entries", return_value=[]),
+                patch(module + ".git.pr_field", return_value="head"),
+                patch(module + ".publication_gate.evaluate", return_value=[]),
                 patch(module + ".step_found", return_value=True),
                 patch(module + ".merge_reason", return_value="") as gate,
             ):
                 enforce_pr_workflow.main()
                 gate.assert_called_once_with("42", directory, unit="2", progress="p.json")
+
+    def test_gh_repo_retarget_denies_before_evidence_lookup(self) -> None:
+        """A merge retargeted by GH_REPO cannot borrow this repository's review and eval evidence."""
+        module = "hooks.scripts.enforce_pr_workflow"
+        payload = {
+            "cwd": str(self.directory),
+            "transcript_path": __file__,
+            "tool_input": {"command": "GH_REPO=other/repo gh pr merge 42"},
+        }
+        with (
+            patch(module + ".read_payload_strict", return_value=payload),
+            patch(module + ".config_path", return_value="config"),
+            patch(module + ".transcript_entries", return_value=[]),
+            patch(module + ".step_found", return_value=True),
+            patch(module + ".merge_reason") as gate,
+            patch(module + ".deny") as deny,
+        ):
+            enforce_pr_workflow.main()
+            gate.assert_not_called()
+            self.assertTrue(deny.call_args.args[0].startswith("pr_repo_override:"))
+
+    def test_direct_publication_check_needs_no_config_or_transcript(self) -> None:
+        """Default-on manifest checks reach a direct merge even without the advisory workflow setup."""
+        before = Path.cwd()
+        self.addCleanup(os.chdir, before)
+        module = "hooks.scripts.enforce_pr_workflow"
+        payload = {"cwd": str(self.directory), "tool_input": {"command": "gh pr merge 42"}}
+        with (
+            patch(module + ".read_payload_strict", return_value=payload),
+            patch(module + ".config_path", return_value=""),
+            patch(module + ".merge_target.resolve", return_value="42"),
+            patch("scripts.lib.git_common.pr_field", return_value="a" * 40),
+            patch(
+                "scripts.lib.publication_gate.evaluate",
+                return_value=[{"code": "diff_manifest:denied_path", "detail": "x"}],
+            ) as gate,
+            patch(module + ".deny") as deny,
+        ):
+            enforce_pr_workflow.main()
+            gate.assert_called_once_with("42", "a" * 40, "", "")
+            self.assertTrue(deny.call_args.args[0].startswith("diff_manifest:denied_path"))
+
+    def test_base_edit_then_merge_refuses_before_publication_lookup(self) -> None:
+        """One Bash call cannot retarget the PR base after the hook checks its old base."""
+        before = Path.cwd()
+        self.addCleanup(os.chdir, before)
+        module = "hooks.scripts.enforce_pr_workflow"
+        payload = {
+            "cwd": str(self.directory),
+            "tool_input": {"command": "gh pr edit 42 --base old-release && gh pr merge 42"},
+        }
+        with (
+            patch(module + ".read_payload_strict", return_value=payload),
+            patch(module + ".publication_gate.evaluate") as gate,
+            patch(module + ".deny") as deny,
+        ):
+            enforce_pr_workflow.main()
+            gate.assert_not_called()
+            self.assertTrue(deny.call_args.args[0].startswith("pr_base_mutation:"))
+
+        payload = {
+            "cwd": str(self.directory),
+            "tool_input": {
+                "command": 'gh api "repos/o/r/pulls/42" -X PATCH --input /tmp/base-change.json && gh pr merge 42'
+            },
+        }
+        with (
+            patch(module + ".read_payload_strict", return_value=payload),
+            patch(module + ".publication_gate.evaluate") as gate,
+            patch(module + ".deny") as deny,
+        ):
+            enforce_pr_workflow.main()
+            gate.assert_not_called()
+            self.assertTrue(deny.call_args.args[0].startswith("pr_base_mutation:"))
+
+        payload = {
+            "cwd": str(self.directory),
+            "tool_input": {
+                "command": "gh api -X PATCH repos/o/r/pulls/42 --input /tmp/base-change.json && gh pr merge 42"
+            },
+        }
+        with (
+            patch(module + ".read_payload_strict", return_value=payload),
+            patch(module + ".publication_gate.evaluate") as gate,
+            patch(module + ".deny") as deny,
+        ):
+            enforce_pr_workflow.main()
+            gate.assert_not_called()
+            self.assertTrue(deny.call_args.args[0].startswith("pr_base_mutation:"))
+
+        payload = {
+            "cwd": str(self.directory),
+            "tool_input": {"command": "gh api -X PATCH repos/o/r/pulls/42 -f base=old-release && gh pr merge 42"},
+        }
+        with (
+            patch(module + ".read_payload_strict", return_value=payload),
+            patch(module + ".publication_gate.evaluate") as gate,
+            patch(module + ".deny") as deny,
+        ):
+            enforce_pr_workflow.main()
+            gate.assert_not_called()
+            self.assertTrue(deny.call_args.args[0].startswith("pr_base_mutation:"))
 
     def test_body_flag_values_are_not_no_ops(self) -> None:
         """Consumed body values remain guarded; actual help and dry-run options are harmless."""

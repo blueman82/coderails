@@ -13,8 +13,7 @@ import unittest
 from pathlib import Path
 from typing import cast
 
-# Not importing scripts.*: that would bind the root `scripts` package and break the Codex tests that need
-# packages/codex/scripts under the same name. Everything below runs the Codex files as subprocesses.
+# Subprocesses keep the root and Codex scripts packages isolated.
 ROOT = Path(__file__).resolve().parents[2]
 CODEX = ROOT / "packages/codex"
 HOOK = CODEX / "hooks/scripts/pr_publication_gate.py"
@@ -24,7 +23,9 @@ CRITICAL = "## Critical\n- injection\n\n## Important\nNone\n\n## Suggestions\nNo
 ZERO = "0" * 64
 HOOK_SHIM = """#!/bin/sh
 case "$1 $2" in
-  "pr view") [ "$5" = headRefOid ] && echo "$FAKE_SHA" ;;
+  "pr view")
+    [ "$5" = headRefOid ] && echo "$FAKE_SHA"
+    [ "$5" = baseRefOid ] && echo "$FAKE_BASE_SHA" ;;
   "api user") echo me ;;
   "repo view") echo WRITE ;;
   "api repos/"*)
@@ -146,7 +147,12 @@ class HookTests(Repo):
     def reason(self, policy: str = "", **env: str) -> str:
         """Permission-decision reason for `gh pr merge 7`, or empty when allowed."""
         environment = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
-        environment |= {"FAKE_SHA": self.sha, "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"), **env}
+        environment |= {
+            "FAKE_SHA": self.sha,
+            "FAKE_BASE_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
+            "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
+            **env,
+        }
         command = {"command": "gh pr merge 7"}
         payload = {"session_id": "s", "cwd": str(self.dir), "tool_name": "Bash", "tool_input": command}
         argv = [sys.executable, str(HOOK)]
@@ -169,8 +175,14 @@ class HookTests(Repo):
         self.assertTrue(self.reason(**only_review_pr).startswith("required_review_missing:security-review"))
 
     def test_security_pass_present_proceeds(self) -> None:
-        """Negative control: with the pass the same hook call allows, so the denial came from the policy."""
+        """The security pass permits a hooks/ PR even when newer main already has the change."""
         self.assertEqual(self.reason(**artifact(entry("review-pr"), entry("security-review"))), "")
+        release = git_cmd(self.dir, "rev-parse", "origin/main").strip()
+        git_cmd(self.dir, "update-ref", "refs/remotes/origin/main", self.sha)
+        self.assertTrue(self.reason(FAKE_BASE_SHA=release).startswith("required_review_missing:security-review"))
+        self.assertEqual(
+            self.reason(FAKE_BASE_SHA=release, **artifact(entry("review-pr"), entry("security-review"))), ""
+        )
 
     def test_forged_pass_is_refused(self) -> None:
         """Negative control: a made-up hash, or a verdict the posted text does not support, is malformed."""
@@ -237,7 +249,11 @@ class DocsOnlyTests(Repo):
     def test_docs_only_needs_review_pr_only(self) -> None:
         """The bare v1 artifact is enough for docs."""
         environment = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
-        environment |= {"FAKE_SHA": self.sha, "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops")}
+        environment |= {
+            "FAKE_SHA": self.sha,
+            "FAKE_BASE_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
+            "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
+        }
         command = {"command": "gh pr merge 7"}
         payload = {"session_id": "s", "cwd": str(self.dir), "tool_name": "Bash", "tool_input": command}
         result = subprocess.run(

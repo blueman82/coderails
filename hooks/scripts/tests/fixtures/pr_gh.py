@@ -18,6 +18,8 @@ def main() -> int:
         print("99")
     elif arguments.startswith("pr view ") and "--json headRefOid" in arguments:
         print(os.environ.get("MOCK_GH_HEAD_SHA", os.environ["FIXTURE_HEAD_SHA"]))
+    elif arguments.startswith("pr view ") and "--json baseRefOid" in arguments:
+        print(os.environ["FIXTURE_HEAD_SHA"])
     elif arguments.startswith("api user "):
         print("testuser")
     elif arguments.startswith("repo view ") and "--json viewerPermission" in arguments:

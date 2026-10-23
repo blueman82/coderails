@@ -46,7 +46,13 @@ class MergeContractTests(unittest.TestCase):
         def field(number: str, name: str, fallback: str = "") -> str:
             """Return exact-head fields without using a provider CLI."""
             del number
-            return {"headRefOid": sha, "state": state, "title": "fixture", "headRefName": "feature"}.get(name, fallback)
+            return {
+                "headRefOid": sha,
+                "baseRefOid": "base-sha",
+                "state": state,
+                "title": "fixture",
+                "headRefName": "feature",
+            }.get(name, fallback)
 
         stream = io.StringIO()
         with ExitStack() as stack:
@@ -67,10 +73,10 @@ class MergeContractTests(unittest.TestCase):
             stack.enter_context(
                 patch.object(git, "review_passes_for_pr", return_value=passes or git.ReviewPasses(0, ()))
             )
-            if changes is not None:
-                stack.enter_context(patch.object(manifest_policy, "diff_changes", return_value=changes))
+            stack.enter_context(patch.object(manifest_policy, "diff_changes", return_value=changes or []))
             eval_reader = stack.enter_context(patch.object(git, "gate_eval_summary_for_pr", return_value=summary))
             stack.enter_context(patch.object(merge, "smoke_verify", return_value=smoke))
+            stack.enter_context(patch.object(manifest_policy, "violations", return_value=[]))
             stack.enter_context(patch.object(merge, "config_path", return_value=""))
             stack.enter_context(patch.object(merge, "has_wiki_ingest_for_merged_prs"))
             if temporary_failure:

@@ -22,6 +22,7 @@ case "$1 $2" in
   "pr view")
     case "$5" in
       headRefOid) if [ "$3" = 1 ]; then echo "$CLEAN_SHA"; else echo "$FAKE_SHA"; fi ;;
+      baseRefOid) echo "$BASE_SHA" ;;
       number) case "$3" in https://github.com/o/r/pull/*) echo "${3##*/}" ;; feat-b) echo 7 ;; esac ;;
     esac ;;
   "api user") echo me ;;
@@ -81,6 +82,7 @@ class CodexPublicationGateTests(unittest.TestCase):
             "PATH": f"{install_gh_shim(self.dir.parent)}{os.pathsep}{os.environ['PATH']}",
             "FAKE_SHA": self.sha,
             "CLEAN_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
+            "BASE_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.loop),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
         }
@@ -148,6 +150,35 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
         self.assertEqual(self.reason("gh pr merge 7"), "")
+
+    def test_gh_repo_retarget_refuses_even_clean_diff(self) -> None:
+        """A same-number PR in another repository cannot borrow this repository's clean result."""
+        git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
+        (self.dir / "docs.md").write_text("x\n")
+        git_cmd(self.dir, "add", "-A")
+        git_cmd(self.dir, "commit", "-qm", "docs")
+        self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        self.assertEqual(self.reason("gh pr merge 7"), "")
+        self.assertTrue(self.reason("GH_REPO=other/repo gh pr merge 7").startswith("pr_repo_override:"))
+        self.env["GH_REPO"] = "other/repo"
+        self.assertTrue(self.reason("gh pr merge 7").startswith("pr_repo_override:"))
+
+    def test_base_edit_then_merge_is_refused_before_stale_base_check(self) -> None:
+        """A shell line cannot change the PR base after the PreToolUse check and then merge it."""
+        git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
+        (self.dir / "docs.md").write_text("x\n")
+        git_cmd(self.dir, "add", "-A")
+        git_cmd(self.dir, "commit", "-qm", "docs")
+        self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        self.assertEqual(self.reason("gh pr merge 7"), "")
+        command = "gh pr edit 7 --base old-release && gh pr merge 7"
+        self.assertTrue(self.reason(command).startswith("pr_base_mutation:"))
+        command = "gh api -X PATCH repos/o/r/pulls/7 -f base=old-release && gh pr merge 7"
+        self.assertTrue(self.reason(command).startswith("pr_base_mutation:"))
+        command = "gh api -X PATCH repos/o/r/pulls/7 --input /tmp/base-change.json && gh pr merge 7"
+        self.assertTrue(self.reason(command).startswith("pr_base_mutation:"))
+        command = 'gh api "repos/o/r/pulls/7" -X PATCH --input /tmp/base-change.json && gh pr merge 7'
+        self.assertTrue(self.reason(command).startswith("pr_base_mutation:"))
 
     def test_unreadable_policy_fails_closed(self) -> None:
         """A policy file that cannot be read denies with manifest_unreadable."""

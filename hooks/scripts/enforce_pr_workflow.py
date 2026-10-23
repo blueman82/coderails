@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import deny, read_payload
+from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload_strict
 from hooks.scripts.lib.loop_state_common import log
 from hooks.scripts.lib.pr_merge_gate import merge_reason
 from hooks.scripts.lib.pr_workflow_match import (
@@ -20,13 +20,18 @@ from hooks.scripts.lib.pr_workflow_match import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.lib import merge_target
+from scripts.lib import git_common as git
+from scripts.lib import merge_target, publication_gate
 from scripts.lib.config import config_path
 
 
 def main() -> int:
     """Redirect missing workflow steps and fail closed on live merge evidence failure."""
-    payload = read_payload()
+    try:
+        payload = read_payload_strict()
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)  # fail closed: a gate that cannot read its input must not allow the action
+        return 0
     data = payload.get("tool_input")
     command = data.get("command") if isinstance(data, dict) else None
     if not isinstance(command, str) or not command:
@@ -40,22 +45,44 @@ def main() -> int:
         for key in ("transcript_path", "agent_transcript_path")
         if isinstance(payload.get(key), str) and Path(str(payload[key])).is_file()
     ]
-    if not paths:
-        return 0
-    entries = transcript_entries(paths)
+    entries = transcript_entries(paths) if paths else []
     for name, segment, where in segments:
-        if not config_path(where) or not targets_main(command, where, target, name):
-            continue
-        number, unit, progress = merge_target.parse(segment) if name == "merge" else ("", "", "")
-        if name == "merge" and number:
+        number, unit, progress = "", "", ""
+        target_number = ""
+        if name == "merge":
+            if merge_target.has_repo_override(command):
+                publication_gate.trace_preflight("pr_repo_override")
+                deny("pr_repo_override: Blocked: merge — GH_REPO can retarget publication outside this repository.")
+                return 0
+            if merge_target.has_base_mutation(command):
+                publication_gate.trace_preflight("pr_base_mutation")
+                deny("pr_base_mutation: Blocked: merge — edit the PR and re-run the checked merge separately.")
+                return 0
+            target_number, unit, progress = merge_target.parse(segment)
             try:
                 os.chdir(where)
-                number = merge_target.resolve(number)
+                number = merge_target.resolve(target_number)
             except (OSError, ValueError, RuntimeError):
                 number = ""
             if not number:
                 deny("pr_number_invalid: Blocked: gh pr merge — could not resolve the target PR.")
                 return 0
+            try:
+                head = git.pr_field(number, "headRefOid")
+                if not head:
+                    raise ValueError("missing head SHA")
+                violations = publication_gate.evaluate(number, head, unit, progress)
+            except (OSError, ValueError, RuntimeError) as error:
+                deny(f"manifest_internal_error: Blocked: merge — publication check failed ({type(error).__name__}).")
+                return 0
+            if violations:
+                first = violations[0]
+                deny(f"{first['code']}: Blocked: merge of PR {number} — {first['detail']}")
+                return 0
+        if not paths or not config_path(where) or not targets_main(command, where, target, name):
+            continue
+        if name == "merge" and not target_number:
+            number = ""  # preserve the existing transcript gate's no-target behavior after the publication check
         if not step_found(entries, name, number):
             required = "/coderails:push" if name == "create" else "/pr-review-toolkit:review-pr"
             action = {
@@ -79,4 +106,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("enforce_pr_workflow", main))

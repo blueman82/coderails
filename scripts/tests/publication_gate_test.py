@@ -24,6 +24,7 @@ case "$1 $2" in
   "pr view")
     case "$5" in
       headRefOid) echo "$FAKE_SHA" ;;
+      baseRefOid) echo "$BASE_SHA" ;;
       state) echo OPEN ;;
       title) echo fixture ;;
       headRefName) echo main ;;
@@ -149,6 +150,11 @@ class MergeCallTests(unittest.TestCase):
         """Evidence gates, then the publication gate, then the remote merge."""
         self.assertEqual(self.run_merge(None), (0, ["evidence", "publication", "merge"]))
 
+    def test_gh_repo_override_refuses_before_lookup(self) -> None:
+        """Direct merge.py cannot resolve local evidence for a GH_REPO-retargeted remote merge."""
+        with mock.patch.dict(os.environ, {"GH_REPO": "other/repo"}):
+            self.assertEqual(self.run_merge(None), (1, []))
+
     def test_refusal_blocks_merge(self) -> None:
         """A refusing publication gate returns 1 and never reaches gh pr merge."""
         status, order = self.run_merge(git.WorkflowError("diff_manifest:denied_path"))
@@ -197,6 +203,7 @@ class HeadlessTests(RepoCase):
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
             "FAKE_GH_LOG": str(self.ghlog),
             "FAKE_SHA": "",
+            "BASE_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
         }
         self.env.pop("CLAUDE_CODE_SESSION_ID", None)
 

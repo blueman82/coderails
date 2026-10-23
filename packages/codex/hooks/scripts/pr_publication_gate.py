@@ -38,6 +38,14 @@ def main() -> int:
         for name, segment, where in guarded_segments(command, cwd):
             if name != "merge":
                 continue
+            if merge_target.has_repo_override(command):
+                publication_gate.trace_preflight("pr_repo_override")
+                deny("pr_repo_override: Blocked: merge — GH_REPO can retarget publication outside this repository.")
+                return 0
+            if merge_target.has_base_mutation(command):
+                publication_gate.trace_preflight("pr_base_mutation")
+                deny("pr_base_mutation: Blocked: merge — edit the PR and re-run the checked merge separately.")
+                return 0
             os.chdir(where)
             target, unit, progress = merge_target.parse(segment)
             number = merge_target.resolve(target)
@@ -58,4 +66,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("pr_publication_gate", main))

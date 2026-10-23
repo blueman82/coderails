@@ -41,7 +41,8 @@ def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list
         return [{"code": "review_passes_malformed", "detail": ""}]
     try:
         policy = review_passes.load_policy()
-        changes = manifest_policy.diff_changes(sha, f"pull/{number}/head")
+        base = git.pr_field(number, "baseRefOid")
+        changes = manifest_policy.diff_changes(sha, f"pull/{number}/head", base) if base else None
     except ValueError:
         return [{"code": "review_policy_unreadable", "detail": ""}]
     if changes is None:
@@ -77,6 +78,11 @@ def remediation(code: str) -> str:
     if code.startswith("required_review_") or code in ("review_artifact_missing", "review_passes_malformed"):
         return "Run the required reviews, then re-post: post_review.py post <PR> --summary F --pass NAME=F."
     return "Resolve the reported publication-check refusal, then retry."
+
+
+def trace_preflight(code: str) -> None:
+    """Count a repository or base retarget refusal before PR evidence can be trusted."""
+    manifest_policy.trace("merge-preflight", "refused", code, command="publication")
 
 
 def evaluate(number: str, sha: str, unit: str = "", progress: str = "") -> list[Violation]:

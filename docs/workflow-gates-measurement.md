@@ -20,7 +20,7 @@ tallied by `measure_graph_alignment.py` into `trace.by_reason` keyed
 | `diff-manifest/warned/diff_manifest_mode_invalid` | an unknown `diff_manifest` value was treated as enforce |
 | `review-passes/ok/review_passes_ok` | the artifact's passes covered every pass the diff requires |
 | `review-passes/refused/<code>` | `<code>` is `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`, `review_artifact_missing` or `review_policy_unreadable` |
-| `publication/refused/<code>` | the single gate refused; `<code>` is `diff_manifest:<code>` or a review code, and later units add theirs |
+| `publication/refused/<code>` | the gate refused; `<code>` is `diff_manifest:<code>`, a review code, `pr_repo_override`, `pr_base_mutation`, or a later unit's code |
 
 Manifest codes are `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`,
 `special_file_type`, `mode_change`, `status_not_allowed`, `too_many_paths`, `manifest_unreadable` and
@@ -55,7 +55,7 @@ cannot match is invisible). The gate is a cooperating-agent safeguard: an agent 
 `.coderails/workflow.config.yaml` can set `diff_manifest: off`, and that change is itself a diff the gate reviews only if
 the policy denies the path. The shipped policy denies additions or modifications to its own policy paths and workflow
 config, but it reads the local checkout's effective config. A same-worktree progress file with forged nonblank owner
-fields can pass the metadata check. Claude's direct arm needs config and a readable transcript; raw Git operations,
+fields can pass the metadata check. Claude's direct manifest arm runs without config or a transcript; raw Git operations,
 unmatched scripts/aliases and browser merges are not observations of this publication gate. Direct hooks cannot pin
-the subsequent remote merge head; `merge.py` uses `--match-head-commit`. Trace-write failure is ignored, so missing rows
+the subsequent remote merge head or base; `merge.py` uses `--match-head-commit` for the head. Trace-write failure is ignored, so missing rows
 also cannot prove that a check did not run.
