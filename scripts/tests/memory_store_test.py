@@ -326,7 +326,7 @@ class SchemaProbe(StoreCase):
         """Negative control 4: typed columns but the pre-v2 kind CHECK -> a lesson add fails (fixture is really v2)."""
         old = self.tmp / "oldkind"
         fs.create(old, old_kind=True)
-        self.assertIsNone(memory_schema.check(old))  # the probe alone cannot see a CHECK constraint; the add does
+        self.assertEqual(memory_schema.check(old), "muninn_schema_incomplete")
         rc, out = self.muninn(*self.add_argv_for("lesson"), extra_env={"MUNINN_HOME": str(old)})
         self.assertEqual((rc, out), (1, {"error": "store_constraint"}))
         rc, _ = self.muninn(*self.add_argv_for("lesson"))  # default v2 home
@@ -354,6 +354,7 @@ class SchemaProbe(StoreCase):
     def test_control_missing_update_trigger_leaves_index_stale(self) -> None:
         """Negative control 3: without knowledge_au a text edit is invisible to search."""
         fs.create(self.home, drop_triggers=("knowledge_au",))
+        self.assertEqual(memory_schema.check(self.home), "muninn_schema_incomplete")
         self.assertIsNone(ma.add(self.record("alpha wording")))
         self.assertIsNone(ma.add(self.record("beta wording", supersedes="K1")))
         self.sql("UPDATE knowledge SET text = 'gamma wording' WHERE id = 2")
