@@ -65,6 +65,14 @@
         }
       }
     },
+    "diff_manifest": {
+      "type": ["string"], "default": "enforce", "status": "enforced_by_code",
+      "description": "Diff-manifest publication gate run by push.py, merge.py and the direct-merge hooks: off, advisory or enforce (default). Any other value is treated as enforce and reported as diff_manifest_mode_invalid."
+    },
+    "diff_manifest_policy": {
+      "type": ["string", "null"], "default": null, "status": "enforced_by_code",
+      "description": "Path to a diff policy JSON file; null = the shipped policy/diff-policy.default.json."
+    },
     "evals": {
       "type": ["object", "null"], "default": null, "status": "enforced_by_code",
       "description": "Eval settings.",

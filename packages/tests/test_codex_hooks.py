@@ -36,6 +36,7 @@ class HookTests(unittest.TestCase):
             "PLUGIN_ROOT": str(PACKAGE),
             "PLUGIN_DATA": str(self.directory / "data"),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.directory / "loops"),
+            "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
             "CODERAILS_TEST_OUTPUT_DIR": str(self.directory / "logs"),
         }
 
@@ -72,6 +73,8 @@ class HookTests(unittest.TestCase):
             [group["matcher"] for group in data["PreToolUse"]],
             ["^Bash$", "^request_user_input$", "^spawn_agent$", "^apply_patch$"],
         )
+        bash_hooks = [hook["command"] for hook in data["PreToolUse"][0]["hooks"]]
+        self.assertIn('"${PLUGIN_ROOT}/hooks/scripts/pr_publication_gate.py"', bash_hooks)
         for groups in data.values():
             for group in groups:
                 for hook in group["hooks"]:
@@ -177,8 +180,6 @@ class HookTests(unittest.TestCase):
 
     def test_confidence_labels_is_advisory_with_trace_row(self) -> None:
         """An unlabeled long message warns via additionalContext, never blocks, and writes one demoted trace row."""
-        loops = self.directory / "loops"
-        self.environment["CODERAILS_AGENTIC_LOOP_DIR"] = str(loops)
         log = self.directory / "d.log"
         self.environment["CODERAILS_DISCIPLINE_LOG"] = str(log)
         for event in ("Stop", "SubagentStop"):
@@ -188,7 +189,7 @@ class HookTests(unittest.TestCase):
             special = out["hookSpecificOutput"]
             self.assertEqual(special["hookEventName"], event)
             self.assertIn("[discipline-advisory]", special["additionalContext"])
-            rows = [json.loads(x) for x in (loops / f"s-{event}/trace.jsonl").read_text().splitlines()]
+            rows = [json.loads(x) for x in (self.loop / f"s-{event}/trace.jsonl").read_text().splitlines()]
             self.assertEqual(
                 [(r["command"], r["outcome"], r["reason_code"]) for r in rows],
                 [("check_confidence_labels", "demoted", "confidence_label_missing")],

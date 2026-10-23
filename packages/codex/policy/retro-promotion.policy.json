@@ -1,0 +1,5 @@
+{
+  "manifest": ["skills/agentic-loop/learned-failure-modes.md"],
+  "statuses": ["M"],
+  "max_paths": 1
+}

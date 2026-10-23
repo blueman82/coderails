@@ -748,9 +748,17 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `sandbox_workers` | boolean/null | `false` | read_by_prose_only | true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md). |
 | `integrity_review` | object/null | `null` | enforced_by_code | Integrity attestation settings. |
 | `integrity_review.machine_user` | string/null | `null` | enforced_by_code | GitHub login that must post the integrity-review status; null or absent = local gate inactive. |
+| `diff_manifest` | string | `"enforce"` | enforced_by_code | Diff-manifest publication gate run by push.py, merge.py and the direct-merge hooks: off, advisory or enforce (default). Any other value is treated as enforce and reported as diff_manifest_mode_invalid. |
+| `diff_manifest_policy` | string/null | `null` | enforced_by_code | Path to a diff policy JSON file; null = the shipped policy/diff-policy.default.json. |
 | `evals` | object/null | `null` | enforced_by_code | Eval settings. |
 | `evals.require_signatures` | boolean/null | `false` | enforced_by_code | true = eval artifacts must be signed; refuse when signing is impossible. |
 <!-- config-schema:end -->
+
+Publication unit scope is opt-in through paired `--unit N --progress PATH` flags, including equals syntax. The requested
+unit needs a string-list manifest and an absolute worktree matching the real repository root; progress needs nonblank
+string session and loop ids. Missing or mismatched metadata refuses `manifest_unreadable`; `manifest: []` permits no
+changed paths. This validates shape and worktree, not publisher identity: same-worktree forged owner fields remain a
+known limit. See the [RUNBOOK](RUNBOOK.md#diff-manifest-check-warned-or-refused) for reason codes and consumer boundaries.
 
 ## Scripts and Libraries
 

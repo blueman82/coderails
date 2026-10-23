@@ -71,7 +71,10 @@ class ReviewFixTests(RepoCase):
             with mock.patch.object(manifest_policy, "diff_changes", side_effect=RuntimeError("boom")):
                 manifest_policy.gate()
         rows = [json.loads(x) for f in self.loop.rglob("trace.jsonl") for x in f.read_text().splitlines()]
-        self.assertEqual([(r["outcome"], r["reason_code"]) for r in rows], [("failed_open", "manifest_unreadable")] * 2)
+        self.assertEqual(
+            [(r["outcome"], r["reason_code"]) for r in rows],
+            [("failed_open", "manifest_unreadable"), ("failed_open", "manifest_internal_error")],
+        )
 
     def test_empty_pr_head_is_unreadable(self) -> None:
         """An unresolvable PR head never diffs the local HEAD: enforce refuses with manifest_unreadable."""
