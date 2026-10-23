@@ -16,6 +16,9 @@ Execute the merge workflow script:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/merge.py" "$ARGUMENTS"
 ```
 
+If this session owns a graph unit in this worktree, append its exact
+`--unit <id> --progress <absolute state path>` to that command. Read both values from the active graph.
+
 The script handles:
 1. Detecting PR from argument (number, branch name, or current branch)
 2. Checking if repository requires PR approval

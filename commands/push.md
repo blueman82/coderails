@@ -38,6 +38,8 @@ If no blocking findings, proceed silently.
 ## Push
 
 Execute the push workflow script. Remove `--quick` from arguments if present.
+If this session owns a graph unit in this worktree, pass its exact `--unit <id> --progress <absolute state path>`
+to the script. Read both values from the active graph. Do not guess them.
 
 `push.py` stages tracked-modified files automatically (`git add -u`) but never sweeps up new, untracked files — that's deliberate, to avoid dragging unrelated working-tree files into the PR. If you (the actor running this command) created NEW files that belong in this PR, list them explicitly and pass each one via a repeatable `--add <path>` flag. You know what you created; don't stage new files with a separate `git add` sweep — name them to push.py instead.
 

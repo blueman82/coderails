@@ -195,24 +195,34 @@ def active_graph_unit() -> bool:
     session = (
         os.environ.get("CODERAILS_PUBLICATION_SESSION_ID")
         or os.environ.get("CLAUDE_CODE_SESSION_ID")
+        or os.environ.get("CODEX_SESSION_ID")
         or os.environ.get("CODEX_THREAD_ID")
         or ""
     )
     if not session:
         return False
     session = session.replace("/", "_").replace("..", "")
-    root = Path(
-        os.environ.get("CLAUDE_AGENTIC_LOOP_DIR")
-        or os.environ.get("CODERAILS_AGENTIC_LOOP_DIR")
-        or Path.home() / ".coderails/agentic-loop"
+    roots = list(
+        dict.fromkeys(
+            Path(value)
+            for value in (
+                os.environ.get("CLAUDE_AGENTIC_LOOP_DIR"),
+                os.environ.get("CODERAILS_AGENTIC_LOOP_DIR"),
+            )
+            if value
+        )
     )
+    if not roots:
+        roots = [Path.home() / ".coderails/agentic-loop"]
     common = git.output("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
     current = git.output("git", "rev-parse", "--show-toplevel")
     if not common or not current:
         return False
-    paths = [root / common.replace("/", "-") / session / "progress.json"]
-    with suppress(OSError):
-        paths += [directory / session / "progress.json" for directory in root.iterdir() if directory.is_dir()]
+    paths: list[Path] = []
+    for root in roots:
+        paths.append(root / common.replace("/", "-") / session / "progress.json")
+        with suppress(OSError):
+            paths += [directory / session / "progress.json" for directory in root.iterdir() if directory.is_dir()]
     for path in paths:
         if not path.is_file():
             continue

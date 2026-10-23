@@ -158,6 +158,7 @@ class CodexPublicationGateTests(unittest.TestCase):
                 }
             )
         )
+        self.env["CLAUDE_AGENTIC_LOOP_DIR"] = str(self.loop / "other-root")
         self.assertTrue(self.reason("gh pr merge 1").startswith("diff_manifest:manifest_unreadable"))
 
     def test_gh_repo_retarget_refuses_even_clean_diff(self) -> None:
