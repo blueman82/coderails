@@ -21,6 +21,7 @@ from graph_identity import (
     GraphError,
     classify_worker_evidence,
     is_legacy_task_name,
+    new_evidence_writes_enabled,
     next_attempt,
     task_name,
 )
@@ -33,7 +34,6 @@ from graph_transcript import (
     refused_launches,
     thread_transcript,
 )
-from graph_transcript import transcript_cursor as transcript_cursor
 
 Refusals = dict[str, tuple[int, str]]
 Requests = dict[str, list[Optional[dict[str, Any]]]]
@@ -383,6 +383,8 @@ def bind_worker_evidence(
         }
         message = cast(dict[str, Any], requests[call_id][0]).get("message")
         if isinstance(message, str) and not message.startswith(graph_contract.ENVELOPE_KEY + "="):
+            if not new_evidence_writes_enabled():
+                raise GraphError("set CODERAILS_A6_EVIDENCE_WRITE=on after reader verification")
             reference["message_sha256"] = hashlib.sha256(message.encode()).hexdigest()
         identifiers = {call_id, agent_thread_id, terminal}
         if used & identifiers:

@@ -116,7 +116,9 @@ class GraphRuntimeTests(unittest.TestCase):
         before = self.path.read_bytes()
         self.assertFalse(graph.reject_invalid_dispatch(self.path, "parent", "U3[1]", "wave-2", apply=False)["applied"])
         self.assertEqual(self.path.read_bytes(), before)
-        report = graph.reject_invalid_dispatch(self.path, "parent", "U3[1]", "wave-2")
+        self.assert_unchanged(graph.reject_invalid_dispatch, self.path, "parent", "U3[1]", "wave-2")
+        with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": "on"}):
+            report = graph.reject_invalid_dispatch(self.path, "parent", "U3[1]", "wave-2")
         self.assertEqual(report["reason_code"], "dispatch_missing_envelope")
         self.assertEqual(read_json(self.path)["graph"]["nodes"]["U3[1]"]["retry"]["attempts"], 1)
         wave = graph.begin_wave(self.path)
@@ -152,7 +154,9 @@ class GraphRuntimeTests(unittest.TestCase):
         call["payload"]["arguments"] = json.dumps(arguments)
         lines[1] = json.dumps(call)
         self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        self.record()
+        self.assert_unchanged(self.record)
+        with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": "on"}):
+            self.record()
         validate_worker_evidence(read_json(self.path))
         arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x01" * 72).decode("ascii")
         call["payload"]["arguments"] = json.dumps(arguments)
@@ -189,7 +193,8 @@ class GraphRuntimeTests(unittest.TestCase):
             call["payload"]["arguments"] = json.dumps(arguments)
             lines[1] = json.dumps(call)
             self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            self.record()
+            with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": "on"}):
+                self.record()
         current = read_json(self.path)
         validate_worker_evidence(current)
         next(iter(current["graph"]["dispatches"].values()))["authorized"] = None

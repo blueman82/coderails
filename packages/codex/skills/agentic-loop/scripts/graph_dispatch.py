@@ -11,13 +11,14 @@ import graph_repair
 import graph_semantics
 import graph_stops
 import worker_status
-from graph_evidence import bind_worker_evidence, transcript_cursor, validate_evals
+from graph_evidence import bind_worker_evidence, validate_evals
 from graph_identity import GraphError, classify_worker_evidence, next_attempt, task_name
 from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import object_value as _object
 from graph_io import write as _write
 from graph_recovery import RecoveryRefusedError, trace, traced_refusal
+from graph_transcript import transcript_cursor
 from json_types import JsonValue
 
 

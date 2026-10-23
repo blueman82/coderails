@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -48,9 +49,9 @@ class CompletionTests(unittest.TestCase):
         write_json(self.path, state())
         self.evals = self.path.with_name("evals.json")
         write_json(self.evals, frozen_evals())
-        parent = transcripts(self.directory)
+        self.parent = transcripts(self.directory)
         graph.begin_wave(self.path)
-        self.child = spawn(parent, read_json(self.path))
+        self.child = spawn(self.parent, read_json(self.path))
         graph.record_wave(
             self.path,
             json.dumps({"wave_id": "wave-2", "results": {"U3[1]": done_result()}}),
@@ -120,6 +121,49 @@ class CompletionTests(unittest.TestCase):
         verify_completion(*self.arguments)
         self.proof_result("later", 1)
         with self.assertRaises(GraphError):
+            verify_completion(*self.arguments)
+
+    def test_new_evidence_writer_can_turn_off_without_losing_reader(self) -> None:
+        """One reader verifies old and new histories across writer activation and deactivation."""
+        graded = read_json(self.evals)
+        with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": ""}):
+            complete(*self.arguments)
+            verify_completion(*self.arguments)
+
+        write_json(self.path, state())
+        write_json(self.evals, frozen_evals())
+        self.parent.write_text(json.dumps({"type": "session_meta", "payload": {"id": "parent"}}) + "\n")
+        self.child.unlink()
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path))
+        lines = self.parent.read_text().splitlines()
+        call = json.loads(lines[1])
+        arguments = json.loads(call["payload"]["arguments"])
+        arguments["message"] = "encrypted_content"
+        call["payload"]["arguments"] = json.dumps(arguments)
+        lines[1] = json.dumps(call)
+        self.parent.write_text("\n".join(lines) + "\n")
+        current = read_json(self.path)
+        next(iter(current["graph"]["dispatches"].values()))["authorized"] = None
+        write_json(self.path, current)
+
+        with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": "on"}):
+            graph.reject_invalid_dispatch(self.path, "parent", "U3[1]", "wave-2")
+            graph.begin_wave(self.path)
+            spawn(self.parent, read_json(self.path))
+            lines = self.parent.read_text().splitlines()
+            call = json.loads(lines[3])
+            arguments = json.loads(call["payload"]["arguments"])
+            arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x00" * 72).decode("ascii")
+            call["payload"]["arguments"] = json.dumps(arguments)
+            lines[3] = json.dumps(call)
+            self.parent.write_text("\n".join(lines) + "\n")
+            graph.record_wave(self.path, json.dumps({"wave_id": "wave-4", "results": {"U3[1]": done_result()}}))
+
+        graded["revision"] = read_json(self.path)["revision"]
+        write_json(self.evals, graded)
+        with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": ""}):
+            complete(*self.arguments)
             verify_completion(*self.arguments)
 
     def test_outer_result_and_foreign_loop_cannot_pass(self) -> None:

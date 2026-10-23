@@ -379,6 +379,13 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   graph is unaffected. Each allowed spawn leaves an
   `authorize-dispatch/reported/dispatch_check_off` trace row. Default ON; unset to re-enable. Use it only to rescue a
   loop wedged by a bad contract or an uninstalled plugin agent.
+- Codex evidence rollout: `CODERAILS_A6_EVIDENCE_WRITE` defaults OFF. While OFF, the new reader can validate old and new
+  references, `reject-invalid-dispatch --report-only` works, and attempts to persist invalid-dispatch or encrypted-message
+  evidence fail without changing `progress.json`. After installing and trusting this reader, check active old graphs with
+  `inspect` and completed ones with `verify-completion` before setting the variable to `on` for new writes. Once either
+  new reference shape is stored, turn writing OFF to stop further new records, but keep this reader installed for later
+  completion and verification. The prior plugin reader cannot verify those histories, even after a loop is complete;
+  reinstalling it is not a rollback path. The owner must accept that permanent reader pin before enabling writes.
 - Bad `add-unit --model-role` is `add_unit_refused_bad_field` (allowed: `fast-mechanical`, `default`, `frontier`).
 - Limits: a plugin agent that is not installed in the session cannot run a guarded scout (refused, never downgraded); the
   sandboxed Bash launcher carries no agent type, so the role is asserted on the `Agent` and `spawn_agent` routes only
