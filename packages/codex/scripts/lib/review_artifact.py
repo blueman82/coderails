@@ -41,10 +41,14 @@ def parse_compat_line(line: str, pr: str, head_sha: str) -> tuple[int, str] | No
 
 
 def compat_problem(bodies: list[str], pr: str, head_sha: str) -> str | None:
-    """Require current-head findings; any malformed or refusing line wins."""
+    """Require current-head findings; malformed current lines and refusing findings win."""
     refusing = None
     matched = False
     for line in (line for body in bodies for line in body.splitlines() if line.startswith(COMPAT_PREFIX)):
+        line_pr = re.search(r"\bpr=(\S+)", line)
+        line_head = re.search(r"\bhead_sha=(\S+)", line)
+        if (line_pr and line_pr[1] != pr) or (line_head and line_head[1] != head_sha):
+            continue
         if _COMPAT.fullmatch(line) is None:
             return "compat_findings_malformed"
         parsed = parse_compat_line(line, pr, head_sha)

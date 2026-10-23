@@ -16,8 +16,7 @@ from scripts.lib import review_artifact  # noqa: E402
 
 SHA = "deadbeef"
 V1 = f"<!-- coderails-review-summary v1 pr=42 head_sha={SHA} -->"
-GATE = textwrap.dedent(
-    """
+GATE = textwrap.dedent("""
     import json, sys
     from unittest.mock import patch
     sys.path.insert(0, sys.argv[1])
@@ -34,8 +33,7 @@ GATE = textwrap.dedent(
             merge.verify_gates("42")
         except git.WorkflowError as error:
             print(error)
-    """
-)
+    """)
 
 
 def compat(count: int, disposition: str, sha: str = SHA) -> str:
@@ -115,6 +113,8 @@ class MergeGateTests(unittest.TestCase):
                 self.assertIn("compat_findings_malformed", broken)
                 mixed = self.verdict(root, compat(0, "clean-break"), compat(3, "clean-break"))
                 self.assertIn("compat_findings_nonzero", mixed)  # fail closed: any refusing line for this head wins
+                stale = "<!-- coderails-compat-findings v1 pr=42 head_sha=old count=bad -->"
+                self.assertIn(passes, self.verdict(root, stale, compat(0, "clean-break")))
 
 
 if __name__ == "__main__":
