@@ -287,17 +287,12 @@ def continue_turn(reason: str) -> None:
 
 def deny(reason: str) -> None:
     """Emit the native PreToolUse denial envelope."""
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": reason,
-                }
-            }
-        )
-    )
+    envelope = {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}
+    print(json.dumps({"hookSpecificOutput": envelope}))
+    with suppress(ImportError):  # telemetry must never be able to break the hook
+        from lib.hook_telemetry import mark_deny
+
+        mark_deny()
 
 
 def session_dir(session_id: str) -> Path | None:
@@ -349,16 +344,16 @@ def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
     """Run one graph command and return its object output when valid."""
     try:
         result = subprocess.run(
-            ["python3", str(graph), *arguments],
-            stdout=subprocess.PIPE,
-            check=False,
-            stderr=subprocess.DEVNULL,
-            text=True,
+            ["python3", graph, *arguments], stdout=subprocess.PIPE, check=False, stderr=subprocess.DEVNULL, text=True
         )
     except OSError as error:
         if error.errno in RESOURCE_ERRNOS:
             raise HostResourceError(error.errno, str(error)) from error
         return None
+    with suppress(ImportError):  # telemetry must never be able to break the hook
+        from lib.hook_telemetry import note_child
+
+        note_child("graph_output", result.returncode)
     if result.returncode != 0:
         return None
     try:
