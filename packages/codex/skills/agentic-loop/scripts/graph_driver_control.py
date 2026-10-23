@@ -110,12 +110,17 @@ def validate(path: Path, state: dict[str, Any], node_id: str, reference: dict[st
     ):
         raise ValueError("invalid root control reference")
     graph = cast(dict[str, Any], state["graph"])
-    active = graph.get("active_wave")
-    if isinstance(active, dict) and (
-        reference["wave_id"] != cast(dict[str, Any], active).get("wave_id")
-        or node_id not in cast(dict[str, Any], active).get("nodes", [])
-    ):
-        raise ValueError("root control result belongs to another wave")
+    active_value = graph.get("active_wave")
+    active = cast(dict[str, Any], active_value) if isinstance(active_value, dict) else None
+    if active is not None and reference["wave_id"] == active.get("wave_id"):
+        if node_id not in active.get("nodes", []):
+            raise ValueError("root control result belongs to another wave")
+        current_revision = active.get("revision")
+    else:
+        node = cast(dict[str, Any], graph["nodes"][node_id])
+        if reference not in node.get("evidence", []):
+            raise ValueError("root control result belongs to another wave")
+        current_revision = None
     target = _artifact(path, reference["wave_id"], node_id)
     if target.is_symlink() or not target.is_file():
         raise ValueError("root control manifest is missing or a symlink")
@@ -128,7 +133,7 @@ def validate(path: Path, state: dict[str, Any], node_id: str, reference: dict[st
     manifest = cast(dict[str, Any], parsed)
     if type(manifest.get("revision")) is not int or manifest.get("wave_id") != f"wave-{manifest['revision']}":
         raise ValueError("root control manifest has an invalid revision")
-    if isinstance(active, dict) and manifest["revision"] != cast(dict[str, Any], active).get("revision"):
+    if current_revision is not None and manifest["revision"] != current_revision:
         raise ValueError("root control result belongs to another wave")
     if any(
         manifest.get(key) != value

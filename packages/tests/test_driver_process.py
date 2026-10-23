@@ -48,12 +48,18 @@ class DriverProcessTests(unittest.TestCase):
         """A sandbox denial cannot crash observation or lose a completed worker."""
         with tempfile.TemporaryDirectory() as directory:
             artifact = Path(directory)
-            command = [sys.executable, "-c", "import time; time.sleep(1)"]
+            command = [sys.executable, "-c", "import time; time.sleep(2)"]
             graph_driver_process.start(artifact, command, artifact)
             with patch("graph_driver_process.subprocess.run", side_effect=PermissionError("ps denied")):
                 self.assertEqual(graph_driver_process.observe(artifact, 0)["status"], "running")
                 with patch.dict("graph_driver_process._CHILDREN", {}, clear=True):
                     self.assertEqual(graph_driver_process.observe(artifact, 0.5)["status"], "running")
+            denied = subprocess.CompletedProcess(["ps"], 1, "", "permission denied")
+            with (
+                patch("graph_driver_process.subprocess.run", return_value=denied),
+                patch.dict("graph_driver_process._CHILDREN", {}, clear=True),
+            ):
+                self.assertEqual(graph_driver_process.observe(artifact, 0.5)["status"], "running")
             deadline = time.monotonic() + 5
             result: dict[str, object] = {"status": "unresolved"}
             while time.monotonic() < deadline:

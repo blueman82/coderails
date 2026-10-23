@@ -56,6 +56,29 @@ class DriverControllerTests(unittest.TestCase):
         state["work_units"]["1"] = {"status": "pending", "scope": "Build the disposable unit"}
         case.write(state)
 
+    @staticmethod
+    def checkout(path: Path) -> None:
+        """Create a retained checkout with a real HEAD for worker evidence."""
+        path.mkdir()
+        subprocess.run(["git", "init", "-q", str(path)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(path),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=t@example.test",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "first",
+            ],
+            check=True,
+        )
+
     def test_missing_implementation_task_pauses_before_wave(self) -> None:
         """An empty graph unit cannot authorize a worker's unscoped done claim."""
         with tempfile.TemporaryDirectory() as directory:
@@ -109,25 +132,7 @@ class DriverControllerTests(unittest.TestCase):
             checkouts: dict[str, Path] = {}
             for node_id in ("U3[1]", "U3[2]"):
                 worker = Path(directory) / node_id.replace("[", "-").replace("]", "")
-                worker.mkdir()
-                subprocess.run(["git", "init", "-q", str(worker)], check=True)
-                subprocess.run(
-                    [
-                        "git",
-                        "-C",
-                        str(worker),
-                        "-c",
-                        "user.name=Test",
-                        "-c",
-                        "user.email=t@example.test",
-                        "commit",
-                        "-q",
-                        "--allow-empty",
-                        "-m",
-                        "first",
-                    ],
-                    check=True,
-                )
+                self.checkout(worker)
                 checkouts[node_id] = worker
             mapping = Path(directory) / "checkout-map.json"
             mapping.write_text(json.dumps({node_id: str(worker) for node_id, worker in checkouts.items()}))
@@ -185,25 +190,7 @@ class DriverControllerTests(unittest.TestCase):
             self.assertEqual(case.graph("cutover-driver").returncode, 0)
             case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
             checkout = base / "checkout"
-            checkout.mkdir()
-            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
-            subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(checkout),
-                    "-c",
-                    "user.name=Test",
-                    "-c",
-                    "user.email=t@example.test",
-                    "commit",
-                    "-q",
-                    "--allow-empty",
-                    "-m",
-                    "first",
-                ],
-                check=True,
-            )
+            self.checkout(checkout)
 
             def command(prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
                 return [sys.executable, "-c", "import sys; print(sys.stdin.readline().strip())"], None, prompt
@@ -239,6 +226,13 @@ class DriverControllerTests(unittest.TestCase):
             state = case.read()
             self.assertEqual(state["graph"]["nodes"]["S13-proof"]["evidence"][-1]["kind"], "root_control")
             self.assertEqual(state["graph"]["nodes"]["U3[1]"]["evidence"][-1]["kind"], "driver_worker")
+            reference = state["graph"]["nodes"]["S13-proof"]["evidence"][-1]
+            later = copy.deepcopy(state)
+            later["graph"]["active_wave"] = {"wave_id": "wave-999", "revision": 999, "nodes": ["S13-retro"]}
+            graph_driver_control.validate(case.path, later, "S13-proof", reference)
+            later["graph"]["nodes"]["S13-proof"]["evidence"] = []
+            with self.assertRaisesRegex(ValueError, "another wave"):
+                graph_driver_control.validate(case.path, later, "S13-proof", reference)
 
     def test_root_owned_proof_node_pauses_before_dispatch(self) -> None:
         """A proof step cannot be satisfied by an external model's done message."""
@@ -334,25 +328,7 @@ class DriverControllerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             checkout = base / "checkout"
-            checkout.mkdir()
-            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
-            subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(checkout),
-                    "-c",
-                    "user.name=Test",
-                    "-c",
-                    "user.email=t@example.test",
-                    "commit",
-                    "-q",
-                    "--allow-empty",
-                    "-m",
-                    "first",
-                ],
-                check=True,
-            )
+            self.checkout(checkout)
             for provider in ("claude", "codex"):
                 case = Case(provider, base)
                 self.scoped(case)

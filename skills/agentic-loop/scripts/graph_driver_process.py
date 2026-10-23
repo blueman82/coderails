@@ -61,16 +61,18 @@ def _live(pid: int, token: str, artifact: Path) -> bool:
             ["ps", "-ww", "-p", str(pid), "-o", "command="], capture_output=True, text=True, check=False
         )
     except OSError:
-        heartbeat = _read(artifact / "heartbeat.json")
-        seen = heartbeat.get("seen") if heartbeat else None
-        return bool(
-            heartbeat
-            and heartbeat.get("token") == token
-            and heartbeat.get("pid") == pid
-            and isinstance(seen, (int, float))
-            and 0 <= time.time() - seen < 1
-        )
-    return result.returncode == 0 and token in result.stdout and "--worker" in result.stdout
+        result = None
+    if result is not None and result.returncode == 0:
+        return token in result.stdout and "--worker" in result.stdout
+    heartbeat = _read(artifact / "heartbeat.json")
+    seen = heartbeat.get("seen") if heartbeat else None
+    return bool(
+        heartbeat
+        and heartbeat.get("token") == token
+        and heartbeat.get("pid") == pid
+        and isinstance(seen, (int, float))
+        and 0 <= time.time() - seen < 1
+    )
 
 
 def observe(artifact: Path, timeout: float) -> dict[str, Any]:
