@@ -9,6 +9,7 @@ SHARED_MODULES = (  # packages/graph-semantics/<file>: shared modules plus the s
     "graph_driver_mode.py",
     "graph_driver_evidence.py",
     "graph_driver_dispatch.py",
+    "graph_driver_process.py",
     "graph_semantics.py",
     "graph_vocab.py",
     "graph_convert.py",
