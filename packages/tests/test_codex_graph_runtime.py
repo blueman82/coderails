@@ -176,7 +176,12 @@ class GraphRuntimeTests(unittest.TestCase):
                 opened["task_name"],
                 self.path.with_name("evals.json"),
             )
+            off_receipt = next(iter(read_json(self.path)["graph"]["dispatches"].values()))["authorized"]
+            self.assertEqual(off_receipt, {"tool_use_id": None, "mode": "off"})
             spawn(self.parent, read_json(self.path))
+            current = read_json(self.path)
+            next(iter(current["graph"]["dispatches"].values()))["authorized"] = off_receipt
+            write_json(self.path, current)
             lines = self.parent.read_text(encoding="utf-8").splitlines()
             call = json.loads(lines[1])
             arguments = json.loads(call["payload"]["arguments"])
@@ -190,6 +195,36 @@ class GraphRuntimeTests(unittest.TestCase):
         next(iter(current["graph"]["dispatches"].values()))["authorized"] = None
         with self.assertRaisesRegex(ValueError, "consumed hook authorization"):
             validate_worker_evidence(current)
+
+    def test_plaintext_dispatch_survives_off_switch_rescue(self) -> None:
+        """A v2-only plaintext rescue stays valid after normal policy resumes."""
+        opened = graph.begin_wave(self.path)["dispatches"][0]
+        message = self.path.with_name("message.txt")
+        message.write_text(opened["prompt_prefix"], encoding="utf-8")
+        with patch.dict("os.environ", {"CODERAILS_GRAPH_DISPATCH": "off"}):
+            graph.authorize_dispatch(
+                self.path,
+                "parent",
+                opened["dispatch_id"],
+                message,
+                "",
+                opened["task_name"],
+                self.path.with_name("evals.json"),
+            )
+            off_receipt = next(iter(read_json(self.path)["graph"]["dispatches"].values()))["authorized"]
+            spawn(self.parent, read_json(self.path))
+            current = read_json(self.path)
+            next(iter(current["graph"]["dispatches"].values()))["authorized"] = off_receipt
+            write_json(self.path, current)
+            lines = self.parent.read_text(encoding="utf-8").splitlines()
+            call = json.loads(lines[1])
+            arguments = json.loads(call["payload"]["arguments"])
+            arguments["message"] = opened["prompt_prefix"]
+            call["payload"]["arguments"] = json.dumps(arguments)
+            lines[1] = json.dumps(call)
+            self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            self.record()
+        validate_worker_evidence(read_json(self.path))
 
     def test_retry_exhaustion(self) -> None:
         """Retry failures receive unique native identities and stop at the configured cap."""

@@ -90,11 +90,9 @@ def _verify_dispatch(
             raise
         record = graph_encrypted_content.check(state, node_id, attempt, wave_id, message)
     else:
-        record = (
-            graph_contract.check_ownership(state, envelope, live=False)
-            if graph_contract.dispatch_off()
-            else graph_contract.check_dispatch(state, envelope, message, live=False)
-        )
+        record = graph_contract.check_ownership(state, envelope, live=False)
+        if not (graph_contract.dispatch_off() or record.get("authorized") == {"tool_use_id": None, "mode": "off"}):
+            record = graph_contract.check_dispatch(state, envelope, message, live=False)
     if (
         record.get("task_name") != request["task_name"]
         or record.get("attempt") != attempt
