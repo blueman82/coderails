@@ -23,6 +23,7 @@ from graph_dispatch import apply_record
 from graph_dispatch import authorize_dispatch as authorize_dispatch
 from graph_dispatch import begin_wave as begin_wave
 from graph_dispatch import record_wave as record_wave
+from graph_driver_cutover import cutover_driver
 from graph_identity import GraphError, next_attempt, task_name
 from graph_io import load as _load
 from graph_io import locked as _locked
@@ -260,6 +261,9 @@ def _parser() -> argparse.ArgumentParser:
     mode = convert.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="report the conversion without writing")
     mode.add_argument("--write", action="store_true", help="convert in place (the default)")
+    cutover = commands.add_parser("cutover-driver")
+    cutover.add_argument("state", type=Path)
+    cutover.add_argument("--session", required=True)
     recover = commands.add_parser("recover-wave")
     recover.add_argument("state", type=Path)
     recover.add_argument("--session", required=True)
@@ -355,6 +359,8 @@ def main() -> int:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "convert":
             output = convert_state(args.state, args.session, args.check)
+        elif args.command == "cutover-driver":
+            output = cutover_driver(args.state, args.session)
         elif args.command == "recover-wave":
             output = recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
         elif args.command == "reject-invalid-dispatch":

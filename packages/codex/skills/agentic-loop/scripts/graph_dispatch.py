@@ -27,6 +27,8 @@ def begin_wave(path: Path) -> dict[str, Any]:
     base = graph_contract.base_ref()
     with _locked(path):
         state = _load(path)
+        if state["graph"].get("dispatch_mode") == "driver":
+            raise GraphError("driver graph refuses native begin-wave")
         try:
             graph_contract.require_converted(state)
         except graph_contract.DispatchDeniedError as error:
@@ -157,6 +159,9 @@ def authorize_dispatch(
     """
     with _locked(path):
         state = _load(path)
+        if state["graph"].get("dispatch_mode") == "driver":
+            trace(path, state, "refused", "driver_native_dispatch", {"session": session}, [], "authorize-dispatch")
+            raise GraphError("driver graph refuses native authorization")
         if state["session_id"] != session:
             raise GraphError("session does not own this loop")
         if state["status"] == "complete":

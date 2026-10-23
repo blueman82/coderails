@@ -8,6 +8,7 @@ import re
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, NoReturn, cast
 
+import graph_driver_mode
 from graph_vocab import decision_pending
 
 STATUSES = frozenset({"pending", "ready", "running", "blocked", "done", "skipped", "failed", "hard-stop", "stale"})
@@ -223,9 +224,9 @@ def validate(state: object) -> dict[str, Any]:
         _error("graph", "graph must declare active_wave and hard_stop")
     if graph["hard_stop"] is not None and not isinstance(graph["hard_stop"], dict):
         _error("hard_stop", "graph.hard_stop must be null or an object")
-    dependencies = _dependencies(graph)
-    _validate_cycle(dependencies)
+    _validate_cycle(_dependencies(graph))
     _validate_active_wave(graph, revision)
+    graph_driver_mode.require_valid(graph, revision)
     return root
 
 

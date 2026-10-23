@@ -11,6 +11,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import graph_convert
+import graph_driver_mode
 import graph_repair
 import graph_spec
 from graph_vocab import DISPOSITION_KINDS, STOP_CATEGORIES, STOP_REASON_CODES, disposition_report
@@ -18,37 +19,41 @@ from graph_vocab import DISPOSITION_KINDS, STOP_CATEGORIES, STOP_REASON_CODES, d
 from hooks.scripts.lib import graph_controller, graph_decisions, graph_recovery, graph_stops
 from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.graph_evidence import object_value
+from hooks.scripts.lib.graph_evidence_revalidate import revalidate_all
 from hooks.scripts.lib.graph_executor import graph_semantics, load, transition, validate_state
 from hooks.scripts.lib.graph_recovery import trace
 from hooks.scripts.lib.loop_state_common import atomic_progress_update
 
+GRAPH_COMMANDS = (
+    "start",
+    "add-unit",
+    "instantiate",
+    "inspect",
+    "summarize",
+    "recover-wave",
+    "plan",
+    "begin-wave",
+    "record-wave",
+    "record-unit",
+    "record-repair",
+    "respawn-stale",
+    "hard-stop",
+    "stop",
+    "authorize-dispatch",
+    "complete",
+    "verify-completion",
+    "convert",
+    "cutover-driver",
+    "disposition-audit",
+    "record-decision",
+)
+
 
 def parser() -> argparse.ArgumentParser:
-    """Expose only current semantic operations and native completion checks."""
+    """Expose current semantic operations and native completion checks."""
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
-    for name in (
-        "start",
-        "add-unit",
-        "instantiate",
-        "inspect",
-        "summarize",
-        "recover-wave",
-        "plan",
-        "begin-wave",
-        "record-wave",
-        "record-unit",
-        "record-repair",
-        "respawn-stale",
-        "hard-stop",
-        "stop",
-        "authorize-dispatch",
-        "complete",
-        "verify-completion",
-        "convert",
-        "disposition-audit",
-        "record-decision",
-    ):
+    for name in GRAPH_COMMANDS:
         command = commands.add_parser(name)
         command.add_argument("state", type=Path)
         if name == "record-wave":
@@ -106,6 +111,7 @@ def parser() -> argparse.ArgumentParser:
             "verify-completion",
             "recover-wave",
             "convert",
+            "cutover-driver",
         }:
             command.add_argument("--session", required=True)
         if name in {"respawn-stale", "hard-stop"}:
@@ -190,6 +196,41 @@ def convert_state(path: Path, session: str, check: bool) -> dict[str, Any]:
         load(path)  # re-validate what was just written; the .pre-convert backup remains for manual recovery
     trace(path, {"session_id": session}, "ok", "convert_ok", inputs, [], "convert")
     return {**report, "check": check, "backup": backup[0].name if backup else None}
+
+
+def cutover_driver(path: Path, session: str) -> dict[str, Any]:
+    """Verify retained native history, then mark one driver-only wave boundary."""
+    output: dict[str, Any] = {}
+    refusal: list[str] = []
+
+    def update(state: dict[str, Any]) -> dict[str, Any]:
+        try:
+            validate_state(state)
+            if state["session_id"] != session:
+                raise ValueError("session does not own this loop")
+            if state.get("state_minor", 0) < 2:
+                raise ValueError("run graph.py convert before driver cutover")
+            result = graph_driver_mode.cutover(state)
+            graph = state["graph"]
+            fresh = not graph.get("wave_history") and all(
+                node["status"] == "pending" and node["retry"]["attempts"] == 0 and not node["evidence"]
+                for node in graph["nodes"].values()
+            )
+            if not fresh:
+                revalidate_all(state)
+            proposed = object_value(result["state"], "driver cutover state")
+            graph_semantics.validate(proposed)
+            graph_convert.write_backup(path, ".pre-driver")
+            output.update(revision=proposed["revision"], driver_from_revision=result["driver_from_revision"])
+            return proposed
+        except ValueError as error:
+            refusal.append(str(error))
+            raise
+
+    if not atomic_progress_update(path, update):
+        raise ValueError(refusal[0] if refusal else "progress.json is locked or unreadable")
+    trace(path, {"session_id": session}, "ok", "driver_cutover", {}, [], "cutover-driver")
+    return output
 
 
 def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str) -> dict[str, Any]:
@@ -301,6 +342,8 @@ def main() -> int:
             output = record_stop(args.state, args.session, args.category, args.reason_code, args.reason)
         elif args.command == "convert":
             output = convert_state(args.state, args.session, args.check)
+        elif args.command == "cutover-driver":
+            output = cutover_driver(args.state, args.session)
         elif args.command == "authorize-dispatch":
             output = dispatch.authorize_dispatch(
                 args.state, args.session, args.prompt, args.subagent_type, args.tool_use_id

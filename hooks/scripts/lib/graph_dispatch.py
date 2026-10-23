@@ -120,6 +120,8 @@ def begin_wave(path: Path) -> dict[str, Any]:
     base, mode = graph_contract.base_ref(), sandbox_mode(load_config(config_path())[0])
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
+        if state["graph"].get("dispatch_mode") == "driver":
+            raise ValueError("driver graph refuses native begin-wave")
         graph_contract.require_converted(state)
         for node in graph_semantics.ready(state):
             validate_dispatch_evals(path, state, node)
@@ -209,6 +211,9 @@ def authorize_dispatch(
     leaves one coded trace row. `tool_use_id` (from the PreToolUse payload, unverified) makes a hook retry idempotent.
     """
     state = load(path)
+    if state["graph"].get("dispatch_mode") == "driver":
+        trace(path, state, "refused", "driver_native_dispatch", {"session": session}, [], "authorize-dispatch")
+        raise ValueError("driver graph refuses native authorization")
     if state["session_id"] != session or state["status"] == "complete":
         raise ValueError("this session does not own an active loop")
     role = role.strip()
