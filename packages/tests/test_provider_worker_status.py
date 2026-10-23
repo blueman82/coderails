@@ -156,6 +156,35 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                 self.assertEqual(provider.success("inspect")["ready"], [NODE])
                 provider.success("begin-wave")
 
+    def test_answer_reopens_terminal_retry_slot(self) -> None:
+        """A valid human-needing status on the last attempt can resume after its answer."""
+        for provider in self.providers:
+            with self.subTest(provider=provider.name):
+                maximum = provider.read()["graph"]["nodes"][NODE]["retry"]["max"]
+                for _ in range(maximum - 1):
+                    failed = self.record(provider, {"outcome": "failed", "evidence": "prior failure"}, "failed")
+                    self.assertEqual(failed.returncode, 0, failed.stderr)
+                result = self.record(provider, typed("NEEDS_DECISION"), "failed")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                blocked = provider.read()
+                self.assertIsNone(blocked["graph"]["hard_stop"])
+                self.assertEqual(blocked["graph"]["nodes"][NODE]["retry"]["attempts"], maximum - 1)
+                self.assertEqual(provider.success("inspect")["ready"], [])
+                provider.success(
+                    "record-decision",
+                    "--session",
+                    provider.session,
+                    "--phase",
+                    "implementation",
+                    "--decision",
+                    "answer",
+                    "--chosen",
+                    "a",
+                    "--worker-status-seq",
+                    "1",
+                )
+                self.assertEqual(provider.success("inspect")["ready"], [NODE])
+
     def test_malformed_status_storage_inhibits_readiness(self) -> None:
         """Malformed rows fail closed instead of being mistaken for resolved decisions."""
         cases: list[Any] = [None, {}, [None], [{}], [{"node": NODE, "decision_pending": "false"}]]

@@ -8,8 +8,9 @@ Pure (stdlib, py3.9) and mirrored byte-for-byte into the Codex plugin. graph_sem
 
 A worker that must stop for a human returns one of STATUSES instead of an {outcome, evidence} result. `prepare()`
 rejects a malformed one (the whole report, atomically) and translates a valid one to core outcome `failed`, which
-consumes one retry (documented limit: the core has no "needs a human" outcome). A done result for a dispatch whose
-record has `final_report_required` must carry a valid `final_report`; it is stripped before the core call and stored.
+consumes one retry except at exhaustion, where the terminal slot is retained until a recorded answer. A done result
+whose record has `final_report_required` must carry a valid `final_report`.
+It is stripped before the core call and stored.
 """
 
 from __future__ import annotations
@@ -204,6 +205,26 @@ def record_into(
                 "revision": proposed["revision"],
             }
         )
+
+
+def retain_decision_slot(proposed: dict[str, Any], statuses: list[dict[str, Any]]) -> None:
+    """Keep a terminal retry available while a valid worker status awaits an answer."""
+    graph = proposed["graph"]
+    if not statuses or graph["hard_stop"] is None or graph["hard_stop"].get("reason") != "retry exhaustion":
+        return
+    reopened = False
+    for status in statuses:
+        node = graph["nodes"][status["node"]]
+        retry = node["retry"]
+        if node["status"] != "hard-stop" or retry["attempts"] < retry["max"]:
+            continue
+        retry["attempts"] -= 1
+        node.update(status="pending", outcome="pending")
+        reopened = True
+    if not reopened:
+        return
+    stopped = sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] == "hard-stop")
+    graph["hard_stop"] = {"node": stopped[0], "reason": "retry exhaustion"} if stopped else None
 
 
 def stop_for(statuses: list[dict[str, Any]]) -> tuple[str, str, str]:

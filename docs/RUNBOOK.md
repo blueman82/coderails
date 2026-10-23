@@ -411,7 +411,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
 - `/coderails:merge` says `compat_findings_nonzero`: the posted review artifact carries a second line
   `<!-- coderails-compat-findings v1 pr=N head_sha=S count=K disposition=D -->` (built by
   `post_review.py compat-line <pr> <sha> --count K --disposition D`) with `disposition=clean-break` and `K > 0`. Remove the
-  retained compatibility code and re-post the review, or register the unit `preserve-compat` with a blocker and ticket.
+  retained compatibility code, creating a new head SHA, and post a fresh review; or register the unit `preserve-compat`
+  with a blocker and ticket. Posting a passing review on the same SHA cannot override an earlier refusing compat line.
   `compat_findings_malformed` means a line with that prefix is not exactly the typed form; an artifact with no such line
   passes (legacy). The v1 review marker the root-owned integrity daemon matches is unchanged. Any refusing line for the
   head wins; the merge refusal is a stderr reason code, not a trace row (merge.py has no loop session).
@@ -425,7 +426,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   `final_report {claims: [{text, label, source?}], did_not_verify: [{item, tag, reason}]}` (non-empty claims, a `verified`
   claim cites a source, tags `resolved|unverifiable`). Both leave a `record-wave/refused/<code>` trace row.
 - A valid typed status is recorded, not refused: `worker_statuses[]` gets a `decision_pending` row, the node is recorded
-  `failed` (one retry consumed: the core has no needs-a-human outcome, so three such stops exhaust the node) and ONE typed
+  as a failed attempt; at the retry limit the terminal slot stays available behind that pending decision, so an answer
+  can resume the node. ONE typed
   stop row is written in the same save (`awaiting-input/needs_human_input` for `NEEDS_DECISION`, `approval-gate/needs_approval`
   for `OUTSIDE_SCOPE` and `IRREVERSIBLE_ACTION`; approval outranks input when a wave returns both). The Stop guard releases
   that row once. Ask the human with `to_decision_request()`, then log the answer with `graph.py record-decision <state>

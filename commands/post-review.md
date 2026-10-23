@@ -102,37 +102,20 @@ Resolve the owner/repo:
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 ```
 
-Before posting, check for an existing artifact comment for this PR+SHA to avoid duplicate
-artifacts:
-
-```bash
-EXISTING=$(gh api "repos/${REPO}/issues/${ARGUMENTS}/comments" \
-  --jq "[.[] | select(.body | startswith(\"$MARKER\"))] | first | select(. != null) | {url:.html_url,id:.id,author:.user.login,created:.created_at}" 2>/dev/null || true)
-```
-
-If `EXISTING` is non-null and contains a url, the artifact already exists for this SHA. Skip
-posting, report the existing URL, and still run Step 6 (cache write) with the existing
-comment's metadata:
-
-```bash
-if [[ -n "$EXISTING" && "$EXISTING" != "null" ]]; then
-  COMMENT_URL=$(printf '%s' "$EXISTING" | python3 -c 'import json, sys; print(json.load(sys.stdin)["url"])')
-  COMMENT_AUTHOR=$(printf '%s' "$EXISTING" | python3 -c 'import json, sys; print(json.load(sys.stdin)["author"])')
-  COMMENT_CREATED=$(printf '%s' "$EXISTING" | python3 -c 'import json, sys; print(json.load(sys.stdin)["created"])')
-  printf 'Artifact already posted for SHA %s — skipping duplicate post.\nExisting: %s\n' "$HEAD_SHA" "$COMMENT_URL"
-else
-```
+Post each completed review, including a corrected review of the same SHA. A previous
+same-SHA artifact may carry a different compatibility finding count; reusing it would
+discard the new verdict. The merge gate treats any refusing same-SHA compatibility
+line as dominant, so a previously refusing line needs a new code SHA to clear.
 
 Post the comment and capture the returned metadata:
 
 ```bash
-  RESULT=$(gh api "repos/${REPO}/issues/${ARGUMENTS}/comments" \
-    -F body=@/tmp/coderails-review-body-$$.md \
-    --jq '{url:.html_url,id:.id,author:.user.login,created:.created_at}')
-  COMMENT_URL=$(printf '%s' "$RESULT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["url"])')
-  COMMENT_AUTHOR=$(printf '%s' "$RESULT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["author"])')
-  COMMENT_CREATED=$(printf '%s' "$RESULT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["created"])')
-fi
+RESULT=$(gh api "repos/${REPO}/issues/${ARGUMENTS}/comments" \
+  -F body=@/tmp/coderails-review-body-$$.md \
+  --jq '{url:.html_url,id:.id,author:.user.login,created:.created_at}')
+COMMENT_URL=$(printf '%s' "$RESULT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["url"])')
+COMMENT_AUTHOR=$(printf '%s' "$RESULT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["author"])')
+COMMENT_CREATED=$(printf '%s' "$RESULT" | python3 -c 'import json, sys; print(json.load(sys.stdin)["created"])')
 ```
 
 ## Step 6 — Best-effort cache write

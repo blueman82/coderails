@@ -17,11 +17,12 @@ class PostReviewCommandTests(unittest.TestCase):
         workflow = (ROOT / "commands/workflow.md").read_text()
         for phrase in (
             "-F body=@",
-            "select(. != null)",
+            "Post each completed review",
             "## Step 0",
             "- Open PRs: !`gh pr list --state open --limit 10`",
         ):
             self.assertIn(phrase, post)
+        self.assertNotIn("select(. != null)", post)
         self.assertNotIn("-f body=@", post)
         self.assertLess(post.index("## Step 0"), post.index("## Step 1"))
         self.assertNotIn("`/pr-review-toolkit:review-pr all`", workflow)

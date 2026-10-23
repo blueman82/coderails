@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import sys
 import unittest
@@ -30,6 +31,16 @@ def base(status: str, **over: object) -> dict[str, Any]:
 
 class ValidateTests(unittest.TestCase):
     """Every status has a valid shape and refusals carry stable codes."""
+
+    def test_decision_slot_preserves_repair_exhaustion(self) -> None:
+        """A human-needing status cannot bypass the independent FULL repair bound."""
+        node = {"status": "hard-stop", "outcome": "hard-stop", "retry": {"attempts": 1, "max": 2}}
+        proposed = {
+            "graph": {"nodes": {"U4[1]": node}, "hard_stop": {"node": "U4[1]", "reason": "repair attempt exhaustion"}}
+        }
+        before = copy.deepcopy((node, proposed["graph"]["hard_stop"]))
+        ws.retain_decision_slot(proposed, [{"node": "U4[1]", "status": "NEEDS_DECISION"}])
+        self.assertEqual((node, proposed["graph"]["hard_stop"]), before)
 
     def test_valid_each_status(self) -> None:
         """All three statuses validate; recommended may be None."""

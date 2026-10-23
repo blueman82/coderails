@@ -96,6 +96,8 @@ def apply_record(state: dict[str, Any], raw_results: str, typed: bool = False) -
             nodes = (error.node,) if error.node else ()
             raise RecoveryRefusedError(error.code, error.message, nodes) from error
     transition = graph_semantics.record_wave(state, envelope.get("wave_id"), results)
+    proposed = cast(dict[str, Any], transition["state"])
+    worker_status.retain_decision_slot(proposed, statuses)
     graph_repair.apply_failed_gates(transition, results)
     stale_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "stale")
     failed_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "failed")
@@ -106,7 +108,6 @@ def apply_record(state: dict[str, Any], raw_results: str, typed: bool = False) -
         if isinstance(result, dict)
     ):
         raise GraphError("result evidence must not contain worker evidence")
-    proposed = cast(dict[str, Any], transition["state"])
     for node_id, reference in references.items():
         proposed["graph"]["nodes"][node_id]["evidence"].append(reference)
     worker_status.record_into(proposed, active["wave_id"], statuses, reports)
