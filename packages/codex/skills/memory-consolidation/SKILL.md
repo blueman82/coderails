@@ -21,8 +21,9 @@ sessions.
 
 ### Step 1: Locate the memory directory
 
-The target is `~/.codex/projects/<project-slug>/memory/`, where
-`<project-slug>` is the sanitized form of the project's working directory
+The target is `~/.codex/projects/<project-slug>/memory/`. Derive it with
+`scripts/memory_dir.py --provider codex`, resolved relative to this `SKILL.md`
+(`../../scripts/memory_dir.py`); `<project-slug>` is the sanitized form of the project's working directory
 path (matching the directory this skill itself is invoked from). Read
 `MEMORY.md` in that directory first — it is the index of every memory file.
 

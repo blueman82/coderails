@@ -170,6 +170,8 @@ Two interactive pauses: the code/iterate loop, and final ship-it authorization. 
 
 **`scripts/` vs `commands/`** — `push.py`/`merge.py` hold deterministic git plumbing (commit, push, `gh pr create`, merge); `.md` commands hold prose/decision logic and shell out to those scripts. Shared git/gh helpers live in `scripts/lib/git_common.py` — add reusable primitives there, not inline.
 
+**Procedures that moved out of prose** (both providers ship byte-identical copies, except `merge.py` which differs only in provider command names): `scripts/wiki_lint.py stale` (the wiki-lint staleness rule; reads typed `wiki_stale_days`, default 30), `scripts/verify_merged.py <PR> [--grep S --path P]` (the one merged-PR rule: content is proof, ancestry only for a true merge commit, never required of a squash; the `verify-merged-pr` skill and agentic-loop phase 9 both call it), `scripts/merge.py --describe` (the gate list, generated from `VERIFY_STAGES` plus `publication_gate.CHECKS`, no remote contact; `commands/merge.md` passes the target as a placeholder, never `"$ARGUMENTS"`), `scripts/memory_dir.py` and `scripts/detect_test_command.py` (memory-consolidation Step 1; test-gate-setup), and `scripts/quality/check.py --json` (consumed by both `quality_feedback.py` hooks). Limits and codes: RUNBOOK entry "A procedure script ... answered unexpectedly"; a skill still has to choose to call its script.
+
 ## Project-specific assumptions (change when generalising)
 
 - **Auth host**: `push.py` requires a `github.com` remote (`scripts.lib.git_common.require_repo`).

@@ -142,5 +142,14 @@
   "scripts/lib/config_counters.py": "100644",
   "scripts/lib/config_schema_docs.py": "100644",
   "scripts/routine_log.py": "100755",
-  "scripts/routine_run.py": "100755"
+  "scripts/routine_run.py": "100755",
+  "scripts/wiki_lint.py": "100755",
+  "packages/codex/scripts/wiki_lint.py": "100755",
+  "scripts/verify_merged.py": "100755",
+  "packages/codex/scripts/verify_merged.py": "100755",
+  "scripts/memory_dir.py": "100755",
+  "packages/codex/scripts/memory_dir.py": "100755",
+  "scripts/detect_test_command.py": "100755",
+  "packages/codex/scripts/detect_test_command.py": "100755",
+  "packages/codex/scripts/merge.py": "100755"
 }

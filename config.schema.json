@@ -31,6 +31,10 @@
       "type": ["integer"], "default": null, "status": "enforced_by_code",
       "description": "First PR number the wiki-ingest debt merge gate covers; absent or empty disables the gate. A literal null is rejected as a bad type, as before."
     },
+    "wiki_stale_days": {
+      "type": ["integer"], "default": 30, "status": "enforced_by_code",
+      "description": "Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Age alone never makes a page stale (a source must also have moved)."
+    },
     "worktree_base": {
       "type": ["string", "null"], "default": null, "status": "read_by_prose_only",
       "description": "Parent directory for sibling worktrees."

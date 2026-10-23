@@ -380,3 +380,25 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `approve-action`). The hash covers only the command text the hook sees, not aliases, functions, eval/xargs or scripts that
   push (env/sudo/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped). Limits: scope 500 chars, 8 KB per receipt,
   50 receipts per session (`receipt_refused_scope_too_long`, `receipt_refused_too_many`). Protected branches are main and master only.
+
+## A procedure script (wiki_lint, verify_merged, merge --describe, memory_dir, detect_test_command, check --json) answered unexpectedly
+
+- `wiki_lint.py stale --repo R --vault V`: typed `wiki_stale_days` (default 30; zero valid) sets candidate age.
+  Only later source commits prove drift, without grace. `data_gaps` names unresolvable sources, missing commit dates,
+  missing `last_updated` and `no_repo_sources`. Missing directories exit 2 (`repo_unavailable`, `vault_unavailable`);
+  bad thresholds report `wiki_stale_days_invalid`. Repair and rerun. Point-in-time/structural directories are excluded.
+- `verify_merged.py <PR> [--grep STR --path P]` exits 0 only when confirmed (`content` or `merge-commit-ancestry`).
+  Refusals: `gh_failed`, `not_merged`, `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`,
+  `content_preexisting` (needle predates merge), `content_check_failed` (Git error/missing parent), `content_check_required`
+  (no needle and no true two-parent ancestry). A squash needs `--grep`. Choose a new needle or restore missing history.
+  Rows `verify-merged/<ok|refused>/<reason>` feed `trace.by_reason` and the `verify-merged` counter.
+- `merge.py --describe` prints JSON from `VERIFY_STAGES` then `publication_gate.CHECKS`, without remote contact.
+  Conditional stages may skip; earlier refusals stop execution. Target/auth/state/approval checks precede those stages.
+- `memory_dir.py [--provider claude|codex]` prints a path even if absent: realpath, every non-alphanumeric becomes `-`.
+  `detect_test_command.py` returns null for zero/several candidates; callers ask before writing configuration. Missing
+  projects exit 2 (`directory_unavailable`); malformed/blank npm test scripts are not candidates. Repair input and rerun.
+- `scripts/quality/check.py --json` emits `{scanned, findings[{path,line,message}], external_ok}` with tools on stderr.
+  Both feedback hooks disclose findings, unusable JSON, nonzero checker exits and external failures, with bounded diagnostics.
+  The Codex adapter runs built-in checks only; `external_ok: true` means no external tools were attempted.
+- Limits: skills choose these helpers; verification writes a trace. Same-user `gh`/clone/dates/sources/config are trusted.
+  Wiki lint is advisory; presence on base and absence at the first parent do not prove PR authorship.
