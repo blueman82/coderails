@@ -101,7 +101,12 @@ Written before interpreting the data above. Each needs a minimum sample so a sma
   `blocked / decisions` of at least 10%; and, on a hand-sampled set of at least 30 of its blocks, a
   real-fix rate below 30%, where a real fix means the next turn changed substance rather than appending a
   token or acknowledgement. Without the sampled rate, no gate may be called demotable.
-  *Superseded for `confidence_labels` and `verify_loop` by a user override on 2026-10-04: both are demoted to advisory lints without meeting this rule (`docs/decisions/2026-10-04-not-in-gate-demotion.md`). The rule still governs every other gate. After the demotion `blocked / decisions` for those two gates falls to about 0; use `demoted` instead.*
+  *A user override on 2026-10-04 superseded this rule for
+  `confidence_labels` and `verify_loop`. Both became advisory lints without
+  meeting the threshold. See
+  `docs/decisions/2026-10-04-not-in-gate-demotion.md`. The rule still
+  applies to other gates. After demotion, `blocked / decisions` for those
+  two gates is about 0. Use `demoted` to measure them.*
 - **(b) Compact bootstrap manifest.** Justified if a provider's injected SessionStart context exceeds
   8192 bytes (roughly 2k tokens, paid on every startup, clear and compaction).
 - **(c) `work_units` / `graph.nodes` RFC.** Justified if, among at least 20 loops carrying both, at least
@@ -187,9 +192,19 @@ Trace rows for signing use `command=sign` with `ok|signed` or
 Refusals keep their existing command names. `eval_trace_counts` groups by
 `command|outcome|reason_code` and deduplicates by `event_id`.
 
-Rows are deduped at write time per (evals.json sha256, command, outcome, reason_code) and the sink stops growing at 1 MiB, so hook polling does not inflate counters; `smoke-run|ok|frozen` records each freeze.
+Rows are deduplicated at write time by `evals.json` SHA-256, command,
+outcome, and reason code. The sink stops growing at 1 MiB. These limits
+prevent hook polling from inflating counters. Each freeze records
+`smoke-run|ok|frozen`.
 
-Behaviour changes to know before paging: `grade-loop` without a sibling `progress.json` (archived or hand-built suites) now refuses `progress_missing` (decision: fail closed on both providers, no bypass); a symlinked or blank-id `progress.json` is refused; a PR-scope eval recorded `pass` whose `cmd` exits non-zero is refused `pass_exit_nonzero` by `smoke-verify`; `smoke-run` after an unrecorded oracle edit refuses `suite_hash_mismatch` (use `post_evals.py amend`). Stop-hook text for a tampered suite prints `reason=<code>`; re-running grade-loop will not clear it.
+`grade-loop` rejects an archived or hand-built suite without a sibling
+`progress.json` as `progress_missing`. Both providers fail closed, with no
+bypass. It also rejects a symlinked `progress.json` or one with a blank ID.
+`smoke-verify` rejects `pass_exit_nonzero` when a PR eval says `pass` but
+its command exits nonzero. After an unrecorded oracle edit, `smoke-run`
+rejects `suite_hash_mismatch`. Use `post_evals.py amend` for that change.
+The Stop hook prints `reason=<code>` for a changed suite. Running
+`grade-loop` again does not clear the refusal.
 
 Also traced as `outcome=legacy`: `legacy_progress_schema` (progress.json schema_version != 3, still allowed).
 
