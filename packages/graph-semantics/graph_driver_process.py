@@ -101,6 +101,8 @@ def observe(artifact: Path, timeout: float) -> dict[str, Any]:
             if time.monotonic() >= deadline:
                 return {"status": "running"}
         elif time.monotonic() >= deadline:
+            if launch.get("status") == "started" and type(pid) is int and isinstance(token, str):
+                return {"status": "unresolved", "reason": "worker_identity_unconfirmed_terminal_missing"}
             return {"status": "unresolved"}
         time.sleep(min(0.02, max(0, deadline - time.monotonic())))
 
@@ -126,30 +128,31 @@ def start(
             os.fsync(stream.fileno())
     except FileExistsError as error:
         raise ValueError("worker attempt was already launched or reserved") from error
-    try:
-        child = subprocess.Popen(
-            [
-                sys.executable,
-                str(Path(__file__).resolve()),
-                "--worker",
-                str(artifact),
-                token,
-                str(cwd),
-                str(stdin_path) if stdin_path is not None else "-",
-                *command,
-            ],
-            cwd=cwd,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        _CHILDREN[token] = child
-    except OSError:
-        (artifact / "output.jsonl").touch(exist_ok=True)
-        _write(artifact / "terminal.json", {"token": token, "exit_code": 127})
-        return {"status": "finished", "exit_code": 127}
+    with (artifact / "stderr.log").open("xb") as errors:
+        try:
+            child = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "--worker",
+                    str(artifact),
+                    token,
+                    str(cwd),
+                    str(stdin_path) if stdin_path is not None else "-",
+                    *command,
+                ],
+                cwd=cwd,
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=errors,
+                start_new_session=True,
+            )
+            _CHILDREN[token] = child
+        except OSError:
+            (artifact / "output.jsonl").touch(exist_ok=True)
+            _write(artifact / "terminal.json", {"token": token, "exit_code": 127})
+            return {"status": "finished", "exit_code": 127}
     deadline = time.monotonic() + 1
     while time.monotonic() < deadline:
         launch = _read(artifact / "launch.json")
@@ -180,7 +183,6 @@ def _worker(artifact: Path, token: str, cwd: Path, stdin_path: Path | None, comm
                 cwd=cwd,
                 stdin=input_stream if input_stream is not None else subprocess.DEVNULL,
                 stdout=output,
-                stderr=subprocess.DEVNULL,
                 check=False,
             ).returncode
     except (OSError, ValueError):

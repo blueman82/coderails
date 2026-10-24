@@ -345,7 +345,7 @@ def drive_once(
                     )
                 observation = graph_driver_process.observe(prompt.parent, 0.05)
                 if observation["status"] != "finished":
-                    return {"status": observation["status"], "node": node_id}
+                    return {**observation, "node": node_id}
                 parsed = _admit_result(state, node_id, result(prompt.parent / "output.jsonl", observation["exit_code"]))
                 if pause := _publication_pause(worker_checkout, node_id, parsed):
                     return pause

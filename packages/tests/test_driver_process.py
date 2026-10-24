@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -144,6 +145,72 @@ class DriverProcessTests(unittest.TestCase):
                     break
             self.assertEqual(result, {"status": "finished", "exit_code": 7})
 
+    def test_child_stderr_stays_separate_from_output(self) -> None:
+        """A failed Codex process leaves diagnostics without corrupting JSONL."""
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory)
+            command = [
+                sys.executable,
+                "-c",
+                'import sys; print(\'{"type":"thread.started"}\'); '
+                "print('codex-failure-marker', file=sys.stderr); raise SystemExit(7)",
+            ]
+            graph_driver_process.start(artifact, command, artifact)
+            deadline = time.monotonic() + 5
+            result: dict[str, object] = {"status": "unresolved"}
+            while time.monotonic() < deadline:
+                result = graph_driver_process.observe(artifact, 0.05)
+                if result["status"] == "finished":
+                    break
+            self.assertEqual(result, {"status": "finished", "exit_code": 7})
+            self.assertEqual((artifact / "output.jsonl").read_text().strip(), '{"type":"thread.started"}')
+            self.assertIn("codex-failure-marker", (artifact / "stderr.log").read_text())
+
+    def test_wrapper_failure_keeps_diagnostic_without_terminal(self) -> None:
+        """A wrapper crash remains unresolved and records its Python error."""
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory)
+            (artifact / "launch.json.tmp").touch()
+            self.assertEqual(
+                graph_driver_process.start(artifact, [sys.executable, "-c", "pass"], artifact),
+                {"status": "unresolved"},
+            )
+            self.assertFalse((artifact / "terminal.json").exists())
+            self.assertIn("FileExistsError", (artifact / "stderr.log").read_text())
+
+    def test_killed_wrapper_cannot_launch_the_same_attempt_again(self) -> None:
+        """An orphaned child leaves a clear unresolved result and a reserved launch."""
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory)
+            command = [
+                sys.executable,
+                "-c",
+                "from pathlib import Path\nimport time\nPath('active').touch()\n"
+                "while not Path('release').exists():\n    time.sleep(0.01)\n",
+            ]
+            graph_driver_process.start(artifact, command, artifact)
+            launch = json.loads((artifact / "launch.json").read_text())
+            try:
+                deadline = time.monotonic() + 5
+                while not (artifact / "active").exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue((artifact / "active").exists())
+                os.kill(launch["pid"], signal.SIGKILL)
+                graph_driver_process._CHILDREN[launch["token"]].wait(timeout=5)  # pyright: ignore[reportPrivateUsage]
+                time.sleep(1.1)
+                self.assertEqual(
+                    graph_driver_process.observe(artifact, 0.1),
+                    {"status": "unresolved", "reason": "worker_identity_unconfirmed_terminal_missing"},
+                )
+                self.assertFalse((artifact / "terminal.json").exists())
+                with self.assertRaisesRegex(ValueError, "already"):
+                    graph_driver_process.start(artifact, command, artifact)
+            finally:
+                (artifact / "release").touch()
+                child = graph_driver_process._CHILDREN.pop(launch["token"], None)  # pyright: ignore[reportPrivateUsage]
+                if child is not None:
+                    child.wait(timeout=5)
+
     def test_launch_failure_has_an_empty_output_artifact(self) -> None:
         """A failed wrapper launch still leaves sealable failed-attempt files."""
         with tempfile.TemporaryDirectory() as directory:
@@ -155,6 +222,7 @@ class DriverProcessTests(unittest.TestCase):
                 )
             self.assertEqual(graph_driver_process.observe(artifact, 0), {"status": "finished", "exit_code": 127})
             self.assertEqual((artifact / "output.jsonl").read_bytes(), b"")
+            self.assertEqual((artifact / "stderr.log").read_bytes(), b"")
 
     def test_worker_receives_prompt_and_private_environment(self) -> None:
         """The prompt enters on stdin and the environment stays out of process records."""
