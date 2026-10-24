@@ -1,84 +1,44 @@
-# Token Limit Calibration Guide
+# Measure loop cost before setting a limit
 
-## Overview
+Coderails does not configure a token cap for agentic loops in this repo.
+Choose any provider limit from measured runs. Check the provider's current
+settings before you set it. Do not use the example ranges from an older
+version of this guide as measured Coderails data.
 
-Set token or byte limits through `RACHEL_MAX_TURNS` (agent SDK) or the runtime
-limits in Claude Code's `settings.json`. Use observed token use in agentic
-loops to choose a limit.
+## Collect a completed loop
 
-## Where Token Limits Live
+1. Run a representative task through `/coderails:agentic-loop`.
+2. Resolve its state directory with
+   `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"`.
+3. After Phase 13 teardown, read `retro.json` beside `progress.json`.
+   Its `cost` field holds the dated token and USD breakdown by model.
+4. Record the task type, work-unit count, provider, model, completion state,
+   and any context compaction. Keep the `cost.prices_as_of` date with USD
+   amounts. An old price date needs a rate check; it does not change the
+   recorded token count.
+5. Repeat with tasks of the size you want the limit to cover. Include
+   failed and retried loops so the sample covers their cost.
 
-1. **Claude Code settings**: `~/.claude/settings.json` → `runtime.max_tokens_per_session` (or `maxTurns` for turn limits)
-2. **Agent SDK**: Environment variable `RACHEL_MAX_TURNS` (for turn-limited loops)
-3. **Coderails workflow**: No built-in token cap (delegates to Claude Code runtime)
+The live dashboard can show cost during a run. Use the completed retro for
+a final comparison. `/coderails:post-evals` posts SHA-bound grading, not the
+loop's final token or USD total.
 
-## Calibration Process
+## Choose and check a limit
 
-### Step 1: Run a Representative Task Loop
+Compare the measured token totals for similar tasks. Choose headroom for
+retries and context compaction. Record the sample and the reason for the
+headroom. Check the current provider documentation for the supported limit
+and its setting name. This repo does not verify a Claude Code or Agent SDK
+setting called `max_tokens_per_session` or an environment variable called
+`RACHEL_MAX_TURNS`.
 
-Use `/coderails:agentic-loop` with a typical task (2–3 implementation units):
-- Measure the total tokens burned across all turns
-- Note the number of turns taken
-- Record the loop type (implementation/review/investigation)
+After setting a limit, run another representative loop. Check whether the
+limit ends useful work before the loop finishes. Change the limit based on
+that result. Recheck after a model, workflow, or task-size change.
 
-### Step 2: Examine Loop Artifacts
+## Sources
 
-After loop completion, find:
-- **`retro.json` beside the current session's `progress.json`** — resolve the state directory with `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"`; the retrospective records the once-frozen `cost` breakdown at its own schema version 2. The graph itself uses schema 3.
-- **Dashboard metrics** — `/coderails:dashboard` live-shows cost per dispatch
-- **PR comment artifact** — `/coderails:post-evals` posts SHA-bound grading. Read token and USD spend from the loop's `retro.json` cost field, not from the PR artifact.
-
-### Step 3: Calculate Headroom
-
-Typical ratios for coderails loops:
-- **Small task (1 unit)**: 50k–80k tokens
-- **Medium task (2–3 units)**: 120k–200k tokens
-- **Large task (4+ units)**: 250k–400k tokens
-
-Add 20% headroom for context compaction and re-expansion overhead.
-
-### Step 4: Set Limits
-
-If observed burn is `X` tokens:
-- **Conservative**: Set cap at `X × 1.3` (30% headroom)
-- **Moderate**: Set cap at `X × 1.5` (50% headroom)
-- **Generous**: Set cap at `X × 2.0` (100% headroom, accounts for edge cases)
-
-## Measurement Example
-
-**Hypothetical loop** (this repo, add integrity-gate docs):
-```
-Turn 1 (planning):           12k tokens
-Turn 2 (implementation):      45k tokens
-Turn 3 (review + fixes):      28k tokens
-Turn 4 (docs + test verification): 15k tokens
-───────────────────────────
-Total:                       100k tokens
-```
-
-**Recommended cap**: 130k–150k tokens (30–50% headroom)
-
-## For This Repo (coderails)
-
-No loop-driven token cap is currently configured. To calibrate for future contributors:
-
-1. Run `/coderails:agentic-loop` on a typical feature (e.g., "add a new skill")
-2. Observe `retro.json` cost breakdown
-3. Set `runtime.maxTurns` or `max_tokens_per_session` in Claude Code settings based on findings
-4. Update this document with the empirical limit
-
-## Headless-Run Consideration
-
-Headless runs (via `/coderails:dashboard` or API) may have lower overhead. Measure separately if deploying a scheduled loop.
-
-## When to Re-Calibrate
-
-- After major codebase changes that increase response sizes
-- When adding new implementation-unit types (e.g., `frontend-render` workers)
-- Quarterly, to account for model efficiency improvements in Claude
-
-## References
-
-- [Agentic Loop SKILL.md](../skills/agentic-loop/SKILL.md) — Phase 13 retro minting + cost mining
-- [Coderails Dashboard](../skills/dashboard/) — Real-time token burn visualization
-- [Claude SDK cost tracking](https://github.com/anthropics/anthropic-sdk-python) — `usage.output_tokens` / `usage.input_tokens`
+- [Agentic-loop teardown](../skills/agentic-loop/teardown.md) defines the
+  completed retro and cost report.
+- [Reference](REFERENCE.md#artifact-and-state-locations) lists loop state
+  locations.
