@@ -128,9 +128,9 @@ Match the confirmation cadence to the envelope class for the rest of the session
 
 The orchestrator must follow the same discipline as workers. The
 confidence-label and verify-loop hooks are advisory on Stop and
-SubagentStop. They send a model-visible `additionalContext` warning and
-return success. They do not block a turn, inside or outside a loop. Act on
-their warning in the next turn. See the 2026-10-04 decision in
+SubagentStop. They emit an `additionalContext` warning and return success.
+They do not block a turn, inside or outside a loop. Host delivery of that
+warning to the model has not been verified. See the 2026-10-04 decision in
 `docs/decisions/2026-10-04-not-in-gate-demotion.md`.
 
 Main context must, in its own output (not just in spawned-agent prompts):
