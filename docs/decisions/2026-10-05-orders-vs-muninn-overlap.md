@@ -85,6 +85,15 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
 - `render` omits orders Muninn no longer holds as current; with Muninn unreachable it exits 3 and leaves the existing
   view untouched, so a view can lag a Muninn retraction until the next successful render.
 - Import of the old hand-written `standing-orders-decayed.md` is not provided; it was never created in this repo.
+- Pre-D4 complete schema-3 loops have no D4 preparation or tick/render receipt. The new guards keep them pending
+  until an operator reviews the retained graph, eval, proof, retro and transcript evidence. For an eligible old loop,
+  read the exact progress hash with `shasum -a 256 <repo-key dir>/<session>/progress.json`, then run
+  `python3 scripts/lib/orders_completion.py admit-legacy --dir <repo-key dir> --session <session> --loop <loop> --progress-sha256 <hash> --reason "<reviewed historical evidence>"`.
+  This writes a separate session/loop/hash-bound receipt. It never edits progress, imports a lesson, ticks a loop or
+  ages an order. Native retry and Stop accept the unchanged admitted graph. Any D4 preparation, observation or ledger
+  effect blocks this exception. Run historical `mark-complete` before admission because its marker changes the file
+  hash. A changed graph makes the admission stale. This same-user receipt records a review; it cannot prove that an
+  owner approved a new lesson. New loops still require the full D4 completion lifecycle.
 - Legacy import preserves titles, counters including decay, full source text and first-seen provenance. Duplicate,
   incomplete, malformed or colliding entries and foreign paths are refused without moving the source. The original
   remains in a local backup. A retry after ledger save but failed source move resumes only when the entire parsed

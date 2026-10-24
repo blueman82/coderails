@@ -86,16 +86,23 @@ if name == 'claude':
     orders = completion.orders_completion
     target = 'hooks.scripts.lib.loop_state_common.os.replace'
     def invoke():
-        completion.complete(path, session)
+        return completion.complete(path, session)
 else:
     import graph_completion as completion
     orders = completion._orders()
     target = 'graph_completion._write'
     def invoke():
-        completion.complete(path, session, path.with_name('evals.json'), path.with_name('proof.json'),
-                            path.with_name('retro.json'), Path(transcript))
+        return completion.complete(path, session, path.with_name('evals.json'), path.with_name('proof.json'),
+                                   path.with_name('retro.json'), Path(transcript))
 if kind == 'save':
     context = mock.patch(target, side_effect=OSError('disk-full'))
+elif kind == 'render_old':
+    original = orders._call
+    def degraded(path, session, command, loop):
+        if command == 'render':
+            return 3, {'degraded': 'muninn_old_ledger'}
+        return original(path, session, command, loop)
+    context = mock.patch.object(orders, '_call', side_effect=degraded)
 else:
     original = orders.prepare
     def changed(*args):
@@ -108,7 +115,10 @@ else:
     context = mock.patch.object(orders, 'prepare', side_effect=changed)
 with context:
     try:
-        invoke()
+        result = invoke()
+        if kind == 'render_old':
+            print(json.dumps(result))
+            sys.exit(0)
     except Exception as error:
         print(type(error).__name__, str(error))
         sys.exit(0)
@@ -292,7 +302,28 @@ sys.exit(1)
                 self.assertEqual(completion.returncode, 3, completion.stderr)
                 payload = json.loads(completion.stdout)
                 self.assertTrue(payload["pending_teardown"])
+                self.assertEqual(payload["reason_code"], "memory_backend_invalid")
                 self.assertEqual(provider.read()["status"], "complete")
                 ledger = json.loads((provider.path.parent.parent / "orders.json").read_text())
                 self.assertEqual(len(ledger["ticked_loops"]), 1)
-                self.assertNotEqual(self.verify(provider).returncode, 0)
+                verified = self.verify(provider)
+                self.assertNotEqual(verified.returncode, 0)
+                self.assertIn("memory_backend_invalid", verified.stdout + verified.stderr)
+                (provider.home / ".coderails/workflow.config.yaml").write_text("memory:\n  backend: off\n")
+                self.assertEqual(provider.complete().returncode, 0)
+                self.assertEqual(self.verify(provider).returncode, 0)
+                saved = json.loads((provider.path.parent.parent / "orders.json").read_text())
+                self.assertEqual(len(saved["ticked_loops"]), 1)
+
+    def test_render_refusal_reason_survives_later_verification(self) -> None:
+        """A current retired Muninn API refusal remains visible after native completion."""
+        for provider in self.providers:
+            with self.subTest(provider=provider.name):
+                self.ready(provider)
+                failed = self.fault(provider, "render_old")
+                self.assertEqual(failed.returncode, 0, failed.stderr)
+                self.assertEqual(json.loads(failed.stdout)["reason_code"], "muninn_old_ledger")
+                self.assertEqual(provider.read()["status"], "complete")
+                verified = self.verify(provider)
+                self.assertNotEqual(verified.returncode, 0)
+                self.assertIn("muninn_old_ledger", verified.stdout + verified.stderr)

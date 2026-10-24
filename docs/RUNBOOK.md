@@ -162,13 +162,13 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `memory_backend_off` | memory.backend is off in the workflow config; set it to muninn (or remove the key) to write typed memory. |
 | `memory_backend_invalid` | memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml. |
 | `muninn_absent` | muninn is not on PATH; install it (the Markdown path is not a fallback). |
-| `muninn_old_ledger` | muninn lacks the Part A flags (--scope-loop, --confidence, ...); upgrade muninn. |
+| `muninn_old_ledger` | the D4 adapter expects retired Muninn flags. Keep the result degraded until a current request-bound adapter is designed. |
 | `muninn_timeout` | muninn hung past 10s; run `muninn know list` by hand and check store locks. |
 | `muninn_error` | muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and read stderr. |
-| `muninn_bad_output` | muninn wrote the entry but printed no K-id; run `muninn know list --scope-loop <id>` to find it. |
+| `muninn_bad_output` | the retired D4 write protocol returned no numeric K-id. Inspect current Muninn records without a legacy scope flag. |
 | `muninn_store_missing` | no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once. |
-| `muninn_schema_old` | the store is schema v1 (PRAGMA user_version != 2); upgrade it with muninn itself, never by hand. |
-| `muninn_schema_incomplete` | the store lacks a typed column or table (confidence, valid_until, sensitivity, contradicts, tags, fts); run `muninn doctor`. |
+| `muninn_schema_old` | the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2. |
+| `muninn_schema_incomplete` | the D4 adapter expects retired v2 columns or tables. Inspect the current store with `muninn doctor`, then redesign the adapter. |
 | `uncited_write` | give a verbatim --quote (and --cite ref); a record without a quote is never written. |
 | `restricted_refused` | restricted records are never written by the adapter; write a normal-sensitivity claim. |
 | `bad_record` | the record failed validation (type, scope, tag, date, empty claim, or loop scope without a loop id). |
@@ -270,8 +270,11 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   after its ledger save. A failed completion save ages nothing. Repeat the native completion command to resume a
   pending tick or render without a second age change; do not edit `progress.json`.
   The Claude Stop guard and Codex `verify-completion` block when the tick or bound generated views are incomplete.
-  On the current Muninn installation, the older D4 store API degrades explicitly. Treat live lesson activation as
-  pending; do not use ledger text as a substitute for a current cited claim.
+  If render fails on the installed Muninn API, the pending result and later verifier show its actual reason code.
+  The installed Muninn uses a current request-bound API that this D4 adapter does not support. Treat live lesson
+  activation as pending; do not use ledger text as a substitute for a current cited claim.
+- Pre-D4 complete loop: review its retained evidence before the explicit exact-hash admission. The command preserves
+  progress and never ages orders. See `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md` for the steps and limits.
 - Completed text replacement: when this session/loop observation already exists, explicit `record` captures
   `replaces_source` in the prepared row. The canonical `lesson_source` hashes owned binding, authored fields and that
   predecessor, excluding mutable store observations, and is sealed/saved with the lesson. Ordinary tick recovers only

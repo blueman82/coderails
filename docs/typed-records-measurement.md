@@ -47,9 +47,11 @@ Counters: `order.record|prepare|tick|render|import|cite` and `lesson.query|predi
 under the `memory` key; no edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Standing order stored without
 a cite, or a lesson missing from dispatch". Decision: `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 
-Limits: the instructed prepare/native-complete/apply caller is advisory at this checkpoint; automatic provider wiring
-remains pending. `orders_ticked` is a post-save observation, and a failed apply/receipt after completion means pending
-teardown. The one same-user lock covers currentness, reconciliation, bounded sync and atomic ledger save, with no
+Limits: Claude and Codex native completion now enforce prepare, validated graph save, tick and render. Both Stop paths
+refuse missing or stale D4 receipts and views. An explicitly reviewed old complete graph can carry a separate
+hash-bound admission that never changes progress or ages orders. `orders_ticked` is a post-save observation, and a
+failed apply/receipt after completion means pending teardown. The one same-user lock covers currentness,
+reconciliation, bounded sync and atomic ledger save, with no
 exactly-once network claim. New completed recurrences revive tombstones; replay cannot reset counters. Current live,
 verified owner-cited lesson text is legitimate typed memory; transcript advisory observations remain metadata only.
 Uncited claims are diagnostic and excluded from dispatch, promotion and views. Claims over 500 collapsed characters
