@@ -60,7 +60,8 @@ class ActionsRunnerTests(unittest.TestCase):
                 "GITHUB_EVENT_PATH": str(event),
             }
             with (
-                patch.dict(os.environ, context),
+                patch.dict(os.environ, {"INTEGRITY_GATE_MAX_DIFF_BYTES": "1"}),
+                patch.dict(os.environ, context, clear=True),
                 patch("integrity_actions.Client") as client,
                 patch("integrity_actions.gate_pr", return_value=0) as gate,
             ):
