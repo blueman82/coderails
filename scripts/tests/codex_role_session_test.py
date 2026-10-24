@@ -73,6 +73,16 @@ class ArgvTests(IsolatedTrace):
                 for other in set(GUARDED) - {role}:
                     self.assertNotIn(f"cap-{other}", text.replace(f"cap-{role}", ""))
 
+    def test_every_guarded_role_disables_nested_agents(self) -> None:
+        """Guarded Codex roles must not receive the nested Agent tool."""
+        for role in GUARDED:
+            with self.subTest(role=role):
+                argv = crs.build_argv(role, REPO)
+                overrides = [argv[i + 1] for i, token in enumerate(argv[:-1]) if token == "-c"]
+                self.assertIn("features.multi_agent=false", overrides)
+                self.assertTrue(crs.contained(argv, role))
+                self.assertFalse(crs.contained([arg for arg in argv if arg != "features.multi_agent=false"], role))
+
     def test_package_install_root_loads_its_own_role_contract(self) -> None:
         """The independent Codex package has the role instructions and server script it launches."""
         package = REPO / "packages" / "codex"
@@ -136,7 +146,10 @@ class EnvAndRunTests(IsolatedTrace):
             fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
             prompt = Path(tmp) / "prompt.txt"
             prompt.write_text("audit claim 1")
-            with patch.dict(os.environ, {"PATH": f"{bin_dir}:/usr/bin:/bin", "GH_TOKEN": "secret", "HOME": tmp}):
+            with patch.dict(
+                os.environ,
+                {"PATH": f"{bin_dir}:{Path(sys.executable).parent}:/usr/bin:/bin", "GH_TOKEN": "secret", "HOME": tmp},
+            ):
                 code = crs.main(["--role", "source-auditor", "--prompt-file", str(prompt), "--cwd", tmp])
             seen = json.loads(out.read_text())
         self.assertEqual(code, 0)

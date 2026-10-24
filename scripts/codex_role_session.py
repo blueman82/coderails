@@ -2,9 +2,9 @@
 """Run one guarded role as its own contained Codex session: `codex_role_session.py --role <agent> --prompt-file <f>`.
 
 Codex native children inherit the parent's permissions and MCP servers, and a role TOML's sandbox_mode does not change
-that. A separate `codex exec` does: user config is ignored, the sandbox is read-only, the shell tool is off, and exactly
-one MCP server (this role's, from capability_mcp.py) is registered. The prompt is read from a file, the environment is
-an allowlist. Use it for source-auditor, whose tests_run/cmd_run must not be reachable by inherited children.
+that. A separate `codex exec` does: user config is ignored, the sandbox is read-only, shell and nested agents are off,
+and exactly one MCP server (this role's, from capability_mcp.py) is registered. The prompt comes from a file, and the
+environment is an allowlist. Use it for source-auditor. Its tests_run/cmd_run must not be reachable by native children.
 """
 
 from __future__ import annotations
@@ -76,7 +76,17 @@ def build_argv(role: str, root: Path, cwd: str | None = None) -> list[str]:
     command = json.dumps(sys.executable)
     args = json.dumps([str(root / "scripts" / "capability_mcp.py"), "--role", role])
     # JSON string syntax is valid TOML basic-string syntax, so json.dumps quotes the inline table safely.
-    argv = ["codex", "exec", "--ignore-user-config", "-s", "read-only", "-c", "features.shell_tool=false"]
+    argv = [
+        "codex",
+        "exec",
+        "--ignore-user-config",
+        "-s",
+        "read-only",
+        "-c",
+        "features.shell_tool=false",
+        "-c",
+        "features.multi_agent=false",
+    ]
     argv += ["-c", f"developer_instructions={json.dumps(role_instructions(root, role))}"]
     argv += ["-c", f"mcp_servers.cap-{role}={{command = {command}, args = {args}}}"]
     if cwd:
@@ -95,6 +105,7 @@ def contained(argv: list[str], role: str) -> bool:
         and "--ignore-user-config" in argv
         and sandbox == ["read-only"]
         and "features.shell_tool=false" in overrides
+        and "features.multi_agent=false" in overrides
         and len(instructions) == 1
         and len(servers) == 1
         and servers[0].startswith(f"mcp_servers.cap-{role}=")
