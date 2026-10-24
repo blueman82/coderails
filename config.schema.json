@@ -78,6 +78,16 @@
           "description": "true = eval artifacts must be signed; refuse when signing is impossible."
         }
       }
+    },
+    "memory": {
+      "type": ["object", "null"], "default": null, "status": "enforced_by_code",
+      "description": "Typed-memory settings.",
+      "properties": {
+        "backend": {
+          "type": ["string", "null"], "default": "muninn", "status": "enforced_by_code",
+          "description": "muninn (default) = Muninn is the authoritative typed-memory store and a missing or refusing Muninn fails with a reason code; off = no typed memory at all (reason memory_backend_off, traced, Markdown is never read or written). Any other value fails with memory_backend_invalid."
+        }
+      }
     }
   }
 }

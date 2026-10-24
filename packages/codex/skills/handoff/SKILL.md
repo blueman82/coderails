@@ -19,19 +19,22 @@ Generate two artefacts that allow a fresh Codex session to continue the current 
 
 ## Instructions
 
-### Step 0: Prefer recorded state (optional)
+### Step 0: Read recorded state (Muninn authoritative)
 
 If a native loop graph exists for this session, take `$STATE` (the `<session>/progress.json` path) and `$SESSION` from
 the SessionStart bootstrap text (it reports the active state path), then run
 `python3 "$SKILL_DIR/../agentic-loop/scripts/graph.py" summarize "$STATE"` (JSON: `phase`, `detail`, `done`, `active`,
 `ready`, `pending`), `... graph.py collection <state-root>` (JSON graph list with each node's stable ID, readable name and status), `... graph.py inspect "$STATE"` (JSON: `revision`, `active_wave`, `running`, `ready`, `hard_stop`),
 and `python3 "$SKILL_DIR/../../scripts/lib/memory_adapter.py" list --type decision --scope loop --loop "<loop id from inspect>" --session "$SESSION"`
-(JSON records with `cite`). `$SKILL_DIR` is the absolute directory containing this `SKILL.md`. Use them for Goal,
-Decisions, Done and Next steps. If a command is unavailable or exits nonzero (the adapter prints
-`{"degraded": "<reason_code>"}`), omit only that command's result. Keep successful current-graph results even if
-collection fails on another graph, then run Step 1.
+(JSON records with `cite`). `$SKILL_DIR` is the absolute directory containing this `SKILL.md`.
+Use successful results for Goal, Decisions, Done, and Next steps. If a graph command fails, omit only its result.
+Keep current-graph results when collection fails on another graph. A missing loop graph drops only the graph commands.
+If the adapter exits nonzero, it prints `{"degraded": "<reason_code>"}`. Put that code under a "Memory degraded" line
+in the handoff (see `docs/RUNBOOK.md`, "Memory degraded (Muninn authoritative)"). Do not skip the read silently or
+replace typed decisions with hand-written Markdown. Then run Step 1.
 
-When reporting graph work, use `inspect`/`summarize`'s `node_names` entry to show each node's one-word job name and lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.
+When reporting graph work, use the `node_names` entry from `inspect` or `summarize`. Show each node's job name and
+lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.
 
 ### Step 1: Extract from current session
 
