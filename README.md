@@ -16,29 +16,36 @@ agents, and hooks; neither dispatches to the other. They provide:
 
 ## Install
 
-See [INSTALLATION.md](./INSTALLATION.md). Short version:
+See [INSTALLATION.md](./INSTALLATION.md) for requirements and migration
+steps. For Claude Code, run these commands in a shell:
 
 ```bash
 git clone https://github.com/blueman82/coderails.git ~/Documents/Github/coderails
 cd ~/Documents/Github/coderails
 python3 install.py --provider claude --dry-run
 python3 install.py --provider claude
-# restart Claude Code, then:
-#   /plugin marketplace add ~/Documents/Github/coderails
-#   /plugin install coderails@coderails
-#   /reload-plugins
 ```
 
-For Codex, use `python3 install.py --provider codex` instead. It registers the
-plugin and installs its bundled agent definitions under `${CODEX_HOME:-~/.codex}/agents`.
-Codex skips plugin hooks until you review and trust them. After installation,
-start a fresh Codex session, run `/hooks`, and review and trust the Coderails hooks.
+Restart Claude Code. Then run these commands inside Claude Code:
+
+```text
+/plugin marketplace add ~/Documents/Github/coderails
+/plugin install coderails@coderails
+/reload-plugins
+```
+
+For Codex, clone the repo as above. In that clone, run
+`python3 install.py --provider codex --dry-run`, then
+`python3 install.py --provider codex`. The installer registers the plugin
+and installs its agent definitions under `${CODEX_HOME:-~/.codex}/agents`.
+Start a fresh Codex session. Run `/hooks`, then review and trust the
+Coderails hooks. Codex skips those hooks until you trust them.
 
 Python commands replaced Coderails-owned shell entrypoints. Both providers
-accept only graph schema 3. They share one source for pure graph semantics,
-copied into each installation. Each provider handles its own dispatch,
-transcript evidence, and state locks. See [INSTALLATION.md](./INSTALLATION.md) before upgrading
-an installation with older commands or loop state.
+accept only graph schema 3. They share pure graph semantics, which the
+installer copies into each plugin. Each provider handles its own dispatch,
+transcript evidence, and state locks. Before you upgrade older commands
+or loop state, read [INSTALLATION.md](./INSTALLATION.md).
 
 Per project, run once: Claude Code users run `/coderails:init`; Codex users run
 `$coderails-codex:init`. Both scaffold `.coderails/workflow.config.yaml` from

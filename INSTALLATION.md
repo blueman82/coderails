@@ -28,56 +28,57 @@ orchestration skills, and discipline hooks. `/push` and `/merge` use GitHub's
 
 ## Choose the provider
 
-The four-step walkthrough below installs Claude. For Codex, run:
+The four-step walkthrough below installs Claude. For Codex, complete the
+clone in step 1. Then run these commands from the clone:
 
 ```bash
 python3 install.py --provider codex --dry-run
 python3 install.py --provider codex
 ```
 
-This registers `coderails-codex@coderails` and installs the bundled native
-agent definitions under `${CODEX_HOME:-~/.codex}/agents`. It refuses unrelated
-agent-name collisions and backs up changed managed definitions. Start a fresh
-Codex session, run `/hooks`, and review and trust the Coderails hooks. Initialize
-each project with `$coderails-codex:init`. The memory-target flag applies only
-to Claude. The integrity-gate setup prompt is available for both providers.
+This registers `coderails-codex@coderails`. It also installs native agent
+definitions under `${CODEX_HOME:-~/.codex}/agents`. The installer refuses
+unrelated agent-name collisions. It backs up managed definitions that change.
+Start a fresh Codex session. Run `/hooks`, then review and trust the
+Coderails hooks. Initialize each project with `$coderails-codex:init`.
+The memory-target flag applies only to Claude. Both providers offer the
+integrity-gate setup prompt.
 
-Both providers use graph schema 3. Each provider handles its own dispatch,
-evidence, and locks. The installer copies the shared pure graph semantics into
-each provider. It does not install retired `.sh` entrypoints or schema-2 graph
-readers. Use the current Python commands shown here. Do not pass existing
-schema-2 loop state to the current graph helpers.
+Both providers use graph schema 3. Each handles its own dispatch, evidence,
+and locks. The installer copies shared pure graph semantics into each plugin.
+It does not install retired `.sh` entrypoints or schema-2 graph readers.
+Use the current Python commands shown here. Do not give schema-2 loop state
+to the current graph helpers.
 
 ## Migrating from the old separate Claude plugins
 
-If you previously installed `workflow-tools` and/or `claude-guardrails` as separate
-plugins, remove them first — **inside Claude Code**, because only `/plugin uninstall`
-deregisters a plugin and clears its cached files (the installer does not):
+If you installed `workflow-tools` or `claude-guardrails` before, remove them
+inside Claude Code. Only `/plugin uninstall` deregisters a plugin and clears
+its cached files. The installer does not do this.
 
 ```
 /plugin uninstall workflow-tools
 /plugin uninstall claude-guardrails
 ```
 
-The installer enforces this. On launch it scans `~/.claude/plugins/installed_plugins.json`
-for either plugin; if it finds one still installed it prints the exact
-`/plugin uninstall` command and exits without changing anything. Run the uninstall
-in Claude Code, then re-run `install.py`. Once they're gone, the installer also
-strips the stale `workflow-tools`/`claude-guardrails` keys from `settings.json` so
-you don't have to touch it.
+The installer checks `~/.claude/plugins/installed_plugins.json` for these
+plugins. If one remains, it prints the exact `/plugin uninstall` command.
+It exits without changes. Uninstall that plugin in Claude Code, then run
+`install.py` again. The installer then removes stale plugin keys from
+`settings.json`.
 
 ## Install (4 steps)
 
-**1. Clone somewhere stable.** Where you clone is where it lives — the installer
-records that path. Don't clone to a temp folder you'll clear.
+**1. Clone somewhere stable.** The installer records the clone path.
+Do not use a temporary directory that you plan to clear.
 
 ```bash
 git clone https://github.com/blueman82/coderails.git ~/Documents/Github/coderails
 ```
 
-Prefer git clone. If you'd rather not clone, download a
-[release archive](https://github.com/blueman82/coderails/releases) (a git-archive
-zip of a tagged release, not an ad-hoc zip) and unzip it to the same path instead:
+Prefer `git clone`. You can instead download a
+[tagged release archive](https://github.com/blueman82/coderails/releases).
+Use its git-archive zip. Do not use an ad-hoc zip. Unzip it to the same path:
 
 ```bash
 unzip coderails.zip -d ~/Documents/Github/
@@ -106,26 +107,27 @@ It does everything that has to happen outside Claude Code:
 - seeds four feedback memories (won't overwrite)
 - aligns Python script permissions with their git index mode (tracked executables get `+x`, tracked import-only modules stay non-executable; untracked files default to `+x`)
 
-The installer also offers the optional integrity gate. It does not run `sudo`,
-read a token, or give privileged access to either provider. It prints a setup
-command after you choose the gate. In this example, replace `123` with the
-number of your test PR:
+The installer offers an optional integrity gate. It does not run `sudo`.
+It does not read a token or give either provider privileged access.
+If you select the gate, it prints a setup command. Replace `123` in this
+example with your test PR number:
 
 ```bash
 python3 scripts/integrity-gate/setup.py --candidate-pr 123 --apply
 ```
 
-First, merge the trusted workflow and enable GitHub Actions. Allow the
-workflow's events through an active repository Actions policy. Then use a test
-PR to confirm that the workflow posts both passing and failing
-`integrity-review` statuses. The setup command checks that policy and the test
-PR's passing status before it creates the rule on `main`. It uses your current
-`gh` login for rule setup. The workflow uses GitHub's built-in `GITHUB_TOKEN`;
-you need no machine-user token, root-owned service, or sudo. See
-[INTEGRITY-GATE.md](docs/INTEGRITY-GATE.md) for the full order and migration
-steps. To select the prompt without interaction, use
-`python3 install.py --integrity-gate`. To suppress it, use
-`python3 install.py --no-integrity-gate`.
+First, merge the trusted workflow and enable GitHub Actions. Allow its
+events in the repository Actions policy. Use a test PR to confirm that the
+workflow posts a passing and a failing `integrity-review` status.
+The setup command checks the policy and the test PR's passing status.
+It then creates the rule on `main` with your current `gh` login.
+The workflow uses GitHub's built-in `GITHUB_TOKEN`. You need no machine-user
+token, root-owned service, or sudo.
+
+See [INTEGRITY-GATE.md](docs/INTEGRITY-GATE.md) for the full order and
+migration steps. Run `python3 install.py --integrity-gate` to select the
+setup prompt without interaction. Run `python3 install.py --no-integrity-gate`
+to suppress that prompt.
 
 **3. Restart Claude Code, then run in order:**
 
@@ -137,9 +139,8 @@ steps. To select the prompt without interaction, use
 /reload-plugins
 ```
 
-The installer already wrote the settings entry, so `marketplace add` resolves the
-local directory instead of trying to clone it as a git URL. `marketplace add` first,
-then `install`.
+The installer already wrote the settings entry. `marketplace add` therefore
+resolves the local directory. Run `marketplace add` before `install`.
 
 **4. Per project (run once per repo):**
 
@@ -160,11 +161,11 @@ Compact measurement and expiry records persist separately. See [retrieval exampl
 measurement limits](docs/REFERENCE.md#retained-test-gate-output).
 
 `/coderails:init` writes `.coderails/workflow.config.yaml` in the current
-directory. It scaffolds new settings when no legacy config exists. When migrating,
-it preserves the legacy contents, schema, and values, validates the canonical
-file, then moves the legacy files to the macOS Trash. Runtime reads do not fall
-back to legacy paths. Review the result before committing it as shared project
-config; it is not machine-local config like `.claude/settings.local.json`.
+directory. It creates settings if no legacy config exists. During migration,
+it preserves the legacy contents, schema, and values. It validates the new
+file, then moves legacy files to the macOS Trash. Runtime reads do not use
+legacy paths. Review the result before you commit it as shared project
+config. It is not local machine config like `.claude/settings.local.json`.
 
 For Coderails itself, activate the repository quality hook once per clone:
 
