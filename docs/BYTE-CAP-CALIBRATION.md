@@ -8,9 +8,10 @@ version of this guide as measured Coderails data.
 ## Collect a completed loop
 
 1. Run a representative task through `/coderails:agentic-loop`.
-2. Resolve its state directory with
+2. Get its `progress.json` path with
    `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"`.
-3. After Phase 13 teardown, read `retro.json` beside `progress.json`.
+   Use that file's parent directory as the state directory.
+3. After Phase 13 teardown, read `retro.json` in that directory.
    Its `cost` field holds the dated token and USD breakdown by model.
 4. Record the task type, work-unit count, provider, model, completion state,
    and any context compaction. Keep the `cost.prices_as_of` date with USD

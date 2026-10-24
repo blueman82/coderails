@@ -4,8 +4,10 @@ description: Set up the test gate for the current project — detects test runne
 
 # Test Gate Setup
 
-Set up the test gate hook for this project. It runs tests before each
-`git commit`. It denies the commit if the tests fail.
+Set up the test gate hook for this project. When Claude runs `git commit`
+through its Bash tool, the hook runs the configured tests first. It denies
+that Bash call if the tests fail. Commits from a separate terminal do not
+pass through this hook.
 
 ## Steps
 
@@ -29,7 +31,9 @@ Set up the test gate hook for this project. It runs tests before each
 
 5. Run the test command once. Report the result.
 
-6. Confirm: "Test gate is active. Every `git commit` in this project will run `<command>` first. Remove `.claude/test_command` to disable."
+6. Confirm: "Test gate is active for Claude Bash calls in this project.
+   A `git commit` through that tool runs `<command>` first. Remove
+   `.claude/test_command` to disable the gate."
 
 7. Explain how to read test output. Each hook run keeps complete stdout and
    stderr under `~/.coderails/test-output/`. Set `CODERAILS_TEST_OUTPUT_DIR`
