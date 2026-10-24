@@ -11,7 +11,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .graph_executor import graph_contract, graph_semantics, graph_spec, transition
 from .graph_recovery import RecoveryRefusedError, trace
@@ -62,6 +62,35 @@ def _stub(session: str, loop_id: str, prompt: str, marker: object) -> dict[str, 
             "contract_from_revision": 1,
         },
     }
+
+
+def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str) -> dict[str, Any]:
+    """Record an independently checked work-unit decision through the Claude lock."""
+    output: dict[str, Any] = {}
+
+    def update(state: dict[str, Any]) -> dict[str, Any]:
+        if state["session_id"] != session:
+            raise ValueError("session does not own this graph")
+        if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
+            raise ValueError("work unit requires an in-progress graph without an active wave")
+        units = cast(object, state.get("work_units"))
+        if not unit_id.strip() or not isinstance(units, dict):
+            raise ValueError("work unit must be registered")
+        unit = cast(dict[str, object], units).get(unit_id)
+        if not isinstance(unit, dict):
+            raise ValueError("work unit must be registered and pending")
+        record = cast(dict[str, object], unit)
+        if record.get("status") != "pending":
+            raise ValueError("work unit must be registered and pending")
+        if status not in {"done", "dropped"} or not detail.strip():
+            raise ValueError("work unit decision requires a status and nonblank evidence or reason")
+        record["status"] = status
+        record["evidence" if status == "done" else "dropped_reason"] = detail.strip()
+        output.update(unit=unit_id, status=status, revision=state["revision"])
+        return state
+
+    transition(path, update)
+    return output
 
 
 def start(path: Path, session: str, loop_id: str, prompt_file: Path) -> dict[str, Any]:

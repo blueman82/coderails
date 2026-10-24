@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_contract
+import graph_driver_control
+import graph_driver_controller
+import graph_driver_dispatch
+import graph_driver_evidence
 import graph_repair
 import graph_semantics
 import graph_stops
@@ -22,11 +26,21 @@ from graph_transcript import transcript_cursor
 from json_types import JsonValue
 
 
+def assign_scope(path: Path, session: str, unit: str, scope: str) -> dict[str, Any]:
+    """Save one pending unit assignment through the Codex graph lock."""
+    with _locked(path):
+        proposed = graph_driver_controller.assign_scope(_load(path), session, unit, scope)
+        _write(path, proposed)
+        return {"unit": unit, "scope": proposed["work_units"][unit]["scope"], "revision": proposed["revision"]}
+
+
 def begin_wave(path: Path) -> dict[str, Any]:
     """Start one core wave under the native state lock and frozen eval gate; store one dispatch record per node."""
     base = graph_contract.base_ref()
     with _locked(path):
         state = _load(path)
+        if state["graph"].get("dispatch_mode") == "driver":
+            raise GraphError("driver graph refuses native begin-wave")
         try:
             graph_contract.require_converted(state)
         except graph_contract.DispatchDeniedError as error:
@@ -68,6 +82,38 @@ def begin_wave(path: Path) -> dict[str, Any]:
             "revision": proposed["revision"],
             "dispatches": dispatches,
         }
+
+
+def begin_driver_wave(path: Path) -> dict[str, Any]:
+    """Issue the entire ready set through the driver route under the Codex lock."""
+    with _locked(path):
+        state = _load(path)
+        validate_evals(state, None, path.with_name("evals.json"))
+        report = graph_driver_dispatch.begin_wave(state, path, Path(__file__).resolve().parents[3] / "scripts/push.py")
+        proposed = cast(dict[str, Any], report["state"])
+        _write(path, proposed)
+        return {**report["wave"], "dispatches": report["dispatches"]}
+
+
+def authorize_driver(
+    path: Path, session: str, dispatch_id: str, prompt_file: Path, role: str, driver_run_id: str
+) -> dict[str, Any]:
+    """Consume one Codex driver slot under the graph lock and frozen eval gate."""
+    with _locked(path):
+        state = _load(path)
+        validate_evals(state, None, path.with_name("evals.json"))
+        proposed = graph_driver_dispatch.authorize(
+            state,
+            path,
+            Path(__file__).resolve().parents[3] / "scripts/push.py",
+            session,
+            dispatch_id,
+            prompt_file,
+            role,
+            driver_run_id,
+        )
+        _write(path, proposed)
+        return {"dispatch_id": dispatch_id, "driver_run_id": driver_run_id}
 
 
 def apply_record(state: dict[str, Any], raw_results: str, typed: bool = False) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -122,6 +168,8 @@ def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
     """Bind native evidence and atomically record exactly the active wave, typed worker results included."""
     with _locked(path):
         state = _load(path)
+        if state["graph"].get("dispatch_mode") == "driver":
+            raise GraphError("driver graph refuses native record-wave")
         with traced_refusal(path, state, "record-wave"):
             proposed, transition = apply_record(state, raw_results, typed=True)
         statuses = transition["statuses"]
@@ -138,6 +186,50 @@ def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
             "released_joins": transition["released_joins"],
             "ready": graph_semantics.ready(proposed),
         }
+
+
+def record_driver_wave(path: Path, raw_report: str) -> dict[str, Any]:
+    """Record one sealed driver wave under the Codex graph lock."""
+    try:
+        report = _object(json.loads(raw_report), "driver wave report")
+    except json.JSONDecodeError as error:
+        raise GraphError(f"driver wave report is not JSON: {error}") from error
+    with _locked(path):
+        state = _load(path)
+        with traced_refusal(path, state, "record-driver-wave"):
+            try:
+                transition = graph_driver_evidence.apply_record(path, state, report, worker_status.prepare)
+            except worker_status.WorkerResultError as error:
+                nodes = (error.node,) if error.node else ()
+                raise RecoveryRefusedError(error.code, error.message, nodes) from error
+        proposed = cast(dict[str, Any], transition["state"])
+        statuses, reports = transition["statuses"], transition["reports"]
+        worker_status.retain_decision_slot(proposed, statuses)
+        graph_repair.apply_failed_gates(transition, transition["core_results"])
+        worker_status.record_into(proposed, report["wave_id"], statuses, reports)
+        if statuses:
+            category, code, reason = worker_status.stop_for(statuses)
+            proposed = graph_stops.record_stop(proposed, state["session_id"], category, code, reason)["state"]
+        graph_semantics.validate(proposed)
+        _write(path, proposed)
+        return {"revision": proposed["revision"], "ready": graph_semantics.ready(proposed)}
+
+
+def record_driver_control(path: Path, session: str, node_id: str, result_file: Path) -> dict[str, Any]:
+    """Stage one root-owned result under the Codex graph lock."""
+    with _locked(path):
+        state = _load(path)
+        reference = graph_driver_control.stage(path, state, session, node_id, result_file)
+        trace(
+            path,
+            state,
+            "ok",
+            "driver_control_staged",
+            {"node": node_id},
+            [(node_id, None, None)],
+            "record-driver-control",
+        )
+        return reference
 
 
 def authorize_dispatch(
@@ -157,6 +249,9 @@ def authorize_dispatch(
     """
     with _locked(path):
         state = _load(path)
+        if state["graph"].get("dispatch_mode") == "driver":
+            trace(path, state, "refused", "driver_native_dispatch", {"session": session}, [], "authorize-dispatch")
+            raise GraphError("driver graph refuses native authorization")
         if state["session_id"] != session:
             raise GraphError("session does not own this loop")
         if state["status"] == "complete":

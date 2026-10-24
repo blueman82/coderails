@@ -4,54 +4,74 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import graph_convert
+import graph_driver_controller
+import graph_driver_mode
 import graph_repair
 import graph_spec
 from graph_vocab import DISPOSITION_KINDS, STOP_CATEGORIES, STOP_REASON_CODES, disposition_report
 
-from hooks.scripts.lib import graph_controller, graph_decisions, graph_recovery, graph_stops
+from hooks.scripts.lib import (
+    graph_controller,
+    graph_decisions,
+    graph_driver_adapter,
+    graph_driver_claude,
+    graph_recovery,
+    graph_stops,
+)
 from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.graph_evidence import object_value
+from hooks.scripts.lib.graph_evidence_revalidate import revalidate_all
 from hooks.scripts.lib.graph_executor import graph_semantics, load, transition, validate_state
 from hooks.scripts.lib.graph_recovery import trace
 from hooks.scripts.lib.loop_state_common import atomic_progress_update
 
+GRAPH_COMMANDS = (
+    "start",
+    "add-unit",
+    "assign-unit-scope",
+    "instantiate",
+    "inspect",
+    "summarize",
+    "recover-wave",
+    "plan",
+    "begin-wave",
+    "begin-driver-wave",
+    "drive",
+    "record-wave",
+    "record-driver-wave",
+    "record-driver-control",
+    "record-unit",
+    "record-repair",
+    "respawn-stale",
+    "hard-stop",
+    "stop",
+    "authorize-dispatch",
+    "authorize-driver",
+    "complete",
+    "verify-completion",
+    "convert",
+    "cutover-driver",
+    "disposition-audit",
+    "record-decision",
+)
+
 
 def parser() -> argparse.ArgumentParser:
-    """Expose only current semantic operations and native completion checks."""
+    """Expose current semantic operations and native completion checks."""
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
-    for name in (
-        "start",
-        "add-unit",
-        "instantiate",
-        "inspect",
-        "summarize",
-        "recover-wave",
-        "plan",
-        "begin-wave",
-        "record-wave",
-        "record-unit",
-        "record-repair",
-        "respawn-stale",
-        "hard-stop",
-        "stop",
-        "authorize-dispatch",
-        "complete",
-        "verify-completion",
-        "convert",
-        "disposition-audit",
-        "record-decision",
-    ):
+    for name in GRAPH_COMMANDS:
         command = commands.add_parser(name)
         command.add_argument("state", type=Path)
-        if name == "record-wave":
+        if name in {"record-wave", "record-driver-wave"}:
             command.add_argument("results_json")
         if name == "record-unit":
             command.add_argument("--unit", required=True)
@@ -65,6 +85,12 @@ def parser() -> argparse.ArgumentParser:
         if name in {"start", "add-unit", "instantiate"}:
             command.add_argument("--session", required=True)
             command.add_argument("--loop-id", required=True)
+        if name == "authorize-driver":
+            for field in ("session", "dispatch-id", "role", "driver-run-id"):
+                command.add_argument(f"--{field}", required=True)
+            command.add_argument("--prompt-file", required=True, type=Path)
+        if name in {"record-driver-control", "drive", "assign-unit-scope"}:
+            graph_driver_adapter.add_arguments(name, command)
         if name == "instantiate":
             command.add_argument("--profile", choices=graph_spec.PROFILES, help="default: policy graph.profile")
             command.add_argument("--unit", action="append", default=[], help="work unit id to register (repeatable)")
@@ -106,6 +132,7 @@ def parser() -> argparse.ArgumentParser:
             "verify-completion",
             "recover-wave",
             "convert",
+            "cutover-driver",
         }:
             command.add_argument("--session", required=True)
         if name in {"respawn-stale", "hard-stop"}:
@@ -192,32 +219,38 @@ def convert_state(path: Path, session: str, check: bool) -> dict[str, Any]:
     return {**report, "check": check, "backup": backup[0].name if backup else None}
 
 
-def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str) -> dict[str, Any]:
-    """Record an independently checked work-unit decision through the Claude lock."""
+def cutover_driver(path: Path, session: str) -> dict[str, Any]:
+    """Verify retained native history, then mark one driver-only wave boundary."""
     output: dict[str, Any] = {}
+    refusal: list[str] = []
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
-        if state["session_id"] != session:
-            raise ValueError("session does not own this graph")
-        if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
-            raise ValueError("work unit requires an in-progress graph without an active wave")
-        units = cast(object, state.get("work_units"))
-        if not unit_id.strip() or not isinstance(units, dict):
-            raise ValueError("work unit must be registered")
-        unit = cast(dict[str, object], units).get(unit_id)
-        if not isinstance(unit, dict):
-            raise ValueError("work unit must be registered and pending")
-        record = cast(dict[str, object], unit)
-        if record.get("status") != "pending":
-            raise ValueError("work unit must be registered and pending")
-        if status not in {"done", "dropped"} or not detail.strip():
-            raise ValueError("work unit decision requires a status and nonblank evidence or reason")
-        record["status"] = status
-        record["evidence" if status == "done" else "dropped_reason"] = detail.strip()
-        output.update(unit=unit_id, status=status, revision=state["revision"])
-        return state
+        try:
+            validate_state(state)
+            if state["session_id"] != session:
+                raise ValueError("session does not own this loop")
+            if state.get("state_minor", 0) < 2:
+                raise ValueError("run graph.py convert before driver cutover")
+            result = graph_driver_mode.cutover(state, hashlib.sha256(path.read_bytes()).hexdigest())
+            graph = state["graph"]
+            fresh = not graph.get("wave_history") and all(
+                node["status"] == "pending" and node["retry"]["attempts"] == 0 and not node["evidence"]
+                for node in graph["nodes"].values()
+            )
+            if not fresh:
+                revalidate_all(state)
+            proposed = object_value(result["state"], "driver cutover state")
+            graph_semantics.validate(proposed)
+            graph_convert.write_backup(path, ".pre-driver")
+            output.update(revision=proposed["revision"], driver_from_revision=result["driver_from_revision"])
+            return proposed
+        except ValueError as error:
+            refusal.append(str(error))
+            raise
 
-    transition(path, update)
+    if not atomic_progress_update(path, update):
+        raise ValueError(refusal[0] if refusal else "progress.json is locked or unreadable")
+    trace(path, {"session_id": session}, "ok", "driver_cutover", {}, [], "cutover-driver")
     return output
 
 
@@ -255,6 +288,8 @@ def main() -> int:
                 args.manifest,
                 {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
             )
+        elif args.command == "assign-unit-scope":
+            output = graph_driver_adapter.assign_scope(args.state, args.session, args.unit, args.scope)
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "inspect":
@@ -287,10 +322,29 @@ def main() -> int:
             output = dispatch.begin_wave(args.state)
         elif args.command == "record-wave":
             output = dispatch.record_wave(args.state, object_value(json.loads(args.results_json), "wave report"))
+        elif args.command == "record-driver-wave":
+            output = graph_driver_adapter.record_wave(
+                args.state, object_value(json.loads(args.results_json), "driver wave report")
+            )
+        elif args.command == "record-driver-control":
+            output = graph_driver_adapter.record_control(args.state, args.session, args.node, args.result_file)
+        elif args.command == "begin-driver-wave":
+            output = graph_driver_adapter.begin_wave(args.state)
+        elif args.command == "drive":
+            checkouts = graph_driver_controller.select_checkouts(args.checkout, args.checkout_map)
+            output = graph_driver_claude.run_wave(
+                args.state, args.session, checkouts, Path(__file__), graph_driver_controller.drive_wave
+            )
+        elif args.command == "authorize-driver":
+            output = graph_driver_adapter.authorize(
+                args.state, args.session, args.dispatch_id, args.prompt_file, args.role, args.driver_run_id
+            )
         elif args.command == "record-unit":
             if (args.status == "done") != (args.evidence is not None):
                 raise ValueError("done requires --evidence; dropped requires --reason")
-            output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
+            output = graph_controller.record_unit(
+                args.state, args.session, args.unit, args.status, args.evidence or args.reason
+            )
         elif args.command == "record-repair":
             output = record_repair(
                 args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis
@@ -301,6 +355,8 @@ def main() -> int:
             output = record_stop(args.state, args.session, args.category, args.reason_code, args.reason)
         elif args.command == "convert":
             output = convert_state(args.state, args.session, args.check)
+        elif args.command == "cutover-driver":
+            output = cutover_driver(args.state, args.session)
         elif args.command == "authorize-dispatch":
             output = dispatch.authorize_dispatch(
                 args.state, args.session, args.prompt, args.subagent_type, args.tool_use_id

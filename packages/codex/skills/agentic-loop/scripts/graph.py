@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_convert
+import graph_dispatch
+import graph_driver_cutover
 import graph_invalid_dispatch
 import graph_ledger
 import graph_repair
@@ -19,7 +21,7 @@ import graph_spec
 import graph_stops
 from graph_completion import complete, verify_completion
 from graph_controller import add_unit, instantiate, start
-from graph_dispatch import apply_record
+from graph_dispatch import apply_record as apply_record
 from graph_dispatch import authorize_dispatch as authorize_dispatch
 from graph_dispatch import begin_wave as begin_wave
 from graph_dispatch import record_wave as record_wave
@@ -193,7 +195,9 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
         check = {"checked": True, "method": f"lease {lease}s expired", "result": "no worker activity"}
         results = {n: {"outcome": "stale", "evidence": "lease expired", "stale_check": check} for n in nodes}
         with traced_refusal(path, state, "recover-wave", session):
-            proposed, _ = apply_record(state, json.dumps({"wave_id": active["wave_id"], "results": results}))
+            proposed, _ = graph_dispatch.apply_record(
+                state, json.dumps({"wave_id": active["wave_id"], "results": results})
+            )
         for node_id in nodes:
             try:
                 respawned = graph_semantics.respawn_stale(proposed, node_id, "lease expired")
@@ -210,11 +214,7 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
 def recover_wave(
     path: Path, session: str, lease_seconds: int, now: float | None = None, apply: bool = True
 ) -> dict[str, Any]:
-    """Recover an active wave whose every spawned worker is silent past the lease, in one locked save.
-
-    A node with no spawn is only reported ("spawn it now"): nothing is recorded for it. Bounded: a node whose
-    respawn generation has reached retry.max refuses recovery (fail closed, human decides).
-    """
+    """Recover silent workers under one lock; report unspawned nodes and refuse exhausted retries."""
     if lease_seconds <= 0:  # a non-positive lease marks every live worker stalled
         raise RecoveryRefusedError("invalid_lease", "lease_seconds must be positive")
     return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
@@ -247,6 +247,10 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--disposition", choices=DISPOSITION_KINDS, help="clean-break | preserve-compat")
             controller.add_argument("--named-blocker", help="what blocks removal (preserve-compat only)")
             controller.add_argument("--removal-ticket", help="ticket that removes it (preserve-compat only)")
+    assignment = commands.add_parser("assign-unit-scope")
+    assignment.add_argument("state", type=Path)
+    for field in ("session", "unit", "scope"):
+        assignment.add_argument(f"--{field}", required=True)
     graph_ledger.add_parsers(commands.add_parser)
     spec = commands.add_parser("instantiate")
     spec.add_argument("state", type=Path)
@@ -274,6 +278,7 @@ def _parser() -> argparse.ArgumentParser:
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
+    graph_driver_cutover.add_parsers(commands.add_parser)
     unit = commands.add_parser("record-unit")
     unit.add_argument("state", type=Path)
     unit.add_argument("--session", required=True)
@@ -330,12 +335,16 @@ def main() -> int:
                 args.manifest,
                 {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
             )
+        elif args.command == "assign-unit-scope":
+            output = graph_dispatch.assign_scope(args.state, args.session, args.unit, args.scope)
         elif args.command == "instantiate":
             output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "begin-wave":
-            output = begin_wave(args.state)
+            output = graph_dispatch.begin_wave(args.state)
         elif args.command == "record-wave":
-            output = record_wave(args.state, args.results_json)
+            output = graph_dispatch.record_wave(args.state, args.results_json)
+        elif args.command in graph_driver_cutover.COMMANDS:
+            output = graph_driver_cutover.run(args)
         elif args.command == "record-unit":
             if (args.status == "done") != (args.evidence is not None):
                 raise GraphError("done requires --evidence; dropped requires --reason")
@@ -366,7 +375,7 @@ def main() -> int:
         elif args.command == "inspect":
             output = inspect(args.state)
         elif args.command == "authorize-dispatch":
-            output = authorize_dispatch(
+            output = graph_dispatch.authorize_dispatch(
                 args.state,
                 args.session,
                 args.dispatch_id,
