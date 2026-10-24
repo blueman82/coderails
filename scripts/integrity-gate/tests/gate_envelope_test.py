@@ -7,8 +7,10 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import integrity_policy
 from gate_policy_test import EvidenceFixture  # type: ignore[import-not-found]
 from integrity_policy import gate_pr
 
@@ -41,6 +43,9 @@ class GateEnvelopeTests(unittest.TestCase):
     def test_import_overrides_remain_protected(self) -> None:
         """A package or compiled module can replace a trusted Python import."""
         for filename in (
+            "argparse.py",
+            "argparse/__init__.py",
+            "json.py",
             "scripts/lib/eval_integrity/__init__.py",
             "scripts/lib/eval_signing.cpython-312-x86_64-linux-gnu.so",
             "scripts/lib/config/__init__.py",
@@ -60,9 +65,19 @@ class GateEnvelopeTests(unittest.TestCase):
         for size, state in ((limit, "success"), (limit + 1, "failure")):
             with self.subTest(size=size):
                 client = EvidenceFixture()
-                client.diff = prefix + "x" * (size - len(prefix))
+                client.diff = prefix + "x" * (size - len(prefix) - 1) + "\n"
                 self.assertEqual(self.gate(client, maximum=limit), 0)
                 self.assertEqual(client.posts[-1][1], state)
+
+    def test_missing_stdlib_names_refuses_attestation(self) -> None:
+        """An older runtime cannot silently weaken the import boundary."""
+        client = EvidenceFixture()
+        client.files = [{"filename": "config.schema.json"}]
+        with patch.object(integrity_policy, "STDLIB_MODULES", None):
+            self.assertEqual(self.gate(client), 1)
+        self.assertEqual(client.posts[-1][1], "error")
+        self.assertIn("reason=unsupported_python_runtime", client.posts[-1][2])
+        self.assertNotIn("diff", client.calls)
 
 
 if __name__ == "__main__":
