@@ -17,6 +17,8 @@ from unittest import mock
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts.lib import memory_adapter as ma  # noqa: E402
+from scripts.lib import memory_reasons  # noqa: E402
+from scripts.tests import fake_muninn_store as fs  # noqa: E402
 
 ADAPTER = str(REPO / "scripts/lib/memory_adapter.py")
 NEW_FLAGS = "--scope-loop --confidence --valid-until --sensitivity --contradicts --tag"
@@ -31,9 +33,12 @@ if "--help" in sys.argv:
     sys.stdout.write("usage: kinds {decision,fact,preference,procedure}" if mode == "old"
                      else "usage: kinds lesson constraint @FLAGS@")
     sys.exit(int(os.environ.get("FAKE_HELP_RC", "0")))
+if sys.argv[1] == "search":
+    sys.stdout.write(json.dumps({"knowledge": [{"id": "K1", "scope": "loop:L1"}, {"id": "K2", "scope": "loop:L2"}]}))
+    sys.exit(0)
 if sys.argv[2] == "list":
     sys.stdout.write(open(os.environ["FAKE_LIST"]).read()); sys.exit(0)
-sys.stdout.write("{}")
+sys.stdout.write('{"entry": {"id": "K9"}}')
 """.replace(
     "@FLAGS@", NEW_FLAGS
 )
@@ -76,7 +81,9 @@ class Base(unittest.TestCase):
             "FAKE_LOG": str(self.log),
             "FAKE_LIST": str(self.tmp / "list.json"),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
+            "MUNINN_HOME": str(self.tmp / "muninn-home"),
         }
+        fs.create(self.tmp / "muninn-home")  # probe() reads the store schema: give it a real v2 store
         patch = mock.patch.dict(os.environ, env)
         patch.start()
         self.addCleanup(patch.stop)
@@ -102,7 +109,10 @@ def rec(
     valid_until: str | None = None,
 ) -> ma.Record:
     """Build a record, defaulting to a valid cited loop lesson."""
-    return ma.Record(scope, type, "c", cite, quote, ["run-ab"] if tags is None else tags, loop_id, None, valid_until)
+    tag_list = ["run-ab"] if tags is None else tags
+    return ma.Record(
+        scope, type, "c", cite, quote, tag_list, loop_id, None, valid_until, cite_role="user", cite_kind="prompt"
+    )
 
 
 class WriteTests(Base):
@@ -112,7 +122,7 @@ class WriteTests(Base):
         """Every typed field becomes its exact muninn flag."""
         r = rec(valid_until="2027-01-01")
         r.confidence, r.supersedes, r.contradicts = "observed", "K1", "K2"
-        self.assertIsNone(ma.add(r, "s1"))
+        self.assertEqual(ma.add(r, "s1"), ma.Written("K9"))
         call = self.argv()[-1]
         self.assertEqual(call[:2], ["know", "add"])
         pairs = [("--kind", "lesson"), ("--scope-loop", "L1"), ("--tag", "run-ab"), ("--cite", "claude:t:1.1")]
@@ -128,9 +138,9 @@ class WriteTests(Base):
 
     def test_uncited_write_refused_before_spawn(self) -> None:
         """No cite or no quote refuses before any add process starts, and traces it."""
-        for bad in (rec(cite=""), rec(quote="")):
+        for bad in (rec(quote=""), rec(cite="", quote="  ")):
             degraded = ma.add(bad, "s1")
-            assert degraded is not None
+            assert isinstance(degraded, ma.Degraded)
             self.assertEqual(degraded.reason, "uncited_write")
         self.assertEqual([c for c in self.argv() if c[:2] == ["know", "add"]], [])
         self.assertEqual([x["reason_code"] for x in self.rows()], ["uncited_write"] * 2)
@@ -138,14 +148,14 @@ class WriteTests(Base):
     def test_uncited_negative_control(self) -> None:
         """With the guard removed the uncited write spawns muninn, so the guard test above is not vacuous."""
         with mock.patch.object(ma, "validate", return_value=None):
-            ma.add(rec(cite=""), "s1")
+            ma.add(rec(quote=""), "s1")
         self.assertTrue([c for c in self.argv() if c[:2] == ["know", "add"]])
 
     def test_bad_record(self) -> None:
         """Bad type, tag, date or a loop scope without an id is refused."""
         for bad in (rec(type="nope"), rec(tags=["Bad Tag"]), rec(valid_until="12345.0"), rec(loop_id=None)):
             degraded = ma.add(bad, "s1")
-            assert degraded is not None
+            assert isinstance(degraded, ma.Degraded)
             self.assertEqual(degraded.reason, "bad_record")
 
 
@@ -205,10 +215,13 @@ class ReadTests(Base):
         self.assertEqual([c for c in self.argv() if c[:2] == ["know", "list"]], [])
 
     def test_tag_and_query_filter(self) -> None:
-        """Tags and query filter client-side."""
+        """Tags filter client-side; query goes through muninn search."""
         self.assertEqual(len(ma.list_records("loop", "L1", tags=["run-a"], session_id="s1")), 1)  # type: ignore[arg-type]
         self.assertEqual(ma.list_records("loop", "L1", tags=["zzz"], session_id="s1"), [])
-        self.assertEqual(ma.list_records("loop", "L1", query="nomatch", session_id="s1"), [])
+        got = ma.list_records("loop", "L1", query="cite", session_id="s1")  # search hit K1 is in scope loop:L1
+        self.assertEqual([r.id for r in got], ["K1"])  # type: ignore[union-attr]
+        self.assertEqual(self.argv()[-1], ["search", "cite", "--all-projects"])
+        self.assertEqual(ma.list_records("loop", "L2", query="cite", session_id="s1"), [])  # hit K2 is loop:L2
 
     def test_unparseable_output_degrades(self) -> None:
         """Output that is not the pinned JSON shape degrades instead of guessing."""
@@ -247,8 +260,11 @@ class HardeningTests(Base):
         self.assertEqual(self.listed({**ok, "valid_until": "2999-01-01"}), ["b"])
 
     def test_help_nonzero_is_old_ledger(self) -> None:
-        """A help that exits nonzero (muninn 0.1.0 exits 2) is an old ledger, not muninn_error."""
+        """Help rc 2 without the Part A flags is an old ledger; rc 2 WITH them (the live binary) is a good probe."""
         os.environ["FAKE_HELP_RC"] = "2"
+        self.assertIsNone(ma.probe())
+        ma.PROBE_CACHE.clear()
+        os.environ["FAKE_MODE"] = "old"
         self.assertEqual(ma.probe(), ma.Degraded("muninn_old_ledger"))
 
     def test_default_session_still_traces(self) -> None:
@@ -260,10 +276,11 @@ class HardeningTests(Base):
     def test_runbook_covers_every_reason_code(self) -> None:
         """Each code the adapter emits has a remediation line in the runbook."""
         text = (REPO / "docs/RUNBOOK.md").read_text()
-        remediation = text.split("## Memory silently using Markdown", 1)[1].split("- Remediation:", 1)[1]
-        for code in ("muninn_absent", "muninn_old_ledger", "muninn_timeout", "muninn_error", "bad_record"):
-            self.assertIn(f"`{code}`", remediation, code)
+        section = text.split("## Memory degraded (Muninn authoritative)", 1)[1].split("\n## ", 1)[0]
+        for code in memory_reasons.REASONS:
+            self.assertIn(f"`{code}`", section, code)
         self.assertIn("unset", text)
+        self.assertNotIn("Memory silently using Markdown", text)
 
     def test_codex_handoff_resolves_paths(self) -> None:
         """The Codex handoff names resolvable paths and where state and session come from."""
@@ -328,14 +345,18 @@ class CounterTests(Base):
         """Memory rows are counted once per event_id, by reason code; other commands are ignored."""
         os.environ["FAKE_MODE"] = "old"
         ma.add(rec(), "s1")
-        ma.add(rec(cite=""), "s1")
+        ma.add(rec(quote=""), "s1")
         path = self.tmp / "loops" / "s1" / "trace.jsonl"
         path.write_text(path.read_text() * 2 + '{"command": "other/x", "event_id": "z", "reason_code": "no"}\n')
         cmd = [sys.executable, str(REPO / "scripts/measure_graph_alignment.py"), "--root", str(REPO), "--json"]
         env = {**os.environ, "HOME": str(self.tmp), "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops")}
         out = subprocess.run(cmd, capture_output=True, text=True, env=env)
         self.assertEqual(out.returncode, 0, out.stderr)
-        expected = {"rows": 2, "by_reason_code": {"muninn_old_ledger": 1, "uncited_write": 1}}
+        expected = {
+            "rows": 2,
+            "by_reason_code": {"muninn_old_ledger": 1, "uncited_write": 1},
+            "by_command": {"memory.add": 2},
+        }
         self.assertEqual(json.loads(out.stdout)["memory"], expected)
 
     def test_measure_stays_within_line_limit(self) -> None:

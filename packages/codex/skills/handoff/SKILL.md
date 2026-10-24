@@ -19,7 +19,7 @@ Generate two artefacts that allow a fresh Codex session to continue the current 
 
 ## Instructions
 
-### Step 0: Prefer recorded state (optional)
+### Step 0: Read recorded state (Muninn authoritative)
 
 If a native loop graph exists for this session, take `$STATE` (the `<session>/progress.json` path) and `$SESSION` from
 the SessionStart bootstrap text (it reports the active state path), then run
@@ -27,8 +27,10 @@ the SessionStart bootstrap text (it reports the active state path), then run
 `ready`, `pending`), `... graph.py inspect "$STATE"` (JSON: `revision`, `active_wave`, `running`, `ready`, `hard_stop`),
 and `python3 "$SKILL_DIR/../../scripts/lib/memory_adapter.py" list --type decision --scope loop --loop "<loop id from inspect>" --session "$SESSION"`
 (JSON records with `cite`). `$SKILL_DIR` is the absolute directory containing this `SKILL.md`. Use them for Goal,
-Decisions, Done and Next steps. If any command is unavailable or exits nonzero (the adapter prints
-`{"degraded": "<reason_code>"}`), skip this step and run Step 1 unchanged.
+Decisions, Done and Next steps. If the adapter exits nonzero it prints `{"degraded": "<reason_code>"}`: put that
+reason code in the handoff under a "Memory degraded" line (see `docs/RUNBOOK.md`, "Memory degraded (Muninn
+authoritative)"); never skip the read silently and never substitute hand-written Markdown for the typed decisions. A
+missing loop graph only drops the graph commands; Step 1 still supplies the rest.
 
 ### Step 1: Extract from current session
 
