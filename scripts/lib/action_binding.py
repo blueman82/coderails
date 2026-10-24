@@ -65,6 +65,24 @@ def pr_view(number: str, cwd: str, repo: str | None = None) -> tuple[str, str] |
         return None
 
 
+def pr_number_for_branch(branch: str, cwd: str) -> str | None:
+    """Resolve the first PR for a branch as merge.py does; refuse an empty or failed lookup."""
+    if not branch:
+        return None
+    try:
+        done = subprocess.run(
+            ["gh", "pr", "list", "--head", branch, "--json", "number"], cwd=cwd,
+            capture_output=True, text=True, timeout=4, check=False,
+        )  # fmt: skip
+        if done.returncode:
+            return None
+        rows: Any = json.loads(done.stdout)
+        number = rows[0]["number"]
+        return str(number) if isinstance(number, int) and number > 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError, TypeError):
+        return None
+
+
 def _full_ref(name: str) -> str:
     return name if name.startswith("refs/") else f"refs/heads/{name}"
 
@@ -103,7 +121,7 @@ def _push(tokens: list[str], cwd: str) -> dict[str, str] | None:
     return {"repository": repository, "ref": _full_ref(dest), "sha": sha} if repository and sha else None
 
 
-def _pr_target(tokens: list[str], segment: str) -> tuple[str, str | None, str | None] | None:
+def _pr_target(tokens: list[str], segment: str, cwd: str) -> tuple[str, str | None, str | None] | None:
     """(PR number, repo spec or None, pinned sha or None) for gh pr merge | gh api .../merge | merge script."""
     if (api := re.search(r"repos/([^/\s]+/[^/\s]+)/pulls/(\d+)/merge", segment)) and tokens[:2] == ["gh", "api"]:
         pin = next((t[4:] for t in tokens if t.startswith("sha=")), None)
@@ -111,6 +129,14 @@ def _pr_target(tokens: list[str], segment: str) -> tuple[str, str | None, str | 
     script = next((i for i, t in enumerate(tokens[:2]) if _SCRIPT.search(t)), None)
     if script is not None:  # merge.py/.sh verify the gates and pin the head sha they verified
         arg = tokens[script + 1] if len(tokens) > script + 1 else ""
+        if arg == "auto":
+            branch = git_out(cwd, "branch", "--show-current")
+            default = git_out(cwd, "symbolic-ref", "refs/remotes/origin/HEAD").rsplit("/", 1)[-1] or "main"
+            if branch == default:
+                return None
+            arg = pr_number_for_branch(branch, cwd) or ""
+        elif not arg.isdigit():
+            arg = pr_number_for_branch(arg, cwd) or ""
         return (arg, None, "pinned") if arg.isdigit() else None
     if tokens[:3] != ["gh", "pr", "merge"]:
         return None
@@ -143,7 +169,7 @@ def _pr_target(tokens: list[str], segment: str) -> tuple[str, str | None, str | 
 
 
 def _merge(tokens: list[str], segment: str, cwd: str) -> dict[str, str] | None:
-    target = _pr_target(tokens, segment)
+    target = _pr_target(tokens, segment, cwd)
     if target is None:
         return None
     number, repo, pin = target
@@ -153,6 +179,15 @@ def _merge(tokens: list[str], segment: str, cwd: str) -> dict[str, str] | None:
     where = repo or git_out(cwd, "remote", "get-url", "origin")
     repository = normalise_repository(f"github.com/{where}" if repo and repo.count("/") == 1 else where)
     return {"repository": repository, "ref": _full_ref(view[0]), "sha": view[1]} if repository else None
+
+
+def merge_number(segment: str, cwd: str) -> str:
+    """Resolve the PR number named by a merge command, including merge.py branch and auto targets."""
+    try:
+        target = _pr_target(shlex.split(segment), segment, cwd)
+    except ValueError:
+        return ""
+    return target[0] if target else ""
 
 
 def binding(kind: str, segment: str, cwd: str) -> dict[str, str] | None:

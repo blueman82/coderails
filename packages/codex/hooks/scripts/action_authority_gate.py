@@ -2,7 +2,8 @@
 """Action-receipt gate: warn by default (Codex copy of hooks/scripts/action_authority_gate.py).
 
 Config `action_authority`: advisory (default, also with no config or no key) | enforce | off; any other value is
-enforce, traced action_authority_bad_mode. Advisory traces and warns, never denies; enforce denies unless
+enforce, traced action_authority_bad_mode. Advisory warns on missing receipts; live authority denials still block.
+Enforce denies unless
 authority.permits() allows and a receipt verifies (mirrored scripts/lib/receipt_gate.py, shared with merge.py, which is
 independently fail-closed); any own error fails open (action_authority_failed_open). Receipts are signed and bound to
 repository+ref+sha; with the user-tier trust root that is a cooperating-agent safeguard, not a boundary. The hash
@@ -14,13 +15,15 @@ from __future__ import annotations
 import os
 import re
 import sys
+from pathlib import Path
 from typing import Any, cast
 
 from hook_common import append_trace_row, deny, payload_object, read_input, text_field
-from lib.action_match import MERGE_SCRIPT, guarded_segments, pr_number, state_mutated_before_guard
+from lib.action_match import MERGE_SCRIPT, guarded_segments, state_mutated_before_guard
 from lib.destructive_patterns import git_output
 
-from scripts.lib.action_binding import binding
+from scripts.lib import advisory_merge, merge_budget
+from scripts.lib.action_binding import binding, merge_number
 from scripts.lib.action_receipt import proposed_action
 from scripts.lib.authority_object import read_authority
 from scripts.lib.receipt_gate import check_and_consume, resolve_mode
@@ -37,7 +40,7 @@ def proposal(name: str, segment: str, where: str) -> tuple[str, dict[str, Any]]:
     branch = git_output(where, "branch", "--show-current")
     proposed = proposed_action(name, segment, where, branch, binding(name, segment, where))
     script = name == "merge" and bool(re.search(MERGE_SCRIPT, segment))
-    return name, proposed | {"script": script, "number": pr_number(segment) if script else ""}
+    return name, proposed | {"script": script, "number": merge_number(segment, where) if name == "merge" else ""}
 
 
 def how_to_proceed(code: str, session: str, name: str) -> str:
@@ -86,14 +89,30 @@ def main() -> int:
                 append_trace_row("action_authority", "allowed", USER_TIER, trace_id, {"loop_id": loop})
             append_trace_row("action_authority", "allowed", "receipt_consumed", trace_id, {"loop_id": loop})
 
+        proposals = [proposal(*segment) for segment in segments]
         missing = check_and_consume(
-            session, [proposal(*segment) for segment in segments], None, loop, signers,
+            session, proposals, None, loop, signers,
             consume=mode_ == "enforce", stale=state_mutated_before_guard(command), on_claim=claimed,
         )  # fmt: skip
+        denied_by_authority = missing is not None and missing[1] in {"authority_denied", "max_prs_exceeded"}
+        if mode_ == "advisory" and authority and not denied_by_authority:
+            reserved: list[Path] = []
+            for name, item in proposals:
+                if name != "merge" or item["script"]:
+                    continue
+                bind = {"repository": item["repository"], "ref": item["ref"], "sha": item["artifact_sha"]}
+                code, path = advisory_merge.reserve(session, item["number"], bind)
+                if code != "ok":
+                    for previous in reserved:
+                        merge_budget.settle(previous, False)
+                    missing = (name, code)
+                    break
+                if path:
+                    reserved.append(path)
         if missing is None:
             return 0
         name, code = missing
-        if mode_ == "advisory":
+        if mode_ == "advisory" and code not in {"authority_denied", "max_prs_exceeded"}:
             append_trace_row("action_authority", "advisory", f"advisory_{code}", trace_id, {"loop_id": loop})
             print(f"action_authority (advisory): no valid receipt for {name} ({code}); not blocked.", file=sys.stderr)
             return 0

@@ -2,10 +2,9 @@
 """permits(): the one answer to "may this session take this action under its live authority".
 
 Categories: merge, push_main (hook kind git_push), destructive_shell. A live authority refuses a category it
-`denied`; merge also stops once max_prs merges were EXECUTED in the session (.executed markers of any merge receipt,
-whatever authority_id it carries, so a pre-minted receipt cannot dodge the cap; consumed-only receipts never reached
-gh, so they do not count; 0 = none).
-merge and push_main always need a signed receipt, with or without an authority. Returns
+`denied`; merge also stops once max_prs slots were claimed in the session. Signed receipts use .executed markers;
+advisory merges use completed or pending ledger entries. Consumed-only receipts do not count; 0 = none.
+merge and push_main require a signed receipt only in enforce mode. Returns
 {allow, reason, requires_approval, authority_id}. Cooperating-agent safeguard (docs/decisions/e3-authority-object.md).
 """
 
@@ -18,6 +17,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import action_receipt as ar
+from scripts.lib import merge_budget
 from scripts.lib.authority_object import authority_path, read_authority
 
 ALWAYS_APPROVED = ("merge", "push_main")
@@ -38,7 +38,7 @@ def executed_merges(session_id: str, base: Path | None = None) -> int:
             and data.get("action") == "merge"
             and marker.with_suffix(".json") == ar.receipt_path(session_id, data.get("receipt_id", ""), base)
         )
-    return count
+    return count + merge_budget.reservations(session_id, base)
 
 
 def permits(

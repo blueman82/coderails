@@ -22,11 +22,13 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from hooks.scripts.tests.receipt_test_support import (  # noqa: E402
     REPOSITORY,
+    git,
     make_owner,
     make_repo,
     signed_receipt,
     store,
 )
+from scripts.tests.merge_receipt_driver import DRIVER  # noqa: E402
 
 _loaded = set(sys.modules)
 from scripts.lib import receipt_gate  # noqa: E402
@@ -39,64 +41,6 @@ for _name in set(sys.modules) - _loaded:  # keep Claude's scripts.* out of the c
             vars(sys.modules[_parent]).pop(_leaf, None)
 
 SHA = "f" * 40
-DRIVER = """
-import contextlib, os, sys, time
-from pathlib import Path
-from unittest import mock
-sys.path.insert(0, os.environ["REPO_ROOT"])
-from scripts import merge
-from scripts.lib import action_receipt as ar
-from scripts.lib import receipt_gate
-from scripts.lib import git_common as git
-
-fields = {"state": "OPEN", "headRefOid": os.environ["SHA"], "title": "t", "headRefName": "feature"}
-patches = [
-    mock.patch.object(git, "require_repo"), mock.patch.object(git, "main", return_value="main"),
-    mock.patch.object(git, "protected", return_value=False), mock.patch.object(git, "sync_main_branch"),
-    mock.patch.object(git, "pr_field", side_effect=lambda n, name, fb="": fields.get(name, fb)),
-    mock.patch.object(merge, "verify_gates"), mock.patch.object(merge.manifest_policy, "gate"),
-    mock.patch.object(merge, "cleanup"),
-]
-if os.environ.get("DELAY_PERMITS"):
-    real_permits = receipt_gate.permits
-    def delayed_permits(*args, **kwargs):
-        verdict = real_permits(*args, **kwargs)
-        time.sleep(0.3)
-        return verdict
-    patches.append(mock.patch.object(receipt_gate, "permits", side_effect=delayed_permits))
-if os.environ.get("NO_SEAM"):  # negative control: the seam call removed
-    patches.append(mock.patch.object(merge, "require_merge_receipt"))
-if os.environ.get("BARRIER"):  # isolate the O_EXCL claim from the separate session-budget lock
-    patches.append(mock.patch.object(receipt_gate.merge_budget, "lock", return_value=contextlib.nullcontext(True)))
-def rendezvous(tag):  # both processes arrive before either goes on
-    if not os.environ.get("BARRIER"):
-        return
-    Path(os.environ["BARRIER"], f"{tag}-{os.getpid()}").write_text("")
-    deadline = time.time() + 15
-    while len(list(Path(os.environ["BARRIER"]).glob(f"{tag}-*"))) < 2 and time.time() < deadline:
-        time.sleep(0.01)
-if os.environ.get("NAIVE_CLAIM"):  # negative control: exists()-then-write instead of O_EXCL
-    def naive(path):
-        marker = path.with_suffix(".consumed")
-        seen = marker.exists()
-        rendezvous("chk")
-        if seen:
-            return False
-        marker.write_text("")
-        return True
-    patches += [mock.patch.object(ar, "consume", side_effect=naive),
-                mock.patch.object(ar, "execute", side_effect=lambda p: True)]
-elif os.environ.get("BARRIER"):  # both finish the is-it-consumed check before either claims
-    real = ar.is_consumed
-    def waiting(path):
-        seen = real(path)
-        rendezvous("in")
-        return seen
-    patches.append(mock.patch.object(ar, "is_consumed", side_effect=waiting))
-for patch in patches:
-    patch.start()
-raise SystemExit(merge.main(["7"]))
-"""
 
 
 class MergeReceiptTests(unittest.TestCase):
@@ -105,7 +49,7 @@ class MergeReceiptTests(unittest.TestCase):
     plugin = ROOT  # the Codex test subclasses this with packages/codex
 
     def setUp(self) -> None:
-        """Build the sandbox."""
+        """Build the isolated repository, owner key, and fake GitHub client."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.tmp = Path(temporary.name)
@@ -123,7 +67,8 @@ class MergeReceiptTests(unittest.TestCase):
         gh.write_text(
             "#!/bin/sh\n"
             f'case "$1 $2" in\n"pr view") echo \'{{"baseRefName":"main","headRefOid":"{SHA}"}}\';;\n'
-            f'"pr merge") echo "$$" >> "{self.log}";;\nesac\n'
+            f'"pr merge") if [ "$GH_MERGE_FAIL" = 1 ]; then exit 1; fi; echo "$$" >> "{self.log}";;\n'
+            '"pr list") echo \'[{"number":7}]\';;\nesac\n'
         )
         gh.chmod(0o755)
         self.env = {
@@ -136,19 +81,26 @@ class MergeReceiptTests(unittest.TestCase):
         }  # fmt: skip
 
     def mint(
-        self, rid: str = "r1", key: Path | None = None, session: str = "s1", number: int = 7, **over: object
+        self,
+        rid: str = "r1",
+        key: Path | None = None,
+        session: str = "s1",
+        number: int = 7,
+        target: str | None = None,
+        **over: object,
     ) -> str:
         """Store a receipt for the merge as the owner would have signed it (bound to the live PR)."""
         bind = {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": SHA}
         rec = signed_receipt(
-            key or self.key, "merge", f"python3 scripts/merge.py {number}", str(self.repo), "main", bind, session,
+            key or self.key, "merge", f"python3 scripts/merge.py {target or number}", str(self.repo),
+            git(self.repo, "branch", "--show-current"), bind, session,
             receipt_id=rid, **over,
         )  # fmt: skip
         store(self.loop, rec, session)
         return rid
 
     def grant(self, **over: object) -> None:
-        """A live authority for s1."""
+        """Write a live session authority with optional overrides."""
         obj = {
             "authority_id": "auth-1", "loop_id": None, "session_id": "s1", "scope": ["code"], "denied": [],
             "max_prs": 3, "expires_at": "2999-01-01T00:00:00+00:00", "revocable": True,
@@ -166,7 +118,7 @@ class MergeReceiptTests(unittest.TestCase):
         )  # fmt: skip
 
     def run_merge(self, **env: str) -> tuple[int, str]:
-        """Run one child to completion; return (exit code, stderr)."""
+        """Run one child to completion; return its exit code and stderr."""
         child = self.spawn(**env)
         _, err = child.communicate(timeout=60)
         return child.returncode, err
@@ -180,11 +132,11 @@ class MergeReceiptTests(unittest.TestCase):
                     stream.close()
 
     def merges(self) -> int:
-        """How many times fake gh saw `pr merge`."""
+        """Count fake gh merge calls."""
         return len(self.log.read_text().splitlines()) if self.log.exists() else 0
 
     def refused(self, code: str, **env: str) -> None:
-        """merge.py exits non-zero, names the reason, and never reaches gh pr merge."""
+        """Require refusal before the first remote merge call."""
         rc, err = self.run_merge(**env)
         self.assertNotEqual(rc, 0, err)
         self.assertIn(code, err)
@@ -228,7 +180,7 @@ class MergeReceiptTests(unittest.TestCase):
         self.assertEqual(sorted(child.returncode for child in children), [0, 1], results)
 
     def refused_after_one(self, code: str, **env: str) -> None:
-        """A further run is refused with `code` and does not add a second gh pr merge."""
+        """Require refusal after one earlier remote merge call."""
         rc, err = self.run_merge(**env)
         self.assertNotEqual(rc, 0, err)
         self.assertIn(code, err)
@@ -264,8 +216,49 @@ class MergeReceiptTests(unittest.TestCase):
         self.refused("max_prs_exceeded")
         self.assertFalse((self.loop / "s1" / "receipts" / "r1.consumed").exists())
 
+    def test_advisory_still_obeys_live_merge_denial_and_cap(self) -> None:
+        """A missing receipt is advisory, but a live authority denial or spent cap stops the remote merge."""
+        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: advisory\n")
+        self.grant(denied=["merge"])
+        self.refused("authority_denied")
+        self.grant(denied=[], max_prs=0)
+        self.refused("max_prs_exceeded")
+
+    def test_advisory_unreceipted_merge_spends_one_live_budget_slot(self) -> None:
+        """One successful advisory merge without a receipt uses the live max_prs budget."""
+        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: advisory\n")
+        self.grant(max_prs=1)
+        first, err = self.run_merge()
+        self.assertEqual(first, 0, err)
+        markers = list((self.loop / "s1" / "merges").glob("*.json"))
+        self.assertEqual(len(markers), 1)
+        self.assertEqual(
+            json.loads(markers[0].read_text()),
+            {"pr": "7", "repository": REPOSITORY, "ref": "refs/heads/main", "head": SHA, "state": "completed"},
+        )
+        self.refused_after_one("max_prs_exceeded")
+
+    def test_confirmed_failed_advisory_merge_releases_budget_slot(self) -> None:
+        """A failed remote merge whose PR remains open does not spend the session cap."""
+        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: advisory\n")
+        self.grant(max_prs=1)
+        failed, _ = self.run_merge(GH_MERGE_FAIL="1")
+        self.assertNotEqual(failed, 0)
+        self.assertEqual(list((self.loop / "s1" / "merges").glob("*.json")), [])
+        success, err = self.run_merge()
+        self.assertEqual((success, self.merges()), (0, 1), err)
+
+    def test_auto_and_branch_targets_can_use_exact_command_receipts(self) -> None:
+        """The hook and direct seam accept receipts for supported merge.py targets."""
+        git(self.repo, "switch", "-q", "-c", "feature/x")
+        for target in ("auto", "feature/x"):
+            with self.subTest(target=target):
+                self.mint(rid=target.replace("/", "_"), target=target)
+                rc, err = self.run_merge(MERGE_TARGET=target)
+                self.assertEqual(rc, 0, err)
+
     def test_no_session_is_denied(self) -> None:
-        """No session id in the environment: nothing can be bound."""
+        """An absent session cannot receive a bound receipt."""
         self.mint()
         rc, err = self.run_merge(CLAUDE_SESSION_ID="")
         self.assertNotEqual(rc, 0)
@@ -327,6 +320,16 @@ class MergeReceiptTests(unittest.TestCase):
         rc, err = self.run_merge()
         self.assertEqual((rc, self.merges()), (0, 1), err)
         self.refused_after_one("consumed")
+
+    def test_branch_target_hook_note_matches_direct_merge(self) -> None:
+        """A branch command's hook note names the resolved PR, then direct merge accepts that receipt."""
+        git(self.repo, "switch", "-q", "-c", "feature/x")
+        self.mint(target="feature/x")
+        self.hook_consume("python3 scripts/merge.py feature/x")
+        marker = self.loop / "s1" / "receipts" / "r1.consumed"
+        self.assertEqual(json.loads(marker.read_text())["number"], "7")
+        rc, err = self.run_merge(MERGE_TARGET="feature/x")
+        self.assertEqual((rc, self.merges()), (0, 1), err)
 
     def test_hook_consumed_receipt_older_than_300_seconds_is_refused(self) -> None:
         """The two phases must be close in time: a stale hook note no longer licenses the merge."""

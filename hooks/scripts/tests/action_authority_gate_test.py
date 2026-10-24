@@ -90,7 +90,7 @@ class GateTests(ReceiptHookCase):
         self.assertEqual(self.reasons(), ["advisory_no_receipt"])
 
     def test_enforce_denies_without_receipt_and_allows_with_one_once(self) -> None:
-        """(a)+(d) Enforce: denied without; allowed and consumed with a signed receipt; replay denied."""
+        """Enforce denies without, allows and consumes with a receipt, and denies replay."""
         self.configure("enforce")
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
         self.mint(MERGE, "merge")
@@ -98,6 +98,16 @@ class GateTests(ReceiptHookCase):
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
         expected = ["denied_no_receipt", "trust_root_user_tier", "receipt_consumed", "denied_consumed"]
         self.assertEqual(self.reasons(), expected)
+
+    def test_enforce_accepts_auto_and_branch_merge_script_targets(self) -> None:
+        """Both documented merge.py targets can be bound and claimed by the hook."""
+        self.configure("enforce")
+        git(self.repo, "switch", "-q", "-c", "feature/x")
+        for target in ("auto", "feature/x"):
+            with self.subTest(target=target):
+                command = f"python3 scripts/merge.py {target}"
+                self.mint(command, "merge", rid=target.replace("/", "_"))
+                self.assertFalse(self.denied("action_authority_gate", self.payload(command)))
 
     def test_self_minted_receipts_are_denied(self) -> None:
         """(b) Unsigned hand-written JSON, an agent-made key, and a body edited after signing are all denied."""
@@ -190,7 +200,7 @@ class GateTests(ReceiptHookCase):
         self.assertEqual(self.reasons(), ["action_authority_failed_open"])
 
     def test_a_different_session_id_is_a_different_session(self) -> None:
-        """Only a different session_id matters (agent_id/agent_type do not): another session's receipt is refused."""
+        """A receipt belongs only to its minted session."""
         self.configure("enforce")
         self.mint(MERGE, "merge", session="parent")
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE, "worker")))

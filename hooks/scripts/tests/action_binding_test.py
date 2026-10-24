@@ -145,6 +145,22 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(got, {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": a})
         view.assert_called_once_with("12", str(self.repo), None)
 
+    def test_merge_script_resolves_auto_and_branch_target(self) -> None:
+        """Supported merge.py targets bind the same PR that the helper resolves."""
+        sha = "a" * 40
+        git(self.repo, "switch", "-q", "-c", "feature/x")
+        with (
+            mock.patch.object(ab, "pr_view", return_value=("main", sha)),
+            mock.patch.object(ab, "pr_number_for_branch", return_value="7") as number,
+        ):
+            for target in ("auto", "feature/x"):
+                with self.subTest(target=target):
+                    self.assertEqual(
+                        ab.binding("merge", f"python3 scripts/merge.py {target}", str(self.repo)),
+                        {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": sha},
+                    )
+        self.assertEqual([call.args[0] for call in number.call_args_list], ["feature/x", "feature/x"])
+
     def test_nonzero_gh_json_cannot_supply_a_binding(self) -> None:
         """A failed gh process can print JSON, but it did not establish a live PR head."""
         done = subprocess.CompletedProcess([], 1, '{"baseRefName":"main","headRefOid":"' + "a" * 40 + '"}', "failed")

@@ -156,7 +156,15 @@ class PermitsTests(unittest.TestCase):
 
     def test_mirror_is_byte_identical(self) -> None:
         """The Codex copy is the Claude file."""
-        for name in ("authority_permits.py", "receipt_gate.py", "action_receipt.py", "authority_object.py"):
+        for name in (
+            "authority_permits.py",
+            "receipt_gate.py",
+            "action_receipt.py",
+            "authority_object.py",
+            "advisory_merge.py",
+            "merge_budget.py",
+            "merge_hook_note.py",
+        ):
             self.assertTrue(
                 filecmp.cmp(ROOT / "scripts/lib" / name, ROOT / "packages/codex/scripts/lib" / name, shallow=False)
             )

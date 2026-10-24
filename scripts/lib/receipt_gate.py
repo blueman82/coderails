@@ -11,15 +11,14 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import action_receipt as ar
-from scripts.lib import merge_budget
+from scripts.lib import advisory_merge, merge_budget, merge_hook_note
 from scripts.lib.action_binding import binding, git_out
 from scripts.lib.authority_object import append_row, authority_path, read_authority
 from scripts.lib.authority_permits import executed_merges, permits
@@ -88,7 +87,7 @@ def _check_and_consume(
             return name, code
     if not consume:
         return None
-    for name, proposed in proposals:  # the O_EXCL claim, not the verify above, decides who is allowed
+    for name, proposed in proposals:
         if name == "merge":
             verdict = permits(session, name, now, snapshot=live)
             if not verdict["allow"]:
@@ -120,47 +119,46 @@ def check_and_consume(
     )
 
 
-def _fresh_hook_note(path: Path, number: str) -> dict[str, Any] | None:
-    """The hook's note in .consumed when it is recent, names this PR and the receipt is not yet executed."""
-    marker = path.with_suffix(".consumed")
-    try:
-        raw: object = json.loads(marker.read_text(encoding="utf-8"))
-        recent = time.time() - marker.stat().st_mtime <= HOOK_WINDOW_S
-    except (OSError, ValueError, RecursionError):
-        return None
-    note = cast("dict[str, Any]", raw) if isinstance(raw, dict) else {}
-    return note if note.get("number") == number and recent and not ar.is_executed(path) else None
-
-
-def require_merge_receipt(number: str, cwd: str | None = None, now: datetime | None = None) -> None:
+def require_merge_receipt(
+    number: str, cwd: str | None = None, now: datetime | None = None, target: str | None = None,
+    verified_sha: str | None = None,
+) -> Path | None:  # fmt: skip
     """Called once by merge.py before `gh pr merge`; returns only when a receipt was claimed (or mode allows)."""
     cwd = cwd or os.getcwd()
     mode, _ = resolve_mode(cwd)
     if mode == "off":
-        return
+        return None
     session = next((os.environ[name] for name in SESSION_ENV if os.environ.get(name)), "")
-    code = _claim_merge(session, number, cwd, now)
+    code = _claim_merge(session, number, cwd, now, target)
     if code == "ok":
-        return
-    outcome = "advisory" if mode == "advisory" else "denied"
+        return None
+    reservation_required = False
+    if mode == "advisory" and code not in {"authority_denied", "max_prs_exceeded"}:
+        reservation_required, reserved, path = advisory_merge.direct(session, number, cwd, target, verified_sha)
+        if path:
+            append_row("action_authority", "advisory", f"merge_py_{code}", session)
+            return path
+        if reservation_required:
+            code = reserved
+    outcome = "advisory" if mode == "advisory" and code not in {"authority_denied", "max_prs_exceeded"} else "denied"
     append_row("action_authority", outcome, f"merge_py_{code}", session or "_no_session")
+    if code in {"authority_denied", "max_prs_exceeded"} or reservation_required:
+        raise ReceiptRefusedError(f"merge refused by live session authority ({code})")
     if mode == "enforce":
-        raise ReceiptRefusedError(
-            f"merge needs a signed owner receipt ({code}); owner mints it: scripts/action_receipt_cli.py approve-action"
-        )
+        raise ReceiptRefusedError(f"merge needs a signed owner receipt ({code}); use approve-action")
+    return None
 
 
-def _claim_merge(session: str, number: str, cwd: str, now: datetime | None) -> str:
-    """Serialize the cap check and executed marker for a direct merge."""
+def _claim_merge(session: str, number: str, cwd: str, now: datetime | None, target: str | None = None) -> str:
     if not session:
         return "no_session"
     with merge_budget.lock(session) as acquired:
         if not acquired:
             return "budget_lock_unavailable"
-        return _claim_merge_unlocked(session, number, cwd, now or datetime.now(timezone.utc))
+        return _claim_merge_unlocked(session, number, cwd, now or datetime.now(timezone.utc), target)
 
 
-def _claim_merge_unlocked(session: str, number: str, cwd: str, now: datetime) -> str:
+def _claim_merge_unlocked(session: str, number: str, cwd: str, now: datetime, target: str | None = None) -> str:
     """Return ok after claiming .executed for one matching receipt, else the refusal code."""
     auth = authority_path(session)
     if not session or auth is None:
@@ -171,12 +169,11 @@ def _claim_merge_unlocked(session: str, number: str, cwd: str, now: datetime) ->
         return str(verdict["reason"])
     if not verdict.get("requires_approval", False):
         return "approval_requirement_missing"
-    bind = binding("merge", f"python3 scripts/merge.py {number}", cwd)  # merge.py pins the head sha it verified
+    command = f"python3 scripts/merge.py {target or number}"
+    bind = binding("merge", command, cwd)  # merge.py pins the head sha it verified
     if bind is None:
         return "binding_unknown"
-    direct = ar.proposed_action(
-        "merge", f"python3 scripts/merge.py {number}", cwd, git_out(cwd, "branch", "--show-current"), bind
-    )
+    direct = ar.proposed_action("merge", command, cwd, git_out(cwd, "branch", "--show-current"), bind)
     loop_id = authority["loop_id"] if authority else None
     signers = resolve_trust_root()[0]
     refusals: list[str] = []
@@ -186,7 +183,7 @@ def _claim_merge_unlocked(session: str, number: str, cwd: str, now: datetime) ->
             refusals.append("malformed")
             continue
         data["revoked"] = data.get("revoked") is True or ar.is_revoked(path)
-        note = _fresh_hook_note(path, number)
+        note = merge_hook_note.fresh(path, number, HOOK_WINDOW_S)
         proposed = direct if note is None else {**direct, "exact_payload_hash": note["hash"]}
         consumed = ar.is_consumed(path) and note is None
         ok, why = ar.verify(data, proposed, now, session, loop_id, consumed, signers)

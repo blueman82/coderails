@@ -88,35 +88,39 @@ The minting step is a separate OWNER-RUN command, signed with a passphrase-prote
 
 ## Binding rules and default
 
-Owner revision, 24 October 2026: The default is now `advisory`, including when the config or key is absent. Routine pushes and merges do not require a passphrase. Explicit `enforce` still requires a signed receipt. An unknown mode enforces. The following paragraph records the original default decision.
+Owner revision, 24 October 2026: `advisory` is now the default, including when the config or key is absent. Routine
+pushes and merges do not need a passphrase. A live session denial or spent merge cap still blocks. Explicit `enforce`
+requires a signed receipt; an unknown mode also enforces. The original design enforced receipts when the config was
+absent or unreadable. That earlier default no longer applies.
 
-The original gate was default ON: absent or unreadable config, or any value other than `off` / `advisory`, was `enforce`
-(`action_authority: off` is the explicit switch). To keep the repository+ref+SHA binding honest, a guarded command is
-unbindable (`binding_unknown`, denied) when it:
+In enforce mode, a command with unknown repository, ref or SHA is denied as `binding_unknown`. With a live session
+authority, advisory merge reservations also need a known PR and head. This replaces the original `default ON`
+decision. Binding fails when the command:
 
 - carries an env assignment prefix (`GIT_DIR=`, `GIT_CONFIG_*=`, `GH_REPO=`, any `NAME=value`), `git -c`, `--git-dir` or
   `--work-tree` (they retarget the action; the prefix is kept in the hashed segment so it is never silently stripped);
 - is a bare or remote-only `git push` (push.default, `branch.*.remote` and `remote.*.push` decide the destination);
 - is `gh pr merge` without `--match-head-commit <live head sha>` (or `gh api .../merge` without `sha=`). GitHub then
   refuses a merge whose head moved after the hook ran. `scripts/merge.py` pins the sha its own gates verified;
-- names the PR ambiguously (a branch name, two PRs, a `-R` that disagrees with the PR URL, a combined short flag
-  hiding a value option). The repository comes from `-R`, the PR URL or the api path, else `origin`.
+- names a raw `gh pr merge` PR ambiguously (a branch name, two PRs, a `-R` that disagrees with the PR URL, or a
+  combined short flag hiding a value option). `scripts/merge.py` also accepts a branch or `auto` and resolves its PR
+  before binding. The repository comes from `-R`, the PR URL or the api path, else `origin`.
 
-`git push origin HEAD` binds the current branch (a detached HEAD is unbindable); the repository is the PUSH url
-(`git remote get-url --push --all`), so `remote.<n>.pushurl` / `pushInsteadOf` are seen, and a remote with more than one
-push url is unbindable (it would push to all of them while the receipt names one). A guarded segment that follows ANY
-segment that is not a known read-only command in the same command (allowlist: `status`, `log`, `diff`, `show`,
-`rev-parse`, `ls-remote`, `cd`, `echo`, `grep`, a `git push` to a remote other than `.`, a `gh pr merge`, ...; a
-redirect, command substitution or unknown program is a mover) is denied `state_mutated_before_guard`: the bound sha
-would be stale at execution (`git push . evil:feature`, `git worktree add -B`, `git filter-branch`, a write into
-`.git`, ...). Scripts and aliases that mutate are seen only as unknown commands, and only within the same command: a
-ref moved by an earlier, separate command is the state the hook binds.
-A `cd` is parsed like a shell: a plain existing path moves the bound directory; a variable, `cd -`, a missing path, a
-`( cd x && ... )` group, or a `cd` before `bash -c`/`eval` makes later guards unbindable (a pipeline `cd` is a subshell
-and moves nothing).
-Git global options before the subcommand (`-c`, `-C`, `--git-dir`, `--no-pager`) no longer hide a push from the
-matcher, which also tightens `enforce_pr_workflow`. Codex has no `receipt_counters` mirror on purpose: the counters
-read trace rows through the shared measurement script, which is provider independent.
+`git push origin HEAD` binds the current branch. A detached HEAD is unbindable. The repository is the push URL from
+`git remote get-url --push --all`, including `remote.<n>.pushurl` and `pushInsteadOf`. More than one push URL is
+unbindable because the command would push to each URL while a receipt names one.
+
+The hook checks earlier segments in the same command. A guarded segment after an unknown or state-changing segment
+is denied as `state_mutated_before_guard`: its bound SHA could be stale. Known read-only commands include `status`,
+`log`, `diff`, `show`, `rev-parse`, `ls-remote`, `cd`, `echo` and `grep`. A redirect, command substitution or unknown
+program may change state. Negative probes include `git push . evil:feature`, `git worktree add -B`, `git
+filter-branch` and a write into `.git`. A ref changed by a separate earlier command is the state the hook binds.
+
+A plain `cd` to an existing path changes the binding directory. A variable path, `cd -`, a missing path, a
+`( cd x && ... )` group, or `cd` before `bash -c` or `eval` makes later guards unbindable. A pipeline `cd` runs in a
+subshell and changes no directory for later segments. Git global options (`-c`, `-C`, `--git-dir`, `--no-pager`) no
+longer hide a push from the matcher; this also tightens `enforce_pr_workflow`. Codex has no `receipt_counters` mirror:
+the shared measurement script reads trace rows from both providers.
 
 ## Counters and reason codes
 

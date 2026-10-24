@@ -199,10 +199,14 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
-- The default is `advisory`. It logs a warning when a merge or push has no valid receipt. It does not block the action.
+- The default is `advisory`. It logs a warning when a merge or push has no valid receipt. A live session authority
+  denial or spent merge cap still blocks the action.
   This default applies when the setting or config file is absent.
 - An explicit `enforce` setting blocks `gh pr merge` and pushes to `main` or `master` without a valid receipt.
   An unknown setting also enforces and logs `action_authority_bad_mode`. The `off` setting is silent.
+- With a live session authority, advisory merges reserve a PR and head SHA against `max_prs`. `scripts/merge.py`
+  records success and releases the slot after a confirmed failed merge. A raw `gh pr merge` hook cannot observe the
+  command result, so its reservation stays charged until an operator reconciles the session.
 - Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,

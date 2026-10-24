@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import git_common as git
-from scripts.lib import manifest_policy
+from scripts.lib import manifest_policy, merge_budget
 from scripts.lib.config import config_path, integrity_machine_user
 from scripts.lib.integrity_status import verify_integrity_status
 from scripts.lib.receipt_gate import require_merge_receipt
@@ -94,9 +94,16 @@ def main(arguments: list[str] | None = None) -> int:
                 raise git.WorkflowError("Not approved")
             sha = verify_gates(number)
             manifest_policy.gate(number)
-            require_merge_receipt(number)  # enforce claims a signed receipt; advisory logs before the merge runs
+            reservation = require_merge_receipt(number, target=argument, verified_sha=sha)
             # pin the head the gates verified: GitHub refuses the merge if the PR head moved since
-            git.run("gh", "pr", "merge", number, "--merge", "--match-head-commit", sha, check=True)
+            try:
+                git.run("gh", "pr", "merge", number, "--merge", "--match-head-commit", sha, check=True)
+            except git.WorkflowError:
+                if reservation and git.pr_field(number, "state") == "OPEN":
+                    merge_budget.settle(reservation, False)
+                raise
+            if reservation:
+                merge_budget.settle(reservation, True)
             print("✓ Merged")
         elif state == "MERGED":
             print("! Already merged")

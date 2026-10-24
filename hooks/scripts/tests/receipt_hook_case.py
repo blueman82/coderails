@@ -10,7 +10,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.tests.native_hook_test_support import HookCase
-from hooks.scripts.tests.receipt_test_support import REPOSITORY, make_owner, make_repo, signed_receipt, store
+from hooks.scripts.tests.receipt_test_support import REPOSITORY, git, make_owner, make_repo, signed_receipt, store
 from scripts.lib import action_binding as ab
 
 MERGE_SHA = "f" * 40
@@ -32,7 +32,11 @@ class ReceiptHookCase(HookCase):
         self.agent_key, _ = make_owner(self.directory / "agent")
         gh = self.directory / "bin" / "gh"
         gh.parent.mkdir()
-        gh.write_text(f'#!/bin/sh\necho \'{{"baseRefName":"main","headRefOid":"{MERGE_SHA}"}}\'\n')
+        gh.write_text(
+            f'#!/bin/sh\ncase "$1 $2" in\n'
+            f'"pr list") echo \'[{{"number":12}}]\';;\n'
+            f'*) echo \'{{"baseRefName":"main","headRefOid":"{MERGE_SHA}"}}\';;\nesac\n'
+        )
         gh.chmod(0o755)
         self.environment = self.environment | {"PATH": f"{gh.parent}:{self.environment['PATH']}"}
 
@@ -62,7 +66,10 @@ class ReceiptHookCase(HookCase):
             {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": MERGE_SHA}
             if kind == "merge" else ab.binding(kind, command, where)
         )  # fmt: skip
-        rec = signed_receipt(key or self.key, kind, command, where, "main", bind, session, receipt_id=rid, **over)
+        rec = signed_receipt(
+            key or self.key, kind, command, where, git(Path(where), "branch", "--show-current"), bind, session,
+            receipt_id=rid, **over,
+        )  # fmt: skip
         store(self.loop, rec, session)
         return rid
 

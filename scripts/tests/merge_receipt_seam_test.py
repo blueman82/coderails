@@ -58,21 +58,22 @@ class SeamSpyTests(unittest.TestCase):
             del number
             return fields.get(name, fallback)
 
-        def seam_call(number: str) -> None:
+        def seam_call(number: str, *, target: str, verified_sha: str) -> None:
             del number
+            self.assertEqual((target, verified_sha), ("7", SHA))
             order.append("seam")
 
         with (
             mock.patch.object(git, "require_repo"), mock.patch.object(git, "main", return_value="main"),
             mock.patch.object(git, "protected", return_value=False), mock.patch.object(git, "run", side_effect=run),
             mock.patch.object(git, "pr_field", side_effect=field),
-            mock.patch.object(merge, "verify_gates"), mock.patch.object(manifest_policy, "gate"),
+            mock.patch.object(merge, "verify_gates", return_value=SHA), mock.patch.object(manifest_policy, "gate"),
             mock.patch.object(merge, "cleanup"),
             mock.patch.object(merge, "require_merge_receipt", side_effect=seam_call) as seam,
             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()),
         ):  # fmt: skip
             self.assertEqual(merge.main(["7"]), 0)
-            seam.assert_called_once_with("7")
+            seam.assert_called_once_with("7", target="7", verified_sha=SHA)
             self.assertEqual(order, ["seam", "gh"])
             order.clear()
             seam.side_effect = receipt_gate.ReceiptRefusedError("no_receipt")

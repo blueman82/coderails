@@ -84,19 +84,19 @@ a consumer. Those four lines are superseded by the next section; the user direct
   Receipts are v2: signed, bound to repository+ref+SHA (`artifact_sha` is mandatory), always single-use; v1/unsigned receipts
   are rejected with no downgrade path. See [p3-human-only-minting.md](p3-human-only-minting.md).
 - Hook `action_authority_gate.py` (Claude, appended to the Bash group; Codex imports the byte-identical mirrored
-  `scripts/lib/{action_receipt,receipt_signing,action_binding}.py`): ON by default via config `action_authority` (enforce | advisory | off; absent key, no config and unknown values are enforce, the last traced `action_authority_bad_mode`). Gates consume the authority
+  `scripts/lib/{action_receipt,receipt_signing,action_binding}.py`): advisory by default via config `action_authority` (enforce | advisory | off; absent key and no config are advisory; unknown values enforce and trace `action_authority_bad_mode`). Gates consume the authority
   fields through `scripts/lib/authority_permits.py` `permits(session, action, now)` -> `{allow, reason, requires_approval, authority_id}`: `denied` refuses a category (`authority_denied`), merge also refuses
-  `max_prs_exceeded` (count = `.executed` markers of every merge receipt in the session, whatever authority_id it carries, so a receipt minted before the grant cannot dodge the cap; 0 = none; consumed-only receipts never count), `merge` and `push_main` always require a signed
-  receipt, with or without an authority; both receipt-consumption paths also fail closed with `approval_requirement_missing` if the permit verdict does not mark the guarded action as requiring approval. Callers: the hook, `enforce_pr_workflow` (early, consumes nothing), `scripts/merge.py` (one seam call before `gh pr merge`, fail-closed) and `destructive_bash_gate`
+  `max_prs_exceeded` (count = `.executed` receipt markers plus completed or pending advisory merge reservations in the session, across authority grants; 0 = none; consumed-only receipts never count), `merge` and `push_main` require a signed
+  receipt when `action_authority: enforce`; advisory warns about a missing receipt while still blocking a live authority denial or spent merge cap. Both receipt-consumption paths also fail closed with `approval_requirement_missing` if the permit verdict does not mark the guarded action as requiring approval. Callers: the hook, `enforce_pr_workflow` (early, consumes nothing), `scripts/merge.py` (one seam call before `gh pr merge`) and `destructive_bash_gate`
   (`destructive_shell` denied refuses the allowlisted `--force-with-lease` family, `authority_denied_destructive_shell`). Decisions taken: D1 authority wins over the old SKILL.md "self-merge is in the envelope" line:
-  self-merge needs `max_prs` > 0 plus an owner-signed receipt; D2 `max_prs` caps executed merge receipts, 0 = none; D3 default-on applies to every repo including `NO_CONFIG` ones (`action_authority: off` is the switch).
+  self-merge needs `max_prs` > 0; an owner-signed receipt is required when enforcement is enabled. D2: `max_prs` counts executed receipts and advisory merge reservations, 0 = none. D3: advisory is the default in every repo, including ones with no config; `action_authority: enforce` requires a receipt.
 - What a receipt proves: the holder of the passphrase-protected owner key signed an approval for exactly this command text,
   cwd, branch, repository, ref and SHA, for this session and loop, once, before it expired. `approve-action` is owner-run: it
   refuses without a tty (`receipt_refused_no_tty`). With the user-tier trust root (agent-writable) this is a
   cooperating-agent safeguard; only the root-owned tier (owner-run sudo install, not performed here) is a real boundary.
 - Limits: hash covers only the command text the hook sees (not aliases, functions, eval/xargs; common wrappers are
   unwrapped); protected branches are main/master only. Subagent identity is settled by the `agent_only_gate` evidence (same `session_id`, differing `agent_id`/`agent_type`) and a payload test, so the parent's
-  receipt is honoured by a subagent. `scripts/merge.py` cannot see the shell's command text; when no hook ran it checks the signed hash against the canonical `python3 scripts/merge.py <PR number>` command, cwd, branch, repository and ref. A hook-consumed receipt must be
+  receipt is honoured by a subagent. `scripts/merge.py` cannot see the shell's command text; when no hook ran it checks the signed hash against the canonical `python3 scripts/merge.py <target>` command, cwd, branch, repository and ref. The target is the PR number, branch name, or `auto` argument supplied to the helper. A hook-consumed receipt must be
   within 300 s. `action_authority: off` and the user-tier trust root are agent-writable: cooperating-agent safeguard, not a boundary.
 
 - Worker statuses `NEEDS_DECISION | OUTSIDE_SCOPE | IRREVERSIBLE_ACTION` ship as a standalone validator
