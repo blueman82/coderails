@@ -39,7 +39,12 @@ Create `.coderails/workflow.config.yaml` in the current project directory. `/cod
    - **Worktree base path** — where sibling worktrees will be created. Default: parent directory of the git root (i.e. `dirname $(git rev-parse --show-toplevel)`). Show the resolved default to the user so they can confirm or override.
    - **Worktree script** (path from project root, e.g. `./worktree-add`) — or "none"
    - **Engineering-principles paths** (comma-separated glob patterns, e.g. `**/container.py,**/typed_di/**`) — or "none"
-   - **Engineering-principles skill** (the slash-command to run, e.g. `/engineering-principles-python`, `/engineering-principles-go`, `/engineering-principles-ts`, `/engineering-principles-bash`) — detect a sensible default: look for `go.mod` → `/engineering-principles-go`, `package.json` with `.ts` files → `/engineering-principles-ts`, no `go.mod`/`package.json` but `.sh` files present (e.g. an all-shell `bin/`/`scripts/` layout) → `/engineering-principles-bash`, otherwise `/engineering-principles-python`. Ask and let the user override. Answer "none" to disable engineering-principles entirely.
+   - **Engineering-principles skill** — select the slash command from the project files:
+     - `go.mod` → `/engineering-principles-go`
+     - `package.json` with `.ts` files → `/engineering-principles-ts`
+     - `.sh` files but no `go.mod` or `package.json` → `/engineering-principles-bash`
+     - Otherwise → `/engineering-principles-python`
+     Show the selected default and let the user change it. "None" disables engineering-principles.
    - **Sandbox workers** — dispatch agentic-loop implementation-unit workers as separate OS-sandboxed processes (`@anthropic-ai/sandbox-runtime`) instead of in-process `Agent` calls, for write containment outside the agent's trust domain. Requires node/npx and a supported platform (macOS Seatbelt, Linux/WSL2 bubblewrap). Default: `false` (or omit the field — same effect). Status `read_by_prose_only` (see `config.schema.json`): the agentic-loop skill reads it from the resolve-config text and no script does.
    - **Integrity review local check** — choose `true` only after the GitHub Actions workflow and server rule are active. The check requires a current-head status from `github-actions[bot]`. Default: `false`. GitHub supplies the workflow token.
 

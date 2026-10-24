@@ -79,7 +79,7 @@ Present the proposal and iterate until the user approves. Include 3-5 seed pages
 
 ### Step 4: Create Foundation Files
 
-**index.md** — content catalog. Claude reads this FIRST when answering queries. Organized by page type with `[[wiki-links]]`. Mark gaps as "Not yet documented." Reference `AGENTS-wiki-schema.md` as the schema location (do NOT create a separate schema.md in the vault — `AGENTS-wiki-schema.md` in the project directory is the single source of truth).
+**index.md** — content catalog. Claude reads this FIRST when answering queries. Organize it by page type with `[[wiki-links]]`. Mark gaps as "Not yet documented." Name the schema source the project actually uses: `AGENTS-wiki-schema.md` for a new wiki, or the `AGENTS.md` wiki section and `wiki.schema.json` for Coderails. Do not create a separate `schema.md` in the vault.
 
 **log.md** — append-only. Each entry: `## [YYYY-MM-DD] operation | description`.
 

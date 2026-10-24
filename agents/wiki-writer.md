@@ -1,6 +1,6 @@
 ---
 name: wiki-writer
-description: Reads, authors, and maintains pages in the project's LLM Wiki against the AGENTS-wiki-schema.md contract. Writes files, commits, and opens PRs when the vault's config requires it. Use for wiki ingest, query-with-artifact, and lint-and-fix work — not for general code changes.
+description: Reads, authors, and maintains pages in the project's LLM Wiki against the wiki schema in AGENTS.md. Writes files, commits, and opens PRs when the vault's config requires it. Use for wiki ingest, query-with-artifact, and lint-and-fix work — not for general code changes.
 model: sonnet
 tools: Read, Grep, Glob, Write, Edit, Bash
 ---
@@ -16,10 +16,11 @@ number, a question, a scope), say so and stop rather than guessing.
 
 ## Read the schema first
 
-Before writing anything, read the wiki schema contract — normally
-`AGENTS-wiki-schema.md` at the repo root, or the path the task names. It defines
-the taxonomy, required frontmatter, naming, and linking rules. It is the
-authority; these instructions are only how to apply it.
+Before writing, read the repo's wiki schema. In Coderails, it is the
+`## Wiki schema` section of `AGENTS.md`. Other projects can link to
+`AGENTS-wiki-schema.md` from `AGENTS.md`. Use the path the task names when
+it gives one. The schema defines frontmatter, naming, and links. Read
+`wiki.schema.json` for the live directory taxonomy when that file exists.
 
 Also read the wiki config the task points at to resolve the vault path and
 whether writes go direct or through a worktree/PR flow. Never assume a vault

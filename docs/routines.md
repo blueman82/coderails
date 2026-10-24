@@ -265,8 +265,9 @@ whole surface.
 (`bypass`). Its mitigation is the same shape as that routine's: no hook
 protects a `claude -p` run, so the entire merge rail is the manifest
 lock (docs-only, three-dot-scoped) plus `scripts/merge.py`'s own
-script-internal artifact gates and `/pr-review-toolkit:review-pr` — not
-any hook or server-side check.
+artifact gates and `/pr-review-toolkit:review-pr`. The active GitHub
+`integrity-review` rule also checks the PR head before merge. Local hooks
+do not protect this headless run.
 
 ## `loop-retro-promotion-weekly`: a dormant-by-default routine
 

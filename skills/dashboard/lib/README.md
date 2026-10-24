@@ -1,18 +1,17 @@
 # @coderails/dashboard-lib
 
-The single source of truth for the intent-queue/runner contract's
-consumer-side pieces: the `Intent` schema and the `RoutineDef`/routines
-section of `DashboardConfig`. The base `ButtonDef`/`PermissionProfile`/
-`loadConfig` and the `buildArgv` profile→flag mapping are NOT owned here —
-they live in `skills/dashboard/app/src/lib/config.ts` and `argv.ts`
-(merged via PR #25) and this package imports them rather than
-re-implementing them.
+This package defines the consumer-side parts of the intent queue and runner
+contract. It owns the `Intent` schema and the `RoutineDef`/routines section
+of `DashboardConfig`.
 
-This README covers the schema contract only. For how to actually stand
-the system up on a fresh clone (`npm install` in this package and in
-`skills/dashboard/runner`, where the dashboard's data directory comes
-from, how the `claude` binary is located under `launchd`) see
-[`docs/routines.md`](../../../docs/routines.md)'s Prerequisites section.
+It imports the base `ButtonDef`, `PermissionProfile`, `loadConfig`, and
+`buildArgv` profile→flag mapping. Those definitions live in
+`skills/dashboard/app/src/lib/config.ts` and `argv.ts` (merged via PR #25).
+
+This README covers the schema contract. For setup on a fresh clone, see the
+Prerequisites section in [`docs/routines.md`](../../../docs/routines.md).
+It covers `npm install` in this package and `skills/dashboard/runner`, the
+dashboard data directory, and how `launchd` finds the `claude` binary.
 
 ## The queue seam is LIVE
 

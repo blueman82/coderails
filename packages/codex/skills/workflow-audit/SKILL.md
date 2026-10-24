@@ -121,8 +121,8 @@ Unless the run is in queue-mode (section 5), send every `propose` candidate to t
 
 For each proposed candidate, in sequence, never batched:
 
-1. Author the skill via `$skill-creator`, fully specified from the candidate's own judge-contract fields. Run a fresh-subagent baseline scenario without the new skill, write the smallest `SKILL.md` that addresses the observed failure, then repeat the scenario.
-2. Land the new skill in the coderails repo as a plugin skill, via its own branch and PR. Run the test gate, spawn the installed `spec-reviewer` custom agent against the current PR head, add `deploy-safety-reviewer` only for a production surface, then invoke `$coderails-codex:post-review`, PR-scope `$coderails-codex:task-evals`, `$coderails-codex:post-evals`, and `$coderails-codex:merge`. Never commit straight to `main`, and never write into a user's personal `~/.codex/skills` directory — this is a repo skill, not a local one.
+1. Freeze PR-scope evals with `$coderails-codex:task-evals` before writing the new skill. Then author the skill via `$skill-creator`, using the candidate's judge-contract fields. Run a fresh-subagent baseline scenario without the new skill, write the smallest `SKILL.md` that addresses the observed failure, then repeat the scenario.
+2. Land the skill in the coderails repo on its own branch and PR. Run the test gate. Spawn the installed `spec-reviewer` against the current PR head, and add `deploy-safety-reviewer` only for a production surface. Resolve findings and grade the frozen evals. Then invoke `$coderails-codex:post-review`, `$coderails-codex:post-evals`, and `$coderails-codex:merge`. Never commit straight to `main`, and never write into a user's personal `~/.codex/skills` directory. This is a repo skill.
 3. **Stop after this skill is merged before starting the next proposed candidate.** Test and ship each candidate separately.
 
 ## 9. Wrap-up

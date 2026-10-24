@@ -14,7 +14,7 @@ Use this skill when the user asks to merge a pull request by number, branch name
 3. If the repository requires approval, confirm the pull request is approved.
 4. Confirm an independent native Codex review covers the current head. If the review is stale or missing, use `spawn_agent` with the installed `source-auditor` and `spec-reviewer` custom agents. Resolve all blocking findings and push any fixes. Review the new head again.
 5. Invoke `$coderails-codex:post-review` for the final head so the trusted SHA-bound review artifact exists.
-6. Invoke `$coderails-codex:task-evals`, run the frozen evals, and invoke `$coderails-codex:post-evals` for the same final head. A justified verification-level-0 result is valid only when that workflow records it as `GO`.
+6. Confirm that the PR evals were frozen before implementation. Run and grade that suite with `$coderails-codex:task-evals`, then invoke `$coderails-codex:post-evals` for the same final head. If the frozen suite is missing, stop and disclose the gap; do not treat a new suite as a pre-build freeze. A justified verification-level-0 result is valid only when that workflow records it as `GO`.
 
 Do not merge if GitHub state cannot be fetched or required approval is missing. Stop if review or eval evidence is missing or stale, an eval is `NO-GO`, smoke verification fails, or a configured integrity attestation or wiki-debt gate fails. Use posted evidence for the current head; local files and model claims do not replace it.
 

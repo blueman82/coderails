@@ -69,13 +69,10 @@ pid, so pid-naming is explanation, not the check to run.
   above), which exits the session from the worktree and removes it in one step — `git
   worktree remove` cannot do this from inside the worktree it's removing, and forcing the
   git path would break the running session.
-- **The locked path is NOT this session's own cwd** — some other session is still
-  working in the worktree. Report and defer, never force, regardless of whether the
-  worktree is also this session's cwd for some other reason. A merged PR does not by
-  itself mean the worktree is safe to remove — forcing it out mid-loop would yank that
-  other session. This precedence holds even when the lock also happens to be reachable
-  from this session: a live pid naming a different session always wins over any other
-  fact about the worktree.
+- **A live lock names another session** — report and defer. Do not force
+  removal, even if this session also uses the worktree. A merged PR alone
+  does not make the worktree safe to remove. The other session's live lock
+  takes precedence over the cwd rule above.
 
 Locked by a dead pid still means: clear the stale lock and remove, with a notice.
 

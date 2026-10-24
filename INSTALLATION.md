@@ -206,8 +206,8 @@ like the test gate — enforces the PR chain, e.g. blocks a direct `git push` to
 `comment_citation_gate` (blocks new code comments that cite a session-artifact
 label like `E#:`/`Task A#`/`CHANGE B#` instead of stating the constraint the
 code enforces; `.md` files are exempt), `wiki_taxonomy_gate` (blocks a write into
-an LLM wiki vault's top-level directory that isn't sanctioned by the vault's own
-`AGENTS.md` "## Page types" table; fails open on any ambiguity),
+an LLM wiki vault's top-level directory that isn't sanctioned by the plugin
+repo's `wiki.schema.json`; fails open on any ambiguity),
 `verification_volume_ceiling` (hard-blocks, with no override, the 3rd+
 invocation per work-unit of `hooks/scripts/tests/run_all.py` or a
 `scripts/post_evals.py` validate-structure ceremony), `loop_dispatch_guard` on `Agent` dispatches

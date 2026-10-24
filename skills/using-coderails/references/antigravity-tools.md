@@ -20,28 +20,24 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 
 ## Invoking a skill — read its `SKILL.md`
 
-Antigravity surfaces every installed skill's `name` + `description` to you at the
-start of each session, but it has **no `Skill`/`activate_skill` tool**. To load a
-skill, **read its `SKILL.md` with `view_file`, setting `IsSkillFile: true`** when
-the skill applies — e.g. `view_file` on
-`.../plugins/coderails/skills/<skill-name>/SKILL.md` with `IsSkillFile: true`.
-(`IsSkillFile` is agy's own signal that you're reading a file to *execute its
-instructions*, not to edit or preview it — set it whenever you load a skill.)
+Antigravity shows each installed skill's `name` and `description` at the start
+of a session. It has no `Skill` or `activate_skill` tool.
 
-This is the blessed skill-loading mechanism on this harness. The general rule
-"never read skill files manually" means "don't bypass your platform's
-skill-loading mechanism" — and on Antigravity, reading `SKILL.md` *is* that
-mechanism. Reading it honors the rule rather than breaking it.
+When a skill applies, read its `SKILL.md` with `view_file`. Set
+`IsSkillFile: true`. For example, read
+`.../plugins/coderails/skills/<skill-name>/SKILL.md` with that setting.
+`IsSkillFile` tells Antigravity that you intend to use the skill's instructions.
 
-You already know which skills exist and what they're for: their names and
-descriptions are in front of you at session start. When a description matches
-what you're about to do, read that skill's `SKILL.md` before acting.
+This is Antigravity's skill-loading method. The general rule to avoid manual
+skill reads means to use your platform's skill-loading method. On Antigravity,
+`view_file` with `IsSkillFile: true` is that method. Read the applicable skill
+before you act.
 
 ## Subagent support
 
-Antigravity dispatches subagents with `invoke_subagent`, passing each one a
-`TypeName` in the `Subagents` array. Two `TypeName`s are **built in** — use them
-directly, no `define_subagent` needed:
+Antigravity dispatches subagents with `invoke_subagent`. Put a `TypeName` for
+each worker in the `Subagents` array. Two types are built in. You can use them
+without `define_subagent`:
 
 - **`self`** — a full clone of you, with every tool you have (including
   `write_to_file`/`replace_file_content`/`run_command`). The safe default for
@@ -51,11 +47,11 @@ directly, no `define_subagent` needed:
   or command access). Use it when you specifically want a subagent that can't make
   changes — investigation and read-only review.
 
-Call `define_subagent` only for a custom system prompt or capability mix: set
-`enable_write_tools: true` to grant file edits **and** `run_command`,
-`enable_subagent_tools` for nested dispatch, `enable_mcp_tools` for MCP. Then
-invoke it by the name you gave it. (`manage_subagents` lists/kills running
-subagents.)
+Use `define_subagent` only when you need a custom system prompt or capability
+mix. Set `enable_write_tools: true` to grant file edits and `run_command`.
+Set `enable_subagent_tools` for nested dispatch, and `enable_mcp_tools` for
+MCP. Then invoke the type by the name you gave it. `manage_subagents` lists
+or stops running subagents.
 
 Skills dispatch by naming an agent (e.g. `coderails:loop-worker`,
 `pr-review-toolkit:code-reviewer`) or by supplying an inline prompt. Antigravity

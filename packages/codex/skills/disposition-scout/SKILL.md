@@ -14,15 +14,15 @@ fact that would flip it. Do not create, edit, or delete any file.
 
 ## Codex tool mapping
 
-Ported from the this provider agent per `skills/using-coderails/references/codex-tools.md`'s
-action-mapping table. This agent is read-only (no Write/Edit/NotebookEdit on
-the this provider side), so only the read-side mappings apply:
+This is the Codex port of `agents/disposition-scout.md`. Use the tool mapping
+in `skills/using-coderails/references/codex-tools.md`. This agent is read-only,
+so use only read-side tools:
 
 | Action | Codex tool |
 |---|---|
-| Read a file | `shell` (`cat`, `head`, `tail`) |
-| Search file contents | `shell` (`grep`, `rg`) |
-| Find files by name | `shell` (`find`, `ls`) |
+| Read a file | `exec_command` with `cat`, `head`, or `tail` |
+| Search file contents | `exec_command` with `rg` |
+| Find files by name | `exec_command` with `rg --files` or `find` |
 
 This agent never dispatches a subagent, so `spawn_agent`/`wait_agent`/`close_agent`
 do not apply here — noted only because the mapping table requires it for any

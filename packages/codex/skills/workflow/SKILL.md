@@ -40,7 +40,7 @@ Apply blocking and worthwhile findings, add or update tests where the public con
 
 Post a pull-request ledger listing every finding and its disposition. Invoke `$coderails-codex:post-review` with the pull-request number only after fixes are pushed so the review artifact is bound to the final head SHA.
 
-Invoke `$coderails-codex:task-evals` if graded evals were not already frozen. Run the frozen checks and negative controls. Then invoke `$coderails-codex:post-evals` with the pull-request number. Stop if evidence is missing, stale, failing, or unverified. Never hand-write a passing result.
+Confirm that the eval suite was frozen before implementation. Run its checks and negative controls, then grade it with `$coderails-codex:task-evals`. Invoke `$coderails-codex:post-evals` with the pull-request number. If the frozen suite is missing, stop and disclose the gap; do not treat a new suite as a pre-build freeze. Stop if evidence is stale, failing, or unverified. Never hand-write a passing result.
 
 Report the pull-request URL, final head SHA, review summary, and eval result. Pause until the user explicitly approves merging.
 

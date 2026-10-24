@@ -4,12 +4,12 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 
 | Action skills request | Codex equivalent |
 |----------------------|------------------|
-| Read a file | `shell` (e.g., `cat`, `head`, `tail`) — Codex reads files via shell |
+| Read a file | `exec_command` with `cat`, `head`, or `tail` |
 | Create / edit / delete a file | `apply_patch` (structured diff for create, update, delete) |
-| Run a shell command | `shell` |
-| Search file contents | `shell` (e.g., `grep`, `rg`) |
-| Find files by name | `shell` (e.g., `find`, `ls`) |
-| Fetch a URL | `shell` with `curl` / `wget` — Codex has no native fetch tool |
+| Run a shell command | `exec_command` |
+| Search file contents | `exec_command` with `rg` |
+| Find files by name | `exec_command` with `rg --files` or `find` |
+| Fetch a URL | the available web tool, or `exec_command` with `curl` when appropriate |
 | Search the web | `web_search` (enabled by default; configurable in `config.toml` via the top-level `web_search` setting — `live`, `cached`, or `disabled`) |
 | Invoke a skill | Skills load natively — just follow the instructions |
 | Dispatch a subagent (a skill naming an agent, e.g. `coderails:loop-worker`) | `spawn_agent` (see [Subagent dispatch requires multi-agent support](#subagent-dispatch-requires-multi-agent-support)) |

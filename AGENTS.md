@@ -6,6 +6,10 @@ Wiki vault: `../coderails-wiki` relative to the plugin, or wherever `/wiki-init`
 
 For any coderails question, lookup, or context, use the `wiki-query` skill; for staleness or health checks, use `wiki-lint`. Prefer both over grepping source or the vault directly — the wiki holds compounded understanding, not just facts derivable from re-reading code.
 
+## Writing rule
+
+Use controlled English for new and revised Coderails Markdown and pull-request prose. Follow the `explainer-artifacts` writing guide: use short sentences, active voice, familiar words, and one main idea at a time. Define technical terms when readers need them. Keep commands, identifiers, evidence, and historical quotations exact. Apply the rule to roadmap work and later work. Do not claim strict ASD-STE100 compliance without a separate check.
+
 ## Current integrity-gate replacement
 
 The semantic judge is replaced by a mechanical `integrity-review` attestor in a trusted GitHub Actions workflow. It checks SHA-bound review/eval evidence, command/eval structure, policy paths, provenance fields, and bounded diff input. It never runs PR code or comment commands and never asks an LLM for a verdict. Authoritative: `docs/INTEGRITY-GATE.md`, `.github/workflows/integrity-review.yml`, `scripts/integrity-gate/integrity_actions.py`, and `integrity_review.enabled` config. GitHub ruleset `25788196` is active on `main` and requires the GitHub Actions app status. Source code alone does not activate the rule.
@@ -66,7 +70,7 @@ examples/, launchd/             → sample configs and macOS scheduling plists
 
 **Enforcement ceiling.** A local hook checks evidence of *invocation*, not of *completion* — e.g. `enforce_pr_workflow` is satisfied by a hollow `/coderails:push` or `/pr-review-toolkit:review-pr` step that ran but did nothing. A hook runs inside the agent's own trust domain (no privilege boundary), so it's a **redirect-and-audit layer** (steers a cooperating agent, leaves a `discipline.log` trail), not a tamper-proof barrier. The real "no unreviewed change reaches `main`" guarantee is **server-side: GitHub branch protection** (required PR + reviews + no direct pushes) — no local agent can fake that; local hooks complement it, don't replace it. Same ceiling applies to Stop-hook gates: they force a declared step to *appear*, not to *be real*.
 
-**This repo** deliberately does not enable general branch protection (2026-07-15, standing decision) — so for ordinary PRs the server-side layer is absent and the redirect-and-audit layer is the whole story, by design.
+**This repo** does not enable general review-approval branch protection (2026-07-15, standing decision). The active integrity rule below is the server-side PR and status gate. It checks evidence structure, not whether an independent reviewer actually ran.
 
 **One server-side exception: integrity-review.** The active GitHub ruleset on `main` requires a PR and a successful `integrity-review` status from the GitHub Actions app. The workflow validates the head SHA's review/eval evidence and policy as data. Local hooks cannot substitute for the rule.
 
@@ -126,7 +130,7 @@ Fourth seam instance: `agentic-loop` Phase 13 teardown writes `retro.json` (`sch
 | `Stop` + `SubagentStop` | `check_verify_loop.py` | advisory lint, never blocks: any untagged `## Did Not Verify` bullet (only `(unverifiable: <reason>)` clears it), or a missing section after a 3+-file turn, emits an `[discipline-advisory]` `additionalContext`, logs `demoted=1 reason_code=verify_loop_missing`, appends an `outcome=demoted` trace row and exits 0 on every path. `loop_state_guard`/`loop_stall_guard` stay Stop-only blocking guards. `Stop` only: exempt when `CODERAILS_HEADLESS_RUN=1` |
 | `Stop` | `voice_announce.py` | observe-only, always exits 0 — speaks a loop lifecycle event (complete/waiting-on-human/stopped/stall) via macOS `say`. Silent outside a loop or on empty text extraction. Debounced per kind. Runs first in the Stop array |
 | `Stop` | `loop_state_guard.py` | block when a loop is active but no session-owned `progress.json` exists (nag-once grace: stands down after one absent-block per session+invocation count; session-mismatch/stale-complete carry no grace). Also gates loop-scope evals when `work_units` ≥1: blocks unless a sibling `evals.json` grades `GO`/`VERIFICATION_LEVEL0` with a non-blank `verification_justification` and a valid stamp — `ABSENT`, `NO-GO`, `UNJUSTIFIED`, `UNSTAMPED` each block; fails open when `work_units` is absent |
-| `Stop` | `loop_stall_guard.py` | block when a loop is active and incomplete with no valid `LOOP-STOP` declaration; shares `loop_state_guard`'s absent-`progress.json` grace (keyed off its log line). On `complete`, also blocks if `retro.json` is absent/malformed/below `schema_version` 1, and if a sibling `proof.json` exists but any frozen proof is unexecuted-in-transcript or last-failed (mined from this session's own Bash tool_use/result pairs). Under current schema 3, absent `proof.json` blocks unless `progress.json.proof_disposition` is `"none"`/`"none: <reason>"`. A sibling `withdrawn_proofs` array is mined the same pass, stricter — blocks unless the proof ran, last failed, carries `withdrawn_reason`, and its `id` isn't also in `.proofs`; combined 100-entry cap. On an unresolved native graph the blocking Stop adds one notice per graph state (loop, revision, session, active wave, hard stop), re-shown once per 900s lease while the stall persists, carrying `graph.py summarize` status and, for a silent wave, one bounded `recover-wave` attempt (it can respawn a worker that is alive but silent, so a duplicate is possible; retry.max bounds it); the dedupe marker is written only after the notice is printed, and markers of older revisions of the same loop are pruned. Codex `graph_completion_guard.py` shares the helper and key but delivers the notice as a `decision: block` JSON on stdout (reason and systemMessage, exit 0) rather than stderr and exit 2 |
+| `Stop` | `loop_stall_guard.py` | blocks an incomplete loop without a valid stop, and blocks an invalid completion claim. See the rules below. |
 | `Stop` | `unregistered_loop_guard.py` | nudge, never blocks — flags a dispatch-heavy session (≥3 Agent-dispatch turns) with no `progress.json` and no `agentic-loop` invocation |
 | `Stop` + `SubagentStop` | `offload_push_guard.py` | nudge, never blocks — final text names a `git push` to `main`/`master` AND an offload-to-user cue (`! ` prefix, "your own shell", "run this yourself"). At most once per session. Runs last in both arrays |
 | `PreToolUse` (Bash) | `destructive_bash_gate.py` | block — permanent blocklist: `rm -rf`, naked `git push --force`/`-f`, `git reset --hard`, SQL `DROP TABLE/DATABASE/SCHEMA` and `TRUNCATE TABLE`, `dd if=`, `mkfs.*`, `chmod -R 777`, `git commit --no-verify`, `git clean -f/--force`, `find -delete/--delete`, `truncate -s/--size`, `shred`, a `.env` literal path token read or write (`.envrc`/`.env.example`/`.sample`/`.template`/`.dist` allowed). Also blocks in-Bash source edits (`sed -i`, `perl -i`, redirects, `tee`, `cp`/`mv`/`dd of=` onto source/plugin-markdown) on main/master. Denies backtick/`$(...)`/process-substitution inside `push.py`/`merge.py`/`post_review.py`/`post_evals.py` args. `--force-with-lease` conditionally allowed |
@@ -142,6 +146,27 @@ Fourth seam instance: `agentic-loop` Phase 13 teardown writes `retro.json` (`sch
 | `PreToolUse` (`Bash\|Edit\|Write\|MultiEdit\|Read\|Grep\|Glob\|WebFetch\|NotebookEdit`) | `agent_only_gate.py` | nudge by default, block opt-in (`AGENT_ONLY_GATE_ENFORCE=1`) — steers the orchestrator from inline do-work calls toward `Agent`. `agent_id` present in the payload iff the call originates inside a dispatched subagent (empirically confirmed) → always allow. `agent_id` absent + the Bash command is entirely one whole-command carve-out (`gh`, `git`, `scripts/push\|merge\|post_review\|post_evals.py`, optional interpreter prefix, no chaining/substitution) → always allow. Otherwise: `additionalContext` nudge by default, hard `deny` under the env flag. `Agent`/`TodoWrite`/`TaskCreate`/`AskUserQuestion`/`ExitPlanMode` are never gated |
 | `PreToolUse` (`Agent`) | `agent_model_routing_nudge.py` | advisory nudge only, never denies — when `tool_input.model` is absent and the description/prompt carries a mechanical word (rename/format/boilerplate/scaffold/reformat/relabel/find-replace) or a complex one (design/architecture/redesign/re-architect), nudges `haiku`/`opus` respectively. Silent if `model` set, neither/both match |
 | `PreToolUse` (`Agent`) | `loop_dispatch_guard.py` | block — every graph-bound native Agent request must match the owned session, loop, current revision, active wave and node. Use an available native `subagent_type`; custom Coderails roles are optional. Nonempty work-unit rosters require owned frozen loop evals before implementation. Frozen suites bind session + loop only, not the evolving graph revision. Missing/foreign ownership fails closed. The Python sandbox launcher invokes this same guard directly before scratch allocation. Completion still requires final neutral grading, native evidence, proofs and retrospective. |
+
+### `loop_stall_guard.py` completion and stall rules
+
+- An incomplete loop needs a valid `LOOP-STOP` declaration. The guard shares
+  `loop_state_guard`'s one-time grace when `progress.json` is absent.
+- A `complete` declaration needs a valid `retro.json` with `schema_version`
+  at least 1. Frozen proofs must have run in this session's Bash transcript
+  and must not have failed last. Under graph schema 3, a missing `proof.json`
+  needs `progress.json.proof_disposition` set to `"none"` or `"none: <reason>"`.
+- A withdrawn proof must have run, failed last, carry `withdrawn_reason`,
+  and have an ID absent from `.proofs`. The combined proof limit is 100.
+- For an unresolved graph, the blocking Stop shows one notice per graph
+  state: loop, revision, session, active wave, and hard stop. It repeats once
+  per 900-second lease while the stall continues. The notice includes
+  `graph.py summarize` status. For a silent wave, it can try one bounded
+  `recover-wave`; this can duplicate a live but quiet worker, within
+  `retry.max`. The guard writes the dedupe marker only after it prints the
+  notice and prunes markers from older revisions.
+- Codex `graph_completion_guard.py` uses the same helper and key. It returns
+  `decision: block` JSON on stdout (reason and systemMessage, exit 0).
+  The Claude guard uses stderr and exit 2.
 
 ### Enforcement ceilings — deliberate, not bugs
 

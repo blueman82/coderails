@@ -14,12 +14,10 @@ a packaged install, but it is normally unset in an orchestrator-issued Bash
 call, since it is not substituted into your own Bash tool calls. Before
 dispatching against whatever it resolves to, confirm the script actually
 exists at that path (e.g. `[ -f "$PLUGIN_ROOT/hooks/scripts/lib/graph_readiness.py" ]`)
-— a packaged install's cache copy can predate this script's introduction, and
-`graph_readiness.py`'s own `blocked` output is indistinguishable from a real
-non-terminal predecessor, so a missing-script call would silently read as
-every node being blocked rather than as a resolution failure. If the file is
-missing, stop and report that PLUGIN_ROOT resolved to a directory without this
-script — do not dispatch. When `${CLAUDE_PLUGIN_ROOT}` is unset, do not
+— a packaged install's cache copy can predate this script's introduction.
+A missing script makes the command fail. If it is missing, report that
+PLUGIN_ROOT resolved to a directory without the script. Do not dispatch.
+When `${CLAUDE_PLUGIN_ROOT}` is unset, do not
 construct or guess a path — reuse the plugin root you already have from this
 session's own rendered context instead: the currently-loaded skill's own
 "Base directory for this skill:" line, or a plugin-root path already

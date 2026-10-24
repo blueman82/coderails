@@ -19,7 +19,7 @@ than inferring one.
 
 ### Step 1: Load the Schema
 
-The git root's `AGENTS.md` loads at session start. Use it for project conventions. `AGENTS.md` links to `AGENTS-wiki-schema.md`. Read that file for the full wiki schema: page types, page format, and the three layers. If `AGENTS.md` is not in context, walk up from the current directory to the git root. Check each level for `AGENTS.md`; a fork can start in a project subdirectory. If you do not find it, tell the user to invoke `$coderails-codex:wiki-init` first. The wiki vault is a separate sibling repo, such as `../coderails-wiki`. The project's `.coderails/workflow.config.yaml` points to it. Do not look for `AGENTS.md` in the vault. A fork does not need to run from inside the vault.
+The git root's `AGENTS.md` loads at session start. Read its wiki schema section, or the `AGENTS-wiki-schema.md` file it links to. Coderails keeps the schema in `AGENTS.md` and the live page types in `wiki.schema.json`. If `AGENTS.md` is not in context, walk up from the current directory to the git root. Check each level for `AGENTS.md`; a fork can start in a project subdirectory. If you do not find it, tell the user to invoke `$coderails-codex:wiki-init` first. The wiki vault is a separate sibling repo, such as `../coderails-wiki`. The project's `.coderails/workflow.config.yaml` points to it. Do not look for `AGENTS.md` in the vault. A fork does not need to run from inside the vault.
 
 The vault path and git flow are **not** read from AGENTS.md — they are the `wiki_path` and
 `wiki_git_worktree` flat keys in that same project's `.coderails/workflow.config.yaml`, resolved
@@ -50,7 +50,7 @@ Answers can take different forms — choose naturally:
 
 When the answer reveals something non-obvious or reusable:
 
-1. Create an investigation page in `$vault/wiki/investigations/` with YAML frontmatter and `[[wiki-links]]`
+1. Create an investigation page in `$vault/investigations/` with YAML frontmatter and `[[wiki-links]]`
 2. Update `$vault/index.md`
 3. Append to `$vault/log.md`: `## [YYYY-MM-DD] query-file-back | <question summary>`
 

@@ -463,9 +463,9 @@ the reviewer only knows what is on the page.
 
 #### `wiki-writer`
 
-**Purpose:** Reads, authors and maintains LLM Wiki pages against the
-`AGENTS-wiki-schema.md` contract. Writes files, commits, and opens PRs when the
-vault config requires it.
+**Purpose:** Reads, authors, and maintains LLM Wiki pages. It uses the wiki
+schema in the project's `AGENTS.md` or linked `AGENTS-wiki-schema.md`. It
+writes files, commits, and opens PRs when the vault config requires it.
 
 **Tools:** `Read, Grep, Glob, Write, Edit, Bash`. **Model:** `sonnet`.
 
@@ -774,7 +774,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `scripts/post_review.py`, `post_evals.py` | Review grammar/cache, structural eval validation, neutral grading and observed smoke execution. |
 | `scripts/lib/git_common.py` | GitHub repository/PR operations and newest trusted exact-head artifact selection. Requires a `github.com` remote. |
 | `scripts/lib/{config,review_artifact,eval_artifact,artifact_io}.py` | Shared root-provider config and structured artifact operations. |
-| `scripts/lib/memory_adapter.py` (+ byte-identical `packages/codex/scripts/lib/` mirror), `memory_counters.py` | Optional typed-memory adapter over the `muninn` CLI (subprocess only; never imported, muninn needs py3.12). `add\|list\|render\|probe`; probes `know add --help` for the Part A flags (`--scope-loop --confidence --valid-until --sensitivity --contradicts --tag`, kinds `lesson`/`constraint`) and returns a reason-coded `Degraded` (exit 3) instead of failing, so callers keep the Markdown memory path. Writes need `--cite` and a verbatim `--quote`; reads drop restricted/expired rows; `render --memory-md\|--standing-orders` prints to stdout and `--write PATH` only replaces an absent or marker-stamped file. The ledger upgrade (schema v2) is one-way, done by muninn, not Coderails. The Codex copy cannot trace (no `trace_row.py` ships there) and has no teardown doc; both fail open. `remember_inject_cap_guard` is untouched (third-party plugin patch, unrelated). |
+| `scripts/lib/memory_adapter.py` (+ byte-identical `packages/codex/scripts/lib/` mirror), `memory_counters.py` | Optional typed-memory adapter over the `muninn` CLI. See details below. |
 | `scripts/lib/{eval_validation,eval_execution}.py` | Eval criteria and command/control verification. Gate smoke runs in a detached worktree at the trusted SHA. |
 | `scripts/sandbox/spawn_sandboxed_worker.py` | Guard dispatch before scratch allocation; run a separate Claude process through pinned srt and retain its exit status. |
 | `scripts/sandbox/{render_settings,sandbox_probe}.py` | Render explicit write containment and discriminate allowed versus forbidden filesystem writes. |
@@ -784,6 +784,23 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `launchd/*_routines.py`, `*_dashboard_agent.py` | Literal-path launch agent installation and verified unload/removal. |
 | `scripts/quality/check.py` | Strict source, format, typing, size and generated-materialization checks. |
 | `hooks/scripts/tests/run_all.py` | Native Python suite discovery with explicit skips and all-skipped failure. |
+
+The memory adapter calls `muninn` as a subprocess; it does not import it.
+Muninn needs Python 3.12. The adapter supports `add`, `list`, `render`, and
+`probe`. It checks `know add --help` for the Part A flags
+(`--scope-loop --confidence --valid-until --sensitivity --contradicts --tag`)
+and the `lesson` and `constraint` kinds. If they are absent, it returns a
+reason-coded `Degraded` result (exit 3). Callers can then keep the Markdown
+memory path.
+
+Writes require `--cite` and a verbatim `--quote`. Reads omit restricted and
+expired rows. `render --memory-md` and `render --standing-orders` print to
+stdout. `--write PATH` replaces only an absent or marker-stamped file. Muninn,
+not Coderails, performs the one-way ledger upgrade to schema v2.
+
+The Codex copy has no `trace_row.py` or teardown doc, so those paths fail
+open. `remember_inject_cap_guard` is unchanged; it patches a third-party
+plugin and is separate from this adapter.
 
 ## Artifact and State Locations
 
