@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -12,6 +13,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import integrity_policy
 from gate_policy_test import EvidenceFixture  # type: ignore[import-not-found]
+from integrity_http import Client
 from integrity_policy import gate_pr
 
 
@@ -68,6 +70,30 @@ class GateEnvelopeTests(unittest.TestCase):
                 client.diff = prefix + "x" * (size - len(prefix) - 1) + "\n"
                 self.assertEqual(self.gate(client, maximum=limit), 0)
                 self.assertEqual(client.posts[-1][1], state)
+
+    def test_raw_crlf_diff_boundary_through_transport(self) -> None:
+        """Curl output keeps CRLF bytes through HTTP parsing and the gate."""
+        limit = 524288
+        prefix = b"diff --git a/docs/safe.txt b/docs/safe.txt\r\n"
+        with tempfile.TemporaryDirectory() as directory:
+            payload = Path(directory) / "response"
+            curl = Path(directory) / "curl"
+            curl.write_text(
+                f"#!{sys.executable}\nimport sys\n" f"sys.stdout.buffer.write(open({str(payload)!r}, 'rb').read())\n"
+            )
+            curl.chmod(0o700)
+            transport = Client("owner/repo", "fixture-token")
+            transport.curl = str(curl)
+            for size, state in ((limit, "success"), (limit + 1, "failure")):
+                with self.subTest(size=size):
+                    diff = prefix + b"x" * (size - len(prefix) - 2) + b"\r\n"
+                    payload.write_bytes(diff + b"\n200")
+                    client = EvidenceFixture()
+                    client.diff = transport.get("pulls/7", "application/vnd.github.v3.diff")
+                    self.assertEqual(len(client.diff.encode()), size)
+                    self.assertTrue(client.diff.endswith("\r\n"))
+                    self.assertEqual(self.gate(client, maximum=limit), 0)
+                    self.assertEqual(client.posts[-1][1], state)
 
     def test_missing_stdlib_names_refuses_attestation(self) -> None:
         """An older runtime cannot silently weaken the import boundary."""
