@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { open, readdir } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
 import { TRACE_SCHEMA_VERSION, record, type SourceRef, type TraceAttribute, type TraceCollectionDeps, type TraceEvent } from "./traceSchema";
+import { nodeAttributes } from "./nodeDisplay";
 
 export const CODEX_PARSER_VERSION = 5;
 export const MAX_SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
@@ -231,7 +232,7 @@ export function nativeEvent(sessionId: string, src: NativeSource, ordinal: numbe
     const identity = dispatch.task ? canonicalTask(dispatch.task) : null;
     if (identity) {
       attributes["coderails.loop.id"] = identity.loopId;
-      attributes["coderails.node.id"] = identity.nodeId;
+      Object.assign(attributes, nodeAttributes(identity.nodeId));
       attributes["coderails.attempt"] = identity.attempt;
     }
   }

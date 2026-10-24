@@ -150,21 +150,199 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   telemetry; after-numbers come from trace rows, so they are not comparable. Reproduce:
   `python3 scripts/measure_graph_alignment.py --root . --json`.
 
-## Memory silently using Markdown
+## Memory degraded (Muninn authoritative)
 
-- Symptom: retro lessons or handoffs never appear as typed records; `memory_adapter.py probe` exits 3.
+- Symptom: a typed lesson, decision or handoff read/write printed `{"degraded": "<reason_code>"}` and exited 3.
+  Muninn is the only typed-memory store. There is NO Markdown fallback: a degrade is reported with its reason code,
+  never skipped and never replaced by hand-written Markdown. `memory.backend: off` is the one explicit way to run
+  without it (reason `memory_backend_off`, traced).
 - Query: `python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['memory'])"`
-  (`by_reason_code`, deduped by `event_id`), or `grep '"command": "memory\.' <agentic-loop dir>/<session_id>/trace.jsonl`.
-  Codes: `muninn_absent`, `muninn_old_ledger`, `muninn_timeout`, `muninn_error`, `uncited_write`, `restricted_refused`,
-  `bad_record`, `handwritten_protected`. An unsafe session id writes no row; an unset or empty session id
-  (CLI without `CLAUDE_SESSION_ID` or `--session`) writes rows under the fixed id `memory-adapter-nosession`.
-- Remediation: `muninn_absent`/`muninn_old_ledger`: install a muninn release with the typed-ledger flags (Part A, muninn
-  PR #9); the Markdown path keeps working meanwhile. `uncited_write`: pass `--cite` and a verbatim `--quote`.
-  `handwritten_protected`: the target is hand-written; render to a new path. `muninn_timeout`: muninn hung past 10s;
-  run `muninn know list` by hand and check ledger locks. `muninn_error`: muninn exited nonzero or returned unparseable
-  JSON on add/list; run the same `muninn know ...` command by hand and read its stderr. `bad_record`: the typed record
-  failed validation (type, scope, tag, date or missing loop id). A help probe that exits nonzero is reported as
-  `muninn_old_ledger`, not `muninn_error`.
+  (`rows`, `by_reason_code`, `by_command`; deduped by `event_id`; commands `memory.*`, `decision.*`, `order.*`,
+  `lesson.*`, `proof.*`, `retro.*`, `teardown.*`, `handoff.*`), or
+  `grep '"command": "memory\.' <agentic-loop dir>/<session_id>/trace.jsonl`. An unsafe session id writes no row; an unset
+  or empty session id (CLI without `CLAUDE_SESSION_ID` or `--session`) writes rows under the fixed id
+  `memory-adapter-nosession`. A muninn refusal keeps its original code in the reason (`refused_<code>`).
+- Remediation (reason code: one-line fix, single source `scripts/lib/memory_reasons.py`):
+
+| Code | Remediation |
+|------|-------------|
+| `memory_backend_off` | memory.backend is off in the workflow config; set it to muninn (or remove the key) to write typed memory. |
+| `memory_backend_invalid` | memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml. |
+| `muninn_absent` | muninn is not on PATH; install it (the Markdown path is not a fallback). |
+| `muninn_old_ledger` | the D4 adapter expects retired Muninn flags. Keep the result degraded until a current request-bound adapter is designed. |
+| `muninn_timeout` | muninn hung past 10s; run `muninn know list` by hand and check store locks. |
+| `muninn_error` | muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and read stderr. |
+| `muninn_bad_output` | the retired D4 write protocol returned no numeric K-id. Inspect current Muninn records without a legacy scope flag. |
+| `muninn_store_missing` | no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once. |
+| `muninn_schema_old` | the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2. |
+| `muninn_schema_incomplete` | the D4 adapter expects retired v2 columns or tables. Inspect the current store with `muninn doctor`, then redesign the adapter. |
+| `uncited_write` | give a verbatim --quote (and --cite ref); a record without a quote is never written. |
+| `restricted_refused` | restricted records are never written by the adapter; write a normal-sensitivity claim. |
+| `bad_record` | the record failed validation (type, scope, tag, date, empty claim, or loop scope without a loop id). |
+| `handwritten_protected` | the render target is hand-written (no generator marker); render to a new path. |
+| `cite_not_user` | the cite must anchor in a user prompt; cite the owner's own words or use the approved-reply form. |
+| `cite_too_short` | a quote-only cite needs 12 to 300 characters; quote more of the user's prompt or cite an approval with its reply. |
+| `cite_unresolved` | the cite ref (or the quote, for a quote-only cite) was not found in `muninn session <root>`, or the approval has no reply before it, or no session id was given; check the ref. |
+| `cite_not_own_session` | the cite ref belongs to another session; only a prompt of the caller's own session (--session) can anchor a write. |
+| `cite_bad_approval` | the approval must be a short user prompt (80 chars or fewer) that directly follows the reply it answers. |
+| `refused_uncited` | muninn got no citation; pass --cite/--quote. |
+| `refused_not_found` | the cite ref does not resolve; run `muninn ingest` and check the ref. |
+| `refused_not_citable` | the cited event is a subagent thread; only the orchestrator session can write typed records. |
+| `refused_quote_length` | the quote must be 12 to 300 characters (a shorter one is valid only as a whole approval prompt). |
+| `refused_quote_not_found` | the quote is not verbatim in the cited event; copy it exactly. |
+| `refused_approval_needs_reply` | a short approval needs the reply it answers cited too; use the approved-reply form (--approval REF). |
+| `refused_preference_needs_user` | a preference must cite a user prompt. |
+| `refused_bad_supersedes` | the superseded K-id is missing, not current, or in another scope. |
+| `refused_bad_contradicts` | the contradicted K-id does not exist. |
+| `refused_bad_valid_until` | valid_until must be a future ISO date. |
+| `refused_bad_tags` | tags must match [a-z0-9_-]{1,32}. |
+| `refused_bad_loop_scope` | the loop id is invalid, or --global was combined with a loop scope. |
+| `refused_bad_kind` | the record kind is not one muninn accepts. |
+| `refused_text_length` | the claim must be 1 to 500 characters. |
+| `refused_no_caller_session` | quote-only writes need CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID in the environment. |
+| `refused_other` | muninn refused with a code not listed here; the reason is `refused_<code>`, read it and the muninn docs. |
+| `decision_wrong_session` | the loop state belongs to another session; record only from the owning session. |
+| `decision_wrong_loop` | the loop changed after the caller read it; read the current loop ID before recording. |
+| `decision_wrong_revision` | the graph changed after the caller read it; read the current revision before recording. |
+| `decision_blank_phase` | a decision needs a non-blank phase (for example 2.5). |
+| `decision_blank_decision` | a decision needs a non-blank decision text; nothing was written. |
+| `decision_invalid_chain` | the decision chain is damaged; inspect and preserve the loop state before any further sync. |
+| `decision_sync_unknown` | a decision sync may have reached Muninn; inspect the store before any manual retry. |
+| `decision_state_error` | the loop state could not be read, validated or locked; nothing was written. |
+| `order_chain_broken` | orders.json was edited by hand (the hash chain names the order); restore it from backup or review the named order, then re-seal by recording through orders.py. |
+| `order_blank_field` | an order needs a non-blank failure mode and lesson; nothing was written. |
+| `order_lesson_too_long` | the collapsed lesson exceeds 500 characters; provide a shorter complete claim, never truncate it. |
+| `order_bad_id` | an explicit order id must match [a-z0-9][a-z0-9_-]{0,119}; use a canonical id. |
+| `order_id_collision` | that id names another failure mode or scope; use its real identity or a distinct id. |
+| `order_not_found` | no order with that id in orders.json; check the id with `orders.py lessons`. |
+| `order_state_error` | orders, preparation or receipt could not be read, locked or written; check the repo-key dir, orders.lock and persistent teardown.jsonl.lock. |
+| `order_loop_unknown` | no source at <repo-key dir>/<session>/progress.json; pass its owning --session and separate logical --loop. |
+| `order_wrong_session` | the source directory, session or logical loop is foreign; use the owning directory and identifiers. |
+| `order_source_invalid` | progress, preparation or observations are malformed; restore genuine validated source artifacts. |
+| `order_source_mismatch` | the prepared source/hash is stale; before completion use `prepare --refresh-from-sha256` with its CURRENT `evidence_sha256`. |
+| `order_loop_ineligible` | graph or work units are incomplete or stopped; finish the existing completion requirements. |
+| `order_not_complete` | preparation is prospective; durably save owned progress complete before recurrence or aging. |
+| `order_pending_teardown` | completion saved but local apply or observation failed; retry tick with the same bound source. |
+| `order_retro_validator_unavailable` | schema3 retros need the matching retro_check.py validator; reconcile that source dependency before graduation. |
+| `order_already_ticked` | this session and logical loop were already counted; the tick was skipped (informational). |
+| `no_user_cite` | the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner prompt text>`. |
+| `legacy_uncited` | an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`. |
+| `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
+| `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
+| `lesson_not_current` | no unambiguous current cited claim exists; inspect conflicting current evidence, or explicitly re-record a retracted/expired lesson with a fresh quote. |
+
+- Limits: only the orchestrator session can write (subagent threads are not citable); cites must anchor in a user
+  prompt; the hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Measurement note: compare
+  `by_reason_code` before and after a change; a rising `muninn_absent` or `refused_approval_needs_reply` is the signal.
+  See `docs/decisions/2026-10-05-memory-authoritative.md`.
+
+## Decision recorded locally but Muninn sync degraded
+
+- Symptom: `graph.py record-decision` printed `"exit_code": 3` and a `muninn.reason_code`. The decision was appended
+  to `progress.json` `decisions_absorbed` before the sync attempt. For `unknown` or `syncing`, the Muninn copy may
+  already exist; inspect both stores before any recovery. A loop restarted during sync may no longer contain that row.
+  Trace rows: `decision.record/recorded/ok`, then `decision.sync/<written|degraded|disabled>/<reason_code>`.
+- Query: `python3 -c "import json;[print(r['seq'],r['muninn']) for r in json.load(open('progress.json'))['decisions_absorbed']]"`,
+  or `grep '"command": "decision\.' <agentic-loop dir>/<session_id>/trace.jsonl`. Chain check:
+  `python3 -c "import json,sys;sys.path.insert(0,'.');from scripts.lib import decision_record as d;print(d.verify_chain(json.load(open('progress.json'))['decisions_absorbed']))"`.
+- Fix: read the reason in the table above. An authorising prompt of "yes" (`cite_too_short`) is expected to degrade: at
+  teardown run `flush_pending(path, session, transition=..., cite_quote="<a substantive sentence the owner typed>")`;
+  the same `seq` is patched to `written`. Rows are never deleted or rewritten to clear a degrade.
+- Limits: the chain is a cooperating-agent safeguard (a same-user agent can rewrite file and chain), and dropping the
+  last row is detected only by the in-file head anchor, which the same agent can also rewrite. Measurement note: `docs/typed-records-measurement.md`.
+
+## Standing order stored without a cite, or a lesson missing from dispatch
+
+- Symptom: `orders.py record` exited 3 with `muninn.reason_code` (`no_user_cite`, `muninn_absent`, `cite_*`), or
+  `lessons.py query` / `orders.py lessons` exited 3 with `{"degraded": ...}`, or an order you recorded is absent from the
+  list. Before completion, `record` stages bound inputs and syncs the cited claim without lifecycle effects. After
+  owned progress is durably complete, local apply records recurrence and aging in `orders.json`. A degraded store
+  result retains any prior K-id. `lessons` never prints ledger text when Muninn is down (`memory.backend: off` is the
+  explicit switch). Trace rows: `order.record|prepare|tick|render|import|cite`, `lesson.query|predicate`.
+- Query: `python3 scripts/lib/lessons.py --dir <repo-key dir> --session <known native caller id> query --format contract`
+  reads current cited lessons. Diagnostic `orders.py ... lessons` also returns an `excluded` list naming entries
+  is retracted, expired or superseded, reason `lesson_not_current`), or
+  `grep -E '"command": "(order|lesson)\.' <agentic-loop dir>/<session_id>/trace.jsonl`. A hand edit of `orders.json` is
+  refused with `order_chain_broken` naming the order.
+- Fix: read the reason in the table above. For `no_user_cite` / `legacy_uncited` run
+  `orders.py --dir <repo-key dir> cite <id> --quote "<verbatim words the owner typed>"` from the owning session. To
+  adopt the old hand-written file run `orders.py import-legacy`. It archives an exact byte copy under the next free
+  `standing-orders.legacy*.md` name and retains the source (`archived_to`, `source_retained: true`). Check the ledger
+  and archive; retire the hand-written `standing-orders.md` before `orders.py render`. Use typed orders thereafter.
+- Apply contract: use `--dir <repo-key dir> --session <provider session>` with the separate logical `--loop` copied
+  from `<repo-key dir>/<session>/progress.json`. Stage `record` inputs before completion. The native `graph.py
+  complete` command prepares orders before the progress lock, rechecks the prepared source under that lock, saves
+  completion, then ticks and renders after it releases the lock. Claude `mark-complete` uses this same path and also
+  stamps the invocation marker. Preparation ages nothing. The tick holds the orders lock and records `orders_ticked`
+  after its ledger save. A failed completion save ages nothing. Repeat the native completion command to resume a
+  pending tick or render without a second age change; do not edit `progress.json`.
+  Render holds the orders lock while it writes both views. The receipt checks the ledger and both view hashes under
+  that lock. If they differ, completion stays pending; repeat the native completion command to render again.
+  The Claude Stop guard and Codex `verify-completion` block when the tick or bound generated views are incomplete.
+  If render fails on the installed Muninn API, the pending result and later verifier show its actual reason code.
+  The installed Muninn uses a current request-bound API that this D4 adapter does not support. Treat live lesson
+  activation as pending; do not use ledger text as a substitute for a current cited claim.
+- Pre-D4 complete loop: review its retained evidence before the exact-hash admission. The receipt then follows only
+  completion bookkeeping; other graph changes still block. See `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
+- Completed text replacement: when this session/loop observation already exists, explicit `record` captures
+  `replaces_source` in the prepared row. The canonical `lesson_source` hashes owned binding, authored fields and that
+  predecessor, excluding mutable store observations, and is sealed/saved with the lesson. Ordinary tick recovers only
+  the accepted row while preserving counters and evidence; an equal published token needs no replay. A later authored
+  source is preserved. Without an exact validated success receipt for this preparation, a conflicting retry stays
+  pending and emits no false completion receipt. Older absent predecessor fields are never retroactively invented;
+  a captured null is distinct and cannot authorize delayed replacement without its own published source or exact
+  validated acknowledgement, even if no later edit occurred. Direct completed explicit record remains available.
+  Publication, receipt loss and then a later replacement can remain pending because these
+  two retained facts do not prove historical application. Unbound pure-model record updates clear an old source token.
+- Preparation recovery: changed sources are refused by default. Before completion, use
+  `prepare --loop <logical loop> --refresh-from-sha256 <CURRENT evidence_sha256>` only with the canonical hash returned
+  by the current preparation. Comparison happens under the same orders lock. Resolved directories, session and
+  logical loop must match; revision cannot roll back, and no matching local tick or recurrence may already exist.
+  Staged records are preserved, with no lifecycle effects. Wrong/stale hashes, invalid/foreign/complete sources and
+  prior application refuse unchanged. A durably saved replacement with a failed preparation receipt leaves progress
+  incomplete; ordinary unchanged `prepare` repairs the receipt without another replacement or duplicate observation.
+  After durable completion, retry `tick` only. Flush and reload pending source updates before final prepare/refresh.
+- Receipt publication: D4 refuses linked preparation, receipt and persistent sidecar paths before read/open/create.
+  It holds orders.lock, then `teardown.jsonl.lock`, and validates every prior physical LF JSONL object, finite JSON
+  number and terminal newline before deduplication, preserves prior bytes, and atomically publishes a complete
+  fsynced sibling. Short writes make progress until complete; a zero write or partial-write exception leaves canonical
+  evidence untouched. An ambiguous error after replacement needs an ordinary prepare/tick retry, without duplicate
+  lifecycle effects. Pre-existing malformed or newline-less evidence is refused untouched; restore genuine evidence,
+  never truncate or skip a tail. Other teardown publishers must adopt the same sidecar/framing/atomic publication
+  contract to preserve concurrent events. D6 adoption remains pending; its latest-step dedupe policy is separate.
+- Shared identity: an id binds failure mode and scope across the ledger and every valid retained preparation before
+  record/cite sync or local application. Historical preparations still constrain identity after progress advances;
+  they establish no present eligibility, currentness, citation or lifecycle effect. Same identities in other sessions
+  are accepted recurrences; conflicts and foreign/malformed stored bindings refuse before superseding a store claim.
+- Current citation: explicit `record` alone may replace lesson text. `cite` reconciles the current tagged claim even
+  when the ledger holds older text, without a knowledge write. A formerly cited id without a current replacement
+  refuses; a genuinely uncited first attachment still validates the owner's quote. Distinct simultaneous current
+  claims refuse as `lesson_not_current`. Tick performs current reads without knowledge writes; outages retain saved
+  K-ids over stale preparation metadata and return explicit degradation. Idempotent tick retry may refresh metadata
+  without repeating lifecycle effects. Promotion uses the current cited join, independent of cached write state.
+- Limits: the one same-user orders lock covers currentness, reconciliation, bounded sync and direct atomic ledger
+  save; it provides no exactly-once network guarantee. Current tagged claims are reconciled even for degraded/pending
+  local records. Only a new completed session+loop recurrence resets a counter or revives a tombstone; replaying the
+  same observation cannot rejuvenate it. Authoritative dispatch, promotion and views use current, normal, live,
+  verified user-cited claims. Diagnostic `orders.py lessons` may show uncited rows (`cited: false`); contract queries,
+  promotion and views exclude them. Owner-cited lesson text is legitimate typed memory; advisory transcript
+  observations remain metadata only. Failed reads exit 3, with no ledger-text fallback. A fresh cited claim can
+  supersede prior text. Legacy import retains full source text and first-seen provenance, preserves decayed counters,
+  and refuses incomplete/colliding entries or an external source path without changing the original.
+- Legacy retry: each row seals the SHA-256 of the exact source bytes. `import-legacy` skips a complete cohort only
+  when saved rows, timestamp and source hash match. It reuses only an exact archive, else publishes a new copy without
+  replacing an occupied name. Mixed or divergent rows refuse. Archive publication precedes ledger save. A failed or
+  uncertain save keeps source and archive; success requires a canonical ledger equal to the expected sealed rows.
+- Graduation still requires >=10 distinct completed source-bound retros, recurrence and decay. Schema2 records need
+  complete typed fields and their genuine completed progress hash. Schema3 delegates to `retro_check.check`; an absent
+  validator returns `order_retro_validator_unavailable`, rather than a known zero count. Both ledger and source hashes
+  remain a cooperating-agent safeguard: the same user can rewrite and recompute them.
+  Measurement note: `docs/typed-records-measurement.md`; overlap decision:
+  `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
+- Lesson attribution: pass the known native caller id with `--session`. The CLI also recognizes CLAUDE_SESSION_ID,
+  CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID and CODEX_SESSION_ID, in that order; explicit input wins. Joined reads carry
+  that id through query, predicate, diagnostic lessons and render to underlying degraded adapter traces. Environment
+  support in source and private fixtures does not prove a variable is exported in an installed provider session.
 
 ## Stop declared in text instead of recorded, or a stop released unexpectedly
 
@@ -200,8 +378,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
 - Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a
-  stderr "action_authority (advisory)" warning appears. The gate is default ON (a "default ON" enforce): absent config or any value
-  other than `off` / `advisory` is `enforce`; `action_authority: off` is the explicit switch.
+  stderr "action_authority (advisory)" warning appears. The gate is off unless config explicitly sets
+  `action_authority: enforce` or `action_authority: advisory`.
 - Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
@@ -212,7 +390,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `printf ZeroDivisionError | shasum -a 256`) and `loop_id` when known; the hook's stderr (hook log) prints
   `action_authority failed open: <Class>: <message>`. A session-less failure is traced under `_no_session`.
 - Remediation (OWNER, at a terminal; an agent cannot): one-time `python3 scripts/authority_keys.py init` (passphrase-protected
-  key; `install-root` prints the sudo commands for the real root-owned trust root; `show` prints fingerprints), then mint for the exact command:
+  key; `show` prints fingerprints), then mint for the exact command:
   `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge|git_push --command '<exact command>' --cwd <directory it runs in>`
   (single-use, 1h by default; the CLI computes repository+ref+SHA itself, signs, and refuses without a tty with
   `receipt_refused_no_tty`; `inspect-receipt` / `revoke-receipt` take `--receipt-id`). `signer_unknown` / `trust_root_missing`
@@ -235,9 +413,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   its own exceptions.
 - Codex: the hook imports the byte-identical mirrored libs and the package ships `scripts/action_receipt_cli.py` and
   `scripts/authority_keys.py` (same owner-run rules).
-- Limits: the trust root has two tiers. The root tier (`/Library/Application Support/Coderails/receipt_signers`, uid 0, not group/other
-  writable, owner-installed with sudo, not installed by this repo) is the real boundary; the user tier (`~/.coderails/keys/receipt_signers`)
-  is agent-writable, so it is a cooperating-agent safeguard. An agent with Accessibility or control of the owner's terminal is out of scope
+- Limits: the user-tier trust root (`~/.coderails/keys/receipt_signers`) is agent-writable, so it is a
+  cooperating-agent safeguard. An agent with Accessibility or control of the owner's terminal is out of scope
   (docs/decisions/p3-human-only-minting.md). The hash covers only the command text the hook sees, not aliases, functions, eval/xargs or scripts that
   push (sudo/time/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped; an env assignment prefix is kept and makes the command unbindable). Limits: scope 500 chars, 8 KB per receipt,
   50 receipts per session (`receipt_refused_scope_too_long`, `receipt_refused_too_many`). Protected branches are main and master only.

@@ -250,7 +250,15 @@ class HookTests(unittest.TestCase):
     def grant(self, session: str, *extra: str, ok: bool = True) -> subprocess.CompletedProcess[str]:
         """Mint through the mirrored typed command (the only route; the hook never mints)."""
         result = subprocess.run(
-            [sys.executable, str(PACKAGE / "scripts/authority.py"), "grant", "--session", session]
+            [
+                sys.executable,
+                str(PACKAGE / "scripts/authority.py"),
+                "grant",
+                "--session",
+                session,
+                "--scope",
+                "autonomous_decisions",
+            ]
             + ["--max-prs", "0", *extra],
             env=self.environment | {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)},
             capture_output=True,

@@ -2,9 +2,9 @@
 """Run one guarded role as its own contained Codex session: `codex_role_session.py --role <agent> --prompt-file <f>`.
 
 Codex native children inherit the parent's permissions and MCP servers, and a role TOML's sandbox_mode does not change
-that. A separate `codex exec` does: user config is ignored, the sandbox is read-only, the shell tool is off, and exactly
-one MCP server (this role's, from capability_mcp.py) is registered. The prompt is read from a file, the environment is
-an allowlist. Use it for source-auditor, whose tests_run/cmd_run must not be reachable by inherited children.
+that. A separate `codex exec` does: user config is ignored, the sandbox is read-only, shell and nested agents are off,
+and exactly one MCP server (this role's, from capability_mcp.py) is registered. The prompt comes from a file, and the
+environment is an allowlist. Use it for source-auditor. Its tests_run/cmd_run must not be reachable by native children.
 """
 
 from __future__ import annotations
@@ -24,6 +24,10 @@ TOOLS = {"repo.inspect", "diff.read", "tests.run", "pr.comment", "cmd.run"}
 ENV_ALLOW = ("PATH", "HOME", "CODEX_HOME", "LANG", "LC_ALL", "TERM", "TMPDIR")
 ROLE = re.compile(r"^[a-z][a-z0-9-]{0,60}$")
 OPTIONS = {"--role", "--prompt-file", "--cwd"}
+SOURCE_AUDITOR_APPROVALS = (
+    'mcp_servers.cap-source-auditor.tools.cmd_run.approval_mode="approve"',
+    'mcp_servers.cap-source-auditor.tools.tests_run.approval_mode="approve"',
+)
 
 
 def guarded_roles(root: Path) -> set[str]:
@@ -76,9 +80,22 @@ def build_argv(role: str, root: Path, cwd: str | None = None) -> list[str]:
     command = json.dumps(sys.executable)
     args = json.dumps([str(root / "scripts" / "capability_mcp.py"), "--role", role])
     # JSON string syntax is valid TOML basic-string syntax, so json.dumps quotes the inline table safely.
-    argv = ["codex", "exec", "--ignore-user-config", "-s", "read-only", "-c", "features.shell_tool=false"]
+    argv = [
+        "codex",
+        "exec",
+        "--ignore-user-config",
+        "-s",
+        "read-only",
+        "-c",
+        "features.shell_tool=false",
+        "-c",
+        "features.multi_agent=false",
+    ]
     argv += ["-c", f"developer_instructions={json.dumps(role_instructions(root, role))}"]
     argv += ["-c", f"mcp_servers.cap-{role}={{command = {command}, args = {args}}}"]
+    if role == "source-auditor":
+        for approval in SOURCE_AUDITOR_APPROVALS:
+            argv += ["-c", approval]
     if cwd:
         argv += ["-C", cwd]
     return argv + ["-"]
@@ -87,7 +104,8 @@ def build_argv(role: str, root: Path, cwd: str | None = None) -> list[str]:
 def contained(argv: list[str], role: str) -> bool:
     """True only when argv carries every containment setting and exactly this role's one MCP server."""
     overrides = [argv[i + 1] for i, token in enumerate(argv[:-1]) if token == "-c"]
-    servers = [o for o in overrides if o.startswith("mcp_servers.")]
+    servers = [o for o in overrides if o.startswith("mcp_servers.") and ".tools." not in o]
+    approvals = [o for o in overrides if ".approval_mode=" in o]
     instructions = [o for o in overrides if o.startswith("developer_instructions=")]
     sandbox = [argv[i + 1] for i, token in enumerate(argv[:-1]) if token == "-s"]
     return (
@@ -95,9 +113,11 @@ def contained(argv: list[str], role: str) -> bool:
         and "--ignore-user-config" in argv
         and sandbox == ["read-only"]
         and "features.shell_tool=false" in overrides
+        and "features.multi_agent=false" in overrides
         and len(instructions) == 1
         and len(servers) == 1
         and servers[0].startswith(f"mcp_servers.cap-{role}=")
+        and approvals == (list(SOURCE_AUDITOR_APPROVALS) if role == "source-auditor" else [])
         and argv[-1] == "-"
     )
 

@@ -18,10 +18,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agent
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 import graph
 from graph_artifacts import validate_evals
-from graph_completion import complete, verify_completion
 from graph_identity import GraphError
 
-from packages.tests.codex_fixture import append, frozen_evals, read_json, spawn, state, transcripts, write_json
+from packages.tests.codex_fixture import (
+    append,
+    complete,
+    frozen_evals,
+    read_json,
+    spawn,
+    state,
+    transcripts,
+    verify_completion,
+    write_json,
+)
 
 
 class CompletionTests(unittest.TestCase):
@@ -32,6 +41,13 @@ class CompletionTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
+        previous = Path.cwd()
+        subprocess.run(["git", "init", "-q", str(self.directory)], check=True)
+        config = self.directory / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
+        config.write_text("memory:\n  backend: off\n")
+        os.chdir(self.directory)
+        self.addCleanup(os.chdir, previous)
         self.addCleanup(patch.stopall)
         patch("pathlib.Path.home", return_value=self.directory).start()
         self.path = self.directory / "loops/project/parent/progress.json"

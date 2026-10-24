@@ -86,10 +86,10 @@ a consumer. Those four lines are superseded by the next section; the user direct
 - Hook `action_authority_gate.py` (Claude, appended to the Bash group; Codex imports the byte-identical mirrored
   `scripts/lib/{action_receipt,receipt_signing,action_binding}.py`): opt-in via config `action_authority` (enforce | advisory | off, default off); it does not touch
   `pr_merge_gate`, the destructive gate or `enforce_pr_workflow`.
-- What a receipt proves: the holder of the passphrase-protected owner key signed an approval for exactly this command text,
-  cwd, branch, repository, ref and SHA, for this session and loop, once, before it expired. `approve-action` is owner-run: it
-  refuses without a tty (`receipt_refused_no_tty`). With the user-tier trust root (agent-writable) this is a
-  cooperating-agent safeguard; only the root-owned tier (owner-run sudo install, not performed here) is a real boundary.
+- What a receipt proves: a key listed in the user-tier signers file signed this command text, cwd, branch,
+  repository, ref and SHA for this session and loop. It expires and can be used once. `approve-action` refuses
+  without a tty (`receipt_refused_no_tty`). The user-tier signers file is agent-writable, so this is a
+  cooperating-agent safeguard. It does not establish independent human approval.
 - Limits: hash covers only the command text the hook sees (not aliases, functions, eval/xargs; common wrappers are
   unwrapped); protected branches are main/master only; (guess, unverified) a subagent's `session_id` may differ from
   its parent's, so a receipt minted by the parent could be refused as `foreign_session` for worker-run actions.
@@ -115,13 +115,17 @@ The phrase heuristics (`invoked()`, negation, question and quote handling, about
   Codex: `packages/codex/skills/authorize/SKILL.md` instructs the same command (no pre-execution).
 - `crack_on_gate.py` (Claude and Codex) on `UserPromptSubmit` never writes. On "crack on" / "crack-on" with no live authority it emits
   `additionalContext` with the grant command and traces `crack_on/ignored/authority_phrase_ignored`. The AskUserQuestion /
-  request_user_input denial, expiry, revoked, foreign and legacy-flag paths are unchanged.
+  request_user_input denial, expiry, revoked, foreign and legacy-flag paths are unchanged. A later B3 correction
+  makes each hook check for `autonomous_decisions` in the current grant scope. The printed grant command now includes
+  that scope and `--denied destructive_shell`. A narrowed grant with an empty scope allows user input.
 - Codex mirror: `packages/codex/scripts/authority.py` and `packages/codex/scripts/lib/authority_object.py` are byte-identical to
   the Claude files (parity test); `hook_common.py` no longer vendors `authority_state`/`write_authority`/`parse_expiry` and imports the
   mirrored lib. Both trace and authority paths now honour `CODERAILS_AGENTIC_LOOP_DIR` as a fallback, as the old Codex vendored code did.
+- A session ID must start with an ASCII letter or digit. It can then contain ASCII letters, digits, `.`, `_`, or `-`,
+  but not `..`. Both grant CLIs and both hooks use this check. Other characters cannot enter a printed shell command.
 - Limit (cooperating-agent safeguard): an agent with shell access can also run `authority.py grant` (for Codex the skill is itself an
   instruction to do so). The change stops accidental, negated and pasted-text grants and removes the false precision of a prose
-  matcher; it does not stop a hostile same-user agent. A human-only mint (receipt signing) is a separate unit.
+  matcher; it does not stop a hostile same-user agent. Optional signed receipts are a separate unit.
 - Same-user boundary: `granted_by` is an unsigned, self-asserted label. Besides running `grant`, an agent can write `authority.json` directly (Write or a shell redirect, with any `granted_by` or none) or touch the legacy `crack_on_active` flag (no expiry, still honoured), and nothing guards those paths; the crack-on hint tells agents not to grant.
 - Not verified: that `${CLAUDE_SESSION_ID}` is substituted before the `!` pre-execution runs in Claude Code 2.1.289 (strings in the binary show
   substitution in the skill body, ordering vs shell execution not observed); the env fallback covers an empty expansion. The

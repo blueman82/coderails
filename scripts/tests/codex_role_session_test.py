@@ -44,7 +44,7 @@ class ArgvTests(IsolatedTrace):
         self.assertEqual(argv[argv.index("-s") + 1], "read-only")
         overrides = [argv[i + 1] for i, token in enumerate(argv) if token == "-c"]
         self.assertIn("features.shell_tool=false", overrides)
-        servers = [o for o in overrides if o.startswith("mcp_servers.")]
+        servers = [o for o in overrides if o.startswith("mcp_servers.") and ".tools." not in o]
         self.assertEqual(len(servers), 1)
         self.assertTrue(servers[0].startswith("mcp_servers.cap-source-auditor="), servers)
         self.assertIn("--role", servers[0])
@@ -69,9 +69,35 @@ class ArgvTests(IsolatedTrace):
             with self.subTest(role=role):
                 text = " ".join(crs.build_argv(role, REPO))
                 self.assertIn(f"mcp_servers.cap-{role}=", text)
-                self.assertEqual(text.count("mcp_servers."), 1)
+                self.assertEqual(text.count(f"mcp_servers.cap-{role}={{"), 1)
                 for other in set(GUARDED) - {role}:
                     self.assertNotIn(f"cap-{other}", text.replace(f"cap-{role}", ""))
+
+    def test_every_guarded_role_disables_nested_agents(self) -> None:
+        """Guarded Codex roles must not receive the nested Agent tool."""
+        for role in GUARDED:
+            with self.subTest(role=role):
+                argv = crs.build_argv(role, REPO)
+                overrides = [argv[i + 1] for i, token in enumerate(argv[:-1]) if token == "-c"]
+                self.assertIn("features.multi_agent=false", overrides)
+                self.assertTrue(crs.contained(argv, role))
+                self.assertFalse(crs.contained([arg for arg in argv if arg != "features.multi_agent=false"], role))
+
+    def test_only_source_auditor_approves_its_bounded_execution_tools(self) -> None:
+        """The two granted execution tools work under approval=never; other roles get no approval override."""
+        allowed = {
+            'mcp_servers.cap-source-auditor.tools.cmd_run.approval_mode="approve"',
+            'mcp_servers.cap-source-auditor.tools.tests_run.approval_mode="approve"',
+        }
+        auditor = crs.build_argv("source-auditor", REPO)
+        overrides = {auditor[i + 1] for i, token in enumerate(auditor[:-1]) if token == "-c"}
+        self.assertTrue(allowed <= overrides)
+        self.assertFalse(crs.contained([arg for arg in auditor if arg not in allowed], "source-auditor"))
+        extra = 'mcp_servers.cap-source-auditor.tools.pr_comment.approval_mode="approve"'
+        self.assertFalse(crs.contained([*auditor[:-1], "-c", extra, "-"], "source-auditor"))
+        for role in set(GUARDED) - {"source-auditor"}:
+            with self.subTest(role=role):
+                self.assertFalse(any("approval_mode" in arg for arg in crs.build_argv(role, REPO)))
 
     def test_package_install_root_loads_its_own_role_contract(self) -> None:
         """The independent Codex package has the role instructions and server script it launches."""
@@ -136,7 +162,10 @@ class EnvAndRunTests(IsolatedTrace):
             fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
             prompt = Path(tmp) / "prompt.txt"
             prompt.write_text("audit claim 1")
-            with patch.dict(os.environ, {"PATH": f"{bin_dir}:/usr/bin:/bin", "GH_TOKEN": "secret", "HOME": tmp}):
+            with patch.dict(
+                os.environ,
+                {"PATH": f"{bin_dir}:{Path(sys.executable).parent}:/usr/bin:/bin", "GH_TOKEN": "secret", "HOME": tmp},
+            ):
                 code = crs.main(["--role", "source-auditor", "--prompt-file", str(prompt), "--cwd", tmp])
             seen = json.loads(out.read_text())
         self.assertEqual(code, 0)

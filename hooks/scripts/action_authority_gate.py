@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Action-receipt gate, ON by default: gh pr merge and git push to main/master need a matching receipt.
+"""Optional action-receipt gate for gh pr merge and git push to main/master.
 
-Config `action_authority`: off | advisory | enforce; absent, unreadable or anything else is enforce.
-Only `off` is silent (exit 0). Advisory traces and warns, never denies. Enforce denies only when no receipt
-verifies. Any own error fails open with reason action_authority_failed_open. It does not touch pr_merge_gate,
-destructive_bash_gate or enforce_pr_workflow. Limits: the hash covers only the command text seen here (not aliases,
-functions, xargs, scripts that push; sudo/subshell/bash -c/eval/gh api wrappers, quoting and absolute program paths
-are normalised by guarded_segments, an env assignment prefix is kept and makes the command unbindable). The mode is
-read from the in-repo config, which the agent can edit: `off` is a same-user switch, not a boundary. Each enforce use is
+Config `action_authority`: enforce | advisory; absent, unreadable or anything else is off. Advisory traces and
+warns, never denies. Enforce denies only when no receipt verifies. Host-resource exhaustion reading the payload
+also denies; any other own error fails open with reason action_authority_failed_open. It does not touch
+pr_merge_gate, destructive_bash_gate or enforce_pr_workflow. The hash covers the command text seen here;
+guarded_segments normalises supported wrappers and rejects commands whose earlier steps move the bound ref.
+Each enforce use is
 claimed by an atomic O_EXCL marker and the claim, not the verify, decides allow vs deny.
 A receipt is signed (ssh-keygen, namespace coderails-receipt) and bound to repository+ref+sha; with the user-tier
 trust root that is a cooperating-agent safeguard, not a boundary (docs/decisions/p3-human-only-minting.md).
@@ -21,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import deny, read_payload
+from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload_strict
 from hooks.scripts.lib.destructive_patterns import git_output
 from hooks.scripts.lib.pr_workflow_match import guarded_segments, state_mutated_before_guard
 from hooks.scripts.lib.trace_row import append_row
@@ -33,15 +32,19 @@ from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
 
 def mode(cwd: str) -> str:
-    """Return enforce (the default, also for absent or unreadable config), advisory or off, never raising."""
+    """Use receipts only when the repository explicitly enables advisory or enforce mode."""
     path = config_path(cwd)
     value = config_value(path, "action_authority") if path else ""
-    return value if value in {"advisory", "off"} else "enforce"
+    return value if value in {"enforce", "advisory"} else "off"
 
 
 def main() -> int:
     """Check one Bash payload; every guarded segment needs its own receipt; fail open on any own error."""
-    payload = read_payload()
+    try:
+        payload = read_payload_strict()
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)  # fail closed: a gate that cannot read its input must not allow the action
+        return 0
     session = str(payload.get("session_id") or "")
     trace_id = session or "_no_session"  # append_row refuses an empty id; keep the denial countable
     loop_id: str | None = None
@@ -94,7 +97,7 @@ def main() -> int:
                 "Use the exact forms `git push <remote> <ref>` (no env prefix, -c or --git-dir) and `gh pr merge <n> "
                 "--match-head-commit <head sha>`, with no earlier ref-moving step in the same command."
                 if code in {"binding_unknown", "state_mutated_before_guard"}
-                else "The OWNER mints one at a terminal (it is signed with their passphrase key; an agent cannot): "
+                else "For optional receipt enforcement, sign one at a terminal with the configured key: "
                 f"python3 scripts/action_receipt_cli.py approve-action --session {session} --kind {name} "
                 "--command '<exact command>' --cwd <directory it runs in>. "
                 "One-time key setup: scripts/authority_keys.py init."
@@ -111,4 +114,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("action_authority_gate", main))

@@ -279,11 +279,11 @@ class HookTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
 
     def test_off_and_advisory(self) -> None:
-        """Only `off` is silent; no config or junk is enforce (default ON); advisory warns and traces, never denies."""
-        self.assertTrue(self.denied(MERGE))  # no config at all
+        """No config, off, and invalid values are silent; advisory warns but does not deny."""
+        self.assertFalse(self.denied(MERGE))  # no config at all
         self.configure("bogus")
-        self.assertTrue(self.denied(MERGE))
-        self.assertEqual(set(self.reasons()), {"denied_no_receipt"})
+        self.assertFalse(self.denied(MERGE))
+        self.assertEqual(self.reasons(), [])
         self.configure("off")
         result = self.run_hook(MERGE, session="s2")
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
@@ -379,14 +379,14 @@ class HookTests(unittest.TestCase):
         self.assertFalse(self.denied("git push origin main"))
 
     def test_missing_session_and_owner_hint(self) -> None:
-        """No session_id: a traced no_session denial; the hint says the OWNER mints at a terminal."""
+        """No session_id: a traced no_session denial; the hint gives the optional receipt command."""
         self.configure("enforce")
         result = self.run_hook("git push origin main", session="")
         self.assertIn("no_session", result.stdout)
         self.assertNotIn("--session  ", result.stdout)
         rows = (self.loop / "_no_session" / "trace.jsonl").read_text().splitlines()
         self.assertEqual(json.loads(rows[0])["reason_code"], "denied_no_session")
-        self.assertIn("OWNER mints", self.run_hook("git push origin main").stdout)
+        self.assertIn("sign one at a terminal", self.run_hook("git push origin main").stdout)
 
     def test_registered_with_timeout(self) -> None:
         """Appended last to the ^Bash$ group with a timeout of at least 5."""

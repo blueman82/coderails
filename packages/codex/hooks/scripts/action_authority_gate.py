@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Action-receipt gate, ON by default (Codex copy of hooks/scripts/action_authority_gate.py).
+"""Optional action-receipt gate (Codex copy of hooks/scripts/action_authority_gate.py).
 
-Config `action_authority`: off | advisory | enforce; absent or anything else is enforce, only `off` is silent.
+Config `action_authority`: enforce | advisory; absent or anything else is off.
 Advisory traces and warns, never denies; enforce denies only when no receipt verifies; any own error fails open
 (action_authority_failed_open).
 Receipts are signed and bound to repository+ref+sha (mirrored scripts/lib); with the user-tier trust root that is a
@@ -28,16 +28,16 @@ from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
 
 def mode(cwd: str) -> str:
-    """Return enforce (the default), advisory or off from the nearest .coderails/workflow.config.yaml, never raising."""
+    """Read explicit advisory or enforce mode from the nearest workflow config."""
     probe = Path(cwd).resolve()
     for directory in (probe, *probe.parents):
         candidate = directory / ".coderails" / "workflow.config.yaml"
         if candidate.is_file():
             match = re.search(r"^action_authority:\s*[\"']?(\w+)", candidate.read_text(), re.MULTILINE)
-            return match[1] if match and match[1] in {"advisory", "off"} else "enforce"
+            return match[1] if match and match[1] in {"enforce", "advisory"} else "off"
         if (directory / ".git").exists():
             break
-    return "enforce"
+    return "off"
 
 
 def main() -> int:
@@ -95,7 +95,7 @@ def main() -> int:
                 "Use the exact forms `git push <remote> <ref>` (no env prefix, -c or --git-dir) and `gh pr merge <n> "
                 "--match-head-commit <head sha>`, with no earlier ref-moving step in the same command."
                 if code in {"binding_unknown", "state_mutated_before_guard"}
-                else "The OWNER mints one at a terminal (signed with their passphrase key; an agent cannot): run "
+                else "For optional receipt enforcement, sign one at a terminal with the configured key: run "
                 f"scripts/action_receipt_cli.py approve-action --session {session} --kind {name} "
                 "--command '<exact command>' --cwd <directory it runs in>. "
                 "One-time key setup: scripts/authority_keys.py init."
@@ -112,4 +112,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("action_authority_gate", main))

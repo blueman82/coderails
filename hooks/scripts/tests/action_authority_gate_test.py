@@ -76,8 +76,8 @@ class GateTests(HookCase):
         path = self.loop / session / "trace.jsonl"
         return [json.loads(line)["reason_code"] for line in path.read_text().splitlines()] if path.exists() else []
 
-    def test_only_explicit_off_is_silent(self) -> None:
-        """`off` never denies, warns or traces; absent config, junk and empty values are enforce (default ON)."""
+    def test_only_explicit_modes_run_the_gate(self) -> None:
+        """Absent config, off, and invalid values do not require a receipt."""
         self.configure("off")
         result = self.invoke("action_authority_gate", self.payload(MERGE))
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
@@ -87,16 +87,14 @@ class GateTests(HookCase):
                 self.configure(value if value is not None else "")
                 if value is None:
                     (self.repo / ".coderails/workflow.config.yaml").unlink()
-                self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
-        self.assertEqual(set(self.reasons()), {"denied_no_receipt"})
+                self.assertFalse(self.denied("action_authority_gate", self.payload(MERGE)))
+        self.assertEqual(self.reasons(), [])
 
-    def test_default_is_enforce_without_any_config_file(self) -> None:
-        """No .coderails directory at all: an unreceipted merge and push to main are denied."""
+    def test_default_is_off_without_any_config_file(self) -> None:
+        """No .coderails directory: ordinary merge and push do not require receipts."""
         self.assertFalse((self.repo / ".coderails").exists())
-        self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
-        self.assertTrue(self.denied("action_authority_gate", self.payload(PUSH)))
-        self.mint(PUSH, "git_push")
         self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))
+        self.assertFalse(self.denied("action_authority_gate", self.payload(MERGE)))
 
     def test_advisory_warns_and_traces_never_denies(self) -> None:
         """Advisory without a receipt: stderr warning plus a trace row, no denial."""
@@ -198,7 +196,7 @@ class GateTests(HookCase):
         self.configure("enforce")
         payload = self.payload(MERGE)
         with (
-            mock.patch.object(gate, "read_payload", return_value=payload),
+            mock.patch.object(gate, "read_payload_strict", return_value=payload),
             mock.patch.object(gate, "find_valid", side_effect=RuntimeError("boom")),
             mock.patch.object(gate, "binding", return_value={"repository": "r", "ref": "f", "sha": "s"}),
             mock.patch.dict("os.environ", {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}),
@@ -251,10 +249,10 @@ class GateTests(HookCase):
         self.assertEqual(self.reasons("_no_session"), ["denied_no_session"])
 
     def test_deny_hint_names_the_owner_run_mint(self) -> None:
-        """The denial tells the agent the OWNER mints receipts at a terminal."""
+        """The denial gives the optional receipt command."""
         self.configure("enforce")
         out = self.invoke("action_authority_gate", self.payload(PUSH)).stdout
-        self.assertIn("OWNER mints", out)
+        self.assertIn("sign one at a terminal", out)
         self.assertIn("authority_keys.py init", out)
 
     def test_failed_open_row_carries_error_class_and_loop(self) -> None:
@@ -262,7 +260,7 @@ class GateTests(HookCase):
         self.configure("enforce")
         payload = self.payload(MERGE)
         with (
-            mock.patch.object(gate, "read_payload", return_value=payload),
+            mock.patch.object(gate, "read_payload_strict", return_value=payload),
             mock.patch.object(gate, "read_authority", side_effect=ZeroDivisionError("boom")),
             mock.patch.dict("os.environ", {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}),
             mock.patch("sys.stderr") as err,

@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import sys
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -42,16 +43,11 @@ def append_row(
 
 
 def safe_session(session_id: object) -> bool:
-    """Accept only a nonempty id that is path-local as written; never sanitise, so ids cannot collide."""
+    """Accept only shell-safe, path-local IDs as written; never sanitise or merge identities."""
     return (
         isinstance(session_id, str)
-        and bool(session_id)
-        and session_id != "."
-        and "/" not in session_id
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", session_id) is not None
         and ".." not in session_id
-        and "\0" not in session_id
-        and "$" not in session_id  # an unsubstituted ${CLAUDE_SESSION_ID} must fail loudly, not bind a dead id
-        and "{" not in session_id
     )
 
 

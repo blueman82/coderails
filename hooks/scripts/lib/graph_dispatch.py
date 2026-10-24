@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
 
+from scripts.lib import orders_completion
+
+from .dir_lock import acquire_dir_lock, release_dir_lock
 from .graph_evidence import ENVELOPE_KEY, cursor, envelope, object_value, transcript
 from .graph_evidence_bind import bind_wave
 from .graph_evidence_revalidate import revalidate_all
@@ -77,12 +81,14 @@ def plan(path: Path) -> list[dict[str, Any]]:
         source = TARGETS.get(role)
         item: dict[str, Any] = {
             "node_id": node_id,
+            **graph_semantics.describe_node(node_id),
             "graph_role": role,
             "path": source,
             "unresolved": not source or not (ROOT / source).is_file(),
         }
         if state["graph"]["active_wave"]:
             item["prompt_prefix"] = ENVELOPE_KEY + "=" + json.dumps(ownership(state, node_id), sort_keys=True)
+            item["node_name_marker"] = "CODERAILS_GRAPH_NODE_NAME=" + item["display"]
         result.append(item)
     return result
 
@@ -196,15 +202,50 @@ def validate_artifacts(path: Path, state: dict[str, Any]) -> None:
     validate_completion(LoopState(path, session, 0, state), str(transcript(session)))
 
 
-def complete(path: Path, session: str, write: bool = True) -> dict[str, Any]:
-    """Validate all native gates under the state lock before completion is written."""
+def complete(path: Path, session: str, write: bool = True, completed_marker: int | None = None) -> dict[str, Any]:
+    """Prepare orders, save validated completion, then apply the lifecycle outside both locks."""
+    current = load(path)
+    if write and current["status"] != "complete":
+        validate_graph_state_completion(current, session)
+        validate_artifacts(path, current)
+    digest = (
+        orders_completion.prepare(path, session, current["loop_id"])
+        if write and current["status"] != "complete"
+        else None
+    )
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
         validate_graph_state_completion(state, session)
         validate_artifacts(path, state)
+        if write and state["status"] != "complete":
+            if digest is None:
+                raise ValueError("order_source_mismatch")
+            orders_completion.validate_prepared(path, state, digest)
         proposed = copy.deepcopy(state)
         proposed["status"] = "complete"
+        if completed_marker is not None:
+            proposed["completed_marker"] = completed_marker
         return proposed
 
-    state = transition(path, update) if write else update(load(path))
-    return {"session_id": session, "loop_id": state["loop_id"], "status": state["status"]}
+    if (
+        write
+        and current["status"] == "complete"
+        and (completed_marker is None or current.get("completed_marker") == completed_marker)
+    ):
+        lock = Path(f"{path}.lock")
+        attempts = int(os.environ.get("CLAUDE_HOOK_MAX_ATTEMPTS", "5"))
+        delay = float(os.environ.get("CLAUDE_HOOK_SLEEP_S", "0.3"))
+        if not acquire_dir_lock(lock, attempts, delay)[0]:
+            raise ValueError("graph lock or atomic update failed")
+        try:
+            state = update(load(path))
+        finally:
+            release_dir_lock(lock)
+    else:
+        state = transition(path, update) if write else update(load(path))
+    result: dict[str, Any] = {"session_id": session, "loop_id": state["loop_id"], "status": state["status"]}
+    if write:
+        result.update(orders_completion.finish(path, session, state["loop_id"]))
+    elif current["status"] == "complete":
+        orders_completion.status(path, session)
+    return result

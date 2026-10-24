@@ -256,7 +256,7 @@ server still accepts TCP but serves nothing.
 
 **When it triggers:** Only as the scheduled `loop-retro-promotion-weekly` routine (see `docs/routines.md`) — never for a single loop's retro and never from inside an active agentic-loop session.
 
-**Graduation predicate (evaluated on every run, dormant until met):** at least 10 `retro.json` files under the repo-key dir; at least one `standing-orders.md` entry whose `last_recurred` differs from its `created` date (one full lifecycle); at least one `standing-orders-decayed.md` entry (one clean decay). Every run — met or unmet — appends a line to `promotion-runs.log`; an unmet predicate then appends a `run=ok` terminal marker and stops, with no branch, no PR, no gate chain. The routine's artifact gate is a `last-marker` predicate keyed on that log's final terminal marker (`run=ok` passes; `abort=` or a stranded `delivery=started` fails).
+**Graduation predicate (evaluated on every run, dormant until met):** at least 10 `retro.json` files under the repo-key dir; at least one order in the typed ledger `orders.json` whose `last_recurred` differs from its `created` date (one full lifecycle); at least one order with `status: decayed` (one clean decay), all computed by `scripts/lib/lessons.py predicate`. Every run — met or unmet — appends a line to `promotion-runs.log`; an unmet predicate then appends a `run=ok` terminal marker and stops, with no branch, no PR, no gate chain. The routine's artifact gate is a `last-marker` predicate keyed on that log's final terminal marker (`run=ok` passes; `abort=` or a stranded `delivery=started` fails).
 
 **Delivery (once graduated):** full gate chain, manifest-locked to exactly `skills/agentic-loop/learned-failure-modes.md` — `task-evals` (pr scope) frozen before the edit, `/coderails:push`, `/pr-review-toolkit:review-pr`, `/coderails:post-review`, `/coderails:post-evals`, `/coderails:merge`. Any other file in the diff aborts with cleanup (closes the PR, deletes the branch, logs the abort).
 
@@ -581,8 +581,8 @@ retained in full; failure notices provide measurements and a reader command
 instead of a fixed excerpt (see below).
 
 Local hooks redirect and audit a cooperating agent. Their files and transcripts
-remain inside the local trust domain. The root-owned integrity attestor and
-GitHub required status provide the separate server-side boundary described in
+remain inside the local trust domain. The trusted GitHub Actions workflow and
+GitHub required status provide the server-side boundary described in
 [INTEGRITY-GATE.md](INTEGRITY-GATE.md).
 
 ### Retained test-gate output
@@ -669,8 +669,9 @@ and readers without installed provider accounts.
 
 | Module | Responsibility |
 |---|---|
-| `hooks/scripts/hook_common.py` | Bounded payload reads and native hook responses. |
+| `hooks/scripts/hook_common.py` | Bounded payload reads and native hook responses. `read_payload` fails open on host exhaustion (logged); `read_payload_strict` raises `HostResourceError` and is used only by the gates that deny on it (`action_authority_gate`, `destructive_bash_gate`, `enforce_pr_workflow`, `no_edit_on_main`). |
 | `hooks/scripts/lib/agentic_loop_path.py` | Resolve the repository/session-owned loop state path. |
+| `hooks/scripts/lib/hook_telemetry.py` | Content-free, fail-open JSONL hook telemetry (`hook_telemetry.jsonl`): exit cause, duration, open fds, native-signal children, `deny` vs `ok` cause (set by `deny()`). Byte-identical copy in `packages/codex/hooks/scripts/lib/`. |
 | `hooks/scripts/lib/discipline_common.py` | Read native Claude transcript tools, final text and edited-file count. |
 | `hooks/scripts/lib/loop_state_common.py` | Loop detection, ownership, atomic state update behind the `dir_lock` mkdir lock; live completion marker. |
 | `hooks/scripts/lib/dir_lock.py` | Stdlib-only mkdir lock with owner pid and start time; steals a dead owner's lock atomically (see `docs/graph-alignment-measurement.md`, stale-lock policy). |
@@ -747,9 +748,12 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
 | `sandbox_workers` | boolean/null | `false` | read_by_prose_only | true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md). |
 | `integrity_review` | object/null | `null` | enforced_by_code | Integrity attestation settings. |
-| `integrity_review.machine_user` | string/null | `null` | enforced_by_code | GitHub login that must post the integrity-review status; null or absent = local gate inactive. |
+| `integrity_review.enabled` | boolean/null | `false` | enforced_by_code | true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live. |
+| `integrity_review.machine_user` | string/null | `null` | enforced_by_code | Deprecated. A non-empty legacy login remains the required local status author until enabled is true. |
 | `evals` | object/null | `null` | enforced_by_code | Eval settings. |
 | `evals.require_signatures` | boolean/null | `false` | enforced_by_code | true = eval artifacts must be signed; refuse when signing is impossible. |
+| `memory` | object/null | `null` | enforced_by_code | Typed-memory settings. |
+| `memory.backend` | string/null | `"muninn"` | enforced_by_code | muninn (default) = Muninn is the authoritative typed-memory store and a missing or refusing Muninn fails with a reason code; off = no typed memory at all (reason memory_backend_off, traced, Markdown is never read or written). Any other value fails with memory_backend_invalid. |
 <!-- config-schema:end -->
 
 ## Scripts and Libraries
@@ -760,12 +764,13 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `scripts/post_review.py`, `post_evals.py` | Review grammar/cache, structural eval validation, neutral grading and observed smoke execution. |
 | `scripts/lib/git_common.py` | GitHub repository/PR operations and newest trusted exact-head artifact selection. Requires a `github.com` remote. |
 | `scripts/lib/{config,review_artifact,eval_artifact,artifact_io}.py` | Shared root-provider config and structured artifact operations. |
-| `scripts/lib/memory_adapter.py` (+ byte-identical `packages/codex/scripts/lib/` mirror), `memory_counters.py` | Optional typed-memory adapter over the `muninn` CLI (subprocess only; never imported, muninn needs py3.12). `add\|list\|render\|probe`; probes `know add --help` for the Part A flags (`--scope-loop --confidence --valid-until --sensitivity --contradicts --tag`, kinds `lesson`/`constraint`) and returns a reason-coded `Degraded` (exit 3) instead of failing, so callers keep the Markdown memory path. Writes need `--cite` and a verbatim `--quote`; reads drop restricted/expired rows; `render --memory-md\|--standing-orders` prints to stdout and `--write PATH` only replaces an absent or marker-stamped file. The ledger upgrade (schema v2) is one-way, done by muninn, not Coderails. The Codex copy cannot trace (no `trace_row.py` ships there) and has no teardown doc; both fail open. `remember_inject_cap_guard` is untouched (third-party plugin patch, unrelated). |
+| `scripts/lib/memory_adapter.py` (+ byte-identical `packages/codex/scripts/lib/` mirrors of it, `memory_cite.py`, `memory_reasons.py`, `memory_schema.py`), `memory_counters.py` | Authoritative typed-memory adapter over the `muninn` CLI (subprocess only; never imported, muninn needs py3.12). `add\|list\|render\|probe`. Config `memory.backend: muninn\|off` (default `muninn`): `off` is the only no-Muninn mode (`memory_backend_off`, traced); an invalid value is `memory_backend_invalid`. `probe()` checks the backend, muninn on PATH, the Part A help flags, the store schema (`memory_schema.check`, never `--version`) and one read smoke. `add()` returns `Written(id='K<n>')` or a reason-coded `Degraded` (exit 3); a muninn refusal (rc 2) is `refused_<code>`. Cites must anchor in a user prompt (`memory_cite`: `quote_only` 12-300 chars, or `approved_reply` via `--approval REF`), else `cite_not_user`. `list` with `--query` uses `muninn search --all-projects` filtered to `loop:<id>`. Reason codes and fixes: `memory_reasons.REASONS`, mirrored in `docs/RUNBOOK.md`. There is no Markdown fallback; `render --write PATH` only replaces an absent or marker-stamped file. `memory_counters.memory_counts` counts `memory./decision./order./lesson./proof./retro./teardown./handoff.` trace rows (`rows`, `by_reason_code`, `by_command`). Limits (orchestrator-only writes, user-anchored cites, cooperating-agent boundary): `docs/decisions/2026-10-05-memory-authoritative.md`. The Codex copy cannot trace (no `trace_row.py` ships there); it fails open. |
+| `scripts/lib/decision_record.py` (+ byte-identical `packages/codex/scripts/lib/` mirror) | Typed, hash-chained loop decisions; the only writer of `decisions_absorbed`. `add_decision` (pure), `verify_chain`, `sync_row` (Muninn `kind=decision`, `scope=loop`, tag `run-<loop_id[:28]>`, `confidence=inferred`, cite = a quote of `authorising_prompt_raw` or a caller `cite_quote`), `mark_synced`, `record` and `flush_pending`. Entry point section below. Limits: cooperating-agent safeguard, last-row deletion undetectable, a short prompt like "yes" degrades visibly. Reasons: `decision_*` in `memory_reasons.REASONS`. |
 | `scripts/lib/{eval_validation,eval_execution}.py` | Eval criteria and command/control verification. Gate smoke runs in a detached worktree at the trusted SHA. |
 | `scripts/sandbox/spawn_sandboxed_worker.py` | Guard dispatch before scratch allocation; run a separate Claude process through pinned srt and retain its exit status. |
 | `scripts/sandbox/{render_settings,sandbox_probe}.py` | Render explicit write containment and discriminate allowed versus forbidden filesystem writes. |
-| `scripts/integrity-gate/integrity_gate_runner.py` | Root-owned mechanical review/eval/diff attestation; no LLM classifier. Deployed with its root-owned HTTP and policy modules. |
-| `scripts/integrity-gate/{install,setup}.py` | Reviewable owner-run promotion, credential handling and GitHub ruleset setup. |
+| `.github/workflows/integrity-review.yml`, `scripts/integrity-gate/integrity_actions.py` | Trusted GitHub Actions review/eval/diff check. It uses the built-in token and runs no PR code. |
+| `scripts/integrity-gate/setup.py` | Preview and activate the GitHub Actions source-bound ruleset after a live candidate status. |
 | `install.py`, `uninstall.py` | Independent provider installation/removal with preserved user data, preflight checks and read-only dry-run. |
 | `launchd/*_routines.py`, `*_dashboard_agent.py` | Literal-path launch agent installation and verified unload/removal. |
 | `scripts/quality/check.py` | Strict source, format, typing, size and generated-materialization checks. |
@@ -792,3 +797,25 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 ### The ephemeral vs committed boundary
 
 The loop's `spec.md`, `plan.md`, and `progress.json` live in `~/.coderails/agentic-loop/` — **outside** the code repo and Claude's configuration tree. They are loop state keyed to this orchestrator run, not shareable design records. If work needs handing to a human, `coderails:handoff` is the right tool. Durable records belong in the wiki or an explicitly authorized repository document, not these session-local scratch files.
+
+### Record-decision entry point
+
+Both provider graph CLIs call `decision_record.record` through their native state locks:
+
+```text
+graph.py record-decision <progress.json> --session <id> --loop-id <loop-id> --revision <revision> --phase <phase> --decision <text> [--flip-condition <text>] [--unit <id>] [--cite-quote <verbatim user quote>]
+graph.py flush-decisions <progress.json> --session <id> [--cite-quote <verbatim user quote>]
+```
+
+Read the current `loop_id` and `revision` from `progress.json` before each call. Use these commands for decisions;
+never append rows to `progress.json` by hand. `record-decision` checks the caller's loop ID and revision under the
+graph lock. It verifies the existing hash chain before appending. `flush-decisions` verifies it before retrying
+pending or degraded rows.
+
+Order: (1) under the lock the local row is appended (`seq`, `prev_sha256`, `row_sha256`, `muninn: {state: syncing}`);
+(2) outside the lock Muninn is written; (3) under the lock again the row's `muninn` field is patched. Return
+`{recorded, seq, muninn: {state, id, reason_code}, exit_code}`; exit 0 written or disabled, 3 degraded or unknown (loud reason
+code, trace `decision.sync/degraded/<code>`, local row kept), 2 refused (wrong session, loop, or revision, or blank phase or decision: nothing
+written). Teardown runs `flush-decisions` to retry pending and safely degraded rows. An in-flight or uncertain sync
+returns `decision_sync_unknown` and must be reconciled against Muninn before any manual retry. Trace commands: `decision.record`,
+`decision.sync` (counted by `memory_counters.memory_counts`).

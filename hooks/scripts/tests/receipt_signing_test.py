@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pin receipt signing with REAL ssh-keygen in temp dirs: signature outcomes, trust-root tiers, no-tty minting."""
+"""Pin receipt signing with real ssh-keygen: signature outcomes, user trust, no-tty minting."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, Callable
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -65,48 +63,20 @@ class SignatureTests(unittest.TestCase):
 
 
 class TrustRootTests(unittest.TestCase):
-    """Two tiers: a genuinely root-owned file wins; otherwise the user tier, labelled; otherwise missing."""
+    """Only the user-tier signers file is used; its absence is reported."""
 
     def setUp(self) -> None:
-        """Temp root-tier and user-tier files."""
+        """Create an isolated user-tier signers path."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.root = Path(tmp.name) / "root_signers"
         self.user = Path(tmp.name) / "user_signers"
-        self.root.write_text("x\n")
-
-    @staticmethod
-    def stat(uid: int, mode: int = 0o644) -> Callable[[str], Any]:
-        """A fake os.stat."""
-        return lambda _path: SimpleNamespace(st_uid=uid, st_mode=mode)
-
-    def test_root_tier_needs_root_ownership(self) -> None:
-        """Uid 0 and not group/other writable is honoured; a non-root owner or a writable mode is ignored."""
-        self.user.write_text("y\n")
-        self.assertEqual(rs.resolve_trust_root(self.root, self.user, self.stat(0)), (self.root, rs.ROOT_TIER))
-        for fake in (self.stat(501), self.stat(0, 0o664), self.stat(0, 0o666)):
-            self.assertEqual(rs.resolve_trust_root(self.root, self.user, fake), (self.user, "trust_root_user_tier"))
-
-    def test_every_ancestor_must_be_root_owned(self) -> None:
-        """Negative control: a root-owned file under a user-owned ancestor directory is not the root tier."""
-        self.user.write_text("y\n")
-
-        user_owned = str(self.root.parent.parent)  # an ancestor of the file and of its directory
-
-        def stat(path: str) -> SimpleNamespace:
-            """Everything root-owned except one ancestor."""
-            return SimpleNamespace(st_uid=501 if path == user_owned else 0, st_mode=0o644)
-
-        self.assertEqual(rs.resolve_trust_root(self.root, self.user, stat), (self.user, "trust_root_user_tier"))
-        self.assertEqual(rs.resolve_trust_root(self.root, self.user, self.stat(0)), (self.root, rs.ROOT_TIER))
 
     def test_user_tier_label_and_missing(self) -> None:
-        """Without a root tier the user file is used and labelled; with neither the answer is trust_root_missing."""
-        self.root.unlink()
+        """A present file is labelled user-tier; a missing file gives trust_root_missing."""
         self.user.write_text("y\n")
-        self.assertEqual(rs.resolve_trust_root(self.root, self.user), (self.user, "trust_root_user_tier"))
+        self.assertEqual(rs.resolve_trust_root(self.user), (self.user, "trust_root_user_tier"))
         self.user.unlink()
-        self.assertEqual(rs.resolve_trust_root(self.root, self.user), (None, "trust_root_missing"))
+        self.assertEqual(rs.resolve_trust_root(self.user), (None, "trust_root_missing"))
 
     def test_no_environment_override(self) -> None:
         """The default user tier follows HOME only; the module never reads os.environ."""
@@ -201,7 +171,7 @@ class DocsTests(unittest.TestCase):
         for text in (record, (ROOT / "AGENTS.md").read_text(), (ROOT / "docs/RUNBOOK.md").read_text()):
             self.assertIn("cooperating-agent safeguard", text)
         for residual in ("agent-writable", "Accessibility", "NOT verified", "command text the hook sees",
-                         ".consumed", "fills the receipts directory", "fails open", "default ON"):  # fmt: skip
+                         ".consumed", "fills the receipts directory", "fails open", "off unless"):  # fmt: skip
             self.assertIn(residual, record)
 
 

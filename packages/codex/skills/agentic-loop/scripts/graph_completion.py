@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,6 +14,15 @@ from graph_io import locked as _locked
 from graph_io import object_value as _object
 from graph_io import write as _write
 from graph_recovery import traced_refusal
+
+
+def _orders() -> Any:  # noqa: ANN401
+    """Load the Codex provider's D4 module lazily to avoid its graph-completion import cycle."""
+    provider = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(provider))
+    from scripts.lib import orders_completion  # noqa: PLC0415
+
+    return orders_completion
 
 
 def validate_work_units(state: dict[str, Any]) -> None:
@@ -56,19 +66,42 @@ def _validate_completion(
 def complete(
     path: Path, session: str, evals_path: Path, proof_path: Path, retro_path: Path, transcript_path: Path | None
 ) -> dict[str, Any]:
-    """Mark the graph complete only after all native gates pass."""
+    """Prepare orders, save validated completion, then apply the lifecycle outside both locks."""
+    current = _load(path)
+    if current["status"] != "complete":
+        _validate_completion(current, session, current["revision"], evals_path, proof_path, retro_path, transcript_path)
+    orders = _orders()
+    try:
+        digest = orders.prepare(path, session, current["loop_id"]) if current["status"] != "complete" else None
+    except ValueError as error:
+        raise GraphError(str(error)) from error
     with _locked(path):
         state = _load(path)
-        if state["status"] == "complete":
-            raise GraphError("graph is already complete")
-        revision = state["revision"]
+        already_complete = state["status"] == "complete"
+        if already_complete:
+            completion = _object(state.get("completion"), "completion")
+            revision = completion.get("revision")
+            if isinstance(revision, bool) or not isinstance(revision, int) or revision != state["revision"] - 1:
+                raise GraphError("graph has no valid completion record")
+        else:
+            revision = state["revision"]
         with traced_refusal(path, state, "complete", session):
             _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
-        state["status"] = "complete"
-        state["revision"] += 1
-        state["completion"] = {"revision": revision}
-        _write(path, state)
-        return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
+            if not already_complete:
+                if digest is None:
+                    raise GraphError("order_source_mismatch")
+                try:
+                    orders.validate_prepared(path, state, digest)
+                except ValueError as error:
+                    raise GraphError(str(error)) from error
+        if not already_complete:
+            state["status"] = "complete"
+            state["revision"] += 1
+            state["completion"] = {"revision": revision}
+            _write(path, state)
+    result = {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
+    result.update(orders.finish(path, session, state["loop_id"]))
+    return result
 
 
 def verify_completion(
@@ -84,4 +117,8 @@ def verify_completion(
         raise GraphError("graph has no valid completion record")
     with traced_refusal(path, state, "verify-completion", session):
         _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
+        try:
+            _orders().status(path, session)
+        except (OSError, ValueError) as error:
+            raise GraphError(f"standing-orders teardown pending: {error}") from error
     return {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
