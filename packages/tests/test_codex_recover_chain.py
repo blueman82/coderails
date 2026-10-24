@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,6 +19,7 @@ import graph
 from graph_completion import complete, verify_completion
 
 from packages.tests.codex_fixture import append, frozen_evals, node, read_json, spawn, state, transcripts, write_json
+from scripts.lib import proof_results as pr
 
 LEASE = 600
 STALLED = 1_789_948_802.0 + LEASE
@@ -68,15 +70,29 @@ class RecoverChainTests(unittest.TestCase):
         suite = self.path.with_name("evals.json")
         write_json(suite, evals)
         proof, retro, log = (self.path.with_name(n) for n in ("proof.json", "retro.json", "proof.jsonl"))
-        proofs = [{"id": "P1", "cmd": "true", "status": "pass", "evidence": "observed"}]
-        write_json(proof, {"session_id": "parent", "loop_id": "loop", "proofs": proofs})
+        document = {
+            "schema_version": 2,
+            "session_id": "parent",
+            "loop_id": "loop",
+            "proofs": [{"id": "P1", "cmd": "true", "expect": {"exit_code": 0}}],
+        }
+        write_json(proof, document)
         write_json(retro, {"schema_version": 2, "session_id": "parent", "loop_id": "loop", "status": "complete"})
         append(log, {"type": "turn_context", "payload": {"loop_id": "loop"}})
-        call = {"type": "custom_tool_call", "name": "exec", "call_id": "p", "input": 'tools.exec_command({cmd:"true"})'}
-        append(log, {"type": "response_item", "payload": call})
-        out = [{"type": "input_text", "text": json.dumps({"loop_id": "loop", "exit_code": 0})}]
-        done = {"type": "custom_tool_call_output", "call_id": "p", "output": out}
-        append(log, {"type": "response_item", "payload": done})
+        results = self.path.with_name(pr.RESULTS_NAME)
+        identity = {"session_id": "parent", "loop_id": "loop"}
+        pr.append(results, kind="freeze", proof_json_sha256=pr.doc_sha(document), **identity)
+        pr.append(
+            results,
+            kind="run",
+            proof_id="P1",
+            cmd_sha256=pr.sha("true"),
+            proof_json_sha256=pr.doc_sha(document),
+            verdict="satisfied",
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            **identity,
+        )
         complete(self.path, "parent", suite, proof, retro, log)
         return verify_completion(self.path, "parent", suite, proof, retro, log)
 

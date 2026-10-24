@@ -22,6 +22,9 @@ from graph_completion import complete, verify_completion
 from graph_identity import GraphError
 
 from packages.tests.codex_fixture import append, frozen_evals, read_json, spawn, state, transcripts, write_json
+from scripts.lib import proof_results as pr
+
+IDENTITY = {"session_id": "parent", "loop_id": "loop"}
 
 
 class CompletionTests(unittest.TestCase):
@@ -60,67 +63,125 @@ class CompletionTests(unittest.TestCase):
         }
         write_json(self.evals, suite)
         self.proof, self.retro = self.path.with_name("proof.json"), self.path.with_name("retro.json")
-        write_json(
-            self.proof,
-            {
-                "session_id": "parent",
-                "loop_id": "loop",
-                "proofs": [{"id": "P1", "cmd": "true", "status": "pass", "evidence": "observed"}],
-            },
-        )
+        self.document: dict[str, Any] = {
+            "schema_version": 2,
+            "session_id": "parent",
+            "loop_id": "loop",
+            "proofs": [{"id": "P1", "cmd": "true", "expect": {"exit_code": 0}}],
+        }
+        write_json(self.proof, self.document)
+        self.results = self.path.with_name(pr.RESULTS_NAME)
+        pr.append(self.results, kind="freeze", proof_json_sha256=pr.doc_sha(self.document), **IDENTITY)
+        self.proof_result("satisfied")
         write_json(self.retro, {"schema_version": 2, "session_id": "parent", "loop_id": "loop", "status": "complete"})
         self.transcript = self.path.with_name("proof.jsonl")
         append(self.transcript, {"type": "turn_context", "payload": {"loop_id": "loop"}})
-        self.proof_result("proof", 0)
         self.arguments = (self.path, "parent", self.evals, self.proof, self.retro, self.transcript)
 
-    def proof_result(self, call: str, code: int | None, loop: str = "loop") -> None:
-        """Append a native proof call and its inner command result."""
-        append(
-            self.transcript,
-            {
-                "type": "response_item",
-                "payload": {
-                    "type": "custom_tool_call",
-                    "name": "exec",
-                    "call_id": call,
-                    "input": 'const r = await tools.exec_command({cmd:"true"}); text(r);',
-                },
-            },
-        )
-        output = (
-            json.dumps({"loop_id": loop, "exit_code": code})
-            if code is not None
-            else "Script completed\nProcess exited with code 1"
-        )
-        append(
-            self.transcript,
-            {
-                "type": "response_item",
-                "payload": {
-                    "type": "custom_tool_call_output",
-                    "call_id": call,
-                    "output": [{"type": "input_text", "text": output}],
-                },
-            },
+    def proof_result(self, verdict: str, cmd: str = "true", **identity: str) -> None:
+        """Append one controller run row for proof P1."""
+        pr.append(
+            self.results,
+            kind="run",
+            proof_id="P1",
+            cmd_sha256=pr.sha(cmd),
+            proof_json_sha256=pr.doc_sha(self.document),
+            verdict=verdict,
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            **(IDENTITY | identity),
         )
 
     def test_success_and_revalidation(self) -> None:
-        """A completed graph is revalidated against the latest proof outcome."""
+        """A completed graph is revalidated against the latest run row."""
         complete(*self.arguments)
         verify_completion(*self.arguments)
-        self.proof_result("later", 1)
+        self.proof_result("failed")
         with self.assertRaises(GraphError):
             verify_completion(*self.arguments)
 
-    def test_outer_result_and_foreign_loop_cannot_pass(self) -> None:
-        """Outer tool success never overrides an inner failed or foreign-loop command."""
-        for code, loop in ((None, "loop"), (1, "loop"), (0, "foreign")):
-            self.proof_result(f"next-{code}-{loop}", code, loop)
+    def test_changed_head_invalidates_codex_completion(self) -> None:
+        """Revalidation refuses a proof that passed before this worktree advanced."""
+        subprocess.run(["git", "-C", str(self.directory), "init", "-q"], check=True)
+
+        def commit(message: str) -> None:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(self.directory),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    message,
+                ],
+                check=True,
+            )
+
+        commit("first")
+        before = Path.cwd()
+        try:
+            os.chdir(self.directory)
+            self.proof_result("satisfied")
+            complete(*self.arguments)
+            commit("second")
+            with self.assertRaisesRegex(GraphError, r"P1\(proof_stale_head\)"):
+                verify_completion(*self.arguments)
+        finally:
+            os.chdir(before)
+
+    def test_unsatisfied_foreign_or_stale_rows_cannot_pass(self) -> None:
+        """Failed, mismatched, foreign-loop, wrong-cmd and status-only proofs never complete the graph."""
+        for verdict, cmd, identity in (
+            ("failed", "true", {}),
+            ("expect_mismatch", "true", {}),
+            ("timeout", "true", {}),
+            ("satisfied", "other", {}),
+            ("satisfied", "true", {"loop_id": "foreign"}),
+        ):
+            self.proof_result(verdict, cmd, **identity)
             before = self.path.read_bytes()
-            with self.assertRaises(GraphError):
+            with self.assertRaisesRegex(GraphError, r"P1\(proof_"):
                 complete(*self.arguments)
             self.assertEqual(before, self.path.read_bytes())
+            self.results.unlink()
+            pr.append(self.results, kind="freeze", proof_json_sha256=pr.doc_sha(self.document), **IDENTITY)
+        self.document["proofs"][0]["status"] = "pass"
+        write_json(self.proof, self.document)
+        with self.assertRaisesRegex(GraphError, r"P1\(proof_stale_cmd\)"):
+            complete(*self.arguments)
+
+    def test_no_proof_needs_a_typed_disposition(self) -> None:
+        """With no proof.json a bare none is rejected and none-with-reason or the typed form completes."""
+        self.proof.unlink()
+        current = read_json(self.path)
+        rejected: tuple[object, ...] = (None, "none", "none: ")
+        for disposition in rejected:
+            write_json(self.path, current | {"proof_disposition": disposition})
+            with self.assertRaisesRegex(GraphError, "proof_disposition_no_reason"):
+                complete(*self.arguments)
+        typed = {"kind": "none", "reason_code": "docs_only", "reason": "documentation only"}
+        accepted: tuple[object, ...] = ("none: no executable surface", typed)
+        for disposition in accepted:
+            write_json(self.path, current | {"proof_disposition": disposition})
+            complete(*self.arguments)
+            write_json(self.path, current)
+
+    def test_empty_proof_file_uses_a_valid_disposition(self) -> None:
+        """An owned empty proof document follows the same disposition rule as Claude."""
+        self.document["proofs"] = []
+        write_json(self.proof, self.document)
+        current = read_json(self.path)
+        write_json(
+            self.path,
+            current
+            | {"proof_disposition": {"kind": "none", "reason_code": "docs_only", "reason": "no executable proof"}},
+        )
+        complete(*self.arguments)
 
     def test_eval_stamp_revision_and_identity(self) -> None:
         """Bind completion to the current suite, checksum, amendments, and loop."""
@@ -154,7 +215,7 @@ class CompletionTests(unittest.TestCase):
         replacements: tuple[dict[str, Any], ...] = (
             {"loop_id": "foreign"},
             {"proofs": []},
-            {"proofs": [{"status": "fail"}]},
+            {"proofs": [{"id": "", "cmd": "true"}]},
         )
         for replacement in replacements:
             write_json(self.proof, proof | replacement)
@@ -180,7 +241,7 @@ class CompletionTests(unittest.TestCase):
         }
         for failed in (False, True):
             if failed:
-                self.proof_result("failure", 1)
+                self.proof_result("failed")
             result = subprocess.run(
                 [sys.executable, str(package / "hooks/scripts/graph_completion_guard.py")],
                 input=json.dumps(payload),

@@ -7,9 +7,9 @@ consult **while writing the retro**.
 `loop_stall_guard` blocks a `complete` declaration when `retro.json` is absent, malformed, or
 below `schema_version` 1 (the hook accepts `schema_version >= 1`, forward-compatible with the cost
 fields added at 2) — so the retro must be written before the declaration. It separately blocks
-when a sibling `proof.json` exists but any of its frozen proofs is unexecuted-in-transcript or
-last-failed — so every proof cmd must be run, in the foreground, in the orchestrator's own
-session, before the declaration too (Step 1 below).
+when a sibling `proof.json` exists but any of its frozen proofs has no satisfied controller-recorded
+run row in `proof_results.jsonl` — so `proof.py run` must have executed every proof before the
+declaration too (Step 1 below).
 
 Before assembling the retro, run `graph.py flush-decisions <progress.json> --session <id>` through the
 current provider's graph CLI. If it returns 3, record the named Muninn degradation or uncertain
@@ -52,14 +52,22 @@ than an honest unscored list because it is more likely to be trusted uncriticall
 
 ## Step 1 — Run every `proof.json` cmd
 
-If a `proof.json` was frozen at Phase 2.7e, run every one of its `cmd`s VERBATIM as its own single
-Bash command, in the FOREGROUND (never `run_in_background`), in THIS (the orchestrator's) own
-session — before assembling the retro. Confirm each exits 0. A proof run inside a dispatched
-worker's session never appears in the orchestrator's own transcript and cannot satisfy the
-`loop_stall_guard` proof gate, whatever its actual outcome. If a proof still fails, fix the
-underlying issue and re-run that proof's `cmd` (not a modified version of it) until it passes, or
-the `complete` declaration below blocks, naming the offending proof id(s) and their verdict. No
-`proof.json` beside `progress.json` means nothing to run here — skip straight to Step 2.
+If a `proof.json` was frozen at Phase 2.7e, have the controller run it — before assembling the retro:
+
+```
+python3 <plugin-root>/scripts/lib/proof.py freeze <state-dir>     # once, records the freeze row
+python3 <plugin-root>/scripts/lib/proof.py run <state-dir> --all  # executes each frozen cmd via /bin/bash -c
+python3 <plugin-root>/scripts/lib/proof.py status <state-dir>     # per-proof verdict from the latest run row
+```
+
+`<state-dir>` is the directory holding `progress.json`/`proof.json`. The script runs each `cmd` verbatim,
+in the foreground, with its timeout, and appends hash-chained rows to `proof_results.jsonl`; the gate reads
+those rows and nothing else (no transcript, no `status` field). A proof run any other way leaves no row and
+cannot satisfy the `loop_stall_guard` proof gate. If a proof fails, fix the underlying issue and re-run
+`proof.py run` (not a modified cmd; editing `proof.json` needs a fresh `freeze`) until it passes, or the
+`complete` declaration below blocks, naming the offending proof id(s) and reason code. No `proof.json`
+means nothing to run: record `proof.py disposition <state-dir> --none --reason-code <code> --reason <text>`
+(or `proof_disposition: "none: <reason>"` in `progress.json`; a bare `"none"` is rejected) and skip to Step 2.
 
 ## Step 2 — Assemble `retro.json`
 
