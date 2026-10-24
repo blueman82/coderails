@@ -121,6 +121,17 @@ class GraphRuntimeTests(unittest.TestCase):
             report = graph.reject_invalid_dispatch(self.path, "parent", "U3[1]", "wave-2")
         self.assertEqual(report["reason_code"], "dispatch_missing_envelope")
         self.assertEqual(read_json(self.path)["graph"]["nodes"]["U3[1]"]["retry"]["attempts"], 1)
+        recovered = read_json(self.path)
+        for status in ("done", "skipped"):
+            with self.subTest(status=status):
+                forged = copy.deepcopy(recovered)
+                node = forged["graph"]["nodes"]["U3[1]"]
+                node["status"] = status
+                node["outcome"] = status
+                node["retry"]["attempts"] = 0
+                graph_semantics.validate(forged)
+                with self.assertRaisesRegex(GraphError, "completed attempt cannot rest on an invalid dispatch"):
+                    validate_worker_evidence(forged)
         wave = graph.begin_wave(self.path)
         self.assertEqual(wave["task_names"]["U3[1]"], task_name("loop", "U3[1]", 2))
         spawn(self.parent, read_json(self.path))
