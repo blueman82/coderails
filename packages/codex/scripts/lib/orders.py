@@ -19,6 +19,7 @@ from hooks.scripts.lib import dir_lock  # noqa: E402
 from scripts.lib import lessons  # noqa: E402
 from scripts.lib import memory_adapter as ma  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
+from scripts.lib import orders_legacy_import as legacy_import  # noqa: E402
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
 from scripts.lib.memory_reasons import REASONS  # noqa: E402
 
@@ -270,8 +271,10 @@ def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
     if src.is_symlink() or src.resolve().parent != repo_dir.resolve():
         return _refuse("legacy_parse_error", entry=str(src))
     try:
-        text = src.read_text(encoding="utf-8")
+        raw = src.read_bytes()
+        text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     except OSError:
+        raw = b""
         text = ""
     if not text.strip() or text.split("\n", 1)[0] == ma.MARKER:
         ol.trace("order.import", "refused", "legacy_missing", a.session)
@@ -283,36 +286,9 @@ def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
         return _refuse("legacy_parse_error", entry=error.entry)
 
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
-        if src.is_symlink() or src.read_text(encoding="utf-8") != text:
+        if src.is_symlink() or src.read_bytes() != raw:
             raise ValueError("legacy_parse_error")
-        new = {**ledger, "orders": list(ledger["orders"])}
-        for row in parsed:
-            lifecycle.check_staged_identity(repo_dir, ledger, row)
-        have = {o["id"]: o for o in new["orders"]}
-        shared = [row for row in parsed if row["id"] in have]
-        if shared:
-            timestamps = {have[row["id"]]["created"] for row in shared}
-            expected = ol.parse_legacy(text, have[shared[0]["id"]]["created"])
-            if (
-                len(shared) != len(parsed)
-                or len(timestamps) != 1
-                or any(
-                    {k: v for k, v in have[row["id"]].items() if k not in ("seq", "prev_sha256", "row_sha256")} != row
-                    for row in expected
-                )
-            ):
-                raise ValueError("legacy_parse_error")
-        for n in range(1, 1000):
-            dest = repo_dir / ("standing-orders.legacy.md" if n == 1 else f"standing-orders.legacy.{n}.md")
-            if not dest.exists() and not dest.is_symlink():
-                break
-        else:
-            raise ValueError("legacy_parse_error")
-        if not shared:
-            new["orders"] += parsed
-            ol.save(repo_dir / "orders.json", ol.seal(new))
-        os.replace(src, dest)
-        return None, {"imported": 0 if shared else len(parsed), "skipped": len(shared), "moved_to": str(dest)}
+        return None, legacy_import.apply(repo_dir, src, raw, text, parsed, ledger)
 
     payload, rc = update(repo_dir, change)
     if not rc:

@@ -140,6 +140,7 @@
   "scripts/lib/decision_record.py": "100644",
   "scripts/lib/orders_atomic.py": "100644",
   "scripts/lib/orders_ledger.py": "100644",
+  "scripts/lib/orders_legacy_import.py": "100644",
   "scripts/lib/orders_lifecycle.py": "100644",
   "scripts/lib/orders_completion.py": "100644",
   "scripts/lib/orders.py": "100755",
