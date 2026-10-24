@@ -39,7 +39,7 @@ edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Decision record
 | Lifecycle effect before durable completion | prose ticked before completion | none: record/prepare stage inputs, tick applies only saved owned completion | `orders_lifecycle_test.py` |
 | Changed preparation recovery | no separately bound preparation | explicit current-hash compare-and-swap; staged records preserved without effects | `orders_prepare_test.py` |
 | Citation chronology | cached ledger/preparation could restore older claims or ids | cite reconciles without authoring; tick reads fresh metadata, preserving later known ids during outages | `orders_current_test.py` |
-| Legacy move interruption | saved imported rows made ordinary retry collide | full parsed-cohort equality resumes only the source move, without another ledger save | `orders_legacy_test.py` |
+| Legacy archive interruption | a source move could separate the saved rows from their backup | an exact-byte archive is published before ledger save; the source stays in place, and an equal full-cohort retry skips another save | `orders_import_capture_test.py`, `orders_legacy_test.py` |
 | Completed lesson replacement recovery | existing evidence could acknowledge an unsaved same-loop edit | captured predecessor and sealed authored-source token recover only the accepted row | `orders_retry_view_test.py` |
 
 Counters: `order.record|prepare|tick|render|import|cite` and `lesson.query|predicate` trace rows are counted by
@@ -60,8 +60,11 @@ Uncited claims are diagnostic and excluded from dispatch, promotion and views. C
 are refused, never truncated. Schema3 history needs the matching `retro_check` validator; absence is unknown/refused.
 The chain and source hashes are cooperating-agent safeguards. Legacy fixture imports preserve all five entries,
 counters, full text and first-seen provenance; a live hand-written-file migration was not verified.
-Legacy retry equivalence covers every parsed row except seal fields, not a whole-source/preamble hash or own-attempt
-identity. Current reads exclude nonfinite expiries; scope labels remain opaque as supplied by Muninn's cwd-filtered
+Each imported row seals the SHA-256 of the full raw source, including its preamble. A retry requires that hash and
+every saved row to match. The archive is a separate copy, so the source stays in place. After a save error, success
+requires the canonical ledger to equal the expected sealed rows. Otherwise import refuses and keeps the archive.
+Archive and ledger publication are not one atomic operation. Current reads
+exclude nonfinite expiries; scope labels remain opaque as supplied by Muninn's cwd-filtered
 repository list. Receipt parsing requires physical LF records and finite JSON numbers; Unicode inside a legitimate
 JSON string remains supported. Linked preparation/receipt/sidecar paths refuse before content read/open/create.
 
