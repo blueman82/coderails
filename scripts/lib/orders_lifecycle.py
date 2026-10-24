@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from hooks.scripts.test_output import file_lock
-from scripts.lib.artifact_io import write_bytes
+from scripts.lib.orders_atomic import write_bytes
 
 ROOT = Path(__file__).resolve().parents[2]
 CODEX = (ROOT / ".codex-plugin/plugin.json").is_file()

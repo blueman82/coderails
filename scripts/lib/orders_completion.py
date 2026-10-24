@@ -16,8 +16,8 @@ sys.path.insert(0, str(ROOT))
 from scripts.lib import orders as order_cli  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
-from scripts.lib.artifact_io import write_bytes  # noqa: E402
 from scripts.lib.memory_adapter import MARKER  # noqa: E402
+from scripts.lib.orders_atomic import write_bytes  # noqa: E402
 
 VIEWS = ("standing-orders.md", "standing-orders-decayed.md")
 
