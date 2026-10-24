@@ -21,6 +21,7 @@ from graph_io import locked as _locked
 from graph_io import object_value as _object
 from graph_io import write as _write
 from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace, traced_refusal
+from graph_recovery import collection as collect
 from json_types import JsonValue
 
 
@@ -42,6 +43,7 @@ def begin_wave(path: Path) -> dict[str, Any]:
         return {
             "wave_id": wave["wave_id"],
             "nodes": wave["nodes"],
+            "node_names": graph_semantics.node_names(proposed["graph"]["nodes"]),
             "task_names": task_names,
             "revision": proposed["revision"],
         }
@@ -142,9 +144,8 @@ def inspect(path: Path) -> dict[str, Any]:
     return {
         "session_id": state["session_id"],
         "loop_id": state["loop_id"],
-        "revision": state["revision"],
         "status": state.get("status"),
-        "active_wave": graph["active_wave"],
+        **graph_semantics.inspect(state),
         "task_names": (
             {
                 node_id: task_name(state["loop_id"], node_id, next_attempt(graph["nodes"][node_id]))
@@ -153,9 +154,6 @@ def inspect(path: Path) -> dict[str, Any]:
             if graph["active_wave"] is not None
             else {}
         ),
-        "running": sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] == "running"),
-        "ready": graph_semantics.ready(state) if graph["active_wave"] is None and graph["hard_stop"] is None else [],
-        "hard_stop": graph["hard_stop"],
     }
 
 
@@ -225,11 +223,7 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
 def recover_wave(
     path: Path, session: str, lease_seconds: int, now: float | None = None, apply: bool = True
 ) -> dict[str, Any]:
-    """Recover an active wave whose every spawned worker is silent past the lease, in one locked save.
-
-    A node with no spawn is only reported ("spawn it now"): nothing is recorded for it. Bounded: a node whose
-    respawn generation has reached retry.max refuses recovery (fail closed, human decides).
-    """
+    """Recover silent active waves atomically; leave unspawned or exhausted nodes for the human."""
     if lease_seconds <= 0:  # a non-positive lease marks every live worker stalled
         raise RecoveryRefusedError("invalid_lease", "lease_seconds must be positive")
     return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
@@ -248,9 +242,10 @@ def summarize(path: Path) -> dict[str, Any]:
     pending = sorted(n for n, s in statuses.items() if s not in {"done", "skipped"})
     ready = [] if graph["active_wave"] or graph["hard_stop"] else graph_semantics.ready(state)
     if graph["hard_stop"] is not None:
+        stopped = graph_semantics.describe_node(graph["hard_stop"]["node"])["display"]
         phase, detail = (
             "waiting for human",
-            f"hard stop on {graph['hard_stop']['node']}: {graph['hard_stop']['reason']}",
+            f"hard stop on {stopped}: {graph['hard_stop']['reason']}",
         )
     elif graph["active_wave"] is not None:
         phase, detail = "waiting for worker", f"wave {graph['active_wave']['wave_id']} dispatched"
@@ -266,6 +261,7 @@ def summarize(path: Path) -> dict[str, Any]:
     return {
         "phase": phase,
         "detail": detail,
+        "node_names": graph_semantics.node_names(graph["nodes"]),
         "done": sorted(n for n in statuses if n not in pending),
         "active": list(graph["active_wave"]["nodes"]) if graph["active_wave"] else [],
         "ready": ready,
@@ -302,9 +298,9 @@ def authorize_dispatch(path: Path, session: str, task: str, evals_path: Path) ->
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Operate one native Codex agentic-loop graph.")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("begin-wave", "inspect", "summarize"):
+    for name in ("begin-wave", "inspect", "summarize", "collection"):
         command = commands.add_parser(name)
-        command.add_argument("state", type=Path)
+        command.add_argument("root" if name == "collection" else "state", type=Path)
     for name in ("start", "add-unit"):
         controller = commands.add_parser(name)
         controller.add_argument("state", type=Path)
@@ -379,8 +375,8 @@ def main() -> int:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "recover-wave":
             output = recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
-        elif args.command == "summarize":
-            output = summarize(args.state)
+        elif args.command in {"summarize", "collection"}:
+            output = summarize(args.state) if args.command == "summarize" else collect(args.root)
         elif args.command == "inspect":
             output = inspect(args.state)
         elif args.command == "authorize-dispatch":

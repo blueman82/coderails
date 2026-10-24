@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import uuid
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
+import graph_semantics
 from graph_data import event_payload, read_records
 from graph_identity import GraphError, next_attempt, task_name
+from graph_io import load as _load
 from graph_transcript import child_read_records, parent_indexes, refused_launches, thread_transcript
 
 
@@ -23,6 +26,138 @@ class RecoveryRefusedError(GraphError):
         """Keep the closed-enum code, the implicated nodes, the refused attempt (if known) and the bare message."""
         super().__init__(f"{message} [reason_code={reason_code}]")
         self.reason_code, self.message, self.nodes, self.attempt = reason_code, message, nodes, attempt
+
+
+class CollectionRecord(TypedDict):
+    """Validated collection index record for one graph and its outgoing links."""
+
+    key: str
+    path: str
+    loop_id: str
+    links: list[str]
+
+
+def _unique_collection_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous JSON object fields in a collection index."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise GraphError(f"duplicate collection field {key!r}")
+        result[key] = value
+    return result
+
+
+def _collection_paths(root: Path) -> list[Path]:
+    """Find graph files, refusing directory links and incomplete traversal."""
+    paths: list[Path] = []
+
+    def walk_error(error: OSError) -> None:
+        raise GraphError(f"cannot inspect collection directory: {error}") from error
+
+    for directory, dirs, files in os.walk(root, onerror=walk_error):
+        if any((Path(directory) / name).is_symlink() for name in dirs):
+            raise GraphError(f"symlinked collection directory: {directory}")
+        if "progress.json" in files:
+            paths.append(Path(directory) / "progress.json")
+    return sorted(paths)
+
+
+def collection(root: Path) -> dict[str, Any]:
+    """List validated graph states beneath a directory without changing them."""
+    root = root.resolve()
+    if not root.is_dir():
+        raise GraphError("graph collection root must be a directory")
+    graphs_by_path: dict[str, dict[str, Any]] = {}
+    for path in _collection_paths(root):
+        if path.is_symlink() or not path.resolve().is_relative_to(root):
+            raise GraphError(f"graph state escapes collection root: {path}")
+        state = _load(path)
+        graph = state["graph"]
+        node_names = graph_semantics.node_names(graph["nodes"])
+        relative = path.relative_to(root).as_posix()
+        if state["loop_id"] in {item["loop_id"] for item in graphs_by_path.values()}:
+            raise GraphError(f"duplicate graph loop_id {state['loop_id']!r}; collection keys must be unambiguous")
+        graphs_by_path[relative] = {
+            "key": state["loop_id"],
+            "path": relative,
+            "loop_id": state["loop_id"],
+            "session_id": state["session_id"],
+            "revision": state["revision"],
+            "status": state["status"],
+            "nodes": [
+                {
+                    "id": node_id,
+                    "name": node_names[node_id]["job_name"],
+                    "lane_code": node_names[node_id]["lane_code"],
+                    "status": node["status"],
+                }
+                for node_id, node in sorted(graph["nodes"].items())
+            ],
+            "links": [],
+        }
+    index_path = root / "collection.json"
+    if index_path.is_symlink() or not index_path.resolve().is_relative_to(root):
+        raise GraphError("collection index escapes collection root")
+    if index_path.exists():
+        try:
+            raw_index: object = json.loads(
+                index_path.read_text(encoding="utf-8"), object_pairs_hook=_unique_collection_fields
+            )
+        except (OSError, json.JSONDecodeError) as error:
+            raise GraphError(f"invalid collection index {index_path}: {error}") from error
+        if not isinstance(raw_index, dict):
+            raise GraphError("collection index must contain schema_version 1 and a graphs array")
+        index = cast(dict[str, Any], raw_index)
+        if (
+            type(index.get("schema_version")) is not int
+            or index["schema_version"] != 1
+            or not isinstance(index.get("graphs"), list)
+        ):
+            raise GraphError("collection index must contain schema_version 1 and a graphs array")
+        by_key: dict[str, CollectionRecord] = {}
+        by_path: dict[str, CollectionRecord] = {}
+        for raw_record in cast(list[Any], index["graphs"]):
+            if not isinstance(raw_record, dict):
+                raise GraphError("each collection graph must be an object")
+            entry = cast(dict[str, object], raw_record)
+            if not all(field in entry for field in ("key", "path", "loop_id", "links")):
+                raise GraphError("each collection graph needs nonblank key, path, loop_id and string links")
+            key_value, path_value, loop_id_value, links = (
+                entry["key"],
+                entry["path"],
+                entry["loop_id"],
+                entry["links"],
+            )
+            if not all(isinstance(value, str) and value for value in (key_value, path_value, loop_id_value)):
+                raise GraphError("each collection graph needs nonblank key, path, loop_id and string links")
+            if not isinstance(links, list):
+                raise GraphError("each collection graph needs nonblank key, path, loop_id and string links")
+            link_values = cast(list[object], links)
+            for raw_target in link_values:
+                if not isinstance(raw_target, str) or not raw_target:
+                    raise GraphError("each collection graph needs nonblank key, path, loop_id and string links")
+            key, record_path, loop_id = cast(str, key_value), cast(str, path_value), cast(str, loop_id_value)
+            targets = cast(list[str], links)
+            if key in by_key:
+                raise GraphError(f"duplicate graph key {key!r}")
+            if record_path in by_path:
+                raise GraphError(f"duplicate graph path {record_path!r}")
+            if record_path not in graphs_by_path or graphs_by_path[record_path]["loop_id"] != loop_id:
+                raise GraphError(f"collection record {key!r} does not match a discovered graph at {record_path!r}")
+            registered: CollectionRecord = {"key": key, "path": record_path, "loop_id": loop_id, "links": targets}
+            by_key[key], by_path[record_path] = registered, registered
+        if set(by_path) != set(graphs_by_path):
+            missing = sorted(set(graphs_by_path) - set(by_path))
+            raise GraphError(f"collection index omits discovered graph path(s): {', '.join(missing)}")
+        for key, record in by_key.items():
+            if len(record["links"]) != len(set(record["links"])):
+                raise GraphError(f"duplicate graph link on {key!r}")
+            for target in record["links"]:
+                if target not in by_key:
+                    raise GraphError(f"unknown graph link target {target!r} from {key!r}")
+            graph = graphs_by_path[record["path"]]
+            graph["key"], graph["links"] = key, list(record["links"])
+    return {"graphs": [graphs_by_path[path] for path in sorted(graphs_by_path)], "unresolved_targets": []}
 
 
 def node_lease(state: dict[str, Any], node_id: str, active: dict[str, Any], now: float, lease: int) -> str:

@@ -115,6 +115,8 @@ const attributeKeys = new Set([
   "coderails.graph.revision",
   "coderails.wave.id",
   "coderails.node.id",
+  "coderails.node.name",
+  "coderails.node.lane_code",
   "coderails.attempt",
   "coderails.native.call_id",
   "coderails.child.id",

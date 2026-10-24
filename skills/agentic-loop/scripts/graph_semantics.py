@@ -8,36 +8,15 @@ import re
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, NoReturn, cast
 
+from node_metadata import LABELS
+from node_metadata import describe_node as _describe_node
+from node_metadata import node_names as _node_names
+
+__all__ = ["LABELS", "GraphSemanticError", "describe_node", "inspect", "node_names"]
+
 STATUSES = frozenset({"pending", "ready", "running", "blocked", "done", "skipped", "failed", "hard-stop", "stale"})
 SUCCESS = frozenset({"done", "skipped"})
 PERSISTED_STATUSES = STATUSES - {"failed"}
-LABELS = {
-    "S-2": "Initialize loop state",
-    "S-1": "Improve prompt",
-    "S0": "Read authorization envelope",
-    "S0.4": "Record model cost",
-    "S0.5": "Apply operating rules",
-    "S1": "Plan work",
-    "S2": "Run preflight",
-    "S2.5": "Resolve design fork",
-    "S2.6": "Choose disposition",
-    "J2": "Preflight decisions joined",
-    "S2.7a": "Write specification",
-    "S2.7b": "Write implementation plan",
-    "S2.7c": "Freeze loop evals",
-    "S2.7e": "Freeze proof plan",
-    "S2.8": "Assign model roles",
-    "J2.8": "Implementation ready",
-    "J12-all-units": "All units joined",
-    "G10": "Guard replacement worker",
-    "G11": "Check confidence labels",
-    "G12": "Fresh artifact check",
-    "S9-wiki": "Update wiki",
-    "S9-docs": "Sync docs",
-    "S13-proof": "Run frozen proofs",
-    "S13-retro": "Write loop retrospective",
-    "S13-complete": "Complete loop",
-}
 
 
 class GraphSemanticError(ValueError):
@@ -99,6 +78,30 @@ def _label_for(node_id: str) -> str:
         "10-respawn": "Respawn unit",
     }[match.group(1)]
     return f"{action} {match.group(2)}"
+
+
+def describe_node(node_id: str) -> dict[str, str | None]:
+    """Return a stable ID, one-word job name, optional lane code, and display label.
+
+    Args:
+        node_id: Registered schema-v3 node ID.
+
+    Returns:
+        A display record that keeps the machine ID intact and adds a human name.
+
+    Raises:
+        GraphSemanticError: If ``node_id`` is not registered in schema version 3.
+    """
+    return _describe_node(node_id, _label_for)
+
+
+def node_names(nodes: object) -> dict[str, dict[str, str | None]]:
+    """Describe graph nodes without changing the stored state.
+
+    Args:
+        nodes: Mapping of stable node IDs to node records.
+    """
+    return _node_names(_object(nodes, "graph.nodes"), _label_for)
 
 
 def _validate_node(node_id: str, value: object) -> dict[str, Any]:
@@ -374,6 +377,7 @@ def inspect(state: object) -> dict[str, Any]:
     graph = root["graph"]
     return {
         "revision": root["revision"],
+        "node_names": node_names(graph["nodes"]),
         "active_wave": copy.deepcopy(graph["active_wave"]),
         "running": sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] == "running"),
         "ready": ready(root),
