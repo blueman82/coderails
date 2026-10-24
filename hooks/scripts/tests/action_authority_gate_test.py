@@ -272,17 +272,17 @@ class GateTests(HookCase):
         self.assertIn("ZeroDivisionError", "".join(c.args[0] for c in err.write.call_args_list))
 
     def test_one_receipt_cannot_authorise_two_identical_segments(self) -> None:
-        """A single-use receipt is spent once: a chain repeating the same guarded command is denied."""
+        """A chain needs distinct receipts; denial leaves the first receipt available."""
         self.configure("enforce")
         self.mint(PUSH, "git_push")
         chained = f"echo x; {PUSH} && {PUSH}"
         self.assertTrue(self.denied("action_authority_gate", self.payload(chained)))
         self.assertNotIn("denied_no_receipt", self.reasons())
-        self.assertEqual(self.reasons().count("receipt_consumed"), 1)
+        self.assertEqual(self.reasons().count("receipt_consumed"), 0)
+        self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
         self.mint(PUSH, "git_push", rid="r2")
-        self.mint(PUSH, "git_push", rid="r3")
         self.assertFalse(self.denied("action_authority_gate", self.payload(chained)))
-        self.assertEqual(self.reasons().count("receipt_consumed"), 3)
+        self.assertEqual(self.reasons().count("receipt_consumed"), 2)
 
     def test_concurrent_hooks_one_receipt_exactly_one_allowed(self) -> None:
         """Four parallel hook processes on one receipt: the O_EXCL claim decides, so one allows and three deny."""
@@ -298,6 +298,25 @@ class GateTests(HookCase):
         outs = [p.communicate(json.dumps(self.payload(PUSH)))[0] for p in procs]
         self.assertEqual(sum("deny" not in out for out in outs), 1)
         self.assertEqual(self.reasons().count("receipt_consumed"), 1)
+
+    def test_concurrent_chain_claims_both_receipts_once(self) -> None:
+        """A competing chain either claims both receipts or leaves them to the winner."""
+        self.configure("enforce")
+        self.mint(PUSH, "git_push", rid="r1")
+        self.mint(PUSH, "git_push", rid="r2")
+        command = f"echo x; {PUSH} && {PUSH}"
+        procs = [
+            subprocess.Popen(
+                [sys.executable, str(ROOT / "hooks/scripts/action_authority_gate.py")], stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, text=True, env=self.environment,
+            )
+            for _ in range(4)
+        ]  # fmt: skip
+        outs = [p.communicate(json.dumps(self.payload(command)))[0] for p in procs]
+        self.assertEqual(sum("deny" not in out for out in outs), 1)
+        self.assertEqual(self.reasons().count("receipt_consumed"), 2)
+        self.assertTrue((self.loop / "s1/receipts/r1.consumed").exists())
+        self.assertTrue((self.loop / "s1/receipts/r2.consumed").exists())
 
     def test_common_wrappers_are_still_guarded(self) -> None:
         """Env prefix, env/sudo/time, subshell, brace group, bash -c and gh api merge need the same receipt."""

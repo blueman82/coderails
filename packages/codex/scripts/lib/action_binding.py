@@ -8,8 +8,8 @@ A bare or remote-only push, `-c`/`--git-dir`/`--work-tree`, and env-prefixed com
 are None (push.default, branch.*.remote, pushurl and GIT_* could redirect them).
 gh pr merge / gh api .../merge: ref = the PR base, sha = the live PR headRefOid, repository = origin, -R, the PR URL or
 the api path. The command must pin that sha (`--match-head-commit <sha>` / `sha=<sha>`) so a head that moves after the
-hook is refused by GitHub; the merge.py script pins it itself. Option values are skipped when finding the PR argument.
-Used by the hook and the receipt CLI; merge.py is not a binding() caller (it pins the sha it verified).
+hook is refused by GitHub. The merge.py helper fetches the head later and cannot bind a receipt to the hook's
+snapshot. Option values are skipped when finding the PR argument. Used by the hook and receipt CLI.
 Refuses (None) --all/--mirror/--tags/--delete, several refspecs, deletes, and remotes that are not host/owner/name.
 """
 
@@ -28,7 +28,6 @@ _SCHEME_URL = re.compile(
 _SCP_URL = re.compile(r"^(?:[^@/\s]+@)?([^:/\s]+):([^/\s]+/[^/?#\s]+?)(?:\.git)?/?$", re.I)
 _BARE_URL = re.compile(r"^([^:/\s]+)/([^/\s]+/[^/?#\s]+?)(?:\.git)?/?$", re.I)
 _PR_URL = re.compile(r"^https://([^/\s]+)/([^/\s]+/[^/\s]+)/pull/(\d+)/?$")
-_SCRIPT = re.compile(r"(?:^|/)merge\.(?:py|sh)$")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _NON_LITERAL = re.compile(r"[$`*?\[\]{}()\\]")
 _VALUE_OPTS = {"-o", "--push-option"}
@@ -104,14 +103,10 @@ def _push(tokens: list[str], cwd: str) -> dict[str, str] | None:
 
 
 def _pr_target(tokens: list[str], segment: str) -> tuple[str, str | None, str | None] | None:
-    """(PR number, repo spec or None, pinned sha or None) for gh pr merge | gh api .../merge | merge script."""
+    """(PR number, repo spec or None, pinned sha or None) for gh pr merge or gh api .../merge."""
     if (api := re.search(r"repos/([^/\s]+/[^/\s]+)/pulls/(\d+)/merge", segment)) and tokens[:2] == ["gh", "api"]:
         pin = next((t[4:] for t in tokens if t.startswith("sha=")), None)
         return api[2], api[1], pin
-    script = next((i for i, t in enumerate(tokens[:2]) if _SCRIPT.search(t)), None)
-    if script is not None:  # merge.py/.sh verify the gates and pin the head sha they verified
-        arg = tokens[script + 1] if len(tokens) > script + 1 else ""
-        return (arg, None, "pinned") if arg.isdigit() else None
     if tokens[:3] != ["gh", "pr", "merge"]:
         return None
     args, i = tokens[3:], 0
@@ -148,7 +143,7 @@ def _merge(tokens: list[str], segment: str, cwd: str) -> dict[str, str] | None:
         return None
     number, repo, pin = target
     view = pr_view(number, cwd, repo)
-    if view is None or not _SHA.match(view[1]) or (pin != "pinned" and pin != view[1]):
+    if view is None or not _SHA.match(view[1]) or pin != view[1]:
         return None  # unknown PR, or the command does not pin the live head sha
     where = repo or git_out(cwd, "remote", "get-url", "origin")
     repository = normalise_repository(f"github.com/{where}" if repo and repo.count("/") == 1 else where)

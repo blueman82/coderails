@@ -12,6 +12,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.tests.receipt_test_support import REPOSITORY, make_owner, signed_receipt, store
@@ -119,6 +120,10 @@ class VerifyTests(Base):
             with self.subTest(name):
                 self.assertEqual(got, (False, code))
 
+    def test_unscoped_receipt_cannot_authorise_a_loop_action(self) -> None:
+        """A receipt minted outside a loop does not approve an action inside a later loop."""
+        self.assertEqual(self.verify(self.receipt(loop_id=None), loop_id="L1"), (False, "foreign_loop"))
+
     def test_malformed(self) -> None:
         """(c) a missing artifact_sha, v1 shapes, extra fields and bad types are malformed, never downgraded."""
         good = self.receipt()
@@ -145,6 +150,26 @@ class StoreTests(Base):
         self.assertEqual((first and first["receipt_id"], code), (rec["receipt_id"], "ok"))
         again = ar.find_valid("s1", self.proposed(), NOW, None, self.base, True, self.signers)
         self.assertEqual(again, (None, "consumed"))
+
+    def test_batch_claim_rolls_back_a_later_marker_failure(self) -> None:
+        """A failed second O_EXCL claim leaves the earlier receipt available for a later action."""
+        first = self.receipt(receipt_id="r1")
+        second = self.receipt(receipt_id="r2")
+        paths = [store(self.base, item) for item in (first, second)]
+        original = ar.consume
+        calls = 0
+
+        def fail_second(path: Path) -> bool:
+            nonlocal calls
+            calls += 1
+            return original(path) if calls == 1 else False
+
+        with mock.patch.object(ar, "consume", side_effect=fail_second):
+            self.assertEqual(
+                ar.claim_many("s1", [self.proposed(), self.proposed()], NOW, None, self.base, self.signers),
+                (None, "consumed", 1),
+            )
+        self.assertTrue(all(not ar.is_consumed(path) for path in paths))
 
     def test_renamed_receipt_cannot_escape_its_consumed_marker(self) -> None:
         """Moving signed JSON to another filename cannot give it a fresh claim marker."""

@@ -403,8 +403,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `scripts/lib/action_binding.py` (push: refspec source sha and destination ref; merge: live PR head via `gh pr view`, 4s timeout);
   unknowable means `binding_unknown`, fail closed. Bindable forms only: `git [-C dir] push <remote> <ref>` (no env prefix,
   `-c`, `--git-dir`; bare `git push` is `binding_unknown`; `HEAD` alone means the current branch; the repository is the push url) and
-  `gh pr merge <n> --match-head-commit <live head sha>` (or `gh api .../merge -f sha=<sha>`; `scripts/merge.py` pins the sha its gates
-  verified). Run ref-moving steps (`commit`, `branch -f`, `reset`, `config`, ...) as separate commands before the guarded one.
+  `gh pr merge <n> --match-head-commit <live head sha>` (or `gh api .../merge -f sha=<sha>`). Bare
+  `scripts/merge.py <n>` is unbindable under receipt enforcement because it fetches the head after the hook.
+  Run ref-moving steps (`commit`, `branch -f`, `reset`, `config`, ...) as separate commands before the guarded one.
 - Counters: `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py` prints `receipts`
   and `trust` (signature, trust-root, binding and `state_mutated_before_guard` counts). Measurement: one hook run is well under 1 s
   with one receipt (single run, not a benchmark; 50 receipts could approach the 10 s hook timeout).

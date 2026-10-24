@@ -38,7 +38,6 @@ MIRRORS = (
     "scripts/action_receipt_cli.py", "scripts/authority_keys.py",
 )  # fmt: skip
 
-# Runs with ONLY the Codex package on sys.path, so every import resolves to packages/codex/scripts/lib.
 PROBE = """
 import json, sys
 from datetime import datetime, timezone
@@ -265,10 +264,11 @@ class HookTests(unittest.TestCase):
         return [json.loads(line)["reason_code"] for line in path.read_text().splitlines()] if path.exists() else []
 
     def test_one_receipt_cannot_authorise_two_identical_segments(self) -> None:
-        """A single-use receipt is spent once; a repeated guarded segment is denied."""
+        """A denied chain cannot spend the receipt for its first segment."""
         self.configure("enforce")
         self.mint()
         self.assertTrue(self.denied(f"{MERGE} && {MERGE}"))
+        self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
 
     def test_common_wrappers_are_still_guarded(self) -> None:
         """Env prefix, sudo, subshell, bash -c and gh api merge are guarded like the bare command."""

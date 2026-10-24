@@ -162,7 +162,20 @@ class MergeTests(unittest.TestCase):
             self.assertIsNotNone(
                 ab.binding("merge", f"gh api repos/acme/widgets/pulls/9/merge -f sha={a}", str(self.repo))
             )
-            self.assertIsNotNone(ab.binding("merge", "python3 scripts/merge.py 12", str(self.repo)))  # pins itself
+            self.assertIsNone(ab.binding("merge", "python3 scripts/merge.py 12", str(self.repo)))
+
+    def test_merge_script_cannot_pin_the_receipt_head(self) -> None:
+        """A merge helper can fetch a newer head after the receipt hook returns, so it cannot bind that receipt."""
+        approved = "a" * 40
+        later = "b" * 40
+        with mock.patch.object(ab, "pr_view", return_value=("main", approved)) as view:
+            self.assertIsNone(ab.binding("merge", "python3 scripts/merge.py 12", str(self.repo)))
+            view.assert_not_called()
+            view.return_value = ("main", later)
+            self.assertEqual(
+                ab.binding("merge", f"gh pr merge 12 --match-head-commit {later}", str(self.repo)),
+                {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": later},
+            )
 
     def test_forms(self) -> None:
         """PR URL, gh api path and -R pick the repository; option values are never mistaken for the PR."""

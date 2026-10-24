@@ -73,6 +73,9 @@ Optional receipt minting uses a key with a passphrase:
   receipts directory. `O_EXCL` stops races, not `unlink`: a same-user agent can delete `<id>.consumed` to replay a
   receipt until it expires (owner-chosen, default 1 h) or delete `<id>.revoked` to un-revoke it. Only a consumed
   ledger outside the agent's write reach (root-owned or append-only) would close this; it is not built.
+- A session lock lets one command select and claim distinct receipts for several guarded segments. If a later
+  claim fails, the hook removes markers this call created before it denies. A process killed between marker
+  creates can leave a partial spend. The batch is not crash-atomic.
 - An agent that fills the receipts directory with junk `*.json` sorted ahead of the real one can push the real
   receipt past the 50-receipt cap (`MAX_RECEIPTS`). That denies, never allows (a denial-of-service, not a bypass).
 - The hook fails open on its own exceptions (`action_authority_failed_open`, traced and written to stderr), so an
@@ -89,7 +92,9 @@ unbindable (`binding_unknown`, denied) when it:
   `--work-tree` (they retarget the action; the prefix is kept in the hashed segment so it is never silently stripped);
 - is a bare or remote-only `git push` (push.default, `branch.*.remote` and `remote.*.push` decide the destination);
 - is `gh pr merge` without `--match-head-commit <live head sha>` (or `gh api .../merge` without `sha=`). GitHub then
-  refuses a merge whose head moved after the hook ran. `scripts/merge.py` pins the sha its own gates verified;
+  refuses a merge whose head moved after the hook ran. Bare `scripts/merge.py <n>` is unbindable in enforce mode:
+  it fetches the head after the hook. B5 must add a literal expected SHA argument before that helper can consume
+  an enforced receipt;
 - names the PR ambiguously (a branch name, two PRs, a `-R` that disagrees with the PR URL, a combined short flag
   hiding a value option). The repository comes from `-R`, the PR URL or the api path, else `origin`.
 

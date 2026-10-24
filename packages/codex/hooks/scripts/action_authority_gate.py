@@ -22,7 +22,7 @@ from lib.action_match import guarded_segments, state_mutated_before_guard
 from lib.destructive_patterns import git_output
 
 from scripts.lib.action_binding import binding
-from scripts.lib.action_receipt import find_valid, proposed_action
+from scripts.lib.action_receipt import claim_many, find_valid, proposed_action
 from scripts.lib.authority_object import read_authority
 from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
@@ -72,14 +72,14 @@ def main() -> int:
             results = [(name, *find_valid(session, p, now, loop, signers=signers)) for name, p in proposals]
             missing = next(((name, code) for name, found, code in results if found is None), None)
         if missing is None and mode_ == "enforce":
-            for name, proposed in proposals:  # the O_EXCL claim, not the verify above, decides who is allowed
-                found, code = find_valid(session, proposed, now, loop, consume_it=True, signers=signers)
-                if found is None:
-                    missing = (name, code)
-                    break
-                if tier == USER_TIER:
-                    append_trace_row("action_authority", "allowed", USER_TIER, trace_id, {"loop_id": loop})
-                append_trace_row("action_authority", "allowed", "receipt_consumed", trace_id, {"loop_id": loop})
+            claimed, code, index = claim_many(session, [p for _, p in proposals], now, loop, signers=signers)
+            if claimed is None:
+                missing = (proposals[index][0], code)
+            else:
+                for _ in claimed:
+                    if tier == USER_TIER:
+                        append_trace_row("action_authority", "allowed", USER_TIER, trace_id, {"loop_id": loop})
+                    append_trace_row("action_authority", "allowed", "receipt_consumed", trace_id, {"loop_id": loop})
         if missing is None:
             return 0
         name, code = missing
