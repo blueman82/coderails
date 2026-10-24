@@ -195,7 +195,7 @@ server still accepts TCP but serves nothing.
 
 **Purpose:** Re-derives a "PR #N is merged" claim from the tools before you rely on it — independently confirming the merge **state** (`gh pr view`), the **content** on `origin/main` (fetch + `git merge-base --is-ancestor` + `git grep`), and the **sibling PRs** that landed in the same author/time window. The sibling check is the one agents skip: a reporter names one PR, but a session often lands several.
 
-**When it triggers:** an agent / teammate / CI report / session summary says a PR is merged, shipped, live, or landed; you are about to build on, deploy, or hand off work that depends on the merge being real; a headless builder or loop reports "done — PR merged" with one PR number.
+**When it triggers:** a report says a PR merged, shipped, or is live. Use the skill before you build on, deploy, or hand off work that depends on that merge. Also use it when a headless builder or loop reports one PR as merged.
 
 **When it does NOT apply:** you performed the merge yourself this session and watched it complete, or the claim is about an open/draft PR (nothing merged to verify).
 

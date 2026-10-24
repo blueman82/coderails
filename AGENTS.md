@@ -8,7 +8,7 @@ For any coderails question, lookup, or context, use the `wiki-query` skill; for 
 
 ## Current integrity-gate replacement
 
-The semantic judge is replaced by a mechanical `integrity-review` attestor in a trusted GitHub Actions workflow. It checks SHA-bound review/eval evidence, command/eval structure, policy paths, provenance fields, and bounded diff input. It never runs PR code or comment commands and never asks an LLM for a verdict. Authoritative: `docs/INTEGRITY-GATE.md`, `.github/workflows/integrity-review.yml`, `scripts/integrity-gate/integrity_actions.py`, and `integrity_review.enabled` config. The GitHub rule must be activated separately; source code alone does not make it live.
+The semantic judge is replaced by a mechanical `integrity-review` attestor in a trusted GitHub Actions workflow. It checks SHA-bound review/eval evidence, command/eval structure, policy paths, provenance fields, and bounded diff input. It never runs PR code or comment commands and never asks an LLM for a verdict. Authoritative: `docs/INTEGRITY-GATE.md`, `.github/workflows/integrity-review.yml`, `scripts/integrity-gate/integrity_actions.py`, and `integrity_review.enabled` config. GitHub ruleset `25788196` is active on `main` and requires the GitHub Actions app status. Source code alone does not activate the rule.
 
 ## What this repo is
 
@@ -68,7 +68,7 @@ examples/, launchd/             → sample configs and macOS scheduling plists
 
 **This repo** deliberately does not enable general branch protection (2026-07-15, standing decision) — so for ordinary PRs the server-side layer is absent and the redirect-and-audit layer is the whole story, by design.
 
-**One server-side exception: integrity-review.** The planned GitHub ruleset on `main` requires a PR and successful `integrity-review` status from the GitHub Actions app. The workflow validates the head SHA's review/eval evidence and policy as data. Activate and verify the rule after the workflow reaches `main`; local hooks cannot substitute for it.
+**One server-side exception: integrity-review.** The active GitHub ruleset on `main` requires a PR and a successful `integrity-review` status from the GitHub Actions app. The workflow validates the head SHA's review/eval evidence and policy as data. Local hooks cannot substitute for the rule.
 
 **Sandboxed workers narrow the ceiling for worker processes only, never the orchestrator.** With `config.sandbox_workers: true` (`skills/agentic-loop/SKILL.md` Phase 3/3a; status `read_by_prose_only`: the orchestrator reads it from the resolve-config text and no script does), an implementation-unit worker runs as a separate OS process via `@anthropic-ai/sandbox-runtime` (srt, pinned), Seatbelt/bubblewrap-enforced — outside the agent's trust domain, the first non-hook layer. The orchestrator itself is never sandboxed.
 
