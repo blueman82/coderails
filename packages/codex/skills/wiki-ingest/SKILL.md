@@ -36,8 +36,8 @@ ingested belongs to, i.e. wherever `AGENTS.md` was found above), resolved by wal
 from the project repo location to its git root and checking for
 `.coderails/workflow.config.yaml`; the first one found wins.
 
-- `wiki_path` — the wiki vault path; resolved relative to the directory containing that
-  `workflow.config.yaml` unless already absolute. Referred to as `vault` below.
+- `wiki_path` — the wiki vault path. Resolve a relative path from the project
+  repo root. Use an absolute path as given. This is `vault` below.
 - `wiki_git_worktree` — whether to use git worktree/PR flow (`true`) or write directly
   (`false`). Default when absent: **`true`** (PR flow) — the fail-safe choice, since
   defaulting to direct-write would silently start committing straight to the vault for a

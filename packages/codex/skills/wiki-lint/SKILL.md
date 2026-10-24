@@ -40,7 +40,8 @@ Step 2's staleness check compares against its git history, so resolve this expli
 The git/vault settings below are **not** read from AGENTS.md — they are flat keys in that same `repo`'s `.coderails/workflow.config.yaml`.
 Starting from `repo`, check each directory up to its git root; the first config found wins.
 
-- `wiki_path` — the wiki vault path; resolved relative to the directory containing that `workflow.config.yaml` unless already absolute. This is `vault` below.
+- `wiki_path` — the wiki vault path. Resolve a relative path from the project
+  repo root. Use an absolute path as given. This is `vault` below.
 - `wiki_git_worktree` — whether to use worktree/PR flow (`true`) or write directly (`false`).
   Default when absent: **`true`** (PR flow) — the fail-safe choice, since defaulting to direct-write would silently start committing straight to the vault for a project that expected review.
 - `wiki_git_bypass_flag` — env var for PR creation/merge (e.g. `BYPASS_REVIEW=1`)

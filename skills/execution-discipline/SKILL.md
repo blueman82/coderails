@@ -70,8 +70,8 @@ Retain instructions across very long contexts by using external memory:
 - Write the final message for someone who did not watch the work. Explain
   shorthand. Describe files and identifiers in plain language.
 - Keep the requested scope. Do not add features, refactor, or add
-  abstractions beyond the task. If the user only asks for an assessment,
-  report findings without applying a fix.
+  abstractions beyond the task. If the user describes a problem or thinks
+  aloud, report an assessment. Apply a fix only when asked.
 
 ## 6. Spend effort where it pays
 

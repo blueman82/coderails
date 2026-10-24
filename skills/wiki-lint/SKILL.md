@@ -33,7 +33,8 @@ The vault is a separate repo, such as `../coderails-wiki`. The project's `.coder
 
 Read the git and vault settings from `.coderails/workflow.config.yaml` in that code repo, not from AGENTS.md. Start at `repo` and search upward to its git root. The first config file wins. This is the same walk-up rule as `config_path` in `scripts/lib/config.py`.
 
-- `wiki_path` — the wiki vault path; resolved relative to the directory containing that `workflow.config.yaml` unless already absolute. This is `vault` below.
+- `wiki_path` — the wiki vault path. Resolve a relative path from the project
+  repo root. Use an absolute path as given. This is `vault` below.
 - `wiki_git_worktree` — `true` selects worktree/PR flow. `false` writes directly. The default is **`true`**, so a missing setting does not silently write to the vault.
 - `wiki_git_bypass_flag` — env var for PR creation/merge (e.g. `BYPASS_REVIEW=1`)
 - `wiki_git_pull_path` — path to pull after merge. Default when absent: skip the post-merge pull.

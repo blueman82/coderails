@@ -1,6 +1,11 @@
 ---
 name: wiki-query
-description: "Use when the user wants to search, query, or look up information in the project's LLM Wiki. Triggers on any phrasing like 'search wiki', 'search the wiki', 'query wiki', 'ask the wiki', 'what does the wiki say', or requests to find project-specific answers grounded in wiki content. Also triggers when the user wants to generate slides (Marp) or charts (matplotlib) drawing on wiki knowledge. Do NOT trigger for general coding questions, wiki maintenance tasks (adding, filing, ingesting, linting), or wiki initialization."
+description: >-
+  Use for project questions that need the LLM Wiki. Trigger phrases include
+  "search wiki", "search the wiki", "query wiki", "ask the wiki", and
+  "what does the wiki say". Also use it for slides or charts based on wiki
+  knowledge. Do not use it for general coding questions, wiki maintenance,
+  or wiki setup.
 ---
 
 # Wiki Query
@@ -19,9 +24,10 @@ empty, report that and stop.
 
 ### Step 1: Load the Schema
 
-The git root's `AGENTS.md` loads at session start.
-Read its wiki schema section, or the `AGENTS-wiki-schema.md` file it links to.
-Coderails keeps the schema in `AGENTS.md` and the live page types in `wiki.schema.json`.
+The git root's `AGENTS.md` loads at session start. Read its wiki schema
+section. If it links to `AGENTS-wiki-schema.md`, read that file.
+Coderails keeps its schema in `AGENTS.md`. Its live page types are in
+`wiki.schema.json`.
 If `AGENTS.md` is not in context, walk up from the current directory to the git root.
 Check each level for `AGENTS.md`; a fork can start in a project subdirectory.
 If you do not find it, tell the user to invoke `$coderails-codex:wiki-init` first.
@@ -30,20 +36,24 @@ The project's `.coderails/workflow.config.yaml` points to it.
 Do not look for `AGENTS.md` in the vault.
 A fork does not need to run from inside the vault.
 
-The vault path and git flow are **not** read from AGENTS.md — they are the `wiki_path` and
-`wiki_git_worktree` flat keys in that same project's `.coderails/workflow.config.yaml`, resolved
-by walking up from the project repo location to its git root and checking for
-`.coderails/workflow.config.yaml`; the first one found wins. Set `vault` to the resolved
-`wiki_path` (relative to the directory containing that `workflow.config.yaml` unless already
-absolute).
+Read `wiki_path` and `wiki_git_worktree` from the project's
+`.coderails/workflow.config.yaml`. These flat keys are not in `AGENTS.md`.
+Start at the project location. Search each directory up to its git root
+for the config file. The first file found wins. Set `vault` to `wiki_path`.
+Resolve a relative path from the project repo root. Use an absolute path
+as given.
 
 ### Step 2: Search the Wiki
 
-1. Read `$vault/index.md` first — scan for relevant pages
-2. Read relevant wiki pages — drill into matches
-3. `qmd` is an optional accelerator — absent, rely on steps 1–2.
-   Use the named `wiki` collection: `qmd query -c wiki "<question>"` for hybrid BM25 + vector search on open-ended questions; `qmd search -c wiki "<keywords>"` for fast BM25-only known-term lookups; `qmd get qmd://wiki/<file>` to fetch a specific page by path.
-4. Fall back to raw code/codebase only if the wiki doesn't cover the topic
+1. Read `$vault/index.md`. Find pages related to the question.
+2. Read those pages.
+3. If `qmd` is available, use it to extend the search. Use the named `wiki`
+   collection. Run `qmd query -c wiki "<question>"` for an open question.
+   It combines BM25 and vector search. Run
+   `qmd search -c wiki "<keywords>"` for known terms. Run
+   `qmd get qmd://wiki/<file>` to read one page. Without `qmd`, use steps
+   1 and 2.
+4. Read raw code only if the wiki does not cover the topic.
 
 Synthesize the answer from wiki pages with citations: "According to [[page_name]]..."
 
@@ -53,8 +63,10 @@ Answers can take different forms — choose naturally:
 
 - **Markdown** — explanations, walkthroughs, summaries
 - **Comparison table** — comparing approaches, services, patterns
-- **Slide deck** (Marp format) — write a `.md` file with Marp frontmatter in `$vault/assets/`. Rendered by the Obsidian Marp Slides plugin
-- **Chart** (matplotlib) — write and execute a Python script, save `.png` to `$vault/assets/`
+- **Slide deck** (Marp format) — write a `.md` file with Marp frontmatter
+  in `$vault/assets/`. The Obsidian Marp Slides plugin renders it.
+- **Chart** (matplotlib) — run a Python script and save its `.png` file to
+  `$vault/assets/`.
 
 ### Step 4: File Back
 
