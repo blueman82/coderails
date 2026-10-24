@@ -52,7 +52,8 @@ refuse missing or stale D4 receipts and views. An explicitly reviewed old comple
 source-bound admission that never changes progress or ages orders. The exact file hash is checked at admission; later
 completion bookkeeping does not revoke it. `orders_ticked` is a post-save observation, and a
 failed apply/receipt after completion means pending teardown. The one same-user lock covers currentness,
-reconciliation, bounded sync and atomic ledger save, with no
+reconciliation, bounded sync, ledger save and both render writes. The rendered receipt also checks the ledger and
+both view hashes under the lock, with no
 exactly-once network claim. New completed recurrences revive tombstones; replay cannot reset counters. Current live,
 verified owner-cited lesson text is legitimate typed memory; transcript advisory observations remain metadata only.
 Uncited claims are diagnostic and excluded from dispatch, promotion and views. Claims over 500 collapsed characters

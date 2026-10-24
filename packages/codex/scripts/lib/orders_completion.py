@@ -78,7 +78,7 @@ def validate_prepared(path: Path, state: dict[str, Any], digest: str) -> None:
         raise ValueError("order_source_mismatch")
 
 
-def _view_digest(repo_dir: Path, ledger: ol.Ledger) -> str:
+def _view_digest(repo_dir: Path, ledger: ol.Ledger, expected_views: object = None) -> str:
     """Bind the saved ledger and both generated read-only views to one receipt."""
     views: dict[str, str] = {}
     for name in VIEWS:
@@ -89,6 +89,8 @@ def _view_digest(repo_dir: Path, ledger: ol.Ledger) -> str:
         if not content.startswith(MARKER.encode()):
             raise ValueError("order_pending_teardown")
         views[name] = hashlib.sha256(content).hexdigest()
+    if expected_views is not None and views != expected_views:
+        raise ValueError("order_source_mismatch")
     return lifecycle.sha({"ledger": ledger, "views": views})
 
 
@@ -281,7 +283,8 @@ def finish(path: Path, session: str, loop: str) -> dict[str, Any]:
                     raise ValueError("order_source_mismatch")
                 state_dir, _, binding = lifecycle.owned(repo_dir, session, loop, complete=True)
                 lifecycle.prepared(state_dir, binding, required=True)
-                lifecycle.observe(state_dir, "orders_rendered", binding, _view_digest(repo_dir, ledger))
+                digest = _view_digest(repo_dir, ledger, render.get("view_sha256", {}))
+                lifecycle.observe(state_dir, "orders_rendered", binding, digest)
         status(path, session)
         result["pending_teardown"] = False
         result["exit_code"] = 0

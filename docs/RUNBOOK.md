@@ -269,6 +269,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   stamps the invocation marker. Preparation ages nothing. The tick holds the orders lock and records `orders_ticked`
   after its ledger save. A failed completion save ages nothing. Repeat the native completion command to resume a
   pending tick or render without a second age change; do not edit `progress.json`.
+  Render holds the orders lock while it writes both views. The receipt checks the ledger and both view hashes under
+  that lock. If they differ, completion stays pending; repeat the native completion command to render again.
   The Claude Stop guard and Codex `verify-completion` block when the tick or bound generated views are incomplete.
   If render fails on the installed Muninn API, the pending result and later verifier show its actual reason code.
   The installed Muninn uses a current request-bound API that this D4 adapter does not support. Treat live lesson

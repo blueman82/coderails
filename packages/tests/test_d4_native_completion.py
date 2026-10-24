@@ -70,9 +70,9 @@ class NativeOrdersCompletion(unittest.TestCase):
             args.extend(["--transcript", str(provider.parent)])
         return provider.call("verify-completion", *args)
 
-    def fault(self, provider: Provider, kind: str) -> subprocess.CompletedProcess[str]:
-        """Inject one file failure or post-prepare mutation into the actual native function."""
-        code = """
+    @staticmethod
+    def _fault_script() -> str:
+        return """
 import json
 import sys
 from pathlib import Path
@@ -116,6 +116,23 @@ elif kind == 'render_race':
                 ol.save(repo / 'orders.json', advanced['ledger'])
         return code, payload
     context = mock.patch.object(orders, '_call', side_effect=raced)
+elif kind == 'render_again':
+    import argparse
+    from scripts.lib import orders_ledger as ol
+    original = orders._call
+    def raced(path, session, command, loop):
+        code, payload = original(path, session, command, loop)
+        if command == 'render' and code == 0:
+            repo = path.parent.parent
+            cli = orders.order_cli
+            ledger = ol.open_ledger(repo)
+            current = cli.lessons.joined(ledger, include_decayed=True, session=session)
+            current['lessons'][0]['text'] = 'A second current lesson.'
+            with mock.patch.object(cli.lessons, 'joined', return_value=current):
+                _, second = cli.cmd_render(argparse.Namespace(session=session), repo)
+            assert second == 0
+        return code, payload
+    context = mock.patch.object(orders, '_call', side_effect=raced)
 else:
     original = orders.prepare
     def changed(*args):
@@ -129,7 +146,7 @@ else:
 with context:
     try:
         result = invoke()
-        if kind in ('render_old', 'render_race'):
+        if kind in ('render_old', 'render_race', 'render_again'):
             print(json.dumps(result))
             sys.exit(0)
     except Exception as error:
@@ -137,11 +154,14 @@ with context:
         sys.exit(0)
 sys.exit(1)
 """
+
+    def fault(self, provider: Provider, kind: str) -> subprocess.CompletedProcess[str]:
+        """Inject one file failure or post-prepare mutation into the actual native function."""
         return subprocess.run(
             [
                 sys.executable,
                 "-c",
-                code,
+                self._fault_script(),
                 str(provider.plugin),
                 provider.name,
                 str(provider.path),
@@ -360,3 +380,21 @@ sys.exit(1)
                 self.assertEqual(self.verify(provider).returncode, 0)
                 rows = [json.loads(line) for line in teardown.read_text().splitlines()]
                 self.assertEqual(len([row for row in rows if row["step"] == "orders_rendered"]), 1)
+
+    def test_second_render_blocks_first_receipt(self) -> None:
+        """A second render from changed currentness cannot certify the first render."""
+        for provider in self.providers:
+            with self.subTest(provider=provider.name):
+                self.ready(provider)
+                raced = self.fault(provider, "render_again")
+                self.assertEqual(raced.returncode, 0, raced.stderr)
+                result = json.loads(raced.stdout)
+                self.assertEqual(result["exit_code"], 3, result)
+                self.assertEqual(result["reason_code"], "order_source_mismatch")
+                teardown = provider.path.with_name("teardown.jsonl")
+                rows = [json.loads(line) for line in teardown.read_text().splitlines()]
+                self.assertFalse(any(row["step"] == "orders_rendered" for row in rows))
+                self.assertEqual(provider.complete().returncode, 0)
+                self.assertEqual(self.verify(provider).returncode, 0)
+                rows = [json.loads(line) for line in teardown.read_text().splitlines()]
+                self.assertEqual(sum(row["step"] == "orders_rendered" for row in rows), 1)
