@@ -68,6 +68,19 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   the call was not exactly `<abs path>/scripts/capability.py <tool> --json-args '<json>'`; the path must be absolute.
   `tests_unknown_name` means the name is not in `profiles.json` `tests`.
 
+## Capability MCP server refused a call or will not start
+
+- Symptom: a role's `capability_mcp.py` exits 2 at launch, or a `tools/call` returns an error or `isError`.
+- Query: `python3 scripts/lib/capability_counters.py` (counts per reason code over `CLAUDE_AGENTIC_LOOP_DIR`), or
+  `trace.by_reason` for `capability/refused/capability_mcp_refused` (startup), `capability_wrong_role` (a tool outside the
+  role's profile), `capability_args_invalid|path_denied|bad_ref` (arguments) and `capability/ok/<tool>` (grants). Rows carry
+  hashed inputs `{tool, role, via: mcp}`; MCP servers read the session id from `CLAUDE_SESSION_ID`, then
+  `CLAUDE_CODE_SESSION_ID`, then `CODEX_THREAD_ID`, else the `unattributed` directory.
+- Remediation: `capability_mcp_refused` means the `--role` is missing from `capabilities/profiles.json`, holds no capability
+  tool, or the flags are wrong (stderr names which). `capability_wrong_role` means the profile does not grant that tool;
+  change the profile deliberately (the validator keeps agent files in step). `path_denied` on a `worktree` argument means
+  the path is not in `git worktree list` of the server's cwd repo. `cmd.run` only runs `named_commands` entries.
+
 ## Authority object refused or changed
 
 - Symptom: `authority.py` refuses a command, or an object disappeared.

@@ -47,7 +47,9 @@ def append_row(
         "command": command,
         "outcome": outcome,
         "reason_code": reason_code,
-        "inputs": {k: hashlib.sha256(str(v).encode("utf-8")).hexdigest() for k, v in (inputs or {}).items()},
+        "inputs": {
+            k: hashlib.sha256(str(v).encode("utf-8", "backslashreplace")).hexdigest() for k, v in (inputs or {}).items()
+        },
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,6 +58,6 @@ def append_row(
             os.write(descriptor, (json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
         finally:
             os.close(descriptor)
-    except OSError:
+    except (OSError, UnicodeError):
         return False
     return True
