@@ -62,7 +62,15 @@ class SyncRaceTests(Base):
 
         with mock.patch.object(dr, "sync_row", return_value=dict(WRITTEN)) as sync:
             with self.assertRaises(RuntimeError):
-                dr.record(self.path, "s1", "2.5", "adopt shape A", transition=crash_after_append)
+                dr.record(
+                    self.path,
+                    "s1",
+                    "2.5",
+                    "adopt shape A",
+                    expected_loop_id="L1",
+                    expected_revision=self.state()["revision"],
+                    transition=crash_after_append,
+                )
             self.assertEqual(self.decisions()[0]["muninn"]["state"], "syncing")
             out = dr.flush_pending(self.path, "s1", transition=claude_transition)
             self.assertEqual((out["exit_code"], out["reason_code"]), (3, "decision_sync_unknown"))
@@ -94,7 +102,9 @@ class SyncRaceTests(Base):
             self.assertTrue(entered.wait(5))
             try:
                 fresh = {**fixture.state(), "session_id": "s1", "loop_id": "L2", "authorising_prompt_raw": "new prompt"}
-                claude_transition(self.path, lambda _old: dr.add_decision(fresh, "s1", "2.5", "new choice")["state"])
+                claude_transition(
+                    self.path, lambda _old: dr.add_decision(fresh, "s1", "2.5", "new choice", "L2", 1)["state"]
+                )
             finally:
                 release.set()
                 worker.join(5)
@@ -117,7 +127,7 @@ class SyncRaceTests(Base):
                 fresh = {**fixture.state(), "session_id": "s1", "loop_id": "L2", "authorising_prompt_raw": "new prompt"}
 
                 def replace(_old: dict[str, Any]) -> dict[str, Any]:
-                    new = dr.add_decision(fresh, "s1", "2.5", "new choice")["state"]
+                    new = dr.add_decision(fresh, "s1", "2.5", "new choice", "L2", 1)["state"]
                     new["decisions_absorbed"][0]["muninn"] = {"state": "degraded"}
                     return new  # type: ignore[no-any-return]
 

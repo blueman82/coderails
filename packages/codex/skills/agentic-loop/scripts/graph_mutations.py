@@ -56,6 +56,8 @@ def record_decision(args: Any) -> dict[str, Any]:  # noqa: ANN401
         args.session,
         args.phase,
         args.decision,
+        expected_loop_id=args.loop_id,
+        expected_revision=args.revision,
         transition=decision_transition,
         flip_condition=args.flip_condition,
         unit=args.unit,

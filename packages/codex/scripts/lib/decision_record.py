@@ -46,7 +46,7 @@ from scripts.lib import memory_adapter as ma  # noqa: E402
 GENESIS = "0" * 64
 HASH_EXCLUDED = ("row_sha256", "muninn")
 QUOTE_MIN, QUOTE_MAX, CLAIM_MAX = 12, 300, 500  # muninn's quote and claim length rules
-REFUSALS = ("wrong_session", "blank_phase", "blank_decision", "invalid_chain")
+REFUSALS = ("wrong_session", "wrong_loop", "wrong_revision", "blank_phase", "blank_decision", "invalid_chain")
 Transition = Callable[[Path, Callable[[dict[str, Any]], dict[str, Any]]], dict[str, Any]]
 
 
@@ -76,6 +76,8 @@ def add_decision(
     session: str,
     phase: str,
     decision: str,
+    expected_loop_id: str,
+    expected_revision: int,
     flip_condition: str | None = None,
     unit: str | None = None,
     now: datetime.datetime | str | None = None,
@@ -83,6 +85,10 @@ def add_decision(
     """Append one hashed row; return {"state", "decision"}. Raises ValueError(<REFUSALS code>) and mutates nothing."""
     if state.get("session_id") != session:
         raise ValueError("wrong_session")
+    if state.get("loop_id") != expected_loop_id:
+        raise ValueError("wrong_loop")
+    if state.get("revision") != expected_revision:
+        raise ValueError("wrong_revision")
     if not str(phase or "").strip():
         raise ValueError("blank_phase")
     if not str(decision or "").strip():
@@ -246,6 +252,8 @@ def record(
     phase: str,
     decision: str,
     *,
+    expected_loop_id: str,
+    expected_revision: int,
     transition: Transition,
     flip_condition: str | None = None,
     unit: str | None = None,
@@ -257,7 +265,9 @@ def record(
     held: dict[str, Any] = {}
 
     def append(state: dict[str, Any]) -> dict[str, Any]:
-        out = add_decision(state, session, phase, decision, flip_condition, unit, now)
+        out = add_decision(
+            state, session, phase, decision, expected_loop_id, expected_revision, flip_condition, unit, now
+        )
         held.update(out["decision"])
         new: dict[str, Any] = out["state"]
         return new

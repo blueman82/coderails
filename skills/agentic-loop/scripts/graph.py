@@ -49,6 +49,8 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--session", required=True)
             command.add_argument("--cite-quote")
         if name == "record-decision":
+            command.add_argument("--loop-id", required=True)
+            command.add_argument("--revision", required=True, type=int)
             command.add_argument("--phase", required=True)
             command.add_argument("--decision", required=True)
             command.add_argument("--flip-condition")
@@ -193,6 +195,8 @@ def main() -> int:
                 args.session,
                 args.phase,
                 args.decision,
+                expected_loop_id=args.loop_id,
+                expected_revision=args.revision,
                 transition=transition,
                 flip_condition=args.flip_condition,
                 unit=args.unit,

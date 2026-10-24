@@ -302,6 +302,8 @@ def _parser() -> argparse.ArgumentParser:
         decision.add_argument("--session", required=True)
         decision.add_argument("--cite-quote")
         if name == "record-decision":
+            decision.add_argument("--loop-id", required=True)
+            decision.add_argument("--revision", required=True, type=int)
             decision.add_argument("--phase", required=True)
             decision.add_argument("--decision", required=True)
             decision.add_argument("--flip-condition")

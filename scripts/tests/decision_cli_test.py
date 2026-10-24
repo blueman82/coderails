@@ -52,6 +52,48 @@ class DecisionCliTests(StoreCase):
         )
         return result.returncode, json.loads(result.stdout) if result.stdout.strip().startswith("{") else {}
 
+    def test_rearmed_same_session_refuses_stale_caller(self) -> None:
+        """Both CLIs compare the caller's loop and revision while holding the graph lock."""
+        for script in GRAPH_SCRIPTS:
+            with self.subTest(provider=script):
+                fresh = {**fixture.state(), "session_id": SESSION, "loop_id": "L2", "revision": 7}
+                self.put(fresh)
+                before = self.path.read_bytes()
+                code, out = self.run_graph(
+                    script,
+                    "record-decision",
+                    str(self.path),
+                    "--session",
+                    SESSION,
+                    "--loop-id",
+                    "L1",
+                    "--revision",
+                    "7",
+                    "--phase",
+                    "2.5",
+                    "--decision",
+                    "stale choice",
+                )
+                self.assertEqual((code, out.get("reason_code")), (2, "decision_wrong_loop"))
+                self.assertEqual(self.path.read_bytes(), before)
+                code, out = self.run_graph(
+                    script,
+                    "record-decision",
+                    str(self.path),
+                    "--session",
+                    SESSION,
+                    "--loop-id",
+                    "L2",
+                    "--revision",
+                    "6",
+                    "--phase",
+                    "2.5",
+                    "--decision",
+                    "stale choice",
+                )
+                self.assertEqual((code, out.get("reason_code")), (2, "decision_wrong_revision"))
+                self.assertEqual(self.path.read_bytes(), before)
+
     def test_record_and_flush_are_native_and_chain_checked(self) -> None:
         """Both graph CLIs persist a hash; a tampered chain refuses further record and flush."""
         for script in GRAPH_SCRIPTS:
@@ -63,6 +105,10 @@ class DecisionCliTests(StoreCase):
                     str(self.path),
                     "--session",
                     SESSION,
+                    "--loop-id",
+                    "L1",
+                    "--revision",
+                    str(self.state()["revision"]),
                     "--phase",
                     "2.5",
                     "--decision",
@@ -81,6 +127,10 @@ class DecisionCliTests(StoreCase):
                     str(self.path),
                     "--session",
                     SESSION,
+                    "--loop-id",
+                    "L1",
+                    "--revision",
+                    str(self.state()["revision"]),
                     "--phase",
                     "2.6",
                     "--decision",
@@ -102,6 +152,10 @@ class DecisionCliTests(StoreCase):
                     str(self.path),
                     "--session",
                     SESSION,
+                    "--loop-id",
+                    "L1",
+                    "--revision",
+                    str(self.state()["revision"]),
                     "--phase",
                     "2.5",
                     "--decision",

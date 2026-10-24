@@ -195,6 +195,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `refused_no_caller_session` | quote-only writes need CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID in the environment. |
 | `refused_other` | muninn refused with a code not listed here; the reason is `refused_<code>`, read it and the muninn docs. |
 | `decision_wrong_session` | the loop state belongs to another session; record only from the owning session. |
+| `decision_wrong_loop` | the loop changed after the caller read it; read the current loop ID before recording. |
+| `decision_wrong_revision` | the graph changed after the caller read it; read the current revision before recording. |
 | `decision_blank_phase` | a decision needs a non-blank phase (for example 2.5). |
 | `decision_blank_decision` | a decision needs a non-blank decision text; nothing was written. |
 | `decision_invalid_chain` | the decision chain is damaged; inspect and preserve the loop state before any further sync. |
