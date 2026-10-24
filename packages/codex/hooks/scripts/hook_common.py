@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.lib.authority_object import parse_time  # noqa: E402  # mirrored lib; Codex ships scripts/ beside hooks/
+from scripts.lib.authority_object import parse_time  # noqa: E402
+from scripts.lib.authority_object import safe_session as safe_id
 
 RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM})
 RESOURCE_MESSAGE = (
@@ -87,17 +88,6 @@ def loop_root() -> Path:
     """Return the loop-state root shared with scripts/authority.py (CLAUDE_AGENTIC_LOOP_DIR wins)."""
     override = os.environ.get("CLAUDE_AGENTIC_LOOP_DIR") or os.environ.get("CODERAILS_AGENTIC_LOOP_DIR")
     return Path(override or Path.home() / ".coderails" / "agentic-loop")
-
-
-def safe_id(session_id: str) -> bool:
-    """True for a nonempty id that is path-local as written (never sanitised, so ids cannot collide)."""
-    return (
-        bool(session_id)
-        and session_id not in {"?", "."}
-        and "/" not in session_id
-        and ".." not in session_id
-        and "\0" not in session_id
-    )
 
 
 def authority_path(session_id: str) -> Path | None:

@@ -117,6 +117,8 @@ The phrase heuristics (`invoked()`, negation, question and quote handling, about
 - Codex mirror: `packages/codex/scripts/authority.py` and `packages/codex/scripts/lib/authority_object.py` are byte-identical to
   the Claude files (parity test); `hook_common.py` no longer vendors `authority_state`/`write_authority`/`parse_expiry` and imports the
   mirrored lib. Both trace and authority paths now honour `CODERAILS_AGENTIC_LOOP_DIR` as a fallback, as the old Codex vendored code did.
+- A session ID must start with an ASCII letter or digit. It can then contain ASCII letters, digits, `.`, `_`, or `-`,
+  but not `..`. Both grant CLIs and both hooks use this check. Other characters cannot enter a printed shell command.
 - Limit (cooperating-agent safeguard): an agent with shell access can also run `authority.py grant` (for Codex the skill is itself an
   instruction to do so). The change stops accidental, negated and pasted-text grants and removes the false precision of a prose
   matcher; it does not stop a hostile same-user agent. A human-only mint (receipt signing) is a separate unit.

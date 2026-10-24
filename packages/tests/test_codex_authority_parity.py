@@ -181,6 +181,15 @@ class CodexCrackOnGateTests(unittest.TestCase):
         self.assertEqual(json.loads((self.loop / "narrow/authority.json").read_text())["scope"], [])
         self.assertFalse(self.asks("narrow"))
 
+    def test_shell_unsafe_session_ids_never_render_a_hint(self) -> None:
+        """The Codex hint uses the same safe ID set as its grant CLI."""
+        for session in ("s;echo INJECTED;#", "s evil", "`id`", "?", "s?"):
+            with self.subTest(session=session):
+                self.assertEqual(self.prompt("crack on", session), {})
+                self.grant(session, ok=False)
+                self.assertFalse((self.loop / session / "authority.json").exists())
+        self.assertIn("--session safe-1", self.prompt("crack on", "safe-1")["hookSpecificOutput"]["additionalContext"])
+
     def test_hook_common_no_longer_vendors_authority(self) -> None:
         """The vendored copies are gone; the mirrored lib is the single implementation."""
         source = (CODEX / "hooks/scripts/hook_common.py").read_text(encoding="utf-8")

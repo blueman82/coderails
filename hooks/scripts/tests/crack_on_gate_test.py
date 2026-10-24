@@ -237,6 +237,15 @@ class CrackOnTests(HookCase):
         self.assertFalse(self.ask("a..b"))
         self.assertTrue(self.ask("ab"))
 
+    def test_shell_unsafe_session_ids_never_render_a_hint(self) -> None:
+        """A supplied ID cannot become shell syntax in the printed grant command."""
+        for session in ("s;echo INJECTED;#", "s evil", "`id`", "?", "s?"):
+            with self.subTest(session=session):
+                self.assertEqual(self.prompt("crack on", session), {})
+                self.grant(session, ok=False)
+                self.assertFalse((self.loop / session / "authority.json").exists())
+        self.assertIn("--session safe-1", self.prompt("crack on", "safe-1")["hookSpecificOutput"]["additionalContext"])
+
     def test_denial_traced_then_expiry_allows_with_trace_and_regrant_works(self) -> None:
         """Live authority denies; expiry allows (traced); a later grant replaces the expired file."""
         self.grant("e1")
