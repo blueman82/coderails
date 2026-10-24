@@ -386,7 +386,8 @@ Its prompt contains `evals.json`, artifact references, and the confidence-label 
 Artifact references can include the PR number, clone path, artifact path, local endpoint, or deployed surface.
 Do not include other context.
 It must not receive the implementation conversation, the implementer's summary, or the orchestrator's opinion.
-Collect the result with `wait_agent`, use `send_input` only for missing evidence, then `close_agent`.
+Collect the result with `wait_agent`. If evidence is missing, use
+`send_message` while the verifier runs or `followup_task` after it ends.
 The verifier returns per-eval status plus evidence; the orchestrator folds those statuses into `evals.json` — nothing more.
 Compute and stamp `result` in a separate neutral step.
 Use `$SKILL_DIR/../../scripts/post_evals.py` for PR scope.

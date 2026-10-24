@@ -1,8 +1,8 @@
 # Workflow-audit judge contract
 
-The prompt template handed to a fresh sonnet judge at the propose stage of the
-workflow-audit skill. The judge turns `cluster_ngrams.py` output into
-propose/reject verdicts for candidate skills.
+The workflow-audit skill gives this prompt template to a fresh sonnet judge.
+The judge reads `cluster_ngrams.py` output. It proposes or rejects candidate
+skills.
 
 ## What the judge receives
 
@@ -14,14 +14,13 @@ Exactly two inputs, nothing else:
    `description` frontmatter fields of every skill already in the repo (e.g.
    read from each `skills/*/SKILL.md` frontmatter block).
 
-The judge must not request, infer, or reconstruct any content beyond these
-two inputs. Its fixed vocabulary is limited to what appears in the cluster
-JSON: tool names, `head` strings (already privacy-whitelisted by
-`scan_transcripts.py`), counts, session ids, and n-gram lengths. It has no
-access to transcript content, prose, file contents, or any other detail —
-if a judgement would require knowing what a command's arguments *meant*
-beyond its whitelisted head, the judge cannot make that judgement and must
-reject or note the limitation, not guess.
+The judge must use only these two inputs. It must not request or reconstruct
+other content. It can use tool names, `head` strings, counts, session IDs,
+and n-gram lengths from the cluster JSON. `scan_transcripts.py` has already
+put the `head` strings on a privacy allowlist. The judge cannot read
+transcripts, file contents, or other prose. If a verdict needs the meaning
+of command arguments beyond the allowed `head`, the judge must reject the
+cluster or state the limit. It must not guess.
 
 ## Per-cluster output
 
@@ -39,13 +38,12 @@ For every cluster in the input, the judge returns one object:
 ```
 
 - `verdict` is exactly `"propose"` or `"reject"`.
-- `reject_reason` is required (non-empty) when `verdict` is `"reject"`; empty
-  string when `"propose"`.
-- `task_summary` and `proposed_description` must be constructed only from the
-  tool names, heads, and counts present in the cluster — no invented
-  specifics, no assumed intent beyond what those strings say. "Sessions
-  repeatedly do X then Y" is fine; "the user was debugging a flaky CI job" is
-  not, unless a whitelisted head literally says so.
+- `reject_reason` is non-empty when `verdict` is `"reject"`. It is empty
+  when `verdict` is `"propose"`.
+- Build `task_summary` and `proposed_description` only from the tool names,
+  heads, and counts in the cluster. Do not invent details or user intent.
+  "Sessions repeatedly do X then Y" is allowed. "The user was debugging a
+  flaky CI job" needs a whitelisted head that says so.
 - `proposed_name` is required only when `verdict` is `"propose"`; kebab-case.
 
 ## Mandatory rejection criteria
@@ -70,13 +68,11 @@ following holds. These are checked in order; the first that fires is the
    worker always does them, not because they represent a repeatable user
    intent.
 
-A cluster that fails none of these three, and where the judge has enough
-information from the cluster JSON alone to write a coherent `task_summary`,
-gets `verdict: "propose"`.
+Use `verdict: "propose"` only if no rejection rule applies. The cluster
+JSON must also support a coherent `task_summary`.
 
 ## Testability
 
-This file is read by both `workflow-audit`'s `SKILL.md` (to construct the
-literal prompt handed to the judge subagent) and by humans reviewing judge
-output. Any change to the per-cluster schema or the three rejection criteria
-above must be reflected in both consumers.
+The `workflow-audit` skill reads this file to build the judge prompt.
+People also read it to review judge output. Update the skill when this
+file's output schema or rejection rules change.

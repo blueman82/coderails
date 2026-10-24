@@ -15,4 +15,4 @@ an inspected file, or a fact provided by the user. For each gap, state:
 - Why it was not verified, such as cost, oversight, or an unsupported assumption.
 - What would verify it now.
 
-Be ruthless. Do not defend unsupported claims. If no gaps remain, say so plainly.
+Report every unsupported claim. Do not defend it. If no gaps remain, say so.

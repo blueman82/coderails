@@ -5,47 +5,43 @@ description: "Launch the coderails observability dashboard — a live local web 
 
 # Dashboard
 
-Launch the local observability HUD for coderails: a live web view of what the
-agentic system is doing right now, backed by files already on disk (sessions,
-loop progress, wiki/memory, PR state, run history) — no new services, no
-telemetry leaving the machine.
+Launch the local Coderails dashboard. It reads session, loop, wiki, memory,
+PR, and run files on this machine. It shows live activity in a web page.
+It needs no separate telemetry service. It does not send telemetry away
+from this machine.
 
 ## What it shows
 
 Seven panels:
 
-1. **SYSTEM VITALS** — usage windows, hooks fired, lint findings; hero
-   numerals + sparklines. Tiles show "loading…" until the first activity
-   collect resolves, then "unavailable" for a source that honestly can't be
-   read locally (never a guess), or the value once collected.
-2. **DIRECTIVES** — one card per live agentic loop (last updated within 60
-   minutes): title, done/total work-unit count, a per-unit checklist with
-   status glyphs (done / in-flight / pending), PR chips, recent decisions,
-   and an evals-frozen footer. A `Live.N` counter in the section header
-   tracks how many loop cards are showing. Non-complete loops that have
-   gone stale drop into a dim sub-list below the cards, one line per loop
-   with its title and time since last update.
-3. **CONTEXT TREND** — one dot per agentic-loop session: x is the session's
-   start date, y is orchestrator cache-read tokens per assistant turn. The
-   2026-07-17 token-reduction cutover is drawn as an annotation the series
-   runs straight through — no gap, no colour change, no causal claim.
-   Per-side medians and n are shown side by side; a side below n=20 is
-   captioned as too few to call. Whether the cutover reduced token burn is
-   not established, and the panel is built to keep it that way: it never
-   renders a "saved X%" headline. Collects on its own SSE frame, so its slow
-   transcript sweep never delays the KPI tiles above.
-4. **COMMAND DECK** — declared buttons (bounded, config-driven runs — never a
-   free prompt box) plus run history, plus a Run Output viewer: click any
-   run-history row to view its output — live-streaming while the run is
-   still going, settled (fetched once) once it ends.
+1. **SYSTEM VITALS** — Shows usage windows, hook calls, and lint findings.
+   Tiles show "loading…" until the first collection ends. A tile shows
+   "unavailable" when its local source cannot be read. Otherwise, it shows
+   the measured value.
+2. **DIRECTIVES** — Shows one card for each loop updated in the last 60
+   minutes. A card shows the title, completed and total work units, each
+   unit's status, PRs, recent decisions, and frozen eval status. The
+   `Live.N` counter shows the number of live cards. Older incomplete loops
+   move to a dim list. Each line gives the loop title and age.
+3. **CONTEXT TREND** — Shows one dot per loop session. The x-axis is the
+   session start date. The y-axis is orchestrator cache-read tokens per
+   assistant turn. An annotation marks the 2026-07-17 token-reduction
+   change. The series has no gap or color change at that date. The panel
+   makes no causal claim. It shows each side's median and sample count.
+   A side with fewer than 20 sessions is marked too small to judge. The
+   panel never claims a percentage saved. Its separate SSE frame keeps
+   transcript collection from delaying the tiles above.
+4. **COMMAND DECK** — Shows declared buttons and run history. It has no free
+   prompt box. Select a run to view its output. Output streams during the
+   run and is fetched once after the run ends.
 5. **PR GATES** — open PRs with gate state: merge-ready / blocked (missing
    artifact) / stale (SHA mismatch).
 6. **Bottom-centre hero** — the active loop's primary directive with a big
    numeral (e.g. work units 2/7) and a micro ticker.
-7. **ASSISTANT.LINK** — pending workflow-audit approvals awaiting a
-   decision (Approve/Deny), plus build status for approved
-   `workflow-audit:propose-skill` entries as they claim, build locally, and
-   become ready for human review and delivery.
+7. **ASSISTANT.LINK** — Shows workflow-audit proposals that need Approve or
+   Deny. It also shows local build status for approved
+   `workflow-audit:propose-skill` entries. A finished build waits for human
+   review and delivery.
 
 ## Starting
 
@@ -56,12 +52,11 @@ the bundled script from that directory:
 "$SKILL_DIR/scripts/start_dashboard.py"
 ```
 
-First run installs dependencies (`npm ci`) and builds the app (`npm run
-build`); later runs skip both when `node_modules` and a fresh `.next` build
-already exist, so a re-launch is fast. Starts the production server
-(`npm run start`) on `127.0.0.1:4173`, writes its pid to
-`~/.codex/coderails-dashboard/dashboard.pid`, and opens the dashboard in the
-browser.
+The first run installs dependencies with `npm ci`. It builds the app with
+`npm run build`. Later runs skip these steps when `node_modules` and a fresh
+`.next` build exist. The script starts the production server with
+`npm run start` on `127.0.0.1:4173`. It writes the process ID to
+`~/.codex/coderails-dashboard/dashboard.pid` and opens the browser.
 
 Override the port with `DASHBOARD_PORT`:
 
@@ -71,36 +66,31 @@ DASHBOARD_PORT=4200 "$SKILL_DIR/scripts/start_dashboard.py"
 
 ## LAN access (opt-in)
 
-By default the dashboard binds to `127.0.0.1` and only accepts requests whose
-Host/Origin resolve to loopback — nothing on the network can reach it. Set
-`DASHBOARD_HOST` to your machine's LAN IP to allow other devices on the same
-network to reach it too:
+By default, the dashboard binds to `127.0.0.1`. Its Host and Origin guard
+accepts only loopback. Set `DASHBOARD_HOST` to this machine's LAN IP to
+allow devices on the same network to connect:
 
 ```
 DASHBOARD_HOST=192.168.50.140 "$SKILL_DIR/scripts/start_dashboard.py"
 ```
 
-This does two things together, from the one variable: the server binds to
-that exact address instead of `127.0.0.1`, and the request guard additionally
-accepts that exact host (and only that host) alongside loopback on both the
-Host and Origin headers. From any other device on the LAN, open
-`http://<LAN-IP>:<port>` (e.g. `http://192.168.50.140:4173`).
+The server binds to that exact address. The request guard accepts that
+host and loopback in Host and Origin headers. On another LAN device, open
+`http://<LAN-IP>:<port>`. For example, use
+`http://192.168.50.140:4173` for the command above.
 
-Leaving `DASHBOARD_HOST` unset (or empty) is unchanged from before this
-option existed: bind and guard are loopback-only, identical to today.
-Wildcard binds (`0.0.0.0`, `::`, `*`) and `host:port` forms are rejected at
-startup with a non-zero exit — the guard exact-matches one host, so a
-wildcard bind would silently 403 real LAN requests.
+With no `DASHBOARD_HOST`, bind and guard stay on loopback. The script
+rejects wildcard addresses (`0.0.0.0`, `::`, `*`) and `host:port` values at
+startup. It exits nonzero. The guard requires one exact host; a wildcard
+bind would cause LAN requests to fail with 403.
 
-**SECURITY NOTE:** the dashboard has an unauthenticated command-execution
-surface — the COMMAND DECK's `POST /run` and workflow-audit Approve/Deny both
-execute declared commands with no login of any kind. The Host/Origin guard
-defends against a hostile web page or DNS-rebinding attack reaching the
-dashboard from your browser; it does **not** authenticate LAN devices. Any
-device on your LAN that can reach the port can trigger declared runs. Only
-enable LAN access on a trusted home network, and use a DHCP reservation or
-static lease for the host — if the host's LAN IP changes, the dashboard will
-fail to bind on next start rather than break silently.
+**Security:** The dashboard has no login. COMMAND DECK `POST /run` and
+workflow-audit Approve/Deny can run declared commands. The Host and Origin
+guard limits hostile web pages and DNS rebinding through your browser.
+It does not authenticate LAN devices. Any LAN device that can reach the
+port can start a declared run. Enable LAN access only on a trusted network.
+Use a DHCP reservation or a static address. If the host IP changes, the
+dashboard fails to bind on the next start.
 
 ## Stopping
 
@@ -108,24 +98,21 @@ fail to bind on next start rather than break silently.
 "$SKILL_DIR/scripts/stop_dashboard.py"
 ```
 
-Kills the process recorded in the pidfile and removes it. The dashboard keeps
-no state of its own outside the config and run-history files below.
+The script stops the process in the PID file and removes that file. The
+dashboard keeps state only in its config and run-history files.
 
 ## First run without a config
 
-If `~/.codex/coderails-dashboard.json` doesn't exist yet, the server still
-starts — it just runs with an empty config, so every panel renders its
-explicit empty state (no repos polled, no buttons declared) instead of
-erroring. Add the config once you're ready to point it at real repos, wiki
-paths, and COMMAND DECK buttons; no restart-and-hope required beyond a normal
-reload.
+The server starts without `~/.codex/coderails-dashboard.json`. It uses an
+empty config. Panels show empty states; no repos are polled and no buttons
+are declared. Add the config when you have repo and wiki paths and COMMAND
+DECK buttons. Reload the page to see them.
 
 ## Configuration
 
-Config lives at `~/.codex/coderails-dashboard.json` (per-user; the watch
-scope is machine-wide): which repos to poll, wiki paths, and the
-button declarations for the COMMAND DECK.
+Config lives at `~/.codex/coderails-dashboard.json` for each user. It names
+the repos to poll, wiki paths, and COMMAND DECK buttons. The watch scope is
+machine-wide.
 
-Buttons only ever run what this config declares. `POST /run` takes a button
-name, looks it up in the config, and refuses anything undeclared — there is
-no path from the dashboard to an arbitrary command.
+Buttons run only commands declared in this config. `POST /run` looks up a
+button name and rejects undeclared names. It cannot run an arbitrary command.

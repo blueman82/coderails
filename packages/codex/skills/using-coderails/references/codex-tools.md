@@ -10,14 +10,15 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 | Search file contents | `exec_command` with `rg` |
 | Find files by name | `exec_command` with `rg --files` or `find` |
 | Fetch a URL | the available web tool, or `exec_command` with `curl` when appropriate |
-| Search the web | `web_search` (enabled by default; configurable in `config.toml` via the top-level `web_search` setting — `live`, `cached`, or `disabled`) |
+| Search the web | Use the web tool exposed in this session. The local CLI has `--search` to enable its native `web_search` tool. |
 | Invoke a skill | Skills load natively — just follow the instructions |
 | Dispatch a subagent (for example the installed `loop-worker`) | `spawn_agent` (see [Subagent dispatch requires multi-agent support](#subagent-dispatch-requires-multi-agent-support)) |
 | Multiple parallel dispatches | Multiple `spawn_agent` calls in one response |
-| Correct or continue a running subagent | `send_input` |
-| Wait for subagent result | `wait_agent` |
-| Free up subagent slot when done | `close_agent` |
-| Task tracking ("create a todo", "mark complete") | `update_plan` |
+| Send context to a running subagent | `send_message` |
+| Give an idle subagent another turn | `followup_task` |
+| Wait for a subagent update or final status | `wait_agent` |
+| Stop a subagent's current turn | `interrupt_agent` |
+| Task tracking ("create a todo", "mark complete") | Use `update_plan` when exposed. The observed collaboration surface does not expose it. |
 
 ## Instructions file
 
@@ -41,7 +42,15 @@ Add to your Codex config (`~/.codex/config.toml`):
 multi_agent = true
 ```
 
-This enables `spawn_agent`, `send_input`, `wait_agent`, and `close_agent`.
+Multi-agent support exposes the collaboration tools available in the active
+session. On the surface observed on 2026-10-24, these are `spawn_agent`,
+`send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and
+`list_agents`. There is no `close_agent` tool. A final status ends the
+subagent's turn; stop waiting when that status arrives. `interrupt_agent`
+stops a current turn but does not retire the agent. The local CLI reports
+`codex-cli 0.164.0`; the session tool surface is the authority for tool names.
+The local `codex --help` lists `--search`; it does not establish that search
+is enabled in every session.
 
 Legacy note: Codex builds before `rust-v0.115.0` exposed spawned-agent
 waiting as `wait`. Current Codex uses `wait_agent` for spawned agents. The

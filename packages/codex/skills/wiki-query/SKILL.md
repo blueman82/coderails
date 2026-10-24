@@ -11,9 +11,9 @@ Answer a question against the project's LLM Wiki.
 
 Spawn the installed `wiki-writer` custom agent with `spawn_agent`, passing the
 question and the project location in a self-contained prompt. Collect its
-result with `wait_agent`, use `send_input` only for a specific missing check,
-then `close_agent`. If the question above is empty, report that and stop rather
-than inferring one.
+result with `wait_agent`. For a specific missing check, use `send_message`
+while it runs or `followup_task` after it ends. If the question above is
+empty, report that and stop.
 
 ## Instructions
 

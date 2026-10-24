@@ -12,9 +12,10 @@ missing argument. Unlike `wiki-ingest` and `wiki-query`, this skill has a
 meaningful behaviour with no argument, so it does not stop. Be aware the whole
 vault is in scope. Spawn the installed `wiki-writer` custom agent with
 `spawn_agent`, passing the scope and project location in a self-contained
-prompt. Collect its result with `wait_agent`, use `send_input` only for a
-specific missing check, then `close_agent`. The agent can write and commit: report
-findings before making sweeping changes across pages you were not asked about.
+prompt. Collect its result with `wait_agent`. For a specific missing check,
+use `send_message` while it runs or `followup_task` after it ends. The
+agent can write and commit. Report findings before broad changes to
+other pages.
 
 Periodically health-check the wiki. The LLM is good at finding inconsistencies, gaps, and new connections — and at suggesting further questions to ask and sources to look for.
 

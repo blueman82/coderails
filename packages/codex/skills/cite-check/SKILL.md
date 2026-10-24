@@ -7,8 +7,8 @@ description: Re-derive a specific claim from sources only - no recall, no infere
 
 Spawn the installed `source-auditor` custom agent with `spawn_agent`, passing
 the claim text and the evidence rules below. Collect its result with
-`wait_agent`, use `send_input` only to request missing evidence, then
-`close_agent`.
+`wait_agent`. If evidence is missing, use `send_message` while it runs or
+`followup_task` after it ends.
 
 Re-derive the claim(s) below using only durable sources you can read or produce
 right now — file contents, git output, and fresh command output. You have no

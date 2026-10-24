@@ -11,9 +11,9 @@ Ingest a new source into the project's LLM Wiki. A single source typically touch
 
 Spawn the installed `wiki-writer` custom agent with `spawn_agent`, passing the
 source and project location in a self-contained prompt. Collect its result with
-`wait_agent`, use `send_input` only for a specific missing check, then
-`close_agent`. If the source above is empty, report that and stop rather than
-guessing which artifact to record.
+`wait_agent`. For a specific missing check, use `send_message` while it runs
+or `followup_task` after it ends. If the source above is empty, report that
+and stop.
 
 ## Instructions
 

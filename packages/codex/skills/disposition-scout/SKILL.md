@@ -24,9 +24,8 @@ so use only read-side tools:
 | Search file contents | `exec_command` with `rg` |
 | Find files by name | `exec_command` with `rg --files` or `find` |
 
-This agent never dispatches a subagent, so `spawn_agent`/`wait_agent`/`close_agent`
-do not apply here — noted only because the mapping table requires it for any
-agent that does dispatch.
+This agent does not dispatch a subagent. The collaboration tools in the
+mapping table do not apply here.
 
 Output:
 
