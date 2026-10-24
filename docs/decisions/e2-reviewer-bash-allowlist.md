@@ -1,57 +1,80 @@
 # E2: reviewer and scout Bash allowlist
 
+This record describes the E2 decision. For current provider limits, use
+[`docs/CAPABILITIES.md`](../CAPABILITIES.md) and the hook source.
+
 The `hooks/scripts/reviewer_bash_allowlist.py` hook runs on PreToolUse for
 `Bash`. It remains last in the Bash group, after `destructive_bash_gate`,
 `enforce_pr_workflow`, `test_gate`, and `verification_volume_ceiling`.
 
 ## Which agents
 
-Claude agents that keep `Bash` and are read-only by contract: `deploy-safety-reviewer`, `design-scout`,
-`disposition-scout`, `preflight-scout`, `source-auditor` (`agents/*.md`: `tools: Read, Grep, Glob, Bash` with
-`disallowedTools: Write, Edit, NotebookEdit`). `spec-reviewer` has no Bash. `docs-auditor`, `loop-worker`,
-`wiki-writer` and `proof-author` write by design and are not guarded.
+The guarded Claude roles are `deploy-safety-reviewer`, `design-scout`,
+`disposition-scout`, `preflight-scout`, and `source-auditor`. Their agent files
+allow Bash and deny `Write`, `Edit`, and `NotebookEdit`. `spec-reviewer` has no
+Bash. The hook does not guard `docs-auditor`, `loop-worker`, `wiki-writer`, or
+`proof-author`. Those roles can write by design.
 
 ## What is and is not enforced
 
-**Enforced (by the hook, keyed on the payload `agent_type`):** a guarded agent's Bash call is denied unless it is one
-command whose argv starts with `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `rg`, `sha256sum`, `git status|log|diff|show|blame`
-or `gh pr view|list ... --json`. Denied on sight: `;` `|` `&` backtick `$(` `>` `<`, newlines, `git -c`, any other
-command (so `find -exec/-delete`, `sed -i`, `python`/`python3`/`node`/`bash -c` all fail), and the flags
-`--output`, `--pre`, `--pre-glob`, `--ext-diff`, `--textconv`, `--hostname-bin`. `rg` is on a per-flag allowlist
-(unknown long flags and `-z` are denied) because its flag surface is open-ended. `agent_type` is matched after stripping a
-plugin namespace (`coderails:design-scout`); the namespaced form is inferred, not captured from a live payload. Each denial
-writes a log line and a trace row with `reason_code=bash_allowlist_deny_{meta,flag,parse,argv}` naming the cause.
+**Enforced by the hook:** The payload `agent_type` selects a guarded role.
+That role can run one Bash command from this list:
 
-**Fail-open by design:** an absent or foreign `agent_type`, a non-Bash tool, or a malformed payload is a no-op.
-Top-level calls carry no `agent_type` (AGENTS.md, `agent_only_gate` probe on Claude Code 2.1.220), so the
-orchestrator is never restricted.
+- `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `rg`, or `sha256sum`;
+- `git status`, `git log`, `git diff`, `git show`, or `git blame`;
+- `gh pr view` or `gh pr list` with `--json`.
+
+The hook denies `;`, `|`, `&`, backticks, `$(`, `>`, `<`, and newlines. It
+also denies `git -c`, other commands, and these flags: `--output`, `--pre`,
+`--pre-glob`, `--ext-diff`, `--textconv`, and `--hostname-bin`. For example,
+`find -exec`, `sed -i`, and interpreter commands fail. `rg` has its own
+flag allowlist. Unknown long flags and `-z` fail. The hook strips a plugin
+namespace before it matches `agent_type`. The namespaced form is an
+inference; no live payload captured it. Each denial writes a log line and
+a trace row. The reason code is `bash_allowlist_deny_{meta,flag,parse,argv}`.
+
+**Fail-open by design:** An absent or foreign `agent_type` does not activate
+this hook. The hook also ignores a non-Bash tool or a malformed payload.
+Top-level calls carried no `agent_type` in the Claude Code 2.1.220 probe.
+Thus, the hook did not restrict the orchestrator in that probe.
 
 **Not enforced, and not to be claimed:**
 
-- `docs-auditor` has Bash plus Edit/Task and writes by design, so it is unguarded; any other Bash-bearing agent not in
-  the guarded list is likewise unrestricted.
+- `docs-auditor` has Bash and can write by design. It is unguarded. The
+  hook also leaves any other Bash role outside the guarded list alone.
 
-- An allowlisted `git`, `grep`, `rg` or `cat` can still read secrets anywhere the process can read. This is a
-  write and execution guard, not a confidentiality guard. `$VAR` expansion is not rejected.
-- `Write`/`Edit` denial (frontmatter `disallowedTools`) is the real block on file writes; this hook narrows Bash.
+- An allowed `git`, `grep`, `rg`, or `cat` can read any file that the process
+  can read. The hook limits Bash commands; it does not hide secrets.
+  It does not reject `$VAR` expansion.
+- Agent frontmatter denies `Write` and `Edit`. This hook narrows Bash.
 - Behaviour under `claude --agent <name>` is unverified (the live probe used a plain session).
-- Claude frontmatter has no command-level Bash restriction (inferred: none found), so only a hook can enforce it.
-- Known cost: `source-auditor` instructs "run the thing" to re-derive numbers (test suite, coverage script). A
-  test-suite run is not on the allowlist, so those runs are now denied for guarded types. Widening would admit an
-  interpreter that can write, so it is left for a human decision.
-- **Codex** keeps `sandbox_mode = "read-only"` on `deploy-safety-reviewer`, `design-scout`, `disposition-scout`,
-  `preflight-scout`, `source-auditor` and `spec-reviewer` (`grep sandbox_mode packages/codex/agents/*.toml`). No
-  per-command knob was found (inferred), so shell reads there are instruction-only. The Codex tomls are unchanged.
+- No command-level Bash rule was found in Claude agent frontmatter. This
+  is an inference from the inspected files. The hook applies that rule.
+- At the first E2 decision, `source-auditor` could not run a test suite
+  through the Bash allowlist. Its instructions require fresh numbers.
+  Allowing an interpreter would also permit file writes. The capability
+  tool below addresses this cost.
+- The listed Codex roles use `sandbox_mode = "read-only"` in their agent
+  files. No per-command Bash hook was found for Codex. Its shell guidance
+  is instruction text. The Codex agent files were unchanged by E2.
 
 ## Addendum: capability tools close the "Known cost" without widening Bash
 
-`source-auditor` now has the `tests.run` capability (`capabilities/profiles.json`). It reaches it as
-`<abs>/scripts/capability.py tests.run --json-args '{"name":"<declared>"}'`; the hook allows that exact absolute path
-only when the caller's profile grants the tool (`capability_denied_<tool>` otherwise; an `agent_type` absent from the profiles is left alone). `python3 -c`, `bash -c` and `python3 <script>` stay denied. Pinned by
-`hooks/scripts/tests/capability_hook_test.py::test_e2_known_cost_closed_without_widening_bash`.
+`source-auditor` has the `tests.run` capability in `capabilities/profiles.json`.
+It calls `<abs>/scripts/capability.py tests.run --json-args '{"name":"<declared>"}'`.
+The hook allows that exact absolute path when the role profile grants the
+tool. Otherwise, it returns `capability_denied_<tool>`. An `agent_type`
+absent from the profiles remains unguarded. The hook still denies
+`python3 -c`, `bash -c`, and `python3 <script>`. The test
+`hooks/scripts/tests/capability_hook_test.py::test_e2_known_cost_closed_without_widening_bash`
+checks this path.
 
-What this is not: `tests.run` is bounded execution of repo code (declared argv lists, timeout, scrubbed env), not
-read-only, and a declared suite can still write caches in the repo. It is a typed argument schema plus an argv-path
-match on Bash, not a harness-level typed tool (that needs an MCP server; none ships). On Codex there is no per-agent
-Bash hook, so the same script ships in `packages/codex/scripts` but per-agent gating there is `sandbox_mode` plus
-instruction text only, and a read-only sandbox may block the suite's cache writes (inferred). See `docs/CAPABILITIES.md`.
+`tests.run` executes declared repo commands with a timeout and a scrubbed
+environment. It can write caches in the repo. It uses typed arguments and
+an argv-path match in the Bash hook. It is not a harness-level typed tool;
+that would need an MCP server, which does not ship here.
+
+Codex has no per-agent Bash hook. The same capability script ships in
+`packages/codex/scripts`, but Codex role limits come from the sandbox and
+instruction text. A read-only sandbox may block test cache writes. That
+last point is an inference. See [`docs/CAPABILITIES.md`](../CAPABILITIES.md).

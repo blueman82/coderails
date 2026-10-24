@@ -5,18 +5,44 @@ recommendation or change. It keeps `work_units` separate from `graph.nodes`.
 
 ## Method
 
-Produced by `python3 scripts/measure_graph_alignment.py --root . --json` (stdlib only, read-only, prints
-counts and paths, never log-message, transcript or prompt content). Run against `origin/main` at
-`04b0eef7f089aebd17ab09ea1464d65b46380d32` on 2026-10-03T19:27+01:00, on the author's workstation, so the
-telemetry and loop-state figures describe that one machine and not a fleet.
+The command was `python3 scripts/measure_graph_alignment.py --root . --json`.
+It used only the Python standard library. It read data and printed counts
+and paths. It did not print log messages, transcripts, or prompt content.
 
-| Key | Source | Rule |
-| --- | --- | --- |
-| `hook_counts` | `hooks/hooks.json`, `packages/codex/hooks/hooks.json` | Commands registered per event type. |
-| `bootstrap_bytes` | `hooks/scripts/inject_bootstrap.py`, `packages/codex/hooks/scripts/inject_bootstrap.py` | Each hook is executed with an empty `{}` payload; the figure is the UTF-8 size of its `additionalContext`. No cwd or session means no legacy-config nudge and no Codex graph-resume text, so this is the static floor. |
-| `gate_blocks` | `~/.claude/discipline.log` (override `CLAUDE_DISCIPLINE_LOG`); `~/.coderails/codex/discipline.log` (overrides `PLUGIN_DATA`, `CODERAILS_DISCIPLINE_LOG`) | Lines with `hook=<name>`. `total` = every line naming the gate; `decisions` = the subset carrying a `blocked=0\|1` field; `blocked`, `would_block`, `warned` = lines with that flag `=1`. Missing log = zeros. |
-| `graph_vs_work_units` | `<root>/*/*/progress.json` for `CLAUDE_AGENTIC_LOOP_DIR`/`CODERAILS_AGENTIC_LOOP_DIR` (default `~/.coderails/agentic-loop`), `~/.claude/agentic-loop`, `~/.codex/agentic-loop`; de-duplicated by real path | Divergence is counted only for loops having both non-empty `work_units` and `graph.nodes`: all work_units terminal XOR all graph nodes in `done`/`skipped`. Strict: work_unit terminal means exactly `done` or `dropped` (the `loop_completion.py` rule). Lenient: statuses merely starting with `done`/`dropped` also count (many real units carry free-text statuses). |
-| `duplication` | line counts of the three `graph_semantics.py` copies and the two provider `agentic-loop/scripts` directories | Content identity by SHA-256. |
+The run used `origin/main` at `04b0eef7f089aebd17ab09ea1464d65b46380d32`.
+It ran on the author's workstation on 2026-10-03T19:27+01:00. The telemetry
+and loop-state figures describe that machine.
+
+The command measured these keys:
+
+- `hook_counts`: It counted commands per event type in `hooks/hooks.json`
+  and `packages/codex/hooks/hooks.json`.
+- `bootstrap_bytes`: It ran each provider's `inject_bootstrap.py` hook with
+  an empty `{}` payload. It counted the UTF-8 bytes in `additionalContext`.
+  No cwd or session was set. Thus, the figure excludes the legacy-config
+  nudge and Codex graph-resume text. It is the static floor.
+- `gate_blocks`: It read `~/.claude/discipline.log` and
+  `~/.coderails/codex/discipline.log`. `CLAUDE_DISCIPLINE_LOG` overrides
+  the Claude path. `PLUGIN_DATA` and `CODERAILS_DISCIPLINE_LOG` override
+  the Codex path. A row needs `hook=<name>`. `total` counts all rows for
+  the gate. `decisions` counts rows with `blocked=0` or `blocked=1`.
+  `blocked`, `would_block`, and `warned` count rows where that flag is `1`.
+  A missing log gives zero counts.
+- `graph_vs_work_units`: It scanned `<root>/*/*/progress.json` under
+  `CLAUDE_AGENTIC_LOOP_DIR` and `CODERAILS_AGENTIC_LOOP_DIR`. Their default
+  is `~/.coderails/agentic-loop`. It also scanned `~/.claude/agentic-loop`
+  and `~/.codex/agentic-loop`. Real paths removed duplicate files. A loop
+  entered the comparison only when it had non-empty `work_units` and
+  `graph.nodes`. The work-unit side is terminal when all units are terminal.
+  The graph side is terminal when all nodes are `done` or `skipped`.
+  Divergence means exactly one side is terminal. The strict count treats
+  only exact `done` or `dropped` work-unit status as terminal. This is the
+  `loop_completion.py` rule.
+  The lenient count also accepts statuses that start with those words.
+  Many real units use free-text statuses.
+- `duplication`: It counted lines in three `graph_semantics.py` copies and
+  both provider `agentic-loop/scripts` directories. It used SHA-256 to
+  test content identity.
 
 Known measurement limits: the discipline log is append-only for the whole life of the machine (Claude log
 starts 2026-08-04, Codex log spans 2026-08-20 to 2026-09-17), and the Claude figures include this session's
