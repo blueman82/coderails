@@ -58,7 +58,7 @@ For example, if cwd is `/Users/you/Documents/Github/ops-agent`, write to:
 
 **Do NOT use the path shown in your system prompt's auto-memory section** — that may be a global fallback path which other project sessions won't load. Always derive from cwd.
 
-**Monorepo edge case — verify the store location before deriving a new one.** When cwd is a sub-project inside a larger repo (e.g. you are working in `<repo>/projects/<sub>` or `<repo>/packages/<sub>`), the memory store is often keyed at the **repo root**, not the sub-project cwd. All of that repo's sessions — including this one — share one root store. Blindly deriving the path from a sub-project cwd creates a brand-new, empty `memory/` folder that NO future session will load from, orphaning your handoff. So before writing:
+**Monorepo edge case: find the existing store before you write.** If cwd is inside `<repo>/projects/<sub>` or `<repo>/packages/<sub>`, the memory store might use the **repo root** path. All sessions for that repo, including this one, can share the root store. A path based only on the sub-project cwd can create an empty `memory/` folder that future sessions do not load. Before writing:
 
 1. Find the existing store. Check the cwd-derived path AND its parent-directory candidates (walk up the path, replacing slashes with dashes), and look at the auto-memory path from the system prompt. Pick the one that already contains a populated `MEMORY.md` + `project_*.md` files.
 2. If exactly one populated store exists, write there — even if it's keyed to a parent/root path rather than your sub-project cwd. Matching the store the session actually loads from beats matching cwd.
