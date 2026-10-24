@@ -802,17 +802,19 @@ The loop's `spec.md`, `plan.md`, and `progress.json` live in `~/.coderails/agent
 Both provider graph CLIs call `decision_record.record` through their native state locks:
 
 ```text
-graph.py record-decision <progress.json> --session <id> --phase <phase> --decision <text> [--flip-condition <text>] [--unit <id>] [--cite-quote <verbatim user quote>]
+graph.py record-decision <progress.json> --session <id> --loop-id <loop-id> --revision <revision> --phase <phase> --decision <text> [--flip-condition <text>] [--unit <id>] [--cite-quote <verbatim user quote>]
 graph.py flush-decisions <progress.json> --session <id> [--cite-quote <verbatim user quote>]
 ```
 
-Use these commands for decisions; never append rows to `progress.json` by hand. `record-decision` verifies the
-existing hash chain before appending. `flush-decisions` verifies it before retrying pending or degraded rows.
+Read the current `loop_id` and `revision` from `progress.json` before each call. Use these commands for decisions;
+never append rows to `progress.json` by hand. `record-decision` checks the caller's loop ID and revision under the
+graph lock. It verifies the existing hash chain before appending. `flush-decisions` verifies it before retrying
+pending or degraded rows.
 
 Order: (1) under the lock the local row is appended (`seq`, `prev_sha256`, `row_sha256`, `muninn: {state: syncing}`);
 (2) outside the lock Muninn is written; (3) under the lock again the row's `muninn` field is patched. Return
 `{recorded, seq, muninn: {state, id, reason_code}, exit_code}`; exit 0 written or disabled, 3 degraded or unknown (loud reason
-code, trace `decision.sync/degraded/<code>`, local row kept), 2 refused (wrong session, blank phase or decision: nothing
+code, trace `decision.sync/degraded/<code>`, local row kept), 2 refused (wrong session, loop, or revision, or blank phase or decision: nothing
 written). Teardown runs `flush-decisions` to retry pending and safely degraded rows. An in-flight or uncertain sync
 returns `decision_sync_unknown` and must be reconciled against Muninn before any manual retry. Trace commands: `decision.record`,
 `decision.sync` (counted by `memory_counters.memory_counts`).

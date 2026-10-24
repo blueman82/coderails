@@ -12,7 +12,8 @@ will not retry it, so "synced to Muninn" is unauthenticated here; check the id a
 Entry point for both graph CLIs (`graph.py record-decision`), `transition(path, fn)` being the provider's lock wrapper
 (Claude `hooks.scripts.lib.graph_executor.transition`; Codex `graph_io.locked/load/write` wrapped to the same shape):
 
-    out = record(path, session, phase, decision, transition=transition, flip_condition=fc, unit=unit)
+    out = record(path, session, phase, decision, expected_loop_id=loop_id,
+                 expected_revision=revision, transition=transition, flip_condition=fc, unit=unit)
     print(json.dumps(out))
     return out["exit_code"]
 

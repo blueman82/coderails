@@ -27,6 +27,28 @@ class DecisionCliTests(StoreCase):
 
     with_store = True
 
+    def test_record_decision_guidance_names_required_caller_binding(self) -> None:
+        """The executable examples and both provider guides name the CLI's required identity fields."""
+        examples = (
+            ROOT / "skills/agentic-loop/phases-setup.md",
+            ROOT / "docs/REFERENCE.md",
+        )
+        for path in examples:
+            with self.subTest(example=path.name):
+                line = next(
+                    line for line in path.read_text().splitlines() if "graph.py record-decision <progress.json>" in line
+                )
+                self.assertIn("--loop-id", line)
+                self.assertIn("--revision", line)
+        for path in (
+            ROOT / "skills/agentic-loop/SKILL.md",
+            ROOT / "packages/codex/skills/agentic-loop/SKILL.md",
+        ):
+            with self.subTest(guide=path):
+                guide = path.read_text()
+                self.assertIn("--loop-id", guide)
+                self.assertIn("--revision", guide)
+
     def setUp(self) -> None:
         """Create an owned graph whose authorising prompt is in the fake transcript."""
         super().setUp()

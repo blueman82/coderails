@@ -45,6 +45,9 @@ Start the loop state (`graph.py start`, then `graph.py add-unit` per unit), shar
 pre-flight checks via spawned agents, resolve design forks and disposition, and
 commit the resolved design to `spec.md` and `plan.md`.
 
+Before each `graph.py record-decision` call, read the current `loop_id` and `revision` from `progress.json`.
+Pass them as `--loop-id` and `--revision`. The CLI refuses a stale caller.
+
 **Read [phases-setup.md](phases-setup.md) in full at loop start.** These phases
 run once, before Phase 2.8 routes any work. Skipping them is how loops start on
 an unresolved design.
