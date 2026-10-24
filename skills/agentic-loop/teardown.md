@@ -12,7 +12,11 @@ last-failed — so every proof cmd must be run, in the foreground, in the orches
 session, before the declaration too (Step 1 below).
 
 **Graph dispatch boundary.** `S13-proof`, `S13-retro`, and `S13-complete` deliberately have no
-entry in the Claude role map, so the native graph CLI `plan` command reports them as `unresolved:true`. These are orchestrator actions. Keep them in the phase/artifact record; do not create fake worker-completed graph nodes for them. An actual graph dispatch requires a resolved instruction source and native worker evidence.
+entry in the Claude role map. The native graph CLI `plan` command reports
+them as `unresolved:true`. The orchestrator performs these actions. Record
+them in the phase and artifact record. Do not create worker-completed graph
+nodes for them. A graph dispatch needs a resolved instruction source and
+native worker evidence.
 
 ## Contents
 

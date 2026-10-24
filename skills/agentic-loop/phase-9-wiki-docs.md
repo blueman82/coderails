@@ -12,7 +12,9 @@ this sequential `S9-wiki -> S9-docs` link, plus the
 [execution-graph.md](execution-graph.md)'s `S9-wiki -> S9-docs` and `J12-all-units` subsection, with
 acceptance evidence in `hooks/scripts/tests/graph_dependencies_test.py`.
 
-**Suppressing per-PR wiki steps in spawned `/coderails:workflow` agents:** place the following line as the **FIRST instruction after the required graph envelope** in every spawned agent's prompt inside this loop (not buried mid-section, not under the task-specific scope, not after the workflow steps — first):
+**Suppress per-PR wiki steps in spawned `/coderails:workflow` agents.** Put
+the following line first after the required graph envelope in every spawned
+agent prompt for this loop. Put it before task scope and workflow steps:
 
 > "When running /workflow inside this agentic-loop, skip /workflow's wiki sub-steps (Phase 2 `/coderails:wiki-query` and Phase 5 `/coderails:wiki-ingest`/`/coderails:wiki-lint`). The orchestrator runs these at the loop boundary — running them per-PR causes redundant ingests and fragmented wiki context."
 

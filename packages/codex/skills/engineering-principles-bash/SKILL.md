@@ -6,7 +6,10 @@ description: Bash/shell-specific coding standards and idioms. Invoked by enginee
 # Engineering Principles Bash - Language-Specific Standards
 
 **Version:** 1.0.0
-**Purpose:** Enforce shell idioms and safety patterns on `.sh` files. Shebang-identified shell scripts without a `.sh` extension are routed here by the `engineering-principles` coordinator's own dispatch table before this skill loads — see that skill's Phase 0 for the detection logic; this file doesn't need to duplicate it.
+**Purpose:** Enforce shell idioms and safety patterns on `.sh` files. The
+`engineering-principles` coordinator also sends shell scripts without a `.sh`
+extension here when they have a shebang. See Phase 0 of that skill for the
+detection rule.
 
 ---
 
