@@ -161,13 +161,13 @@ def _d4_evidence(state_dir: Path, session: str, loop: str, ledger: ol.Ledger) ->
 
 
 def _legacy_admitted(path: Path, session: str, loop: str, ledger: ol.Ledger) -> bool:
-    """Accept only a separately reviewed exact historical progress snapshot."""
+    """Accept the reviewed graph source across completion-only bookkeeping updates."""
     receipt_path = _legacy_path(path.parent, loop)
     if receipt_path.is_symlink():
         raise ValueError("order_wrong_session")
     if not receipt_path.exists():
         return False
-    state_dir, _, _ = lifecycle.owned(path.parent.parent, session, loop, complete=True)
+    state_dir, state, _ = lifecycle.owned(path.parent.parent, session, loop, complete=True)
     if _d4_evidence(state_dir, session, loop, ledger):
         raise ValueError("order_legacy_conflict")
     receipt = lifecycle.object_file(receipt_path)
@@ -175,9 +175,13 @@ def _legacy_admitted(path: Path, session: str, loop: str, ledger: ol.Ledger) -> 
         "schema": 1,
         "session_id": session,
         "loop_id": loop,
-        "progress_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "source_sha256": lifecycle.sha(lifecycle.source_state(state)),
     }
     if any(receipt.get(key) != value for key, value in expected.items()):
+        raise ValueError("order_legacy_admission_stale")
+    if not isinstance(receipt.get("progress_sha256"), str) or not re.fullmatch(
+        r"[0-9a-f]{64}", receipt["progress_sha256"]
+    ):
         raise ValueError("order_legacy_admission_stale")
     if not isinstance(receipt.get("reason"), str) or len(receipt["reason"].strip()) < 12:
         raise ValueError("order_legacy_admission_stale")
@@ -190,7 +194,7 @@ def admit_legacy(path: Path, session: str, loop: str, expected_sha256: str, reas
         raise ValueError("order_legacy_admission_invalid")
     with order_cli.locked(path.parent.parent):
         ledger = ol.open_ledger(path.parent.parent)
-        state_dir, _, _ = lifecycle.owned(path.parent.parent, session, loop, complete=True)
+        state_dir, state, _ = lifecycle.owned(path.parent.parent, session, loop, complete=True)
         if _d4_evidence(state_dir, session, loop, ledger):
             raise ValueError("order_legacy_conflict")
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -201,6 +205,7 @@ def admit_legacy(path: Path, session: str, loop: str, expected_sha256: str, reas
             "session_id": session,
             "loop_id": loop,
             "progress_sha256": actual,
+            "source_sha256": lifecycle.sha(lifecycle.source_state(state)),
             "reason": reason.strip(),
         }
         destination = _legacy_path(state_dir, loop)
@@ -272,6 +277,8 @@ def finish(path: Path, session: str, loop: str) -> dict[str, Any]:
             repo_dir = path.parent.parent
             with order_cli.locked(repo_dir):
                 ledger = ol.open_ledger(repo_dir)
+                if render.get("ledger_sha256") != lifecycle.sha(ledger):
+                    raise ValueError("order_source_mismatch")
                 state_dir, _, binding = lifecycle.owned(repo_dir, session, loop, complete=True)
                 lifecycle.prepared(state_dir, binding, required=True)
                 lifecycle.observe(state_dir, "orders_rendered", binding, _view_digest(repo_dir, ledger))

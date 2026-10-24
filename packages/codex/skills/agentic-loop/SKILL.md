@@ -106,7 +106,8 @@ completion save ages nothing. `orders_ticked` follows the ledger save; a failed 
 means `pending_teardown: true`. Repeat the same native `complete` command to resume the bound tick and render before
 claiming teardown finished. `verify-completion` and the Stop guard refuse pending teardown.
 An old complete loop without D4 receipts needs explicit reviewed legacy admission as documented in the orders
-decision and runbook. Admission binds unchanged progress and does not age orders; new loops cannot use it.
+decision and runbook. Admission checks the exact file hash, then permits completion bookkeeping while binding the
+graph source. It does not age orders; new loops cannot use it.
 
 Run each proof command through `functions.exec` using this canonical nested-result output; replace the placeholder with the proof's exact command so transcript matching remains exact:
 

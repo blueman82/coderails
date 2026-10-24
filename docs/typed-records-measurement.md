@@ -49,7 +49,8 @@ a cite, or a lesson missing from dispatch". Decision: `docs/decisions/2026-10-05
 
 Limits: Claude and Codex native completion now enforce prepare, validated graph save, tick and render. Both Stop paths
 refuse missing or stale D4 receipts and views. An explicitly reviewed old complete graph can carry a separate
-hash-bound admission that never changes progress or ages orders. `orders_ticked` is a post-save observation, and a
+source-bound admission that never changes progress or ages orders. The exact file hash is checked at admission; later
+completion bookkeeping does not revoke it. `orders_ticked` is a post-save observation, and a
 failed apply/receipt after completion means pending teardown. The one same-user lock covers currentness,
 reconciliation, bounded sync and atomic ledger save, with no
 exactly-once network claim. New completed recurrences revive tombstones; replay cannot reset counters. Current live,

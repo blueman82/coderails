@@ -107,6 +107,10 @@ class LegacyAdmission(unittest.TestCase):
                 if ledger.exists():
                     self.assertEqual(json.loads(ledger.read_text())["ticked_loops"], [])
                 provider.path.write_bytes(original + b" ")
+                self.assertEqual(self.verify(provider).returncode, 0)
+                changed = provider.read()
+                changed["authorising_prompt_raw"] = "A different authorising prompt."
+                provider.write(changed)
                 self.assertNotEqual(self.verify(provider).returncode, 0)
 
     def test_new_completion_cannot_use_legacy_admission(self) -> None:
@@ -141,3 +145,56 @@ class LegacyAdmission(unittest.TestCase):
                 target = {**other, "loop_id": provider.read()["loop_id"]}
                 log.write_text(json.dumps(other) + "\n" + json.dumps(target) + "\n")
                 self.assertNotEqual(self.verify(provider).returncode, 0)
+
+    def test_claude_completion_bookkeeping_keeps_admission_valid(self) -> None:
+        """Repeated Stop counts and mark-complete cannot revoke an old reviewed loop."""
+        provider = self.providers[0]
+        self.old_complete(provider)
+        command = self.command(provider, "Reviewed the old complete loop before Stop bookkeeping.")
+        admitted = subprocess.run(command, cwd=provider.home, env=provider.environment, capture_output=True)
+        self.assertEqual(admitted.returncode, 0, admitted.stdout)
+        claude.append(
+            provider.parent,
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "tool_use", "name": "Skill", "input": {"skill": "coderails:agentic-loop"}}]
+                },
+            },
+        )
+        claude.append(
+            provider.parent,
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "LOOP-STOP: complete"}]}},
+        )
+        payload = {
+            "session_id": provider.session,
+            "cwd": str(provider.home),
+            "transcript_path": str(provider.parent),
+            "last_assistant_message": "LOOP-STOP: complete",
+        }
+        for count in (1, 2):
+            stopped = provider.hook("loop_stall_guard", payload)
+            self.assertEqual(stopped.returncode, 0, stopped.stderr)
+            self.assertEqual(provider.read()["loop_stop_counts"]["complete"], count)
+            verified = self.verify(provider)
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+        marked = subprocess.run(
+            [
+                sys.executable,
+                str(provider.plugin / "hooks/scripts/lib/loop_state_common.py"),
+                "mark-complete",
+                str(provider.home),
+                provider.session,
+            ],
+            cwd=provider.home,
+            env=provider.environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(marked.returncode, 0, marked.stderr)
+        self.assertEqual(provider.read()["completed_marker"], 1)
+        self.assertEqual(self.verify(provider).returncode, 0)
+        ledger = provider.path.parent.parent / "orders.json"
+        if ledger.exists():
+            self.assertEqual(json.loads(ledger.read_text())["ticked_loops"], [])

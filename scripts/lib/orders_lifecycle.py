@@ -38,9 +38,8 @@ RETRO_CHECK = _retro_check
 
 def sha(value: object) -> str:
     """Canonical JSON hash shared by preparation, application and their observations."""
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    ).hexdigest()
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def loop_key(session: str, loop: str) -> str:
@@ -86,9 +85,10 @@ def source_state(state: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("order_source_invalid")
     for key in ("status", "completion", "completed_marker"):
         source.pop(key, None)
-    counts = source.get("loop_stop_counts")
-    if isinstance(counts, dict):
-        source["loop_stop_counts"] = {k: v for k, v in cast("dict[str, Any]", counts).items() if k != "complete"}
+    if isinstance(counts := source.get("loop_stop_counts"), dict):
+        remaining = {k: v for k, v in cast("dict[str, Any]", counts).items() if k != "complete"}
+        source.pop("loop_stop_counts")
+        source.update({"loop_stop_counts": remaining} if remaining else {})
     return source
 
 

@@ -103,6 +103,19 @@ elif kind == 'render_old':
             return 3, {'degraded': 'muninn_old_ledger'}
         return original(path, session, command, loop)
     context = mock.patch.object(orders, '_call', side_effect=degraded)
+elif kind == 'render_race':
+    from scripts.lib import orders_ledger as ol
+    original = orders._call
+    def raced(path, session, command, loop):
+        code, payload = original(path, session, command, loop)
+        if command == 'render' and code == 0:
+            repo = path.parent.parent
+            with orders.order_cli.locked(repo):
+                ledger = ol.open_ledger(repo)
+                advanced = ol.tick(ledger, 'another-loop', ol.now_iso(), session_id='another-session')
+                ol.save(repo / 'orders.json', advanced['ledger'])
+        return code, payload
+    context = mock.patch.object(orders, '_call', side_effect=raced)
 else:
     original = orders.prepare
     def changed(*args):
@@ -116,7 +129,7 @@ else:
 with context:
     try:
         result = invoke()
-        if kind == 'render_old':
+        if kind in ('render_old', 'render_race'):
             print(json.dumps(result))
             sys.exit(0)
     except Exception as error:
@@ -327,3 +340,23 @@ sys.exit(1)
                 verified = self.verify(provider)
                 self.assertNotEqual(verified.returncode, 0)
                 self.assertIn("muninn_old_ledger", verified.stdout + verified.stderr)
+
+    def test_render_input_change_blocks_receipt_until_retry(self) -> None:
+        """A ledger update after rendering cannot certify old views for the new ledger."""
+        for provider in self.providers:
+            with self.subTest(provider=provider.name):
+                self.ready(provider)
+                raced = self.fault(provider, "render_race")
+                self.assertEqual(raced.returncode, 0, raced.stderr)
+                result = json.loads(raced.stdout)
+                self.assertEqual(result["exit_code"], 3)
+                self.assertEqual(result["reason_code"], "order_source_mismatch")
+                teardown = provider.path.with_name("teardown.jsonl")
+                rows = [json.loads(line) for line in teardown.read_text().splitlines()]
+                rendered = [row for row in rows if row["step"] == "orders_rendered"]
+                self.assertEqual(rendered, [])
+                self.assertNotEqual(self.verify(provider).returncode, 0)
+                self.assertEqual(provider.complete().returncode, 0)
+                self.assertEqual(self.verify(provider).returncode, 0)
+                rows = [json.loads(line) for line in teardown.read_text().splitlines()]
+                self.assertEqual(len([row for row in rows if row["step"] == "orders_rendered"]), 1)

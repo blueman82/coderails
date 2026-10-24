@@ -228,8 +228,7 @@ def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
 
 def cmd_lessons(a: argparse.Namespace, repo_dir: Path) -> Result:
     """Active orders joined with Muninn's current status."""
-    payload, rc = lessons.serve(ol.open_ledger(repo_dir), a.session)
-    return payload, rc
+    return lessons.serve(ol.open_ledger(repo_dir), a.session)
 
 
 def cmd_render(a: argparse.Namespace, repo_dir: Path) -> Result:
@@ -258,7 +257,8 @@ def cmd_render(a: argparse.Namespace, repo_dir: Path) -> Result:
             return {"degraded": bad.reason}, 3
         os.chmod(repo_dir / name, 0o444)
     ol.trace("order.render", "rendered", "ok", a.session)
-    return {"rendered": [n for n, _ in VIEWS], "excluded": sorted({g["order"] for g in got.get("excluded", [])})}, 0
+    excluded = sorted({g["order"] for g in got.get("excluded", [])})
+    return {"rendered": [n for n, _ in VIEWS], "excluded": excluded, "ledger_sha256": lifecycle.sha(ledger)}, 0
 
 
 def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:

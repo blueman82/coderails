@@ -33,8 +33,9 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
 - K=5 is a code constant (`orders_ledger.K`), not config.
 - The native completion command now prepares orders before it takes the progress lock. It validates the exact prepared
   source again under that lock, saves completion, then releases the lock before it ticks and renders. A repeat of the
-  same completion command resumes the tick and render without a second age change. Claude `mark-complete` uses the
-  same validated path. The Claude Stop guard and Codex completion verifier block when bound teardown is pending.
+  same completion command resumes the tick and render without a second age change. The renderer returns its input
+  ledger hash; the completion caller checks that hash under the orders lock before it records `orders_rendered`.
+  Claude `mark-complete` uses the same validated path. Both native guards block when bound teardown is pending.
 - Preparation validates genuine eligible progress at `<repo-key dir>/<session>/progress.json` and binds the resolved
   directories, owning session, separate logical loop, revision and source hash. Prospective eligibility permits
   preparation only. Actual recurrence/aging requires that owned progress be durably saved complete. Failed completion
@@ -89,11 +90,11 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
   until an operator reviews the retained graph, eval, proof, retro and transcript evidence. For an eligible old loop,
   read the exact progress hash with `shasum -a 256 <repo-key dir>/<session>/progress.json`, then run
   `python3 scripts/lib/orders_completion.py admit-legacy --dir <repo-key dir> --session <session> --loop <loop> --progress-sha256 <hash> --reason "<reviewed historical evidence>"`.
-  This writes a separate session/loop/hash-bound receipt. It never edits progress, imports a lesson, ticks a loop or
-  ages an order. Native retry and Stop accept the unchanged admitted graph. Any D4 preparation, observation or ledger
-  effect blocks this exception. Run historical `mark-complete` before admission because its marker changes the file
-  hash. A changed graph makes the admission stale. This same-user receipt records a review; it cannot prove that an
-  owner approved a new lesson. New loops still require the full D4 completion lifecycle.
+  This writes a separate session/loop receipt after checking that exact file hash. It also binds the substantive
+  graph source. It never edits progress, imports a lesson, ticks a loop or ages an order. Native retry and Stop may
+  update `completed_marker` and the complete Stop count; those bookkeeping changes do not revoke admission. A changed
+  graph source or any D4 preparation, observation or ledger effect blocks the exception. This same-user receipt records
+  a review; it cannot prove that an owner approved a new lesson. New loops need the full D4 completion lifecycle.
 - Legacy import preserves titles, counters including decay, full source text and first-seen provenance. Duplicate,
   incomplete, malformed or colliding entries and foreign paths are refused without moving the source. The original
   remains in a local backup. A retry after ledger save but failed source move resumes only when the entire parsed

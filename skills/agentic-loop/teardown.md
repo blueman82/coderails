@@ -152,7 +152,8 @@ and refuse missing, foreign, malformed, incomplete or stale sources. A failed na
 Stop guard blocks a finished loop until those bound receipts and generated views are current. The Codex equivalent is
 in `packages/codex/skills/agentic-loop/SKILL.md`.
 An old complete loop without D4 receipts needs explicit reviewed legacy admission; see the orders decision and
-runbook. Admission binds its unchanged progress hash and does not age orders. New loops cannot use it.
+runbook. Admission checks the exact file hash, then permits completion bookkeeping while binding the graph source.
+It does not age orders. New loops cannot use it.
 
 The graduation predicate and the promotion selection are `$O predicate` and `lessons.py predicate`. This step is
 additive-or-recurrence-only: no metric-based removal anywhere.

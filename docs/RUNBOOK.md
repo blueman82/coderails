@@ -273,8 +273,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   If render fails on the installed Muninn API, the pending result and later verifier show its actual reason code.
   The installed Muninn uses a current request-bound API that this D4 adapter does not support. Treat live lesson
   activation as pending; do not use ledger text as a substitute for a current cited claim.
-- Pre-D4 complete loop: review its retained evidence before the explicit exact-hash admission. The command preserves
-  progress and never ages orders. See `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md` for the steps and limits.
+- Pre-D4 complete loop: review its retained evidence before the exact-hash admission. The receipt then follows only
+  completion bookkeeping; other graph changes still block. See `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 - Completed text replacement: when this session/loop observation already exists, explicit `record` captures
   `replaces_source` in the prepared row. The canonical `lesson_source` hashes owned binding, authored fields and that
   predecessor, excluding mutable store observations, and is sealed/saved with the lesson. Ordinary tick recovers only
