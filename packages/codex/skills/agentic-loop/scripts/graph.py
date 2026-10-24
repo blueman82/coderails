@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+import graph_mutations
 import graph_semantics
 import graph_stops
 from graph_completion import complete, verify_completion
@@ -109,32 +110,6 @@ def transition(path: Path, session: str, operation: str, node: str, reason: str)
         _write(path, proposed)
         key = "respawn" if operation == "respawn_stale" else "hard_stop"
         return cast(dict[str, Any], transition[key])
-
-
-def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str) -> dict[str, Any]:
-    """Record an independently checked work-unit decision under the state lock."""
-    with _locked(path):
-        state = _load(path)
-        if state["session_id"] != session:
-            raise GraphError("session does not own this loop")
-        if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
-            raise GraphError("work unit requires an in-progress graph without an active wave")
-        units = cast(object, state.get("work_units"))
-        if not isinstance(cast(object, unit_id), str) or not unit_id.strip() or not isinstance(units, dict):
-            raise GraphError("work unit must be registered")
-        unit = cast(dict[str, object], units).get(unit_id)
-        if not isinstance(unit, dict):
-            raise GraphError("work unit must be registered and pending")
-        record = cast(dict[str, object], unit)
-        if record.get("status") != "pending":
-            raise GraphError("work unit must be registered and pending")
-        if status not in {"done", "dropped"} or not isinstance(cast(object, detail), str) or not detail.strip():
-            raise GraphError("work unit decision requires a status and nonblank evidence or reason")
-        record["status"] = status
-        record["evidence" if status == "done" else "dropped_reason"] = detail.strip()
-        graph_semantics.validate(state)
-        _write(path, state)
-        return {"unit": unit_id, "status": status, "revision": state["revision"]}
 
 
 def inspect(path: Path) -> dict[str, Any]:
@@ -321,6 +296,18 @@ def _parser() -> argparse.ArgumentParser:
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
+    for name in ("record-decision", "flush-decisions"):
+        decision = commands.add_parser(name)
+        decision.add_argument("state", type=Path)
+        decision.add_argument("--session", required=True)
+        decision.add_argument("--cite-quote")
+        if name == "record-decision":
+            decision.add_argument("--loop-id", required=True)
+            decision.add_argument("--revision", required=True, type=int)
+            decision.add_argument("--phase", required=True)
+            decision.add_argument("--decision", required=True)
+            decision.add_argument("--flip-condition")
+            decision.add_argument("--unit")
     unit = commands.add_parser("record-unit")
     unit.add_argument("state", type=Path)
     unit.add_argument("--session", required=True)
@@ -368,7 +355,13 @@ def main() -> int:
         elif args.command == "record-unit":
             if (args.status == "done") != (args.evidence is not None):
                 raise GraphError("done requires --evidence; dropped requires --reason")
-            output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
+            output = graph_mutations.record_unit(
+                args.state, args.session, args.unit, args.status, args.evidence or args.reason
+            )
+        elif args.command == "record-decision":
+            output = graph_mutations.record_decision(args)
+        elif args.command == "flush-decisions":
+            output = graph_mutations.flush_decisions(args)
         elif args.command in {"stop", "consume-stop"}:
             output = graph_stops.run(args)
         elif args.command in {"respawn-stale", "hard-stop"}:
@@ -389,7 +382,7 @@ def main() -> int:
         print(f"graph: {error}", file=sys.stderr)
         return 1
     print(json.dumps(output, sort_keys=True))
-    return 0
+    return int(output.get("exit_code", 0))
 
 
 if __name__ == "__main__":

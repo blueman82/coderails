@@ -55,7 +55,10 @@ The collection command adds `key` and `links` to each graph record; an unlinked 
 
 Partial, extra, malformed, wrong-wave, stale, failed, duplicate, foreign-session, or reused worker evidence is rejected without changing state. `record-wave` atomically adds compact transcript references to the existing node evidence array; workers never write graph state. A failed node increments its attempts and preserves a separate reference for that attempt. If a `spawn_agent` call was refused (for example "agent thread limit reached"), re-issue it with the same printed `task_name` until it succeeds; if it keeps being refused, report that node as `failed`, and `record-wave` binds the latest refused call (a call with an error output and no `SubAgentActivity`) as that attempt's reference. A refused call never satisfies `done`, `skipped`, or `stale`. A later `followup_task` turn on a recorded child does not invalidate its earlier recorded completion, but the child's latest turn must have completed successfully. It returns to pending while attempts remain; exhaustion becomes a durable hard-stop. Successful all-input joins release deterministically after every input succeeds. Repeat from `inspect`, then `begin-wave`.
 
-**Scout spawn refusal fails closed.** If the design scout (or any independent reviewer) cannot be spawned (`agent thread limit reached` or any other capacity refusal), do not silently downgrade to the orchestrator's or a worker's own read. Retry the spawn with the same `task_name`; if it keeps being refused, record the node `failed` through `graph.py record-wave`, which binds the refused call as that attempt's reference (a refused call never satisfies `done`, and `record-wave` rejects it as success on Codex), then halt. A `not_found` on a `task_name` carried over from a previous session or resumed loop is not a capacity refusal: retry with a FRESH `task_name`, never the same one. Without an independent scout the loop HALTS for the human: do not continue past the refusal. A `non_independent` fallback requires explicit human approval. Only after the human approves, record `S2.5` as `skipped` with evidence beginning `non_independent: human approved` and append a `decisions_absorbed` entry `{phase: "<current phase>", decision: "scout refused: <error text>, adopted non_independent"}`. That `skipped` record is the only exit that lets `J2` release without an independent scout; a `non_independent` read never counts as an independent review or as `done`. Hooks cannot spawn agents and no gate reads `non_independent`, so this is an orchestrator rule, not a hook-enforced one.
+**Scout spawn refusal fails closed.** If the design scout (or any independent reviewer) cannot be spawned (`agent thread limit reached` or any other capacity refusal), do not silently downgrade to the orchestrator's or a worker's own read. Retry the spawn with the same `task_name`; if it keeps being refused, record the node `failed` through `graph.py record-wave`, which binds the refused call as that attempt's reference (a refused call never satisfies `done`, and `record-wave` rejects it as success on Codex), then halt. A `not_found` on a `task_name` carried over from a previous session or resumed loop is not a capacity refusal: retry with a FRESH `task_name`, never the same one. Without an independent scout the loop HALTS for the human: do not continue past the refusal. A `non_independent` fallback requires explicit human approval. Only after the human approves, record `S2.5` as `skipped` with evidence beginning `non_independent: human approved` and run `graph.py record-decision` with that phase and decision text. That `skipped` record is the only exit that lets `J2` release without an independent scout; a `non_independent` read never counts as an independent review or as `done`. Hooks cannot spawn agents and no gate reads `non_independent`, so this is an orchestrator rule, not a hook-enforced one.
+
+Before each `graph.py record-decision` call, read the current `loop_id` and `revision` from `progress.json`.
+Pass them as `--loop-id` and `--revision`. The CLI refuses a stale caller.
 
 **What consumes the thread limit.** Every spawned agent thread, including completed and idle ones, counts until it is retired. Before a scout spawn, retire completed threads with the provider's close tool where one exists (Codex: `close_agent`); otherwise nothing frees the slot, so record the limit in the refusal and halt rather than assume a thread was freed.
 
@@ -71,11 +74,21 @@ For a confirmed failure, make at most five distinct diagnosed repairs. When the 
 
 ## Complete
 
-Before completion, update and regrade `evals.json` against the graph's exact current revision, then write beside the state:
+Before completion, run `graph.py flush-decisions "$STATE" --session "$SESSION"`; preserve and report any
+degraded Muninn sync, and stop on an invalid decision chain. Then update and regrade `evals.json`
+against the graph's exact current revision and write beside the state:
 
 - graded `evals.json` for the current session, loop, and revision;
 - non-empty `proof.json` for the same session and loop, with every proof carrying a nonblank executable `cmd` and `status: "pass"`;
 - `retro.json` for the same session and loop, schema version 1 or newer, with `status: "complete"`.
+
+Prepare standing orders from the retro with code, never by editing Markdown. With `D` the repo-key dir (the grandparent of `$STATE`), `LOOP` the separate logical `loop_id` from owned progress, and `O="python3 $SKILL_DIR/../../scripts/lib/orders.py --dir $D --session $SESSION"`: run `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop "$LOOP" --quote "<verbatim words of the owner's own prompt, 12-300 chars>"` for each failure mode (add `--scope agnostic` for a lesson that applies to any repo). The native `complete` command runs `prepare` after final progress updates, including when none were recorded. Preparation binds the eligible owned source and records `orders_prepared`, with no recurrence or aging effect. Exit 3 prints a `reason_code`: report it and never write a Markdown fallback. `memory.backend: off` is the explicit opt-out. The current Muninn installation uses a newer API, so live lesson activation remains pending (see `docs/RUNBOOK.md`, "Standing order stored without a cite").
+
+Flush and reload pending progress-source updates before final preparation. Changed sources are refused by default.
+For a legitimate incomplete-source retry, use `$O prepare --loop "$LOOP" --refresh-from-sha256 <CURRENT evidence_sha256>`
+with the current preparation's returned canonical hash. Immutable ownership must match, revision cannot roll back,
+and that session+loop must have no applied tick or recurrence. Staged records are preserved with no effects. A saved
+replacement whose receipt failed needs ordinary unchanged `prepare` to repair it. Never refresh completed inputs.
 
 Apply `superpowers:verification-before-completion` to the orchestrator's completion claim. Then run:
 
@@ -84,6 +97,17 @@ python3 "$SKILL_DIR/scripts/graph.py" complete "$STATE" \
   --session "$SESSION" --evals "$EVALS" --proof "$PROOF" --retro "$RETRO" \
   --transcript "$TRANSCRIPT_PATH"
 ```
+
+That command runs `prepare` before the graph lock, checks the prepared source under the graph lock, saves completion,
+then runs `$O tick --loop "$LOOP"` and `$O render --loop "$LOOP"` after it releases the lock. Apply validates the
+separately bound directory/session/logical-loop/source and the actual provider completion revision. New completed
+recurrences reset counters; unmatched orders age once and become tombstones at K=5, never deletions. A failed native
+completion save ages nothing. `orders_ticked` follows the ledger save; a failed postcompletion apply or observation
+means `pending_teardown: true`. Repeat the same native `complete` command to resume the bound tick and render before
+claiming teardown finished. `verify-completion` and the Stop guard refuse pending teardown.
+An old complete loop without D4 receipts needs explicit reviewed legacy admission as documented in the orders
+decision and runbook. Admission checks the exact file hash, then permits completion bookkeeping while binding the
+graph source. It does not age orders; new loops cannot use it.
 
 Run each proof command through `functions.exec` using this canonical nested-result output; replace the placeholder with the proof's exact command so transcript matching remains exact:
 

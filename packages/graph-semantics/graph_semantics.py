@@ -81,26 +81,12 @@ def _label_for(node_id: str) -> str:
 
 
 def describe_node(node_id: str) -> dict[str, str | None]:
-    """Return a stable ID, one-word job name, optional lane code, and display label.
-
-    Args:
-        node_id: Registered schema-v3 node ID.
-
-    Returns:
-        A display record that keeps the machine ID intact and adds a human name.
-
-    Raises:
-        GraphSemanticError: If ``node_id`` is not registered in schema version 3.
-    """
+    """Describe one registered node and keep its machine ID."""
     return _describe_node(node_id, _label_for)
 
 
 def node_names(nodes: object) -> dict[str, dict[str, str | None]]:
-    """Describe graph nodes without changing the stored state.
-
-    Args:
-        nodes: Mapping of stable node IDs to node records.
-    """
+    """Describe graph nodes without changing the stored state."""
     return _node_names(_object(nodes, "graph.nodes"), _label_for)
 
 
@@ -248,6 +234,8 @@ def ready(state: object) -> list[str]:
     graph = root["graph"]
     if graph["active_wave"] is not None or graph["hard_stop"] is not None:
         return []
+    if _decision_sync_pending(root):
+        return []
     dependencies = _dependencies(graph)
     return sorted(
         node_id
@@ -256,6 +244,20 @@ def ready(state: object) -> list[str]:
         and node["status"] == "pending"
         and all(graph["nodes"][source]["status"] in SUCCESS for source in dependencies[node_id])
     )
+
+
+def _decision_sync_pending(state: dict[str, Any]) -> bool:
+    """A typed decision must reach an accepted sync state before the next wave."""
+    for value in _array(state.get("decisions_absorbed", []), "decisions_absorbed"):
+        if not isinstance(value, dict):
+            continue  # historic prose rows have no sync contract
+        row = cast(dict[str, Any], value)
+        if row.get("row_sha256") and _object(row.get("muninn"), "decision.muninn").get("state") not in {
+            "written",
+            "disabled",
+        }:
+            return True
+    return False
 
 
 def begin_wave(state: object) -> dict[str, Any]:
