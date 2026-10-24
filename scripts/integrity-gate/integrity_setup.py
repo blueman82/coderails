@@ -10,6 +10,9 @@ from typing import cast
 from integrity_http import IntegrityError, JsonObject, array_value, object_value
 
 RULESET_NAME = "coderails-integrity-review"
+EVENT_POLICY_NAME = "coderails-integrity-review-events"
+WORKFLOW_PATH = ".github/workflows/integrity-review.yml"
+WORKFLOW_EVENTS = frozenset({"pull_request_target", "issue_comment", "schedule", "workflow_dispatch"})
 
 
 def gh_json(endpoint: str, *, method: str = "GET", body: object = None) -> object:
@@ -133,6 +136,48 @@ def verify_candidate(slug: str, number: int) -> str:
     return sha
 
 
+def verify_event_policy(slug: str) -> None:
+    """Require an active, workflow-scoped allow policy before adding a status rule."""
+    policies: list[JsonObject] = []
+    for page in range(1, 32):
+        response = object_value(gh_json(f"repos/{slug}/actions/policies?per_page=100&page={page}&has_parents=true"))
+        batch = array_value(response.get("policies"))
+        if page == 31 and batch:
+            raise ValueError("event policy list exceeds 3000 entries")
+        policies.extend(batch)
+        if len(batch) < 100:
+            break
+    found = [item for item in policies if item.get("name") == EVENT_POLICY_NAME]
+    if len(found) != 1 or not isinstance(found[0].get("id"), int):
+        raise ValueError("active integrity event policy is missing")
+    detail = object_value(gh_json(f"repos/{slug}/actions/policies/{found[0]['id']}"))
+    conditions = object_value(detail.get("conditions"))
+    path = object_value(conditions.get("workflow_path"))
+    rules = array_value(detail.get("rules"))
+    event_rules = [item for item in rules if item.get("type") == "restrict_action_events"]
+    if (
+        detail.get("name") != EVENT_POLICY_NAME
+        or detail.get("enforcement") != "active"
+        or detail.get("target") != "actions"
+        or path.get("include") != [WORKFLOW_PATH]
+        or path.get("exclude") != []
+        or len(rules) != 1
+        or len(event_rules) != 1
+    ):
+        raise ValueError("integrity event policy does not match the workflow")
+    parameters = object_value(event_rules[0].get("parameters"))
+    allowed: object = parameters.get("allowed_events")
+    if not isinstance(allowed, list):
+        raise ValueError("integrity event policy does not allow the workflow events")
+    typed_allowed = cast(list[object], allowed)
+    if (
+        any(not isinstance(event, str) for event in typed_allowed)
+        or frozenset(str(event) for event in typed_allowed) != WORKFLOW_EVENTS
+        or len(typed_allowed) != len(WORKFLOW_EVENTS)
+    ):
+        raise ValueError("integrity event policy does not allow the workflow events")
+
+
 def configure_ruleset(slug: str, number: int, *, apply: bool) -> JsonObject:
     """Prepare or create the rule only after Actions and its status are live."""
     permissions = object_value(gh_json(f"repos/{slug}/actions/permissions"))
@@ -144,6 +189,7 @@ def configure_ruleset(slug: str, number: int, *, apply: bool) -> JsonObject:
         raise ValueError("GitHub Actions app id is invalid")
     payload = ruleset_payload(app_id)
     verify_candidate(slug, number)
+    verify_event_policy(slug)
     rulesets = array_value(gh_json(f"repos/{slug}/rulesets?per_page=100"))
     existing = next((item for item in rulesets if item.get("name") == RULESET_NAME), None)
     if existing is not None:

@@ -33,6 +33,15 @@ class SharedShaTests(unittest.TestCase):
         self.assertEqual(client.posts[-1][1], "failure")
         self.assertEqual(len(client.posts), 1)
 
+    def test_closed_main_pr_cannot_block_open_pr_at_shared_sha(self) -> None:
+        """A comment on a closed PR cannot replace an open PR's status."""
+        client = EvidenceFixture()
+        client.state = "closed"
+        client.open_main = [{"number": 8, "head": {"sha": SHA}, "base": {"ref": "main"}}]
+        client.posts.append((SHA, "success", f"integrity=pass sha={SHA}"))
+        self.gate(client)
+        self.assertEqual(client.posts, [(SHA, "success", f"integrity=pass sha={SHA}")])
+
     def test_two_main_prs_with_one_sha_never_post_success(self) -> None:
         """A passing PR cannot hide a second main PR's missing evidence."""
         client = EvidenceFixture()

@@ -62,6 +62,10 @@
         "enabled": {
           "type": ["boolean", "null"], "default": false, "status": "enforced_by_code",
           "description": "true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live."
+        },
+        "machine_user": {
+          "type": ["string", "null"], "default": null, "status": "enforced_by_code",
+          "description": "Deprecated. A non-empty legacy login keeps local integrity checks on until the configuration is migrated."
         }
       }
     },

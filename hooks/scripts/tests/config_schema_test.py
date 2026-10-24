@@ -120,6 +120,13 @@ class LoadConfigTests(ConfigCase):
         self.assertEqual(findings[0]["key"], "integrity_review.enabld")
         self.assertEqual(findings[0]["hint"], "integrity_review.enabled")
 
+    def test_legacy_integrity_login_stays_enforced_until_migration(self) -> None:
+        """An installed machine-user setting cannot silently turn off the local gate."""
+        path = self.write("integrity_review:\n  machine_user: attestor\n  enabled: false\n")
+        _, findings = load_config(path)
+        self.assertEqual(findings, [])
+        self.assertTrue(integrity_enabled(path))
+
     def test_bad_type_keeps_raw_value(self) -> None:
         """A value of the wrong type is reported and left as written."""
         values, findings = load_config(self.write("sandbox_workers: maybe\nwiki_debt_epoch_pr: null\n"))
@@ -166,6 +173,7 @@ class ReaderTests(ConfigCase):
         """Body of the reader assertions, stderr muted."""
         self.assertTrue(integrity_enabled(self.write("integrity_review:\n  enabled: true # on\n")))
         self.assertFalse(integrity_enabled(self.write("integrity_review:\n  enabled: null\n")))
+        self.assertFalse(integrity_enabled(self.write("integrity_review:\n  machine_user: null\n")))
         self.assertFalse(integrity_enabled("/nonexistent"))
         self.assertTrue(require_signatures(self.write("evals:\n  require_signatures: true\n")))
         self.assertFalse(require_signatures(self.write("evals:\n  require_signatures: yes\n")))

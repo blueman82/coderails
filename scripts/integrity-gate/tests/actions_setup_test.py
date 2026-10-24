@@ -23,6 +23,29 @@ class ActionsSetupTests(unittest.TestCase):
             "description": f"integrity=pass sha={sha}",
         }
 
+    def valid_event_policy(self) -> tuple[dict[str, object], dict[str, object]]:
+        """Use one active policy scoped to the trusted workflow's four triggers."""
+        listing: dict[str, object] = {
+            "total_count": 1,
+            "policies": [{"id": 9, "name": "coderails-integrity-review-events"}],
+        }
+        detail: dict[str, object] = {
+            "id": 9,
+            "name": "coderails-integrity-review-events",
+            "target": "actions",
+            "enforcement": "active",
+            "conditions": {"workflow_path": {"include": [".github/workflows/integrity-review.yml"], "exclude": []}},
+            "rules": [
+                {
+                    "type": "restrict_action_events",
+                    "parameters": {
+                        "allowed_events": ["pull_request_target", "issue_comment", "schedule", "workflow_dispatch"]
+                    },
+                }
+            ],
+        }
+        return listing, detail
+
     def test_ruleset_uses_expected_app_and_no_bypass(self) -> None:
         """The rule pins the expected app and keeps bypass actors empty."""
         payload = ruleset_payload(15368)
@@ -72,7 +95,14 @@ class ActionsSetupTests(unittest.TestCase):
 
     def test_preview_never_creates_a_ruleset(self) -> None:
         """A preview reads GitHub but sends no POST."""
-        responses = [{"enabled": True}, {"id": 15368}, {"head": {"sha": "a" * 40}}, [self.valid_status()], []]
+        responses = [
+            {"enabled": True},
+            {"id": 15368},
+            {"head": {"sha": "a" * 40}},
+            [self.valid_status()],
+            *self.valid_event_policy(),
+            [],
+        ]
         with patch("integrity_setup.gh_json", side_effect=responses) as api:
             self.assertTrue(ruleset_matches(configure_ruleset("owner/repo", 7, apply=False), 15368))
             self.assertTrue(all(call.kwargs.get("method", "GET") == "GET" for call in api.call_args_list))
@@ -84,6 +114,55 @@ class ActionsSetupTests(unittest.TestCase):
                 configure_ruleset("owner/repo", 7, apply=True)
             self.assertEqual(api.call_count, 1)
 
+    def test_missing_event_allow_prevents_future_dead_gate(self) -> None:
+        """A candidate status today cannot prove pull_request_target will run later."""
+        responses: list[object] = [
+            {"enabled": True},
+            {"id": 15368},
+            {"head": {"sha": "a" * 40}},
+            [self.valid_status()],
+            {"total_count": 0, "policies": []},
+        ]
+        with (
+            patch("integrity_setup.gh_json", side_effect=responses),
+            self.assertRaisesRegex(ValueError, "event policy"),
+        ):
+            configure_ruleset("owner/repo", 7, apply=False)
+
+    def test_event_policy_must_be_active_and_allow_all_workflow_events(self) -> None:
+        """An evaluate-only or malformed event rule cannot back the status gate."""
+        for change in ("evaluate", "wrong_path", "missing_trigger", "malformed_event"):
+            with self.subTest(change=change):
+                listing, detail = self.valid_event_policy()
+                if change == "evaluate":
+                    detail["enforcement"] = "evaluate"
+                elif change == "wrong_path":
+                    detail["conditions"] = {"workflow_path": {"include": ["other.yml"], "exclude": []}}
+                elif change == "missing_trigger":
+                    detail["rules"] = [
+                        {
+                            "type": "restrict_action_events",
+                            "parameters": {"allowed_events": ["issue_comment", "schedule", "workflow_dispatch"]},
+                        }
+                    ]
+                else:
+                    detail["rules"] = [
+                        {"type": "restrict_action_events", "parameters": {"allowed_events": [["pull_request_target"]]}}
+                    ]
+                responses = [
+                    {"enabled": True},
+                    {"id": 15368},
+                    {"head": {"sha": "a" * 40}},
+                    [self.valid_status()],
+                    listing,
+                    detail,
+                ]
+                with (
+                    patch("integrity_setup.gh_json", side_effect=responses),
+                    self.assertRaisesRegex(ValueError, "event policy"),
+                ):
+                    configure_ruleset("owner/repo", 7, apply=False)
+
     def test_apply_reads_back_the_created_rule(self) -> None:
         """A POST alone is not proof that GitHub installed the expected rule."""
         payload = ruleset_payload(15368)
@@ -93,6 +172,7 @@ class ActionsSetupTests(unittest.TestCase):
             {"id": 15368},
             {"head": {"sha": "a" * 40}},
             [self.valid_status()],
+            *self.valid_event_policy(),
             [],
             detail,
             [{"id": 42, "name": "coderails-integrity-review"}],
@@ -100,8 +180,8 @@ class ActionsSetupTests(unittest.TestCase):
         ]
         with patch("integrity_setup.gh_json", side_effect=responses) as api:
             self.assertEqual(configure_ruleset("owner/repo", 7, apply=True), detail)
-            self.assertEqual(api.call_args_list[5].kwargs["method"], "POST")
-            self.assertEqual(api.call_args_list[5].kwargs["body"], payload)
+            self.assertEqual(api.call_args_list[7].kwargs["method"], "POST")
+            self.assertEqual(api.call_args_list[7].kwargs["body"], payload)
 
     def test_apply_refuses_readback_that_excludes_main(self) -> None:
         """GitHub readback must prove main is covered after rule creation."""
@@ -113,6 +193,7 @@ class ActionsSetupTests(unittest.TestCase):
             {"id": 15368},
             {"head": {"sha": "a" * 40}},
             [self.valid_status()],
+            *self.valid_event_policy(),
             [],
             detail,
             [{"id": 42, "name": "coderails-integrity-review"}],

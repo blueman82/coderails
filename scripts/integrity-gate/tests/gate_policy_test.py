@@ -57,6 +57,7 @@ class EvidenceFixture:
         self.failure = ""
         self.calls: list[str] = []
         self.head = SHA
+        self.state = "open"
         self.base = "main"
         self.open_main: list[JsonObject] = [{"number": 7, "head": {"sha": SHA}, "base": {"ref": "main"}}]
         self.changed_files: int | None = None
@@ -79,6 +80,7 @@ class EvidenceFixture:
         return {
             "head": {"sha": self.head},
             "base": {"ref": self.base},
+            "state": self.state,
             "changed_files": self.changed_files or len(self.files),
         }
 

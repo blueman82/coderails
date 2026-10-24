@@ -255,8 +255,9 @@ def _section(path: str | Path, key: str) -> dict[str, Any]:
 
 
 def integrity_enabled(path: str | Path) -> bool:
-    """Enable the local GitHub Actions status check after server-side rollout."""
-    return _section(path, "integrity_review").get("enabled") is True
+    """Keep legacy machine-user gates active until explicit config migration."""
+    settings = _section(path, "integrity_review")
+    return settings.get("enabled") is True or bool(settings.get("machine_user"))
 
 
 def require_signatures(path: str | Path) -> bool:

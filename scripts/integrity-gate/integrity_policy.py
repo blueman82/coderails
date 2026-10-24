@@ -196,17 +196,24 @@ def gate_pr(client: EvidenceClient, number: int, max_bytes: int, pending_ttl: in
     del pending_ttl
     count: object = None
     base: object = None
+    state: object = None
     try:
         pr = client.get_object(f"pulls/{number}")
         head = object_value(pr.get("head"))
         sha = head.get("sha")
         base = pr.get("base")
+        state = pr.get("state")
         count = pr.get("changed_files")
     except IntegrityError:
         sha = None
     if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
         print(f"skip: pr={number} reason=head_sha_fetch_failed")
         return 1
+    if state == "closed":
+        print(f"skip: pr={number} sha={sha} reason=closed")
+        return 0
+    if state != "open":
+        return fail(client, number, sha, "state_invalid", error=True)
     try:
         base_ref = object_value(base).get("ref")
     except IntegrityError:

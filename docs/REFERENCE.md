@@ -748,6 +748,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `sandbox_workers` | boolean/null | `false` | read_by_prose_only | true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md). |
 | `integrity_review` | object/null | `null` | enforced_by_code | Integrity attestation settings. |
 | `integrity_review.enabled` | boolean/null | `false` | enforced_by_code | true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live. |
+| `integrity_review.machine_user` | string/null | `null` | enforced_by_code | Deprecated. A non-empty legacy login keeps local integrity checks on until the configuration is migrated. |
 | `evals` | object/null | `null` | enforced_by_code | Eval settings. |
 | `evals.require_signatures` | boolean/null | `false` | enforced_by_code | true = eval artifacts must be signed; refuse when signing is impossible. |
 <!-- config-schema:end -->
