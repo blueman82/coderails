@@ -1,27 +1,32 @@
 ---
 name: improve-prompt
-description: Improves a prompt before execution by surfacing ambiguities, filling gaps with reasonable assumptions, and rewriting it for clarity and precision. Use this skill whenever the user invokes /improve-prompt, says "improve this prompt", "what's missing from this prompt", or asks for help tightening a task description before running it. Also trigger when a prompt is vague, underspecified, or missing success criteria that would likely produce a poor result.
+description: Improve a prompt before execution. Find gaps, state grounded assumptions, and rewrite for clarity. Use for /improve-prompt, "improve this prompt", "what's missing from this prompt", or a vague or underspecified task.
 ---
 
 # Improve Prompt
 
-Rewrite unclear prompts so the first attempt has a clear target. A clear prompt can prevent later corrections, especially during autonomous work.
+Rewrite an unclear prompt so the task has a clear target. This helps the
+first attempt meet the user's intent.
 
-Trigger on `/improve-prompt`, "improve this prompt", "what's missing", or any prompt vague enough that execution would likely go wrong. "Just do it" skips improvement entirely and executes immediately.
+Use this skill for `/improve-prompt`, "improve this prompt", or "what's
+missing". Also use it when a vague prompt is likely to cause a wrong result.
+"Just do it" skips this skill and starts the task.
 
 <context_first>
-Before evaluating anything, gather context in this order. Each source can resolve gaps without asking.
+Gather context in this order. Use it to resolve gaps before you ask.
 
 1. Check memory files for prior context on the prompt topic
-2. AGENTS.md — stack, conventions, and preferences already defined here apply directly
-3. Open files or codebase — read what's accessible
-4. Current conversation — prior messages may already answer the gaps
+2. `AGENTS.md` — read the stack, conventions, and preferences
+3. Files and code — read the relevant paths
+4. Current conversation — use answers already given
 
-What context resolves, you don't ask about.
+Do not ask about a gap that the context resolves.
 </context_first>
 
 <diagnosis>
-Use a `<thinking>` block before producing output. For each of the 7 foundations, identify what context resolved and what remains open. Check whether N/A truly applies, and identify the most blocking gap.
+Before you write the result, check all seven foundations. Record what
+context resolved. Identify open gaps and the most blocking gap. Use N/A
+only when the foundation does not apply.
 
 Then mark each foundation ✓, ✗, or N/A:
 
@@ -33,79 +38,66 @@ Then mark each foundation ✓, ✗, or N/A:
 6. **Execution override** — execute or discuss?
 7. **Defines role** — would a persona sharpen the output? *(N/A for mechanical tasks)*
 
-**Golden rule**: would a capable colleague, handed this prompt cold, produce the right result? If not, something is still missing. Apply this after diagnosis and after rewriting.
+**Final check:** Could a capable colleague use the prompt without prior
+context and produce the intended result? Check after diagnosis and again
+after rewriting.
 </diagnosis>
 
 <gaps>
-Use a `<thinking>` block before asking or rewriting. Work out which gaps remain, which is most blocking, and whether each warrants a question or a grounded assumption.
+Before you ask or rewrite, list the remaining gaps. For each gap, choose
+a question or a grounded assumption.
 
-**Ask when context doesn't resolve a gap** — a correct answer once costs less than fixing bad output.
+**Ask when context does not resolve a gap.**
 
-- Bounded answer space (format, audience, mode, genre, platform) → `AskUser` with short multiple-choice options
-- Open-ended answer space (constraints, success criteria, personal taste) → one terse freeform question
+- Bounded answer space (format, audience, mode, genre, platform) → ask one
+  short multiple-choice question. Use an available question tool when the
+  active session exposes one. Otherwise, ask in a normal user-facing reply.
+- Open-ended answer space (constraints, success criteria, personal taste) →
+  ask one short freeform question
 - Personal preference → memory cannot ground this; always ask
 - One question at a time, most blocking gap first
 
-**Assume when** context provides solid grounding and the risk of being wrong is low. State every assumption explicitly so the user can correct it.
+**Assume when** context provides solid evidence and error risk is low.
+State each assumption so the user can correct it.
 </gaps>
 
 <rewrite>
 Construct the improved prompt with these in mind:
 
-- **Role first** — one sentence if foundation 7 failed: "You are a senior SRE..."
-- **Positive framing** — say what to do, not what to avoid
-- **XML structure** — when instructions, context, examples, and inputs mix, wrap each in its own tag
-- **Explain the WHY** — where a constraint or instruction isn't obvious, add one clause of motivation; Codex generalises from it
-- **Examples** — when output format is specific or non-obvious, include 3–5 `<example>` tags covering the typical case and at least one edge case; examples are high leverage
-- **Focused length** — add structure where the original was ambiguous; carry through what was already clear
+- **Role:** If foundation 7 failed, start with one role sentence.
+- **Positive instructions:** State the action to take.
+- **XML sections:** Separate instructions, context, examples, and inputs
+  when they appear together.
+- **Reason:** Explain a constraint when its purpose is unclear.
+- **Examples:** For a specific or unusual output format, give three to five
+  `<example>` tags. Include one edge case.
+- **Length:** Add structure only where the original prompt needs it. Keep
+  clear parts of the original.
 
-Before presenting, verify the rewrite passes all 7 foundations. Fix anything that still fails.
+Check all seven foundations again. Fix an open gap before you present the
+rewrite.
 </rewrite>
 
 <output_format>
-```
-<thinking>
-[context gathered · foundation-by-foundation diagnosis · ask vs assume · rewrite plan]
-</thinking>
+Present four parts:
 
-**Diagnosis**
-✓/✗/N/A  Foundation — one-line note
-...
+1. **Diagnosis:** Give one line and a ✓, ✗, or N/A mark for each foundation.
+2. **Context used:** Name the memory, `AGENTS.md`, or code that resolved gaps.
+3. **Assumptions made:** State the gaps closed by grounded assumptions.
+4. **Improved prompt:** Put the ready-to-use text in a code fence.
 
-**Context used** — what memory / AGENTS.md / codebase resolved
-**Assumptions made** — only where context or answers didn't close the gap
-
-**Improved prompt**
-```
-[ready to use — always present inside a code fence so it renders unambiguously in terminal CLI]
-```
-```
-
-On iteration: update only the affected foundations. Preserve the rest.
-On tool target (Codex, API, specific model): tailor the rewrite to its strengths.
-Always present the improved prompt inside a triple-backtick code fence — never as blockquotes (`>`) which collapse visually in terminal renderers.
+On a later iteration, update only the affected foundations. Preserve the
+others. If the prompt names a tool target, tailor the rewrite to it.
+Put the improved prompt in a triple-backtick code fence. Do not use a
+block quote; it can lose structure in a terminal.
 </output_format>
 
 <examples>
 
+These examples show the response format. Their project facts are illustrative.
+
 <example type="technical — strong context">
 **Input**: `automate what you can from the Theo v1 evaluation process`
-
-<thinking>
-memory_recall("theo v1 evaluation"): window 2026-02-27 to 2026-03-06, metrics, thresholds, data sources, human gates. AGENTS.md: Python/Airflow, SRE audience.
-
-1. Defines done — ✗. Output format unspecified. Memory silent on plan vs implementation. Autonomous mode → implementation assumed. Low risk.
-2. Names assumptions — ✗. Data sources not in prompt. Memory has them.
-3. Specifies constraints — ✗. Human gates not in prompt. Memory has them.
-4. Single scope — ✓.
-5. States what's been tried — N/A. Greenfield.
-6. Execution override — ✓. Implicit.
-7. Defines role — ✗. Audience unstated. AGENTS.md confirms SRE.
-
-All gaps resolvable from context. No questions needed. Rewrite: role opening, XML structure, pull from memory and AGENTS.md, state output assumption.
-
-Self-check: all 7 pass. Golden rule: a colleague with AGENTS.md and Theo memory could follow this.
-</thinking>
 
 **Diagnosis**
 ```
@@ -159,22 +151,8 @@ Out of scope: auditing ambiguous labels · final go/no-go approval
 ```
 </example>
 
-<example type="personal preference — AskUser triggered">
+<example type="personal preference — clarification needed">
 **Input**: `recommend me some movies`
-
-<thinking>
-memory_recall("movies preferences") — empty. No taste, genre, or viewing history stored.
-
-1. Defines done — ✗. No count, format, or criteria.
-2. Names assumptions — ✗. Taste, mood, genre all unknown. Cannot ground.
-3. Specifies constraints — ✗. Nothing to exclude.
-4. Single scope — ✓.
-5. States what's been tried — N/A.
-6. Execution override — ✓.
-7. Defines role — N/A.
-
-All failures require personal preference. Memory empty. Must ask. Most blocking gap: genre/mood — bounded, good for AskUser.
-</thinking>
 
 **Diagnosis**
 ```
@@ -191,7 +169,7 @@ N/A Defines role
 
 *Personal preference — asking before rewriting.*
 
-[AskUser: What are you in the mood for? → Action/thriller · Drama/indie · Comedy · Sci-fi/horror · Surprise me]
+[Question to user: What are you in the mood for? → Action/thriller · Drama/indie · Comedy · Sci-fi/horror · Surprise me]
 
 *User selects "Sci-fi / horror"*
 
@@ -205,20 +183,6 @@ Recommend 5 sci-fi or horror films — a mix of well-known and less obvious pick
 
 <example type="problem-solving — foundation 5 active">
 **Input**: `fix the daemon startup crash`
-
-<thinking>
-memory_recall("daemon startup crash"): two prior attempts — (1) socket path permissions fix 2026-02-20, ineffective; (2) Ollama embed timeout on cold start, identified but not fixed.
-
-1. Defines done — ✗. No success criteria. What does working look like?
-2. Names assumptions — ✗. Which daemon? theo-daemon.py assumed from context. Local dev assumed — low risk.
-3. Specifies constraints — ✗. Files off-limits not stated.
-4. Single scope — ✓.
-5. States what's been tried — ✗. Memory has both attempts; including them prevents retreading.
-6. Execution override — ✓.
-7. Defines role — N/A.
-
-Most blocking: success criteria. Memory resolves prior attempts and daemon identity. Rewrite: scope, prior attempts, success criteria.
-</thinking>
 
 **Diagnosis**
 ```
