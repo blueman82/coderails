@@ -115,6 +115,9 @@ def ruleset_matches(value: object, app_id: int) -> bool:
 def verify_candidate(slug: str, number: int) -> str:
     """Require a live exact-head status from GitHub Actions before activation."""
     pr = object_value(gh_json(f"repos/{slug}/pulls/{number}"))
+    base = pr.get("base")
+    if pr.get("state") != "open" or not isinstance(base, dict) or cast(JsonObject, base).get("ref") != "main":
+        raise ValueError("candidate PR must be open and target main")
     head = pr.get("head")
     sha = cast(JsonObject, head).get("sha") if isinstance(head, dict) else None
     if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
@@ -134,6 +137,26 @@ def verify_candidate(slug: str, number: int) -> str:
     ):
         raise ValueError("candidate status is not a valid SHA-bound pass")
     return sha
+
+
+def verify_workflow(slug: str) -> None:
+    """Require the expected workflow to be active before installing its status rule."""
+    workflow = object_value(gh_json(f"repos/{slug}/actions/workflows/integrity-review.yml"))
+    if workflow.get("state") != "active" or workflow.get("path") != WORKFLOW_PATH:
+        raise ValueError("integrity workflow is not active at the expected path")
+
+
+def list_rulesets(slug: str) -> list[JsonObject]:
+    """Scan every repository ruleset page, refusing an unbounded inventory."""
+    rulesets: list[JsonObject] = []
+    for page in range(1, 32):
+        batch = array_value(gh_json(f"repos/{slug}/rulesets?per_page=100&page={page}"))
+        if page == 31 and batch:
+            raise ValueError("ruleset list exceeds 3000 entries")
+        rulesets.extend(batch)
+        if len(batch) < 100:
+            break
+    return rulesets
 
 
 def verify_event_policy(slug: str) -> None:
@@ -190,9 +213,14 @@ def configure_ruleset(slug: str, number: int, *, apply: bool) -> JsonObject:
     payload = ruleset_payload(app_id)
     verify_candidate(slug, number)
     verify_event_policy(slug)
-    rulesets = array_value(gh_json(f"repos/{slug}/rulesets?per_page=100"))
-    existing = next((item for item in rulesets if item.get("name") == RULESET_NAME), None)
-    if existing is not None:
+    verify_workflow(slug)
+    matches = [item for item in list_rulesets(slug) if item.get("name") == RULESET_NAME]
+    if len(matches) > 1:
+        raise ValueError("multiple integrity rulesets exist; no overwrite was made")
+    if matches:
+        existing = matches[0]
+        if not isinstance(existing.get("id"), int):
+            raise ValueError("existing integrity ruleset id is invalid")
         detail = object_value(gh_json(f"repos/{slug}/rulesets/{existing['id']}"))
         if not ruleset_matches(detail, app_id):
             raise ValueError("existing integrity ruleset differs; no overwrite was made")
@@ -200,11 +228,10 @@ def configure_ruleset(slug: str, number: int, *, apply: bool) -> JsonObject:
     if not apply:
         return payload
     gh_json(f"repos/{slug}/rulesets", method="POST", body=payload)
-    updated = array_value(gh_json(f"repos/{slug}/rulesets?per_page=100"))
-    rule = next((item for item in updated if item.get("name") == RULESET_NAME), None)
-    if not isinstance(rule, dict) or not isinstance(rule.get("id"), int):
+    updated = [item for item in list_rulesets(slug) if item.get("name") == RULESET_NAME]
+    if len(updated) != 1 or not isinstance(updated[0].get("id"), int):
         raise ValueError("created ruleset could not be verified")
-    detail = object_value(gh_json(f"repos/{slug}/rulesets/{rule['id']}"))
+    detail = object_value(gh_json(f"repos/{slug}/rulesets/{updated[0]['id']}"))
     if not ruleset_matches(detail, app_id):
         raise ValueError("created ruleset does not match expected policy")
     return detail
