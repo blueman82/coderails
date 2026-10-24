@@ -286,6 +286,18 @@ class GatePolicyTests(unittest.TestCase):
             self.assertEqual(client.posts[-1][1], "error")
             self.assertIn("eval_evidence_invalid", client.posts[-1][2])
 
+    def test_negative_grading_chain_length_replaces_old_success(self) -> None:
+        """Bad owner grading data must post a newer error on the same head."""
+        for length in (-1, -2):
+            with self.subTest(chain_len=length):
+                client = EvidenceFixture()
+                client.statuses = [{"context": "integrity-review", "state": "success"}]
+                client.document["grading"] = {"chain_len": length}
+                self.assertEqual(self.gate(client), 1)
+                self.assertEqual(client.posts[-1][0], SHA)
+                self.assertEqual(client.posts[-1][1], "error")
+                self.assertIn("eval_evidence_invalid", client.posts[-1][2])
+
     def test_removed_eval_comment_overrides_previous_success(self) -> None:
         """Deleting the eval makes the next status a failure."""
         client = EvidenceFixture()

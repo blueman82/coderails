@@ -125,8 +125,13 @@ def eval_valid(body: str, number: int, sha: str) -> bool:
         return False
     if not _text(data.get("frozen_hash")):
         return False
+    grading = data.get("grading")
+    if isinstance(grading, dict):
+        chain_len = cast(JsonObject, grading).get("chain_len")
+        if isinstance(chain_len, int) and not isinstance(chain_len, bool) and chain_len < 0:
+            return False
     try:
         verify_suite(data)
-    except (EvalIntegrityError, TypeError, ValueError):
+    except (EvalIntegrityError, IndexError, TypeError, ValueError):
         return False
     return data.get("result") in (None, "GO")
