@@ -193,6 +193,42 @@ class HookTests(unittest.TestCase):
         self.assertEqual((result.stdout, "advisory" in result.stderr), ("", True))
         self.assertEqual(self.reasons()[-1], "advisory_no_receipt")
 
+    def test_unbindable_merge_with_live_cap_is_denied_before_remote_command(self) -> None:
+        """The Codex hook refuses an unknown PR or head while a merge cap is live."""
+        authority = {
+            "authority_id": "a1", "loop_id": None, "session_id": "s1", "scope": ["code"], "denied": [],
+            "max_prs": 1, "expires_at": "2999-01-01T00:00:00+00:00", "revocable": True,
+            "approval_required_for": ["merge"], "granted_by": "command",
+        }  # fmt: skip
+        path = self.loop / "s1" / "authority.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(authority))
+        remote = self.directory / "remote.log"
+        gh = self.directory / "bin" / "gh"
+        gh.write_text(
+            f'#!/bin/sh\nif [ "$1 $2" = "pr view" ]; then '
+            f'echo \'{{"baseRefName":"main","headRefOid":"{MERGE_SHA}"}}\'; '
+            f'else echo "$*" >> "{remote}"; fi\n'
+        )
+        for command in (
+            "gh pr merge 12 --squash",
+            "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { id } }'",
+        ):
+            with self.subTest(command=command):
+                denied = self.denied(command)
+                if not denied:
+                    subprocess.run(command, shell=True, env=self.environment, cwd=self.repo, check=True)
+                self.assertTrue(denied)
+                self.assertFalse(remote.exists())
+                self.assertEqual(list((self.loop / "s1" / "merges").glob("*.json")), [])
+        self.assertEqual(self.reasons(), ["denied_binding_unknown", "denied_binding_unknown"])
+
+    def test_unbindable_merge_without_live_cap_remains_advisory(self) -> None:
+        """No authority keeps unbindable merges receipt-free until enforcement is explicit."""
+        self.assertFalse(self.denied("gh pr merge 12 --squash"))
+        self.configure("enforce")
+        self.assertTrue(self.denied("gh pr merge 12 --squash"))
+
     def test_default_is_advisory_and_unknown_value_is_traced(self) -> None:
         """No config or key warns; an unknown value denies and is traced."""
         for command in (MERGE, "git push origin main", "python3 scripts/merge.py 12"):

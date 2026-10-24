@@ -206,7 +206,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   An unknown setting also enforces and logs `action_authority_bad_mode`. The `off` setting is silent.
 - With a live session authority, advisory merges reserve a PR and head SHA against `max_prs`. `scripts/merge.py`
   records success and releases the slot after a confirmed failed merge. A raw `gh pr merge` hook cannot observe the
-  command result, so its reservation stays charged until an operator reconciles the session.
+  command result, so its reservation stays charged until an operator reconciles the session. An unknown PR or head
+  cannot be reserved and is blocked as `binding_unknown` while the authority is live.
 - Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,

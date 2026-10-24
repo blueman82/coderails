@@ -12,7 +12,7 @@ from scripts.lib.authority_permits import permits
 
 def reserve(session: str, number: str, bind: dict[str, str] | None) -> tuple[str, Path | None]:
     """Reserve one merge while holding the session lock exactly once."""
-    if bind is None:
+    if not bind or not number.isdigit() or not all(bind.get(key) for key in ("repository", "ref", "sha")):
         return "binding_unknown", None
     with merge_budget.lock(session) as acquired:
         if not acquired:

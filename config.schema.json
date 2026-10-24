@@ -57,7 +57,7 @@
     },
     "action_authority": {
       "type": ["string", "null"], "default": "advisory", "enum": ["enforce", "advisory", "off"], "status": "enforced_by_code",
-      "description": "Advisory is the default when the setting or config file is absent. It logs and warns but does not block. Enforce requires a signed owner receipt for merges and pushes to main or master, and checks the session authority. Off is silent. An unknown value enforces and logs action_authority_bad_mode."
+      "description": "Advisory is the default when the setting or config file is absent. Missing receipts warn without blocking. A live session authority still blocks denied actions and merges that cannot be bound to its budget. Enforce requires a signed owner receipt for merges and pushes to main or master. Off is silent. An unknown value enforces and logs action_authority_bad_mode."
     },
     "integrity_review": {
       "type": ["object", "null"], "default": null, "status": "enforced_by_code",

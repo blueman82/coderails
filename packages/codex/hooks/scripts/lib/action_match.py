@@ -136,7 +136,7 @@ def guarded_segments(command: str, cwd: str) -> list[tuple[str, str, str]]:
     missing directory, a subshell group) makes every later guard unbindable, as does a cd before `bash -c`/`eval`.
     Quoting and absolute program paths are normalised (`canonical`); wrappers are unwrapped (env/sudo/time prefixes,
     subshell and brace groups, `bash -c '...'`, `eval '...'`, `gh api .../merge` with flags first, and the GraphQL
-    mergePullRequest/enablePullRequestAutoMerge mutations, which are unbindable and so never allowed).
+    mergePullRequest/enablePullRequestAutoMerge mutations, which are unbindable for receipts and live merge budgets).
     Still unmatched: xargs, aliases, functions, scripts that push, `gh api` ref/contents writes, other branches.
     ponytail: tokens only, no variable or alias expansion (a non-literal destination is guarded and unbindable).
     """

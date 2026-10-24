@@ -2,7 +2,8 @@
 """Action-receipt gate: warn by default (Codex copy of hooks/scripts/action_authority_gate.py).
 
 Config `action_authority`: advisory (default, also with no config or no key) | enforce | off; any other value is
-enforce, traced action_authority_bad_mode. Advisory warns on missing receipts; live authority denials still block.
+enforce, traced action_authority_bad_mode. Advisory warns on missing receipts; live authority denials and
+unbindable merges under a live merge cap still block.
 Enforce denies unless
 authority.permits() allows and a receipt verifies (mirrored scripts/lib/receipt_gate.py, shared with merge.py, which is
 independently fail-closed); any own error fails open (action_authority_failed_open). Receipts are signed and bound to
@@ -95,6 +96,7 @@ def main() -> int:
             consume=mode_ == "enforce", stale=state_mutated_before_guard(command), on_claim=claimed,
         )  # fmt: skip
         denied_by_authority = missing is not None and missing[1] in {"authority_denied", "max_prs_exceeded"}
+        reservation_failed = False
         if mode_ == "advisory" and authority and not denied_by_authority:
             reserved: list[Path] = []
             for name, item in proposals:
@@ -106,21 +108,20 @@ def main() -> int:
                     for previous in reserved:
                         merge_budget.settle(previous, False)
                     missing = (name, code)
+                    reservation_failed = True
                     break
                 if path:
                     reserved.append(path)
         if missing is None:
             return 0
         name, code = missing
-        if mode_ == "advisory" and code not in {"authority_denied", "max_prs_exceeded"}:
+        if mode_ == "advisory" and not reservation_failed and code not in {"authority_denied", "max_prs_exceeded"}:
             append_trace_row("action_authority", "advisory", f"advisory_{code}", trace_id, {"loop_id": loop})
             print(f"action_authority (advisory): no valid receipt for {name} ({code}); not blocked.", file=sys.stderr)
             return 0
         append_trace_row("action_authority", "denied", f"denied_{code}", trace_id, {"loop_id": loop})
-        deny(
-            f"Blocked: {name.replace('_', ' ')} needs an action receipt ({code}). "
-            f"{how_to_proceed(code, session, name)}"
-        )
+        need = "needs a bound PR and head under live authority" if reservation_failed else "needs an action receipt"
+        deny(f"Blocked: {name.replace('_', ' ')} {need} ({code}). {how_to_proceed(code, session, name)}")
     except Exception as error:  # noqa: BLE001 - the gate must never break a session; trace and fail open
         append_trace_row(
             "action_authority", "failed_open", "action_authority_failed_open", trace_id,

@@ -94,8 +94,8 @@ requires a signed receipt; an unknown mode also enforces. The original design en
 absent or unreadable. That earlier default no longer applies.
 
 In enforce mode, a command with unknown repository, ref or SHA is denied as `binding_unknown`. With a live session
-authority, advisory merge reservations also need a known PR and head. This replaces the original `default ON`
-decision. Binding fails when the command:
+authority, advisory merge reservations also need a known PR and head. An unbindable merge is blocked while that
+authority is live. This replaces the original `default ON` decision. Binding fails when the command:
 
 - carries an env assignment prefix (`GIT_DIR=`, `GIT_CONFIG_*=`, `GH_REPO=`, any `NAME=value`), `git -c`, `--git-dir` or
   `--work-tree` (they retarget the action; the prefix is kept in the hashed segment so it is never silently stripped);
