@@ -42,12 +42,14 @@ sys.stdout.write('{"entry": {"id": "K9"}}')
 """.replace(
     "@FLAGS@", NEW_FLAGS
 )
-
+USER_ANCHOR = {"role": "user", "kind": "prompt", "state": "live", "verify": "ok"}
 ENTRIES: dict[str, Any] = {
     "entries": [
         {
             "id": "K1",
             "kind": "lesson",
+            "status": "current",
+            "scope": "loop:L1",
             "text": "Always cite",
             "tags": ["run-a", "x"],
             "sensitivity": "normal",
@@ -55,7 +57,7 @@ ENTRIES: dict[str, Any] = {
             "confidence": "observed",
             "valid_until": None,
             "date": "2026-10-01",
-            "cites": [{"ref": "claude:t:1.1", "quote": "cite it"}],
+            "cites": [{"ref": "claude:t:1.1", "quote": "cite it", **USER_ANCHOR}],
         },
         {"id": "K2", "kind": "lesson", "text": "secret", "sensitivity": "restricted", "expired": False},
         {"id": "K3", "kind": "lesson", "text": "stale", "sensitivity": "normal", "expired": True},
@@ -243,21 +245,22 @@ class HardeningTests(Base):
 
     def test_uncited_current_record_not_returned(self) -> None:
         """A record with no cites is never current, even when muninn returns it."""
-        base = {"id": "a", "kind": "lesson", "text": "nocite", "sensitivity": "normal"}
+        base = ENTRIES["entries"][0]
         self.assertEqual(self.listed({**base, "cites": []}), [])
         self.assertEqual(self.listed({**base, "cites": [{"ref": "", "quote": ""}]}), [])
-        self.assertEqual(self.listed({**base, "cites": [{"ref": "r", "quote": "q"}]}), ["a"])  # negative control
+        self.assertEqual(self.listed(base), ["K1"])  # positive control has verified user provenance
 
     def test_filters_fail_closed(self) -> None:
         """Missing sensitivity, non-current status and a past valid_until are all dropped."""
-        ok = {"id": "b", "kind": "fact", "text": "t", "cites": [{"ref": "r", "quote": "q"}], "sensitivity": "normal"}
-        self.assertEqual(self.listed(ok), ["b"])
+        ok = ENTRIES["entries"][0]
+        self.assertEqual(self.listed(ok), ["K1"])
         self.assertEqual(self.listed({k: v for k, v in ok.items() if k != "sensitivity"}), [])
+        self.assertEqual(self.listed({k: v for k, v in ok.items() if k != "status"}), [])
         self.assertEqual(self.listed({**ok, "status": "superseded"}), [])
-        self.assertEqual(self.listed({**ok, "status": "current"}), ["b"])
+        self.assertEqual(self.listed({**ok, "status": "current"}), ["K1"])
         self.assertEqual(self.listed({**ok, "valid_until": "2000-01-01"}), [])
         self.assertEqual(self.listed({**ok, "valid_until": 946684800.0}), [])
-        self.assertEqual(self.listed({**ok, "valid_until": "2999-01-01"}), ["b"])
+        self.assertEqual(self.listed({**ok, "valid_until": "2999-01-01"}), ["K1"])
 
     def test_help_nonzero_is_old_ledger(self) -> None:
         """Help rc 2 without the Part A flags is an old ledger; rc 2 WITH them (the live binary) is a good probe."""
@@ -380,10 +383,16 @@ class ProbeAndParity(Base):
         self.assertEqual(Path(ADAPTER).read_bytes(), mirror.read_bytes())
 
     def test_docs_carry_helper(self) -> None:
-        """Teardown and both handoff skills name the helper command."""
-        docs = ("skills/agentic-loop/teardown.md", "skills/handoff/SKILL.md", "packages/codex/skills/handoff/SKILL.md")
-        for rel in docs:
+        """Both handoff skills name the helper command; teardown calls orders.py (standing orders left the adapter)."""
+        for rel in ("skills/handoff/SKILL.md", "packages/codex/skills/handoff/SKILL.md"):
             self.assertIn("memory_adapter.py", (REPO / rel).read_text(), rel)
+        self.assertIn("orders.py", (REPO / "skills/agentic-loop/teardown.md").read_text())
+
+    def test_standing_orders_render_flag_is_gone(self) -> None:
+        """The superseded --standing-orders flag is rejected by the adapter CLI (argparse exit 2)."""
+        out = subprocess.run([sys.executable, ADAPTER, "render", "--standing-orders"], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("unrecognized arguments", out.stderr)
 
 
 if __name__ == "__main__":
