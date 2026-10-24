@@ -194,11 +194,32 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `refused_text_length` | the claim must be 1 to 500 characters. |
 | `refused_no_caller_session` | quote-only writes need CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID in the environment. |
 | `refused_other` | muninn refused with a code not listed here; the reason is `refused_<code>`, read it and the muninn docs. |
+| `decision_wrong_session` | the loop state belongs to another session; record only from the owning session. |
+| `decision_blank_phase` | a decision needs a non-blank phase (for example 2.5). |
+| `decision_blank_decision` | a decision needs a non-blank decision text; nothing was written. |
+| `decision_invalid_chain` | the decision chain is damaged; inspect and preserve the loop state before any further sync. |
+| `decision_sync_unknown` | a decision sync may have reached Muninn; inspect the store before any manual retry. |
+| `decision_state_error` | the loop state could not be read, validated or locked; nothing was written. |
 
 - Limits: only the orchestrator session can write (subagent threads are not citable); cites must anchor in a user
   prompt; the hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Measurement note: compare
   `by_reason_code` before and after a change; a rising `muninn_absent` or `refused_approval_needs_reply` is the signal.
   See `docs/decisions/2026-10-05-memory-authoritative.md`.
+
+## Decision recorded locally but Muninn sync degraded
+
+- Symptom: `graph.py record-decision` printed `"exit_code": 3` and a `muninn.reason_code`. The decision was appended
+  to `progress.json` `decisions_absorbed` before the sync attempt. For `unknown` or `syncing`, the Muninn copy may
+  already exist; inspect both stores before any recovery. A loop restarted during sync may no longer contain that row.
+  Trace rows: `decision.record/recorded/ok`, then `decision.sync/<written|degraded|disabled>/<reason_code>`.
+- Query: `python3 -c "import json;[print(r['seq'],r['muninn']) for r in json.load(open('progress.json'))['decisions_absorbed']]"`,
+  or `grep '"command": "decision\.' <agentic-loop dir>/<session_id>/trace.jsonl`. Chain check:
+  `python3 -c "import json,sys;sys.path.insert(0,'.');from scripts.lib import decision_record as d;print(d.verify_chain(json.load(open('progress.json'))['decisions_absorbed']))"`.
+- Fix: read the reason in the table above. An authorising prompt of "yes" (`cite_too_short`) is expected to degrade: at
+  teardown run `flush_pending(path, session, transition=..., cite_quote="<a substantive sentence the owner typed>")`;
+  the same `seq` is patched to `written`. Rows are never deleted or rewritten to clear a degrade.
+- Limits: the chain is a cooperating-agent safeguard (a same-user agent can rewrite file and chain), and dropping the
+  last row is undetectable. Measurement note: `docs/typed-records-measurement.md`.
 
 ## Stop declared in text instead of recorded, or a stop released unexpectedly
 

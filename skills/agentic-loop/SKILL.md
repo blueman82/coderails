@@ -70,7 +70,7 @@ the escalation rule (`frontier` resolves to opus, never automatically to fable, 
 capability reason), the effort table (effort is part of every stamp, tuned before escalating the
 model), the investigations-get-`frontier`-first exception, and the fallback-valve discipline.
 
-**Record the assignment set once.** Append one `decisions_absorbed` entry covering
+**Record the assignment set once.** Run `graph.py record-decision` for one `decisions_absorbed` entry covering
 every task's role assignment for this loop — `{phase: "2.8", decision: "<task id:
 role, ...>"}` — not one entry per task. A `<3`-unit loop still writes this entry
 even when it skipped Phase 2.7.
@@ -159,7 +159,7 @@ Before spawning a "bug fix" agent for any reported regression, use a two-agent s
 
 This is a specific application of `/coderails:cite-check` — the same "re-derive from sources only, no recall, no inference" discipline, applied to one claim: "this bug currently reproduces." The source-auditor returns a sourced PASS / FAIL / UNSUPPORTED verdict. **Spawn the fix agent only when the auditor returns PASS.** This split prevents fix work on non-existent bugs and keeps premise verification independent of the fixer.
 
-**Once a fix is diagnosed, before implementing it, run `/coderails:disconfirm` on the diagnosis.** Phase 5 checks whether the bug exists; this checks whether the proposed fix is actually right, before code gets written against it. Argue against the diagnosis — what would falsify it, what edge case breaks it, what did the fix agent assume away. This is cheap (one more tool call) relative to implementing, reviewing, and reverting a fix for the wrong root cause. Skip this step only when the fix is a direct, mechanical application of an already-verified design (e.g. this session's dashboard UX findings — each treatment was already confirmed against source during brainstorming, so there is no fresh diagnosis left to disconfirm). A consciously absorbed disconfirm-skip is an in-scope decision — append it to `progress.json`'s `decisions_absorbed` at the same phase boundary where `progress.json` is already being updated for this work-unit.
+**Once a fix is diagnosed, before implementing it, run `/coderails:disconfirm` on the diagnosis.** Phase 5 checks whether the bug exists; this checks whether the proposed fix is actually right, before code gets written against it. Argue against the diagnosis — what would falsify it, what edge case breaks it, what did the fix agent assume away. This is cheap (one more tool call) relative to implementing, reviewing, and reverting a fix for the wrong root cause. Skip this step only when the fix is a direct, mechanical application of an already-verified design (e.g. this session's dashboard UX findings — each treatment was already confirmed against source during brainstorming, so there is no fresh diagnosis left to disconfirm). A consciously absorbed disconfirm-skip is an in-scope decision — run `graph.py record-decision` at the same phase boundary where the graph is already being updated for this work-unit.
 
 ### Phase 6 — Match confirmation to authorisation envelope
 
@@ -174,7 +174,7 @@ Inside an authorised loop:
 
 Re-asking is more expensive than over-reaching by a small margin within scope. If the user wants to redirect, they will.
 
-A notable in-scope action taken without a check-in under this phase is also a consciously absorbed decision — append it to `progress.json`'s `decisions_absorbed` at the phase boundary where `progress.json` is already updated.
+A notable in-scope action taken without a check-in under this phase is also a consciously absorbed decision — run `graph.py record-decision` at the phase boundary where the graph is already updated.
 
 ### Phases 7 & 8 — stack-specific deploy/push tactics live in a feedback memory, not here
 
