@@ -44,9 +44,10 @@ The command measured these keys:
   both provider `agentic-loop/scripts` directories. It used SHA-256 to
   test content identity.
 
-Known measurement limits: the discipline log is append-only for the whole life of the machine (Claude log
-starts 2026-08-04, Codex log spans 2026-08-20 to 2026-09-17), and the Claude figures include this session's
-own hook activity at run time. `blocked=1` says a gate fired, not that the block was correct or useful.
+The discipline log is append-only for the life of the machine. The Claude
+log starts on 2026-08-04. The Codex log spans 2026-08-20 to 2026-09-17.
+The Claude figures include this session's hook activity. `blocked=1` means
+that a gate fired. It does not show whether the block was correct or useful.
 
 ## Measured data (verbatim from the run)
 
@@ -84,10 +85,11 @@ Claude log: 15394 hook lines, 2026-08-04T19:36:33+01:00 to 2026-10-03T19:26:31+0
 | voice_announce | 448 | 309 | 0 | 0 | 0 | 0.0% |
 | agent_only_gate, agent_model_routing_nudge, crack_on_gate, enforce_pr_workflow, no_edit_on_main, offload_push_guard, unregistered_loop_guard | 7 gates, 6289 lines combined | 0 | 0 | 0 | 0 | n/a (no `blocked=` field logged) |
 
-`confidence_labels` writes a bookkeeping line on every evaluation (3453 lines: 769 Stop plus 2684
-SubagentStop) and a decision line only when text of at least 200 characters lacks a label. Against all
-evaluations, 194 blocks is 5.6%. The 75.2% figure is conditional on a missing label already having been
-detected.
+`confidence_labels` wrote a bookkeeping line on every evaluation: 769 Stop
+and 2684 SubagentStop lines, for 3453 lines in total. It wrote a decision
+line only when text of at least 200 characters lacked a label. The 194
+blocks were 5.6% of all evaluations. The 75.2% figure applies only after
+the hook detected a missing label.
 
 Codex log: 117 hook lines, 2026-08-20T11:40:26+01:00 to 2026-09-17T11:30:25+01:00.
 
@@ -108,8 +110,9 @@ Codex log: 117 hook lines, 2026-08-20T11:40:26+01:00 to 2026-09-17T11:30:25+01:0
 | Divergent, strict | 2 |
 | Divergent, lenient | 2 |
 
-`~/.codex/agentic-loop` does not exist on this machine (verified by `ls`); Codex loops write to the shared
-`~/.coderails/agentic-loop`, so Claude and Codex loops are not separable in this scan.
+`~/.codex/agentic-loop` did not exist on this machine. The author checked
+with `ls`. Codex loops used the shared `~/.coderails/agentic-loop` path.
+This scan could not separate Claude loops from Codex loops.
 
 ### Duplication
 
@@ -241,7 +244,8 @@ python3 scripts/measure_graph_alignment.py --root . --json
 python3 scripts/tests/measure_graph_alignment_test.py
 ```
 
-Telemetry and loop-state numbers will differ on re-run because both sources keep growing.
+Telemetry and loop-state numbers will differ on a new run. Both sources
+continue to grow.
 
 Eval integrity (no `timeout`, it does not exist on macOS):
 
@@ -252,22 +256,39 @@ PYTHONPATH=. python3 -m unittest packages/tests/test_codex_grading_encoding.py
 
 ## Stale mkdir lock recovery (runbook)
 
-Before this change a SIGKILLed hook left `progress.json.lock` (or `verification-ceiling/*.count.lock`) behind
-forever: every later `atomic_progress_update` returned `False` and the verification ceiling denied every command.
-Both sites now take the lock through `hooks/scripts/lib/dir_lock.py`.
+Before this change, a hook killed with SIGKILL left its lock directory
+behind. The directory was `progress.json.lock` or
+`verification-ceiling/*.count.lock`. Each later `atomic_progress_update`
+returned `False`. The verification ceiling then denied each command.
+Both sites now use `hooks/scripts/lib/dir_lock.py` to take the lock.
 
-**Policy.** The lock dir holds `owner` = `{pid, host, start, ts}` (`start` is `ps -o lstart=`). A lock is stolen only when
-the owner is provably dead: `os.kill(pid, 0)` raises `ProcessLookupError`, or the pid is alive with a different
-start time (pid reuse). `PermissionError` means alive and never steals. An absent, empty or torn owner file is not
-dead on its own (it is the mkdir-then-write window); it is stolen only when the lock dir's mtime is older than
-`CLAUDE_LOCK_STALE_S` (default 60). An old lock with a live owner is never stolen. A future mtime (clock skew)
-counts as young. The steal is `os.rename(lock, lock.stale.<pid>.<uuid>)`: one racing stealer wins, losers retry
-`mkdir`; the renamed owner is rechecked against the one judged, and a mismatch is given back as `lock_busy`.
-Release removes the lock only if `owner.pid` is the caller's.
+**Policy.** The lock directory holds an `owner` record with `pid`, `host`,
+`start`, and `ts`. The `start` value comes from `ps -o lstart=`.
 
-**Reason codes** (appended as non-authoritative rows `{ts, event_id, reason, schema:"lock_event",
-non_authoritative:true, lock, owner_pid, pid}` (lock path, judged owner pid or null, acquirer pid) to `lock-events.jsonl` beside the lock; fail-open, a write failure never changes the
-lock result):
+The code steals a lock only when it can prove that the owner is dead.
+`os.kill(pid, 0)` raises `ProcessLookupError` when that process is gone.
+A live pid with a different start time shows pid reuse. A
+`PermissionError` means the process is alive, so the code keeps the lock.
+
+An absent, empty, or torn owner file does not prove that the owner is dead.
+The owner file can be incomplete between directory creation and its write.
+The code steals such a lock only after the lock directory is older than
+`CLAUDE_LOCK_STALE_S` seconds. The default is 60 seconds. It never steals
+an old lock with a live owner. It treats a future mtime from clock skew as
+young.
+
+To steal a lock, the code renames it to
+`lock.stale.<pid>.<uuid>`. One contender wins the rename. Other contenders
+retry `mkdir`. The winner checks the renamed owner against the owner it
+judged. If they differ, the code returns `lock_busy`. On release, the code
+removes the lock only if `owner.pid` matches the caller.
+
+**Reason codes.** The code appends non-authoritative rows to
+`lock-events.jsonl` beside the lock. Each row contains `ts`, `event_id`,
+`reason`, `schema:"lock_event"`, `non_authoritative:true`, `lock`,
+`owner_pid`, and `pid`. These last three values are the lock path, the
+judged owner pid or null, and the acquirer pid. A write failure does not
+change the lock result.
 
 | Code | Meaning |
 | --- | --- |
@@ -278,16 +299,25 @@ lock result):
 `python3 scripts/measure_graph_alignment.py --root . --json` reports `lock_events` counts per code, deduped by
 `event_id` across all loop-state roots.
 
-**Manual recovery** (only if a lock never clears): confirm the owner is gone with
-`cat <lock>/owner; ps -p <pid>`, then move the directory aside (`mv <lock> /tmp/trash/`); do not delete a lock
-whose pid is alive.
+**Manual recovery.** Use this only if a lock never clears. Read the owner
+with `cat <lock>/owner`. Check its process with `ps -p <pid>`. If the
+process is gone, move the directory aside with `mv <lock> /tmp/trash/`.
+Do not delete a lock whose pid is alive.
 
-**Known ceiling.** If a new holder wins between the steal's judgement and its rename, and a third process takes the
-vacated name before the rename-back, two holders can briefly coexist. A pid recorded by a different `host`
-is never judged by `kill -0` (shared state dirs over NFS or containers); such a lock is stolen only by age.
-Same-second pid reuse with an identical `lstart` is not detectable. The Codex hook uses a byte-identical vendored
-copy (`packages/codex/hooks/scripts/lib/dir_lock.py`, guarded by `dir_lock_test`); its events land in
-`$PLUGIN_DATA/verification-ceiling/lock-events.jsonl`, which the measurement script does not yet scan.
+**Known ceiling.** A race can briefly create two holders. It requires a
+new holder to win between the steal decision and rename. A third process
+must then take the vacant name before the rename back.
+
+The code does not use `kill -0` for a pid recorded by a different `host`.
+This case can occur with a shared state directory on NFS or in containers.
+The code steals that lock only by age. It cannot detect pid reuse within
+one second when `lstart` is identical.
+
+The Codex hook uses a byte-identical copy at
+`packages/codex/hooks/scripts/lib/dir_lock.py`. `dir_lock_test` guards
+that copy. Its events go to
+`$PLUGIN_DATA/verification-ceiling/lock-events.jsonl`. The measurement
+script does not scan that path yet.
 
 **Reproduce.**
 
@@ -299,14 +329,26 @@ python3 -m unittest scripts.tests.measure_graph_alignment_test
 
 ## Typed stop intent and hook state (measurement note)
 
-`graph.py stop` records a `progress.stops[]` row; `loop_stall_guard` consumes the newest unconsumed row at the current
-revision in the same atomic write that increments the hook-owned `loop_stop_counts`, and falls back to the final
-anchored `LOOP-STOP:` line (trace `legacy_text_parse`). Absent-state grace reads `hook_state.json`
-`ordinals.absent_blocked`, falling back to the discipline.log regex (trace `legacy_log_parse`). The Claude hook honours a recorded row only if `graph.py stop` ran after the last user prompt (else trace
-`stale_stop_row`). The Codex guard writes the same `legacy_text_parse` trace row (command `graph_completion_guard`), so the
-ratio covers both providers; before this change Codex fallbacks appeared only in discipline.log and were not counted.
-Counters live in `scripts/graph_alignment_stops.py`. Flip condition: if `legacy_text_parse` still dominates `stops_consumed` over the
-first few loops, agents are not recording stops; tighten the parse and block text-only stops instead.
+`graph.py stop` records a `progress.stops[]` row. `loop_stall_guard` consumes
+the newest unused row at the current revision. The same atomic write
+increments the hook-owned `loop_stop_counts`. If there is no usable row,
+the guard reads the final anchored `LOOP-STOP:` line. It traces that path
+as `legacy_text_parse`.
+
+Absent-state grace reads `ordinals.absent_blocked` from `hook_state.json`.
+It falls back to a `discipline.log` regex and traces `legacy_log_parse`.
+The Claude hook accepts a stop row only if `graph.py stop` ran after the
+last user prompt. Otherwise it traces `stale_stop_row`.
+
+The Codex guard also traces `legacy_text_parse`. Its trace command is
+`graph_completion_guard`. This lets the ratio cover both providers.
+Before this change, Codex fallback records appeared only in
+`discipline.log` and were not counted. The counters live in
+`scripts/graph_alignment_stops.py`.
+
+If `legacy_text_parse` still exceeds `stops_consumed` over the first few
+loops, agents are not recording stops. In that case, tighten the parser
+and block stops that use only text.
 
 **Reproduce.**
 
