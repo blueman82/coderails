@@ -126,13 +126,32 @@ Match the confirmation cadence to the envelope class for the rest of the session
 
 ### `S0.5` — Phase 0.5: Orchestrator operating rules (the conductor obeys its own rules)
 
-The orchestrator (main context) is subject to the same discipline it imposes on workers. Inside an active, incomplete loop, the two discipline Stop hooks — confidence-label and verify-loop — demote a would-be block to a model-visible warn (`additionalContext` on the Stop event) rather than stopping the turn outright; the discipline itself hasn't changed, the warn is the correction signal the orchestrator acts on next turn. Outside an active loop, and for worker output (SubagentStop), both hooks still block outright. Even at warn-level, a missed warn is still a cost — it's the cost this skill exists to keep to a minimum, just paid as a drifted transcript instead of a forced regeneration.
+The orchestrator must follow the same discipline as workers. The
+confidence-label and verify-loop hooks are advisory on Stop and
+SubagentStop. They send a model-visible `additionalContext` warning and
+return success. They do not block a turn, inside or outside a loop. Act on
+their warning in the next turn. See the 2026-10-04 decision in
+`docs/decisions/2026-10-04-not-in-gate-demotion.md`.
 
 Main context must, in its own output (not just in spawned-agent prompts):
 - Confidence-label every substantive status claim — `(verified)` / `(inferred)` / `(guess)` (same taxonomy as Phase 11).
-- Pre-tag any `## Did Not Verify` bullet that genuinely can't be checked, in the same turn it's written — an untagged bullet blocks the stop outside a loop and for workers, and is the first thing the in-loop warn will name.
+- Tag each `## Did Not Verify` bullet that cannot be checked in the same
+  turn. An untagged bullet causes an advisory warning on Stop or
+  SubagentStop. It does not block either event.
 - Never narrate a claim about an artifact (PR merged, deploy live) without having run the check this turn (Phase 12).
-- End any stopping turn inside an active loop with a LOOP-STOP declaration line — `LOOP-STOP: <hard-stop|approval-gate|awaiting-input|complete> — <reason>` — as the FINAL line of the turn, emitted in the SAME turn as the confidence-label and Did-Not-Verify requirements above — that ending-line position is the contract this skill defines and the hook's category accounting assumes: when a turn carries more than one LOOP-STOP-shaped line (e.g. a quoted example), `loop_stall_guard` counts only the last one, so the last line must be the declaration that reflects the turn's actual outcome. Bundling all three matters more, not less, in the warn era: the confidence-label and verify-loop hooks no longer block the orchestrator's in-loop Stop turns, so nothing else forces those labels and DNV tags into the transcript — the bundle is what keeps them present for post-hoc audit, and one composed ending beats clearing one stop hook only to trip another (`loop_stall_guard` still blocks). Declaring `complete` means the loop is done: also set `progress.json` `status: "complete"` and run the Phase 13 teardown. The declaration line is all that's required — `loop_stop_counts` is HOOK-OWNED: the `loop_stall_guard` hook itself increments the matching category on a valid declaration; never write or compute this field yourself.
+- End each stopping turn in an active loop with this final line:
+  `LOOP-STOP: <hard-stop|approval-gate|awaiting-input|complete> — <reason>`.
+  Put it in the same turn as the confidence labels and Did Not Verify tags.
+  `loop_stall_guard` uses only the last LOOP-STOP-shaped line, even when an
+  earlier line quotes an example. The final line must state the real turn
+  outcome. The two discipline hooks are advisory, so this skill must keep
+  the labels and tags in the transcript for later review.
+
+  Declare `complete` only when the loop is done. It needs Phase 13 teardown
+  and a `progress.json` status of `"complete"` set through the supported
+  controller. `loop_stop_counts` belongs to the hook. `loop_stall_guard`
+  increments the matching count for a valid declaration. Never write or
+  calculate that field yourself.
 
 ### `S1` — Phase 1: State the plan in bullets, ask once
 
