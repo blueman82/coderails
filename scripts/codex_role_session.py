@@ -24,6 +24,10 @@ TOOLS = {"repo.inspect", "diff.read", "tests.run", "pr.comment", "cmd.run"}
 ENV_ALLOW = ("PATH", "HOME", "CODEX_HOME", "LANG", "LC_ALL", "TERM", "TMPDIR")
 ROLE = re.compile(r"^[a-z][a-z0-9-]{0,60}$")
 OPTIONS = {"--role", "--prompt-file", "--cwd"}
+SOURCE_AUDITOR_APPROVALS = (
+    'mcp_servers.cap-source-auditor.tools.cmd_run.approval_mode="approve"',
+    'mcp_servers.cap-source-auditor.tools.tests_run.approval_mode="approve"',
+)
 
 
 def guarded_roles(root: Path) -> set[str]:
@@ -89,6 +93,9 @@ def build_argv(role: str, root: Path, cwd: str | None = None) -> list[str]:
     ]
     argv += ["-c", f"developer_instructions={json.dumps(role_instructions(root, role))}"]
     argv += ["-c", f"mcp_servers.cap-{role}={{command = {command}, args = {args}}}"]
+    if role == "source-auditor":
+        for approval in SOURCE_AUDITOR_APPROVALS:
+            argv += ["-c", approval]
     if cwd:
         argv += ["-C", cwd]
     return argv + ["-"]
@@ -97,7 +104,8 @@ def build_argv(role: str, root: Path, cwd: str | None = None) -> list[str]:
 def contained(argv: list[str], role: str) -> bool:
     """True only when argv carries every containment setting and exactly this role's one MCP server."""
     overrides = [argv[i + 1] for i, token in enumerate(argv[:-1]) if token == "-c"]
-    servers = [o for o in overrides if o.startswith("mcp_servers.")]
+    servers = [o for o in overrides if o.startswith("mcp_servers.") and ".tools." not in o]
+    approvals = [o for o in overrides if ".approval_mode=" in o]
     instructions = [o for o in overrides if o.startswith("developer_instructions=")]
     sandbox = [argv[i + 1] for i, token in enumerate(argv[:-1]) if token == "-s"]
     return (
@@ -109,6 +117,7 @@ def contained(argv: list[str], role: str) -> bool:
         and len(instructions) == 1
         and len(servers) == 1
         and servers[0].startswith(f"mcp_servers.cap-{role}=")
+        and approvals == (list(SOURCE_AUDITOR_APPROVALS) if role == "source-auditor" else [])
         and argv[-1] == "-"
     )
 
