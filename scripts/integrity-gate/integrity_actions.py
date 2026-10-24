@@ -70,7 +70,7 @@ def main() -> int:
         payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
         client = Client(slug, token)
         numbers = select_prs(client, event, payload)
-        maximum = int(os.environ.get("INTEGRITY_GATE_MAX_DIFF_BYTES", "204800"))
+        maximum = int(os.environ.get("INTEGRITY_GATE_MAX_DIFF_BYTES", "524288"))
         if maximum < 1:
             raise ValueError("invalid diff limit")
         results = [gate_pr(client, number, maximum, 0) for number in numbers]

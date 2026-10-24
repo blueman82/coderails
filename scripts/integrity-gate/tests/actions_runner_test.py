@@ -1,11 +1,15 @@
 """Keep trusted workflow dispatch scoped to PR numbers from GitHub events."""
 
+import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from integrity_actions import select_prs
+from integrity_actions import main, select_prs
 
 
 class Pages:
@@ -43,6 +47,25 @@ class ActionsRunnerTests(unittest.TestCase):
         """A text value never becomes an API path number."""
         pages = Pages([])
         self.assertEqual(select_prs(pages, "pull_request_target", {"pull_request": {"number": "7"}}), [])
+
+    def test_default_diff_limit_admits_current_roadmap_size(self) -> None:
+        """The deployed entrypoint passes the 512 KiB bound to the policy."""
+        with tempfile.TemporaryDirectory() as directory:
+            event = Path(directory) / "event.json"
+            event.write_text(json.dumps({"pull_request": {"number": 7}}))
+            context = {
+                "GITHUB_REPOSITORY": "owner/repo",
+                "GITHUB_TOKEN": "test-token",
+                "GITHUB_EVENT_NAME": "pull_request_target",
+                "GITHUB_EVENT_PATH": str(event),
+            }
+            with (
+                patch.dict(os.environ, context),
+                patch("integrity_actions.Client") as client,
+                patch("integrity_actions.gate_pr", return_value=0) as gate,
+            ):
+                self.assertEqual(main(), 0)
+            gate.assert_called_once_with(client.return_value, 7, 524288, 0)
 
 
 if __name__ == "__main__":

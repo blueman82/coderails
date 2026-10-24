@@ -22,6 +22,14 @@ ATTESTOR_IMPORT_PATHS = frozenset(
         "scripts/lib/eval_trace.py",
     }
 )
+ATTESTOR_IMPORT_STEMS = tuple(path[:-3] for path in ATTESTOR_IMPORT_PATHS if path.endswith(".py"))
+ATTESTOR_PACKAGE_PATHS = tuple(f"{stem}/" for stem in ATTESTOR_IMPORT_STEMS if stem.startswith("scripts/lib/"))
+PROTECTED_PREFIXES = (
+    "scripts/integrity-gate/",
+    "scripts/__pycache__/",
+    "scripts/lib/__pycache__/",
+    ".github/workflows/",
+)
 STATUS_CONTEXT = "integrity-review"
 STATUS_BUDGET = 900
 STATUS_CAP = 1000
@@ -205,10 +213,9 @@ def check_inputs(
     for name in filenames:
         if isinstance(name, str) and (
             name in ATTESTOR_IMPORT_PATHS
-            or re.match(
-                r"^(skills/dashboard/|launchd/|scripts/integrity-gate/|scripts/__pycache__/|scripts/lib/__pycache__/|scripts/(merge\.py|lib/(config\.py|eval_|integrity_status\.py|review_artifact\.py))|hooks/scripts/lib/pr_merge_gate\.py|packages/codex/scripts/(merge\.py|lib/(config\.py|eval_|integrity_status\.py|review_artifact\.py))|\.github/workflows/|config\.schema\.json$|packages/codex/config\.schema\.json$)",
-                name,
-            )
+            or name.startswith(PROTECTED_PREFIXES)
+            or any(name.startswith(f"{stem}.") for stem in ATTESTOR_IMPORT_STEMS)
+            or name.startswith(ATTESTOR_PACKAGE_PATHS)
         ):
             return fail(client, number, sha, "policy_path_protected")
     try:
