@@ -82,6 +82,14 @@ against the graph's exact current revision and write beside the state:
 - non-empty `proof.json` for the same session and loop, with every proof carrying a nonblank executable `cmd` and `status: "pass"`;
 - `retro.json` for the same session and loop, schema version 1 or newer, with `status: "complete"`.
 
+Prepare standing orders from the retro with code, never by editing Markdown. With `D` the repo-key dir (the grandparent of `$STATE`), `LOOP` the separate logical `loop_id` from owned progress, and `O="python3 $SKILL_DIR/../../scripts/lib/orders.py --dir $D --session $SESSION"`: run `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop "$LOOP" --quote "<verbatim words of the owner's own prompt, 12-300 chars>"` for each failure mode (add `--scope agnostic` for a lesson that applies to any repo). The native `complete` command runs `prepare` after final progress updates, including when none were recorded. Preparation binds the eligible owned source and records `orders_prepared`, with no recurrence or aging effect. Exit 3 prints a `reason_code`: report it and never write a Markdown fallback. `memory.backend: off` is the explicit opt-out. The current Muninn installation uses a newer API, so live lesson activation remains pending (see `docs/RUNBOOK.md`, "Standing order stored without a cite").
+
+Flush and reload pending progress-source updates before final preparation. Changed sources are refused by default.
+For a legitimate incomplete-source retry, use `$O prepare --loop "$LOOP" --refresh-from-sha256 <CURRENT evidence_sha256>`
+with the current preparation's returned canonical hash. Immutable ownership must match, revision cannot roll back,
+and that session+loop must have no applied tick or recurrence. Staged records are preserved with no effects. A saved
+replacement whose receipt failed needs ordinary unchanged `prepare` to repair it. Never refresh completed inputs.
+
 Apply `superpowers:verification-before-completion` to the orchestrator's completion claim. Then run:
 
 ```bash
@@ -89,6 +97,17 @@ python3 "$SKILL_DIR/scripts/graph.py" complete "$STATE" \
   --session "$SESSION" --evals "$EVALS" --proof "$PROOF" --retro "$RETRO" \
   --transcript "$TRANSCRIPT_PATH"
 ```
+
+That command runs `prepare` before the graph lock, checks the prepared source under the graph lock, saves completion,
+then runs `$O tick --loop "$LOOP"` and `$O render --loop "$LOOP"` after it releases the lock. Apply validates the
+separately bound directory/session/logical-loop/source and the actual provider completion revision. New completed
+recurrences reset counters; unmatched orders age once and become tombstones at K=5, never deletions. A failed native
+completion save ages nothing. `orders_ticked` follows the ledger save; a failed postcompletion apply or observation
+means `pending_teardown: true`. Repeat the same native `complete` command to resume the bound tick and render before
+claiming teardown finished. `verify-completion` and the Stop guard refuse pending teardown.
+An old complete loop without D4 receipts needs explicit reviewed legacy admission as documented in the orders
+decision and runbook. Admission checks the exact file hash, then permits completion bookkeeping while binding the
+graph source. It does not age orders; new loops cannot use it.
 
 Run each proof command through `functions.exec` using this canonical nested-result output; replace the placeholder with the proof's exact command so transcript matching remains exact:
 

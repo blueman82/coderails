@@ -12,22 +12,26 @@ REASONS: dict[str, str] = {
     ),
     "memory_backend_invalid": "memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml.",
     "muninn_absent": "muninn is not on PATH; install it (the Markdown path is not a fallback).",
-    "muninn_old_ledger": "muninn lacks the Part A flags (--scope-loop, --confidence, ...); upgrade muninn.",
+    "muninn_old_ledger": (
+        "the D4 adapter expects retired Muninn flags; keep this degraded until a current request-bound adapter "
+        "is designed."
+    ),
     "muninn_timeout": "muninn hung past 10s; run `muninn know list` by hand and check store locks.",
     "muninn_error": (
         "muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and "
         "read stderr."
     ),
     "muninn_bad_output": (
-        "muninn wrote the entry but printed no K-id; run `muninn know list --scope-loop <id>` to find it."
+        "the retired D4 write protocol returned no numeric K-id; inspect current Muninn records without a legacy "
+        "scope flag."
     ),
     "muninn_store_missing": "no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once.",
     "muninn_schema_old": (
-        "the store is schema v1 (PRAGMA user_version != 2); upgrade it with muninn itself, never by hand."
+        "the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2."
     ),
     "muninn_schema_incomplete": (
-        "the store lacks a typed column or table (confidence, valid_until, sensitivity, contradicts, "
-        "tags, fts); run `muninn doctor`."
+        "the D4 adapter expects retired v2 columns or tables; inspect the current store with `muninn doctor`, "
+        "then redesign the adapter."
     ),
     "uncited_write": "give a verbatim --quote (and --cite ref); a record without a quote is never written.",
     "restricted_refused": "restricted records are never written by the adapter; write a normal-sensitivity claim.",
@@ -89,4 +93,62 @@ REASONS: dict[str, str] = {
     ),
     "decision_sync_unknown": "a decision sync may have reached Muninn; inspect the store before any manual retry.",
     "decision_state_error": "the loop state could not be read, validated or locked; nothing was written.",
+    "order_chain_broken": (
+        "orders.json was edited by hand (the hash chain names the order); restore it from backup or review the "
+        "named order, then re-seal by recording through orders.py."
+    ),
+    "order_blank_field": "an order needs a non-blank failure mode and lesson; nothing was written.",
+    "order_lesson_too_long": (
+        "the collapsed lesson exceeds 500 characters; provide a shorter complete claim, never truncate it."
+    ),
+    "order_bad_id": "an explicit order id must match [a-z0-9][a-z0-9_-]{0,119}; use a canonical id.",
+    "order_id_collision": (
+        "that order id already names another failure mode or scope; use its real identity or a distinct id."
+    ),
+    "order_not_found": "no order with that id in orders.json; check the id with `orders.py lessons`.",
+    "order_state_error": (
+        "orders, preparation or receipt could not be read, locked or written; check the repo-key dir, "
+        "orders.lock and persistent teardown.jsonl.lock."
+    ),
+    "order_loop_unknown": (
+        "no source at <repo-key dir>/<session>/progress.json; pass the owning --session and its separate "
+        "logical --loop."
+    ),
+    "order_wrong_session": (
+        "the source directory, session or logical loop is foreign; use the owning directory and identifiers."
+    ),
+    "order_source_invalid": (
+        "progress, preparation or observations are malformed; restore genuine validated source artifacts."
+    ),
+    "order_source_mismatch": (
+        "the prepared source/hash is stale; before completion use prepare --refresh-from-sha256 with its "
+        "CURRENT evidence_sha256."
+    ),
+    "order_loop_ineligible": (
+        "the owned graph or work units are incomplete or stopped; finish the existing completion requirements."
+    ),
+    "order_not_complete": (
+        "preparation is prospective; durably save owned progress as complete before applying recurrence or aging."
+    ),
+    "order_pending_teardown": (
+        "completion saved but local apply or its observation failed; retry tick with the same bound source."
+    ),
+    "order_retro_validator_unavailable": (
+        "schema3 retros require the matching retro_check validator; install the matching validator before graduation."
+    ),
+    "order_already_ticked": "this session and logical loop were already counted; the tick was skipped (informational).",
+    "no_user_cite": (
+        "the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner "
+        "prompt text>`."
+    ),
+    "legacy_uncited": "an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`.",
+    "legacy_parse_error": (
+        "the local legacy input has an incomplete, ambiguous or colliding entry; fix the named entry and "
+        "rerun import-legacy, preserving the original."
+    ),
+    "legacy_missing": "there is no hand-written standing-orders.md to import (absent, empty or already generated).",
+    "lesson_not_current": (
+        "the order has no unambiguous current cited Muninn claim (retracted, expired, superseded or conflicting "
+        "current claims); inspect the current evidence and explicitly record the intended lesson with a fresh quote."
+    ),
 }

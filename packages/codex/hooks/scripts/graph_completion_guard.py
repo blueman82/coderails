@@ -161,7 +161,7 @@ def main() -> int:
     if not unresolved(state):
         continue_turn(
             "The native Codex graph passed graph checks but completion evidence is invalid. "
-            "Repair evals, proof, or retro evidence before stopping."
+            "Repair evals, proof, retro, or standing-orders teardown evidence before stopping."
         )
         return 0
     try:

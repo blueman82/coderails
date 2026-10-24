@@ -27,7 +27,7 @@ entry in the Claude role map, so the native graph CLI `plan` command reports the
 - [Step 2 — Assemble `retro.json`](#step-2--assemble-retrojson)
 - [Cost-mining sub-step](#cost-mining-sub-step)
 - [Pricing is computed once and frozen](#pricing-is-computed-once-and-frozen)
-- [Step 3 — Update `standing-orders.md`](#step-3--update-standing-ordersmd)
+- [Step 3 — Update the standing orders (code, not prose)](#step-3--update-the-standing-orders-code-not-prose)
 - [Steps 4 and 5](#steps-4-and-5)
 
 ## The Phase 13 self-audit report
@@ -120,41 +120,70 @@ NEVER re-derive them from token counts against a live price table. If a second p
 ever tempting (e.g. a dashboard-side "current price" toggle), that is out of contract — the frozen
 number at teardown is the number.
 
-## Step 3 — Update `standing-orders.md`
+## Step 3 — Update the standing orders (code, not prose)
 
-At the repo-key dir. Match this loop's retro failure modes against existing entries:
+Standing orders are typed records in `<repo-key dir>/orders.json` (the grandparent of the `progress.json` path), changed
+only by `scripts/lib/orders.py`; `standing-orders.md` and `standing-orders-decayed.md` are generated, read-only views.
+Never write those files by hand (`render` refuses an unmarked file with `handwritten_protected`). Run, in order, from the
+orchestrator session (`O="python3 ${CLAUDE_PLUGIN_ROOT}/scripts/lib/orders.py --dir <repo-key dir> --session <session_id>"`).
+Pass the separate logical `loop_id` copied from owned `progress.json`; it is not the session directory name.
 
-- A **match** resets that entry's `loops_since_recurrence` to 0, updates `last_recurred`, and appends evidence.
-- A genuinely **new** failure mode appends a new entry (fields: `id`, `created`, `failure_mode`, `lesson`, `evidence`, `last_recurred`, `loops_since_recurrence`).
-- **Increment** `loops_since_recurrence` on every non-matched surviving entry.
-- When an entry's `loops_since_recurrence` reaches **K=5** (a constant stated here, not config), MOVE it to `standing-orders-decayed.md` — a tombstone, **never a delete**; the graduation predicate's "one clean decay" is checked against this file.
+1. For each failure mode in this loop's retro, `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop <loop_id> --quote "<verbatim words of the owner's own prompt, 12-300 chars>"`. Add `--scope agnostic` for a lesson that applies
+   to any repo. Before completion this stages the observation and any cited sync; it changes no lifecycle counters.
+   An id must name the same failure mode and scope. A claim over 500 collapsed characters is refused, never truncated.
+2. After final progress updates, the native completion command runs `$O prepare --loop <loop_id>`. It validates the
+   owned eligible graph and work units, binds the source directory, session, logical loop, revision and progress hash,
+   and records `orders_prepared`. This also runs when the retro has no failure mode. Prospective eligibility authorizes
+   preparation only.
+   A changed source is refused by default. For a legitimate incomplete-source retry, pass
+   `$O prepare --loop <loop_id> --refresh-from-sha256 <CURRENT evidence_sha256>` using the canonical hash returned by
+   the current preparation. It preserves staged records, refuses rollback/foreign/already-applied sources, and has
+   no lifecycle effect. A saved replacement whose receipt failed needs ordinary unchanged `prepare` to repair it.
+   Flush and reload pending source updates before final preparation. Never refresh after durable completion.
+3. After native completion is durably saved, that command runs `$O tick --loop <loop_id>` and `$O render --loop
+   <loop_id>`. It applies staged recurrences and ages every unmatched active order once. A new completed session+loop
+   recurrence resets the counter and revives a tombstone; replay does neither. At **K=5** an order becomes `decayed`,
+   **never deleted**. A decayed order appears only in `standing-orders-decayed.md`.
 
-This step is additive-or-recurrence-only: no metric-based removal anywhere.
+Preparation and apply read `<repo-key dir>/<session_id>/progress.json`, validate its ownership and source binding,
+and refuse missing, foreign, malformed, incomplete or stale sources. A failed native completion save ages nothing.
+`orders_ticked` is emitted only after the ledger save. A failed postcompletion ledger save or observation reports
+`pending_teardown: true`. Repeat the native completion command to resume the same bound tick and render. The Claude
+Stop guard blocks a finished loop until those bound receipts and generated views are current. The Codex equivalent is
+in `packages/codex/skills/agentic-loop/SKILL.md`.
+An old complete loop without D4 receipts needs explicit reviewed legacy admission; see the orders decision and
+runbook. Admission checks the exact file hash, then permits completion bookkeeping while binding the graph source.
+It does not age orders. New loops cannot use it.
 
-**Typed lessons (Muninn authoritative).** Typed lessons are recorded in Muninn; there is no Markdown substitute. First run
-`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" probe`. Exit 0 means Muninn is ready: emit each new or
-recurred lesson as a record with
-`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" add --type lesson --scope loop --loop <session_id> --run <session_id> --claim "<lesson>" --quote "<verbatim quote of the owner's own prompt, 12-300 chars>"`
-(or `--approval <ref of the owner's approval prompt>` to cite a short approval together with the reply
-it answers). The cite must anchor in a user prompt: an agent-only cite is refused with `cite_not_user`, an uncited write
-with `uncited_write`. Only the orchestrator session can write. Then regenerate the read-only view with
-`... memory_adapter.py render --standing-orders --loop <session_id> --write <repo-key dir>/standing-orders-generated.md`
-(it only overwrites a file whose first line is the generator marker, never the hand-written `standing-orders.md`).
-Any nonzero exit prints `{"degraded": "<reason_code>"}` and appends a trace row: **report that reason code in the
-retro and stop that write; never skip it silently and never write the lesson to Markdown instead.** `memory.backend: off`
-(reason `memory_backend_off`) is the only explicit opt-out. Runbook: `docs/RUNBOOK.md`, "Memory degraded (Muninn
-authoritative)"; decision record: `docs/decisions/2026-10-05-memory-authoritative.md`.
+The graduation predicate and the promotion selection are `$O predicate` and `lessons.py predicate`. This step is
+additive-or-recurrence-only: no metric-based removal anywhere.
+
+**Typed lessons (Muninn authoritative).** The cited claim of each order lives in Muninn as a `lesson` tagged `order` and
+`ord-<id>`; the one orders lock covers currentness lookup, tagged-claim reconciliation, bounded sync and local save.
+Current claims are reconciled even for degraded/pending local rows; a failed lookup retains a prior K-id and reports
+degradation. The cite must anchor in a user prompt (`--quote`): with none, the staged or completed local row has
+`muninn.state=degraded` and reason `no_user_cite`, exit 3, and
+`$O cite <id> --quote "<owner's words>"` attaches it later. Exit 3 prints `{"muninn": {... "reason_code": ...}}`:
+**report that reason code in the retro; never skip it silently and never write the lesson to Markdown instead.**
+`memory.backend: off` (reason `memory_backend_off`, exit 0) is the only explicit opt-out. A first-time adoption of an old
+hand-written file is `$O import-legacy` (it archives a byte copy and retains the original). Verify the archive and
+ledger, then retire the hand-written source before generating `standing-orders.md`. Runbook:
+`docs/RUNBOOK.md`, "Standing order stored without a cite"; decision records:
+`docs/decisions/2026-10-05-memory-authoritative.md`, `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 
 ## Steps 4 and 5
 
 4. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
-5. **Only then** run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session_id>` to validate the current native graph and identity-bound artifacts. Then run `loop_state_common.py mark-complete <cwd> <session_id>` to
-   set `progress.json` `status: "complete"` and stamp `completed_marker` together — e.g.
+5. **Only then** run `loop_state_common.py mark-complete <cwd> <session_id>` to validate native completion, prepare and
+   recheck orders, save progress, apply the tick and render, and stamp `completed_marker` — e.g.
    `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete "$PWD" "<session_id>"`.
    Never write `status: "complete"` via a bare atomic update — that leaves
    `completed_marker` unstamped at its prior value (permanently 0 for a loop's first completion),
    which false-positives `loop_state_guard`'s `stale_complete_rearmed` block on every later turn of
-   the same session. Then run `graph.py stop <state> --session <session_id> --category complete --reason-code work_complete --reason "<reason>"` and declare `LOOP-STOP: complete`. First apply
+   the same session. If completion reports pending teardown, repeat `mark-complete` to resume it. Then run
+   `graph.py verify-completion <state> --session <session_id>` to check the graph and bound orders evidence. Then run
+   `graph.py stop <state> --session <session_id> --category complete --reason-code work_complete --reason "<reason>"`
+   and declare `LOOP-STOP: complete`. First apply
    `superpowers:verification-before-completion` to the orchestrator's own completion claim
    (SKILL.md's Phase 13 links the `finishing-out.md` detail). The `loop_stall_guard` proof gate
    blocks the declaration itself if Step 1 was skipped or left a proof unexecuted/failed — it does
