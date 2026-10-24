@@ -48,7 +48,10 @@ class EvidenceFixture:
             ],
         }
         self.document["frozen_hash"] = suite_hash(self.document)
-        self.review = f"<!-- coderails-review-summary v1 pr=7 head_sha={SHA} -->\n\n## No findings"
+        self.review = (
+            f"<!-- coderails-review-summary v1 pr=7 head_sha={SHA} -->\n"
+            f"<!-- coderails-compat-findings v1 pr=7 head_sha={SHA} count=0 disposition=clean-break -->\n## No findings"
+        )
         self.marker = f"<!-- coderails-eval-summary v1 pr=7 head_sha={SHA} result=GO verification_level=1 -->"
         self.files: list[JsonObject] = [{"filename": "scripts/example.py"}]
         self.diff = "diff --git a/scripts/example.py b/scripts/example.py\n+x\n"

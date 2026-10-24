@@ -20,11 +20,23 @@ def review_valid(body: str, number: int, sha: str) -> bool:
     """Require one exact marker and a structurally valid reviewer summary."""
     marker = f"<!-- coderails-review-summary v1 pr={number} head_sha={sha} -->"
     lines = body.splitlines()
-    if not lines or lines[0] != marker:
+    if len(lines) < 3 or lines[0] != marker:
         return False
-    summary = [line for line in lines[1:] if line.strip()]
+    compat = re.fullmatch(
+        rf"<!-- coderails-compat-findings v1 pr={number} head_sha={re.escape(sha)} "
+        r"count=(0|[1-9][0-9]{0,8}) disposition=(clean-break|preserve-compat) -->",
+        lines[1],
+    )
+    if compat is None:
+        return False
+    count = int(compat[1])
+    if (compat[2] == "clean-break" and count > 0) or ("## No findings" in lines[2:] and count > 0):
+        return False
+    summary = [line for line in lines[2:] if line.strip()]
     if summary == ["## No findings"]:
         return True
+    if any(line.startswith("<!-- coderails-compat-findings") for line in summary):
+        return False
     headings = ("## Critical", "## Important", "## Suggestions")
     if [line for line in summary if line.startswith("## ")] != list(headings):
         return False
