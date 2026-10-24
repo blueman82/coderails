@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import sys
 import unittest
@@ -112,7 +113,18 @@ class CrackOnTests(HookCase):
     ) -> subprocess.CompletedProcess[str]:
         """Run the typed `authority.py grant` for a session (the only way an object is minted)."""
         result = subprocess.run(
-            [sys.executable, str(cli), "grant", "--session", session, "--max-prs", "0", *extra],
+            [
+                sys.executable,
+                str(cli),
+                "grant",
+                "--session",
+                session,
+                "--scope",
+                "autonomous_decisions",
+                "--max-prs",
+                "0",
+                *extra,
+            ],
             env=self.environment | (env or {}),
             capture_output=True,
             text=True,
@@ -134,7 +146,12 @@ class CrackOnTests(HookCase):
         for index, text in enumerate(self.PHRASES):
             session = f"phrase-{index}"
             context = self.prompt(text, session)["hookSpecificOutput"]["additionalContext"]
-            self.assertIn(f"authority.py grant --session {session} --max-prs N", context, text)
+            self.assertIn(
+                f"authority.py grant --session {session} --scope autonomous_decisions "
+                "--denied destructive_shell --max-prs N",
+                context,
+                text,
+            )
             self.assertIn("/coderails:authorize", context)
             self.assertIn(str(AUTHORITY_CLI), context)
             self.assertFalse((self.loop / session / "authority.json").exists(), text)
@@ -149,6 +166,16 @@ class CrackOnTests(HookCase):
         self.assertEqual(self.prompt("crack on", "live"), {})
         self.assertEqual(self.reasons("plain"), [])
         self.assertEqual(self.reasons("live"), ["authority_granted_command"])
+
+    def test_printed_command_grants_the_scope_it_claims(self) -> None:
+        """The command in the actual hint must make a usable, bounded authority."""
+        context = self.prompt("crack on", "hint")["hookSpecificOutput"]["additionalContext"]
+        command = context.split("or runs ", 1)[1].split(". Agents", 1)[0].replace("--max-prs N", "--max-prs 0")
+        run = subprocess.run(shlex.split(command), env=self.environment, capture_output=True, text=True, check=False)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(self.authority("hint")["scope"], ["autonomous_decisions"])
+        self.assertEqual(self.authority("hint")["denied"], ["destructive_shell"])
+        self.assertTrue(self.ask("hint"))
 
     def test_grant_writes_valid_bound_object_then_gate_denies(self) -> None:
         """Grant stamps a valid 24h granted_by=command object; the gate then denies; a second grant is refused."""
@@ -166,6 +193,21 @@ class CrackOnTests(HookCase):
         expected = ["authority_granted_command", "authority_deny", "authority_refused_exists"]
         self.assertEqual(self.reasons("g1"), expected)
         self.assertFalse((self.loop / "g1" / "crack_on_active").exists())
+
+    def test_narrow_to_empty_scope_allows_human_input(self) -> None:
+        """A valid grant stops suppressing questions after its autonomy scope is removed."""
+        self.grant("narrow")
+        self.assertTrue(self.ask("narrow"))
+        narrowed = subprocess.run(
+            [sys.executable, str(AUTHORITY_CLI), "narrow", "--session", "narrow", "--scope", ""],
+            env=self.environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(narrowed.returncode, 0, narrowed.stderr)
+        self.assertEqual(self.authority("narrow")["scope"], [])
+        self.assertFalse(self.ask("narrow"))
 
     def test_legacy_phrase_and_fieldless_objects_are_honoured(self) -> None:
         """Objects the old hook wrote (no granted_by, or legacy_phrase) keep denying until expiry."""

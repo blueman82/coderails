@@ -111,7 +111,9 @@ The phrase heuristics (`invoked()`, negation, question and quote handling, about
   Codex: `packages/codex/skills/authorize/SKILL.md` instructs the same command (no pre-execution).
 - `crack_on_gate.py` (Claude and Codex) on `UserPromptSubmit` never writes. On "crack on" / "crack-on" with no live authority it emits
   `additionalContext` with the grant command and traces `crack_on/ignored/authority_phrase_ignored`. The AskUserQuestion /
-  request_user_input denial, expiry, revoked, foreign and legacy-flag paths are unchanged.
+  request_user_input denial, expiry, revoked, foreign and legacy-flag paths are unchanged. A later B3 correction
+  makes each hook check for `autonomous_decisions` in the current grant scope. The printed grant command now includes
+  that scope and `--denied destructive_shell`. A narrowed grant with an empty scope allows user input.
 - Codex mirror: `packages/codex/scripts/authority.py` and `packages/codex/scripts/lib/authority_object.py` are byte-identical to
   the Claude files (parity test); `hook_common.py` no longer vendors `authority_state`/`write_authority`/`parse_expiry` and imports the
   mirrored lib. Both trace and authority paths now honour `CODERAILS_AGENTIC_LOOP_DIR` as a fallback, as the old Codex vendored code did.

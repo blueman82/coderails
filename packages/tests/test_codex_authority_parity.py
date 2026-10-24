@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -98,7 +99,17 @@ class CodexCrackOnGateTests(unittest.TestCase):
 
     def grant(self, session: str, ok: bool = True) -> None:
         """Mint through the mirrored typed command."""
-        cli = [sys.executable, str(CODEX / "scripts/authority.py"), "grant", "--session", session, "--max-prs", "0"]
+        cli = [
+            sys.executable,
+            str(CODEX / "scripts/authority.py"),
+            "grant",
+            "--session",
+            session,
+            "--scope",
+            "autonomous_decisions",
+            "--max-prs",
+            "0",
+        ]
         run = subprocess.run(cli, env=self.env, capture_output=True, text=True, check=False)
         self.assertEqual(run.returncode == 0, ok, run.stderr)
 
@@ -112,7 +123,12 @@ class CodexCrackOnGateTests(unittest.TestCase):
         for index, text in enumerate(PHRASES):
             session = f"neg{index}"
             context = self.prompt(text, session)["hookSpecificOutput"]["additionalContext"]
-            self.assertIn(f"authority.py grant --session {session} --max-prs N", context, text)
+            self.assertIn(
+                f"authority.py grant --session {session} --scope autonomous_decisions "
+                "--denied destructive_shell --max-prs N",
+                context,
+                text,
+            )
             self.assertIn("$coderails-codex:authorize", context)
             self.assertIn("Agents must not run", context)
             self.assertFalse((self.loop / session / "authority.json").exists(), text)
@@ -138,6 +154,32 @@ class CodexCrackOnGateTests(unittest.TestCase):
         obj["expires_at"] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         path.write_text(json.dumps(obj))
         self.assertFalse(self.asks("g1"))
+
+    def test_printed_command_grants_the_scope_it_claims(self) -> None:
+        """The Codex hint must execute as a usable bounded grant."""
+        context = self.prompt("crack on", "hint")["hookSpecificOutput"]["additionalContext"]
+        command = context.split("or runs ", 1)[1].split(". Agents", 1)[0].replace("--max-prs N", "--max-prs 0")
+        run = subprocess.run(shlex.split(command), env=self.env, capture_output=True, text=True, check=False)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        obj = json.loads((self.loop / "hint/authority.json").read_text())
+        self.assertEqual(obj["scope"], ["autonomous_decisions"])
+        self.assertEqual(obj["denied"], ["destructive_shell"])
+        self.assertTrue(self.asks("hint"))
+
+    def test_narrow_to_empty_scope_allows_human_input(self) -> None:
+        """The native input hook reads the current scope after a typed narrowing."""
+        self.grant("narrow")
+        self.assertTrue(self.asks("narrow"))
+        narrowed = subprocess.run(
+            [sys.executable, str(CODEX / "scripts/authority.py"), "narrow", "--session", "narrow", "--scope", ""],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(narrowed.returncode, 0, narrowed.stderr)
+        self.assertEqual(json.loads((self.loop / "narrow/authority.json").read_text())["scope"], [])
+        self.assertFalse(self.asks("narrow"))
 
     def test_hook_common_no_longer_vendors_authority(self) -> None:
         """The vendored copies are gone; the mirrored lib is the single implementation."""
