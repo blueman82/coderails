@@ -17,12 +17,16 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/merge.py" "$ARGUMENTS"
 ```
 
 The script:
+
 1. Finds the PR from its number, branch name, or current branch.
-2. Checks whether the repository requires PR approval.
-3. Verifies approval when required. It checks the review artifact for the current head SHA. It then checks the current-head eval artifact from `/coderails:post-evals`. The eval result must be `GO` or have a justified level-0 exemption. Both artifacts gate the merge.
-4. Merges the PR and deletes its branch.
-5. Switches to the main branch.
-6. Pulls the latest changes.
-7. Shows recent commits.
+2. Checks approval if the repository requires it.
+3. Requires review and eval artifacts for the current head SHA. The eval
+   result must be `GO` or have a justified level-0 exemption.
+4. Reruns the scripted eval checks against the trusted head. It checks
+   `integrity-review` when enabled. It checks configured wiki debt and
+   manifest policy before merge.
+5. Merges the PR.
+6. Tries to sync the primary checkout, delete the merged branch, and show
+   recent commits. A cleanup failure does not undo the merge. Report it.
 
 Report success and final state when complete.
