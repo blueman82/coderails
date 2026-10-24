@@ -39,9 +39,7 @@ if sys.argv[1] == "search":
 if sys.argv[2] == "list":
     sys.stdout.write(open(os.environ["FAKE_LIST"]).read()); sys.exit(0)
 sys.stdout.write('{"entry": {"id": "K9"}}')
-""".replace(
-    "@FLAGS@", NEW_FLAGS
-)
+""".replace("@FLAGS@", NEW_FLAGS)
 
 ENTRIES: dict[str, Any] = {
     "entries": [
@@ -266,6 +264,16 @@ class HardeningTests(Base):
         ma.PROBE_CACHE.clear()
         os.environ["FAKE_MODE"] = "old"
         self.assertEqual(ma.probe(), ma.Degraded("muninn_old_ledger"))
+
+    def test_default_store_switch_repeats_read_smoke(self) -> None:
+        """A new HOME selects a new default store and needs its own read smoke."""
+        with mock.patch.dict(os.environ):
+            os.environ.pop("MUNINN_HOME", None)
+            for home in (self.tmp / "user-a", self.tmp / "user-b"):
+                fs.create(home / ".local/share/muninn")
+                os.environ["HOME"] = str(home)
+                self.assertEqual((ma.probe(), ma.probe()), (None, None))
+        self.assertEqual(self.argv().count(["know", "list", "--scope-loop", ma.PROBE_LOOP, "--status", "all"]), 2)
 
     def test_default_session_still_traces(self) -> None:
         """With no session id the degrade still lands a trace row under a fixed fallback id."""
