@@ -15,6 +15,7 @@ CODEX = ROOT / "packages/codex"
 MIRRORED = (
     "scripts/capability.py",
     "scripts/capability_mcp.py",
+    "scripts/codex_role_session.py",
     "scripts/lib/capability_extra.py",
     "capabilities/profiles.json",
 )
@@ -39,6 +40,7 @@ class CodexCapabilityTests(unittest.TestCase):
                 self.assertEqual((ROOT / relative).read_bytes(), (CODEX / relative).read_bytes())
         self.assertTrue(os.access(CODEX / "scripts/capability.py", os.X_OK))
         self.assertTrue(os.access(CODEX / "scripts/capability_mcp.py", os.X_OK))
+        self.assertTrue(os.access(CODEX / "scripts/codex_role_session.py", os.X_OK))
 
     def test_mirror_check_catches_deletion_and_one_byte_edit(self) -> None:
         """Negative control: a missing or one-byte-different mirror is reported by the comparison."""
@@ -102,6 +104,32 @@ class CodexCapabilityTests(unittest.TestCase):
         text = (CODEX / "hooks/hooks.json").read_text(encoding="utf-8")
         self.assertNotIn("reviewer_bash_allowlist", text)
         self.assertNotIn("capability.py", text)
+
+    def test_guarded_codex_agents_switch_the_shell_tool_off(self) -> None:
+        """Every guarded role TOML carries [features] shell_tool = false AND keeps sandbox_mode = read-only."""
+        profiles = json.loads((CODEX / "capabilities/profiles.json").read_text(encoding="utf-8"))["agents"]
+        guarded = [n for n, c in profiles.items() if "shell.raw" not in c and "worktree.write" not in c and c]
+        self.assertEqual(len(guarded), 5)
+        for name in guarded:
+            text = (CODEX / "agents" / f"{name}.toml").read_text(encoding="utf-8")
+            with self.subTest(name=name):
+                self.assertRegex(text, r"(?m)^\[features\]\nshell_tool = false$")
+                self.assertIn('sandbox_mode = "read-only"', text)
+                # a real table after the multi-line string, not swallowed into it
+                self.assertLess(text.rindex('"""'), text.index("\n[features]\n"))
+
+    def test_role_session_is_the_documented_source_auditor_route(self) -> None:
+        """The contained launcher refuses an unguarded role from the Codex copy too (nothing spawned, exit 2)."""
+        done = subprocess.run(
+            [sys.executable, str(CODEX / "scripts/codex_role_session.py")]
+            + ["--role", "loop-worker", "--prompt-file", "/dev/null"],
+            capture_output=True,
+            text=True,
+            env={"PATH": os.environ["PATH"], "CLAUDE_AGENTIC_LOOP_DIR": "/nonexistent-loop"},
+            check=False,
+        )
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("not a guarded role", done.stderr)
 
 
 if __name__ == "__main__":

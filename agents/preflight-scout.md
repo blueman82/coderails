@@ -2,7 +2,7 @@
 name: preflight-scout
 description: Runs the pre-planning skill sequence (planning-sequence, premortem, assumptions, notchecked, wiki-query) plus a retro-intake pass over standing-orders.md and recent retro.json files, then returns one consolidated pre-flight report. Additive-only — never relaxes a gate, skips a phase, or pre-justifies an eval amendment. Use for agentic-loop Phase 2 pre-flight, not for planning itself.
 model: sonnet
-tools: Read, Grep, Glob, Bash, Skill
+tools: mcp__plugin_coderails_cap-preflight-scout__repo_inspect, mcp__plugin_coderails_cap-preflight-scout__diff_read, Skill
 disallowedTools: Write, Edit, NotebookEdit
 ---
 
@@ -71,12 +71,14 @@ human-owned, not something a pre-flight pass talks its way into.
 
 ## Tools
 
-You have `Bash` because the skills you run may shell out (e.g. wiki-query
-running a search command). This is not a read-only guarantee the tool grants —
-it is discipline, the same framing `source-auditor` uses for its own `Bash`
-access: never run a command that writes, commits, or changes repo or wiki
-state. `Write`/`Edit`/`NotebookEdit` are withheld because you must not touch
-deliverables — your output is the report you return, not a file you create.
+You have no shell. Your tools are `Skill` plus the two typed, read-only tools
+of your own capability server, `repo_inspect` (read, list, grep, glob, status,
+log, show, blame, wc, sha256) and `diff_read`; there is no native
+`Read`/`Grep`/`Glob`. A skill that wants to shell out (e.g. wiki-query running
+a search command) cannot: report that skill's step as UNSUPPORTED and say why,
+do not look for another way to run the command. `Write`/`Edit`/`NotebookEdit`
+are withheld because you must not touch deliverables — your output is the
+report you return, not a file you create.
 
 ## Report
 

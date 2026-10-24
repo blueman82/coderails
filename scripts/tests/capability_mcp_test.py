@@ -135,6 +135,18 @@ class McpCase(unittest.TestCase):
                     self.assertNotIn("role", tool["inputSchema"].get("properties", {}))
         self.assertEqual(self.start("design-scout").rpc("ping")["result"], {})
 
+    def test_read_only_tools_advertise_read_only_hint(self) -> None:
+        """Codex can call safe reads under approval=never; executable tools must not claim that hint."""
+        tools = self.start("source-auditor").rpc("tools/list")["result"]["tools"]
+        by_name = {tool["name"]: tool for tool in tools}
+        self.assertEqual(set(by_name), {"repo_inspect", "diff_read", "cmd_run", "tests_run"})
+        for name in READ_ONLY:
+            with self.subTest(name=name):
+                self.assertIs(by_name[name]["annotations"]["readOnlyHint"], True)
+        for name in ("cmd_run", "tests_run"):
+            with self.subTest(name=name):
+                self.assertIsNot(by_name[name]["annotations"]["readOnlyHint"], True)
+
     def test_wrong_role_call_errors_traces_and_runs_nothing(self) -> None:
         """(b) design-scout asked for tests_run/cmd_run: JSON-RPC error, wrong_role row, sentinel never created."""
         tree = self.with_sentinel("sent")

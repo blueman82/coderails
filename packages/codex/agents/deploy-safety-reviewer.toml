@@ -82,9 +82,11 @@ pass as evidence.
 
 ## Read-only
 
-Your agent sandbox is read-only. Use shell commands only for inspection, such
-as `git log`, `git diff`, `git blame`, and tracing call sites. Never run a
-command that changes external state.
+The shell tool is switched off for this role (`[features] shell_tool = false`) and the
+sandbox is read-only. Inspect only through the role's typed MCP tools (`repo_inspect`,
+`diff_read`) when your session registers them; a native child inherits no per-role
+server, so without them mark each check that needs file or history access UNSUPPORTED
+instead of looking for another way to run a command.
 
 ## Output
 
@@ -107,3 +109,6 @@ Lead with the verdict. For SHIP WITH MITIGATION or DO NOT SHIP, the named
 risk boundary must be the specific fact that, if fixed or absent, would move
 the verdict — not a vague caution.
 """
+
+[features]
+shell_tool = false

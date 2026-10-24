@@ -51,6 +51,26 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Remediation: rerun the inspection with a single allowlisted read-only command (no chaining, redirection or
   interpreters). If a legitimate command is missing, add its exact argv prefix to the allowlist with a test.
 
+## Subagent Bash denied for absent agent_type
+
+- Symptom: a subagent's Bash call is denied with `bash_agent_type_absent`.
+- Query: `trace.by_reason` for `subagent_identity_gate/denied/bash_agent_type_absent`; the discipline log line
+  `hook=subagent_identity_gate` carries the session. Counters: `python3 scripts/measure_graph_alignment.py --root . --json`.
+- Remediation: dispatch the role by its `subagent_type` (for example `coderails:design-scout`) so the payload carries an
+  `agent_type`; guarded roles act through their MCP tools and have no Bash. Do not widen the hook: it denies only
+  `agent_id` without `agent_type` in a graph-bound session. Codex has no counterpart (no `agent_type` at PreToolUse).
+
+## Guarded role has no tools or no shell
+
+- Symptom: a reviewer/scout reports it cannot run a command or read a file, or a skill step is UNSUPPORTED.
+- Cause: by design the five guarded agents hold only `mcp__plugin_coderails_cap-<role>__*` tools (+`Skill` for
+  preflight-scout). If the tools are missing entirely, `.claude-plugin/plugin.json` lacks `mcpServers` or
+  `capabilities/mcp.json` is stale: run `python3 scripts/capability_profiles_validate.py --check`, and `--write-mcp` to
+  regenerate. Codex: launch the role with `scripts/codex_role_session.py`; a native Codex child of a guarded role has no
+  shell and no capability tools. The launcher refuses a cwd under a project `.codex/` directory
+  (move the audit elsewhere or remove it). Set `subagent_identity_gate: off` in the repo config to disable the
+  identity gate (default ON).
+
 ## Capability tool refused or denied
 
 - Symptom: a reviewer/scout (usually `source-auditor` running `tests.run`) is refused a `scripts/capability.py` call.
