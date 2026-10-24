@@ -1,14 +1,17 @@
 # Agentic loop — setup phases (-2 through 2.7)
 
-Everything before routing and delegation: starting `progress.json` via `graph.py start`, sharpening the
-authorising prompt, reading the envelope, pre-flight checks, resolving design forks
-and disposition, and committing the design to `spec.md`/`plan.md`.
+Complete these steps before routing and delegation. Start `progress.json` with
+`graph.py start`. Sharpen the authorising prompt, read the envelope, run
+pre-flight checks, and resolve design forks and disposition. Commit the design
+to `spec.md` and `plan.md`.
 
 Read this in full at loop start. Phase 2.8 onward lives in SKILL.md.
 
 ### `S-2` — Phase -2: Bootstrap a local repo, then start `progress.json`
 
-Before resolving the loop-state path, check whether the current folder is inside a Git repository with `git rev-parse --show-toplevel`. If it is not, create the local-only base required for worktree isolation:
+Before resolving the loop-state path, run `git rev-parse --show-toplevel` to
+check whether the current folder is in a Git repository. If it is not, create
+the local base needed for worktree isolation:
 
 ```bash
 git init -b main
@@ -16,9 +19,15 @@ git add -A
 git commit --allow-empty -m "Initial project"
 ```
 
-Stop and report the exact failing command if any of these commands fails (for example, Git author identity is not configured). Do not add a remote, create a hosted repository, push, or create a pull request. This is the only action before the loop's initial state is created: it ensures the path helper below keys the loop to the repository it just created rather than to the pre-Git folder path.
+If a command fails, stop and report that command. For example, Git may lack an
+author identity. Do not add a remote, create a hosted repository, push, or
+create a pull request. Take no other action before creating the initial loop state. The path
+helper then keys the loop to the new repository, not the earlier folder path.
 
-Before Phase -1 — before anything else — create the loop's durable state with the controller command. This guarantees `progress.json` exists before the first stop, so the `loop_state_guard` Stop hook never trips a compliant loop; the block degrades to a backstop for a skipped `start`. Never write or edit `progress.json` by hand for this.
+Before Phase -1, create durable loop state with the controller command.
+`progress.json` must exist before the first stop. The `loop_state_guard` Stop
+hook then acts only as a backstop if `start` was skipped. Never write or edit
+`progress.json` by hand for this step.
 
 **Resolve the path — never compute it yourself.** Run the path helper; it keys the path to the repo's `git --git-common-dir` (falling back to the raw cwd), so a mid-loop worktree hop resolves to the SAME path:
 
@@ -153,7 +162,7 @@ Include `/coderails:wiki-query` in the pre-flight agent's skill list, scoped to 
 
 **Retro intake.** The pre-flight agent additionally reads `standing-orders.md` at the repo-key dir (derive it as the grandparent of the path printed by `hooks/scripts/lib/agentic_loop_path.py` — i.e. `dirname` of `dirname` of that path) and the last N=5 `retro.json` files under `<repo-key-dir>/*/retro.json` (mtime-sorted). It returns (a) premortem entries seeded from OBSERVED past failure modes and (b) a "carry into worker prompts" list of applicable lessons. Intake is additive-only: it may add cautions, assertions, and premortem entries; it may never relax a gate, skip a phase, or pre-justify an eval amendment. Gate changes remain human-owned. First-loop no-op: no retros + no overlay → skip silently, not an error.
 
-**Primitive-contract read (mandatory when the plan calls a primitive in a non-standard way).** If the plan calls a lock, queue, transaction, or other shared primitive in any of: nested calls, recursion, parallel from same process, re-entered from the same caller — the pre-flight agent MUST read the primitive's source and document its contract: raise vs. return-bool semantics, reentrancy (PK collision behaviour), owner identity, expiry/steal logic. The schema may have been written before anyone read the primitive's internals. Past failure: a "wrap both sites with a DistributedLock" schema was impossible — the lock's `attribute_not_exists(PK)` semantics are non-reentrant and the sites were nested, not parallel; only reading the primitive's source caught it.
+**Primitive-contract read (mandatory for unusual calls).** A plan may call a lock, queue, transaction, or another shared primitive in nested, recursive, parallel, or re-entered code. In that case, the pre-flight agent MUST read the primitive's source. It must record whether failure raises an error or returns a Boolean, whether the primitive allows re-entry, who owns it, and how expiry or stealing works. For example, a plan proposed one `DistributedLock` around two nested sites. That lock uses `attribute_not_exists(PK)` and does not allow re-entry. Reading its source showed why the proposed use could not work.
 
 Spawn this pre-flight agent at the `default` role — it's running skills, not making architectural decisions, and `default` controls cost. (One of the two assignment sites Phase 2.8 doesn't cover — this agent runs before 2.8 exists in the sequence, so it gets its role inline, here.)
 
@@ -242,7 +251,21 @@ The `spec.md` is loop state, keyed to this orchestrator's run, exactly like `pro
 - **Phase 3 builds its task list directly from `plan.md`** — the shared task list (`TaskCreate`/`TaskUpdate`) and the Phase 3/3a worker descriptions derive from the plan's tasks, so the two are consistent by construction rather than re-derived from conversation.
 - **After any compaction the orchestrator re-reads `plan.md` to recover *scope* (what to build)** the same way it re-reads `progress.json` to recover *position* (where we are).
 
-**2.7c — generate and freeze loop-scope evals via `/coderails:task-evals`.** Alongside `spec.md`/`plan.md`, invoke **`/coderails:task-evals`** (scope: `loop`) to produce a frozen `evals.json` defining the loop's end-state success evals. This sub-step fires for EVERY loop, regardless of unit count — it is NOT gated behind 2.7a/2.7b's ≥3-work-unit-or-cross-unit-dependency threshold, and does not wait on "reaching Phase 2.7" in that sense: `loop_dispatch_guard`/`loop_state_guard` gate every loop with **work_units >= 1** on a frozen/graded loop-scope `evals.json`, so a 1–2-unit loop must run 2.7c even when it skips 2.7a/2.7b entirely, or its first worker dispatch deadlocks against a gate that never got a chance to be satisfied. Two triggers fire this sub-step, stated explicitly because they're independent: (1) verification_level-2-eligibility on work-unit count alone, which applies to any loop with **work_units >= 1** (2.7c itself is required starting at that same floor); (2) an irreversible-surface trigger (publish, deploy, migration, data deletion, external send), independently of unit count. The frozen `evals.json` (scope: `loop`) lives beside `progress.json`/`spec.md`/`plan.md` in the loop-state dir — same "never committed, outside the repo" rule as those two files. Grading this file at loop end is `post_evals.py grade-loop`'s job, not the orchestrator's — see Phase 13. **The frozen-and-ungraded file is itself checked at dispatch**: `loop_dispatch_guard` refuses every graph-bound implementation dispatch regardless of native worker role in a **>=1-unit** loop until a loop-scope `evals.json` exists that is owned by this session and loop, carries a non-blank `verification_justification`, and holds at least one P0 in an array-typed `.evals` — the FROZEN state. It does **not** demand a grade at dispatch, and must not: at freeze time every P0 is still `pending` with empty evidence, so `grade-loop` correctly refuses the file (`validate_structure` check 5). Do not run `grade-loop` early to satisfy the dispatch gate — a suite graded before the build is either a refusal or a rigged pass. Completion is the opposite: Phase 13, `loop_state_guard`, and `loop_stall_guard` accept only a genuinely graded GO (or a graded verification_level-0 exemption), so a FROZEN suite opens dispatch and still blocks `complete`. The eval author anchors goal state on `progress.json`'s `authorising_prompt_raw`, per `task-evals`'s oracle-independence rule.
+**2.7c — generate and freeze loop-scope evals via `/coderails:task-evals`.** Alongside `spec.md`/`plan.md`, invoke **`/coderails:task-evals`** (scope: `loop`) to produce a frozen `evals.json` defining the loop's end-state success evals.
+
+This sub-step fires for EVERY loop, regardless of unit count — it is NOT gated behind 2.7a/2.7b's ≥3-work-unit-or-cross-unit-dependency threshold, and does not wait on "reaching Phase 2.7" in that sense: `loop_dispatch_guard`/`loop_state_guard` gate every loop with **work_units >= 1** on a frozen/graded loop-scope `evals.json`, so a 1–2-unit loop must run 2.7c even when it skips 2.7a/2.7b entirely, or its first worker dispatch deadlocks against a gate that never got a chance to be satisfied.
+
+Two triggers fire this sub-step, stated explicitly because they're independent: (1) verification_level-2-eligibility on work-unit count alone, which applies to any loop with **work_units >= 1** (2.7c itself is required starting at that same floor); (2) an irreversible-surface trigger (publish, deploy, migration, data deletion, external send), independently of unit count.
+
+The frozen `evals.json` (scope: `loop`) lives beside `progress.json`/`spec.md`/`plan.md` in the loop-state dir — same "never committed, outside the repo" rule as those two files. Grading this file at loop end is `post_evals.py grade-loop`'s job, not the orchestrator's — see Phase 13.
+
+**The frozen-and-ungraded file is itself checked at dispatch**: `loop_dispatch_guard` refuses every graph-bound implementation dispatch regardless of native worker role in a **>=1-unit** loop until a loop-scope `evals.json` exists that is owned by this session and loop, carries a non-blank `verification_justification`, and holds at least one P0 in an array-typed `.evals` — the FROZEN state.
+
+It does **not** demand a grade at dispatch, and must not: at freeze time every P0 is still `pending` with empty evidence, so `grade-loop` correctly refuses the file (`validate_structure` check 5). Do not run `grade-loop` early to satisfy the dispatch gate — a suite graded before the build is either a refusal or a rigged pass.
+
+Completion is the opposite: Phase 13, `loop_state_guard`, and `loop_stall_guard` accept only a genuinely graded GO (or a graded verification_level-0 exemption), so a FROZEN suite opens dispatch and still blocks `complete`.
+
+The eval author anchors goal state on `progress.json`'s `authorising_prompt_raw`, per `task-evals`'s oracle-independence rule.
 
 **2.7d — freeze a PR-scope `evals.json` per work-unit, in the same invocation.** The same `/coderails:task-evals` run ALSO produces one **frozen** PR-scope `evals.json` (scope: `pr`) for every work-unit that will carry a PR. This is a **separate artifact** from 2.7c's loop-scope file, not a view of it, and freezing 2.7c alone does not satisfy it: `scripts/merge.py` hard-gates every merge on a SHA-bound **pr-scope** eval comment with `result=GO` — fail-closed, no config opt-out. A loop that freezes only loop-scope evals passes Phase 3 and Phase 4b unimpeded and then meets an unsatisfiable merge gate, with the implementation already built.
 

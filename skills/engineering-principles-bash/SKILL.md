@@ -8,7 +8,10 @@ paths: "**/*.sh"
 # Engineering Principles Bash - Language-Specific Standards
 
 **Version:** 1.0.0
-**Purpose:** Enforce shell idioms and safety patterns on `.sh` files. Shebang-identified shell scripts without a `.sh` extension are routed here by the `engineering-principles` coordinator's own dispatch table before this skill loads — see that skill's Phase 0 for the detection logic; this file doesn't need to duplicate it.
+**Purpose:** Enforce shell idioms and safety patterns on `.sh` files. The
+`engineering-principles` coordinator also sends shell scripts without a `.sh`
+extension here when they have a shebang. See Phase 0 of that skill for the
+detection rule.
 
 ---
 
@@ -17,7 +20,7 @@ Coderails-owned hooks, workflow helpers, launchers, and tests are Python. The ru
 ## Bash Idioms (MANDATORY)
 
 ### Safety Header
-- **`set -euo pipefail`** at the top of every standalone script that is *executed* (not sourced) — `-e` stops on the first unhandled error, `-u` turns a typo'd variable name into a hard failure instead of a silent empty string, `-o pipefail` makes a failure anywhere in a pipeline propagate instead of being masked by the last command's exit status.
+- **Use `set -euo pipefail`** at the top of each standalone script that you execute (not source). `-e` stops on the first unhandled error. `-u` makes an unset variable an error. `-o pipefail` reports a failed pipeline command even when the last command succeeds.
 - **Sourced library files are the deliberate exception.** A file that is `source`d into other scripts (helper libraries, hook utilities) must NOT impose `set -e`/`set -u` on its caller — that decision belongs to the top-level script. If you add `set -e` to a library file, say so in a comment and confirm every caller actually wants it.
 - **PreToolUse/hook scripts are a second deliberate exception.** A hook invoked by the Claude Code harness in a shell-based integration must degrade gracefully and almost always `exit 0` even on internal failure — a hook that aborts hard can break the calling harness rather than just failing its own check. These scripts intentionally skip `set -e` and guard every risky read with `|| true` or an explicit fallback. This is not sloppiness; it is a documented tradeoff for a different execution context. Don't "fix" a hook script by bolting on `set -euo pipefail` without checking whether that changes its failure mode from "degrade" to "abort."
 

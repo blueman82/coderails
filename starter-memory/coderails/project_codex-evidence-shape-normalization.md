@@ -10,7 +10,11 @@ type: project
 
 ## Goal
 
-Fix only the native Codex graph-evidence tampering gap under `packages/codex/`. PR #446 closed the six known single-layer shapes and nested identity reuse, but a fresh executed probe found that a twice-encoded JSON reference still bypasses classification and allows one worker identity to be reused across nodes through completion.
+Fix only the native Codex graph-evidence tampering gap under `packages/codex/`.
+PR #446 closed six known single-layer shapes and nested identity reuse. A new
+executed probe found that a twice-encoded JSON reference still bypasses
+classification. It lets one worker identity be reused across nodes through
+completion.
 
 Before merge, independently attack the exact PR head and confirm that no tampering bypass remains within the defined evidence-shape threat model. Do not turn “tests passed” into a universal claim that no undiscovered software defect can exist.
 

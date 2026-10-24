@@ -10,7 +10,9 @@ type: project
 
 ## Goal
 
-Fix the rough edge shared by the Claude and Codex plugins: an incomplete agentic-loop graph must result in one clear, human-readable escalation, not repeated raw Stop-hook prompts.
+When an agentic-loop graph is incomplete, raise one clear human escalation.
+This goal applies to both Claude and Codex Stop hooks. Avoid repeated raw
+Stop-hook prompts.
 
 ## Decisions
 

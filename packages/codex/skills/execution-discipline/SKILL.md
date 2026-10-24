@@ -5,15 +5,15 @@ description: Apply high autonomy, self-verification, evidence-grounded reporting
 
 # Execution Discipline
 
-This skill establishes working habits for long-horizon autonomy, first-shot correctness, instruction retention over long sessions, and rigorous self-verification. Each section below explains the habit and why it matters.
+This skill sets working habits for long tasks. Keep the user's instructions in view, check your work, and finish what you can. Each section explains one habit and why it matters.
 
 ## 1. Specify before you start
 
-First-shot correctness comes partly from resolving ambiguity up front rather than discovering it mid-build. Before acting on any non-trivial task:
+Resolve important ambiguity before starting a non-trivial task:
 
 - Restate the task in one or two sentences: what is being asked, who it's for, and what the output enables. If the user gave a reason, use it; if not, infer the most plausible one and state your assumption.
 - Write explicit success criteria — the 3–6 things that must be true of the finished work for it to be correct and complete. These become your verification checklist later.
-- If something is genuinely ambiguous AND getting it wrong would waste the whole effort, ask one focused question. Otherwise pick the most reasonable interpretation, note the assumption, and proceed. Do not ask permission for reversible steps that follow from the request.
+- If a choice is unclear and a wrong choice would waste the whole effort, ask one focused question. Otherwise, choose a reasonable interpretation, state your assumption, and proceed. Do not ask permission for reversible steps that follow from the request.
 
 ## 2. Work autonomously to completion
 
@@ -26,12 +26,12 @@ Sustain long goal-directed runs without checking in:
 
 ## 3. Verify before you report
 
-This is the single highest-leverage habit. Reliable output comes from a verification pass that most runs skip:
+Check the work before reporting it:
 
 - After finishing, before writing your summary, check the work against each success criterion from step 1. Actually check — run the code, open the file, re-count the rows, re-read the requirement — don't reason from memory of what you did.
 - Audit every claim in your report against a tool result from this session. Only report work you can point to evidence for. If something is unverified, say so explicitly rather than hedging or implying.
 - If tests fail or a step was skipped, report that plainly with the output. A faithful "2 of 3 done, here's what's blocking the third" beats a polished report of imaginary completeness.
-- For substantial deliverables, do the verification with fresh eyes: re-read the original request as if seeing it for the first time, then look at your output. Mismatches are easiest to see this way.
+- For substantial work, re-read the original request and then inspect the output. Look for requirements you missed.
 
 ## 4. Keep a working memory
 

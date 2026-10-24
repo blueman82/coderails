@@ -6,19 +6,19 @@ effort: high
 
 # Agentic Loop
 
-How to run an autonomous multi-agent / multi-PR session so the user doesn't have to manually instruct every turn.
+Run an autonomous multi-agent or multi-PR session without asking the user to direct every turn.
 
 ## Why this skill exists
 
-In long agentic sessions the assistant drifts back into bad habits: running skills in main context instead of delegating; asking "want me to spawn an agent for X?" when X is obviously in scope; holding at human gates the session already removed; trusting an "idle" notification as proof-of-failure when the agent often finished silently; spawning fix workers without disproving the symptom premise. Each unnecessary stall is a manual prompt the user has to write — a stalled loop loses the autonomy the session was authorised for.
+Long sessions can lose their assigned workflow. The assistant may run skills in the main context instead of delegating. It may ask whether to spawn an agent when the task is already in scope, or pause at a human gate the session removed. It may treat an "idle" notice as proof of failure even when the agent finished silently. It may spawn fix workers before checking whether the reported symptom is real. Each avoidable pause makes the user write another prompt and reduces the autonomy they authorised.
 
-Repo-agnostic lessons promoted from accumulated loop retros live in [learned-failure-modes.md](learned-failure-modes.md) — machine-maintained via the `loop-retro-promotion` pipeline; read it alongside this skill.
+Read [learned-failure-modes.md](learned-failure-modes.md) with this skill. The `loop-retro-promotion` pipeline maintains it from lessons gathered across loop retros.
 
-**Authoring rule — every instruction in this skill must name an action its reader can actually perform.** Before writing any directive, confirm the reader has a tool call, command, or file write that executes it, and that the condition it tests can actually come out both ways. An instruction the reader cannot carry out is not a weak instruction, it is a no-op: it gets silently skipped or reported as done without happening. Three instances of this defect class were found across this skill and its sibling `superpowers:finishing-a-development-branch` in a single loop on 2026-07-29 — a cwd-equality test whose two sides were assigned from the same source and whose pid was a bash subshell's, never the harness session's, so both branches were dead; a squash-merge safety predicate asserting `git log --oneline origin/main..HEAD` is empty, which a squash's SHA rewrite makes unsatisfiable (both fixed in PR #317); and Phase 0.4's instruction to pin the orchestrator's own model via `/model`, a command the orchestrator cannot invoke.
+**Authoring rule: every instruction in this skill must name an action its reader can perform.** Before adding a directive, confirm that a tool call, command, or file write can carry it out. Also confirm that any condition can produce each stated outcome. An impossible instruction becomes a no-op: the reader may skip it or report it as done. A loop on 2026-07-29 found three examples across this skill and `superpowers:finishing-a-development-branch`. One cwd test compared values from the same source and used a Bash subshell pid instead of the harness session pid, so both branches were dead. A squash-merge check required `git log --oneline origin/main..HEAD` to be empty, which the squash SHA rewrite prevents (both fixed in PR #317). Phase 0.4 also told the orchestrator to set its own model with `/model`, a command it cannot invoke.
 
 ## The phases
 
-Nineteen-plus numbered phases (−2 through 13, with lettered sub-phases) is too many to hold in mind cold. Group them into five stages before descending into per-phase detail:
+The phases run from −2 through 13 and include lettered sub-phases. Use these five stages to find the detail you need:
 
 | Stage | Phases |
 |---|---|
@@ -77,20 +77,26 @@ even when it skipped Phase 2.7.
 
 ### Phase 3 — Delegate all implementation to routed workers; spawn a team when work has ≥3 sequential units or dependency chains
 
-**Default: main context never implements.** It orchestrates — plans, delegates, verifies. Every implementation unit (even a single-file edit, even a tight sequential step) goes to a spawned worker at the role Phase 2.8 assigned it — the `default` role unless Phase 2.8 routed otherwise. The two reasons, in order: keep main context clean (frontier-verification_level context is scarce and fills fast in long sessions), and keep cost down (`default` does the typing, not `frontier`). Treat a `frontier`-role worker, or a file edit done directly in main context, as the exception that needs a reason, not the default.
+**Default: main context never implements.** It plans, delegates, and verifies. Send every implementation unit to a spawned worker, even a single-file edit or tight sequential step. Use the role assigned in Phase 2.8, or `default` if no other role was assigned. This keeps scarce frontier context clear during long sessions. It also lets `default` do the typing at lower cost. Give a reason for a `frontier` worker or a main-context file edit; neither is the default.
 
 The delegation decision is a two-rung ladder, not "delegate vs. do it yourself":
 
-1. **Single routed `Agent` for impl + verify, `subagent_type: general-purpose`** — the default for any self-contained 1–2 unit of work (a bug fix, one PR, a single-file change), at the role Phase 2.8 assigned. One agent does the implementation *and* verifies its own artifact before reporting. A spawned team would be overkill here. See Phase 3a below for the prompt contract. Explicit worker instructions below must travel in the prompt.
-2. **Spawn a team, `subagent_type: general-purpose`** — when the loop has 3+ PRs or any cross-step dependency, spawn each worker via the native `Agent` tool, build a task list with explicit `blockedBy` dependencies via `TaskCreate`/`TaskUpdate`, and coordinate with `SendMessage`. Don't just describe a "sequential PR loop" — actually spawn the agents and create the task list, so the user can see each teammate and the task list becomes the shared source of truth. For graph-bound completion use unnamed native Agent calls: mailbox teammate messages do not satisfy the existing evidence gate.
+1. **Single routed `Agent` for implementation and verification, `subagent_type: general-purpose`:** Use this for self-contained work of one or two units, such as a bug fix, one PR, or a single-file change. Use the Phase 2.8 role. The agent implements, verifies its artifact, then reports. Phase 3a gives the prompt contract; send every explicit worker instruction below in that prompt.
+2. **Spawn a team, `subagent_type: general-purpose`:** Use this when the loop has at least three PRs or any cross-step dependency. Spawn each worker with the native `Agent` tool. Create a task list with explicit `blockedBy` dependencies through `TaskCreate`/`TaskUpdate`, and coordinate with `SendMessage`. Spawn the agents and create the list; do not only describe a sequential PR loop. The user can then see each teammate, and the list becomes the shared source of truth. For graph-bound completion, use unnamed native Agent calls. Mailbox teammate messages do not satisfy the evidence gate.
 
-The only work that legitimately stays in main context: reading for orchestration decisions (git status, `gh pr view`, log reads, the Phase 12 artifact checks), and the planning/cadence the skill describes. If you catch yourself running `Edit`/`Write`/`MultiEdit` in main context inside an authorised loop, stop — that work belongs in a routed worker agent.
+Main context can read for orchestration decisions, including git status, `gh pr view`, logs, and Phase 12 artifacts. It also owns the planning and cadence in this skill. If you start `Edit`, `Write`, or `MultiEdit` there during an authorised loop, stop. Route that file work to a worker.
 
-**Orchestrator never authors deliverable files inline (token-burn rule, row 3 of 3).** The orchestrator's own `Write`/`Edit` calls are for loop-state only — `progress.json`, `spec.md`, `plan.md`, `retro.json`, and the like. Every deliverable artifact (code, docs, config, any file that ends up in a PR) is authored by a spawned worker, never typed inline in main context. Workers report back structured, confidence-labelled verdicts (Phase 11) — a short claim plus the command that verified it — not long narrative prose; a verbose report re-inflates the same context this rule is trying to keep small.
+**Orchestrator never authors deliverable files inline (token-burn rule, row 3 of 3).** Its own `Write` and `Edit` calls are for loop state, such as `progress.json`, `spec.md`, `plan.md`, and `retro.json`. A spawned worker writes every deliverable artifact, including code, docs, config, and files that enter a PR. Workers report a structured, confidence-labelled Phase 11 verdict with a short claim and the verifying command. Long reports refill the main context this rule keeps clear.
 
 If the user has explicitly asked for a spawned team in their prompt, it is non-negotiable — spawn named teammates even if a flat sequence of solo `Agent` calls would technically work.
 
-**Sandboxed dispatch (`config.sandbox_workers: true`).** When set, implementation-unit workers (rung 1 and each teammate in rung 2) dispatch as a separate OS-sandboxed process instead of an in-process `Agent` call: `python3 scripts/sandbox/spawn_sandboxed_worker.py <worktree> <prompt_file> <model>` (worktree must already exist; `prompt_file` holds the same self-contained worker prompt Phase 3a requires — every travel-rule bullet still applies, just written to a file instead of passed as an `Agent` prompt string).  **Note: this script takes a MODEL parameter but has NO agent-type parameter — the `coderails:loop-worker` type naming above applies to the in-process `Agent` path only; sandboxed workers cannot carry a type at dispatch.** Orchestration reads (git status, `gh pr view`, log reads) stay in-process regardless — only implementation units route through the sandbox. Trade-off: a sandboxed worker is a separate process, so it has no `SendMessage`/task-list coordination — reporting is artifact-terminal only (PR state), same terminal-state discipline as Phase 3a's own contract. Seam: a spawn failure (non-zero rc, non-git worktree, missing prompt file) is a failed dispatch — treat it exactly like an idle/failed `Agent` call under Phase 4, re-derive from the artifact, don't retry blindly. In the sandboxed path, push with plain `git push origin <branch>` — no `-u` (concurrency hygiene: parallel sandboxed workers would otherwise race to write `branch.*` into one shared primary `.git/config`; on this pinned srt version `-u` also silently fails its config write while still exiting 0, a partial-failure mode this contract avoids rather than depends on). Any in-worker GitHub API call must use curl, not `gh` — `gh`'s Go/trustd TLS verification does not work inside the sandbox on this pinned version.
+**Sandboxed dispatch (`config.sandbox_workers: true`).** Dispatch implementation-unit workers in either rung as separate OS-sandboxed processes. Use `python3 scripts/sandbox/spawn_sandboxed_worker.py <worktree> <prompt_file> <model>`. The worktree must already exist. Put the same self-contained Phase 3a worker prompt in `prompt_file`; every travel rule still applies.
+
+This script takes a model but has no agent-type parameter. The `coderails:loop-worker` type applies only to in-process `Agent` calls. A sandboxed worker cannot carry that type at dispatch. Keep orchestration reads, such as git status, `gh pr view`, and log reads, in-process. Route only implementation units through the sandbox.
+
+A sandboxed worker has no `SendMessage` or task-list coordination. Its report uses artifact-terminal state, as Phase 3a requires. Treat a non-zero spawn result, a non-git worktree, or a missing prompt file as a failed dispatch. Apply Phase 4 to that failure: re-derive state from the artifact before you retry.
+
+In this path, use `git push origin <branch>` without `-u`. Parallel workers share the primary `.git/config`; `-u` can make them race to write `branch.*`. On the pinned srt version, that config write can also fail silently while the push exits 0. For GitHub API calls inside the worker, use curl. The pinned sandbox breaks `gh`'s Go/trustd TLS verification.
 
 Each task description must be **self-contained** so the spawned agent can act without re-reading the conversation. Every bullet of Phase 3a's prompt contract applies to each teammate's task description — role verbatim, construction method and discipline, the self-run verify step, manifest + pre-push scope assertion, disposition, lessons, terminal state, report-back contract, and the hook-seam. A task-list entry is not a substitute for any of them: anything absent from the prompt does not exist for the worker. Add, on top of that contract:
 - Worktree path and branch name
@@ -145,7 +151,9 @@ The same rationale applies beyond Bash: independent non-Bash tool calls — `Rea
 
 ### Phase 4b — PR review invokes `/pr-review-toolkit:review-pr <PR#>` as a Skill, then `/coderails:post-review <PR#>`
 
-When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill — passing the PR number as the argument — which itself fans out six specialised reviewers plus a security pass. Do NOT hand-roll the reviewers as separate `Agent`/`Task` spawns. **This is REQUIRED to satisfy the merge gate** — `enforce_pr_workflow` only accepts the `review-pr` Skill (with the PR number in args) as merge evidence; a hand-rolled fanout leaves no evidence the gate recognises. After findings are applied and pushed, invoke `/coderails:post-review <PR#>` to post the SHA-bound review artifact `/merge` requires. Before `/coderails:merge`, also produce the independent eval artifact via `/coderails:task-evals` (scope `pr`) then `/coderails:post-evals` — `scripts/merge.py` hard-gates on both artifacts, no config opt-out. Immediately after `/coderails:merge` confirms the PR merged, tear down this work-unit's worktree (`superpowers:finishing-a-development-branch` Step 6, mechanics in [finishing-out.md](finishing-out.md)).
+When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill with the PR number. It fans out six specialised reviewers plus a security pass. Do not replace this Skill with separate `Agent`/`Task` spawns: `enforce_pr_workflow` requires the `review-pr` Skill invocation as merge evidence.
+
+After findings are applied and pushed, invoke `/coderails:post-review <PR#>` for the final head. Grade the PR-scope evals frozen in Phase 2.7d and post them with `/coderails:post-evals`. If the frozen suite is missing, stop and disclose the gap; do not claim a new suite was frozen before build. `scripts/merge.py` requires both artifacts, with no config opt-out. After `/coderails:merge` confirms the PR merged, tear down this work-unit's worktree (`superpowers:finishing-a-development-branch` Step 6, mechanics in [finishing-out.md](finishing-out.md)).
 
 **Read [phase-4b-review.md](phase-4b-review.md) in full before running this phase** for: the six-reviewer table and when each runs, the review-verification_level ladder (when `/security-review` may be skipped), the mandatory `/security-review` and `deploy-safety-reviewer` add-ons, and the clean-break MERGE-BLOCKER gate (the orchestrator cannot downgrade a surviving-compat finding unilaterally on a `clean-break` unit).
 
@@ -182,7 +190,18 @@ Deploy and push gotchas tied to a particular stack — skip-validation flags whe
 
 ### Phase 9 — Cluster wiki ingest, don't fragment
 
-Delegate wiki ingest and lint to a spawned agent, `subagent_type: general-purpose` with explicit instructions from `agents/wiki-writer.md`, once at the end of the loop, with all related PRs as a cluster — not once per PR. Lint must always pair with ingest. **Include the wiki-writer instructions explicitly** — wiki authoring requires schema-aware vault ingestion and self-linting against the AGENTS-wiki-schema; the push/PR sequence and Phase 3a's shared-checkout isolation must still travel in the prompt explicitly. One source page covers the cluster; avoid one-per-PR sprawl. After the cluster ingest+lint, run `/sync-docs` ONCE at the loop boundary (delegated to `subagent_type: general-purpose` with explicit instructions from `agents/docs-auditor.md`) to audit the repo's own in-tree docs for drift — fix only drift this loop's own PRs introduced; surface pre-existing drift rather than folding it into scope.
+At the end of the loop, delegate wiki ingest and lint to one spawned
+`general-purpose` agent. Give the agent the instructions from
+`agents/wiki-writer.md` and the related PRs as one cluster. Always pair lint
+with ingest. The agent must check the vault against the `## Wiki schema`
+section of `AGENTS.md` and the live directory rules in `wiki.schema.json`.
+Include the push and PR sequence in the prompt. Include Phase 3a's shared
+checkout isolation rules. Write one source page for the cluster.
+
+After wiki ingest and lint, run `/sync-docs` once at the loop boundary.
+Delegate it to a `general-purpose` agent with the instructions from
+`agents/docs-auditor.md`. The agent must audit this repo's own documents.
+Fix drift caused by this loop's PRs. Report older drift to the owner.
 
 **Read [phase-9-wiki-docs.md](phase-9-wiki-docs.md) in full before running this phase** for: the required first-line wiki-step-suppression instruction for spawned `/workflow` agents, the wiki-delivery verification mechanics (commit SHA vs. merged PR, ruleset-protected `main`, the `--is-ancestor` squash-merge trap), and the docs-drift findings disposition rule.
 
@@ -226,7 +245,15 @@ The cost of one extra tool call before unblocking the next phase is small. The c
 
 **This phase is mandatory and singular, not optional and not repeatable mid-loop.** It runs exactly once, only at the very end of the loop, immediately before the `complete` LOOP-STOP declaration — never as a mid-loop check-in, never skipped because the loop "felt straightforward." A loop that reaches `complete` without this report has not actually finished; the `loop_stall_guard` hook's `retro.json` requirement (see the teardown contract below) is what makes skipping it structurally hard, not just discouraged. The report is a summary, not a checkpoint — it does not pause for approval and does not ask the human anything; it tells them what happened.
 
-At the end of the loop, before declaring done, the orchestrator audits its own autonomy from the `progress.json` counters and reports raw, unscored facts — no pass/fail scorecard. The human is the only party positioned to judge "should I have been asked about that?"; hand them the raw list rather than have the process pre-grade itself. Report: **`LOOP-STOP` category counts** (HOOK-OWNED — read as-is, never compute or edit), **decisions absorbed** (copied VERBATIM from `progress.json`, never reconstructed from memory), **artifacts produced** (each with its Phase 12 verifying check), **loop cost** (`loop_stall_guard`'s cost reporter now prints this mechanically from `retro.json` on every `complete` declaration, with a price-staleness age — the hook is the floor, not a reason to omit it from your own report; it reports what you wrote, so writing `cost` correctly at step 1 is still yours), **disposition violations**, and the **loop-scope eval result** (graded via `post_evals.py grade-loop`, never hand-written). For the last two, "no record found" is an **audit failure, not a pass**. Per-field detail: [teardown.md](teardown.md).
+At the end of the loop, before declaring done, audit autonomy from the `progress.json` counters. Report raw facts, with no pass/fail scorecard. Only the human can judge whether the process should have asked them. Give them this list:
+
+- **`LOOP-STOP` category counts:** These are hook-owned. Read them as-is; never compute or edit them.
+- **Decisions absorbed:** Copy them verbatim from `progress.json`. Never reconstruct them from memory.
+- **Artifacts produced:** Name each artifact and its Phase 12 verifying check.
+- **Loop cost:** Write `cost` correctly when you assemble the retro, and include it in your report. On every `complete` declaration, `loop_stall_guard` also prints that value from `retro.json`, with a price-staleness age. The hook output is a minimum check; it does not replace your report.
+- **Disposition violations** and **loop-scope eval result:** Grade the eval result with `post_evals.py grade-loop`; never write it by hand. For either field, "no record found" is an **audit failure, not a pass**.
+
+See [teardown.md](teardown.md) for each field.
 
 This is the factory's own audit — raw facts for the human to judge, not a self-issued verdict.
 

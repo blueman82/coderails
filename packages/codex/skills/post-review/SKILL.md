@@ -13,7 +13,7 @@ Require an explicitly supplied PR number. Inspect it before using it in any comm
 
 ## Native Codex review evidence
 
-Resolve the PR's current `headRefOid`, then use `spawn_agent` to run the relevant installed Codex custom reviewer agents against that exact PR head. Wait for every reviewer. Use only their observed findings; never invent or silently omit a finding.
+Resolve the PR's current `headRefOid`. Use `spawn_agent` to run the relevant installed Codex custom reviewer agents against that exact PR head. Wait for every reviewer. Report their observed findings without adding or omitting any.
 
 Stop without posting when:
 

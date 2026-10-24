@@ -26,7 +26,7 @@ git add -A
 git commit --allow-empty -m "Initial project"
 ```
 
-Stop and report the exact failing command if any command fails (for example, Git author identity is not configured). Do not add a remote, create a hosted repository, push, or create a pull request.
+If a command fails, stop and report the exact command. Git author identity may need configuration. Do not add a remote, create a hosted repository, push, or create a pull request.
 
 Resolve the nearest `.coderails/workflow.config.yaml` by walking from the current directory upward to the Git root. The first file found wins. Otherwise use:
 

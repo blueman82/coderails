@@ -1,12 +1,12 @@
 # @coderails/dashboard-lib
 
-The single source of truth for the intent-queue/runner contract's
-consumer-side pieces: the `Intent` schema and the `RoutineDef`/routines
-section of `DashboardConfig`. The base `ButtonDef`/`PermissionProfile`/
-`loadConfig` and the `buildArgv` profile→flag mapping are NOT owned here —
-they live in `skills/dashboard/app/src/lib/config.ts` and `argv.ts`
-(merged via PR #25) and this package imports them rather than
-re-implementing them.
+This package defines the consumer-side parts of the intent queue and runner
+contract. It owns the `Intent` schema and the `RoutineDef`/routines section
+of `DashboardConfig`.
+
+It imports the base `ButtonDef`, `PermissionProfile`, `loadConfig`, and
+`buildArgv` profile→flag mapping. Those definitions live in
+`skills/dashboard/app/src/lib/config.ts` and `argv.ts` (merged via PR #25).
 
 This README covers the schema contract only. See
 [`docs/routines.md`](../docs/routines.md) for native on-demand execution.

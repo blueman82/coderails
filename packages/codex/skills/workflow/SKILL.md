@@ -15,7 +15,7 @@ Obtain a branch name matching `feature/*`, `bug/*`, or `bugfix/*` and an optiona
 
 Invoke `$coderails-codex:prep` with the branch and summary. Work only in the worktree it returns. Report the worktree path and any issue key it creates.
 
-If a project wiki is configured, invoke `$coderails-codex:wiki-query` for known constraints, open gaps, adjacent behavior, and assumptions not enforced in code. Surface material findings before coding. For a substantial design, spawn two or three relevant Codex custom agents in parallel to challenge the design, record every finding as accepted or skipped with a reason, and update the design before coding.
+If a project wiki is configured, invoke `$coderails-codex:wiki-query`. Ask about known constraints, open gaps, adjacent behavior, and assumptions that code does not enforce. Report material findings before coding. For a substantial design, spawn two or three relevant Codex custom agents in parallel to challenge it. Record each finding as accepted or skipped, with a reason. Update the design before coding.
 
 Pause while the user implements and tests the change. Continue only when they say it is ready to push.
 
@@ -40,7 +40,7 @@ Apply blocking and worthwhile findings, add or update tests where the public con
 
 Post a pull-request ledger listing every finding and its disposition. Invoke `$coderails-codex:post-review` with the pull-request number only after fixes are pushed so the review artifact is bound to the final head SHA.
 
-Invoke `$coderails-codex:task-evals` if graded evals were not already frozen, run the frozen checks and negative controls, then invoke `$coderails-codex:post-evals` with the pull-request number. Missing, stale, failing, or unverified evidence is a hard stop; never hand-write a passing result.
+Confirm that the eval suite was frozen before implementation. Run its checks and negative controls, then grade it with `$coderails-codex:task-evals`. Invoke `$coderails-codex:post-evals` with the pull-request number. If the frozen suite is missing, stop and disclose the gap; do not treat a new suite as a pre-build freeze. Stop if evidence is stale, failing, or unverified. Never hand-write a passing result.
 
 Report the pull-request URL, final head SHA, review summary, and eval result. Pause until the user explicitly approves merging.
 

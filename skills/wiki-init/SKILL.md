@@ -79,7 +79,7 @@ Present the proposal and iterate until the user approves. Include 3-5 seed pages
 
 ### Step 4: Create Foundation Files
 
-**index.md** — content catalog. Claude reads this FIRST when answering queries. Organized by page type with `[[wiki-links]]`. Mark gaps as "Not yet documented." Reference `AGENTS-wiki-schema.md` as the schema location (do NOT create a separate schema.md in the vault — `AGENTS-wiki-schema.md` in the project directory is the single source of truth).
+**index.md** — content catalog. Claude reads this FIRST when answering queries. Organize it by page type with `[[wiki-links]]`. Mark gaps as "Not yet documented." Name the schema source the project actually uses: `AGENTS-wiki-schema.md` for a new wiki, or the `AGENTS.md` wiki section and `wiki.schema.json` for Coderails. Do not create a separate `schema.md` in the vault.
 
 **log.md** — append-only. Each entry: `## [YYYY-MM-DD] operation | description`.
 
@@ -102,7 +102,28 @@ Create two files in the project directory (not the wiki vault):
 - **`AGENTS.md`** — a slim entry point. It points to `AGENTS-wiki-schema.md` as the source of truth for wiki conventions and, if the project already has other `AGENTS.md` content (a working guide, etc.), coexists with it rather than replacing it.
 - **`AGENTS-wiki-schema.md`** — the actual schema the LLM reads at conversation start. Include: wiki location, three layers, page types, page format, search, Ingest/Query/Lint workflows, conventions, evolution note. The Search section must note that `qmd` is optional — a fallback to reading `index.md` directly — so a machine without qmd isn't left with unconditional `qmd` instructions.
 
-**The Page types section in `AGENTS-wiki-schema.md` must include every directory Claude will write to — `templates/` and `assets/` included, marked as structural directories rather than page types.** This matters beyond documentation: the coderails plugin's own `hooks/scripts/wiki_taxonomy_gate.py` reads `wiki.schema.json` (repo root: `{"page_types": [...dir names], "structural_dirs": [...]}`) as its write allow-list, so write that file alongside the Page types section and keep the two in step, but only for the ONE vault named in the plugin's own `.coderails/workflow.config.yaml` — running this skill against some other project's vault (the normal case) does not put that vault under this gate at all. When the gate does apply and does fire, a denial is explicit and logged (it names the rejected directory and the sanctioned list), not silent — but a directory created in Step 3 and omitted from this section will still be rejected on its first write. Listing a directory that doesn't exist yet on disk is harmless — the parse that builds the allow-list doesn't check the filesystem — so a vault may list `assets/` per this step while skipping its creation per Step 3; just note that the hook's secondary corroboration check separately requires at least 2 of the listed directories to actually be present on disk, so a vault can't rely on this to skip creating most of its structure.
+**List every directory Claude will write to in the Page types section of
+`AGENTS-wiki-schema.md`.** Include `templates/` and `assets/` as structural
+directories, not page types.
+
+For the Coderails plugin's **own vault**, also write `wiki.schema.json` at the
+plugin repository root. Keep its `page_types` and `structural_dirs` lists
+aligned with the Page types section. `hooks/scripts/wiki_taxonomy_gate.py`
+reads that JSON as its write allow-list. This gate applies only to the vault
+named in this plugin's `.coderails/workflow.config.yaml`. Running this skill
+for another project's vault does not place that vault under this gate.
+
+When the gate identifies the plugin's own vault, reads a valid schema, and
+finds at least two listed directories on disk, it rejects a write to an
+unlisted directory. The denial names that directory and the sanctioned list.
+Under those conditions, a directory from Step 3 that is missing from the
+lists fails on its first write. If vault identity or schema is unclear, or
+fewer than two listed directories exist, the hook fails open.
+
+A listed directory may not yet exist: the allow-list parser does not check
+the filesystem. For example, you may list `assets/` even if Step 3 did not
+create it. The two-directory check is separate. Listing paths cannot replace
+creating most of the vault structure.
 
 ### Step 7: Update CLAUDE.md
 

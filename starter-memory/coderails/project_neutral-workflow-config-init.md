@@ -10,7 +10,10 @@ type: project
 
 ## Goal
 
-Implement the previously selected clean-break migration from provider-specific workflow configuration to one canonical `.coderails/workflow.config.yaml`. Keep the Claude and Codex plugins independent: each provider owns its own SessionStart behavior and init instructions, while both read the same project configuration path.
+Migrate provider-specific workflow configuration to one canonical
+`.coderails/workflow.config.yaml` path, as previously selected. Keep Claude
+and Codex independent. Each provider owns its SessionStart behavior and init
+instructions. Both read the same project configuration path.
 
 ## Decisions
 

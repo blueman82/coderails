@@ -1,10 +1,14 @@
 # Runbook: hook and trace observability
 
-Trace rows are NON-AUTHORITATIVE: fail-open, append-only, one `event_id` per event, written by
-`hooks/scripts/lib/trace_row.py` to `<agentic-loop dir>/<session_id>/trace.jsonl` (the same per-session directory
-`crack_on_gate.py` uses, with or without a loop). Rows hold `schema_version`, `event_id`, `session_id`, `loop_id`
-(null outside a loop), `ts`, `command`, `outcome`, `reason_code` and sha256-hashed `inputs`. No gate decision
-reads them. Counters dedupe by `event_id`, skip torn lines, and key tallies as `command/outcome/reason_code`.
+Trace rows are NON-AUTHORITATIVE. They fail open and append one `event_id` per
+event. `hooks/scripts/lib/trace_row.py` writes them to
+`<agentic-loop dir>/<session_id>/trace.jsonl`. This is the same per-session
+directory that `crack_on_gate.py` uses, with or without a loop.
+
+Rows hold `schema_version`, `event_id`, `session_id`, `loop_id` (null outside a
+loop), `ts`, `command`, `outcome`, `reason_code`, and sha256-hashed `inputs`. No
+gate reads them to make a decision. Counters dedupe by `event_id`, skip torn
+lines, and tally by `command/outcome/reason_code`.
 
 Query every entry below with:
 
@@ -29,7 +33,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Remediation: fix the key (the finding carries a did-you-mean hint) or the value type; for `wiki_schema_*` restore or
   repair `wiki.schema.json` (`page_types` non-empty list of directory names). Both are fail-open by design: findings never
   change a gate's decision, and a stale AGENTS.md Page types table fails the build (`config_docs_drift_test.py`), not the hook. `wiki_schema_legacy` means a vault still has only
-  `AGENTS-wiki-schema.md`: policing continues from its Page types table; add `wiki.schema.json` to retire the fallback.
+  `AGENTS-wiki-schema.md`: the hook does not use that legacy file. Restore `wiki.schema.json` to resume taxonomy checks.
 
 ## Discipline lint advisories climbing
 
@@ -70,16 +74,24 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Capability MCP server refused a call or will not start
 
-- Symptom: a role's `capability_mcp.py` exits 2 at launch, or a `tools/call` returns an error or `isError`.
-- Query: `python3 scripts/lib/capability_counters.py` (counts per reason code over `CLAUDE_AGENTIC_LOOP_DIR`), or
-  `trace.by_reason` for `capability/refused/capability_mcp_refused` (startup), `capability_wrong_role` (a tool outside the
-  role's profile), `capability_args_invalid|path_denied|bad_ref` (arguments) and `capability/ok/<tool>` (grants). Rows carry
-  hashed inputs `{tool, role, via: mcp}`; MCP servers read the session id from `CLAUDE_SESSION_ID`, then
-  `CLAUDE_CODE_SESSION_ID`, then `CODEX_THREAD_ID`, else the `unattributed` directory.
-- Remediation: `capability_mcp_refused` means the `--role` is missing from `capabilities/profiles.json`, holds no capability
-  tool, or the flags are wrong (stderr names which). `capability_wrong_role` means the profile does not grant that tool;
-  change the profile deliberately (the validator keeps agent files in step). `path_denied` on a `worktree` argument means
-  the path is not in `git worktree list` of the server's cwd repo. `cmd.run` only runs `named_commands` entries.
+- **Symptom:** A role's `capability_mcp.py` exits 2 at launch, or a
+  `tools/call` returns an error or `isError`.
+- **Query:** Run `python3 scripts/lib/capability_counters.py` for counts by
+  reason code under `CLAUDE_AGENTIC_LOOP_DIR`. `trace.by_reason` also shows
+  `capability/refused/capability_mcp_refused` for startup,
+  `capability_wrong_role` for a tool outside the role's profile,
+  `capability_args_invalid|path_denied|bad_ref` for arguments, and
+  `capability/ok/<tool>` for grants. Rows hash `{tool, role, via: mcp}`.
+  The server reads the session ID from `CLAUDE_SESSION_ID`, then
+  `CLAUDE_CODE_SESSION_ID`, then `CODEX_THREAD_ID`. Otherwise it uses the
+  `unattributed` directory.
+- **Remediation:** For `capability_mcp_refused`, check `--role`,
+  `capabilities/profiles.json`, and the flags. Stderr names the reason.
+  `capability_wrong_role` means the profile does not grant the tool.
+  Change the profile deliberately; the validator checks agent files against
+  it. `path_denied` for `worktree` means the path is absent from
+  `git worktree list` in the server's cwd repo. `cmd.run` accepts only
+  `named_commands` entries.
 
 ## Authority object refused or changed
 

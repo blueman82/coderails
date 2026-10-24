@@ -18,11 +18,11 @@ type: project
 
 ## Goal
 
-Make the independent Codex plugin perform the same graph engineering as the
-independent Claude plugin: the same graph state, readiness rules, waves, joins,
-retries, hard stops, completion checks, resume behaviour and proof tests. Keep
-provider dispatch native and separate: Claude uses `Agent`; Codex uses
-`spawn_agent`. Neither provider calls, routes to, or reviews through the other.
+Make the independent Codex plugin match the Claude plugin's graph engineering.
+Match graph state, readiness rules, waves, joins, retries, hard stops,
+completion checks, resume behaviour, and proof tests. Keep dispatch native to
+each provider: Claude uses `Agent`; Codex uses `spawn_agent`. Neither provider
+calls, routes to, or reviews through the other.
 
 Parity alone is not enough if it copies known Claude defects. Treat the work as
 two explicit acceptance milestones: first prove matching behaviour, then prove

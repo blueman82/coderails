@@ -2,7 +2,9 @@
 
 ## Overview
 
-Token/byte caps in Claude Code are configured via `RACHEL_MAX_TURNS` (agent SDK) or directly in Claude Code's `settings.json` under runtime limits. This document guides calibration based on observed token burn in agentic loops.
+Set token or byte limits through `RACHEL_MAX_TURNS` (agent SDK) or the runtime
+limits in Claude Code's `settings.json`. Use observed token use in agentic
+loops to choose a limit.
 
 ## Where Token Limits Live
 
@@ -24,7 +26,7 @@ Use `/coderails:agentic-loop` with a typical task (2–3 implementation units):
 After loop completion, find:
 - **`retro.json` beside the current session's `progress.json`** — resolve the state directory with `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"`; the retrospective records the once-frozen `cost` breakdown at its own schema version 2. The graph itself uses schema 3.
 - **Dashboard metrics** — `/coderails:dashboard` live-shows cost per dispatch
-- **PR comment artifact** — `/coderails:post-evals` posts grading info with final token/USD spend
+- **PR comment artifact** — `/coderails:post-evals` posts SHA-bound grading. Read token and USD spend from the loop's `retro.json` cost field, not from the PR artifact.
 
 ### Step 3: Calculate Headroom
 

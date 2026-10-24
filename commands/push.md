@@ -16,7 +16,11 @@ Config: !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.py" resolve-config`
 
 **Non-interactive context**: If you are running as a sub-task (conductor, background agent) with no interactive user turn available, log any findings but proceed to push — do not block.
 
-**Trigger**: Determine the base branch first: `git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@.*/@@'` (falls back to `main` if unset). Then run `git diff --name-only $(git merge-base HEAD <base>)..HEAD` and check if ANY changed files match the patterns listed in `config.engineering_principles_paths`.
+**Trigger:** Find the base branch with
+`git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@.*/@@'`.
+Use `main` if the command finds no branch. Then run
+`git diff --name-only $(git merge-base HEAD <base>)..HEAD`. Check the changed
+paths against `config.engineering_principles_paths`.
 
 If **no files match**, skip to push.
 
@@ -39,9 +43,9 @@ If no blocking findings, proceed silently.
 
 Execute the push workflow script. Remove `--quick` from arguments if present.
 
-`push.py` stages tracked-modified files automatically (`git add -u`) but never sweeps up new, untracked files — that's deliberate, to avoid dragging unrelated working-tree files into the PR. If you (the actor running this command) created NEW files that belong in this PR, list them explicitly and pass each one via a repeatable `--add <path>` flag. You know what you created; don't stage new files with a separate `git add` sweep — name them to push.py instead.
+`push.py` stages modified tracked files with `git add -u`. It does not stage new files, which prevents unrelated files from entering the PR. If you created a new file for this PR, pass its path with a separate `--add <path>` flag. Do not stage new files with a broad `git add` command.
 
-Use a separate `--add` flag per file, one path per occurrence — never a space-separated variable like `--add $FILES`. `--add` consumes exactly one token, so `--add $FILES` would stage only the first file and the rest would be silently misparsed as extra arguments (the next token becomes part of the commit message). Name individual files, not directories or globs — a directory would stage everything under it, including files that aren't yours. Example shape:
+Use one `--add` flag and one path for each file. Do not use a space-separated variable such as `--add $FILES`. The flag consumes one token: it would stage only the first file, then treat the rest as extra arguments. The next token can become part of the commit message. Name files, not directories or globs. A directory can stage unrelated files. Example:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/push.py" "$ARGUMENTS" --add path/to/newfile --add path/to/another
@@ -63,7 +67,7 @@ JIRA_KEY=$(git config branch.$BRANCH.jira-ticket 2>/dev/null)
 ```
 
 If `JIRA_KEY` is set, transition the ticket to **Resolved** via whichever Jira route you have:
-Read `config.jira.mcp_namespace` from the project config (default: `jira` if unset or config is `NO_CONFIG`). Call `mcp__<mcp_namespace>__transition_jira_status_by_name` with `{issueIdOrKey: JIRA_KEY, statusName: "<config.jira.transitions.resolve>", comment: "..."}`. For non-default namespaces, calls fall through to the normal permission system (one-time prompt or a `mcp__<mcp_namespace>__*` rule in `settings.json` `permissions.allow` — see INSTALLATION.md).
+Read `config.jira.mcp_namespace` from the project config. Use `jira` if it is unset or the config is `NO_CONFIG`. Call `mcp__<mcp_namespace>__transition_jira_status_by_name` with `{issueIdOrKey: JIRA_KEY, statusName: "<config.jira.transitions.resolve>", comment: "..."}`. A non-default namespace uses the normal permission system: a one-time prompt or a `mcp__<mcp_namespace>__*` rule in `settings.json` `permissions.allow`. See INSTALLATION.md.
 
 Then:
 1. Use comment text: `"Resolved via PR merge. Work implemented via AI-assisted development (Claude Code). Branch: $BRANCH."`

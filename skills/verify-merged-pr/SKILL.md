@@ -57,7 +57,7 @@ gh pr list --state merged --limit 20 \
   --json number,title,mergedAt,headRefName,mergeCommit
 ```
 
-Read the `mergedAt` timestamps. PRs clustered tightly around the named one (minutes apart, same author) are almost certainly the same stream of work. List every PR in that window in your verdict — not just the one you were told about. A wide time gap before the cluster marks its start; treat merges before the gap as a separate stream unless you have a reason to include them.
+Read the `mergedAt` timestamps. Look for PRs by the same author that merged within minutes of the named PR. They are likely part of the same stream of work. List each PR in that window in your verdict. A wide time gap marks the start of the cluster. Treat earlier merges as a separate stream unless you have a reason to include them.
 
 ## Quick Reference
 

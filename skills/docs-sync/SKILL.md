@@ -171,18 +171,10 @@ cannot distinguish "finished but did not log it" from "failed silently",
 so it deliberately writes nothing.
 
 Any of steps 5–9 can REFUSE rather than the routine choosing to abort.
-**The trigger is the mechanism, not the reason: if the step's command
-exits non-zero, that is a refusal.** This is deliberately keyed on the
-exit code rather than on a list of rejecting reasons, because a list
-only covers the outcomes someone thought to enumerate. `scripts/merge.py`
-alone has more than thirty distinct non-zero exits through one shared
-`err` function, PLUS failures that bypass `err` entirely — it runs under
-`set -euo pipefail`, so an unguarded command aborts the script directly
-(the `gh pr merge` call is exactly this: its own comment says "its
-failure must abort"). Counting the `err` calls therefore does not
-enumerate the exits either, which is the point. A run must terminate on
-every one of them, including the ones added after this sentence was
-written.
+**Treat each non-zero command exit as a refusal.** Check the exit status,
+not a list of known error messages. `scripts/merge.py` can fail for many
+reasons, including a failed `gh pr merge` call. Stop the run for every
+non-zero exit, including failure modes added later.
 
 Treat a refusal the same as an abort: close the PR if one is open,
 delete the branch locally and on the remote, and append a

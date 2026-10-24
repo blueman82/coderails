@@ -25,7 +25,10 @@ they all report back. This is a parallelisation tactic inside one retry-until-gr
 substitute for it — the bound is per failure (as stated above), so each independent failure domain
 gets its own 5-attempt budget, not a pool shared or split across the dispatched agents. A
 genuinely single, related failure (fixing one thing likely fixes the rest) should NOT be split
-into parallel agents — that's this skill's own explicit "don't use when" case. **Never substitute generic agents for failure-domain fixers.** Each domain needs test-first / verify-before-report discipline; a named loop-worker type embeds these constraints at dispatch.
+into parallel agents. This skill excludes that case. **Use failure-domain
+fixers for separate failures.** Each fixer must write the failing test first
+and verify its result before reporting. The named loop-worker type gives
+each worker these rules at dispatch.
 
 **Cause not obvious — use `superpowers:systematic-debugging`.** "Diagnose" above is not "try
 something plausible." If the first fix attempt doesn't make the cause clear, the second attempt

@@ -22,7 +22,7 @@ that and stop rather than answering a question you inferred.
 
 ### Step 1: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content for conventions. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root (same pattern as `config_path` in `scripts/lib/config.py`) — a fork's cwd may be a subdirectory of the project repo. If no `AGENTS.md` is found by the git root, tell the user to run `/wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.coderails/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
+The project's `CLAUDE.md` loads the git root's `AGENTS.md` at session start. Read its wiki schema section, or the `AGENTS-wiki-schema.md` file it links to. Coderails keeps the schema in `AGENTS.md` and the live page types in `wiki.schema.json`. If `AGENTS.md` is not in context, walk up from the current directory to the git root. Use the same walk-up pattern as `config_path` in `scripts/lib/config.py`. Check each level for `AGENTS.md`; a fork can start in a project subdirectory. If you do not find it, tell the user to run `/wiki-init` first. The wiki vault is a separate sibling repo, such as `../coderails-wiki`. The project's `.coderails/workflow.config.yaml` points to it. Do not look for `AGENTS.md` in the vault. A fork does not need to run from inside the vault.
 
 The vault path and git flow are **not** read from AGENTS.md — they are the `wiki_path` and
 `wiki_git_worktree` flat keys in that same project's `.coderails/workflow.config.yaml`, resolved
@@ -54,7 +54,7 @@ Answers can take different forms — choose naturally:
 
 When the answer reveals something non-obvious or reusable:
 
-1. Create an investigation page in `$vault/wiki/investigations/` with YAML frontmatter and `[[wiki-links]]`
+1. Create an investigation page in `$vault/investigations/` with YAML frontmatter and `[[wiki-links]]`
 2. Update `$vault/index.md`
 3. Append to `$vault/log.md`: `## [YYYY-MM-DD] query-file-back | <question summary>`
 
