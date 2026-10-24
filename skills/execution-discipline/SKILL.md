@@ -5,7 +5,8 @@ description: Apply high autonomy, self-verification, evidence-grounded reporting
 
 # Execution Discipline
 
-This skill sets habits for long tasks. It covers independent work, accuracy on the first pass, retaining instructions, and checking your own work. Each section explains one habit and its purpose.
+Use these habits for long tasks. Work independently, retain instructions,
+and check the result before reporting it.
 
 ## 1. Specify before you start
 
@@ -54,4 +55,4 @@ Execution discipline matters most on hard, ambiguous problems. Match effort to t
 
 - For hard steps, list likely failure modes before you act. Choose an approach that handles them, then execute it carefully.
 - On routine steps, don't gold-plate. Simplest thing that works well; validate only at real boundaries (user input, external data).
-- If subagents are available, delegate independent subtasks and keep working while they run; use a fresh-context subagent as verifier for high-stakes work — fresh eyes catch what self-review misses.
+- If subagents are available, delegate independent tasks. Continue your own work while they run. For high-stakes work, ask a new subagent to verify the result.

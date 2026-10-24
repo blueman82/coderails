@@ -6,7 +6,8 @@ effort: high
 
 # Planning Sequence
 
-This skill runs three anticipatory planning techniques in sequence on a plan, idea, or decision. The goal is to surface structural gaps, execution failures, and adversarial weaknesses *before* commitment, while there's still time to act.
+Run three planning checks on the same plan, idea, or decision. Find missing
+success conditions, likely failures, and weaknesses before commitment.
 
 The three techniques are:
 1. **Pre-Parade** — what does success actually require?
@@ -29,9 +30,10 @@ State clearly at the top what you're analysing. One sentence.
 
 ## Stage 1: Pre-Parade
 
-Pre-Parade is the success-first pass. You imagine it's a year from now and this worked brilliantly. Then you ask: what had to be true for that to happen?
+For Pre-Parade, imagine that the plan succeeded one year from now. Ask
+what had to be true for that result.
 
-This surfaces the *conditions for success* — the things that must be in place, the assumptions that must hold, the decisions that must go right. It's not optimism; it's forensic reverse-engineering of a good outcome.
+List the conditions, assumptions, and decisions that made success possible.
 
 **Run this stage as follows:**
 
@@ -63,7 +65,7 @@ What success actually required — focus on the least obvious conditions, what t
 
 Run the premortem skill logic here. Do not call the skill separately — execute its process inline.
 
-You assume the plan has already failed. You work backwards to find out why. The goal is the most *credible* failure story, not a comprehensive list of everything that could go wrong.
+Assume the plan failed. Work backward to find the most credible causes.
 
 **Run this stage as follows:**
 
@@ -96,7 +98,8 @@ What does this plan assume that's almost certainly wrong? Where is the optimism?
 
 ## Stage 3: Red Team
 
-Red Team is the adversarial challenge. You take the strongest possible position *against* the plan and attack it directly. This is not a balanced critique — it's an intentional one-sided assault on the weakest points.
+For Red Team, take the strongest position against the plan. Attack its
+weakest points directly.
 
 The difference from premortem: premortem imagines accidental failure. Red Team imagines a motivated opponent — a competitor, a sceptic, a regulator, a hostile stakeholder — who wants this to fail and is actively working against it.
 

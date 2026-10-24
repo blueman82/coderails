@@ -6,9 +6,12 @@ effort: high
 
 # Premortem
 
-A premortem is a planning technique where you assume something has already failed — then work backwards to find out why. It's the opposite of a postmortem. The goal is to surface failure modes *before* you commit, while you can still act on them.
+For a premortem, assume the plan failed. Work backward to find why. Use
+the findings before commitment, while you can still change the plan.
 
-This skill works on plans, decisions, arguments, features, architectures, or your own previous response. The user may explicitly invoke it (`premortem this`, `premortem <X>`) or it may be appropriate to trigger it proactively before a high-stakes commitment.
+Apply this skill to a plan, decision, argument, feature, architecture, or
+your previous response. Use it when the user asks for a premortem or
+before a high-stakes commitment.
 
 ---
 
@@ -30,7 +33,8 @@ Use a `<thinking>` block to reason before writing output. The goal is genuine ad
 - **Unknown unknowns**: what hasn't been considered at all?
 - **Timing failures**: what's sensitive to sequencing or deadlines that could slip?
 
-Don't be comprehensive for its own sake. Surface the *most credible* failure modes — the ones that are both plausible and consequential. A few sharp ones beat a long generic list.
+Select the most plausible and consequential failures. Keep the list short
+and specific.
 
 ### Step 3: Assess each failure
 

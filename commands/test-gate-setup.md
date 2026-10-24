@@ -4,7 +4,7 @@ description: Set up the test gate for the current project — detects test runne
 
 # Test Gate Setup
 
-Set up the test gate hook for the current project. This makes `git commit` automatically run tests first — if they fail, the commit is denied.
+Set up the test gate hook for this project. It runs tests before each `git commit` and denies the commit if they fail.
 
 ## Steps
 
@@ -27,17 +27,17 @@ Set up the test gate hook for the current project. This makes `git commit` autom
 
 6. Confirm: "Test gate is active. Every `git commit` in this project will run `<command>` first. Remove `.claude/test_command` to disable."
 
-7. Explain that every hook execution of the configured command retains complete
-   stdout/stderr in a unique run under `~/.coderails/test-output/` (override with
-   `CODERAILS_TEST_OUTPUT_DIR`). A run may contain many tests. On failure, follow
-   the reported reader command: add `--all`, `--start N --end M` (one-based,
-   inclusive), or `--search TEXT --before N --after N` for literal search.
-   Without flags, reads always return metadata and guidance. Expand requests
-   explicitly as needed; there is no cross-run line-range prediction.
-   Completed logs compress automatically under a 1 GiB compressed-log budget
-   (`CODERAILS_TEST_LOG_BUDGET_BYTES` overrides it). Oldest completed logs expire
-   first; active and just-completed runs are protected and may exceed the budget.
-   Compact measurement and expiry records persist separately. Emitted bytes are
-   not proof of model delivery;
-   ordinary log-file reads bypass retrieval telemetry. See
-   [the output reference](../docs/REFERENCE.md#retained-test-gate-output).
+7. Explain how to read test output. Each hook run keeps complete stdout and
+   stderr under `~/.coderails/test-output/`. Set `CODERAILS_TEST_OUTPUT_DIR` to
+   use another directory. A run can contain many tests. On failure, use the
+   reader command in the report. Add `--all`, `--start N --end M` (one-based,
+   inclusive), or `--search TEXT --before N --after N` for a literal search.
+   A read without flags returns metadata and guidance. Expand each request as
+   needed; line ranges from one run do not predict ranges in another run.
+
+   Completed logs compress automatically. The compressed-log budget is 1 GiB;
+   `CODERAILS_TEST_LOG_BUDGET_BYTES` can change it. The oldest completed logs
+   expire first. Active and just-completed runs are protected and can exceed
+   the budget. Compact measurement and expiry records persist separately.
+   Emitted bytes do not prove model delivery. Ordinary log-file reads bypass
+   retrieval telemetry. See [the output reference](../docs/REFERENCE.md#retained-test-gate-output).

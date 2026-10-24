@@ -8,11 +8,13 @@ model: sonnet
 
 ## Overview
 
-A claim that "PR #N is merged" is a claim, not a fact. Re-derive it from the tools yourself before you rely on it.
+Check a reported PR merge before you rely on it.
 
-**Core principle:** Never trust a reported merge on its word. Independently re-derive three things: the merge STATE, the CONTENT on `origin/main`, and the SIBLING PRs the reporter may not have mentioned.
+Check three things independently: the PR's merge state, its content on
+`origin/main`, and other PRs that merged in the same period.
 
-The third is the one agents skip. A teammate or headless builder usually reports the *one* PR it means to, but sessions often land several. Verifying only the named PR confirms the claim while missing half the work that actually merged.
+A builder may report one PR even when it merged several. Check related PRs
+so the handoff covers the full set of changes.
 
 ## When to Use
 

@@ -4,9 +4,9 @@ argument-hint: <PR#>
 description: Validate and post a SHA-bound review summary as a durable PR artifact
 ---
 
-Post a machine-marked, SHA-bound review summary comment to the PR. This creates
-the durable artifact that `/coderails:merge` verifies before merging. Run this
-after `/pr-review-toolkit:review-pr` completes.
+Post a marked review summary comment for the PR head SHA. `/coderails:merge`
+checks this durable artifact before merging. Run this command after
+`/pr-review-toolkit:review-pr` completes.
 
 ## Current PR State
 
@@ -32,8 +32,8 @@ Write the findings from the just-completed `review-pr` run into a temp file at
 **Anti-fabrication rule:** if `review-pr` reported no findings, write `## No findings` and nothing else. Do NOT invent placeholder findings.
 
 **Completeness floor:** include the finding counts from `review-pr`'s output
-(for example, "0 critical, 2 important, 1 suggestion"). The counts let a
-reader compare the summary with the review that ran.
+(for example, "0 critical, 2 important, 1 suggestion"). The reader can then
+compare the summary with the review.
 
 Example valid body (findings present):
 
@@ -95,17 +95,17 @@ Resolve the owner/repo:
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 ```
 
-Before posting, check for an existing artifact comment for this PR+SHA to avoid duplicate
-artifacts:
+Before posting, check for an artifact comment for this PR and SHA. Avoid a
+duplicate:
 
 ```bash
 EXISTING=$(gh api "repos/${REPO}/issues/${ARGUMENTS}/comments" \
   --jq "[.[] | select(.body | startswith(\"$MARKER\"))] | first | select(. != null) | {url:.html_url,id:.id,author:.user.login,created:.created_at}" 2>/dev/null || true)
 ```
 
-If `EXISTING` is non-null and contains a url, the artifact already exists for this SHA. Skip
-posting, report the existing URL, and still run Step 6 (cache write) with the existing
-comment's metadata:
+If `EXISTING` contains a URL, the artifact already exists for this SHA.
+Report the URL and skip posting. Run Step 6 with the existing comment's
+metadata:
 
 ```bash
 if [[ -n "$EXISTING" && "$EXISTING" != "null" ]]; then

@@ -6,9 +6,9 @@ effort: high
 
 # Loop Retro Promotion
 
-Machine-run pipeline. It is dormant until enough loop history exists, then
-promotes durable, repo-agnostic lessons out of `standing-orders.md` /
-`retro.json` and into `skills/agentic-loop/learned-failure-modes.md`.
+This scheduled pipeline waits until there is enough loop history. It then
+moves lessons that apply across repositories from `standing-orders.md` and
+`retro.json` into `skills/agentic-loop/learned-failure-modes.md`.
 
 ## 1. Predicate evaluation (always runs, even when dormant)
 
@@ -28,20 +28,15 @@ Append one line to `<repo-key-dir>/promotion-runs.log`:
 <ISO8601> predicate=<met|unmet> retros=<n> lifecycle=<0|1> decay=<0|1>
 ```
 
-If the predicate is unmet, this is a dormant run — the log line IS the run's
-artifact. No branch, no PR, no gate chain. A dormant stop is a correct,
-successful no-op, not a failure: append a `run=ok` line to
-`promotion-runs.log` so the artifact gate (a last-marker predicate, keyed on
-this file's terminal markers) reads this run as green. STOP here.
+If the predicate is unmet, stop after logging it. Create no branch or PR.
+Append `run=ok` to `promotion-runs.log`. The log is the artifact for this
+successful dormant run. The gate reads its last terminal marker.
 
-If the predicate is met, append a `delivery=started` line to
-`promotion-runs.log` immediately after the `predicate=met...` line, before
-starting §2 Mining. This is the fail-safe in-progress marker for the entire
-met-path — mining, drafting, AND delivery — not delivery alone: any death
-anywhere after met-determination leaves `delivery=started` as the last
-terminal marker, so the gate reads that run RED regardless of which step it
-died in. §4 below writes the corresponding success terminal (`run=ok`) once
-delivery completes.
+If the predicate is met, append `delivery=started` immediately after the
+`predicate=met...` line. Do this before mining. The marker covers mining,
+drafting, and delivery. If the run stops during any of them, this stays the
+last terminal marker and the gate fails. Section 4 writes `run=ok` after
+delivery succeeds.
 
 ## 2. Mining
 
@@ -54,8 +49,8 @@ Select ONLY failure modes that:
 - whose lesson is **repo-agnostic** — it would apply to any repo running the
   agentic-loop skill, not just this one.
 
-Reject repo-specific lessons even if they meet the recurrence bar — they
-stay in the overlay (`standing-orders.md`), they do not get promoted.
+Keep repository-specific lessons in `standing-orders.md`, even when they
+meet the recurrence threshold.
 
 ## 3. Drafting
 
@@ -69,28 +64,19 @@ under `## Promoted lessons`, containing:
 
 ## 4. Delivery — full gate chain, manifest-locked
 
-The `delivery=started` in-progress marker was already written in §1's
-predicate=met branch, ahead of §2 Mining — it covers this entire section too,
-so no separate write is needed here. Any run that enters this section but
-does not reach `run=ok` below (step 9's success write) leaves
-`delivery=started` as its last terminal marker, so the last-marker gate reads
-that run RED — one fail-safe write at one known point, rather than trying to
-enumerate every failure exit between here and merge. The existing `abort=`
-line on manifest failure (step 4 below) is unchanged and still fires on its
-own path.
+Section 1 wrote `delivery=started` before mining. It covers this section
+too; do not write it again. If delivery stops before step 9 writes `run=ok`,
+the gate sees `delivery=started` last and fails. A manifest failure in step
+4 still writes its own `abort=` line.
 
 1. Fetch `origin/main`; branch off the freshly-fetched tip.
 2. Run `/coderails:task-evals` (scope: `pr`) and freeze it — BEFORE making
    the edit.
 3. Make the edit (the append from step 3, above), then **commit it** —
    `git add skills/agentic-loop/learned-failure-modes.md` and commit. The
-   assertion in step 4 is a **commit-range** diff: it compares two commits,
-   so it cannot see an uncommitted working-tree edit. Skip this commit and
-   the range is empty, step 4's "exactly one line" fails, and the run aborts
-   every single time — a self-inflicted denial of service, not a safety
-   check. Stage the ONE target path by name, never `git add -A`: an
-   uncommitted stray from an earlier step would otherwise be swept into the
-   same commit and trip the assertion legitimately.
+   assertion in step 4 compares commits. It cannot see an uncommitted edit.
+   Without this commit, its diff is empty and the run aborts. Stage only
+   the named target path. `git add -A` could include an unrelated edit.
 4. Assert `git diff origin/main...HEAD --name-status` (THREE-dot, not two;
    `--name-status`, never `--name-only`) shows EXACTLY ONE line, and that
    line is a modification (`M`) of:
@@ -123,13 +109,10 @@ own path.
      `--name-only`, while `--name-status` prints `D`. (All proven empirically
      in a scratch repo, 2026-07-17.)
 
-   **What this assertion does NOT catch, stated plainly:** it is a PATH
-   check, not a CONTENT check. A commit that legitimately modifies only
-   `learned-failure-modes.md`, but fills it with something other than a
-   mined lesson, is a lone `M` of the permitted path and PASSES here. That
-   residual is held by the mining rules in section 2 and by the review/eval
-   gates in steps 6-8 — not by this step. No path-based manifest can close
-   it, and pretending otherwise would be worse than naming it.
+   **Limit:** This assertion checks paths, not content. A commit that
+   changes only `learned-failure-modes.md` passes even if its text is not a
+   mined lesson. Section 2's mining rules and steps 6–8's review and eval
+   gates check that separate risk.
 5. `/coderails:push`
 6. `/pr-review-toolkit:review-pr <PR#>`
 7. `/coderails:post-review <PR#>`
@@ -146,4 +129,8 @@ marker for a completed delivery.
 
 ## 5. Prohibitions
 
-This pipeline writes exactly one repo file. It never edits SKILL.md, hook scripts, gate logic, its own skill definition, the routine config, or the graduation predicate. It never relaxes, reorders, or skips a gate. It merges ONLY via /coderails:merge — never raw gh pr merge: PreToolUse hooks do not fire in this headless execution mode, so merge.py's script-internal artifact gates are the merge rail.
+This pipeline writes one repository file:
+`skills/agentic-loop/learned-failure-modes.md`. Do not edit skill files,
+hooks, gate logic, routine config, or the graduation predicate. Keep every
+gate in order. Merge only with `/coderails:merge`. `PreToolUse` hooks do
+not fire in this headless mode, so `merge.py` must check the artifacts.

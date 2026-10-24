@@ -4,9 +4,9 @@ argument-hint: <PR#>
 description: Validate and post a SHA-bound eval-artifact summary as a durable PR artifact
 ---
 
-Post a machine-marked, SHA-bound eval summary comment to the PR. This creates
-the durable artifact that `/coderails:merge` verifies before merging. Run this
-after `/coderails:task-evals` has produced an `evals.json` for this PR.
+Post a marked eval summary comment for the PR head SHA. `/coderails:merge`
+checks this durable artifact before merging. Run this command after
+`/coderails:task-evals` produces `evals.json` for the PR.
 
 ## Current PR State
 
@@ -70,20 +70,18 @@ Run the eval marker helper:
 MARKER=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/eval_artifact.py" "$ARGUMENTS" "$HEAD_SHA" "$RESULT" "$VERIFICATION_LEVEL")
 ```
 
-Write a summary body: per-eval pass/fail split by priority (P0/P1), plus any
-`amendments` from the evals.json — `amendments` is freeform narrative text,
-not validated by `post_evals.py`; include it verbatim for human context. The
-prose summary itself is deliberately not grammar-gated: the JSON's structural
-guarantees (checks 1-10 in `post_evals::validate_structure` at post time, and
-`post_evals::smoke_verify`'s gate-time re-execution of every scripted eval at
-merge) are what the merge gate relies on, not the wording of this comment body.
-Prepend the marker,
-append the full `evals.json` as a fenced JSON code block, so the posted
-comment begins with the marker line and ends with the complete artifact —
-this is the embed the trusted GitHub Actions workflow extracts and validates (never
-hand-summarised; the raw file, verbatim). Use a `FENCE` variable rather than
-literal triple-backticks inside this script, since a literal fence would
-terminate this instruction's own surrounding code block:
+Write a summary of each eval's pass or fail result, grouped by priority
+(P0/P1). Include any `amendments` from `evals.json` verbatim for the reader.
+`post_evals.py` does not validate this freeform text.
+
+The merge gate relies on the JSON checks, not on the summary's wording.
+`post_evals::validate_structure` runs checks 1-10 when posting.
+`post_evals::smoke_verify` reruns every scripted eval at merge time.
+
+Put the marker first. Put the complete, unchanged `evals.json` last in a
+fenced JSON code block. The trusted GitHub Actions workflow extracts and
+validates that embedded file. Use the `FENCE` variable in this script.
+Literal triple backticks would close this instruction's code block:
 
 ```bash
 FENCE='```'
@@ -113,16 +111,16 @@ Resolve the owner/repo:
 REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 ```
 
-Before posting, check for an existing artifact comment for this PR+SHA to avoid duplicate
-artifacts:
+Before posting, check for an artifact comment for this PR and SHA. Avoid a
+duplicate:
 
 ```bash
 EXISTING=$(gh api "repos/${REPO}/issues/${ARGUMENTS}/comments" \
   --jq "[.[] | select(.body | startswith(\"$MARKER\"))] | first | select(. != null) | {url:.html_url,id:.id,author:.user.login,created:.created_at}" 2>/dev/null || true)
 ```
 
-If `EXISTING` is non-null and contains a url, the artifact already exists for this SHA. Skip
-posting and report the existing URL:
+If `EXISTING` contains a URL, the artifact already exists for this SHA.
+Report that URL and skip posting:
 
 ```bash
 if [[ -n "$EXISTING" && "$EXISTING" != "null" ]]; then

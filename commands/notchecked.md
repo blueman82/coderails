@@ -4,7 +4,7 @@ description: List claims you made but did not actually verify - the gap between 
 
 # Not Checked
 
-Review your recent responses in this conversation. List each non-trivial claim you made without checking it. Include claims you stated with confidence but did not support with a tool result, file read, or fact from the user.
+Review your recent responses. List each substantive claim you did not check. Include confident claims that lack support from a tool result, a file read, or the user.
 
 For each, state:
 - The claim, in one sentence

@@ -6,7 +6,7 @@ model: sonnet
 
 # Handoff
 
-Generate two artefacts that allow a fresh Claude Code session to continue the current work without re-deriving context:
+Create two artifacts so a new Claude Code session can continue the work:
 
 1. **A project memory file** — persists in `~/.claude/projects/<project>/memory/` and loads automatically in future sessions
 2. **A continuation prompt** — ready to paste into a new session to kick off the work immediately
@@ -22,18 +22,22 @@ Generate two artefacts that allow a fresh Claude Code session to continue the cu
 
 ### Step 0: Prefer recorded state (optional)
 
-If a native loop graph exists for this session, first run
-`python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" summarize <state>` (JSON: `phase`, `detail`, `done`,
-`active`, `ready`, `pending`) and `... graph.py inspect <state>` (JSON: `revision`, `active_wave`, `running`, `ready`,
-`hard_stop`), plus `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" list --type decision --scope loop --loop <session_id>`
-(JSON records with `cite`). Use them for Goal, Decisions, Done and Next steps. If any command is unavailable or exits
-nonzero (the adapter prints `{"degraded": "<reason_code>"}`), skip this step and run Step 1 unchanged.
+If this session has a native loop graph, first run these commands:
+
+- `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" summarize <state>` for JSON fields `phase`, `detail`, `done`, `active`, `ready`, and `pending`.
+- `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" inspect <state>` for `revision`, `active_wave`, `running`, `ready`, and `hard_stop`.
+- `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" list --type decision --scope loop --loop <session_id>` for decision records with `cite`.
+
+Use those results for Goal, Decisions, Done, and Next steps. If any command
+is unavailable or exits nonzero, skip this step and continue with Step 1.
+The adapter reports degradation as `{"degraded": "<reason_code>"}`.
 
 When reporting graph work, use `inspect`/`summarize`'s `node_names` entry to show each node's one-word job name and lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.
 
 ### Step 1: Extract from current session
 
-Scan the conversation for these categories. Be thorough — the new session has ZERO context from this one:
+Scan the conversation for these categories. The new session has no context
+from this one:
 
 | Category | What to capture |
 |----------|----------------|

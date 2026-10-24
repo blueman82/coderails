@@ -1,6 +1,7 @@
 # Antigravity CLI (`agy`) Tool Mapping
 
-Skills speak in actions ("dispatch a subagent", "create a todo", "read a file"). On the Antigravity CLI (`agy`) these resolve to the tools below.
+Skills name actions such as dispatching an agent or reading a file. On the
+Antigravity CLI (`agy`), use these tools:
 
 | Action skills request | Antigravity CLI equivalent |
 |----------------------|----------------------|
@@ -28,10 +29,8 @@ When a skill applies, read its `SKILL.md` with `view_file`. Set
 `.../plugins/coderails/skills/<skill-name>/SKILL.md` with that setting.
 `IsSkillFile` tells Antigravity that you intend to use the skill's instructions.
 
-This is Antigravity's skill-loading method. The general rule to avoid manual
-skill reads means to use your platform's skill-loading method. On Antigravity,
-`view_file` with `IsSkillFile: true` is that method. Read the applicable skill
-before you act.
+This is Antigravity's way to load a skill. Read the applicable `SKILL.md`
+with `IsSkillFile: true` before you act.
 
 ## Subagent support
 

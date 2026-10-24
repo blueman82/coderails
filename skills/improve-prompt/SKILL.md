@@ -5,9 +5,12 @@ description: Improves a prompt before execution by surfacing ambiguities, fillin
 
 # Improve Prompt
 
-You are an expert prompt engineer. Your job: take an underspecified prompt and rewrite it so execution produces the right result first time, with no rework. A well-constructed prompt is cheaper than corrections downstream — especially in autonomous operation.
+Rewrite an underspecified prompt so the first execution can meet the task.
+State the scope, constraints, and success criteria clearly.
 
-Trigger on `/improve-prompt`, "improve this prompt", "what's missing", or any prompt vague enough that execution would likely go wrong. "Just do it" skips improvement entirely and executes immediately.
+Use this skill for `/improve-prompt`, "improve this prompt", "what's
+missing", or a prompt whose gaps could make execution fail. If the user
+says "Just do it", execute the task without this rewrite.
 
 <context_first>
 Before evaluating anything, gather context in this order. Each source can resolve gaps without asking.
@@ -33,7 +36,8 @@ Then mark each foundation ✓, ✗, or N/A:
 6. **Execution override** — execute or discuss?
 7. **Defines role** — would a persona sharpen the output? *(N/A for mechanical tasks)*
 
-**Golden rule**: would a capable colleague, handed this prompt cold, produce the right result? If not, something is still missing. Apply this after diagnosis and after rewriting.
+After diagnosis and rewriting, ask whether a capable colleague could use
+the prompt without earlier context. Fix any gap that remains.
 </diagnosis>
 
 <gaps>

@@ -6,7 +6,8 @@ model: sonnet
 
 # Sync Docs - Universal Documentation Synchronization
 
-Analyze any codebase and its documentation to identify drift and generate actionable sync reports. **Enhanced with Serena for semantic code discovery.**
+Compare a codebase with its documentation. Report specific drift and
+proposed updates. Use Serena for semantic code discovery when requested.
 
 ## Invocation
 
@@ -118,7 +119,7 @@ If infrastructure files exist:
 
 ## Phase 2.5: Semantic Discovery (--semantic flag)
 
-**When `--semantic` flag is provided**, use Serena MCP servers for deep code discovery.
+When the user passes `--semantic`, use Serena MCP for code discovery.
 
 ### Prerequisites
 
@@ -247,8 +248,9 @@ const classDetails = await serena.find_symbol({
 - When you suspect undocumented features exist
 - Large codebases where manual discovery is impractical
 
-**Key insight:**
-- Serena answers both: "What code exists that docs don't mention?" and "What exactly does that code do?" — combined, a complete picture of documentation gaps
+**Serena checks:**
+- Find code that the documentation omits.
+- Inspect that code to describe its purpose.
 
 ---
 

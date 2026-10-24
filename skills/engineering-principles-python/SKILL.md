@@ -55,7 +55,7 @@ paths: "**/*.py"
 
 ## Imperative → Declarative Patterns (MANDATORY)
 
-Scan for these anti-patterns and replace with idiomatic Python.
+Find these patterns and replace them with the matching Python idiom.
 
 ### Loop Anti-Patterns
 

@@ -6,10 +6,9 @@ model: sonnet
 
 # Memory Consolidation
 
-Periodically health-check and consolidate a project's persistent memory
-directory (`~/.claude/projects/<slug>/memory/`), the same directory the
-memory system documented in `~/.claude/CLAUDE.md` writes to during normal
-sessions.
+Check and consolidate the project's memory directory at
+`~/.claude/projects/<slug>/memory/`. Normal sessions write there as
+described in `~/.claude/CLAUDE.md`.
 
 ## When to Use
 
@@ -49,45 +48,27 @@ Read each file the index points to. Each memory has YAML frontmatter
 
 ### Step 4: Apply merges, update MEMORY.md
 
-For each merge or deletion decided in Step 3: update or remove the
-affected memory file(s), then update `MEMORY.md`'s index line(s) to match.
-Never leave `MEMORY.md` pointing at a file that no longer exists. When a
-merge changes what a surviving file covers, update that file's frontmatter
-`description:` FIRST so it still matches the file's content, then derive
-the index line from the updated description — never from a `description:`
-left stale by the merge itself.
+For each merge or deletion from Step 3, update the memory files and their
+`MEMORY.md` index lines. Do not leave an index link to a deleted file.
+If a merge changes a surviving file's scope, update its frontmatter
+`description:` first. Then derive the index line from that description.
 
-**This next rule applies any time you edit `MEMORY.md` — including a run
-where Step 3 found nothing to merge, and any pass whose sole purpose is
-answering a size-pressure nudge.** Never shorten an index line by cutting
-it. A size-pressure nudge (a hook warning the index is approaching a
-read-limit) may fire while you work — it is a prompt to compress, never
-an instruction to truncate. Byte-truncating a line mid-clause silently
-destroys information with no record of what was lost, and nothing else in
-this system holds a second copy of it once that happens.
+**Apply this rule whenever you edit `MEMORY.md`, even if Step 3 found no
+merge.** Never cut an index line mid-clause. A size-pressure hook asks
+you to compress the text, not truncate bytes. Truncation can erase a
+fact without leaving a record of it.
 
-The file's own frontmatter `description:` field is the durable source of
-truth for its one-line summary — it is written once, at memory-creation
-time (or updated deliberately on merge, per above), and normal sessions do
-not touch it again. When shortening an index line, derive it from
-`description:`, not from the previous index line: condense the
-description's wording, but never drop the concrete fact it states — the
-incident, the concrete consequence, the specific next action. That fact
-must stay on the index line itself; if there is genuinely more supporting
-detail beyond that one fact, move the extra detail into the memory file's
-own body, but never the load-bearing fact itself.
+The memory file's frontmatter `description:` is the source for its index
+summary. Normal sessions do not change it. When shortening an index line,
+start from `description:`, not the old index text. Keep the concrete fact:
+the incident, consequence, or next action. Move only supporting detail
+into the file body.
 
-Before finishing this step, re-check every index line you touched: does
-it end on a complete clause (not a bare article, preposition, or
-conjunction), and does it still carry the specific fact — a name, a PR
-number, a concrete failure mode — that made the original entry worth
-recording? A line that reads as a complete sentence but lost its
-concrete details has been damaged just as much as one cut mid-word.
-When a run finds existing index lines already damaged this way (cut
-mid-clause, or a complete sentence stripped of its concrete fact), that
-counts as a consolidation candidate too — rebuild it from the file's
-`description:` in this same step, even if Step 3 didn't separately flag
-it.
+Before finishing, check each index line you changed. It must end on a
+complete clause and retain its identifying fact, such as a name, PR
+number, or failure mode. A complete sentence with no concrete fact is
+still damaged. Rebuild existing damaged lines from their file's
+`description:`, even if Step 3 found no other consolidation candidate.
 
 Worked example — given a file whose `description:` reads "a failed git
 checkout leaves a plausible-looking tree at the OLD commit; nearly
