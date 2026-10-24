@@ -8,6 +8,6 @@ Before using memory to recommend or act, check the current state. Read the
 file, search for the symbol, check git, or query the resource. Memory records
 what was true when written; it may no longer be current.
 
-**Why:** Stale memory presented as current is a top failure mode. A memory naming a file, function, or flag is a claim that it existed when written, not that it exists now. Acting on stale recall produces confidently-wrong recommendations. The user flagged this on 2026-05-01 as a structural gap.
+**Why:** A stale memory can make a past fact look current. A named file, function, or flag existed when the memory was written. It may not exist now. Acting on stale recall can lead to a wrong recommendation. The user flagged this on 2026-05-01.
 
-**How to apply:** Every time memory content is used as the basis for a recommendation or an action. Single-turn verification: the same response that cites the memory must also show the verification step (Read, Grep, or git output).
+**How to apply:** Verify memory before using it for a recommendation or action. In the same response, show the check that supports the cited memory. Use a file read, search, or Git output.

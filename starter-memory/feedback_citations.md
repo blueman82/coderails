@@ -8,6 +8,6 @@ For every non-trivial claim, cite a source or label the claim `(inferred)`.
 Sources include `file:line`, tool output, an exact quote, or a git reference.
 Apply this to claims about code, files, behavior, and external state.
 
-**Why:** Bare assertions are unverifiable by the user and indistinguishable from hallucination. Cited claims either hold up under check or fail visibly. The user requested this on 2026-05-01 as the core mechanic for trustable output.
+**Why:** The user cannot check a bare assertion. A cited claim can pass or fail a source check. The user requested this rule on 2026-05-01 to make output trustworthy.
 
-**How to apply:** Any response asserting something about the codebase, files, function behavior, API shape, or external state. Acceptable forms: `path/file.py:42`, "tool returned X", quoted user statement, or explicit `(inferred)` tag.
+**How to apply:** Use this for claims about code, files, functions, APIs, or external state. Cite `path/file.py:42`, a tool result, or a user statement. Otherwise add `(inferred)`.
