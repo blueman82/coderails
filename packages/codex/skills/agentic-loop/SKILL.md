@@ -54,7 +54,48 @@ python3 "$SKILL_DIR/scripts/graph.py" record-wave "$STATE" \
 
 The graph marker correlates a node and attempt; it does not attest a custom agent role. Native task paths, child/thread IDs, and any actual requested role are bound to provider transcript evidence. A supplied native role must match both child role fields; role-less dispatch is accepted only for the recognized `collaboration` function-call/activity shape with an explicit null nested spawn role; the top-level role may be absent or null, and any populated top-level path must agree. Parent/session, depth, unique dispatch, terminal completion for completed attempts, cursor, and reuse checks remain mandatory. A checked stale result verifies its unique native spawn and child ownership without inventing a successful terminal; subsequent completion rechecks every abandoned attempt from native transcripts. `loop_dispatch_guard.py` routes graph tasks through state, session, active-wave, and eval authorization before dispatch; an ambiguous marker is denied.
 
-If every worker in the active wave has been silent past a lease, run `graph.py recover-wave "$STATE" --session "$SESSION" [--lease-seconds N] [--report-only]`. It reports each node as `dispatch` (never spawned: spawn it now, nothing is recorded), `record` (finished or launch refused: record it), `waiting` or `stalled`, plus one stable `reason_code`. Only when all nodes are `stalled` does it, in one locked save, record them `stale` and request the respawn, so no attempt is counted without a stored worker reference. It refuses (`recovery_budget_exhausted`) once a node's respawns reach `retry.max`; a human then decides. Each outcome appends a non-authoritative row to `recovery-trace.jsonl` beside the state (see `docs/recover-wave-runbook.md`). For plain-language status run `graph.py summarize "$STATE"`; to list graph states and readable names for every node run `graph.py collection <state-root>`. An optional `collection.json` explicitly links graphs: `{"schema_version":1,"graphs":[{"key":"build","path":"build/progress.json","loop_id":"build-loop","links":["verify"]},{"key":"verify","path":"verify/progress.json","loop_id":"verify-loop","links":[]}]}`. Paths and loop IDs must match discovered schema-v3 states; links name keys, and unknown or ambiguous targets fail closed. Without the index, graphs are listed as disconnected. The command only reads graph states and returns graph links plus `unresolved_targets` (empty for a valid index). Malformed states fail the collection command. The Stop hook runs this recovery itself (at most once per 900s lease per graph state, within a 4s budget) when a blocked Stop finds a silent wave; it can respawn a worker that is alive but silent, so a duplicate is possible (bounded by `retry.max`). A timed-out attempt reports its outcome as unknown.
+If every worker in the active wave has been silent past a lease, run:
+
+```bash
+python3 "$SKILL_DIR/scripts/graph.py" recover-wave "$STATE" --session "$SESSION" [--lease-seconds N] [--report-only]
+```
+
+The command reports each node with one stable `reason_code` and one status:
+
+- `dispatch`: the node was never spawned. Spawn it now; no attempt was
+  recorded.
+- `record`: the worker finished or its launch was refused. Record that
+  result.
+- `waiting` or `stalled`: use the reported reason to decide whether to
+  wait or recover.
+
+Only when every node is `stalled` does the command record them as `stale`
+and request a respawn. It saves this change under one lock. It does not count
+an attempt without a stored worker reference. Once a node reaches
+`retry.max`, the command refuses with `recovery_budget_exhausted`. A human
+then decides. Each outcome adds a non-authoritative row to
+`recovery-trace.jsonl` beside the graph state. See
+`docs/recover-wave-runbook.md`.
+
+Run `graph.py summarize "$STATE"` for plain-language status. Run
+`graph.py collection <state-root>` to list graph states and node names.
+The optional `collection.json` can link graphs explicitly:
+
+```json
+{"schema_version":1,"graphs":[{"key":"build","path":"build/progress.json","loop_id":"build-loop","links":["verify"]},{"key":"verify","path":"verify/progress.json","loop_id":"verify-loop","links":[]}]}
+```
+
+Paths and loop IDs must match discovered schema-3 graph states. Links name
+graph keys. Unknown or ambiguous targets fail closed. Without this index,
+the command lists graphs as disconnected. It reads graph state and returns
+links plus `unresolved_targets`. A valid index has an empty
+`unresolved_targets` list. Malformed states make the command fail.
+
+When a blocked Stop finds a silent wave, the Stop hook runs this recovery.
+It tries at most once per 900-second lease for each graph state and has a
+four-second budget. A live but silent worker can be spawned twice. The
+`retry.max` limit bounds this case. A timed-out attempt has an unknown
+outcome.
 
 The collection command adds `key` and `links` to each graph record; an unlinked record has `"links": []`. Each node keeps its stable `id` and reports its one-word `name`, optional `lane_code`, and current `status` (for example: `{"id":"U3[15]","name":"Builder","lane_code":"C-3","status":"pending"}`). A missing or malformed target makes the command fail with a `graph:` error.
 
@@ -66,7 +107,13 @@ A later `followup_task` turn does not invalidate a recorded child's earlier comp
 
 **Scout spawn refusal fails closed.** If the design scout (or any independent reviewer) cannot be spawned (`agent thread limit reached` or any other capacity refusal), do not silently downgrade to the orchestrator's or a worker's own read. Retry the spawn with the same `task_name`; if it keeps being refused, record the node `failed` through `graph.py record-wave`, which binds the refused call as that attempt's reference (a refused call never satisfies `done`, and `record-wave` rejects it as success on Codex), then halt. A `not_found` on a `task_name` carried over from a previous session or resumed loop is not a capacity refusal: retry with a FRESH `task_name`, never the same one. Without an independent scout the loop HALTS for the human: do not continue past the refusal. A `non_independent` fallback requires explicit human approval. Only after the human approves, record `S2.5` as `skipped` with evidence beginning `non_independent: human approved` and append a `decisions_absorbed` entry `{phase: "<current phase>", decision: "scout refused: <error text>, adopted non_independent"}`. That `skipped` record is the only exit that lets `J2` release without an independent scout; a `non_independent` read never counts as an independent review or as `done`. Hooks cannot spawn agents and no gate reads `non_independent`, so this is an orchestrator rule, not a hook-enforced one.
 
-**What consumes the thread limit.** Every spawned agent thread, including completed and idle ones, counts until it is retired. Before a scout spawn, retire completed threads with the provider's close tool where one exists (Codex: `close_agent`); otherwise nothing frees the slot, so record the limit in the refusal and halt rather than assume a thread was freed.
+**Thread-limit boundary.** Spawned agent threads can continue to count after
+they finish or become idle. Before a scout spawn, use a provider close tool
+only if that tool is present. Codex CLI 0.164.0's collaboration surface has
+no `close_agent` tool. `interrupt_agent` stops a turn but does not retire the
+thread. Do not treat CLI session archive or delete as a close operation for
+this active team. If capacity remains exhausted, record the refusal and
+halt. Do not claim that a slot was freed.
 
 After independently verifying a deliverable and recording its wave, decide its registered work unit through `python3 "$SKILL_DIR/scripts/graph.py" record-unit "$STATE" --session "$SESSION" --unit "<id>" --status done --evidence "<observed check>"`. If the authorized deliverable is withdrawn, use `--status dropped --reason "<reason>"`. The command requires a pending unit and no active wave and records the decision atomically. The graph revision remains unchanged so stored wave evidence stays valid. A completed graph node never changes a work unit by itself. Grade final evals against the current graph revision.
 

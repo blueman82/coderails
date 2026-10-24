@@ -374,14 +374,70 @@ Fourth seam instance: `agentic-loop` Phase 13 teardown writes `retro.json` (`sch
 - **Wiki/workflow sequence past merge is advisory.** `/wiki-ingest` + `/wiki-lint` after merge are slash commands; nothing enforces them.
 - **`check_verify_loop`, `check_confidence_labels`, both loop guards** all short-circuit on `stop_hook_active=true` (the two loop guards block at most once per turn; the two discipline lints are advisory and exit 0 either way) — intentional infinite-loop safety valve. `voice_announce` reads it too (via its shared loop helper), no observable effect (always exits 0).
 - **TDD is not enforced test-first.** `test_gate` only checks tests pass at commit time.
-- **Test-output delivery is not observable from capture alone.** Both providers retain complete per-command logs under `~/.coderails/test-output/` (override: `CODERAILS_TEST_OUTPUT_DIR`). The provider-local `hooks/scripts/test_output.py` reader measures explicit full/ranged/literal-search retrievals. Default reads always return metadata and guidance; the agent expands requests as needed, without predicting line ranges across runs. Emitted bytes are not confirmed delivered bytes; direct file reads are unobserved. Completed logs compress automatically; a 1 GiB compressed-log budget (`CODERAILS_TEST_LOG_BUDGET_BYTES`) expires oldest completed logs first while protecting active and just-completed runs. Protected logs may exceed the budget; compact metrics and expiry records persist. See [retained test-gate output](docs/REFERENCE.md#retained-test-gate-output) for usage and measurement limits.
-- **Authority objects (E3) back the crack-on denial.** `crack_on_gate.py` (and the Codex copy, which vendors a subset of the validator in `hook_common.py` because its package ships without `scripts/lib`) writes and reads `<loop dir>/<session_id>/authority.json`; `scripts/authority.py inspect|narrow|revoke --session <id>` manage it. Expiry and revocation end the denial; granting or revoking also deletes any legacy `crack_on_active` flag (Claude loop dir and Codex `$PLUGIN_DATA/sessions/<id>/`). Until then a legacy flag is honoured one more release via `crack_on_legacy_flag`. Both gates read the loop root from `CLAUDE_AGENTIC_LOOP_DIR` (Codex falls back to `CODERAILS_AGENTIC_LOOP_DIR`), so one `authority.py revoke` covers both providers. A failed grant fails open with a `crack_on/failed_open/authority_write_failed` trace row. See [docs/decisions/e3-authority-object.md](docs/decisions/e3-authority-object.md) and the RUNBOOK entry.
+- **Retained test output.** Both providers keep complete command logs under
+  `~/.coderails/test-output/`. `CODERAILS_TEST_OUTPUT_DIR` can change that
+  path. The provider-local `hooks/scripts/test_output.py` reader measures
+  full, ranged, and literal-search retrievals. Default reads return
+  metadata and guidance. The agent asks for more output when needed.
+  Emitted bytes do not prove delivery to the model. Direct file reads are
+  not observed. Completed logs compress automatically. The default
+  `CODERAILS_TEST_LOG_BUDGET_BYTES` limit is 1 GiB of compressed logs.
+  Old completed logs expire first; active and just-completed runs remain
+  protected. Protected logs can exceed the limit. Compact metrics and
+  expiry records remain. See [retained test-gate output](docs/REFERENCE.md#retained-test-gate-output).
+- **Authority objects back the crack-on denial.** `crack_on_gate.py`
+  writes and reads `<loop dir>/<session_id>/authority.json`. The Codex
+  copy keeps a subset of the validator in `hook_common.py` because its
+  package does not ship `scripts/lib`. Run
+  `scripts/authority.py <inspect|narrow|revoke> --session <id>` to manage it.
+  Expiry or revocation ends the denial. Grant or revoke also removes the legacy
+  `crack_on_active` flag from the Claude loop directory and Codex
+  `$PLUGIN_DATA/sessions/<id>/`. One release still honors an old flag and
+  traces `crack_on_legacy_flag`.
+
+  Both providers read `CLAUDE_AGENTIC_LOOP_DIR`. Codex uses
+  `CODERAILS_AGENTIC_LOOP_DIR` as a fallback. One `authority.py revoke`
+  can therefore cover both. A failed grant stands down and traces
+  `crack_on/failed_open/authority_write_failed`. See
+  [the authority decision](docs/decisions/e3-authority-object.md) and the
+  runbook entry.
 - **Skill invocation, ask-on-ambiguity, verify-memory are structurally unenforceable by hooks** — they depend on Claude's internal reasoning, which a hook can't observe.
 - **No `SubagentStart` event exists.** `inject_bootstrap.py` can't inject `using-coderails` into subagents; they get it only via the orchestrator's system prompt.
 - **`/coderails:post-review` validates summary structure, not provenance.** Proves an auditable SHA-bound artifact exists, not that the review was substantive. The `review-pr` arm of `enforce_pr_workflow` is expected to demote block→nudge once the artifact gate is verified live — never before, or a window opens with neither gate active.
-- **Model-role routing is advisory, hook-enforced only as a nudge.** `agentic-loop` Phase 2.8 assigns a role (`fast-mechanical`/`default`/`frontier`) + effort per task (table in Phase 2.8, defaults + fable-escalation in `model-routing.md`), asserted at spawn sites (Phases 2, 2.5, 3, 3a, 9, 10). `agent_model_routing_nudge.py` is the only hook touching this — advisory only. No hook enforces *correct* role selection; a `frontier`-role worker still produces a fully-gated PR. Phase 2.8 also sanctions a legitimate `default`-vs-`frontier` judgement call a blunt gate can't distinguish from a disallowed spawn without a self-reported carve-out (reintroducing the same trust problem).
-- **`agent_only_gate`'s detection is real but narrow.** `agent_id` presence/absence was confirmed empirically on Claude Code 2.1.220 via a live probe (top-level Bash/Agent calls carried no `agent_id`; a subagent's Bash call carried both `agent_id`/`agent_type`; `session_id` was identical across all three, so it alone can't distinguish them). This answers "did this call originate at top level," not "is the orchestrator cooperating" — a top-level session doing real work in-context and never calling `Agent` is invisible until it attempts a do-work call. Hard top-level block isn't default because it would deadlock this repo's own shipping path (`enforce_pr_workflow`, `merge.py`, every workflow command assume the orchestrator runs `gh`/`git`/`scripts/*.py` inline). `AGENT_ONLY_GATE_ENFORCE=1` opts into hard-blocking with the same workflow-chain carve-out. Unverified: behaviour under `claude --agent <name>` mode (reportedly sets `agent_type` even on top-level calls, per docs) — the live probe used a plain headless session, not `--agent` mode.
-- **Headless-run exemption is env-triggered, `Stop`-only, inside the agent trust domain.** `check_confidence_labels.py`, `check_verify_loop.py` skip enforcement when `CODERAILS_HEADLESS_RUN=1` is in their process env — a headless `claude -p` run has no interactive turn left to satisfy a repair-turn block. Does NOT extend to `SubagentStop`: the two discipline lints still emit their advisory for worker output regardless of the flag. Set in exactly one place: `skills/dashboard/app/src/app/api/run/route.ts`'s `spawn(...)` call — a second set-site (including a session setting it on itself) is a security finding. `scripts/sandbox/spawn_sandboxed_worker.py` force-unsets it before launching a sandboxed worker so no inherited value leaks the exemption in; keep the two in lockstep.
+- **Model-role routing is advisory.** Phase 2.8 assigns each task a role:
+  `fast-mechanical`, `default`, or `frontier`, plus effort. Its table gives
+  defaults and the escalation rule in `model-routing.md`. Spawn sites in
+  Phases 2, 2.5, 3, 3a, 9, and 10 assert the role. Only
+  `agent_model_routing_nudge.py` checks it, and that hook only nudges.
+  It cannot judge whether the choice was correct. A `frontier` worker can
+  still produce a fully gated PR. Phase 2.8 also allows a real choice
+  between `default` and `frontier`. A blunt hook cannot tell that choice
+  from a wrong spawn without trusting the agent's own carve-out.
+- **`agent_only_gate` detects a top-level call.** A live probe on Claude
+  Code 2.1.220 found no `agent_id` on top-level Bash and Agent calls. A
+  subagent Bash call carried `agent_id` and `agent_type`. All three shared
+  one `session_id`, so that field cannot distinguish the caller.
+  The gate can tell where a tool call came from. It cannot tell whether
+  the orchestrator is cooperating before that call.
+
+  A hard top-level block is off by default. It would block this repo's
+  shipping commands, which expect the orchestrator to run `gh`, `git`,
+  and `scripts/*.py` inline. `AGENT_ONLY_GATE_ENFORCE=1` enables the hard
+  block with the existing workflow-command carve-out. Behavior under
+  `claude --agent <name>` remains unverified. The live probe used a plain
+  headless session; docs suggest that mode can put `agent_type` on
+  top-level calls.
+- **Headless-run exemption.** At `Stop`, `check_confidence_labels.py` and
+  `check_verify_loop.py` stand down when their process has
+  `CODERAILS_HEADLESS_RUN=1`. A headless `claude -p` run has no interactive
+  turn in which to repair a block. This exemption does not apply to
+  `SubagentStop`; worker output still gets the advisory.
+
+  Set this variable only in the `spawn(...)` call in
+  `skills/dashboard/app/src/app/api/run/route.ts`. A second set site,
+  including one set by the session itself, is a security finding.
+  `scripts/sandbox/spawn_sandboxed_worker.py` removes an inherited value
+  before it launches a worker. Keep these rules in step.
 
 **Hook script conventions** (follow when editing/adding a script):
 - Use the provider-local Python payload reader with a five-second total deadline, including partial input on an open pipe. Empty/invalid input stands aside where the hook contract is fail-open; do not extend the hook timeout to conceal an unbounded read.

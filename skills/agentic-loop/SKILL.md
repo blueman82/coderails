@@ -107,7 +107,30 @@ Each task description must be **self-contained** so the spawned agent can act wi
 Include this line in every agent prompt:
 > "Don't go silently idle — send a completion message via SendMessage. Past agents have failed this way."
 
-**Provider-native worker contract.** Claude dispatch uses its native `Agent` tool and available `subagent_type` (normally `general-purpose`); installed custom types remain optional. The role map identifies instruction sources, not a required runtime label. Begin each worker prompt with the exact `CODERAILS_GRAPH_DISPATCH=<JSON>` ownership envelope. Immediately after it, include the printed `CODERAILS_GRAPH_NODE_NAME=<job> · <lane> [<node-id>]` display marker as a separate human-readable line. It is descriptive only; keep the stable node ID in the task brief and never use the display marker for authorization or evidence matching. Before every implementation dispatch, read `${CLAUDE_PLUGIN_ROOT}/agents/loop-worker.md` and include its instruction body explicitly after both markers, followed by the task brief and current user restrictions. Carry scoped implementation, test-first for testable changes, actual verification results, self-review, and honest reporting. Never infer these instructions from a worker name. User restrictions on commits, remote writes, or test scope override the template. The envelope correlates the graph node/wave; provider tool-use/result identity and task notification bind the actual worker. Keep native `subagent_type` in evidence and revalidate it against the original dispatch. A `name` is only a native label, never completion evidence; graph completion still refuses mailbox-only teammate results. `loop_dispatch_guard.py` requires session-owned state, the exact active wave and frozen evals regardless of native role. Frozen dispatch evals bind session_id + loop_id only, never the current graph revision; the dispatch envelope binds the exact active revision, wave and node. Completion requires final-revision neutral grading. Resolve a denial by correcting the state/envelope/evals, never changing the role to evade it.
+**Provider-native worker contract.** Claude dispatch uses its native `Agent` tool. Use an available
+`subagent_type`, normally `general-purpose`. Installed custom types are optional. The role map identifies
+instruction sources; it does not require a matching runtime label.
+
+Begin each worker prompt with the exact `CODERAILS_GRAPH_DISPATCH=<JSON>` ownership envelope. Put the
+printed `CODERAILS_GRAPH_NODE_NAME=<job> · <lane> [<node-id>]` display marker on its own line immediately
+after the envelope. The marker helps people read logs. It is not authorization or evidence. Keep the
+stable node ID in the task brief.
+
+Before each implementation dispatch, read `${CLAUDE_PLUGIN_ROOT}/agents/loop-worker.md`. Put its full
+instruction body after both markers. Then add the task brief and current user restrictions. The worker
+implements the scoped change. It writes a failing test first when possible. It verifies results and
+reviews its work. It reports honestly. Do not infer these rules from a worker name. User limits on commits, remote
+writes, or tests take precedence.
+
+The envelope binds the graph node and wave. Native tool-use and result IDs, plus the task notification,
+bind the actual worker. Keep the native `subagent_type` in evidence and compare it with the original
+dispatch. A `name` is only a native label. A mailbox-only result cannot prove graph completion.
+
+`loop_dispatch_guard.py` requires state owned by the session, the exact active wave, and frozen evals.
+This applies to every native role. Frozen dispatch evals bind `session_id` and `loop_id`; they do not
+bind the changing graph revision. The dispatch envelope binds the active revision, wave, and node.
+Completion needs neutral grading at the final revision. To resolve a denial, fix the state, envelope, or
+evals. Do not change the role to avoid the guard.
 
 ### Phase 3a — Single routed agent for impl + verify (the spawned-team-is-overkill case)
 
@@ -123,7 +146,27 @@ The agent's prompt must be self-contained (it can't re-read the conversation) an
 - **A verify step the agent runs itself before reporting** — run the test / lint / build, read back the diff, hit the endpoint or read the log. State which one. "Implement X, then verify by running `Y`, and only report success if `Y` passes."
 - **Report-back contract:** return a confidence-labelled summary (Phase 11), state what was run to verify (the command + its result, not just "verified"), and "don't go silently idle — send a completion message" (Phase 4 — workers go idle without reporting regardless of role). A worker that must stop for a human returns one typed status (`NEEDS_DECISION`, `OUTSIDE_SCOPE` or `IRREVERSIBLE_ACTION`, schema in `scripts/worker_status.py`) instead of asking the human itself; only the orchestrator talks to the human: it runs `validate()` then `to_decision_request()` and asks. The statuses are not `record-wave` outcomes (record-wave evidence demands are unchanged); the wiring point is the orchestrator's U4 step.
 - If the work writes to git, the worktree/branch and a "commit your work" instruction so the artifact is durable for the orchestrator's Phase 4 check.
-- **Shared-checkout isolation — applies to ANY target checkout the agent will write into, not just the loop's own code repo (an external wiki vault, a docs repo, any other git checkout another session might also have open).** The decidable test: is the target checkout already a linked worktree (`superpowers:using-git-worktrees` Step 0's `GIT_DIR != GIT_COMMON`)? If not, the dispatch prompt must instruct the agent to create one via `superpowers:using-git-worktrees` — "before making any edits, confirm or create worktree isolation for `<target checkout path>` via the superpowers:using-git-worktrees skill; do not write directly onto that checkout's current branch" — using the base ref selected by Phase 2's clean-base check: `origin/main` when `origin` exists, otherwise `main`; never HEAD. Before dispatch, the orchestrator itself runs `git -C <abs target path> worktree list` and `git -C <abs target path> log --oneline <selected-base-ref>..HEAD` (absolute path, not `cd` — see `learned-failure-modes.md` on cwd drift across worktrees) to know about any pre-existing unpushed work on that checkout first. Root incident: an unisolated wiki-writer dispatch committed straight onto a shared vault checkout's local `main`, interleaving with a concurrent session's unpushed commits there — nothing was lost, but a routine push became a manual untangling job. This is dispatch discipline, not a hook: there is no reliable signal for "another session is using this checkout right now," so it cannot be enforced mechanically and must travel in the prompt every time.
+- **Isolate every checkout that a worker can write.** This includes a wiki
+  vault or a separate docs repo. First check whether the target is already a
+  linked worktree. `superpowers:using-git-worktrees` Step 0 tests
+  `GIT_DIR != GIT_COMMON`. If the target is not isolated, give the worker
+  this exact instruction:
+
+  > before making any edits, confirm or create worktree isolation for
+  > `<target checkout path>` via the superpowers:using-git-worktrees skill;
+  > do not write directly onto that checkout's current branch
+
+  Select the base ref with Phase 2's clean-base check. Use `origin/main` when
+  `origin` exists; otherwise use `main`. Do not use HEAD. Before dispatch,
+  the orchestrator runs `git -C <abs target path> worktree list` and
+  `git -C <abs target path> log --oneline <selected-base-ref>..HEAD`. Use the
+  absolute target path to avoid cwd drift. Check for unpushed work before
+  the worker starts.
+
+  An earlier wiki-writer committed to a shared vault `main` while another
+  session had unpushed commits there. The commits survived, but a routine
+  push needed manual repair. No hook can reliably detect another session's
+  use of a checkout. Put this isolation rule in every affected prompt.
 - **A manifest — the exact set of files this change should touch — plus a pre-push scope assertion.** Require: "before you push, run `git diff <selected-base-ref> --name-only` and confirm the file list equals EXACTLY this manifest. If any file you did not intend to touch appears — especially one you never edited — STOP and report; do not push. A PR that carries files outside its manifest is a contamination, not a change." This catches a dirty base or a stray `git add -A` at push time, one stage before the orchestrator's merge gate, where it is far cheaper to fix.
   When the unit's disposition is `clean-break`, the assertion also covers compat: before push, confirm no compatibility shim, bridge, adapter, or legacy code path for the replaced functionality remains. If one does, clean-break is not finished — remove it or STOP and report. This worker assertion is a **first-pass smell test, not the gate** — the independent reviewer (Phase 4b) is the gate, because the worker that wrote a shim is the party least able to see it as one.
 - **The disposition, verbatim** — for a retirement unit, the `clean-break`/`preserve-compat` decision from Phase 2.6 and (if preserve-compat) the `named_blocker`. The single agent cannot re-read the conversation; the decision must travel in its prompt or it does not exist for the worker.
@@ -233,7 +276,41 @@ Before unblocking the next dependent task in the chain:
 
 **Re-check at the moment of action, not at the moment the report arrived.** State changes in the gap. If the worker says "PR is CONFLICTING" or "ready to merge" and you queue a corrective instruction (rebase, redo, wait), the artifact may have moved by the time the message lands. Always re-run `gh pr view` (or equivalent) at the moment you act on the report, not when you first read it. Past failure: a CONFLICTING state self-healed via an intervening merge before the queued rebase instruction landed — stale on arrival, it triggered redundant work. One extra `gh pr view` between report and instruction is cheap.
 
-If every spawned worker in the active wave has been silent past a lease, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" recover-wave <state> --session <session_id> [--lease-seconds N] [--report-only]`. It reports each node as `dispatch` (never spawned: spawn it now, nothing is recorded), `record` (finished or launch refused: record it), `waiting` or `stalled`, plus one stable `reason_code`. Only when all nodes are `stalled` does it, in one locked save, record them `stale` with their native `tool_use_id` references and request the respawn. It refuses (`recovery_budget_exhausted`) once a node's respawns reach `retry.max`; a human then decides. Each outcome appends a non-authoritative row to `recovery-trace.jsonl` beside the state (see `docs/recover-wave-runbook.md`). `graph.py summarize <state>` gives a plain-language status. `graph.py collection <root>` lists graph states beneath a directory with each node's stable ID, readable name and status; malformed states fail the command. An optional `collection.json` explicitly links graphs: `{"schema_version":1,"graphs":[{"key":"build","path":"build/progress.json","loop_id":"build-loop","links":["verify"]},{"key":"verify","path":"verify/progress.json","loop_id":"verify-loop","links":[]}]}`. Paths and loop IDs must match discovered schema-v3 states; links name keys, and unknown or ambiguous targets fail closed. Without the index, graphs are listed as disconnected. The command only reads graph states and returns graph links plus `unresolved_targets` (empty for a valid index). The Stop hook runs this recovery itself (at most once per 900s lease per graph state, within a 4s budget) when a blocked Stop finds a silent wave; it can respawn a worker that is alive but silent, so a duplicate is possible (bounded by `retry.max`). A timed-out attempt reports its outcome as unknown.
+If every spawned worker in the active wave has been silent past a lease, run the supported recovery
+command:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" recover-wave <state> --session <session_id> [--lease-seconds N] [--report-only]
+```
+
+The command gives each node one stable `reason_code` and one status:
+
+- `dispatch`: the node was never spawned. Spawn it now. No attempt was
+  recorded.
+- `record`: the worker finished or its launch was refused. Record that
+  result.
+- `waiting` or `stalled`: use the reported reason to wait or recover.
+
+Only when all nodes are `stalled` does the command record them as `stale` and request respawn. It saves
+this change under one lock and keeps the native `tool_use_id` references. Once a node reaches `retry.max`,
+it refuses with `recovery_budget_exhausted`. A human then decides. Each outcome adds a non-authoritative
+row to `recovery-trace.jsonl` beside the state. See `docs/recover-wave-runbook.md`.
+
+Run `graph.py summarize <state>` for plain-language status. Run `graph.py collection <root>` to list graph
+states beneath a directory. The collection includes each node's stable ID, readable name, and status.
+Malformed states make it fail. An optional `collection.json` links graphs:
+
+```json
+{"schema_version":1,"graphs":[{"key":"build","path":"build/progress.json","loop_id":"build-loop","links":["verify"]},{"key":"verify","path":"verify/progress.json","loop_id":"verify-loop","links":[]}]}
+```
+
+Paths and loop IDs must match discovered schema-3 graph states. Links name graph keys. Unknown or
+ambiguous targets fail closed. Without an index, listed graphs are disconnected. The command reads only
+graph states. It returns graph links plus `unresolved_targets`, which is empty for a valid index.
+
+A blocked Stop runs this recovery when it finds a silent wave. It tries at most once per 900-second lease
+per graph state and has a four-second budget. A live but silent worker can be spawned twice. The
+`retry.max` limit bounds this case. A timed-out attempt has an unknown outcome.
 
 The collection command adds `key` and `links` to each graph record; an unlinked record has `"links": []`. Each node keeps its stable `id` and reports its one-word `name`, optional `lane_code`, and current `status` (for example: `{"id":"U3[15]","name":"Builder","lane_code":"C-3","status":"pending"}`). A missing or malformed target makes the command fail with a `graph:` error.
 

@@ -183,7 +183,27 @@ server still accepts TCP but serves nothing.
 
 **Queue-mode output (optional):** each `verdict: "propose"` judge output can additionally be piped through `skills/workflow-audit/scripts/write_queue_entry.py` to surface it on the observability dashboard, writing into `~/.claude/coderails-dashboard/approvals/` (routines' own scheduler intents live in the sibling `queue/` directory — see `docs/routines.md`). This is additive to, never a replacement for, the interactive approval gate — a dashboard "Approve" click only flips a queue entry's `status` from `pending` to `approved`.
 
-**Approve-click build runner:** flipping a `workflow-audit:propose-skill` entry to `approved` makes the dashboard's `POST /api/queue` route claim a build directory and spawn a detached, headless `claude -p` build (`skills/dashboard/app/src/lib/build/spawn.ts`, running `skills/dashboard/scripts/run_builder.py` and prompted via `skills/dashboard/app/src/lib/build/prompt.ts`) that authors the proposed skill through skill-creator and ships it as a coderails PR through the full gate sequence. The builder never merges — its terminal state is an open PR with gates green, surfaced on the dashboard (`skills/dashboard/app/src/lib/collect/builds.ts`); the owner reviews and merges by hand. While the build runs, the panel shows a coarse builder-reported phase (`authoring`/`testing`/`pushing`/`opening_pr`, closed-set-validated in the collector before reaching the client), an elapsed timer, and heartbeat freshness rather than an opaque "building"; once the build's PR leaves the dashboard's open-PR set it shows "PR resolved" instead of a stale "awaiting your merge" (skipped whenever the open-PR set is untrustworthy, so an open PR is never falsely marked resolved). **First skill built end-to-end by this runner:** `verify-merged-pr` (below).
+**Approve-click build runner:** When the owner sets a
+`workflow-audit:propose-skill` entry to `approved`, the dashboard's
+`POST /api/queue` route claims a build directory. It starts a detached
+`claude -p` build through `skills/dashboard/app/src/lib/build/spawn.ts`.
+The build runs `skills/dashboard/scripts/run_builder.py`. Its prompt comes
+from `skills/dashboard/app/src/lib/build/prompt.ts`.
+
+The builder uses skill-creator to author the proposed skill. It then opens
+a Coderails PR through the full gate sequence. It does not merge the PR.
+Its final state is an open PR with green gates. The dashboard reads this
+state through `skills/dashboard/app/src/lib/collect/builds.ts`. The owner
+reviews and merges the PR.
+
+While the build runs, the panel shows its phase, elapsed time, and heartbeat
+freshness. The phase is one of `authoring`, `testing`, `pushing`, or
+`opening_pr`. The collector validates this closed set before it reaches the
+client. When the PR leaves the trusted open-PR set, the panel shows
+"PR resolved". If that set is not trustworthy, the collector skips this
+transition. This prevents a false resolved state for an open PR.
+
+The first skill this runner built through all steps was `verify-merged-pr`.
 
 **Privacy invariant:** every artifact in the pipeline — scan output, cluster output, judge input/output, proposal chart, queue entry — carries only tool names, a privacy-whitelisted `head` (first two Bash command tokens, the Skill name, or the Agent subagent_type), counts, and session ids. Never verbatim transcript prose, file contents, or reconstructed intent.
 

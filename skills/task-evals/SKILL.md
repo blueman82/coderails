@@ -222,4 +222,41 @@ A plan's or loop's per-work-unit eval refs travel in worker prompts the same way
 
 ## Verifier agent contract (agent-run evals)
 
-For agent-run evals, a fresh sonnet subagent is spawned to grade. Its prompt contains: the `evals.json` content, artifact references (PR number, clone path, artifact path or local endpoint, deployed surface), and the confidence-label contract — and explicitly nothing else. It must not receive the implementation conversation, the implementer's summary, or the orchestrator's opinion of the outcome — the same principle behind agentic-loop Phase 4b's clean-break gate (the author is the least able to see its own shims). The verifier returns per-eval status plus evidence; the orchestrator folds those statuses into `evals.json` — nothing more. Computing and stamping `result` is a separate, neutral step: `post_evals.py` for pr scope, `post_evals.py grade-loop` for loop scope. The orchestrator never writes `result` at either scope. Folding applies to fresh grader output only: an eval amended after a grader verdict goes back to a fresh grader, whose per-eval output is folded the same way, and the post-verdict amendment records who re-graded in a `regraded_by` field — `grade-loop` refuses to re-grade a post-verdict amendment that lacks it. `grade-loop` also stamps a `grading` object (`by`, a `checksum` over the per-eval statuses + result) that the loop-stop guard checks before accepting a GO/VERIFICATION_LEVEL0 verdict — honest boundary: the stamp catches accidental drift (a status edited after grading), not deliberate tampering. The stamp also records `amendments_at_grade`, which is what lets `grade-loop` detect a post-verdict amendment. The backstop's boundaries, stated plainly: it keys on amendment count growth after a grade-loop stamp. A status flipped with no accompanying amendment, an existing amendment edited or replaced in place, and a flip folded in before the first grade-loop run are all invisible to it, as is a hand-edited `amendments_at_grade` stamp (the stamp sits outside the checksum canon) — those cases are held by this rule and the Phase 13 audit alone. Amending means editing the graded file in place; regenerating the file sheds the stamp, and `grade-loop` treats remaining grade residue (`graded_at`/`result`) as the prior verdict, so a regenerated-but-residued file still refuses.
+For agent-run evals, spawn a fresh sonnet subagent. Give it only:
+
+- The `evals.json` content.
+- Artifact references: the PR number, clone path, artifact path or local
+  endpoint, and deployed surface.
+- The confidence-label contract.
+
+Do not give it the implementation conversation, the implementer's summary,
+or the orchestrator's verdict. The author can miss its own compatibility
+shims, as explained in agentic-loop Phase 4b. The verifier returns one status
+and evidence for each eval. The orchestrator folds only those statuses into
+`evals.json`.
+
+Compute and stamp `result` in a separate neutral step. Use `post_evals.py`
+for PR scope or `post_evals.py grade-loop` for loop scope. The orchestrator
+must not write `result` at either scope.
+
+Fold only fresh grader output. After an eval amendment, send the changed
+eval to a fresh grader. Fold its new per-eval result. A post-verdict
+amendment records the grader in `regraded_by`. `grade-loop` refuses a
+post-verdict amendment without that field.
+
+For loop scope, `grade-loop` stamps a `grading` object. It records `by`, a
+checksum over per-eval statuses and `result`, and `amendments_at_grade`.
+The loop Stop guard uses this stamp to accept `GO` or
+`VERIFICATION_LEVEL0`. The checksum catches an accidental status edit after
+grading. It does not protect against deliberate tampering.
+
+`grade-loop` compares the amendment count with `amendments_at_grade` to
+detect a post-verdict amendment. It cannot detect a status change without a
+new amendment. It also cannot detect an old amendment edited in place, a
+change folded before the first `grade-loop` run, or a hand edit to
+`amendments_at_grade`. That field is outside the checksum. This rule and
+the Phase 13 audit hold those cases.
+
+Amend the graded file in place. Regenerating the file removes the stamp.
+If `graded_at` or `result` remains, `grade-loop` treats it as a prior
+verdict and still refuses a missing `regraded_by` field.
