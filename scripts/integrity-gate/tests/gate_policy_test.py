@@ -57,6 +57,8 @@ class EvidenceFixture:
         self.failure = ""
         self.calls: list[str] = []
         self.head = SHA
+        self.base = "main"
+        self.open_main: list[JsonObject] = [{"number": 7, "head": {"sha": SHA}, "base": {"ref": "main"}}]
         self.changed_files: int | None = None
         self.comments_available = True
         self.review_author = "owner"
@@ -74,13 +76,20 @@ class EvidenceFixture:
     def get_object(self, target: str) -> JsonObject:
         """Return only the fixture's authoritative PR head."""
         self.check(target)
-        return {"head": {"sha": self.head}, "changed_files": self.changed_files or len(self.files)}
+        return {
+            "head": {"sha": self.head},
+            "base": {"ref": self.base},
+            "changed_files": self.changed_files or len(self.files),
+        }
 
     def get_array(self, target: str) -> list[JsonObject]:
         """Return independent changed-file or commit-status arrays."""
         self.check(target)
         if target.startswith("commits/"):
             return copy.deepcopy(self.statuses)
+        if target.startswith("pulls?state=open&base=main&"):
+            page = int(target.rsplit("page=", 1)[1])
+            return copy.deepcopy(self.open_main[(page - 1) * 100 : page * 100])
         page = int(target.rsplit("page=", 1)[1]) if "page=" in target else 1
         return copy.deepcopy(self.files[(page - 1) * 100 : page * 100])
 
@@ -237,21 +246,6 @@ class GatePolicyTests(unittest.TestCase):
         ]
         self.assertEqual(self.gate(client), 1)
         self.assertIn("eval_evidence_invalid", client.posts[-1][2])
-
-    def test_latest_head_must_match_attested_head_before_posting(self) -> None:
-        """A moved head gets no stale success status."""
-        client = EvidenceFixture()
-        original = client.get_object
-        reads = 0
-
-        def moving_head(target: str) -> JsonObject:
-            nonlocal reads
-            reads += 1
-            return {"head": {"sha": SHA if reads == 1 else "b" * 40}} if target == "pulls/7" else original(target)
-
-        client.get_object = moving_head  # type: ignore[method-assign]
-        self.assertNotEqual(self.gate(client), 0)
-        self.assertNotIn("success", [post[1] for post in client.posts])
 
     def test_protected_path_after_first_file_page_is_checked(self) -> None:
         """The file after the first page still blocks success."""

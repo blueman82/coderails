@@ -1,6 +1,7 @@
 """Mechanical SHA-bound evidence and bounded policy checks for attestation."""
 
 import re
+from contextlib import suppress
 from typing import Protocol
 
 from integrity_evidence import eval_valid, review_valid
@@ -65,15 +66,50 @@ def owner_bodies(client: EvidenceClient, number: int, owner: str) -> list[str]:
     return bodies
 
 
+def main_prs_at_head(client: EvidenceClient, sha: str) -> list[int]:
+    """Read every open main PR before posting a SHA-wide passing status."""
+    matches: list[int] = []
+    for page in range(1, 32):
+        batch = client.get_array(f"pulls?state=open&base=main&per_page=100&page={page}")
+        if page == 31 and batch:
+            raise IntegrityError("open main PR list exceeds 3000 entries")
+        for item in batch:
+            number = item.get("number")
+            head = object_value(item.get("head"))
+            base = object_value(item.get("base"))
+            head_sha = head.get("sha")
+            if (
+                not isinstance(number, int)
+                or isinstance(number, bool)
+                or number < 1
+                or not isinstance(head_sha, str)
+                or not re.fullmatch(r"[0-9a-f]{40}", head_sha)
+                or base.get("ref") != "main"
+            ):
+                raise IntegrityError("invalid open main PR")
+            if head_sha == sha:
+                matches.append(number)
+        if len(batch) < 100:
+            return matches
+    raise IntegrityError("open main PR list exceeds 3000 entries")
+
+
 def post_current(client: EvidenceClient, number: int, sha: str, state: str, description: str) -> int:
     """Never post a result for a head that moved during evaluation."""
     try:
-        current = object_value(client.get_object(f"pulls/{number}").get("head")).get("sha")
+        pr = client.get_object(f"pulls/{number}")
+        current = object_value(pr.get("head")).get("sha")
         if current != sha:
             print(f"skip: pr={number} sha={sha} reason=head_moved")
             return 1
+        if state == "success" and object_value(pr.get("base")).get("ref") != "main":
+            client.post_status(sha, "error", f"integrity=fail sha={sha} reason=base_changed")
+            return 1
         client.post_status(sha, state, description)
     except IntegrityError:
+        if state == "success":
+            with suppress(IntegrityError):
+                client.post_status(sha, "error", f"integrity=fail sha={sha} reason=final_pr_fetch_failed")
         print(f"skip: pr={number} sha={sha} reason=status_post_failed")
         return 1
     return 0
@@ -137,6 +173,12 @@ def check_inputs(
     current_reviews = [item for item in current_bodies if item.splitlines()[:1] == [review_marker]]
     if not current_evals or not current_reviews or current_evals[-1] != body or current_reviews[-1] != review_body:
         return fail(client, number, sha, "evidence_changed", error=True)
+    try:
+        main_numbers = main_prs_at_head(client, sha)
+    except IntegrityError:
+        return fail(client, number, sha, "main_roster_fetch_failed", error=True)
+    if main_numbers != [number]:
+        return fail(client, number, sha, "shared_or_missing_main_head", error=True)
     posted = post_current(
         client,
         number,
@@ -153,16 +195,27 @@ def gate_pr(client: EvidenceClient, number: int, max_bytes: int, pending_ttl: in
     """Attest only exact-head evidence and fail closed on live-fetch errors."""
     del pending_ttl
     count: object = None
+    base: object = None
     try:
         pr = client.get_object(f"pulls/{number}")
         head = object_value(pr.get("head"))
         sha = head.get("sha")
+        base = pr.get("base")
         count = pr.get("changed_files")
     except IntegrityError:
         sha = None
     if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
         print(f"skip: pr={number} reason=head_sha_fetch_failed")
         return 1
+    try:
+        base_ref = object_value(base).get("ref")
+    except IntegrityError:
+        return fail(client, number, sha, "base_invalid", error=True)
+    if not isinstance(base_ref, str) or not base_ref:
+        return fail(client, number, sha, "base_invalid", error=True)
+    if base_ref != "main":
+        print(f"skip: pr={number} sha={sha} reason=non_main_base")
+        return 0
     if not isinstance(count, int) or isinstance(count, bool) or count < 1:
         return fail(client, number, sha, "file_count_invalid", error=True)
     try:
