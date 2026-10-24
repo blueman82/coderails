@@ -49,7 +49,7 @@ class ActionsRunnerTests(unittest.TestCase):
         self.assertEqual(select_prs(pages, "pull_request_target", {"pull_request": {"number": "7"}}), [])
 
     def test_default_diff_limit_admits_current_roadmap_size(self) -> None:
-        """The deployed entrypoint passes the 512 KiB bound to the policy."""
+        """The deployed entrypoint passes the finite 768 KiB bound to the policy."""
         with tempfile.TemporaryDirectory() as directory:
             event = Path(directory) / "event.json"
             event.write_text(json.dumps({"pull_request": {"number": 7}}))
@@ -65,7 +65,7 @@ class ActionsRunnerTests(unittest.TestCase):
                 patch("integrity_actions.gate_pr", return_value=0) as gate,
             ):
                 self.assertEqual(main(), 0)
-            gate.assert_called_once_with(client.return_value, 7, 524288, 0)
+            gate.assert_called_once_with(client.return_value, 7, 786432, 0)
 
 
 if __name__ == "__main__":
