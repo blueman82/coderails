@@ -41,7 +41,7 @@ If CLAUDE.md, GEMINI.md, or AGENTS.md says "don't use TDD" and a skill says "alw
 
 ## Platform Adaptation
 
-Skills speak in actions ("dispatch a subagent", "create a todo", "read a file") rather than naming any one runtime's tools. For per-platform tool equivalents and instructions-file conventions, see [claude-code-tools.md](references/claude-code-tools.md), [codex-tools.md](references/codex-tools.md), [copilot-tools.md](references/copilot-tools.md), [gemini-tools.md](references/gemini-tools.md), [pi-tools.md](references/pi-tools.md), and [antigravity-tools.md](references/antigravity-tools.md). Gemini CLI users get the tool mapping loaded automatically via GEMINI.md.
+Skills describe actions such as "dispatch a subagent" and "read a file". Use the tool and instructions-file mapping for your platform: [Claude Code](references/claude-code-tools.md), [Codex](references/codex-tools.md), [Copilot CLI](references/copilot-tools.md), [Gemini CLI](references/gemini-tools.md), [Pi](references/pi-tools.md), or [Antigravity](references/antigravity-tools.md). Gemini CLI loads its mapping through GEMINI.md.
 
 # Using Skills
 

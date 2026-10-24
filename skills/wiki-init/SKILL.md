@@ -8,11 +8,11 @@ model: sonnet
 
 Bootstrap an LLM Wiki for the current project based on Karpathy's LLM Wiki pattern: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
 
-The core idea: instead of re-deriving knowledge from raw code on every question, the LLM incrementally builds and maintains a persistent wiki — a structured, interlinked collection of markdown files that compounds over time. The human browses it in Obsidian. The LLM does the bookkeeping.
+The LLM builds and maintains a persistent wiki. It adds links and updates pages as the project changes. The human browses the wiki in Obsidian. This reduces repeated work from raw code.
 
 ## Prerequisites
 
-Use Obsidian to browse the vault. `qmd` is optional: without it, read `index.md` and linked pages directly. Install matplotlib only when creating charts; install any build tools required by your chosen optional tooling. This plugin does not bundle a wiki setup script.
+Use Obsidian to browse the vault. `qmd` is optional; without it, read `index.md` and linked pages. Install matplotlib only if you create charts. Install other build tools only for optional tooling that needs them. This plugin has no wiki setup script.
 
 The plugin also bundles Obsidian config files and the Marp plugin in `assets/` — these get copied into the vault in Step 3.
 
@@ -37,7 +37,7 @@ Based on the project, propose page types and directory structure. Do NOT use har
 - **Library**: modules/, apis/, patterns/, migrations/, sources/
 - **Infrastructure**: services/, resources/, runbooks/, incidents/, sources/
 
-Common across all projects: `index.md` (catalog), `log.md` (chronological), `templates/` (page skeletons), `sources/` (ingested PRs), `investigations/` (filed-back answers). Schema lives in the project directory as `AGENTS-wiki-schema.md`, linked from a slim `AGENTS.md` entry point — not inside the vault.
+Every vault has `index.md` for the catalog and `log.md` for the history. It also has `templates/`, `sources/`, and `investigations/`. For a new project, put `AGENTS-wiki-schema.md` in the project directory and link to it from `AGENTS.md`. Keep the schema outside the vault.
 
 Present the proposal and iterate until the user approves. Include 3-5 seed pages you'd create first.
 
@@ -45,7 +45,7 @@ Present the proposal and iterate until the user approves. Include 3-5 seed pages
 
 1. Determine project name from current directory or CLAUDE.md.
 2. Ask the user where the vault should live. Default suggestion: `<project-parent-dir>/<project-name>-wiki/` (sibling of the current project directory). Accept any path they provide. Set the shell variable `VAULT` to this path.
-3. Locate the skill's bundled assets. The assets live next to this SKILL.md file, in the `assets/` subdirectory. Set the shell variable `ASSETS` to the absolute path of that directory. On a typical Claude Code install this is `~/.claude/skills/wiki-init/assets`. Verify it exists and contains `obsidian-plugins/marp/main.js` before proceeding — if it doesn't, stop and ask the user to reinstall the skill.
+3. Locate the bundled `assets/` directory next to this SKILL.md file. Set `ASSETS` to its absolute path. A typical Claude Code path is `~/.claude/skills/wiki-init/assets`. Check that `obsidian-plugins/marp/main.js` exists. If it does not, stop and ask the user to reinstall the skill.
 4. Create the vault and init git:
    ```bash
    mkdir -p "$VAULT/.obsidian/plugins"
@@ -70,7 +70,7 @@ Present the proposal and iterate until the user approves. Include 3-5 seed pages
    grep -q '"marp"' "$VAULT/.obsidian/community-plugins.json" || { echo "FATAL: community-plugins.json missing marp entry"; exit 1; }
    ```
    If any check fails, stop. Do not improvise. Tell the user what failed and ask for help.
-7. Create the wiki content directories (one per approved page type) plus `templates/`. Also create `assets/` if the project expects matplotlib charts or other generated images in the wiki — it's optional, not required for every vault:
+7. Create one directory for each approved page type and create `templates/`. Create `assets/` only if the wiki will hold charts or other generated images:
    ```bash
    cd "$VAULT" && mkdir -p templates <page-type-1> <page-type-2> ...
    # optional, only if charts/images are expected:
@@ -97,21 +97,23 @@ Discuss pages with the user as you create them — don't auto-ingest silently.
 
 ### Step 6: Create AGENTS.md and AGENTS-wiki-schema.md
 
-Create two files in the project directory (not the wiki vault):
+For a new project's wiki, create two files in the project directory, outside the vault:
 
-- **`AGENTS.md`** — a slim entry point. It points to `AGENTS-wiki-schema.md` as the source of truth for wiki conventions and, if the project already has other `AGENTS.md` content (a working guide, etc.), coexists with it rather than replacing it.
-- **`AGENTS-wiki-schema.md`** — the actual schema the LLM reads at conversation start. Include: wiki location, three layers, page types, page format, search, Ingest/Query/Lint workflows, conventions, evolution note. The Search section must note that `qmd` is optional — a fallback to reading `index.md` directly — so a machine without qmd isn't left with unconditional `qmd` instructions.
+- **`AGENTS.md`** — a short entry point to `AGENTS-wiki-schema.md`. Keep any existing working guide in the same file.
+- **`AGENTS-wiki-schema.md`** — the wiki schema. Include the vault location, three layers, page types, page format, search, Ingest/Query/Lint workflows, conventions, and an evolution note. Say that `qmd` is optional. Without it, readers use `index.md` and its links.
 
-**List every directory Claude will write to in the Page types section of
-`AGENTS-wiki-schema.md`.** Include `templates/` and `assets/` as structural
+**List every directory Claude will write to in the Page types section.**
+For a new project, this section is in `AGENTS-wiki-schema.md`. For Coderails,
+it is in `AGENTS.md`. List `templates/` and `assets/` as structural
 directories, not page types.
 
-For the Coderails plugin's **own vault**, also write `wiki.schema.json` at the
-plugin repository root. Keep its `page_types` and `structural_dirs` lists
-aligned with the Page types section. `hooks/scripts/wiki_taxonomy_gate.py`
-reads that JSON as its write allow-list. This gate applies only to the vault
-named in this plugin's `.coderails/workflow.config.yaml`. Running this skill
-for another project's vault does not place that vault under this gate.
+For the Coderails plugin's **own vault**, use the existing `## Wiki schema`
+section in the plugin's `AGENTS.md`. Do not create a separate
+`AGENTS-wiki-schema.md` for Coderails. Also maintain `wiki.schema.json` at the
+plugin root. Keep its `page_types` and `structural_dirs` lists aligned with
+the Page types section. `hooks/scripts/wiki_taxonomy_gate.py` uses that JSON
+as its write allow-list. The gate applies only to the vault named in this
+plugin's `.coderails/workflow.config.yaml`.
 
 When the gate identifies the plugin's own vault, reads a valid schema, and
 finds at least two listed directories on disk, it rejects a write to an
@@ -127,13 +129,16 @@ creating most of the vault structure.
 
 ### Step 7: Update CLAUDE.md
 
-Add near the top of the project's CLAUDE.md:
+For a new project, add this text near the top of its CLAUDE.md:
 
 ```markdown
 ## Wiki Knowledge Base
 
 **At the start of every conversation**, read `AGENTS.md` in this directory — the entry point — which links to `AGENTS-wiki-schema.md` for wiki maintenance protocols. The <project> wiki is a persistent, compounding knowledge base maintained by Claude and browsed by <user> in Obsidian. The wiki vault lives at `<vault-path-chosen-in-step-3>`.
 ```
+
+For Coderails itself, keep `CLAUDE.md` as a thin pointer to `AGENTS.md`.
+The wiki schema is in `AGENTS.md` and `wiki.schema.json`.
 
 ### Step 8: Setup Tooling
 

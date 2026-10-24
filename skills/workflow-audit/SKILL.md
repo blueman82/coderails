@@ -6,11 +6,11 @@ model: sonnet
 
 # Workflow Audit
 
-Mines Claude Code session transcripts for tool-use patterns that repeat across sessions, judges which ones are genuine candidates for a new skill, and creates each proposed skill through the normal `superpowers:writing-skills` TDD process and a full PR gate.
+Find repeated tool-use patterns in Claude Code session transcripts. A separate judge selects candidates for new skills. Create each proposed skill through `superpowers:writing-skills` TDD and the full PR gate.
 
 ## Overview
 
-Four stages: scan transcripts into tool-use event sequences, cluster repeated n-grams across sessions, hand the clusters to a fresh judge subagent for propose/reject verdicts, then carry every `propose` verdict forward — straight to creation in-session by default, or to a dashboard queue entry if the run is in queue-mode (section 5), never both. Nothing is created that the judge rejected.
+The audit has four stages. Scan transcripts into tool-use sequences. Cluster repeated n-grams across sessions. Ask a fresh judge subagent to propose or reject each cluster. Send each proposal to one destination: in-session creation by default, or a dashboard queue in queue-mode (section 5). Never create a rejected candidate.
 
 ## 1. Scope mapping
 
@@ -35,9 +35,11 @@ python3 skills/workflow-audit/scripts/scan_transcripts.py <scan args> \
   | python3 skills/workflow-audit/scripts/cluster_ngrams.py --min-sessions 3
 ```
 
-`scan_transcripts.py` (full contract: `--help`) emits one JSON line per session: tool names plus a privacy-whitelisted `head` (first two Bash command tokens, the Skill name, or the Agent subagent_type — nothing else). `cluster_ngrams.py` (full contract: `--help`) consumes that stream and emits one JSON object: n-grams (n=2..5) that recur across `--min-sessions` (default 3) distinct sessions, capped at `--top` (default 50) clusters.
+`scan_transcripts.py` emits one JSON line per session. Each line has tool names and a privacy-whitelisted `head`: two Bash command tokens, the Skill name, or the Agent subagent_type. It emits nothing else from the transcript. See `--help` for its full contract.
 
-**Diagnostics are not noise.** `jq_parse_error:<file>` or `jq_parse_error:<line-no>` lines on stderr are real parse failures — surface them, don't swallow them. An empty `clusters` array is a legitimate result ("no repeated patterns found at this threshold") — report it plainly and stop; don't lower the threshold or invent candidates to fill the gap.
+`cluster_ngrams.py` consumes that stream. It emits one JSON object with n-grams of length 2–5 that recur across distinct sessions. The default `--min-sessions` is 3. The default `--top` cap is 50 clusters. See `--help` for its full contract.
+
+**Report diagnostics.** A `jq_parse_error:<file>` or `jq_parse_error:<line-no>` line on stderr is a parse failure. Do not suppress it. An empty `clusters` array means no repeated pattern met the threshold. Report that result and stop. Do not lower the threshold or invent candidates.
 
 ## 4. Judge stage
 
@@ -46,18 +48,14 @@ Read `references/judge-contract.md` in full, then spawn exactly one fresh sonnet
 1. The cluster JSON — the full stdout object from `cluster_ngrams.py`.
 2. The existing-skill list — the `name` and `description` frontmatter lines from every `skills/*/SKILL.md` in the repo.
 
-**The judge receives nothing else.** No transcript content, no conversation history, no orchestrator commentary. This is a deliberate privacy boundary: the judge's entire vocabulary is tool names, whitelisted heads, counts, session ids, and n-gram lengths — the same boundary `scan_transcripts.py` and `cluster_ngrams.py` already enforce on their own output. The judge returns one propose/reject verdict per cluster per the contract's schema.
+**The judge receives nothing else.** Do not send transcript content, conversation history, or orchestrator commentary. Its input is limited to tool names, whitelisted heads, counts, session ids, and n-gram lengths. The scanner and clusterer enforce the same boundary. The judge returns one propose/reject verdict per cluster under the contract schema.
 
 ## 5. Queue-mode output (optional) — mutually exclusive with in-session creation
 
-A run either creates in-session (the default: every `propose` verdict goes
-straight to section 8, no queue entries written) **or** defers to the
-dashboard (queue-mode: every `propose` verdict is written as a queue entry
-and the run does NOT also create in-session). Never both for the same run
-— a candidate is created by exactly one path, never twice. Choose
-queue-mode when the session wants proposals surfaced on the dashboard for
-the owner to trigger builds from at a time of their choosing, instead of
-building them immediately in-session.
+A run uses one creation path. By default, each `propose` verdict goes to
+section 8 for in-session creation. Queue-mode writes each proposal to the
+dashboard instead. Do not create the same proposal in-session in queue-mode.
+Use queue-mode when the owner wants to start builds from the dashboard later.
 
 To run in queue-mode, pipe each `verdict: "propose"` judge output through
 the writer script, once per candidate, instead of proceeding to section 8:
@@ -69,31 +67,25 @@ echo "$JUDGE_VERDICT_JSON" | python3 skills/workflow-audit/scripts/write_queue_e
   --sessions "$CLUSTER_SESSIONS_JSON"
 ```
 
-**The dashboard build trigger is owner-initiated, not an audit surface.**
-A dashboard "Approve" click on one of these entries flips its on-disk
-`status` from `pending` to `approved` and triggers a build — the
-dashboard's approve-path spawns a detached headless build that
-re-validates the entry's content hash and drives the section-8 create
-step (see `docs/REFERENCE.md`'s "Approve-click build runner" entry for the
-full runner contract). This is the owner clicking a button on their own
-initiative, not the session pausing to ask — it never blocks or stalls a
-session, and it is the sole creation path for a queue-mode candidate.
-**A stale or context-free status flip is not equivalent to a live owner
-exchange** — an `approved` queue entry carries real consequence, so treat
-the moment of clicking Approve with the same weight as any other consent
-that triggers action, not less because it happened outside a live
-conversation. The runner never merges the resulting skill PR; the owner
-reviews and merges it by hand.
+**The dashboard build trigger is owner-initiated.** An "Approve" click changes
+an entry from `pending` to `approved` and starts a detached headless build.
+The build checks the entry's content hash, then runs the section-8 create
+step. See "Approve-click build runner" in `docs/REFERENCE.md` for the full
+contract. The click is the only creation path for a queue-mode candidate.
+It does not pause this audit session.
 
-**Zero clicks is a complete, successful run here too** — an audit run
-that writes queue entries nobody has approved yet ends cleanly; there is
-no retry, no nag, no follow-up ask.
+An `approved` queue entry starts work, so treat the click as consequential
+consent. A stale status change does not replace a live owner exchange. The
+runner never merges the resulting skill PR; the owner reviews and merges it.
 
-The queue file itself carries only the D2-whitelisted fields already
-vetted by the judge contract (`cluster_ngram`, `count`, `sessions`,
-`task_summary`, `proposed_name`, `proposed_description`) — never verbatim
-transcript content — and is never committed to any repo
-(`~/.claude/coderails-dashboard/approvals/` lives outside every repo).
+**Zero clicks is a complete run.** The audit ends after it writes queue
+entries. It does not retry, nag, or ask again if nobody approves them.
+
+The queue file carries only judge-approved D2-whitelisted fields:
+`cluster_ngram`, `count`, `sessions`, `task_summary`, `proposed_name`, and
+`proposed_description`. It never contains verbatim transcript content.
+The queue lives outside every repo at `~/.claude/coderails-dashboard/approvals/`.
+Do not commit it.
 
 ## 6. Proposal chart
 
@@ -107,9 +99,9 @@ Present one row per candidate cluster to the owner:
 | Proposed name / description | judge's `proposed_name` / `proposed_description` |
 | Verdict | judge's `verdict` (+ `reject_reason` if rejected) |
 
-Only rows with `verdict: "propose"` go forward (to creation or a queue entry, per section 7); rejected clusters are reported (with their reason) but nothing further is done with them.
+Only rows with `verdict: "propose"` go to creation or the queue. Report rejected clusters and their reasons. Take no further action on them.
 
-**Privacy invariant.** The chart and every downstream artifact (proposal file, wrap-up report) contain only tool names, whitelisted heads, counts, and session ids — never verbatim transcript prose, file contents, or reconstructed intent beyond what those fields literally say. Any proposal artifact written to disk stays local (scratch or loop-state dir) and is never committed to the repo.
+**Privacy invariant.** The chart and downstream artifacts contain only tool names, whitelisted heads, counts, and session ids. Do not include transcript prose, file contents, or inferred intent. Keep proposal files in local scratch or loop state. Never commit them.
 
 ## 7. Proceed to creation
 
@@ -123,9 +115,10 @@ The judge's `propose` or `reject` verdict is the only filter. Create nothing tha
 
 For each proposed candidate, in sequence, never batched:
 
-1. Author the skill via `/skill-creator:skill-creator`, as the owner directed on 2026-07-07. Specify it from the candidate's judge-contract fields. In a headless run, skip the human-facing eval-viewer step. Skill-creator has no autonomous "done" signal, so use `superpowers:writing-skills`'s RED/GREEN/REFACTOR discipline as the stop condition. RED: run a baseline pressure test with a fresh subagent and no new skill; record what it does. GREEN: write the smallest `SKILL.md` that addresses the observed failures. REFACTOR: repeat the test under the same pressure and close any loopholes.
-2. Land the new skill in the coderails repo as a plugin skill, via its own branch and PR, through the full gate sequence: `test_gate` → `pr-review-toolkit:review-pr` → security review → `post-review` → pr-scope evals → merge. Never commit straight to `main`, and never write into a user's personal `~/.claude/skills` directory — this is a repo skill, not a local one.
-3. **Stop after this skill is merged before starting the next proposed candidate.** Batching multiple skill creations without testing and shipping each individually is the exact anti-pattern `superpowers:writing-skills` prohibits — apply it here too.
+1. Author the skill via `/skill-creator:skill-creator`, as the owner directed on 2026-07-07. Use the candidate's judge-contract fields. In a headless run, skip the human-facing eval viewer.
+   Skill-creator has no autonomous "done" signal. Use `superpowers:writing-skills` RED/GREEN/REFACTOR as the stop rule. In RED, test a fresh subagent without the new skill and record its behavior. In GREEN, write the smallest `SKILL.md` that fixes the observed failures. In REFACTOR, repeat the same pressure test and close any loopholes.
+2. Add the skill to the Coderails repo on its own branch and PR. Run the full gate sequence: `test_gate` → `pr-review-toolkit:review-pr` → security review → `post-review` → PR-scope evals → merge. Do not commit to `main` or write to `~/.claude/skills`. This is a repo skill.
+3. **Wait for this skill to merge before starting the next candidate.** Test and ship each skill separately. Do not batch their creation.
 
 ## 9. Wrap-up
 

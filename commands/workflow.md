@@ -27,15 +27,15 @@ $ARGUMENTS
 This command runs the code-change workflow. Follow these rules:
 
 - **Worktree before code**: create a worktree for every feature/bug branch — never edit on main
-- **Engineering-principles pre-flight**: run `config.engineering_principles_skill` (default: `/engineering-principles-python`) before pushing if the diff touches paths listed in `config.engineering_principles_paths` (or any file with ≥20 lines changed)
+- **Engineering-principles pre-flight**: run `config.engineering_principles_skill` before pushing when the diff touches configured paths or changes ≥20 lines in one file. The default skill is `/engineering-principles-python`.
 - **Adversarial PR review**: use `/pr-review-toolkit:review-pr`, not manual Agent fan-out — runs 4+ specialist agents in parallel
 - **Apply findings inline**: on authorized ship-it, apply blocking and worthwhile review findings directly; do not re-ask per finding
-- **Wiki after merge**: after every merge run `/wiki-ingest` (if `config.wiki_path` is non-null); also run `/wiki-lint` immediately only when `config.wiki_git_worktree` is `false` (direct-write) — for PR flow (`true`, or the key absent) `/wiki-lint` is deferred until the ingest PR merges, see Phase 5
+- **Wiki after merge**: run `/wiki-ingest` after every merge when `config.wiki_path` is set. Run `/wiki-lint` immediately only for direct-write wiki flow (`config.wiki_git_worktree: false`). For PR flow, run lint after the ingest PR merges. See Phase 5.
 - **Parallel tool calls**: when tool calls or file reads do not depend on each other, run them in parallel in one message.
 
 Phase 2b reviews the *design page* before coding. Phase 3 (`/pr-review-toolkit:review-pr`) reviews the *code* before merge. Run both for non-trivial features.
 
-Pause for the developer during the code and iteration loop, then again for final ship-it authorization. Run the other steps in sequence. The Phase 3 review chain is: `review-pr → post-review → (Phase 4 ship-it pause) → /merge`.
+Pause for the developer during code and iteration. Pause again for final ship-it authorization. Run the other steps in sequence. The review chain is `review-pr → post-review → (Phase 4 ship-it pause) → /merge`.
 
 ## Parse Arguments
 
@@ -115,7 +115,7 @@ If none of those apply, skip this phase and go straight to Code.
 | New dependency-injection protocol or service registration pattern | `type-design-analyzer` |
 | Novel test surface or integration boundary | `pr-test-analyzer` |
 
-Always pick at least 2. Cap at 3. Brief each agent with the full design investigation page content + the specific sub-questions most relevant to its expertise (not just "review this" — give it attack vectors).
+Pick at least 2 agents and no more than 3. Give each agent the full design page. Add specific questions and attack vectors for its area.
 
 **After the agents report:**
 1. Enumerate every finding — do not skip any.
@@ -136,25 +136,25 @@ Hand control back to the user. They will:
 
 Do not proceed to Phase 3 until the user gives that signal. Do not nag.
 
-**Pre-flight when the user signals ready:** if `config.engineering_principles_paths` is non-null and the cumulative diff against the base branch touches any of those paths — or any file with ≥20 lines changed — run `config.engineering_principles_skill` (default: `/engineering-principles-python`) on those files before calling `/push`.
+**Pre-flight when the user signals ready:** Check the cumulative diff against the base branch. If it touches a configured engineering-principles path or changes ≥20 lines in one file, run `config.engineering_principles_skill` on those files before `/push`. The default skill is `/engineering-principles-python`.
 
-Note: `/push` already runs this pre-flight itself for paths in `config.engineering_principles_paths`, so if you forget, `/push` will catch it. The reason to also run it here is to catch non-config-listed large diffs that `/push`'s pre-flight misses.
+`/push` also runs this check for configured paths. This earlier check covers large diffs outside those paths.
 
 ## Phase 3 — Push + Adversarial Review (auto after ready signal)
 
 Execute in order — do not pause between these:
 
 1. `/coderails:push` — stages, commits, pushes, opens PR with branch-protection reviewers, auto-resolves JIRA on PR creation (if `config.jira` non-null). Capture the PR URL from the output.
-2. `/pr-review-toolkit:review-pr <PR#>` — runs all applicable specialist agents (code-reviewer, pr-test-analyzer, silent-failure-hunter, type-design-analyzer). Use the PR number captured from `/coderails:push` — the hook requires the args to start with the PR number. Passing just the number is sufficient; the command defaults to all reviews when no aspect keyword is given.
+2. `/pr-review-toolkit:review-pr <PR#>` — runs the applicable specialist agents: code-reviewer, pr-test-analyzer, silent-failure-hunter, and type-design-analyzer. Use the PR number from `/coderails:push`. The hook requires it at the start of the arguments. The number alone selects all reviews.
 2b. **Verify engineering principles** — run `/engineering-principles` on the cumulative diff against the base branch. Apply the same rule as `/push`'s pre-flight: deviations from documented architectural conventions are blocking; style notes are non-blocking. Feed any blocking finding into step 3's apply loop.
-2c. **Simplify** — run `/simplify` on the diff (built-in command). `review-pr`'s own `code-simplifier` agent only runs "after passing review" and is not guaranteed, so this is the explicit simplify pass; route its changes through step 3.
+2c. **Simplify** — run the built-in `/simplify` command on the diff. `review-pr` might not run its `code-simplifier` agent. Apply useful changes through step 3.
 3. Apply worthwhile findings inline — do not re-ask per finding. Push the follow-up commit. Classify each finding as:
    - **Blocking** (apply silently): correctness bug, protocol violation, silent-failure pattern, missing test for changed public contract, missing dependency-injection registration
    - **Worthwhile** (apply silently): readability wins, better names, extracted helpers that clearly reduce duplication
    - **Cosmetic/subjective** (skip, note in PR body): style preferences, naming opinions without a concrete defect
 4. Post a ledger comment on the PR summarising what was applied vs. skipped and why.
-5. `/coderails:post-review <PR#>` — post the SHA-bound review artifact on the PR. This converts the ephemeral review output into a durable, machine-verifiable GitHub comment that `/merge` requires before merging. Run this after all findings are applied and the follow-up commit is pushed, so the artifact is stamped against the final head SHA. The chain is: `review-pr → (apply findings) → post-review → (Phase 4 ship-it pause) → /merge`.
-6. Use the PR evals frozen before implementation at plan completion. Run their checks and grade the result with `/coderails:task-evals`. If the frozen suite is missing, stop and disclose that gap; do not present a new suite as a pre-build freeze. Invoke `/coderails:post-evals <PR#>` to post the final-head eval artifact. This artifact does not satisfy the hook's `review-pr` requirement.
+5. `/coderails:post-review <PR#>` — post the SHA-bound review artifact on the PR. `/merge` requires this durable GitHub comment. Apply findings and push the follow-up commit first. The artifact must name the final head SHA. The chain is `review-pr → (apply findings) → post-review → (Phase 4 ship-it pause) → /merge`.
+6. Use the PR evals frozen before implementation at plan completion. Run their checks and grade them with `/coderails:task-evals`. If the frozen suite is missing, stop and report the gap. Do not present a new suite as a pre-build freeze. Run `/coderails:post-evals <PR#>` for the final-head eval artifact. This artifact does not meet the hook's `review-pr` requirement.
 
 Report the PR URL, review summary, and resolved JIRA key (if applicable).
 
@@ -171,7 +171,7 @@ Execute in order:
 1. `/coderails:merge` — merges the PR, switches back to `main`, pulls latest. Do not re-ask about merge strategy flags.
 2. **If `config.wiki_path` is non-null**: `/wiki-ingest` — creates the source page in `<config.wiki_path>/sources/pr_<N>_*.md`, updates affected wiki pages, refreshes the index, appends to the log. Never write wiki pages directly — always use the skill.
 3. **If `config.wiki_path` is non-null AND `config.wiki_git_worktree` is `false` (direct-write)**: `/wiki-lint` — checks for contradictions, stale pages, orphans, missing cross-references. Fix anything directly related to this PR; defer anything else.
-   **If `config.wiki_git_worktree` is `true`, or the key is absent from config (wiki-ingest's own Step 0 fail-safe default is `true` — PR flow), do not run `/wiki-lint` here.** The wiki-ingest PR from step 2 is still open — `/wiki-lint` audits the vault's merged state (`origin/main`), which doesn't yet include the pages just ingested (same reasoning as wiki-ingest's own Step 8). Run `/wiki-lint` as a separate follow-up once that PR has actually merged.
+   **If `config.wiki_git_worktree` is `true` or absent, do not run `/wiki-lint` here.** The default is PR flow. The ingest PR is still open, while `/wiki-lint` reads the merged vault at `origin/main`. Run lint after the ingest PR merges. See wiki-ingest Step 8.
 
 Report: merge commit SHA, wiki source page path (if wiki enabled), any lint findings that need follow-up (if lint ran).
 
@@ -188,7 +188,7 @@ If `git branch -d` refuses because the branch is not fully merged into local `ma
 
 ## Escape hatches
 
-- **Docs-only change:** skip `/workflow` and edit on `main` directly. The `no_edit_on_main.py` hook blocks code files (`.py/.ts/.tsx/.js/.jsx/.go`) on `main`/`master`, plus plugin source carried in markdown (`skills/*/SKILL.md`, `commands/*.md`) when you're in a plugin repo — so *plain* docs and config (README, `docs/*.md`, JSON) pass freely, but editing a `SKILL.md` or a command `.md` on `main` is blocked. A one-line *code* (or plugin-source) hotfix still needs a branch (run `/coderails:prep`) or a `settings.json` Write/Edit permission override — the hook blocks regardless of size.
+- **Docs-only change:** skip `/workflow` and edit on `main` directly. The `no_edit_on_main.py` hook blocks `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, and `.go` files on `main` or `master`. In a plugin repo, it also blocks `skills/*/SKILL.md` and `commands/*.md`. Plain docs and config files can be edited on `main`. A code or plugin-source fix still needs a branch (`/coderails:prep`) or a `settings.json` Write/Edit permission override. File size does not change the hook rule.
 - **Phase skip:** The user can interrupt at any time and tell you to skip a specific phase or re-enter a prior phase. Obey; don't argue for the canonical sequence.
 - **Standalone sub-commands:** every phase's sub-command (`/coderails:prep`, `/coderails:push`, `/pr-review-toolkit:review-pr`, `/coderails:merge`, `/wiki-ingest`, `/wiki-lint`) remains callable on its own for edge cases. `/coderails:workflow` is the happy path, not the only path.
 

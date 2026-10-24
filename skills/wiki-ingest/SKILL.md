@@ -166,10 +166,10 @@ git commit -m "wiki: ingest <description>"
 
 ### Step 7: Report
 
-Pages created/updated, new wiki-links added, gaps identified. **If worktree flow: the PR URL/number is the final deliverable — report it and stop. The PR is not merged by this skill; a human, or an explicit separate follow-up instruction, merges it.** Also report `WORKTREE_PATH` and the cleanup command from Step 6, so whoever merges the PR knows to remove the worktree afterward.
+Report the pages changed, new wiki links, and gaps. **For worktree flow, report the PR URL or number and stop.** This skill does not merge the PR. A human or an explicit follow-up instruction handles that step. Also report `WORKTREE_PATH` and the Step 6 cleanup command.
 
 ### Step 8: Run wiki-lint
 
-**If `wiki_git_worktree` is `false` (direct-write): always run `coderails:wiki-lint` immediately after ingest completes.** An ingest without a follow-up lint leaves the new/updated pages unverified — treat ingest and lint as one combined step, not two independently optional ones. (`agentic-loop` batches this at the cluster level when running many ingests across a loop's PRs; a solo invocation of this skill still pairs immediately, since there's no larger batch to wait for.)
+**If `wiki_git_worktree` is `false` (direct-write), run `coderails:wiki-lint` after ingest.** It checks the vault after the changed pages enter it. A solo ingest pairs with lint. During an agentic loop, the loop can batch lint across several wiki ingests.
 
-**If `wiki_git_worktree` is `true` (PR flow): do not run wiki-lint yet.** The ingest PR from Step 6 is still open — `wiki-lint` audits the vault's current merged state (`origin/main`), which does not yet include these pages, so running it now would not verify them. Run `coderails:wiki-lint` as a separate follow-up once the ingest PR has actually merged.
+**If `wiki_git_worktree` is `true` (PR flow), wait to run wiki-lint.** The ingest PR is open. `wiki-lint` reads merged `origin/main`, which does not yet contain the new pages. Run `coderails:wiki-lint` after the ingest PR merges.

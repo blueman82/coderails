@@ -22,7 +22,11 @@ that and stop rather than answering a question you inferred.
 
 ### Step 1: Load the Schema
 
-The project's `CLAUDE.md` loads the git root's `AGENTS.md` at session start. Read its wiki schema section, or the `AGENTS-wiki-schema.md` file it links to. Coderails keeps the schema in `AGENTS.md` and the live page types in `wiki.schema.json`. If `AGENTS.md` is not in context, walk up from the current directory to the git root. Use the same walk-up pattern as `config_path` in `scripts/lib/config.py`. Check each level for `AGENTS.md`; a fork can start in a project subdirectory. If you do not find it, tell the user to run `/wiki-init` first. The wiki vault is a separate sibling repo, such as `../coderails-wiki`. The project's `.coderails/workflow.config.yaml` points to it. Do not look for `AGENTS.md` in the vault. A fork does not need to run from inside the vault.
+The project's `CLAUDE.md` loads `AGENTS.md` from the git root. Read its wiki schema section or the `AGENTS-wiki-schema.md` file it links to. Coderails keeps its schema in `AGENTS.md` and its live page types in `wiki.schema.json`.
+
+If `AGENTS.md` is not in context, search upward from the current directory to the git root. Follow the walk-up pattern in `scripts/lib/config.py`. Check each level; a fork can start in a project subdirectory. If the file is absent, tell the user to run `/wiki-init`.
+
+The vault is a separate repo, such as `../coderails-wiki`. The project's `.coderails/workflow.config.yaml` points to it. Do not look for `AGENTS.md` in the vault. The command can run outside the vault.
 
 The vault path and git flow are **not** read from AGENTS.md — they are the `wiki_path` and
 `wiki_git_worktree` flat keys in that same project's `.coderails/workflow.config.yaml`, resolved
@@ -36,7 +40,7 @@ absolute).
 
 1. Read `$vault/index.md` first — scan for relevant pages
 2. Read relevant wiki pages — drill into matches
-3. `qmd` is an optional accelerator — absent, rely on steps 1–2. Use the named `wiki` collection: `qmd query -c wiki "<question>"` for hybrid BM25 + vector search on open-ended questions; `qmd search -c wiki "<keywords>"` for fast BM25-only known-term lookups; `qmd get qmd://wiki/<file>` to fetch a specific page by path.
+3. Use `qmd` only if it is available. Otherwise, rely on steps 1–2. In the `wiki` collection, use `qmd query -c wiki "<question>"` for hybrid BM25 and vector search on open questions. Use `qmd search -c wiki "<keywords>"` for BM25 search on known terms. Use `qmd get qmd://wiki/<file>` for one page.
 4. Fall back to raw code/codebase only if the wiki doesn't cover the topic
 
 Synthesize the answer from wiki pages with citations: "According to [[page_name]]..."
@@ -62,6 +66,6 @@ When the answer reveals something non-obvious or reusable:
 
 **If `wiki_git_worktree` is `false`**: write directly and commit to the vault.
 
-After writing, reindex if `qmd` is available: `qmd update` (refreshes all configured collections), then `qmd embed -c wiki` (`update` must run first to pick up new/changed files; `embed` alone only refreshes already-known content hashes). Run `qmd collection add <vault-path> --name wiki` only during first-time setup when the `wiki` collection is missing; it is not routine maintenance.
+After writing, reindex if `qmd` is available. Run `qmd update` first to find new or changed files. Then run `qmd embed -c wiki` to refresh embeddings. Run `qmd collection add <vault-path> --name wiki` only during first-time setup if the collection is missing.
 
 Good answers compound the knowledge base. File back anything that took real effort to assemble.

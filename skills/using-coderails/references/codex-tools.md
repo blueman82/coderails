@@ -15,16 +15,16 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 | Dispatch a subagent (a skill naming an agent, e.g. `coderails:loop-worker`) | `spawn_agent` (see [Subagent dispatch requires multi-agent support](#subagent-dispatch-requires-multi-agent-support)) |
 | Multiple parallel dispatches | Multiple `spawn_agent` calls in one response |
 | Wait for subagent result | `wait_agent` |
-| Free up subagent slot when done | `close_agent` |
+| Free up a subagent slot | Wait for the agent to finish; this tool surface has no `close_agent` |
 | Task tracking ("create a todo", "mark complete") | `update_plan` |
 
 ## Instructions file
 
-When a skill mentions "your instructions file", on Codex this is **`AGENTS.md`** at the project root. Codex also reads `~/.codex/AGENTS.md` for global context, and an `AGENTS.override.md` (in the project tree or `~/.codex/`) takes precedence when present. Codex walks from the project root down to the current working directory, concatenating `AGENTS.md` files it finds along the way, up to `project_doc_max_bytes` (32 KiB by default).
+On Codex, "your instructions file" means **`AGENTS.md`** at the project root. Codex also reads `~/.codex/AGENTS.md` for global context. An `AGENTS.override.md` in the project tree or `~/.codex/` takes precedence. Codex loads `AGENTS.md` files from the project root down to the current directory. The default `project_doc_max_bytes` limit is 32 KiB.
 
 ## Personal skills directory
 
-User-level skills live at **`$CODEX_HOME/skills/`** (default `~/.codex/skills/`). Codex also reads the cross-runtime path **`~/.agents/skills/`** (shared with Copilot CLI and Gemini CLI). When both directories exist at the same scope, Codex loads them both as separate skill catalogs — Codex's docs don't currently document a precedence between them. Each skill is a subdirectory containing a `SKILL.md` (with `name` and `description` frontmatter).
+User-level skills live at **`$CODEX_HOME/skills/`** (default `~/.codex/skills/`). Codex also reads **`~/.agents/skills/`**, which Copilot CLI and Gemini CLI share. If both paths exist at the same scope, Codex loads both catalogs. Its docs do not state a precedence. Each skill has a `SKILL.md` with `name` and `description` frontmatter.
 
 ## Subagent dispatch requires multi-agent support
 
@@ -35,7 +35,7 @@ Add to your Codex config (`~/.codex/config.toml`):
 multi_agent = true
 ```
 
-This enables `spawn_agent`, `wait_agent`, and `close_agent` for skills like `superpowers:dispatching-parallel-agents` and `superpowers:subagent-driven-development`.
+This enables `spawn_agent` and `wait_agent` for skills such as `superpowers:dispatching-parallel-agents` and `superpowers:subagent-driven-development`. The current collaboration surface has no `close_agent`; a completed agent frees its slot.
 
 Legacy note: Codex builds before `rust-v0.115.0` exposed spawned-agent
 waiting as `wait`. Current Codex uses `wait_agent` for spawned agents. The

@@ -23,14 +23,18 @@ Periodically health-check the wiki. The LLM is good at finding inconsistencies, 
 
 ### Step 0: Load the Schema
 
-The project's `CLAUDE.md` loads the git root's `AGENTS.md` at session start. Read its wiki schema section, or the `AGENTS-wiki-schema.md` file it links to. Coderails keeps the schema in `AGENTS.md` and the live page types in `wiki.schema.json`. If `AGENTS.md` is not in context, walk up from the current directory to the git root. Use the same walk-up pattern as `config_path` in `scripts/lib/config.py`. Check each level for `AGENTS.md`; a fork can start in a project subdirectory. If you do not find it, tell the user to run `/wiki-init` first. The wiki vault is a separate sibling repo, such as `../coderails-wiki`. The project's `.coderails/workflow.config.yaml` points to it. Do not look for `AGENTS.md` in the vault. A fork does not need to run from inside the vault.
+The project's `CLAUDE.md` loads `AGENTS.md` from the git root. Read its wiki schema section or the `AGENTS-wiki-schema.md` file that it links to. Coderails keeps its schema in `AGENTS.md` and its live page types in `wiki.schema.json`.
+
+If `AGENTS.md` is not in context, search upward from the current directory to the git root. Follow the walk-up pattern in `scripts/lib/config.py`. Check each level; a fork can start in a project subdirectory. If the file is absent, tell the user to run `/wiki-init`.
+
+The vault is a separate repo, such as `../coderails-wiki`. The project's `.coderails/workflow.config.yaml` points to it. Do not look for `AGENTS.md` in the vault. The command can run outside the vault.
 
 `repo` — absolute path to the **code** repo root: the directory containing the `AGENTS.md` you just located. Step 2's staleness check compares against its git history, so resolve this explicitly rather than assuming cwd.
 
-The git/vault settings below are **not** read from AGENTS.md — they are flat keys in that same `repo`'s `.coderails/workflow.config.yaml`, resolved with the same walk-up pattern as `config_path` in `scripts/lib/config.py`: starting from `repo`, check each directory up to its git root for `.coderails/workflow.config.yaml`; the first one found wins.
+Read the git and vault settings from `.coderails/workflow.config.yaml` in that code repo, not from AGENTS.md. Start at `repo` and search upward to its git root. The first config file wins. This is the same walk-up rule as `config_path` in `scripts/lib/config.py`.
 
 - `wiki_path` — the wiki vault path; resolved relative to the directory containing that `workflow.config.yaml` unless already absolute. This is `vault` below.
-- `wiki_git_worktree` — whether to use worktree/PR flow (`true`) or write directly (`false`). Default when absent: **`true`** (PR flow) — the fail-safe choice, since defaulting to direct-write would silently start committing straight to the vault for a project that expected review.
+- `wiki_git_worktree` — `true` selects worktree/PR flow. `false` writes directly. The default is **`true`**, so a missing setting does not silently write to the vault.
 - `wiki_git_bypass_flag` — env var for PR creation/merge (e.g. `BYPASS_REVIEW=1`)
 - `wiki_git_pull_path` — path to pull after merge. Default when absent: skip the post-merge pull.
 - `wiki_stale_days` — age in days before a page becomes a **candidate** for the
