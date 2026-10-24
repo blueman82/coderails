@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Pure authority-object validation plus exact-id, atomic storage.
+
+Consumed by crack_on_gate (AskUserQuestion); action receipts are a separate schema (action_receipt.py).
+"""
+
+from __future__ import annotations
+
+import importlib
+import json
+import os
+import re
+import sys
+from contextlib import suppress
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, cast
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+FIELDS = (
+    "authority_id",
+    "loop_id",
+    "session_id",
+    "scope",
+    "denied",
+    "max_prs",
+    "expires_at",
+    "revocable",
+    "approval_required_for",
+)
+OPTIONAL_FIELDS = ("granted_by",)
+GRANTED_BY = ("command", "legacy_phrase")  # objects without the field read as legacy_phrase
+MERGE = "merge"
+
+
+def append_row(
+    command: str, outcome: str, reason_code: str, session_id: str, loop_id: str | None = None, base: Path | None = None
+) -> bool:
+    """Trace via hooks.scripts.lib.trace_row, imported by name so Codex type-checks see one module name."""
+    module = importlib.import_module("hooks.scripts.lib.trace_row")
+    return bool(module.append_row(command, outcome, reason_code, session_id, loop_id, base=base))
+
+
+def safe_session(session_id: object) -> bool:
+    """Accept only shell-safe, path-local IDs as written; never sanitise or merge identities."""
+    return (
+        isinstance(session_id, str)
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", session_id) is not None
+        and ".." not in session_id
+    )
+
+
+def authority_path(session_id: str, base: Path | None = None) -> Path | None:
+    """Return <loop dir>/<session_id>/authority.json, or None for an unsafe id."""
+    if not safe_session(session_id):
+        return None
+    override = os.environ.get("CLAUDE_AGENTIC_LOOP_DIR") or os.environ.get("CODERAILS_AGENTIC_LOOP_DIR")
+    root = base or Path(override or Path.home() / ".coderails/agentic-loop")
+    return root / session_id / "authority.json"
+
+
+def parse_time(value: object) -> datetime | None:
+    """Parse a timezone-aware ISO-8601 time, or None."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def string_list(value: object) -> bool:
+    """True for a list of nonempty strings."""
+    items = cast("list[object]", value) if isinstance(value, list) else None
+    return items is not None and all(isinstance(item, str) and item for item in items)
+
+
+def validate(obj: object, now: datetime) -> list[str]:
+    """Return every problem with an authority object; an empty list means valid and unexpired."""
+    if not isinstance(obj, dict):
+        return ["not_an_object"]
+    data = cast("dict[str, Any]", obj)
+    errors = [f"missing:{name}" for name in FIELDS if name not in data]
+    errors += [f"unknown:{name}" for name in data if name not in FIELDS + OPTIONAL_FIELDS]
+    if errors:
+        return errors
+    if not isinstance(data["authority_id"], str) or not data["authority_id"]:
+        errors.append("authority_id")
+    if data["loop_id"] is not None and (not isinstance(data["loop_id"], str) or not data["loop_id"]):
+        errors.append("loop_id")
+    if not safe_session(data["session_id"]):
+        errors.append("session_id")
+    for name in ("scope", "denied", "approval_required_for"):
+        if not string_list(data[name]):
+            errors.append(name)
+    max_prs = data["max_prs"]
+    if isinstance(max_prs, bool) or not isinstance(max_prs, int) or max_prs < 0:
+        errors.append("max_prs")
+    if "granted_by" in data and data["granted_by"] not in GRANTED_BY:
+        errors.append("granted_by")
+    if not isinstance(data["revocable"], bool):
+        errors.append("revocable")
+    expires = parse_time(data["expires_at"])
+    if expires is None:
+        errors.append("expires_at")
+    elif expires <= now:
+        errors.append("expired")
+    if errors:
+        return errors
+    if MERGE not in data["approval_required_for"]:
+        errors.append("approval_required_for_must_include_merge")
+    if set(data["scope"]) & set(data["denied"]):
+        errors.append("scope_denied_overlap")
+    return errors
+
+
+def write_authority(path: Path, obj: dict[str, Any]) -> bool:
+    """Write atomically (tmp + os.replace): a crash leaves the old file or none. False on any OSError."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        with suppress(OSError):
+            tmp.unlink()
+        return False
+    return True
+
+
+def read_authority(session_id: str, base: Path | None = None, now: datetime | None = None) -> dict[str, Any] | None:
+    """Return this exact session's valid, unexpired authority object, else None (nothing is granted).
+
+    A file whose embedded session_id differs from the requested id is refused and traced as foreign.
+    """
+    path = authority_path(session_id, base)
+    if path is None:
+        return None
+    try:
+        raw: object = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    data = cast("dict[str, Any]", raw)
+    if data.get("session_id") != session_id:
+        append_row("authority", "refused", "authority_refused_foreign", session_id, base=base)
+        return None
+    return None if validate(data, now or datetime.now(timezone.utc)) else data
+
+
+def clear_legacy_flags(session_id: str) -> None:
+    """Remove the pre-authority crack_on_active flags (Claude loop dir and Codex PLUGIN_DATA) for a safe session id."""
+    path = authority_path(session_id)
+    if path is None:
+        return
+    codex = Path(os.environ.get("PLUGIN_DATA", str(Path.home() / ".coderails" / "codex")))
+    for flag in (path.with_name("crack_on_active"), codex / "sessions" / session_id / "crack_on_active"):
+        with suppress(OSError):
+            flag.unlink()

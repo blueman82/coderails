@@ -21,7 +21,8 @@ def trace_path(session_id: str, base: Path | None = None) -> Path | None:
     """
     if not session_id or session_id in {"?", "."} or "/" in session_id or ".." in session_id or "\0" in session_id:
         return None
-    root = base or Path(os.environ.get("CLAUDE_AGENTIC_LOOP_DIR", str(Path.home() / ".coderails/agentic-loop")))
+    override = os.environ.get("CLAUDE_AGENTIC_LOOP_DIR") or os.environ.get("CODERAILS_AGENTIC_LOOP_DIR")
+    root = base or Path(override or Path.home() / ".coderails/agentic-loop")
     return root / session_id / "trace.jsonl"
 
 
