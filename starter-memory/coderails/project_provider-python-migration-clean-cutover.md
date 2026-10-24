@@ -6,7 +6,11 @@ type: project
 
 # Provider Python Migration: Clean Cutover
 
-> Supersession note (2026-09-21): This records the migration requirements and earlier work-unit position. The current checkout uses maintained Python entrypoints and schema 3 only; its old shell paths and active-node/resume details are historical, not a current dispatch plan. Use the owned session graph for current progress and the implementation plan for the preserved acceptance contract.
+> Supersession note (2026-09-21): This records migration requirements and an earlier work-unit
+> position. The current checkout uses maintained Python entry points and schema 3 only. The shell
+> paths and resume details below are historical. They are not a current dispatch plan. Use the owned
+> session graph for current progress. Use the implementation plan for the preserved acceptance
+> contract.
 
 ## Goal
 
@@ -21,7 +25,7 @@ Preserve provider-native dispatch, evidence binding, and safety gates.
 - The graph contract is a clean cutover: current schema only. Do not preserve, read, convert, dual-write, or grandfather historical or active graph state.
 - Keep provider-native dispatch and provider-local evidence. The shared contract must not replace either provider's agent loop.
 - Keep the five-second hook-input timeout, Git-internal trusted command allowance, `/bin/bash -c` behavior where required, failure denial, and 1,500-byte output cap when migrating Codex `test_gate.sh`.
-- All pre-existing quality violations are in scope: PEP 8/20/257, strict docstrings, Ruff, Black, comment quality, function/file-size checks, and coverage. Do not suppress findings, raise caps, add broad exclusions, or use `--no-verify`.
+- All existing quality violations are in scope. Check PEP 8/20/257, strict docstrings, Ruff, Black, comments, function and file size, and coverage. Do not suppress findings, raise caps, add broad exclusions, or use `--no-verify`.
 
 ## Constraints
 
@@ -37,7 +41,9 @@ The active Codex graph state is:
 
 `/Users/garyharr/.coderails/agentic-loop/-Users-garyharr-Github-coderails-.git/01a061b6-79e2-7bf0-8935-57399e7d52bc/progress.json`
 
-It was structurally repaired after a missing active-wave envelope. The subsequent message calling it invalid was caused by `python3 graph.py inspect` failing because macOS had not accepted the Xcode licence; it was not evidence of another graph invariant failure. The loop was then deliberately hard-stopped at revision 66 because the user requested a fresh-session handoff; node `M3` is `hard-stop`, with reason `user-requested handoff`. Treat this graph as closed historical evidence. Do not resume or mutate it.
+The graph was structurally repaired after a missing active-wave envelope. A later message called it invalid because `python3 graph.py inspect` failed while the Xcode licence was not accepted. That command failure did not show a new graph invariant failure.
+
+The loop was deliberately hard-stopped at revision 66 for a user-requested fresh-session handoff. Node `M3` has status `hard-stop` and reason `user-requested handoff`. This graph is closed historical evidence. Do not resume or change it.
 
 ## Key Files
 

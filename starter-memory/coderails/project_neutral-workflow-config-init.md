@@ -6,7 +6,10 @@ type: project
 
 # Neutral workflow config init
 
-> Supersession note (2026-09-21): This is a historical configuration-migration handoff. The canonical .coderails/workflow.config.yaml contract remains current, but the shell runtime/test filenames below were retired. Both providers now resolve configuration through their own scripts/lib/config.py, and current hook/test commands use Python.
+> Supersession note (2026-09-21): This is a historical configuration-migration handoff. The
+> `.coderails/workflow.config.yaml` contract remains current. The shell runtime and test paths below
+> were retired. Each provider resolves configuration through its own `scripts/lib/config.py`.
+> Current hook and test commands use Python.
 
 ## Goal
 
@@ -21,8 +24,8 @@ instructions. Both read the same project configuration path.
 - Do not add resolver fallback to `.claude/workflow.config.yaml` or `.codex/workflow.config.yaml`; legacy-only repositories must be treated as unconfigured until init migrates them.
 - Reuse each plugin's existing SessionStart bootstrap script. Do not add a second hook when the registered bootstrap can emit the nudge.
 - The SessionStart hook only detects and prompts. It must not create, edit, move, or delete configuration.
-- When a legacy provider config exists and the canonical file does not, emit a stable, non-spamming nudge to run that provider's init entry point: `/coderails:init` for Claude and `$coderails-codex:init` for Codex.
-- Init writes and validates `.coderails/workflow.config.yaml` first. Only after successful validation may it move legacy `.claude/workflow.config.yaml` and `.codex/workflow.config.yaml` files to the macOS Trash.
+- If a legacy provider config exists but the canonical file does not, emit a stable nudge without repeated prompts. Name `/coderails:init` for Claude or `$coderails-codex:init` for Codex.
+- Init writes and validates `.coderails/workflow.config.yaml` first. Only after validation can it move legacy `.claude/workflow.config.yaml` and `.codex/workflow.config.yaml` files to the macOS Trash.
 - A failed canonical write, failed validation, or failed Trash move must stop and report the problem. Never delete legacy configuration directly.
 - Keep `.coderails/workflow.config.yaml` committable while leaving runtime state under `.coderails/` ignored.
 - Do not implement graph hardening, graph parity, mixed-provider review, or shared provider executables in this change.
@@ -33,7 +36,7 @@ instructions. Both read the same project configuration path.
 - Claude init is currently `commands/init.md`; Codex init is `packages/codex/skills/init/SKILL.md`.
 - The nudge must not repeat on resume, clear, or compact SessionStart events.
 - Preserve existing workflow configuration values, including `sandbox_workers`; this task changes location and migration behavior, not the schema.
-- The current `.gitignore` ignores `.coderails/` and every `workflow.config.yaml`, while init says the generated config should be committed. Narrowly unignore the canonical file without exposing runtime graph state.
+- The old `.gitignore` ignores `.coderails/` and every `workflow.config.yaml`. Init says the generated config should be committed. Exclude only the canonical file from that ignore rule. Keep runtime graph state ignored.
 - Do not claim completion from unit tests alone. Verify both provider packages in fresh sessions after installation.
 
 ## Schema / Taxonomy

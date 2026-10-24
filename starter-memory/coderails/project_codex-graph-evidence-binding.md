@@ -6,7 +6,11 @@ type: project
 
 # Codex graph evidence binding
 
-> Supersession note (2026-09-21): This is a historical native-evidence implementation handoff. The current graph is schema 3 only and uses provider-native dispatch with explicit agent instruction bodies; worker labels alone are never evidence. Retired shell test paths below are baseline references, not executable instructions. Read the current native agentic-loop skill and graph evidence modules before changing them.
+> Supersession note (2026-09-21): This is a historical native-evidence handoff. The current graph
+> uses schema 3 only. Each provider dispatches agents with explicit instructions. Worker labels
+> alone are not evidence. The retired shell test paths below are baseline references, not commands
+> to run. Read the current native agentic-loop skill and graph evidence modules before changing
+> them.
 
 ## Goal
 
@@ -14,7 +18,7 @@ Make Codex graph execution mechanically auditable. Codex already runs the
 graph manually. Bind each graph node attempt to native worker events stored
 in the Codex session transcript. Do not add an automatic scheduler.
 
-After implementation and live acceptance, Codex must satisfy the complete agreed manual graph contract: durable state, dependency readiness, waves, native workers, exact result binding, joins, retries, resume, hard stops, ownership, transcript-backed evidence, and completion gates.
+After implementation and live acceptance, Codex must satisfy the agreed manual graph contract. It includes durable state, dependency readiness, waves, and native workers. It also includes exact result binding, joins, retries, resume, hard stops, ownership, transcript-backed evidence, and completion gates.
 
 ## Decisions
 

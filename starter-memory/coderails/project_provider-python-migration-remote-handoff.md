@@ -6,7 +6,10 @@ type: project
 
 # Provider Python migration remote handoff
 
-> Supersession note (2026-09-21): This is a historical remote-machine handoff. Its branch, graph path, unfinished-work claims, and shell test commands describe that checkpoint only. Never resume or mutate the referenced old graph from this memory; inspect the current checkout and owned session state. The current cutover uses Python entrypoints and schema 3 only.
+> Supersession note (2026-09-21): This is a historical remote-machine handoff. Its branch, graph
+> path, unfinished-work claims, and shell commands describe that checkpoint only. Do not resume or
+> change the old graph from this memory. Inspect the current checkout and owned session state. The
+> current cutover uses Python entry points and schema 3 only.
 
 ## Goal
 
@@ -18,7 +21,7 @@ not publish, create a PR, or merge without new authorization.
 ## Decisions and constraints
 
 - Historical graph `/Users/garyharr/.coderails/agentic-loop/-Users-garyharr-Github-coderails-.git/01a061b6-79e2-7bf0-8935-57399e7d52bc/progress.json` is closed historical evidence.
-- Multiple successor graphs hard-stopped because native task identifiers are global to a session and activation gates needed explicit approvals. Do not resume them; start a fresh graph with unused stable work-unit IDs.
+- Several successor graphs hard-stopped. Native task IDs are global to a session, and activation gates needed explicit approval. Do not resume those graphs. Start a fresh graph with unused stable work-unit IDs.
 - `graph_evidence.py` now accepts the live native `spawn_agent` function-call + `SubAgentActivity` + child `task_complete` evidence chain while retaining legacy evidence and fail-closed checks.
 - User explicitly approved activation/deletion for these root Claude hooks: agent-only, comment-citation, no-edit-on-main, offload-push, quality-feedback, verification-volume, crack-on, crack-on-prose.
 - Preserve all dirty integration-worktree changes; no reset, broad staging, force push, or quality bypass.
@@ -27,7 +30,7 @@ not publish, create a PR, or merge without new authorization.
 
 - Native Codex graph evidence binding repair with focused adversarial coverage.
 - Root Claude Python cutovers activated for: `agent_model_routing_nudge`, `inject_bootstrap`, `inject_context`, `graph_readiness`, `agent_only_gate`, `comment_citation_gate`, `no_edit_on_main`, `offload_push_guard`, `quality_feedback`, `verification_volume_ceiling`, `crack_on_gate`, and `crack_on_prose_gate`.
-- Focused tests for the activated hooks passed. A full `hooks/scripts/tests/run_all.sh` process completed but its exit status was not captured; a replacement run was blocked by the verification-volume ceiling, so do not report it green.
+- Focused tests for the activated hooks passed. A full `hooks/scripts/tests/run_all.sh` process ended, but its exit status was not captured. The verification-volume ceiling blocked a replacement run. Do not report the full suite as green.
 
 ## Key files
 

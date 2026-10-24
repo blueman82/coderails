@@ -6,7 +6,10 @@ type: project
 
 # PR #429 Execution Discipline Eval Artifact
 
-> Supersession note (2026-09-21): This is a historical PR #429 handoff, not current authorization to post or merge. Its Bash checker paths were replaced by scripts/quality/check.py and focused Python tests. Re-fetch exact-head state only when a current task authorizes work on that PR; do not treat the pending-artifact claim below as current.
+> Supersession note (2026-09-21): This is a historical PR #429 handoff. It does not authorize
+> posting or merging now. `scripts/quality/check.py` and focused Python tests replaced the Bash
+> checkers. Re-fetch exact-head state if a current task authorizes work on that PR. The
+> pending-artifact claim below is historical.
 
 ## Goal
 

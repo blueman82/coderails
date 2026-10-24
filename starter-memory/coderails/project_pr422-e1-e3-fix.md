@@ -6,7 +6,10 @@ type: project
 
 # PR #422 E1-E3 Fix and Rerun
 
-> Supersession note (2026-09-21): This is a historical PR #422 repair handoff, not current authorization or an instruction to post artifacts. Its shell paths and prior Codex package-test names were retired by the Python/schema-3 cutover. Consult the current implementation and component reference before reusing an old diagnostic.
+> Supersession note (2026-09-21): This is a historical PR #422 repair handoff. It does not authorize
+> current work or artifact posting. The Python/schema-3 cutover retired its shell paths and old
+> Codex test names. Check the current implementation and component reference before reusing a
+> diagnostic.
 
 ## Goal
 
