@@ -42,6 +42,12 @@ class ActionsSetupTests(unittest.TestCase):
         payload["conditions"]["ref_name"]["exclude"] = ["refs/heads/main"]
         self.assertFalse(ruleset_matches(payload, 15368))
 
+    def test_creation_bypass_is_not_a_matching_ruleset(self) -> None:
+        """The status rule must also cover the branch's first commit."""
+        payload = ruleset_payload(15368)
+        payload["rules"][1]["parameters"]["do_not_enforce_on_create"] = True
+        self.assertFalse(ruleset_matches(payload, 15368))
+
     def test_candidate_requires_current_head_actions_success(self) -> None:
         """A stale, failed, or foreign status cannot activate the rule."""
         sha = "a" * 40

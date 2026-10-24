@@ -119,7 +119,9 @@ def eval_valid(body: str, number: int, sha: str) -> bool:
     ):
         return False
     ids = [cast(JsonObject, item).get("id") for item in entries if isinstance(item, dict)]
-    if len(ids) != len(entries) or len(set(ids)) != len(ids) or not all(_eval_valid(item, level) for item in entries):
+    if len(ids) != len(entries) or not all(_text(identifier) for identifier in ids):
+        return False
+    if len(set(cast(list[str], ids))) != len(ids) or not all(_eval_valid(item, level) for item in entries):
         return False
     if not _text(data.get("frozen_hash")):
         return False

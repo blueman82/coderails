@@ -6,6 +6,20 @@ from typing import Protocol
 from integrity_evidence import eval_valid, review_valid
 from integrity_http import IntegrityError, JsonObject, object_value
 
+ATTESTOR_IMPORT_PATHS = frozenset(
+    {
+        "scripts.py",
+        "scripts/__init__.py",
+        "scripts/lib.py",
+        "scripts/lib/__init__.py",
+        "scripts/lib/artifact_io.py",
+        "scripts/lib/config.py",
+        "scripts/lib/eval_integrity.py",
+        "scripts/lib/eval_signing.py",
+        "scripts/lib/eval_trace.py",
+    }
+)
+
 
 class EvidenceClient(Protocol):
     """REST operations consumed by the mechanical policy."""
@@ -99,9 +113,12 @@ def check_inputs(
     if len(files) != count:
         return fail(client, number, sha, "file_count_mismatch", error=True)
     for name in filenames:
-        if isinstance(name, str) and re.match(
-            r"^(skills/dashboard/|launchd/|scripts/integrity-gate/|scripts/(merge\.py|lib/(config\.py|eval_|integrity_status\.py|review_artifact\.py))|hooks/scripts/lib/pr_merge_gate\.py|packages/codex/scripts/(merge\.py|lib/(config\.py|eval_|integrity_status\.py|review_artifact\.py))|\.github/workflows/|config\.schema\.json$|packages/codex/config\.schema\.json$)",
-            name,
+        if isinstance(name, str) and (
+            name in ATTESTOR_IMPORT_PATHS
+            or re.match(
+                r"^(skills/dashboard/|launchd/|scripts/integrity-gate/|scripts/__pycache__/|scripts/lib/__pycache__/|scripts/(merge\.py|lib/(config\.py|eval_|integrity_status\.py|review_artifact\.py))|hooks/scripts/lib/pr_merge_gate\.py|packages/codex/scripts/(merge\.py|lib/(config\.py|eval_|integrity_status\.py|review_artifact\.py))|\.github/workflows/|config\.schema\.json$|packages/codex/config\.schema\.json$)",
+                name,
+            )
         ):
             return fail(client, number, sha, f"policy_path_{name}")
     try:

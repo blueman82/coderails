@@ -9,7 +9,7 @@ The workflow uses the built-in `GITHUB_TOKEN`. You do not need a second account,
 - The review and eval markers name the current PR and head SHA. GitHub attributes both comments to the live repository owner login.
 - The review summary has the required headings.
 - The eval has a valid structure, a frozen hash, command and control fields, and recorded results. Every P0 eval has a passing result and evidence.
-- The complete changed-file list matches the PR file count and stays below GitHub's 3,000-file API cap. The PR does not change the workflow, gate code, or other protected paths.
+- The complete changed-file list matches the PR file count and stays below GitHub's 3,000-file API cap. The PR does not change the workflow, gate code, its imported Python modules, or other protected paths. This includes `scripts/lib/artifact_io.py`, `eval_integrity.py`, `eval_signing.py`, `eval_trace.py`, `config.py`, and the package paths that could replace those imports.
 - The diff is present and below the byte limit.
 
 The workflow runs code from `main`. It reads PR files and comments as data. It never checks out the PR head or runs a command from an eval comment. It reads the owner comments and PR head again just before it posts a passing status. One concurrency group prevents runs of this workflow from posting statuses at the same time. GitHub does not guarantee the order of queued runs. A queue can overflow and cancel a waiting run. Comment changes trigger a new check. An hourly run checks open PRs again if GitHub misses an event.

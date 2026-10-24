@@ -152,6 +152,15 @@ class GatePolicyTests(unittest.TestCase):
             "skills/dashboard/page.ts",
             "launchd/job.plist",
             ".github/workflows/action.yml",
+            "scripts.py",
+            "scripts/__init__.py",
+            "scripts/lib.py",
+            "scripts/lib/__init__.py",
+            "scripts/lib/artifact_io.py",
+            "scripts/lib/eval_integrity.py",
+            "scripts/lib/eval_signing.py",
+            "scripts/lib/eval_trace.py",
+            "scripts/lib/config.py",
         ):
             client = EvidenceFixture()
             client.files = [{"filename": filename}]
@@ -266,6 +275,16 @@ class GatePolicyTests(unittest.TestCase):
         client.document["evals"][0]["assert"] = "Changed after the freeze."
         self.assertEqual(self.gate(client), 1)
         self.assertIn("eval_evidence_invalid", client.posts[-1][2])
+
+    def test_unhashable_eval_id_posts_failure(self) -> None:
+        """Malformed owner JSON must produce a newer error status on the same head."""
+        malformed_ids: tuple[object, ...] = ([], {})
+        for malformed in malformed_ids:
+            client = EvidenceFixture()
+            client.document["evals"][0]["id"] = malformed
+            self.assertEqual(self.gate(client), 1)
+            self.assertEqual(client.posts[-1][1], "error")
+            self.assertIn("eval_evidence_invalid", client.posts[-1][2])
 
     def test_removed_eval_comment_overrides_previous_success(self) -> None:
         """Deleting the eval makes the next status a failure."""

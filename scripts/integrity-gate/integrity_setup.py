@@ -103,6 +103,7 @@ def ruleset_matches(value: object, app_id: int) -> bool:
     return (
         all(pr_parameters.get(key) == part for key, part in required_pr.items())
         and check_parameters.get("strict_required_status_checks_policy") is False
+        and check_parameters.get("do_not_enforce_on_create") is False
         and check_parameters.get("required_status_checks")
         == [{"context": "integrity-review", "integration_id": app_id}]
     )
