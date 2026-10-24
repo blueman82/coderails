@@ -1,5 +1,7 @@
 """Mechanical SHA-bound evidence and bounded policy checks for attestation."""
 
+from __future__ import annotations
+
 import re
 from contextlib import suppress
 from typing import Protocol
@@ -20,6 +22,9 @@ ATTESTOR_IMPORT_PATHS = frozenset(
         "scripts/lib/eval_trace.py",
     }
 )
+STATUS_CONTEXT = "integrity-review"
+STATUS_BUDGET = 900
+STATUS_CAP = 1000
 
 
 class EvidenceClient(Protocol):
@@ -94,6 +99,53 @@ def main_prs_at_head(client: EvidenceClient, sha: str) -> list[int]:
     raise IntegrityError("open main PR list exceeds 3000 entries")
 
 
+def status_history(client: EvidenceClient, sha: str) -> tuple[JsonObject | None, int]:
+    """Read newest status and count this context before any mutation."""
+    latest: JsonObject | None = None
+    count = 0
+    for page in range(1, 102):
+        batch = client.get_array(f"commits/{sha}/statuses?per_page=100&page={page}")
+        if page == 101 and batch:
+            raise IntegrityError("status history exceeds read limit")
+        for item in batch:
+            context = item.get("context")
+            if isinstance(context, str) and context.casefold() == STATUS_CONTEXT:
+                if latest is None:
+                    latest = item
+                count += 1
+                if count >= STATUS_CAP:
+                    return latest, count
+        if len(batch) < 100:
+            return latest, count
+    raise IntegrityError("status history exceeds read limit")
+
+
+def post_if_changed(client: EvidenceClient, sha: str, state: str, description: str) -> int:
+    """Reconcile current evidence without consuming a status on every hourly run."""
+    if len(description) > 140:
+        raise IntegrityError("status description exceeds GitHub limit")
+    latest, count = status_history(client, sha)
+    if count >= STATUS_BUDGET:
+        if latest is not None and latest.get("state") in {"failure", "error"}:
+            return 1
+        if count >= STATUS_CAP:
+            raise IntegrityError("status quota exhausted while latest status passes")
+        client.post_status(sha, "error", f"integrity=fail sha={sha} reason=status_budget_exhausted")
+        return 1
+    creator = (
+        object_value(latest.get("creator")) if latest is not None and isinstance(latest.get("creator"), dict) else {}
+    )
+    if (
+        latest is not None
+        and latest.get("state") == state
+        and latest.get("description") == description
+        and creator.get("login") == "github-actions[bot]"
+    ):
+        return 0
+    client.post_status(sha, state, description)
+    return 0
+
+
 def post_current(client: EvidenceClient, number: int, sha: str, state: str, description: str) -> int:
     """Never post a result for a head that moved during evaluation."""
     try:
@@ -103,19 +155,18 @@ def post_current(client: EvidenceClient, number: int, sha: str, state: str, desc
             print(f"skip: pr={number} sha={sha} reason=head_moved")
             return 1
         if state == "success" and pr.get("state") != "open":
-            client.post_status(sha, "error", f"integrity=fail sha={sha} reason=state_changed")
+            post_if_changed(client, sha, "error", f"integrity=fail sha={sha} reason=state_changed")
             return 1
         if state == "success" and object_value(pr.get("base")).get("ref") != "main":
-            client.post_status(sha, "error", f"integrity=fail sha={sha} reason=base_changed")
+            post_if_changed(client, sha, "error", f"integrity=fail sha={sha} reason=base_changed")
             return 1
-        client.post_status(sha, state, description)
+        return post_if_changed(client, sha, state, description)
     except IntegrityError:
         if state == "success":
             with suppress(IntegrityError):
                 client.post_status(sha, "error", f"integrity=fail sha={sha} reason=final_pr_fetch_failed")
         print(f"skip: pr={number} sha={sha} reason=status_post_failed")
         return 1
-    return 0
 
 
 def fail(client: EvidenceClient, number: int, sha: str, reason: str, *, error: bool = False) -> int:
@@ -159,7 +210,7 @@ def check_inputs(
                 name,
             )
         ):
-            return fail(client, number, sha, f"policy_path_{name}")
+            return fail(client, number, sha, "policy_path_protected")
     try:
         diff = client.get(f"pulls/{number}", "application/vnd.github.v3.diff").rstrip("\n")
     except IntegrityError:

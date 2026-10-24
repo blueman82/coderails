@@ -88,7 +88,8 @@ class EvidenceFixture:
         """Return independent changed-file or commit-status arrays."""
         self.check(target)
         if target.startswith("commits/"):
-            return copy.deepcopy(self.statuses)
+            page = int(target.rsplit("page=", 1)[1])
+            return copy.deepcopy(self.statuses[(page - 1) * 100 : page * 100])
         if target.startswith("pulls?state=open&base=main&"):
             page = int(target.rsplit("page=", 1)[1])
             return copy.deepcopy(self.open_main[(page - 1) * 100 : page * 100])
@@ -151,6 +152,7 @@ class GatePolicyTests(unittest.TestCase):
             self.assertIn("sha=" + SHA, description)
         for token in ("integrity=pass", "evidence=review,eval,commands", "source=actions", "provenance=sha-bound"):
             self.assertIn(token, client.posts[-1][2])
+        self.assertLessEqual(len(client.posts[-1][2]), 140)
 
     def test_missing_review_and_protected_policy_paths(self) -> None:
         """Missing review is a retryable error; protected changes produce terminal failure."""
