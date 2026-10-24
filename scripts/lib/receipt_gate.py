@@ -20,7 +20,7 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import action_receipt as ar
 from scripts.lib import merge_budget
-from scripts.lib.action_binding import binding
+from scripts.lib.action_binding import binding, git_out
 from scripts.lib.authority_object import append_row, authority_path, read_authority
 from scripts.lib.authority_permits import executed_merges, permits
 from scripts.lib.config import config_path, config_value
@@ -174,6 +174,9 @@ def _claim_merge_unlocked(session: str, number: str, cwd: str, now: datetime) ->
     bind = binding("merge", f"python3 scripts/merge.py {number}", cwd)  # merge.py pins the head sha it verified
     if bind is None:
         return "binding_unknown"
+    direct = ar.proposed_action(
+        "merge", f"python3 scripts/merge.py {number}", cwd, git_out(cwd, "branch", "--show-current"), bind
+    )
     loop_id = authority["loop_id"] if authority else None
     signers = resolve_trust_root()[0]
     refusals: list[str] = []
@@ -184,10 +187,7 @@ def _claim_merge_unlocked(session: str, number: str, cwd: str, now: datetime) ->
             continue
         data["revoked"] = data.get("revoked") is True or ar.is_revoked(path)
         note = _fresh_hook_note(path, number)
-        proposed = {
-            "action": "merge", "repository": bind["repository"], "ref": bind["ref"], "artifact_sha": bind["sha"],
-            "exact_payload_hash": note["hash"] if note else (data or {}).get("exact_payload_hash"),
-        }  # fmt: skip
+        proposed = direct if note is None else {**direct, "exact_payload_hash": note["hash"]}
         consumed = ar.is_consumed(path) and note is None
         ok, why = ar.verify(data, proposed, now, session, loop_id, consumed, signers)
         if not ok:

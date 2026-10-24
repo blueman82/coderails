@@ -109,7 +109,9 @@ class MergeReceiptTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.tmp = Path(temporary.name)
-        self.repo = make_repo(self.tmp / "repo")
+        self.repo = make_repo(self.tmp / "repo").resolve()
+        (self.repo / ".coderails").mkdir()
+        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: enforce\n")
         keys = self.tmp / "home" / ".coderails" / "keys"
         self.key, signers = make_owner(keys)
         signers.rename(keys / "receipt_signers")
@@ -200,6 +202,13 @@ class MergeReceiptTests(unittest.TestCase):
         base = self.loop / "s1" / "receipts"
         self.assertTrue((base / "r1.consumed").exists() and (base / "r1.executed").exists())
         self.refused_after_one("consumed")
+
+    def test_direct_merge_rejects_a_receipt_for_another_pr(self) -> None:
+        """Two PRs can share a target and head SHA; the signed PR number must still match."""
+        self.mint(number=8)
+        self.refused("hash_mismatch")
+        base = self.loop / "s1" / "receipts"
+        self.assertFalse((base / "r1.consumed").exists() or (base / "r1.executed").exists())
 
     def test_direct_merge_refuses_renamed_signed_receipt(self) -> None:
         """The direct merge path must bind a receipt's filename to its signed ID too."""

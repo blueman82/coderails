@@ -96,7 +96,7 @@ a consumer. Those four lines are superseded by the next section; the user direct
   cooperating-agent safeguard; only the root-owned tier (owner-run sudo install, not performed here) is a real boundary.
 - Limits: hash covers only the command text the hook sees (not aliases, functions, eval/xargs; common wrappers are
   unwrapped); protected branches are main/master only. Subagent identity is settled by the `agent_only_gate` evidence (same `session_id`, differing `agent_id`/`agent_type`) and a payload test, so the parent's
-  receipt is honoured by a subagent. `scripts/merge.py` cannot see the shell's command text; when no hook ran it binds PR number + repository+ref+SHA instead of the text hash, and a hook-consumed receipt must be
+  receipt is honoured by a subagent. `scripts/merge.py` cannot see the shell's command text; when no hook ran it checks the signed hash against the canonical `python3 scripts/merge.py <PR number>` command, cwd, branch, repository and ref. A hook-consumed receipt must be
   within 300 s. `action_authority: off` and the user-tier trust root are agent-writable: cooperating-agent safeguard, not a boundary.
 
 - Worker statuses `NEEDS_DECISION | OUTSIDE_SCOPE | IRREVERSIBLE_ACTION` ship as a standalone validator

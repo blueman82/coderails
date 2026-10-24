@@ -9,7 +9,7 @@ are None (push.default, branch.*.remote, pushurl and GIT_* could redirect them).
 gh pr merge / gh api .../merge: ref = the PR base, sha = the live PR headRefOid, repository = origin, -R, the PR URL or
 the api path. The command must pin that sha (`--match-head-commit <sha>` / `sha=<sha>`) so a head that moves after the
 hook is refused by GitHub; the merge.py script pins it itself. Option values are skipped when finding the PR argument.
-Used by the hook and the receipt CLI; merge.py is not a binding() caller (it pins the sha it verified).
+Used by the hook, the receipt CLI and merge.py's direct receipt check; merge.py pins the sha it verified.
 Refuses (None) --all/--mirror/--tags/--delete, several refspecs, deletes, and remotes that are not host/owner/name.
 """
 
