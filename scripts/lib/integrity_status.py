@@ -1,4 +1,4 @@
-"""Verify the newest GitHub Actions integrity status for an exact head SHA."""
+"""Verify the newest configured integrity status for an exact head SHA."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from . import git_common as git
 from .artifact_io import array_value, object_value
 
 
-def verify_integrity_status(sha: str) -> None:
+def verify_integrity_status(sha: str, expected_login: str = "github-actions[bot]") -> None:
     """Refuse missing, stale, failed or incorrectly attributed attestations."""
     result = git.run(
         "gh",
@@ -37,8 +37,8 @@ def verify_integrity_status(sha: str) -> None:
     if status.get("state") != "success":
         raise git.WorkflowError(f"integrity-review status for {sha} is not success")
     creator = status.get("creator")
-    if not isinstance(creator, dict) or object_value(cast(object, creator)).get("login") != "github-actions[bot]":
-        raise git.WorkflowError(f"integrity-review status for {sha} was not posted by GitHub Actions")
+    if not isinstance(creator, dict) or object_value(cast(object, creator)).get("login") != expected_login:
+        raise git.WorkflowError(f"integrity-review status for {sha} was not posted by {expected_login}")
     description = str(status.get("description") or "")
     if not re.search(r"(^|\s)integrity=pass(\s|$)", description) or not re.search(
         r"(^|\s)sha=" + re.escape(sha) + r"(\s|$)", description

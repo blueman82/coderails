@@ -65,7 +65,7 @@
         },
         "machine_user": {
           "type": ["string", "null"], "default": null, "status": "enforced_by_code",
-          "description": "Deprecated. A non-empty legacy login keeps local integrity checks on until the configuration is migrated."
+          "description": "Deprecated. A non-empty legacy login remains the required local status author until enabled is true."
         }
       }
     },

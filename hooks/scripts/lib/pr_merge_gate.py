@@ -12,7 +12,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts.lib.artifact_io import array_value
-from scripts.lib.config import config_path, integrity_enabled
+from scripts.lib.config import config_path, integrity_enabled, integrity_status_login
 from scripts.lib.git_common import branch, gate_eval_summary_for_pr, pr_field, pr_num, repo, run
 from scripts.post_evals import smoke_verify
 
@@ -22,6 +22,7 @@ def integrity_reason(number: str, sha: str, cwd: str) -> str:
     path = config_path(cwd)
     if not path or not integrity_enabled(path):
         return ""
+    expected_login = integrity_status_login(path)
     prefix = f"Blocked: gh pr merge {number} — "
     try:
         result = run(
@@ -59,8 +60,8 @@ def integrity_reason(number: str, sha: str, cwd: str) -> str:
             prefix + f"integrity-review status for {sha} is '{state}' (not success). GitHub Actions "
             f"has not attested this SHA."
         )
-    if creator != "github-actions[bot]":
-        return prefix + f"integrity-review status for {sha} was posted by '{creator}', not the " "GitHub Actions bot."
+    if creator != expected_login:
+        return prefix + f"integrity-review status for {sha} was posted by '{creator}', not '{expected_login}'."
     if (
         not isinstance(description, str)
         or not re.search(r"(^|\s)integrity=pass(\s|$)", description)

@@ -102,6 +102,24 @@ class SharedShaTests(unittest.TestCase):
         self.assertNotEqual(self.gate(client), 0)
         self.assertEqual(client.posts[-1][1], "error")
 
+    def test_closed_at_final_read_cannot_post_success(self) -> None:
+        """A PR closed during evaluation cannot attest the shared commit."""
+        client = EvidenceFixture()
+        original = client.get_object
+        reads = 0
+
+        def closed_late(target: str) -> JsonObject:
+            nonlocal reads
+            reads += 1
+            pr = object_value(original(target))
+            if reads > 1:
+                pr["state"] = "closed"
+            return pr
+
+        client.get_object = closed_late
+        self.assertNotEqual(self.gate(client), 0)
+        self.assertNotIn("success", [post[1] for post in client.posts])
+
     def test_latest_head_must_match_attested_head_before_posting(self) -> None:
         """A moved head gets no stale success status."""
         client = EvidenceFixture()

@@ -257,7 +257,17 @@ def _section(path: str | Path, key: str) -> dict[str, Any]:
 def integrity_enabled(path: str | Path) -> bool:
     """Keep legacy machine-user gates active until explicit config migration."""
     settings = _section(path, "integrity_review")
-    return settings.get("enabled") is True or bool(settings.get("machine_user"))
+    legacy = settings.get("machine_user")
+    return settings.get("enabled") is True or (isinstance(legacy, str) and bool(legacy))
+
+
+def integrity_status_login(path: str | Path) -> str:
+    """Trust the old login until enabled=true selects the Actions bot."""
+    settings = _section(path, "integrity_review")
+    legacy = settings.get("machine_user")
+    if settings.get("enabled") is not True and isinstance(legacy, str) and legacy:
+        return legacy
+    return "github-actions[bot]"
 
 
 def require_signatures(path: str | Path) -> bool:

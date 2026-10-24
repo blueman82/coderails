@@ -102,6 +102,9 @@ def post_current(client: EvidenceClient, number: int, sha: str, state: str, desc
         if current != sha:
             print(f"skip: pr={number} sha={sha} reason=head_moved")
             return 1
+        if state == "success" and pr.get("state") != "open":
+            client.post_status(sha, "error", f"integrity=fail sha={sha} reason=state_changed")
+            return 1
         if state == "success" and object_value(pr.get("base")).get("ref") != "main":
             client.post_status(sha, "error", f"integrity=fail sha={sha} reason=base_changed")
             return 1

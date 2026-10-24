@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts.lib.config import (
     config_value,
     integrity_enabled,
+    integrity_status_login,
     load_config,
     report_findings,
     require_signatures,
@@ -172,6 +173,11 @@ class ReaderTests(ConfigCase):
     def _readers(self) -> None:
         """Body of the reader assertions, stderr muted."""
         self.assertTrue(integrity_enabled(self.write("integrity_review:\n  enabled: true # on\n")))
+        self.assertEqual(integrity_status_login(self.write("integrity_review:\n  machine_user: machine\n")), "machine")
+        self.assertEqual(
+            integrity_status_login(self.write("integrity_review:\n  machine_user: machine\n  enabled: true\n")),
+            "github-actions[bot]",
+        )
         self.assertFalse(integrity_enabled(self.write("integrity_review:\n  enabled: null\n")))
         self.assertFalse(integrity_enabled(self.write("integrity_review:\n  machine_user: null\n")))
         self.assertFalse(integrity_enabled("/nonexistent"))

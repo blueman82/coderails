@@ -81,6 +81,16 @@ class TrustedGitTests(unittest.TestCase):
         ):
             verify_integrity_status("abc")
 
+    def test_legacy_login_remains_valid_until_explicit_cutover(self) -> None:
+        """The configured old attestor still authorizes exact-head evidence before migration."""
+        old = '{"state":"success","creator":{"login":"machine"},"description":"integrity=pass sha=abc"}'
+        response = subprocess.CompletedProcess(["gh"], 0, f"[{old}]", "")
+        with (
+            patch.object(git_common, "repo", return_value="o/r"),
+            patch.object(git_common, "run", return_value=response),
+        ):
+            verify_integrity_status("abc", "machine")
+
 
 if __name__ == "__main__":
     unittest.main()
