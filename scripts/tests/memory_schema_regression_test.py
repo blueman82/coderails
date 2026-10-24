@@ -40,6 +40,21 @@ class SchemaRegression(unittest.TestCase):
                 )
             self.assertIsNone(memory_schema.check(home))
 
+    def test_muninn_trigger_with_comments_and_case_is_accepted(self) -> None:
+        """Ignore SQL formatting changes that do not change trigger actions."""
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "store"
+            path = store.create(home)
+            with sqlite3.connect(path) as connection:
+                connection.execute("DROP TRIGGER knowledge_au")
+                connection.execute(
+                    store.TRIGGERS["knowledge_au"]
+                    .replace("AFTER UPDATE", "after /* format */ update")
+                    .replace("INSERT INTO", "insert into")
+                    .replace("SELECT", "select")
+                )
+            self.assertIsNone(memory_schema.check(home))
+
     def test_missing_scope_table_is_incomplete(self) -> None:
         """Reject a store that cannot resolve knowledge scopes."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -79,6 +94,34 @@ class SchemaRegression(unittest.TestCase):
                     "SELECT 'delete', old.id, old.text; "
                     "INSERT INTO knowledge_fts(rowid, text) SELECT new.id, new.text; */ "
                     "SELECT 1; END"
+                )
+                connection.execute("UPDATE knowledge SET text = 'beta' WHERE id = 1")
+                self.assertEqual(
+                    connection.execute("SELECT rowid FROM knowledge_fts WHERE knowledge_fts MATCH 'alpha'").fetchall(),
+                    [(1,)],
+                )
+                self.assertEqual(
+                    connection.execute("SELECT rowid FROM knowledge_fts WHERE knowledge_fts MATCH 'beta'").fetchall(),
+                    [],
+                )
+            self.assertEqual(memory_schema.check(home), "muninn_schema_incomplete")
+
+    def test_update_trigger_with_false_predicates_is_incomplete(self) -> None:
+        """Reject a trigger whose two FTS statements never write rows."""
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "store"
+            path = store.create(home)
+            with sqlite3.connect(path) as connection:
+                connection.execute("INSERT INTO scope (key, label, kind) VALUES ('test', 'Test', 'global')")
+                connection.execute(
+                    "INSERT INTO knowledge (scope_id, kind, text, status, actor, created_at) "
+                    "VALUES (1, 'fact', 'alpha', 'current', 'test', 1)"
+                )
+                connection.execute("DROP TRIGGER knowledge_au")
+                connection.execute(
+                    store.TRIGGERS["knowledge_au"]
+                    .replace("WHERE old.text IS NOT NULL", "WHERE 0")
+                    .replace("WHERE new.text IS NOT NULL", "WHERE 0")
                 )
                 connection.execute("UPDATE knowledge SET text = 'beta' WHERE id = 1")
                 self.assertEqual(
