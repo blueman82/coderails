@@ -365,8 +365,9 @@ def build_parser() -> argparse.ArgumentParser:
     prep = sub.add_parser("prepare")
     prep.add_argument("--loop", required=True)
     prep.add_argument("--refresh-from-sha256", default=None, help="CURRENT preparation's evidence_sha256")
-    for name in ("predicate", "lessons", "render"):
+    for name in ("predicate", "lessons"):
         sub.add_parser(name)
+    sub.add_parser("render").add_argument("--loop", default="")
     sub.add_parser("import-legacy").add_argument("--file", default="")
     cite = sub.add_parser("cite")
     cite.add_argument("order_id")

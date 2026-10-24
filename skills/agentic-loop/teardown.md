@@ -131,24 +131,26 @@ Pass the separate logical `loop_id` copied from owned `progress.json`; it is not
 1. For each failure mode in this loop's retro, `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop <loop_id> --quote "<verbatim words of the owner's own prompt, 12-300 chars>"`. Add `--scope agnostic` for a lesson that applies
    to any repo. Before completion this stages the observation and any cited sync; it changes no lifecycle counters.
    An id must name the same failure mode and scope. A claim over 500 collapsed characters is refused, never truncated.
-2. After final progress updates, `$O prepare --loop <loop_id>` validates the owned eligible graph and work units,
-   binds the source directory, session, logical loop, revision and progress hash, and records `orders_prepared`.
-   This also runs when the retro has no failure mode. Prospective eligibility authorizes preparation only.
+2. After final progress updates, the native completion command runs `$O prepare --loop <loop_id>`. It validates the
+   owned eligible graph and work units, binds the source directory, session, logical loop, revision and progress hash,
+   and records `orders_prepared`. This also runs when the retro has no failure mode. Prospective eligibility authorizes
+   preparation only.
    A changed source is refused by default. For a legitimate incomplete-source retry, pass
    `$O prepare --loop <loop_id> --refresh-from-sha256 <CURRENT evidence_sha256>` using the canonical hash returned by
    the current preparation. It preserves staged records, refuses rollback/foreign/already-applied sources, and has
    no lifecycle effect. A saved replacement whose receipt failed needs ordinary unchanged `prepare` to repair it.
    Flush and reload pending source updates before final preparation. Never refresh after durable completion.
-3. In Step 5, after native completion is durably saved, `$O tick --loop <loop_id>` applies the staged recurrences
-   and ages every unmatched active order once. A new completed session+loop recurrence resets the counter and revives
-   a tombstone; replay does neither. At **K=5** an order becomes `decayed`, **never deleted**. Then `$O render` regenerates
-   both views; a decayed order appears only in `standing-orders-decayed.md`.
+3. After native completion is durably saved, that command runs `$O tick --loop <loop_id>` and `$O render --loop
+   <loop_id>`. It applies staged recurrences and ages every unmatched active order once. A new completed session+loop
+   recurrence resets the counter and revives a tombstone; replay does neither. At **K=5** an order becomes `decayed`,
+   **never deleted**. A decayed order appears only in `standing-orders-decayed.md`.
 
 Preparation and apply read `<repo-key dir>/<session_id>/progress.json`, validate its ownership and source binding,
 and refuse missing, foreign, malformed, incomplete or stale sources. A failed native completion save ages nothing.
 `orders_ticked` is emitted only after the ledger save. A failed postcompletion ledger save or observation reports
-`pending_teardown: true`, exit 3; retry the same bound tick. This caller remains **advisory** in this checkpoint:
-automatic provider completion wiring is pending. The Codex equivalent is in `packages/codex/skills/agentic-loop/SKILL.md`.
+`pending_teardown: true`. Repeat the native completion command to resume the same bound tick and render. The Claude
+Stop guard blocks a finished loop until those bound receipts and generated views are current. The Codex equivalent is
+in `packages/codex/skills/agentic-loop/SKILL.md`.
 
 The graduation predicate and the promotion selection are `$O predicate` and `lessons.py predicate`. This step is
 additive-or-recurrence-only: no metric-based removal anywhere.
@@ -168,14 +170,14 @@ hand-written file is `$O import-legacy` (the original is moved to `standing-orde
 ## Steps 4 and 5
 
 4. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
-5. **Only then** run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session_id>` to validate the current native graph and identity-bound artifacts. Then run `loop_state_common.py mark-complete <cwd> <session_id>` to
-   set `progress.json` `status: "complete"` and stamp `completed_marker` together — e.g.
+5. **Only then** run `loop_state_common.py mark-complete <cwd> <session_id>` to validate native completion, prepare and
+   recheck orders, save progress, apply the tick and render, and stamp `completed_marker` — e.g.
    `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete "$PWD" "<session_id>"`.
    Never write `status: "complete"` via a bare atomic update — that leaves
    `completed_marker` unstamped at its prior value (permanently 0 for a loop's first completion),
    which false-positives `loop_state_guard`'s `stale_complete_rearmed` block on every later turn of
-   the same session. After a successful durable save, run `$O tick --loop <loop_id>` and `$O render` as described in
-   Step 3; a pending teardown must be recovered before reporting it as finished. Then run
+   the same session. If completion reports pending teardown, repeat `mark-complete` to resume it. Then run
+   `graph.py verify-completion <state> --session <session_id>` to check the graph and bound orders evidence. Then run
    `graph.py stop <state> --session <session_id> --category complete --reason-code work_complete --reason "<reason>"`
    and declare `LOOP-STOP: complete`. First apply
    `superpowers:verification-before-completion` to the orchestrator's own completion claim

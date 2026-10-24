@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from scripts.lib import orders_completion
+
 from .graph_evidence import ENVELOPE_KEY, cursor, envelope, object_value, transcript
 from .graph_evidence_bind import bind_wave
 from .graph_evidence_revalidate import revalidate_all
@@ -198,15 +200,35 @@ def validate_artifacts(path: Path, state: dict[str, Any]) -> None:
     validate_completion(LoopState(path, session, 0, state), str(transcript(session)))
 
 
-def complete(path: Path, session: str, write: bool = True) -> dict[str, Any]:
-    """Validate all native gates under the state lock before completion is written."""
+def complete(path: Path, session: str, write: bool = True, completed_marker: int | None = None) -> dict[str, Any]:
+    """Prepare orders, save validated completion, then apply the lifecycle outside both locks."""
+    current = load(path)
+    if write and current["status"] != "complete":
+        validate_graph_state_completion(current, session)
+        validate_artifacts(path, current)
+    digest = (
+        orders_completion.prepare(path, session, current["loop_id"])
+        if write and current["status"] != "complete"
+        else None
+    )
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
         validate_graph_state_completion(state, session)
         validate_artifacts(path, state)
+        if write and state["status"] != "complete":
+            if digest is None:
+                raise ValueError("order_source_mismatch")
+            orders_completion.validate_prepared(path, state, digest)
         proposed = copy.deepcopy(state)
         proposed["status"] = "complete"
+        if completed_marker is not None:
+            proposed["completed_marker"] = completed_marker
         return proposed
 
     state = transition(path, update) if write else update(load(path))
-    return {"session_id": session, "loop_id": state["loop_id"], "status": state["status"]}
+    result: dict[str, Any] = {"session_id": session, "loop_id": state["loop_id"], "status": state["status"]}
+    if write:
+        result.update(orders_completion.finish(path, session, state["loop_id"]))
+    elif current["status"] == "complete":
+        orders_completion.status(path, session)
+    return result

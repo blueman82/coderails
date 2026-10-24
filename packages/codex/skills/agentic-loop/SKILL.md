@@ -82,7 +82,7 @@ against the graph's exact current revision and write beside the state:
 - non-empty `proof.json` for the same session and loop, with every proof carrying a nonblank executable `cmd` and `status: "pass"`;
 - `retro.json` for the same session and loop, schema version 1 or newer, with `status: "complete"`.
 
-Prepare standing orders from the retro with code, never by editing Markdown. With `D` the repo-key dir (the grandparent of `$STATE`), `LOOP` the separate logical `loop_id` from owned progress, and `O="python3 $SKILL_DIR/../../scripts/lib/orders.py --dir $D --session $SESSION"`: run `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop "$LOOP" --quote "<verbatim words of the owner's own prompt, 12-300 chars>"` for each failure mode (add `--scope agnostic` for a lesson that applies to any repo). After final progress updates, run `$O prepare --loop "$LOOP"`, including when none were recorded. It binds the eligible owned source and records `orders_prepared`, with no recurrence/aging effect. Exit 3 prints a `reason_code`: report it and never write a Markdown fallback. `memory.backend: off` is the explicit opt-out. Automatic provider completion wiring remains pending in this checkpoint; this caller is advisory (see `docs/RUNBOOK.md`, "Standing order stored without a cite").
+Prepare standing orders from the retro with code, never by editing Markdown. With `D` the repo-key dir (the grandparent of `$STATE`), `LOOP` the separate logical `loop_id` from owned progress, and `O="python3 $SKILL_DIR/../../scripts/lib/orders.py --dir $D --session $SESSION"`: run `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop "$LOOP" --quote "<verbatim words of the owner's own prompt, 12-300 chars>"` for each failure mode (add `--scope agnostic` for a lesson that applies to any repo). The native `complete` command runs `prepare` after final progress updates, including when none were recorded. Preparation binds the eligible owned source and records `orders_prepared`, with no recurrence or aging effect. Exit 3 prints a `reason_code`: report it and never write a Markdown fallback. `memory.backend: off` is the explicit opt-out. The current Muninn installation uses a newer API, so live lesson activation remains pending (see `docs/RUNBOOK.md`, "Standing order stored without a cite").
 
 Flush and reload pending progress-source updates before final preparation. Changed sources are refused by default.
 For a legitimate incomplete-source retry, use `$O prepare --loop "$LOOP" --refresh-from-sha256 <CURRENT evidence_sha256>`
@@ -98,11 +98,13 @@ python3 "$SKILL_DIR/scripts/graph.py" complete "$STATE" \
   --transcript "$TRANSCRIPT_PATH"
 ```
 
-After that command durably saves completion, run `$O tick --loop "$LOOP"`, then `$O render`. Apply validates the
+That command runs `prepare` before the graph lock, checks the prepared source under the graph lock, saves completion,
+then runs `$O tick --loop "$LOOP"` and `$O render --loop "$LOOP"` after it releases the lock. Apply validates the
 separately bound directory/session/logical-loop/source and the actual provider completion revision. New completed
 recurrences reset counters; unmatched orders age once and become tombstones at K=5, never deletions. A failed native
 completion save ages nothing. `orders_ticked` follows the ledger save; a failed postcompletion apply or observation
-means `pending_teardown: true`, exit 3, recoverable by retrying the same bound tick before claiming teardown finished.
+means `pending_teardown: true`. Repeat the same native `complete` command to resume the bound tick and render before
+claiming teardown finished. `verify-completion` and the Stop guard refuse pending teardown.
 
 Run each proof command through `functions.exec` using this canonical nested-result output; replace the placeholder with the proof's exact command so transcript matching remains exact:
 

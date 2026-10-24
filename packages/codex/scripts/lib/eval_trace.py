@@ -39,7 +39,7 @@ def emit(evals_path: str | Path, command: str, outcome: str, reason_code: str) -
     try:
         path = Path(evals_path)
         progress = _read(path.with_name("progress.json"))
-        ident = {**_read(path), **{k: progress[k] for k in ("session_id", "loop_id") if k in progress}}
+        ident: dict[str, Any] = {**_read(path), **{k: progress[k] for k in ("session_id", "loop_id") if k in progress}}
         sink_path = path.with_name("eval_trace.jsonl")
         evals_sha = hashlib.sha256(path.read_bytes()).hexdigest()
         if sink_path.exists():

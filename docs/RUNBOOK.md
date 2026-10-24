@@ -263,13 +263,15 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `standing-orders.legacy.md`, never deletes it), then `orders.py render`.
   This importer is for one-time cutover only; retire it after conversion and use typed orders thereafter.
 - Apply contract: use `--dir <repo-key dir> --session <provider session>` with the separate logical `--loop` copied
-  from `<repo-key dir>/<session>/progress.json`. Stage `record` inputs, then `prepare --loop <logical loop>` after
-  the final progress-source mutations. Preparation validates ownership, revision, eligibility and hashes, and appends
-  `orders_prepared`; it ages nothing. Run the existing native provider completion checks and durable save under the
-  progress lock. After releasing that lock, run `tick --loop <logical loop>` and `render`. Tick holds only the orders
-  lock and emits `orders_ticked` after its ledger save. A failed completion save ages nothing. A failed postcompletion
-  ledger save or observation returns exit 3 and `pending_teardown: true`; retry the same tick to recover idempotently.
-  Automatic provider completion wiring is pending in this source checkpoint; the instructed caller remains advisory.
+  from `<repo-key dir>/<session>/progress.json`. Stage `record` inputs before completion. The native `graph.py
+  complete` command prepares orders before the progress lock, rechecks the prepared source under that lock, saves
+  completion, then ticks and renders after it releases the lock. Claude `mark-complete` uses this same path and also
+  stamps the invocation marker. Preparation ages nothing. The tick holds the orders lock and records `orders_ticked`
+  after its ledger save. A failed completion save ages nothing. Repeat the native completion command to resume a
+  pending tick or render without a second age change; do not edit `progress.json`.
+  The Claude Stop guard and Codex `verify-completion` block when the tick or bound generated views are incomplete.
+  On the current Muninn installation, the older D4 store API degrades explicitly. Treat live lesson activation as
+  pending; do not use ledger text as a substitute for a current cited claim.
 - Completed text replacement: when this session/loop observation already exists, explicit `record` captures
   `replaces_source` in the prepared row. The canonical `lesson_source` hashes owned binding, authored fields and that
   predecessor, excluding mutable store observations, and is sealed/saved with the lesson. Ordinary tick recovers only

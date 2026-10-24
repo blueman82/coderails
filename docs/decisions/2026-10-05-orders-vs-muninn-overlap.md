@@ -31,9 +31,10 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
 ## Consequences and limits
 
 - K=5 is a code constant (`orders_ledger.K`), not config.
-- The caller is advisory on both providers: the record/prepare/native-complete/tick/render sequence is instructed in
-  `skills/agentic-loop/teardown.md` and `packages/codex/skills/agentic-loop/SKILL.md`; no hook or completion command
-  automatically runs it in this checkpoint. Later provider wiring must use this interface without a second gate.
+- The native completion command now prepares orders before it takes the progress lock. It validates the exact prepared
+  source again under that lock, saves completion, then releases the lock before it ticks and renders. A repeat of the
+  same completion command resumes the tick and render without a second age change. Claude `mark-complete` uses the
+  same validated path. The Claude Stop guard and Codex completion verifier block when bound teardown is pending.
 - Preparation validates genuine eligible progress at `<repo-key dir>/<session>/progress.json` and binds the resolved
   directories, owning session, separate logical loop, revision and source hash. Prospective eligibility permits
   preparation only. Actual recurrence/aging requires that owned progress be durably saved complete. Failed completion
@@ -57,6 +58,9 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
   `retro_count` requires distinct completed logical loops, valid owned progress and complete source-bound retros.
   Schema2 uses complete typed fields and the saved progress hash. Schema3 delegates to the matching `retro_check`;
   absence of that validator is an explicit refusal, never a known zero count. The same user can rewrite these sources.
+- The installed Muninn service on the current machine uses a newer request-bound API. The D4 adapter still requires
+  the earlier schema-2 CLI. Its currentness check degrades explicitly on that installation. No ledger-text fallback
+  or implicit store upgrade is part of this completion change; live activation remains unaccepted.
 - A recurrence revives a decayed order (status back to `active`, record kept), so the predicate's "one decayed order"
   is a snapshot, not a history.
 - Current tagged claims are reconciled even for degraded/pending local rows before another add. A failed currentness
