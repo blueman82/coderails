@@ -1,20 +1,68 @@
-#!/usr/bin/env python3
 """Exercise native Stop lifecycle counters and completion gates with explicit v3 fixtures."""
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import subprocess
 import sys
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.loop_state_common import count_invocations
 from hooks.scripts.tests.lib.hook_test_support import HookTestCase
 from scripts.lib import proof_results as pr
+from scripts.lib import retro, teardown_steps
 from scripts.lib.eval_artifact import grading_checksum
+
+
+def assemble_test_retro(state_dir: Path, session: str) -> dict[str, Any]:
+    """Build a fixture retro with the serialized D4 preparation receipt, without invoking live Muninn."""
+    path = state_dir / "progress.json"
+    state: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    loop_id = str(state.get("loop_id") or "")
+    teardown_steps.record(
+        state_dir, "proof_run", session, loop_id, teardown_steps.file_sha(state_dir / "proof_results.jsonl")
+    )
+    with patch.dict(os.environ, {"PATH": "/nonexistent"}):
+        retro.assemble(state_dir, session)
+        state = json.loads(path.read_text(encoding="utf-8"))
+        source = dict(state)
+        for key in ("status", "completion", "completed_marker"):
+            source.pop(key, None)
+        if isinstance(source.get("loop_stop_counts"), dict):
+            source["loop_stop_counts"].pop("complete", None)
+        binding = {
+            "repo_dir": str(state_dir.parent.resolve()),
+            "state_dir": str(state_dir.resolve()),
+            "session_id": session,
+            "loop_id": loop_id,
+            "revision": state["revision"],
+            "progress_sha256": teardown_steps.sha_json(source),
+        }
+        prepared: dict[str, Any] = {"schema": 1, "binding": binding, "records": []}
+        (state_dir / f"orders-prepared-{hashlib.sha256(loop_id.encode()).hexdigest()}.json").write_text(
+            json.dumps(prepared), encoding="utf-8"
+        )
+        row = {
+            "step": "orders_prepared",
+            "session_id": session,
+            "loop_id": loop_id,
+            "revision": state["revision"],
+            "binding": binding,
+            "evidence_sha256": teardown_steps.sha_json(prepared),
+            "ts": "2026-10-19T00:00:00+00:00",
+        }
+        with (state_dir / teardown_steps.NAME).open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(row) + "\n")
+        payload, code = retro.assemble(state_dir, session)
+    if code == 2:
+        raise AssertionError(payload)
+    return cast("dict[str, Any]", json.loads((state_dir / "retro.json").read_text()))
 
 
 class StallGuardTests(HookTestCase):
@@ -46,7 +94,6 @@ class StallGuardTests(HookTestCase):
         }
         path = self.progress(graph=graph, proof_disposition="none: no executable surface", work_units={})
         identity = {"session_id": self.session, "loop_id": "loop-test"}
-        path.with_name("retro.json").write_text(json.dumps({"schema_version": 2, **identity}))
         suite_path = path.with_name("evals.json")
         suite: dict[str, Any] = {
             "scope": "loop",
@@ -60,6 +107,7 @@ class StallGuardTests(HookTestCase):
         suite_path.write_text(json.dumps(suite))
         suite["grading"] = {"by": "post_evals.py grade-loop", "checksum": grading_checksum(suite_path, "GO")}
         suite_path.write_text(json.dumps(suite))
+        assemble_test_retro(path.parent, self.session)
         return path
 
     def test_skips_and_declared_categories(self) -> None:
@@ -76,6 +124,15 @@ class StallGuardTests(HookTestCase):
         for category in ("hard-stop", "approval-gate", "awaiting-input", "HARD-STOP"):
             payload = self.payload(self.transcript("LOOP-STOP: " + category + " — reason"))
             self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
+        self.progress().unlink()
+        self.directory.joinpath("discipline.log").write_text(
+            "hook=loop_state_guard session=S1 invocations=1 reason=absent blocked=1\n"
+        )
+        payload = self.payload(self.transcript("no declaration"))
+        for status, count, expected in ((None, None, 0), ("active", None, 2), ("complete", 1, 0), ("complete", 0, 2)):
+            if status is not None:
+                self.progress(status, count or 0)
+            self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, expected)
 
     def test_counters_accumulate_preserve_fields_and_use_last_category(self) -> None:
         """The sole atomic writer increments exactly one key and preserves unrelated state."""
@@ -151,7 +208,6 @@ class StallGuardTests(HookTestCase):
         self.assertEqual(after["loop_stop_counts"], {"approval-gate": 1})
         self.assertTrue(after["stops"][0]["consumed"])
         self.assertEqual(self.trace_reasons(), [])
-        # repeated Stop: the row is consumed, so the text path runs and its hard-stop is counted instead
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
         self.assertEqual(json.loads(path.read_text())["loop_stop_counts"], {"approval-gate": 1, "hard-stop": 1})
         self.assertEqual(self.trace_reasons(), ["legacy_text_parse"])
@@ -249,10 +305,16 @@ class StallGuardTests(HookTestCase):
             result = self.run_hook("loop_stall_guard", payload)
             self.assertEqual(result.returncode, 2)
             self.assertNotIn("loop_stop_counts", json.loads(path.read_text()))
-        for version in (1, 2, 99):
+        for version in (1, 2):  # below 3 is a hand-written retro: retro_not_assembled
             retro.write_text(json.dumps({**original, "schema_version": version}))
-            self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
-        self.assertEqual(json.loads(path.read_text())["loop_stop_counts"], {"Complete": 3})
+            result = self.run_hook("loop_stall_guard", payload)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("retro_not_assembled", result.stderr)
+        for version in (3, 99):
+            retro.write_text(json.dumps({**original, "schema_version": version}))
+            result = self.run_hook("loop_stall_guard", payload)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(path.read_text())["loop_stop_counts"], {"Complete": 2})
 
     def test_completion_identity_proof_eval_and_legacy_refusals(self) -> None:
         """Exact identity and frozen grade remain mandatory even with no unfinished graph nodes."""
@@ -315,20 +377,23 @@ class StallGuardTests(HookTestCase):
             head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
             **identity,
         )
-        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
+        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)  # old retro binds old proof files
+        assemble_test_retro(path.parent, self.session)
+        result = self.run_hook("loop_stall_guard", payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_shared_absent_grace_and_complete_off_switch(self) -> None:
-        """Only matching absent-state grace releases; existing active state stays policed."""
-        payload = self.payload(self.transcript("no declaration"))
-        log = self.directory / "discipline.log"
-        log.write_text("hook=loop_state_guard session=S1 invocations=1 reason=absent blocked=1\n")
-        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
-        self.progress()
-        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)
-        self.progress("complete", 1)
-        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
-        self.progress("complete", 0)
-        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)
+    def test_muninn_degrade_is_printed_and_never_blocks(self) -> None:
+        """Degraded memory disclosure does not block completion."""
+        path = self.complete_fixture()
+        state = json.loads(path.read_text())
+        state["decisions_absorbed"] = [
+            {"seq": 1, "phase": "2.5", "decision": "x", "muninn": {"state": "degraded", "reason_code": "muninn_absent"}}
+        ]
+        path.write_text(json.dumps(state))
+        assemble_test_retro(path.parent, self.session)
+        result = self.run_hook("loop_stall_guard", self.payload(self.transcript("LOOP-STOP: complete")))
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("1 decision(s) not in Muninn (muninn_absent: 1)", result.stdout)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages/codex/skills/agentic-loop/scripts"))
 from hooks.scripts.tests.claude_graph_test_support import node
+from hooks.scripts.tests.lib import assembled_retro
 from hooks.scripts.tests.lib import claude_transcript_fixture as claude
 from packages.tests import codex_fixture as codex
 from scripts.lib import proof_results
@@ -50,7 +51,12 @@ class Provider:
     def state(self, identifiers: tuple[str, ...] = ("U3[1]",)) -> dict[str, Any]:
         """Return a current state using stable semantic IDs and native session identity."""
         value = claude.state(0)
-        value.update(session_id=self.session, loop_id="fixture-loop")
+        value.update(
+            session_id=self.session,
+            loop_id="fixture-loop",
+            created="2026-10-19T00:00:00+00:00",
+            authorising_prompt_raw="Complete the fixture loop with verified evidence.",
+        )
         value["graph"]["nodes"] = {identifier: node(identifier) for identifier in identifiers}
         return value
 
@@ -155,7 +161,6 @@ class Provider:
             "withdrawn_proofs": [],
         }
         self.write(document, "proof.json")
-        self.write({**identity, "schema_version": 1, "status": "complete"}, "retro.json")
         results = self.path.with_name(proof_results.RESULTS_NAME)
         results.unlink(missing_ok=True)
         digest = proof_results.doc_sha(document)
@@ -171,6 +176,7 @@ class Provider:
             head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
             **identity,
         )
+        assembled_retro.write(self.path.parent, identity["session_id"])  # last: the retro binds every source above
 
     def complete(self) -> subprocess.CompletedProcess[str]:
         """Run each provider's native completion options without sharing runtime code."""

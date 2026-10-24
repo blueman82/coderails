@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/script
 import graph
 from graph_completion import complete, verify_completion
 
+from hooks.scripts.tests.lib import assembled_retro
 from packages.tests.codex_fixture import append, frozen_evals, node, read_json, spawn, state, transcripts, write_json
 from scripts.lib import proof_results as pr
 
@@ -36,8 +38,13 @@ class RecoverChainTests(unittest.TestCase):
         self.directory = Path(temporary.name)
         self.addCleanup(patch.stopall)
         patch("pathlib.Path.home", return_value=self.directory).start()
-        self.path = self.directory / "progress.json"
+        self.path = self.directory / "parent" / "progress.json"
+        self.path.parent.mkdir()
         initial = state()
+        initial.update(
+            created="2026-10-19T00:00:00+00:00",
+            authorising_prompt_raw="Complete the recovered fixture loop.",
+        )
         initial["graph"]["nodes"]["U3[2]"] = node(2)
         write_json(self.path, initial)
         write_json(self.path.with_name("evals.json"), frozen_evals())
@@ -52,6 +59,52 @@ class RecoverChainTests(unittest.TestCase):
         wave = read_json(self.path)["graph"]["active_wave"]["wave_id"]
         results = {unit: {"outcome": "done", "evidence": "ok"} for unit in UNITS}
         graph.record_wave(self.path, json.dumps({"wave_id": wave, "results": results}))
+
+    def _assemble_retro(self) -> None:
+        """Run the prepare CLI, then bind its receipt into the final retro assembly."""
+        assembled_retro.write(self.path.parent, "parent")
+        state_dir = self.path.parent
+        environment = {
+            **os.environ,
+            "HOME": str(self.directory),
+            "CLAUDE_AGENTIC_LOOP_DIR": str(self.directory),
+            "CODERAILS_AGENTIC_LOOP_DIR": str(self.directory),
+        }
+        prepared = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parents[2] / "scripts/lib/orders.py"),
+                "--dir",
+                str(state_dir.parent),
+                "--session",
+                "parent",
+                "prepare",
+                "--loop",
+                read_json(self.path)["loop_id"],
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=environment,
+            cwd=self.directory,
+        )
+        self.assertEqual(prepared.returncode, 0, prepared.stderr)
+        assembled = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parents[2] / "scripts/lib/retro.py"),
+                "assemble",
+                str(state_dir),
+                "--session",
+                "parent",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**environment, "PATH": "/nonexistent"},
+            cwd=self.directory,
+        )
+        self.assertIn(assembled.returncode, (0, 3), assembled.stderr)
 
     def _verify(self) -> dict[str, Any]:
         """Freeze a level-0 suite at the current revision and verify completion."""
@@ -77,7 +130,6 @@ class RecoverChainTests(unittest.TestCase):
             "proofs": [{"id": "P1", "cmd": "true", "expect": {"exit_code": 0}}],
         }
         write_json(proof, document)
-        write_json(retro, {"schema_version": 2, "session_id": "parent", "loop_id": "loop", "status": "complete"})
         append(log, {"type": "turn_context", "payload": {"loop_id": "loop"}})
         results = self.path.with_name(pr.RESULTS_NAME)
         identity = {"session_id": "parent", "loop_id": "loop"}
@@ -93,6 +145,7 @@ class RecoverChainTests(unittest.TestCase):
             head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
             **identity,
         )
+        self._assemble_retro()  # last: the retro binds every source above
         complete(self.path, "parent", suite, proof, retro, log)
         return verify_completion(self.path, "parent", suite, proof, retro, log)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -13,6 +14,49 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from packages.tests.provider_fixture import Provider
+
+
+def artifacts_with_orders_prepared(provider: Provider) -> None:
+    """Run the prepare CLI, then bind its receipt into the final retro assembly."""
+    provider.artifacts()
+    state_dir = provider.path.parent
+    prepared = subprocess.run(
+        [
+            sys.executable,
+            str(provider.plugin / "scripts/lib/orders.py"),
+            "--dir",
+            str(state_dir.parent),
+            "--session",
+            provider.session,
+            "prepare",
+            "--loop",
+            provider.read()["loop_id"],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=provider.environment,
+        cwd=provider.home,
+    )
+    if prepared.returncode:
+        raise AssertionError(prepared.stderr)
+    assembled = subprocess.run(
+        [
+            sys.executable,
+            str(provider.plugin / "scripts/lib/retro.py"),
+            "assemble",
+            str(state_dir),
+            "--session",
+            provider.session,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**provider.environment, "PATH": "/nonexistent"},
+        cwd=provider.home,
+    )
+    if assembled.returncode not in (0, 3):
+        raise AssertionError(assembled.stderr)
 
 
 class ProviderAdversarialTests(unittest.TestCase):
@@ -111,7 +155,7 @@ class ProviderAdversarialTests(unittest.TestCase):
         """Typed proof claims and forged grades cannot substitute for observed evidence."""
         for provider in self.providers:
             provider.finish_wave()
-            provider.artifacts()
+            artifacts_with_orders_prepared(provider)
             baseline = provider.read()
             self.assertEqual(provider.complete().returncode, 0)
             provider.write(baseline)
@@ -151,7 +195,7 @@ class ProviderAdversarialTests(unittest.TestCase):
         result = provider.hook("loop_dispatch_guard", request)
         self.assertEqual(result.stdout, "", result.stderr)
         provider.success("record-wave", json.dumps(provider.launch()))
-        provider.artifacts()
+        artifacts_with_orders_prepared(provider)
         result = provider.complete()
         self.assertEqual(result.returncode, 0, result.stderr)
 

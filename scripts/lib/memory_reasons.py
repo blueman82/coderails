@@ -141,6 +141,30 @@ REASONS: dict[str, str] = {
         "rerun import-legacy, preserving the original."
     ),
     "legacy_missing": "there is no hand-written standing-orders.md to import (absent, empty or already generated).",
+    "retro_not_assembled": (
+        "retro.json is below schema_version 3 or has no source_hashes; run `python3 scripts/lib/retro.py assemble "
+        "<state-dir> --session <session_id>` instead of writing it by hand."
+    ),
+    "retro_source_mismatch": (
+        "a hashed source (named in the message) changed after the retro was assembled; re-run retro.py assemble "
+        "once the sources are final."
+    ),
+    "retro_decisions_chain_broken": (
+        "decisions_absorbed fails verify_chain (the failing seq is named); restore the rows, record decisions only "
+        "through `graph.py record-decision`, then re-assemble."
+    ),
+    "retro_steps_missing": (
+        "a teardown step is missing or out of order in teardown.jsonl; run proof.py run --all (or proof.py "
+        "disposition), flush decisions, orders.py prepare and retro.py assemble, in that order."
+    ),
+    "retro_state_error": "progress.json is unreadable, so nothing was assembled.",
+    "retro_wrong_session": "the loop state belongs to another session; assemble only from the owning session.",
+    "retro_free_invalid": "--free-file must hold one JSON object; nothing was assembled.",
+    "handoff_state_unreadable": "handoff_derive could not read the loop's progress.json; pass the real state path.",
+    "graph_unavailable": (
+        "graph.py summarize or inspect failed for this state, so the done and next-step lists are empty; run the "
+        "command by hand and read stderr."
+    ),
     "lesson_not_current": (
         "the order has no unambiguous current cited Muninn claim (retracted, expired, superseded or conflicting "
         "current claims); inspect the current evidence and explicitly record the intended lesson with a fresh quote."

@@ -26,6 +26,7 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.lib.destructive_patterns import permanent_pattern, secret_path  # noqa: E402
 from scripts.lib import proof_results as pr  # noqa: E402
+from scripts.lib import teardown_steps  # noqa: E402
 
 DEFAULT_TIMEOUT_S = 600
 EXCERPT_CAP = 2000
@@ -217,6 +218,10 @@ def cmd_run(state_dir: Path, wanted: str | None) -> int:
         print(json.dumps({"id": entry["id"], "verdict": verdict}))
         if verdict != "satisfied" and not withdrawn:
             status = 1
+    if wanted is None and status == 0:  # a full, clean run is the teardown step; `--id` runs and failures are not
+        teardown_steps.record(
+            state_dir, "proof_run", str(who[0]), cast("str | None", who[1]), teardown_steps.file_sha(path)
+        )
     return status
 
 
@@ -253,6 +258,13 @@ def cmd_disposition(state_dir: Path, code: str, reason: str) -> int:
         ended=_now(),
     )
     pr.trace("proof.freeze", "disposition", "", *who)
+    teardown_steps.record(
+        state_dir,
+        "proof_run",
+        str(who[0]),
+        cast("str | None", who[1]),
+        teardown_steps.file_sha(state_dir / pr.RESULTS_NAME),
+    )  # the proof stage is resolved by the typed disposition
     return 0
 
 

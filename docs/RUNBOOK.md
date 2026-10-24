@@ -188,6 +188,15 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
 | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
 | `lesson_not_current` | no unambiguous current cited claim exists; inspect conflicting current evidence, or explicitly re-record a retracted/expired lesson with a fresh quote. |
+| `retro_not_assembled` | Assemble schema-3 retro.json with `retro.py assemble`; preserve the source artifacts. |
+| `retro_source_mismatch` | A named source changed after assembly; finish that source and re-assemble. |
+| `retro_decisions_chain_broken` | Restore the damaged decision row; record decisions through the graph CLI. |
+| `retro_steps_missing` | Run the missing proof, decision flush or orders preparation step, then re-assemble. |
+| `retro_state_error` | Restore the owned, readable progress.json before assembly. |
+| `retro_wrong_session` | Use the session that owns progress.json. |
+| `retro_free_invalid` | Supply one JSON object in the free-file. |
+| `handoff_state_unreadable` | Pass the readable, owned progress.json to handoff_derive. |
+| `graph_unavailable` | Run graph.py summarize and inspect to diagnose the unavailable graph. |
 
 - Limits: only the orchestrator session can write (subagent threads are not citable); cites must anchor in a user
   prompt; the hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Measurement note: compare
