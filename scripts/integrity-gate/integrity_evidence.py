@@ -78,6 +78,8 @@ def _eval_valid(item: object, level: int) -> bool:
 
 def eval_valid(body: str, number: int, sha: str) -> bool:
     """Check marker, current head, frozen oracle and recorded outcomes as data."""
+    if len(body) > 262144:
+        return False
     lines = body.splitlines()
     if not lines:
         return False
@@ -92,7 +94,7 @@ def eval_valid(body: str, number: int, sha: str) -> bool:
         return False
     try:
         data: object = json.loads(block[1])
-    except ValueError:
+    except (RecursionError, ValueError):
         return False
     if not isinstance(data, dict):
         return False
@@ -132,6 +134,6 @@ def eval_valid(body: str, number: int, sha: str) -> bool:
             return False
     try:
         verify_suite(data)
-    except (EvalIntegrityError, IndexError, TypeError, ValueError):
+    except (EvalIntegrityError, IndexError, RecursionError, TypeError, ValueError):
         return False
     return data.get("result") in (None, "GO")

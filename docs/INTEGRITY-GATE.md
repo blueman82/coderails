@@ -14,7 +14,7 @@ The workflow uses the built-in `GITHUB_TOKEN`. You do not need a second account,
 
 The workflow runs code from `main`. It reads PR files and comments as data. It never checks out the PR head or runs a command from an eval comment. It reads the owner comments and PR head again just before it posts a passing status. One concurrency group prevents runs of this workflow from posting statuses at the same time. GitHub does not guarantee the order of queued runs. A queue can overflow and cancel a waiting run. Comment changes trigger a new check. An hourly run checks open PRs again if GitHub misses an event.
 
-**Trust limit:** This is a structure and consistency check. A passing status does not prove that the repository owner ran the commands or used an independent reviewer. The owner can change either comment. A comment can also change after the final read and before the status post. The next event or hourly run will correct that status, but there is a delay. Another trusted workflow with `statuses:write` could post the same context; the app source rule cannot identify one workflow.
+**Trust limit:** This is a structure and consistency check. A passing status does not prove that the repository owner ran the commands or used an independent reviewer. The owner can change either comment. A comment can also change after the final read and before the status post. The next event or hourly run can correct that status, but there is a delay. If GitHub rejects the new status, the workflow cannot replace an old success. Inspect the failed run and status history. Another trusted workflow with `statuses:write` could post the same context; the app source rule cannot identify one workflow.
 
 ## Turn on the gate
 

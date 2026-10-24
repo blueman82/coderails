@@ -186,6 +186,11 @@ def gate_pr(client: EvidenceClient, number: int, max_bytes: int, pending_ttl: in
         if not review_valid(reviews[-1], number, sha):
             return fail(client, number, sha, "review_evidence_invalid", error=True)
         return check_inputs(client, number, sha, body, reviews[-1], owner, max_bytes, count)
-    except IntegrityError as error:
-        print(f"skip: pr={number} sha={sha} reason={error}")
+    except Exception as error:
+        reason = "evaluation_input_error" if isinstance(error, IntegrityError) else "evaluation_internal_error"
+        print(f"refuse: pr={number} sha={sha} reason={reason} type={type(error).__name__}")
+        try:
+            return fail(client, number, sha, reason, error=True)
+        except Exception as post_error:
+            print(f"skip: pr={number} sha={sha} reason=error_status_post_failed type={type(post_error).__name__}")
         return 1

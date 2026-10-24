@@ -61,6 +61,7 @@ class EvidenceFixture:
         self.comments_available = True
         self.review_author = "owner"
         self.eval_author = "owner"
+        self.eval_json_override: str | None = None
         self.late_eval = ""
         self.remove_comments_during_diff = False
 
@@ -105,7 +106,7 @@ class EvidenceFixture:
             [
                 {"body": self.review, "user": {"login": self.review_author}},
                 {
-                    "body": self.marker + "\n```json\n" + json.dumps(self.document) + "\n```",
+                    "body": f"{self.marker}\n```json\n{self.eval_json_override or json.dumps(self.document)}\n```",
                     "user": {"login": self.eval_author},
                 },
             ]
@@ -293,10 +294,53 @@ class GatePolicyTests(unittest.TestCase):
                 client = EvidenceFixture()
                 client.statuses = [{"context": "integrity-review", "state": "success"}]
                 client.document["grading"] = {"chain_len": length}
+                self.assertEqual((self.gate(client), client.posts[-1][:2]), (1, (SHA, "error")))
+                self.assertIn("eval_evidence_invalid", client.posts[-1][2])
+
+    def test_deep_owner_eval_replaces_old_success_with_error(self) -> None:
+        """Deep JSON cannot leave a prior pass as the latest exact-head status."""
+        for deep in ("[" * 1100 + "0" + "]" * 1100, '{"x":' * 1100 + "0" + "}" * 1100):
+            with self.subTest(shape="array" if deep.startswith("[") else "object"):
+                client = EvidenceFixture()
+                client.statuses = [{"context": "integrity-review", "state": "success"}]
+                valid = json.dumps(client.document)
+                client.eval_json_override = valid[:-1] + ',"nested":' + deep + "}"
                 self.assertEqual(self.gate(client), 1)
                 self.assertEqual(client.posts[-1][0], SHA)
                 self.assertEqual(client.posts[-1][1], "error")
                 self.assertIn("eval_evidence_invalid", client.posts[-1][2])
+
+    def test_unexpected_evaluation_fault_attempts_sanitized_error_status(self) -> None:
+        """A future parser bug is visible and attempts a current-head refusal."""
+        client = EvidenceFixture()
+
+        def broken_comments(number: int) -> list[JsonObject]:
+            raise RuntimeError("untrusted comment content")
+
+        client.comments = broken_comments  # type: ignore[method-assign]
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(gate_pr(client, 7, 204800, 720), 1)
+        self.assertEqual(client.posts[-1][:2], (SHA, "error"))
+        self.assertIn("evaluation_internal_error", client.posts[-1][2])
+        self.assertIn("RuntimeError", output.getvalue())
+        self.assertNotIn("untrusted comment content", output.getvalue())
+
+    def test_known_head_comment_and_owner_errors_replace_old_success(self) -> None:
+        """Bad comment fields or owner lookup still attempt a newer error status."""
+        for failure in ("missing_user", "owner_fetch"):
+            with self.subTest(failure=failure):
+                client = EvidenceFixture()
+                client.statuses = [{"context": "integrity-review", "state": "success"}]
+                if failure == "missing_user":
+                    client.comments = lambda number: [{"body": "owner text", "user": None}]  # type: ignore[method-assign]
+                else:
+
+                    def owner_fetch_error() -> str:
+                        raise IntegrityError("owner fetch refused")
+
+                    client.owner_login = owner_fetch_error  # type: ignore[method-assign]
+                self.assertEqual((self.gate(client), client.posts[-1][:2]), (1, (SHA, "error")))
 
     def test_removed_eval_comment_overrides_previous_success(self) -> None:
         """Deleting the eval makes the next status a failure."""
