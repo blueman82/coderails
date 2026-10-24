@@ -8,7 +8,7 @@ For any coderails question, lookup, or context, use the `wiki-query` skill; for 
 
 ## Current integrity-gate replacement
 
-The semantic judge is replaced by a root-owned mechanical `integrity-review` attestor. Checks SHA-bound review/eval evidence, command/eval structure, policy paths, provenance fields, bounded diff input — never classifies work or asks an LLM for a verdict. Authoritative: `docs/INTEGRITY-GATE.md`, `scripts/integrity-gate/integrity_gate_runner.py`, `integrity_review.machine_user` config.
+The semantic judge is replaced by a mechanical `integrity-review` attestor in a trusted GitHub Actions workflow. It checks SHA-bound review/eval evidence, command/eval structure, policy paths, provenance fields, and bounded diff input. It never runs PR code or comment commands and never asks an LLM for a verdict. Authoritative: `docs/INTEGRITY-GATE.md`, `.github/workflows/integrity-review.yml`, `scripts/integrity-gate/integrity_actions.py`, and `integrity_review.enabled` config. The GitHub rule must be activated separately; source code alone does not make it live.
 
 ## What this repo is
 
@@ -37,7 +37,7 @@ commands/*.md                   → slash commands (frontmatter + prose instruct
        └─ scripts/lib/git_common.py → shared git/gh/PR helpers, imported by both
        └─ scripts/lib/config.py     → workflow.config.yaml resolver (single source of truth; see "Config resolution")
   └─ scripts/sandbox/*.py       → srt sandbox wrapper for spawned workers (see "Sandboxed workers")
-  └─ scripts/integrity-gate/*        → root-owned launchd daemon that posts the `integrity-review` commit status
+  └─ scripts/integrity-gate/*        → trusted GitHub Actions evidence check and `integrity-review` status
 skills/*/SKILL.md               → skills with triggering descriptions
 agents/*.md                     → subagent definitions the skills spawn (deploy-safety-reviewer,
                                   design-scout, disposition-scout, docs-auditor,
@@ -68,7 +68,7 @@ examples/, launchd/             → sample configs and macOS scheduling plists
 
 **This repo** deliberately does not enable general branch protection (2026-07-15, standing decision) — so for ordinary PRs the server-side layer is absent and the redirect-and-audit layer is the whole story, by design.
 
-**One server-side exception: integrity-review.** A GitHub ruleset on `main` requires a PR + successful `integrity-review` status, posted only after the root-owned daemon (`scripts/integrity-gate/`) validates the head SHA's review/eval evidence and policy. Owner-provisioned; local hooks stay fail-closed but can't substitute for it.
+**One server-side exception: integrity-review.** The planned GitHub ruleset on `main` requires a PR and successful `integrity-review` status from the GitHub Actions app. The workflow validates the head SHA's review/eval evidence and policy as data. Activate and verify the rule after the workflow reaches `main`; local hooks cannot substitute for it.
 
 **Sandboxed workers narrow the ceiling for worker processes only, never the orchestrator.** With `config.sandbox_workers: true` (`skills/agentic-loop/SKILL.md` Phase 3/3a; status `read_by_prose_only`: the orchestrator reads it from the resolve-config text and no script does), an implementation-unit worker runs as a separate OS process via `@anthropic-ai/sandbox-runtime` (srt, pinned), Seatbelt/bubblewrap-enforced — outside the agent's trust domain, the first non-hook layer. The orchestrator itself is never sandboxed.
 
@@ -89,7 +89,7 @@ When a skill instructs an action a hook gates — `git merge`/`gh pr create`/`gh
 
 Second, additive merge gate — task evals: `/coderails:task-evals` freezes an ungraded `evals.json` before implementation and grades actual results afterward (see `skills/task-evals/SKILL.md`); `/coderails:post-evals <PR#>` validates and posts it as a SHA-bound PR comment (`coderails-eval-summary`, via `scripts/lib/eval_artifact.py`). `scripts/merge.py` reads it right after the review-artifact gate — same fail-closed rc semantics: `gh` fetch failure or `NO-GO`/missing artifact both block. Loop scope: `loop_state_guard` also requires a loop-scope `evals.json` when `progress.json`'s `work_units` ≥1, blocking stop if none — fail-open when `work_units` is absent. A loop-scope `result` must be computed by `scripts/post_evals.py grade-loop` (never hand-written) and carry a valid `grading` stamp, or `loop_state_guard` demotes an otherwise-valid `GO`/`VERIFICATION_LEVEL0` to `UNSTAMPED` and blocks.
 
-Third, additive merge gate — machine attestation: when `config.integrity_review.machine_user` is set, `scripts/merge.py` and `enforce_pr_workflow` require the newest `integrity-review` status on the exact head SHA to be successful, posted by that login, carrying `integrity=pass sha=<head>`. Wrong creator, missing status, stale SHA, non-success state, malformed description, or fetch failure — all block. Redundant defence-in-depth; the GitHub ruleset is the real boundary.
+Third, additive merge gate — GitHub Actions attestation: when `config.integrity_review.enabled` is true, `scripts/merge.py` and `enforce_pr_workflow` require the newest `integrity-review` status on the exact head SHA to be successful, posted by `github-actions[bot]`, carrying `integrity=pass sha=<head>`. Wrong creator, missing status, stale SHA, non-success state, malformed description, or fetch failure all block. The GitHub ruleset is the server boundary.
 
 Fourth seam instance: `agentic-loop` Phase 13 teardown writes `retro.json` (`schema_version` 2) beside `progress.json` before a `complete` declaration; `loop_stall_guard` gates that declaration on it, accepting `schema_version >= 1`. Resolution: do what Phase 13 says, then re-declare `complete`. At `schema_version` 2, Phase 13 step 1 also runs `python3 hooks/scripts/lib/loop_cost.py <session_id>`, writes the result as `retro.cost` (dated, once-frozen per-model token/USD breakdown), and lifts `models_used` to top-level `retro.models_used` — fail-open (miner failure → both empty, never blocks; caller error → self-describing error object). See `skills/agentic-loop/SKILL.md` Phase 13 / `teardown.md`.
 

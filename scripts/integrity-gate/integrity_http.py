@@ -69,8 +69,8 @@ def array_value(value: object) -> list[JsonObject]:
 class Client:
     """Keep credentials private while preserving injectable curl transport."""
 
-    def __init__(self, slug: str, token: str, machine_user: str) -> None:
-        """Bind one repository and machine identity for this polling tick."""
+    def __init__(self, slug: str, token: str, machine_user: str = "") -> None:
+        """Bind one repository and token; legacy daemon identity is optional."""
         self.slug = slug
         self.token = token
         self.machine_user = machine_user
@@ -120,10 +120,18 @@ class Client:
         except ValueError as error:
             raise IntegrityError("invalid JSON response") from error
 
-    def comments(self, number: int) -> list[str]:
-        """Follow GitHub comment pagination while checking each page's HTTP status."""
+    def owner_login(self) -> str:
+        """Read the live repository owner from GitHub, not from PR data."""
+        owner = object_value(self.get_object(f"https://api.github.com/repos/{self.slug}").get("owner"))
+        login = owner.get("login")
+        if not isinstance(login, str) or not login:
+            raise IntegrityError("repository owner login unavailable")
+        return login
+
+    def comments(self, number: int) -> list[JsonObject]:
+        """Keep GitHub comment author metadata across checked pages."""
         url = f"https://api.github.com/repos/{self.slug}/issues/{number}/comments?per_page=100"
-        bodies: list[str] = []
+        comments: list[JsonObject] = []
         seen: set[str] = set()
         while url:
             if url in seen or not url.startswith("https://api.github.com/"):
@@ -139,19 +147,23 @@ class Client:
                 for item in array_value(json.loads(body)):
                     if not isinstance(item.get("body"), str):
                         raise IntegrityError("invalid comment body")
-                    bodies.append(item["body"])
+                    user = object_value(item.get("user"))
+                    if not isinstance(user.get("login"), str):
+                        raise IntegrityError("invalid comment author")
+                    comments.append(item)
             except ValueError as error:
                 raise IntegrityError("invalid comment JSON") from error
             links = " ".join(line for line in lines if line.lower().startswith("link:"))
             match = re.search(r'<([^>]+)>; rel="next"', links)
             url = match[1] if match else ""
-        return bodies
+        return comments
 
     def post_status(self, sha: str, state: str, description: str) -> None:
         """Verify the live token identity before every commit-status mutation."""
-        actual = self.get_object("https://api.github.com/user").get("login", "")
-        if actual != self.machine_user:
-            raise IntegrityError(f"integrity identity mismatch expected={self.machine_user} actual={actual}")
+        if self.machine_user:
+            actual = self.get_object("https://api.github.com/user").get("login", "")
+            if actual != self.machine_user:
+                raise IntegrityError(f"integrity identity mismatch expected={self.machine_user} actual={actual}")
         body = json.dumps({"state": state, "context": "integrity-review", "description": description})
         code = self.request(
             f"https://api.github.com/repos/{self.slug}/statuses/{sha}",

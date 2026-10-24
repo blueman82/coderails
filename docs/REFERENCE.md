@@ -581,8 +581,8 @@ retained in full; failure notices provide measurements and a reader command
 instead of a fixed excerpt (see below).
 
 Local hooks redirect and audit a cooperating agent. Their files and transcripts
-remain inside the local trust domain. The root-owned integrity attestor and
-GitHub required status provide the separate server-side boundary described in
+remain inside the local trust domain. The trusted GitHub Actions workflow and
+GitHub required status provide the server-side boundary described in
 [INTEGRITY-GATE.md](INTEGRITY-GATE.md).
 
 ### Retained test-gate output
@@ -747,7 +747,8 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
 | `sandbox_workers` | boolean/null | `false` | read_by_prose_only | true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md). |
 | `integrity_review` | object/null | `null` | enforced_by_code | Integrity attestation settings. |
-| `integrity_review.machine_user` | string/null | `null` | enforced_by_code | GitHub login that must post the integrity-review status; null or absent = local gate inactive. |
+| `integrity_review.enabled` | boolean/null | `false` | enforced_by_code | true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live. |
+| `integrity_review.machine_user` | string/null | `null` | enforced_by_code | Deprecated. A non-empty legacy login remains the required local status author until enabled is true. |
 | `evals` | object/null | `null` | enforced_by_code | Eval settings. |
 | `evals.require_signatures` | boolean/null | `false` | enforced_by_code | true = eval artifacts must be signed; refuse when signing is impossible. |
 <!-- config-schema:end -->
@@ -764,8 +765,8 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `scripts/lib/{eval_validation,eval_execution}.py` | Eval criteria and command/control verification. Gate smoke runs in a detached worktree at the trusted SHA. |
 | `scripts/sandbox/spawn_sandboxed_worker.py` | Guard dispatch before scratch allocation; run a separate Claude process through pinned srt and retain its exit status. |
 | `scripts/sandbox/{render_settings,sandbox_probe}.py` | Render explicit write containment and discriminate allowed versus forbidden filesystem writes. |
-| `scripts/integrity-gate/integrity_gate_runner.py` | Root-owned mechanical review/eval/diff attestation; no LLM classifier. Deployed with its root-owned HTTP and policy modules. |
-| `scripts/integrity-gate/{install,setup}.py` | Reviewable owner-run promotion, credential handling and GitHub ruleset setup. |
+| `.github/workflows/integrity-review.yml`, `scripts/integrity-gate/integrity_actions.py` | Trusted GitHub Actions review/eval/diff check. It uses the built-in token and runs no PR code. |
+| `scripts/integrity-gate/setup.py` | Preview and activate the GitHub Actions source-bound ruleset after a live candidate status. |
 | `install.py`, `uninstall.py` | Independent provider installation/removal with preserved user data, preflight checks and read-only dry-run. |
 | `launchd/*_routines.py`, `*_dashboard_agent.py` | Literal-path launch agent installation and verified unload/removal. |
 | `scripts/quality/check.py` | Strict source, format, typing, size and generated-materialization checks. |

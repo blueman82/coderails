@@ -59,9 +59,13 @@
       "type": ["object", "null"], "default": null, "status": "enforced_by_code",
       "description": "Integrity attestation settings.",
       "properties": {
+        "enabled": {
+          "type": ["boolean", "null"], "default": false, "status": "enforced_by_code",
+          "description": "true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live."
+        },
         "machine_user": {
           "type": ["string", "null"], "default": null, "status": "enforced_by_code",
-          "description": "GitHub login that must post the integrity-review status; null or absent = local gate inactive."
+          "description": "Deprecated. A non-empty legacy login remains the required local status author until enabled is true."
         }
       }
     },
