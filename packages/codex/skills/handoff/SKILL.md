@@ -31,7 +31,8 @@ Decisions, Done and Next steps. If a command is unavailable or exits nonzero (th
 `{"degraded": "<reason_code>"}`), omit only that command's result. Keep successful current-graph results even if
 collection fails on another graph, then run Step 1.
 
-When reporting graph work, use `inspect`/`summarize`'s `node_names` entry to show each node's one-word job name and lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.
+When reporting graph work, use `inspect`/`summarize`'s `node_names` entry to show each node's one-word job name and lane code beside its stable ID.
+Keep the stable ID in continuation instructions and evidence references.
 
 ### Step 1: Extract from current session
 
@@ -61,9 +62,14 @@ For example, if cwd is `/Users/you/Documents/Github/ops-agent`, write to:
 
 **Do NOT use the path shown in your system prompt's auto-memory section** — that may be a global fallback path which other project sessions won't load. Always derive from cwd.
 
-**Monorepo edge case: find the existing store before you write.** If cwd is inside `<repo>/projects/<sub>` or `<repo>/packages/<sub>`, the memory store might use the **repo root** path. All sessions for that repo, including this one, can share the root store. A path based only on the sub-project cwd can create an empty `memory/` folder that future sessions do not load. Before writing:
+**Monorepo edge case: find the existing store before you write.** If cwd is inside `<repo>/projects/<sub>` or `<repo>/packages/<sub>`, the memory store might use the **repo root** path.
+All sessions for that repo, including this one, can share the root store.
+A path based only on the sub-project cwd can create an empty `memory/` folder that future sessions do not load.
+Before writing:
 
-1. Find the existing store. Check the cwd-derived path AND its parent-directory candidates (walk up the path, replacing slashes with dashes), and look at the auto-memory path from the system prompt. Pick the one that already contains a populated `MEMORY.md` + `project_*.md` files.
+1. Find the existing store.
+   Check the cwd-derived path AND its parent-directory candidates (walk up the path, replacing slashes with dashes), and look at the auto-memory path from the system prompt.
+   Pick the one that already contains a populated `MEMORY.md` + `project_*.md` files.
 2. If exactly one populated store exists, write there — even if it's keyed to a parent/root path rather than your sub-project cwd. Matching the store the session actually loads from beats matching cwd.
 3. Only create a new cwd-derived directory if NO populated store exists for this repo (genuinely first memory for the project).
 

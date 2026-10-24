@@ -5,9 +5,12 @@ description: 'Use this skill for premortem analysis: assume a plan, decision, or
 
 # Premortem
 
-A premortem is a planning technique where you assume something has already failed — then work backwards to find out why. It's the opposite of a postmortem. The goal is to surface failure modes *before* you commit, while you can still act on them.
+A premortem is a planning technique where you assume something has already failed — then work backwards to find out why.
+It's the opposite of a postmortem.
+The goal is to surface failure modes *before* you commit, while you can still act on them.
 
-This skill works on plans, decisions, arguments, features, architectures, or your own previous response. The user may explicitly invoke it (`premortem this`, `premortem <X>`) or it may be appropriate to trigger it proactively before a high-stakes commitment.
+This skill works on plans, decisions, arguments, features, architectures, or your own previous response.
+The user may explicitly invoke it (`premortem this`, `premortem <X>`) or it may be appropriate to trigger it proactively before a high-stakes commitment.
 
 ---
 

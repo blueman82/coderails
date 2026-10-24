@@ -97,7 +97,8 @@ What does this plan assume that's almost certainly wrong? Where is the optimism?
 
 Red Team is the adversarial challenge. You take the strongest possible position *against* the plan and attack it directly. This is not a balanced critique — it's an intentional one-sided assault on the weakest points.
 
-The difference from premortem: premortem imagines accidental failure. Red Team imagines a motivated opponent — a competitor, a sceptic, a regulator, a hostile stakeholder — who wants this to fail and is actively working against it.
+The difference from premortem: premortem imagines accidental failure.
+Red Team imagines a motivated opponent — a competitor, a sceptic, a regulator, a hostile stakeholder — who wants this to fail and is actively working against it.
 
 **Run this stage as follows:**
 

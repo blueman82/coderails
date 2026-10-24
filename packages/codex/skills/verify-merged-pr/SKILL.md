@@ -11,7 +11,9 @@ A claim that "PR #N is merged" is a claim, not a fact. Re-derive it from the too
 
 **Core principle:** Check three things yourself: the merge STATE, the CONTENT on `origin/main`, and any SIBLING PRs the reporter did not mention.
 
-The third is the one agents skip. A teammate or headless builder usually reports the *one* PR it means to, but sessions often land several. Verifying only the named PR confirms the claim while missing half the work that actually merged.
+The third is the one agents skip.
+A teammate or headless builder usually reports the *one* PR it means to, but sessions often land several.
+Verifying only the named PR confirms the claim while missing half the work that actually merged.
 
 ## When to Use
 
@@ -32,7 +34,8 @@ Run all three. The claim is confirmed only when state, content, and siblings all
 gh pr view <N> --json state,mergedAt,mergeCommit,author,headRefName,baseRefName,url
 ```
 
-Confirm `state` is `MERGED`, `mergedAt` is non-null, and note `mergeCommit.oid`, `author.login`, and `baseRefName`. A PR can be closed-not-merged, or merged into a branch other than the one you assumed — the JSON tells you which.
+Confirm `state` is `MERGED`, `mergedAt` is non-null, and note `mergeCommit.oid`, `author.login`, and `baseRefName`.
+A PR can be closed-not-merged, or merged into a branch other than the one you assumed — the JSON tells you which.
 
 ### 2. Confirm the CONTENT is actually on origin/main
 
@@ -56,7 +59,10 @@ gh pr list --state merged --limit 20 \
   --json number,title,mergedAt,headRefName,mergeCommit
 ```
 
-Read the `mergedAt` timestamps. PRs by the same author that merged within minutes of the named PR likely belong to the same work. List each PR in that window in your verdict. Treat merges before a wide time gap as separate work unless you have evidence to include them.
+Read the `mergedAt` timestamps.
+PRs by the same author that merged within minutes of the named PR likely belong to the same work.
+List each PR in that window in your verdict.
+Treat merges before a wide time gap as separate work unless you have evidence to include them.
 
 ## Quick Reference
 

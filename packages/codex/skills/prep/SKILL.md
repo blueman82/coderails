@@ -14,7 +14,9 @@ Identify:
 - A required branch named `feature/...`, `bug/...`, or `bugfix/...`.
 - An optional issue type, summary, and description.
 
-If the branch is missing or ambiguous, use `request_user_input` to ask only for the branch name. Infer `Task` for feature branches and `Bug` for bug branches. When absent, generate a plain summary from the branch suffix and a short description that includes `Branch: <branch>`.
+If the branch is missing or ambiguous, use `request_user_input` to ask only for the branch name.
+Infer `Task` for feature branches and `Bug` for bug branches.
+When absent, generate a plain summary from the branch suffix and a short description that includes `Branch: <branch>`.
 
 ## Read project configuration
 

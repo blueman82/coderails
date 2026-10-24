@@ -15,13 +15,20 @@ Use the package-local [post_evals.py](../../scripts/post_evals.py) and [eval_art
 
 1. Locate the existing `evals.json` produced for this pull request. Do not create or rewrite its claimed results.
 2. Fetch the current head with `gh pr view <pr> --json headRefOid -q .headRefOid`. Treat an empty value or fetch failure as `NO-GO` and stop.
-3. Run `post_evals.py validate-structure <evals_json> <pr> <current_head_sha>`. This is the fail-closed structure gate, including PR-head binding, recorded smoke evidence, and current command/control execution. Stop on any failure.
+3. Run `post_evals.py validate-structure <evals_json> <pr> <current_head_sha>`.
+   This is the fail-closed structure gate, including PR-head binding, recorded smoke evidence, and current command/control execution.
+   Stop on any failure.
 4. Run `post_evals.py validate-discriminating <evals_json>`. Stop on any malformed, environmental, or non-discriminating result.
-5. Run `post_evals.py compute-result <evals_json>` and read `.verification_level` from that JSON with Python's standard-library `json` module. Never accept a hand-written result. Stop unless the result is exactly `GO` or `NO-GO` and the verification level is `0`, `1`, or `2`.
+5. Run `post_evals.py compute-result <evals_json>` and read `.verification_level` from that JSON with Python's standard-library `json` module.
+   Never accept a hand-written result.
+   Stop unless the result is exactly `GO` or `NO-GO` and the verification level is `0`, `1`, or `2`.
 6. Run `python3 <resolved eval_artifact.py> <pr> <current_head_sha> <result> <verification_level>`. The marker must remain bound to the validated pull request and its currently fetched head.
-7. Build a temporary comment body that starts with that exact marker, summarizes P0/P1 pass and fail outcomes, includes amendments for human context, and ends with the complete source `evals.json` in one fenced `json` block. Do not hand-summarize or alter the embedded JSON.
+7. Build a temporary comment body that starts with that exact marker, summarizes P0/P1 pass and fail outcomes, includes amendments for human context, and ends with the complete source `evals.json` in one fenced `json` block.
+   Do not hand-summarize or alter the embedded JSON.
 8. Run `post_evals.py validate-embed <evals_json> <comment_body>`. Stop without posting if it fails.
-9. Resolve `owner/repo` with `gh repo view --json nameWithOwner -q .nameWithOwner`. Fetch issue comments with `gh api`, and compare their opening line to the exact marker. If an exact marker already exists, do not post a duplicate; report its URL.
+9. Resolve `owner/repo` with `gh repo view --json nameWithOwner -q .nameWithOwner`.
+   Fetch issue comments with `gh api`, and compare their opening line to the exact marker.
+   If an exact marker already exists, do not post a duplicate; report its URL.
 10. Otherwise post with `gh api repos/<owner>/<repo>/issues/<pr>/comments -F body=@<comment_body>`. Do not use `gh pr comment`. Treat any fetch or post failure as `NO-GO` and do not claim an artifact exists.
 11. Report the comment URL, computed result, verification level, and current head SHA.
 

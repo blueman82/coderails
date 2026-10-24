@@ -19,7 +19,16 @@ guessing which artifact to record.
 
 ### Step 0: Load the Schema
 
-The git root's `AGENTS.md` loads at session start. Read its wiki schema section, or the `AGENTS-wiki-schema.md` file it links to. Coderails keeps the schema in `AGENTS.md` and the live page types in `wiki.schema.json`. If `AGENTS.md` is not in context, walk up from the current directory to the git root. Check each level for `AGENTS.md`; a fork can start in a project subdirectory. If you do not find it, tell the user to invoke `$coderails-codex:wiki-init` first. The wiki vault is a separate sibling repo, such as `../coderails-wiki`. The project's `.coderails/workflow.config.yaml` points to it. Do not look for `AGENTS.md` in the vault. A fork does not need to run from inside the vault.
+The git root's `AGENTS.md` loads at session start.
+Read its wiki schema section, or the `AGENTS-wiki-schema.md` file it links to.
+Coderails keeps the schema in `AGENTS.md` and the live page types in `wiki.schema.json`.
+If `AGENTS.md` is not in context, walk up from the current directory to the git root.
+Check each level for `AGENTS.md`; a fork can start in a project subdirectory.
+If you do not find it, tell the user to invoke `$coderails-codex:wiki-init` first.
+The wiki vault is a separate sibling repo, such as `../coderails-wiki`.
+The project's `.coderails/workflow.config.yaml` points to it.
+Do not look for `AGENTS.md` in the vault.
+A fork does not need to run from inside the vault.
 
 The git/vault/supervision settings below are **not** read from AGENTS.md — they are flat
 keys in that same project's `.coderails/workflow.config.yaml` (the repo the source being
@@ -150,10 +159,19 @@ git commit -m "wiki: ingest <description>"
 
 ### Step 7: Report
 
-Pages created/updated, new wiki-links added, gaps identified. **If worktree flow: the PR URL/number is the final deliverable — report it and stop. The PR is not merged by this skill; a human, or an explicit separate follow-up instruction, merges it.** Also report `WORKTREE_PATH` and the cleanup command from Step 6, so whoever merges the PR knows to remove the worktree afterward.
+Report the pages created or updated, new wiki links, and gaps.
+**For worktree flow, report the PR URL or number and stop.**
+A human or a separate follow-up instruction merges the PR.
+Also report `WORKTREE_PATH` and the cleanup command from Step 6.
 
 ### Step 8: Run wiki-lint
 
-**If `wiki_git_worktree` is `false` (direct-write): always run `$coderails-codex:wiki-lint` immediately after ingest completes.** An ingest without a follow-up lint leaves the new/updated pages unverified — treat ingest and lint as one combined step, not two independently optional ones. (`agentic-loop` batches this at the cluster level when running many ingests across a loop's PRs; a solo invocation of this skill still pairs immediately, since there's no larger batch to wait for.)
+**If `wiki_git_worktree` is `false` (direct-write), run `$coderails-codex:wiki-lint` immediately after ingest.**
+The lint checks the new or updated pages.
+Treat ingest and lint as one step.
+For an agentic loop with many ingests, run lint after the cluster.
 
-**If `wiki_git_worktree` is `true` (PR flow): do not run wiki-lint yet.** The ingest PR from Step 6 is still open — `wiki-lint` audits the vault's current merged state (`origin/main`), which does not yet include these pages, so running it now would not verify them. Run `$coderails-codex:wiki-lint` as a separate follow-up once the ingest PR has actually merged.
+**If `wiki_git_worktree` is `true` (PR flow), wait to run wiki-lint.**
+The ingest PR from Step 6 is still open.
+`wiki-lint` checks the vault's merged state (`origin/main`), which does not yet include these pages.
+Run `$coderails-codex:wiki-lint` as a separate follow-up once the ingest PR has actually merged.

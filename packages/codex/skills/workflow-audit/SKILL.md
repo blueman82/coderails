@@ -5,14 +5,24 @@ description: Use when the user asks to look at recent sessions and find repeated
 
 # Workflow Audit
 
-Finds tool-use patterns that repeat across Codex sessions. A fresh judge selects candidates for new skills. Each proposed skill then goes through `$skill-creator`, a fresh-subagent pressure test, and the native Codex PR workflow.
+Finds tool-use patterns that repeat across Codex sessions.
+A fresh judge selects candidates for new skills.
+Each proposed skill then goes through `$skill-creator`, a fresh-subagent pressure test, and the native Codex PR workflow.
 
 Set `SKILL_DIR` to the absolute directory containing this `SKILL.md`; run all
 bundled scripts through that path.
 
 ## Overview
 
-The work has four stages. Scan transcripts into tool-use event sequences. Group repeated n-grams across sessions. Give those groups to a fresh judge subagent for `propose` or `reject` verdicts. Then act on each `propose` verdict. By default, create the skill in this session. In queue-mode (section 5), write a dashboard queue entry instead. Never use both paths for one verdict. Do not create a skill that the judge rejected.
+The work has four stages.
+Scan transcripts into tool-use event sequences.
+Group repeated n-grams across sessions.
+Give those groups to a fresh judge subagent for `propose` or `reject` verdicts.
+Then act on each `propose` verdict.
+By default, create the skill in this session.
+In queue-mode (section 5), write a dashboard queue entry instead.
+Never use both paths for one verdict.
+Do not create a skill that the judge rejected.
 
 ## 1. Scope mapping
 
@@ -24,7 +34,11 @@ Map the user's phrasing onto scan arguments before running anything:
 | no scope given | `--all-projects --days 14` (default) |
 | "just this project" / a named project | `--project <slug>` |
 
-Use `WORKFLOW_AUDIT_ROOT` as the corpus root. It defaults to `~/.codex/sessions`; override it only if the user names another root. Native Codex stores JSONL below dated directories. `--project` matches the basename of `session_meta.payload.cwd`. Exclude child-agent threads so they cannot inflate support across sessions.
+Use `WORKFLOW_AUDIT_ROOT` as the corpus root.
+It defaults to `~/.codex/sessions`; override it only if the user names another root.
+Native Codex stores JSONL below dated directories.
+`--project` matches the basename of `session_meta.payload.cwd`.
+Exclude child-agent threads so they cannot inflate support across sessions.
 
 ## 2. Size sanity
 
@@ -37,9 +51,14 @@ python3 "$SKILL_DIR/scripts/scan_transcripts.py" <scan args> \
   | python3 "$SKILL_DIR/scripts/cluster_ngrams.py" --min-sessions 3
 ```
 
-`scan_transcripts.py` (full contract: `--help`) emits one JSON line per root session from native `event_msg.payload.item` records. It allows only completed `CommandExecution`, `FileChange`, `Extension`, and `CollabAgentToolCall` items. The optional `head` is limited to the first two command tokens or an explicit allowlist of native extension and collaboration tool names; unknown names lose their head. Message, prompt, result, reasoning, remaining command arguments, and file-change content is never copied. `cluster_ngrams.py` (full contract: `--help`) consumes that stream and emits one JSON object: n-grams (n=2..5) that recur across `--min-sessions` (default 3) distinct sessions, capped at `--top` (default 50) clusters.
+`scan_transcripts.py` (full contract: `--help`) emits one JSON line per root session from native `event_msg.payload.item` records.
+It allows only completed `CommandExecution`, `FileChange`, `Extension`, and `CollabAgentToolCall` items.
+The optional `head` is limited to the first two command tokens or an explicit allowlist of native extension and collaboration tool names; unknown names lose their head.
+Message, prompt, result, reasoning, remaining command arguments, and file-change content is never copied.
+`cluster_ngrams.py` (full contract: `--help`) consumes that stream and emits one JSON object: n-grams (n=2..5) that recur across `--min-sessions` (default 3) distinct sessions, capped at `--top` (default 50) clusters.
 
-**Diagnostics are not noise.** `jq_parse_error:<file>` or `jq_parse_error:<line-no>` lines on stderr are real parse failures — surface them, don't swallow them. An empty `clusters` array is a legitimate result ("no repeated patterns found at this threshold") — report it plainly and stop; don't lower the threshold or invent candidates to fill the gap.
+**Diagnostics are not noise.** `jq_parse_error:<file>` or `jq_parse_error:<line-no>` lines on stderr are real parse failures — surface them, don't swallow them.
+An empty `clusters` array is a legitimate result ("no repeated patterns found at this threshold") — report it plainly and stop; don't lower the threshold or invent candidates to fill the gap.
 
 ## 4. Judge stage
 
@@ -48,7 +67,10 @@ Read `$SKILL_DIR/references/judge-contract.md` in full, then call `spawn_agent` 
 1. The cluster JSON — the full stdout object from `cluster_ngrams.py`.
 2. The existing-skill list — the `name` and `description` frontmatter lines from every `skills/*/SKILL.md` in the repo.
 
-**The judge receives nothing else.** Do not send transcript content, conversation history, or orchestrator commentary. The judge receives only tool names, whitelisted heads, counts, session ids, and n-gram lengths. `scan_transcripts.py` and `cluster_ngrams.py` apply the same privacy limit to their output. The judge returns one `propose` or `reject` verdict per cluster, as the contract's schema requires.
+**The judge receives nothing else.** Do not send transcript content, conversation history, or orchestrator commentary.
+The judge receives only tool names, whitelisted heads, counts, session ids, and n-gram lengths.
+`scan_transcripts.py` and `cluster_ngrams.py` apply the same privacy limit to their output.
+The judge returns one `propose` or `reject` verdict per cluster, as the contract's schema requires.
 
 ## 5. Queue-mode output (optional) — mutually exclusive with in-session creation
 
@@ -111,18 +133,33 @@ Present one row per candidate cluster to the owner:
 
 Only rows with `verdict: "propose"` go forward (to creation or a queue entry, per section 7); rejected clusters are reported (with their reason) but nothing further is done with them.
 
-**Privacy invariant.** The chart and every downstream artifact (proposal file, wrap-up report) contain only tool names, whitelisted heads, counts, and session ids — never verbatim transcript prose, file contents, or reconstructed intent beyond what those fields literally say. Any proposal artifact written to disk stays local (scratch or loop-state dir) and is never committed to the repo.
+**Privacy invariant.** The chart and every downstream artifact (proposal file, wrap-up report) contain only tool names, whitelisted heads, counts, and session ids — never verbatim transcript prose, file contents, or reconstructed intent beyond what those fields literally say.
+Any proposal artifact written to disk stays local (scratch or loop-state dir) and is never committed to the repo.
 
 ## 7. Proceed to creation
 
-Unless the run is in queue-mode (section 5), send every `propose` candidate to the section-8 create step without asking the owner again. In queue-mode, write a queue entry instead. Do NOT also create the skill here. The dashboard Approve click is the only build trigger for a queue entry. The judge's verdict is the only filter for what gets built. Create nothing the judge rejected. A run with zero `propose` verdicts is complete and successful.
+Unless the run is in queue-mode (section 5), send every `propose` candidate to the section-8 create step without asking the owner again.
+In queue-mode, write a queue entry instead.
+Do NOT also create the skill here.
+The dashboard Approve click is the only build trigger for a queue entry.
+The judge's verdict is the only filter for what gets built.
+Create nothing the judge rejected.
+A run with zero `propose` verdicts is complete and successful.
 
 ## 8. Create step — one skill at a time
 
 For each proposed candidate, in sequence, never batched:
 
-1. Freeze PR-scope evals with `$coderails-codex:task-evals` before writing the new skill. Then author the skill via `$skill-creator`, using the candidate's judge-contract fields. Run a fresh-subagent baseline scenario without the new skill, write the smallest `SKILL.md` that addresses the observed failure, then repeat the scenario.
-2. Land the skill in the coderails repo on its own branch and PR. Run the test gate. Spawn the installed `spec-reviewer` against the current PR head, and add `deploy-safety-reviewer` only for a production surface. Resolve findings and grade the frozen evals. Then invoke `$coderails-codex:post-review`, `$coderails-codex:post-evals`, and `$coderails-codex:merge`. Never commit straight to `main`, and never write into a user's personal `~/.codex/skills` directory. This is a repo skill.
+1. Freeze PR-scope evals with `$coderails-codex:task-evals` before writing the new skill.
+   Then author the skill via `$skill-creator`, using the candidate's judge-contract fields.
+   Run a fresh-subagent baseline scenario without the new skill, write the smallest `SKILL.md` that addresses the observed failure, then repeat the scenario.
+2. Land the skill in the coderails repo on its own branch and PR.
+   Run the test gate.
+   Spawn the installed `spec-reviewer` against the current PR head, and add `deploy-safety-reviewer` only for a production surface.
+   Resolve findings and grade the frozen evals.
+   Then invoke `$coderails-codex:post-review`, `$coderails-codex:post-evals`, and `$coderails-codex:merge`.
+   Never commit straight to `main`, and never write into a user's personal `~/.codex/skills` directory.
+   This is a repo skill.
 3. **Stop after this skill is merged before starting the next proposed candidate.** Test and ship each candidate separately.
 
 ## 9. Wrap-up
@@ -134,6 +171,14 @@ Report, unscored:
 
 ## 10. On-demand invocation
 
-Native Codex has no scheduler. Invoke this skill on demand in Codex or from the dashboard's manually triggered `workflow-audit-weekly` routine. See the dashboard's `docs/routines.md` for the operator guide. Despite its name, the routine does not run weekly or automatically. It scans the last 7 days (`--days 7`), groups repeated patterns, judges them, and writes `propose` verdicts to the dashboard queue.
+Native Codex has no scheduler.
+Invoke this skill on demand in Codex or from the dashboard's manually triggered `workflow-audit-weekly` routine.
+See the dashboard's `docs/routines.md` for the operator guide.
+Despite its name, the routine does not run weekly or automatically.
+It scans the last 7 days (`--days 7`), groups repeated patterns, judges them, and writes `propose` verdicts to the dashboard queue.
 
-**Queue-mode is mandatory for this dashboard routine.** Do not create a skill in-session. The owner's Approve click on a queue entry is the only build trigger for that proposal. In a direct interactive run, the user can choose in-session creation or queue-mode. The routine completes cleanly only if `proposals_written == proposals_attempted`, with no queue write failure. Zero proposals is a successful run.
+**Queue-mode is mandatory for this dashboard routine.** Do not create a skill in-session.
+The owner's Approve click on a queue entry is the only build trigger for that proposal.
+In a direct interactive run, the user can choose in-session creation or queue-mode.
+The routine completes cleanly only if `proposals_written == proposals_attempted`, with no queue write failure.
+Zero proposals is a successful run.
