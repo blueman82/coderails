@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Read-only Muninn store schema probe. `check()` returns None or a reason code; it never trusts `muninn --version`.
 
-Reason codes: muninn_store_missing, muninn_schema_old (PRAGMA user_version != 2), muninn_schema_incomplete (a typed
-`knowledge` column or the knowledge_fts / citation / knowledge_log table is missing). Opens the file with sqlite
-mode=ro.
+Reason codes: muninn_store_missing, muninn_schema_old (PRAGMA user_version != 2), muninn_schema_incomplete (a required
+column, table, or FTS trigger action is missing). Opens the file with sqlite mode=ro.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from pathlib import Path
 
 SCHEMA_VERSION = 2
 TYPED_COLUMNS = ("confidence", "valid_until", "sensitivity", "contradicts", "tags")
-TABLES = ("knowledge_fts", "citation", "knowledge_log")
+TABLES = ("knowledge", "scope", "knowledge_fts", "citation", "knowledge_log")
 TRIGGERS = ("knowledge_ai", "knowledge_ad", "knowledge_au")
 KINDS = {"decision", "fact", "preference", "procedure", "lesson", "constraint"}
 DB_NAME = "muninn.sqlite"
@@ -33,7 +32,7 @@ def check(data_home: str | Path | None = None) -> str | None:
     if not db.is_file():
         return "muninn_store_missing"
     try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+        conn = sqlite3.connect(f"{db.absolute().as_uri()}?mode=ro", uri=True, timeout=5)
         try:
             if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
                 return "muninn_schema_old"
@@ -49,13 +48,22 @@ def check(data_home: str | Path | None = None) -> str | None:
         re.I,
     )
     allowed_kinds: set[str] = set(re.findall(r"'([^']+)'", kind_check.group(1))) if kind_check else set()
+    effects = {
+        "knowledge_ai": ("INSERTINTOKNOWLEDGE_FTS(ROWID,TEXT)SELECTNEW.ID,NEW.TEXT",),
+        "knowledge_ad": ("INSERTINTOKNOWLEDGE_FTS(KNOWLEDGE_FTS,ROWID,TEXT)SELECT'DELETE',OLD.ID,OLD.TEXT",),
+        "knowledge_au": (
+            "INSERTINTOKNOWLEDGE_FTS(KNOWLEDGE_FTS,ROWID,TEXT)SELECT'DELETE',OLD.ID,OLD.TEXT",
+            "INSERTINTOKNOWLEDGE_FTS(ROWID,TEXT)SELECTNEW.ID,NEW.TEXT",
+        ),
+    }
     triggers = all(
         schema.get(name, ("", ""))[0] == "trigger"
         and f"AFTER {event} ON KNOWLEDGE" in " ".join(schema[name][1].split()).upper()
-        and "knowledge_fts" in schema[name][1]
+        and all(effect in re.sub(r"\s+", "", schema[name][1]).upper() for effect in effects[name])
         for name, event in zip(TRIGGERS, ("INSERT", "DELETE", "UPDATE"))
     )
-    if not (set(TYPED_COLUMNS) <= columns and set(TABLES) <= schema.keys() and allowed_kinds >= KINDS and triggers):
+    tables = all(schema.get(name, ("", ""))[0] == "table" for name in TABLES)
+    if not (set(TYPED_COLUMNS) <= columns and tables and allowed_kinds >= KINDS and triggers):
         return "muninn_schema_incomplete"
     return None
 
