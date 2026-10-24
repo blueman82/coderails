@@ -130,5 +130,10 @@
   "scripts/lib/manifest_policy.py": "100644",
   "scripts/lib/manifest_counters.py": "100644",
   "scripts/lib/config_counters.py": "100644",
-  "scripts/lib/config_schema_docs.py": "100644"
+  "scripts/lib/config_schema_docs.py": "100644",
+  "scripts/lib/memory_schema.py": "100755",
+  "scripts/tests/fake_muninn.py": "100755",
+  "scripts/tests/fake_muninn_store.py": "100644",
+  "scripts/tests/fake_muninn_case.py": "100644",
+  "scripts/tests/fake_muninn_read.py": "100644"
 }
