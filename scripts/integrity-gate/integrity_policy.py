@@ -22,13 +22,33 @@ class EvidenceClient(Protocol):
         """Fetch a checked HTTP body."""
         ...
 
-    def comments(self, number: int) -> list[str]:
-        """Fetch all comment bodies in server order."""
+    def comments(self, number: int) -> list[JsonObject]:
+        """Fetch all comments with GitHub author metadata in server order."""
+        ...
+
+    def owner_login(self) -> str:
+        """Fetch the live repository owner login."""
         ...
 
     def post_status(self, sha: str, state: str, description: str) -> None:
         """Post a commit status with the workflow's scoped token."""
         ...
+
+
+def owner_bodies(client: EvidenceClient, number: int, owner: str) -> list[str]:
+    """Use only comments that GitHub attributes to the repository owner."""
+    bodies: list[str] = []
+    for comment in client.comments(number):
+        user = object_value(comment.get("user"))
+        body = comment.get("body")
+        if not isinstance(body, str):
+            raise IntegrityError("invalid comment body")
+        login = user.get("login")
+        if not isinstance(login, str):
+            raise IntegrityError("invalid comment author")
+        if login.casefold() == owner.casefold():
+            bodies.append(body)
+    return bodies
 
 
 def post_current(client: EvidenceClient, number: int, sha: str, state: str, description: str) -> int:
@@ -53,10 +73,14 @@ def fail(client: EvidenceClient, number: int, sha: str, reason: str, *, error: b
     return 1 if posted or error else 0
 
 
-def check_inputs(client: EvidenceClient, number: int, sha: str, body: str, max_bytes: int) -> int:
+def check_inputs(
+    client: EvidenceClient, number: int, sha: str, body: str, review_body: str, owner: str, max_bytes: int, count: int
+) -> int:
     """Validate command evidence, policy paths and the bounded diff before success."""
     if not eval_valid(body, number, sha):
         return fail(client, number, sha, "eval_evidence_invalid", error=True)
+    if count >= 3000:
+        return fail(client, number, sha, "file_count_at_api_cap", error=True)
     try:
         files: list[JsonObject] = []
         for page in range(1, 32):
@@ -72,6 +96,8 @@ def check_inputs(client: EvidenceClient, number: int, sha: str, body: str, max_b
     filenames.extend(item.get("previous_filename") for item in files if item.get("status") == "renamed")
     if not filenames or any(not isinstance(name, str) or not name for name in filenames):
         return fail(client, number, sha, "file_list_invalid", error=True)
+    if len(files) != count:
+        return fail(client, number, sha, "file_count_mismatch", error=True)
     for name in filenames:
         if isinstance(name, str) and re.match(
             r"^(skills/dashboard/|launchd/|scripts/integrity-gate/|scripts/(merge\.py|lib/(config\.py|eval_|integrity_status\.py|review_artifact\.py))|hooks/scripts/lib/pr_merge_gate\.py|packages/codex/scripts/(merge\.py|lib/(config\.py|eval_|integrity_status\.py|review_artifact\.py))|\.github/workflows/|config\.schema\.json$|packages/codex/config\.schema\.json$)",
@@ -84,6 +110,16 @@ def check_inputs(client: EvidenceClient, number: int, sha: str, body: str, max_b
         return fail(client, number, sha, "diff_fetch_failed", error=True)
     if not diff or len(diff.encode()) > max_bytes:
         return fail(client, number, sha, "diff_invalid_or_oversize")
+    try:
+        current_bodies = owner_bodies(client, number, owner)
+    except IntegrityError:
+        return fail(client, number, sha, "comment_recheck_failed", error=True)
+    eval_prefix = f"<!-- coderails-eval-summary v1 pr={number} head_sha={sha} "
+    review_marker = f"<!-- coderails-review-summary v1 pr={number} head_sha={sha} -->"
+    current_evals = [item for item in current_bodies if item.startswith(eval_prefix)]
+    current_reviews = [item for item in current_bodies if item.splitlines()[:1] == [review_marker]]
+    if not current_evals or not current_reviews or current_evals[-1] != body or current_reviews[-1] != review_body:
+        return fail(client, number, sha, "evidence_changed", error=True)
     posted = post_current(
         client,
         number,
@@ -99,16 +135,22 @@ def check_inputs(client: EvidenceClient, number: int, sha: str, body: str, max_b
 def gate_pr(client: EvidenceClient, number: int, max_bytes: int, pending_ttl: int) -> int:
     """Attest only exact-head evidence and fail closed on live-fetch errors."""
     del pending_ttl
+    count: object = None
     try:
-        head = object_value(client.get_object(f"pulls/{number}").get("head"))
+        pr = client.get_object(f"pulls/{number}")
+        head = object_value(pr.get("head"))
         sha = head.get("sha")
+        count = pr.get("changed_files")
     except IntegrityError:
         sha = None
     if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
         print(f"skip: pr={number} reason=head_sha_fetch_failed")
         return 1
+    if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+        return fail(client, number, sha, "file_count_invalid", error=True)
     try:
-        comments = client.comments(number)
+        owner = client.owner_login()
+        comments = owner_bodies(client, number, owner)
         prefix = f"<!-- coderails-eval-summary v1 pr={number} head_sha={sha} "
         bodies = [
             body
@@ -126,7 +168,7 @@ def gate_pr(client: EvidenceClient, number: int, max_bytes: int, pending_ttl: in
             return fail(client, number, sha, "review_evidence_missing", error=True)
         if not review_valid(reviews[-1], number, sha):
             return fail(client, number, sha, "review_evidence_invalid", error=True)
-        return check_inputs(client, number, sha, body, max_bytes)
+        return check_inputs(client, number, sha, body, reviews[-1], owner, max_bytes, count)
     except IntegrityError as error:
         print(f"skip: pr={number} sha={sha} reason={error}")
         return 1

@@ -69,6 +69,17 @@ class TransportTests(unittest.TestCase):
             identity.assert_not_called()
             self.assertEqual(request.call_count, 1)
 
+    def test_comments_keep_live_author_login(self) -> None:
+        """The policy needs the author supplied by GitHub for each comment."""
+        client = Client("owner/repo", "workflow-token")
+
+        def response(_url: str, arguments: list[str]) -> str:
+            Path(arguments[arguments.index("-D") + 1]).write_text("HTTP/2 200\n")
+            return '[{"body":"artifact","user":{"login":"other"}}]'
+
+        with patch.object(client, "request", side_effect=response):
+            self.assertEqual(client.comments(7), [{"body": "artifact", "user": {"login": "other"}}])
+
 
 if __name__ == "__main__":
     unittest.main()

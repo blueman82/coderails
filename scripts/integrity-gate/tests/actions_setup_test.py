@@ -36,6 +36,12 @@ class ActionsSetupTests(unittest.TestCase):
         checks = payload["rules"][1]["parameters"]["required_status_checks"]
         self.assertEqual(checks, [{"context": "integrity-review", "integration_id": 15368}])
 
+    def test_excluded_main_is_not_a_matching_ruleset(self) -> None:
+        """A same-name rule that excludes main leaves the branch unprotected."""
+        payload = ruleset_payload(15368)
+        payload["conditions"]["ref_name"]["exclude"] = ["refs/heads/main"]
+        self.assertFalse(ruleset_matches(payload, 15368))
+
     def test_candidate_requires_current_head_actions_success(self) -> None:
         """A stale, failed, or foreign status cannot activate the rule."""
         sha = "a" * 40
@@ -90,6 +96,27 @@ class ActionsSetupTests(unittest.TestCase):
             self.assertEqual(configure_ruleset("owner/repo", 7, apply=True), detail)
             self.assertEqual(api.call_args_list[5].kwargs["method"], "POST")
             self.assertEqual(api.call_args_list[5].kwargs["body"], payload)
+
+    def test_apply_refuses_readback_that_excludes_main(self) -> None:
+        """GitHub readback must prove main is covered after rule creation."""
+        detail = copy.deepcopy(ruleset_payload(15368))
+        detail["id"] = 42
+        detail["conditions"]["ref_name"]["exclude"] = ["refs/heads/main"]
+        responses = [
+            {"enabled": True},
+            {"id": 15368},
+            {"head": {"sha": "a" * 40}},
+            [self.valid_status()],
+            [],
+            detail,
+            [{"id": 42, "name": "coderails-integrity-review"}],
+            detail,
+        ]
+        with (
+            patch("integrity_setup.gh_json", side_effect=responses),
+            self.assertRaisesRegex(ValueError, "does not match"),
+        ):
+            configure_ruleset("owner/repo", 7, apply=True)
 
 
 if __name__ == "__main__":

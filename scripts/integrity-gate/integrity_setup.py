@@ -78,7 +78,8 @@ def ruleset_matches(value: object, app_id: int) -> bool:
         or data.get("enforcement") != "active"
         or data.get("bypass_actors") != []
         or not isinstance(reference, dict)
-        or "refs/heads/main" not in cast(JsonObject, reference).get("include", [])
+        or cast(JsonObject, reference).get("include") != ["refs/heads/main"]
+        or cast(JsonObject, reference).get("exclude") != []
     ):
         return False
     rules = data.get("rules")

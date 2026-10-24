@@ -57,6 +57,12 @@ class EvidenceFixture:
         self.failure = ""
         self.calls: list[str] = []
         self.head = SHA
+        self.changed_files: int | None = None
+        self.comments_available = True
+        self.review_author = "owner"
+        self.eval_author = "owner"
+        self.late_eval = ""
+        self.remove_comments_during_diff = False
 
     def check(self, target: str) -> None:
         """Record every read and raise a configured transport refusal."""
@@ -67,7 +73,7 @@ class EvidenceFixture:
     def get_object(self, target: str) -> JsonObject:
         """Return only the fixture's authoritative PR head."""
         self.check(target)
-        return {"head": {"sha": self.head}}
+        return {"head": {"sha": self.head}, "changed_files": self.changed_files or len(self.files)}
 
     def get_array(self, target: str) -> list[JsonObject]:
         """Return independent changed-file or commit-status arrays."""
@@ -80,16 +86,35 @@ class EvidenceFixture:
     def get(self, target: str, accept: str = "application/vnd.github+json") -> str:
         """Return the reviewed diff only for the real diff media type."""
         self.check("diff")
+        if getattr(self, "remove_comments_during_diff", False):
+            self.comments_available = False
         if target != "pulls/7" or accept != "application/vnd.github.v3.diff":
             raise AssertionError((target, accept))
         return self.diff
 
-    def comments(self, number: int) -> list[str]:
+    def owner_login(self) -> str:
+        """Return the fixture repository owner."""
+        return "owner"
+
+    def comments(self, number: int) -> list[JsonObject]:
         """Return the exact review and eval artifacts in server order."""
         self.check("comments")
         if number != 7:
             raise AssertionError(number)
-        return [self.review, self.marker + "\n```json\n" + json.dumps(self.document) + "\n```"]
+        comments = (
+            [
+                {"body": self.review, "user": {"login": self.review_author}},
+                {
+                    "body": self.marker + "\n```json\n" + json.dumps(self.document) + "\n```",
+                    "user": {"login": self.eval_author},
+                },
+            ]
+            if self.comments_available
+            else []
+        )
+        if self.late_eval:
+            comments.append({"body": self.late_eval, "user": {"login": "owner"}})
+        return comments
 
     def post_status(self, sha: str, state: str, description: str) -> None:
         """Capture each attempted attestation for independent assertions."""
@@ -151,7 +176,7 @@ class GatePolicyTests(unittest.TestCase):
             client = EvidenceFixture()
             client.files = files
             self.assertEqual(self.gate(client), 1)
-            self.assertIn("file_list_invalid", client.posts[-1][2])
+            self.assertIn("file_count_invalid" if not files else "file_list_invalid", client.posts[-1][2])
         for diff in ("", "é" * 5):
             client = EvidenceFixture()
             client.diff = diff
@@ -246,10 +271,53 @@ class GatePolicyTests(unittest.TestCase):
         """Deleting the eval makes the next status a failure."""
         client = EvidenceFixture()
         client.statuses = [{"context": "integrity-review", "state": "success"}]
-        client.comments = lambda number: [client.review]  # type: ignore[method-assign]
+        client.comments = lambda number: [{"body": client.review, "user": {"login": "owner"}}]  # type: ignore[method-assign]
         self.assertEqual(self.gate(client), 1)
         self.assertEqual(client.posts[-1][1], "error")
         self.assertIn("eval_evidence_missing", client.posts[-1][2])
+
+    def test_comment_deleted_during_check_never_posts_older_success(self) -> None:
+        """The status cannot pass from comments removed before the final post."""
+        client = EvidenceFixture()
+        client.remove_comments_during_diff = True
+        self.assertNotEqual(self.gate(client), 0)
+        self.assertNotIn("success", [post[1] for post in client.posts])
+
+    def test_newer_owner_eval_during_check_overrides_older_go(self) -> None:
+        """A later owner NO-GO cannot leave the old GO as the current status."""
+        client = EvidenceFixture()
+        original = client.get
+
+        def change_during_diff(target: str, accept: str = "application/vnd.github+json") -> str:
+            result = original(target, accept)
+            client.late_eval = client.marker.replace("result=GO", "result=NO-GO")
+            return result
+
+        client.get = change_during_diff  # type: ignore[method-assign]
+        self.assertNotEqual(self.gate(client), 0)
+        self.assertNotIn("success", [post[1] for post in client.posts])
+
+    def test_api_file_cap_cannot_hide_a_protected_file(self) -> None:
+        """A PR with 3001 files cannot attest from the API's first 3000."""
+        client = EvidenceFixture()
+        client.changed_files = 3001
+        client.files = [{"filename": f"docs/safe-{index}.md"} for index in range(3000)]
+        self.assertNotEqual(self.gate(client), 0)
+        self.assertNotIn("success", [post[1] for post in client.posts])
+
+    def test_foreign_comment_cannot_forge_either_artifact(self) -> None:
+        """Only GitHub comments by the live owner can provide either artifact."""
+        for artifact in ("review", "eval"):
+            client = EvidenceFixture()
+            if artifact == "review":
+                client.review_author = "other"
+            else:
+                client.eval_author = "other"
+            self.assertNotEqual(self.gate(client), 0)
+            self.assertNotIn("success", [post[1] for post in client.posts])
+        client = EvidenceFixture()
+        self.assertEqual(self.gate(client), 0)
+        self.assertEqual(client.posts[-1][1], "success")
 
 
 if __name__ == "__main__":
