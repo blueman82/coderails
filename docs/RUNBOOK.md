@@ -199,9 +199,10 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
-- Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a
-  stderr "action_authority (advisory)" warning appears. ON by default: config `action_authority` absent, no config file, or any unrecognised
-  value is `enforce` (an unrecognised value also traces `action_authority_bad_mode`); only an explicit `off` silences it, `advisory` warns without blocking.
+- The default is `advisory`. It logs a warning when a merge or push has no valid receipt. It does not block the action.
+  This default applies when the setting or config file is absent.
+- An explicit `enforce` setting blocks `gh pr merge` and pushes to `main` or `master` without a valid receipt.
+  An unknown setting also enforces and logs `action_authority_bad_mode`. The `off` setting is silent.
 - Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,

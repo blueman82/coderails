@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Action-receipt gate, ON by default (Codex copy of hooks/scripts/action_authority_gate.py).
+"""Action-receipt gate: warn by default (Codex copy of hooks/scripts/action_authority_gate.py).
 
-Config `action_authority`: enforce (default, also with no config or no key) | advisory | off; any other value is
+Config `action_authority`: advisory (default, also with no config or no key) | enforce | off; any other value is
 enforce, traced action_authority_bad_mode. Advisory traces and warns, never denies; enforce denies unless
 authority.permits() allows and a receipt verifies (mirrored scripts/lib/receipt_gate.py, shared with merge.py, which is
 independently fail-closed); any own error fails open (action_authority_failed_open). Receipts are signed and bound to
@@ -28,7 +28,7 @@ from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
 
 def mode(cwd: str) -> str:
-    """Return enforce (the default), advisory or off, never raising."""
+    """Return advisory (the default), enforce or off, never raising."""
     return resolve_mode(cwd)[0]
 
 

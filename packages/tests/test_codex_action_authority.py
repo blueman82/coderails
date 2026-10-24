@@ -193,13 +193,13 @@ class HookTests(unittest.TestCase):
         self.assertEqual((result.stdout, "advisory" in result.stderr), ("", True))
         self.assertEqual(self.reasons()[-1], "advisory_no_receipt")
 
-    def test_default_is_enforce_and_unknown_value_is_traced(self) -> None:
-        """(b) No config, a config without the key and an unknown value all deny; the unknown value is traced."""
+    def test_default_is_advisory_and_unknown_value_is_traced(self) -> None:
+        """No config or key warns; an unknown value denies and is traced."""
         for command in (MERGE, "git push origin main", "python3 scripts/merge.py 12"):
-            self.assertTrue(self.denied(command), command)
+            self.assertFalse(self.denied(command), command)
         (self.repo / ".coderails").mkdir()
         (self.repo / ".coderails/workflow.config.yaml").write_text("other: 1\n")
-        self.assertTrue(self.denied(MERGE))
+        self.assertFalse(self.denied(MERGE))
         self.assertNotIn("action_authority_bad_mode", self.reasons())
         self.configure("bogus")
         self.assertTrue(self.denied(MERGE))
@@ -207,6 +207,7 @@ class HookTests(unittest.TestCase):
 
     def test_rejected_set(self) -> None:
         """(c) wrong repository, wrong ref, stale sha, unsigned, agent-signed, expired and foreign-session receipts."""
+        self.configure("enforce")
         past = datetime.now(timezone.utc) - timedelta(hours=1)
         cases: tuple[tuple[str, dict[str, Any]], ...] = (
             ("repository_mismatch", {"repository": "github.com/evil/w"}), ("ref_mismatch", {"ref": "refs/heads/x"}),
@@ -224,6 +225,7 @@ class HookTests(unittest.TestCase):
 
     def test_authority_denied_and_max_prs_beat_a_valid_receipt(self) -> None:
         """(a) authority.denied and a spent max_prs refuse before any receipt is consumed."""
+        self.configure("enforce")
         obj: dict[str, Any] = {
             "authority_id": "auth-1", "loop_id": None, "session_id": "s1", "scope": ["code"], "denied": ["merge"],
             "max_prs": 0, "expires_at": "2999-01-01T00:00:00+00:00", "revocable": True,
@@ -241,6 +243,7 @@ class HookTests(unittest.TestCase):
 
     def test_subagent_payload_is_the_same_session(self) -> None:
         """(d) Extra agent_id/agent_type fields do not change the session: the parent's receipt is honoured."""
+        self.configure("enforce")
         self.mint()
         payload = {"session_id": "s1", "cwd": str(self.repo), "tool_input": {"command": MERGE},
                    "agent_id": "a-1", "agent_type": "loop-worker"}  # fmt: skip

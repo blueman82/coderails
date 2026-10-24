@@ -3,7 +3,7 @@
 
 The hook checks permits and bindings before O_EXCL consumption; plain gh merges count as executed.
 merge.py checks a recent hook claim or consumes directly, then claims execution before gh pr merge.
-Absent or bad action_authority config enforces; advisory and off are explicit modes.
+Absent action_authority config is advisory; an invalid value enforces.
 """
 
 from __future__ import annotations
@@ -36,12 +36,12 @@ class ReceiptRefusedError(ValueError):
 
 
 def resolve_mode(cwd: str) -> tuple[str, bool]:
-    """(mode, bad): enforce when the key or the whole config is absent; an unrecognised value is enforce, bad=True."""
+    """(mode, bad): warn by default; fail closed for an unrecognised value."""
     path = config_path(cwd)
     value = config_value(path, "action_authority") if path else ""
     if value in MODES:
         return value, False
-    return "enforce", bool(value)
+    return ("enforce", True) if value else ("advisory", False)
 
 
 def _record(path: Path, name: str, proposed: dict[str, Any]) -> None:

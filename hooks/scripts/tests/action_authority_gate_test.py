@@ -22,7 +22,7 @@ class GateTests(ReceiptHookCase):
     """Drive the hook as a subprocess against the shared receipt fixture."""
 
     def test_only_explicit_off_is_silent(self) -> None:
-        """`off` never denies, warns or traces; absent config, junk and empty values are enforce (default ON)."""
+        """`off` is silent; absent and empty values warn, while a typo denies."""
         self.configure("off")
         result = self.invoke("action_authority_gate", self.payload(MERGE))
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
@@ -32,26 +32,25 @@ class GateTests(ReceiptHookCase):
                 self.configure(value if value is not None else "")
                 if value is None:
                     (self.repo / ".coderails/workflow.config.yaml").unlink()
-                self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
-        self.assertEqual(set(self.reasons()), {"denied_no_receipt", "action_authority_bad_mode"})  # "yes" is junk
+                self.assertEqual(self.denied("action_authority_gate", self.payload(MERGE)), value == "yes")
+        self.assertEqual(set(self.reasons()), {"advisory_no_receipt", "denied_no_receipt", "action_authority_bad_mode"})
 
-    def test_default_is_enforce_without_any_config_file(self) -> None:
-        """No .coderails directory at all: an unreceipted merge and push to main are denied."""
+    def test_default_is_advisory_without_any_config_file(self) -> None:
+        """No config: merge and push proceed without a passphrase and leave a trace."""
         self.assertFalse((self.repo / ".coderails").exists())
-        self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
-        self.assertTrue(self.denied("action_authority_gate", self.payload(PUSH)))
-        self.mint(PUSH, "git_push")
+        self.assertFalse(self.denied("action_authority_gate", self.payload(MERGE)))
         self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))
+        self.assertEqual(self.reasons(), ["advisory_no_receipt", "advisory_no_receipt"])
 
-    def test_default_is_enforce_without_config_or_key(self) -> None:
-        """(b) No config file at all, and a config lacking the key, deny merge, merge.py and push to main."""
+    def test_default_is_advisory_without_config_or_key(self) -> None:
+        """No config or key: merge and push warn without requiring a passphrase."""
         for value in (None, "other_key: 1\n"):
             if value:
                 (self.repo / ".coderails").mkdir(exist_ok=True)
                 (self.repo / ".coderails/workflow.config.yaml").write_text(value)
             for command in (MERGE, PUSH, "python3 scripts/merge.py 12"):
                 with self.subTest(config=value, command=command):
-                    self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+                    self.assertFalse(self.denied("action_authority_gate", self.payload(command)))
         self.assertNotIn("action_authority_bad_mode", self.reasons())
 
     def test_unknown_value_denies_and_traces_bad_mode(self) -> None:
@@ -62,6 +61,7 @@ class GateTests(ReceiptHookCase):
 
     def test_authority_denied_and_max_prs_refuse_even_with_a_valid_receipt(self) -> None:
         """(a) A valid signed receipt does not override authority.denied or a spent max_prs, and is not consumed."""
+        self.configure("enforce")
         self.grant(denied=["merge", "push_main"])
         self.mint(MERGE, "merge")
         self.mint(PUSH, "git_push", rid="r2")
@@ -75,6 +75,7 @@ class GateTests(ReceiptHookCase):
 
     def test_subagent_payload_is_the_same_session(self) -> None:
         """(d) A subagent call (agent_id/agent_type set, same session_id) uses the parent's receipt."""
+        self.configure("enforce")
         self.mint(MERGE, "merge")
         sub = self.payload(MERGE) | {"agent_id": "a-1", "agent_type": "loop-worker"}
         self.assertFalse(self.denied("action_authority_gate", sub))
@@ -215,6 +216,7 @@ class GateTests(ReceiptHookCase):
 
     def test_two_merge_segments_cannot_spend_one_budget_twice(self) -> None:
         """A denied shell line cannot consume a receipt or spend the session budget."""
+        self.configure("enforce")
         self.grant(max_prs=1)
         first, second = f"gh pr merge 1 {PIN}", f"gh pr merge 2 {PIN}"
         self.mint(first, "merge", rid="r1")

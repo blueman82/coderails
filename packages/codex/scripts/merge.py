@@ -94,7 +94,7 @@ def main(arguments: list[str] | None = None) -> int:
                 raise git.WorkflowError("Not approved")
             sha = verify_gates(number)
             manifest_policy.gate(number)
-            require_merge_receipt(number)  # fail-closed: a signed owner receipt, claimed before the merge runs
+            require_merge_receipt(number)  # enforce claims a signed receipt; advisory logs before the merge runs
             # pin the head the gates verified: GitHub refuses the merge if the PR head moved since
             git.run("gh", "pr", "merge", number, "--merge", "--match-head-commit", sha, check=True)
             print("✓ Merged")

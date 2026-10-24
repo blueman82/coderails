@@ -88,7 +88,9 @@ The minting step is a separate OWNER-RUN command, signed with a passphrase-prote
 
 ## Binding rules and default
 
-The gate is default ON: absent or unreadable config, or any value other than `off` / `advisory`, is `enforce`
+Owner revision, 24 October 2026: The default is now `advisory`, including when the config or key is absent. Routine pushes and merges do not require a passphrase. Explicit `enforce` still requires a signed receipt. An unknown mode enforces. The following paragraph records the original default decision.
+
+The original gate was default ON: absent or unreadable config, or any value other than `off` / `advisory`, was `enforce`
 (`action_authority: off` is the explicit switch). To keep the repository+ref+SHA binding honest, a guarded command is
 unbindable (`binding_unknown`, denied) when it:
 

@@ -62,7 +62,7 @@ engineering_principles_paths:
   - "**/container.py"
 engineering_principles_skill: coderails-codex:engineering-principles-python
 sandbox_workers: false
-action_authority: enforce
+action_authority: advisory
 integrity_review:
   machine_user: null
 ```

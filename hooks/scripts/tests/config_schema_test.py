@@ -128,16 +128,16 @@ class LoadConfigTests(ConfigCase):
         self.assertEqual(values["wiki_debt_epoch_pr"], "null")
 
     def test_action_authority_enum(self) -> None:
-        """enforce|advisory|off are clean, absent defaults to enforce, anything else is config_bad_type."""
+        """enforce|advisory|off are clean, absent defaults to advisory, anything else is config_bad_type."""
         for value in ("enforce", "advisory", "off"):
             values, findings = load_config(self.write(f"action_authority: {value}\n"))
             self.assertEqual((values["action_authority"], findings), (value, []))
         values, findings = load_config(self.write("project: x\n"))
-        self.assertEqual((values["action_authority"], findings), ("enforce", []))
+        self.assertEqual((values["action_authority"], findings), ("advisory", []))
         values, findings = load_config(self.write("action_authority: bogus\n"))
         self.assertEqual((values["action_authority"], self.codes(findings)), ("bogus", ["config_bad_type"]))
         schema = json.loads((ROOT / "config.schema.json").read_text())["properties"]["action_authority"]
-        self.assertEqual((schema["status"], schema["default"]), ("enforced_by_code", "enforce"))
+        self.assertEqual((schema["status"], schema["default"]), ("enforced_by_code", "advisory"))
 
     def test_unreadable_never_raises(self) -> None:
         """Missing, torn (non-UTF-8) and directory paths fall back to defaults with one finding."""

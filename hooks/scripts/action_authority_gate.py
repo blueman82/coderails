@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Action-receipt gate, ON by default: gh pr merge, merge.py and git push to main/master need a signed receipt.
+"""Action-receipt gate: warn by default; explicit enforce needs a signed receipt.
 
-Config `action_authority`: enforce (default, also with no config or no key) | advisory | off; any other value is
+Config `action_authority`: advisory (default, also with no config or no key) | enforce | off; any other value is
 enforce, traced action_authority_bad_mode. Advisory traces and warns, never denies. Enforce denies unless
 authority.permits() allows and a receipt verifies (scripts/lib/receipt_gate.py, shared with merge.py, which is
 independently fail-closed). Any own error fails open with reason action_authority_failed_open. It does not touch
@@ -35,7 +35,7 @@ from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
 
 def mode(cwd: str) -> str:
-    """Return enforce (the default), advisory or off, never raising."""
+    """Return advisory (the default), enforce or off, never raising."""
     return resolve_mode(cwd)[0]
 
 

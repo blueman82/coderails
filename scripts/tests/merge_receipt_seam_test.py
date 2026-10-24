@@ -35,6 +35,15 @@ DENIED = {"allow": False, "reason": "authority_denied"}
 class SeamSpyTests(unittest.TestCase):
     """merge.py reaches authority_permits.permits through the shared gate, and calls the gate exactly once."""
 
+    def test_default_mode_does_not_require_a_merge_passphrase(self) -> None:
+        """With no config, the direct merge path reports a missing receipt but proceeds."""
+        with (
+            mock.patch.object(receipt_gate, "_claim_merge", return_value="no_receipt"),
+            mock.patch.object(receipt_gate, "append_row") as trace,
+        ):
+            receipt_gate.require_merge_receipt("7", "/nowhere")
+        self.assertEqual(trace.call_args.args[1:3], ("advisory", "merge_py_no_receipt"))
+
     def test_merge_main_calls_the_seam_once_before_gh_pr_merge(self) -> None:
         """The order is: seam, then gh pr merge; a refusal from the seam stops before gh."""
         order: list[str] = []
