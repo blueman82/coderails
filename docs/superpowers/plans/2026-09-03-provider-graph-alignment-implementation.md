@@ -5,10 +5,10 @@
 ## Purpose and fixed boundaries
 
 Implement the approved schema-v3 graph contract from
-`docs/superpowers/specs/2026-09-02-provider-graph-alignment-design.md` without
-creating a shared installed runtime. `packages/graph-semantics/` is the one
-maintained Python source; `install.sh` materializes it into the independently
-installable Claude and Codex bundles. (verified)
+`docs/superpowers/specs/2026-09-02-provider-graph-alignment-design.md`. Keep
+the installed Claude and Codex runtimes separate. `packages/graph-semantics/`
+is the one maintained Python source. Under this frozen migration baseline,
+`install.sh` copies it into each independently installable bundle. (verified)
 
 The core owns only pure validation and state transitions. Provider adapters
 retain state paths, locks, atomic writes, native dispatch, transcript parsing,

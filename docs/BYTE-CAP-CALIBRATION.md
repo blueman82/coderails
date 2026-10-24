@@ -2,7 +2,9 @@
 
 ## Overview
 
-Token/byte caps in Claude Code are configured via `RACHEL_MAX_TURNS` (agent SDK) or directly in Claude Code's `settings.json` under runtime limits. This document guides calibration based on observed token burn in agentic loops.
+Set token or byte limits through `RACHEL_MAX_TURNS` (agent SDK) or the runtime
+limits in Claude Code's `settings.json`. Use observed token use in agentic
+loops to choose a limit.
 
 ## Where Token Limits Live
 

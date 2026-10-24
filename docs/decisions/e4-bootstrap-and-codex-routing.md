@@ -2,7 +2,8 @@
 
 > **Bootstrap section superseded 2026-10-05** by `docs/decisions/2026-10-05-dynamic-context-manifest.md`.
 
-Docs only. No behaviour change and no trace row (nothing executes).
+This record changes no behaviour. It produces no trace row because nothing
+executes.
 
 ## Bootstrap manifest: threshold not crossed, no change
 

@@ -2,7 +2,10 @@
 
 ## Status and intent
 
-Design approved; implementation plan review pending. This covers the accepted post-cutover observability and measurement phase. The target is an inspectable trace of one native Coderails session, including parallel workers, alongside an evidence-based post-migration baseline.
+Design approved; implementation plan review pending. This design covers the
+accepted post-cutover observability and measurement phase. It calls for a trace
+of one native Coderails session, including parallel workers, and an
+evidence-based post-migration baseline.
 
 The design preserves provider-local dispatch, transcript parsing, graph state, evidence validation, and completion authority. It does not update the LLM Wiki, unify `work_units` with graph nodes, or introduce a shared runtime in the graph-semantics package.
 

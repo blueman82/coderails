@@ -14,7 +14,7 @@ If the config block above says `NO_CONFIG`, do NOT stop. Run in minimal mode:
 - Skip the engineering-principles pre-flight — `config.engineering_principles_paths` is null.
 - Worktree uses plain `git worktree add` off the git root.
 
-The workflow collapses to: prep (worktree only) → code → push → review → merge.
+The workflow becomes: prep (worktree only) → code → push → review → merge.
 
 ## Raw arguments
 
@@ -24,18 +24,18 @@ $ARGUMENTS
 
 ## Purpose
 
-This command is the umbrella for the canonical code-change workflow. The rules it encodes:
+This command runs the code-change workflow. Follow these rules:
 
 - **Worktree before code**: create a worktree for every feature/bug branch — never edit on main
 - **Engineering-principles pre-flight**: run `config.engineering_principles_skill` (default: `/engineering-principles-python`) before pushing if the diff touches paths listed in `config.engineering_principles_paths` (or any file with ≥20 lines changed)
 - **Adversarial PR review**: use `/pr-review-toolkit:review-pr`, not manual Agent fan-out — runs 4+ specialist agents in parallel
 - **Apply findings inline**: on authorized ship-it, apply blocking and worthwhile review findings directly; do not re-ask per finding
 - **Wiki after merge**: after every merge run `/wiki-ingest` (if `config.wiki_path` is non-null); also run `/wiki-lint` immediately only when `config.wiki_git_worktree` is `false` (direct-write) — for PR flow (`true`, or the key absent) `/wiki-lint` is deferred until the ingest PR merges, see Phase 5
-- **Parallel tool calls**: when multiple tool calls or file reads have no dependency between them, issue them in parallel in a single message — not sequentially. Never serialize work that can run concurrently.
+- **Parallel tool calls**: when tool calls or file reads do not depend on each other, run them in parallel in one message.
 
-Phase 2b (design adversarial review) is distinct from Phase 3 (`/pr-review-toolkit:review-pr`): Phase 2b reviews the *design page* before coding, Phase 3 reviews the *code* before merge. Both are required on non-trivial features.
+Phase 2b reviews the *design page* before coding. Phase 3 (`/pr-review-toolkit:review-pr`) reviews the *code* before merge. Run both for non-trivial features.
 
-The workflow has two interactive pauses where the developer drives: (a) the code/iterate loop, (b) the final ship-it authorization. Everything else auto-chains. The Phase 3 review chain runs in order: `review-pr → post-review → (Phase 4 ship-it pause) → /merge`.
+Pause for the developer during the code and iteration loop, then again for final ship-it authorization. Run the other steps in sequence. The Phase 3 review chain is: `review-pr → post-review → (Phase 4 ship-it pause) → /merge`.
 
 ## Parse Arguments
 
@@ -77,7 +77,7 @@ Identify: known constraints, open gaps, adjacent behaviour, superseded decisions
 Flag anything that looks like an assumption that is NOT enforced in code."
 ```
 
-This is `/wiki-query`, not `/wiki-lint`. `/wiki-lint` is a full-vault audit (orphans, stale dates) — wrong scope and too slow at coding time. `/wiki-query` reads only relevant pages and answers a targeted question.
+Use `/wiki-query` here. It reads relevant pages to answer a targeted question. `/wiki-lint` checks the full vault for problems such as orphaned pages and stale dates.
 
 What to look for in the response:
 - **Design gaps**: assumptions baked into the current implementation that this change might violate

@@ -1,7 +1,8 @@
 # E2: reviewer and scout Bash allowlist
 
-Hook: `hooks/scripts/reviewer_bash_allowlist.py` (PreToolUse, `Bash`), registered last in the Bash group, after
-`destructive_bash_gate`, `enforce_pr_workflow`, `test_gate` and `verification_volume_ceiling` (order unchanged).
+The `hooks/scripts/reviewer_bash_allowlist.py` hook runs on PreToolUse for
+`Bash`. It remains last in the Bash group, after `destructive_bash_gate`,
+`enforce_pr_workflow`, `test_gate`, and `verification_volume_ceiling`.
 
 ## Which agents
 

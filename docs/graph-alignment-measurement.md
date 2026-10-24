@@ -1,7 +1,7 @@
 # Graph-alignment measurement (plan section 28)
 
-Post-migration evidence only. This document collects numbers; it does not recommend or implement any
-behavioural change, and it does not merge `work_units` into `graph.nodes`.
+This document records post-migration measurements. It makes no behaviour
+recommendation or change. It keeps `work_units` separate from `graph.nodes`.
 
 ## Method
 

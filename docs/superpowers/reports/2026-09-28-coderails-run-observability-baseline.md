@@ -22,7 +22,11 @@ The Coderails working-directory rule accepts `/Users/harrison/Github/coderails` 
 
 ## Metric record, version 1
 
-`N/D` is the counted numerator over the eligible audited denominator. `Unavailable` means the required evidence or independent check is absent; it never means zero. Rates below are calculated only where both counts are supported. All rows use the frozen cohort above. The source paths and identifiers in this report are evidence references, not a replacement for the native records.
+`N/D` gives the counted numerator over the eligible audited denominator.
+`Unavailable` means required evidence or an independent check is absent. It
+never means zero. Rates appear only where both counts have support. All rows
+use the frozen cohort above. Source paths and identifiers point to evidence;
+they do not replace the native records.
 
 | Metric and counting rule | N / D; rate | Basis and method | Evidence and exclusions |
 | --- | --- | --- | --- |

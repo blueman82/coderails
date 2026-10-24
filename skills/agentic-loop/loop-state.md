@@ -153,11 +153,50 @@ is still your job; the guard only catches its absence.
 - **`evals.json`** — loop-scope and pr-scope, frozen at Phase 2.7c/2.7d via `/coderails:task-evals`; see `skills/agentic-loop/SKILL.md` for the field contract.
 - **`proof.json`** — loop-scope, frozen at Phase 2.7e beside `evals.json`, by a SEPARATE agent given only `authorising_prompt_raw`, `session_id`, and `loop_id` as explicit dispatch inputs (never the plan/spec/conversation, never a `progress.json` read) — generalising `task-evals`' grader-independence to the author. Schema: `{"schema_version":1,"session_id","loop_id","frozen_at","frozen_sha","proofs":[{"id","claim","cmd","expect","status":"pending"}]}`. Voluntary adoption, same posture as `evals.json`: a loop with no executable surface writes none, and records that choice in `decisions_absorbed` **and** in `progress.json`'s own `proof_disposition` field (see the Fields table above) — the latter is what the gate actually reads.
 
-  **`proof.json` feeds the `loop_stall_guard` proof gate** (`loop_proofs.validate_proofs`). On a `LOOP-STOP: complete` declaration, the gate mines THIS session's own transcript for a Bash `tool_use`/`tool_result` pair matching each proof's `cmd`, run in the FOREGROUND ONLY (never `run_in_background` — a backgrounded launch's immediate result is not an outcome) (trimmed, EXACT string equality — never substring), and blocks naming any proof whose verdict isn't `satisfied`. The offenders list a user will actually see: `unexecuted` (no matching call, or the matching call's result never returned), `failed` (the LAST matching call's result carried `is_error: true`), `badcmd` (the proof's own `cmd` is missing, non-string, or empty/whitespace-only — cannot even be searched for), or `unverifiable` (the proofs-array entry itself is not a JSON object, so no `id`/`cmd` can be read from it at all). The `status` field inside `proof.json` is present but never consulted — the verifier never reads `.status`, so an orchestrator-written `"pass"` cannot rescue an unexecuted proof.
+  **`proof.json` feeds the `loop_stall_guard` proof gate** through
+  `loop_proofs.validate_proofs`. On a `LOOP-STOP: complete` declaration, the
+  gate reads this session's own transcript. It looks for a Bash `tool_use` and
+  `tool_result` pair for each proof's `cmd`. The command must run in the
+  foreground; a `run_in_background` launch returns before its outcome is
+  known. The gate trims the command and requires exact string equality, never
+  a substring match. The last matching result decides the verdict.
 
-  **A proof can be withdrawn instead of fixed via a sibling `withdrawn_proofs` array** (same file, same schema_version): `[{"id","cmd","withdrawn_reason"}]`. The gate mines it in the same transcript pass as `.proofs`, but STRICTER — a withdrawal claims a failure was witnessed, so only a matching call whose LAST result was an observed `is_error: true` passes; `.proofs`' null-tolerance ("ran, no clear signal, let it through") does not apply here. An entry blocks `complete` unless its `cmd` executed in this session, its last result was a genuine failure, `withdrawn_reason` is non-empty, and its `id` does not also appear in `.proofs` (no double-dipping between pending and withdrawn). `.proofs` and `withdrawn_proofs` share a combined cap of 100 entries — checked before any transcript mining, to close a timeout-based bypass (an inflated proof.json making the gate's own scan time out, rather than satisfying it). A withdrawal that clears all its checks is reported, never blocking, in the `complete` systemMessage.
+  The gate blocks `complete` when a proof verdict is not `satisfied`. It names
+  these proof failures:
 
-  **Absence requires a disposition.** Missing `proof.json` requires `proof_disposition` to equal `"none"` or start with `"none:"`. No legacy schema exemption exists. A present proof file must carry this session and loop identity and a numeric schema version >= 1. A malformed file, non-array proof collection or unprovable entry blocks. Empty/absent proof arrays are allowed only after the file-level checks; populated withdrawals are always checked. The combined cap is 100 entries. Proofs execute in the orchestrator's own foreground Bash transcript; a worker's execution cannot satisfy them.
+  - `unexecuted`: no matching call exists, or its result did not return.
+  - `failed`: the last matching result has `is_error: true`.
+  - `badcmd`: `cmd` is missing, is not a string, or is empty after trimming.
+  - `unverifiable`: the proof entry is not a JSON object, so the gate cannot
+    read its `id` or `cmd`.
+
+  The gate never reads the proof's `.status` field. Writing `"pass"` there
+  cannot make an unexecuted proof pass.
+
+  **A proof can be withdrawn instead of fixed.** Put it in a sibling
+  `withdrawn_proofs` array in the same file and schema version:
+  `[{"id","cmd","withdrawn_reason"}]`. The gate reads withdrawals in the
+  same transcript pass as `.proofs`, but applies a stricter rule. A withdrawal
+  claims that the command failed in this session. Its **last** matching result
+  must have `is_error: true`. The null-tolerance used for `.proofs` does not
+  apply.
+
+  A withdrawal blocks `complete` unless its `cmd` ran in this session, its
+  last result was a real failure, `withdrawn_reason` is non-empty, and its
+  `id` does not also appear in `.proofs`. The two arrays share a cap of 100
+  entries. The gate checks that cap before reading transcripts, so an inflated
+  file cannot make the scan time out and bypass the gate. A valid withdrawal
+  appears in the `complete` systemMessage but does not block completion.
+
+  **Absence requires a disposition.** When `proof.json` is missing,
+  `proof_disposition` must equal `"none"` or start with `"none:"`. There is no
+  legacy schema exemption. A present file must name this session and loop and
+  have a numeric schema version of at least 1. A malformed file, a non-array
+  proof collection, or an unprovable entry blocks completion. Empty or absent
+  proof arrays are allowed only after the file-level checks. Populated
+  withdrawals are always checked. The 100-entry combined cap still applies.
+  Proofs must run in the orchestrator's own foreground Bash transcript; a
+  worker's execution cannot satisfy them.
 
   **Declaration boundary:** the gate checks that the no-proof disposition exists, not whether its reason is true. It also checks execution, not whether the frozen command is a good proof. These remain auditable declarations, not an external trust boundary.
 

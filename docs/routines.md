@@ -1,8 +1,8 @@
 # Verified routines
 
-A **routine** is a scheduled skill run that isn't considered done just
-because `claude` exited 0. It's done when a specific artifact exists,
-is fresh enough, and satisfies a predicate — the **artifact gate**. Five
+A **routine** is a scheduled skill run. Exit code 0 from `claude` does not
+complete it. The run is complete when an artifact exists, is fresh enough,
+and satisfies a predicate. This check is the **artifact gate**. Five
 routines ship today: `wiki-lint` (nightly), `sync-docs-nightly` (nightly),
 `memory-consolidation-weekly` (weekly), `loop-retro-promotion-weekly`
 (weekly), `workflow-audit-weekly` (weekly).
@@ -181,7 +181,11 @@ cron job piping into `claude -p`.
 
 ## `workflow-audit-weekly`: transcript mining with queue-mode proposals
 
-This routine mines transcripts from the last 7 days, clusters repeated tool-use patterns, judges them as skill candidates, and writes any `propose` verdicts as queue entries in the dashboard approval queue. It runs in **queue-mode mandatory**: in-session skill creation is forbidden, and every proposal appears as a queue entry awaiting the owner's Approve click, never auto-built.
+This routine mines transcripts from the last 7 days. It groups repeated tool
+use, checks whether each group could become a skill, and writes `propose`
+verdicts to the dashboard approval queue. **Queue-mode is mandatory.** The
+routine cannot create a skill in the session. Each proposal waits in the queue
+for the owner's Approve click; it is never built automatically.
 
 The routine's run note lives at `~/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md` and records `proposals_written: <N>` (count of queue entries actually written this run). The artifact gate checks for the completion marker `## [{date}] workflow-audit complete`, which the routine emits **only** if it finishes cleanly **and** `proposals_written == proposals_attempted` (no queue write failures). A week with zero proposals (`proposals_written: 0` with no failures) is a **successful run** — the marker is emitted and the gate passes. A crash, or a shortfall where some proposals failed to write, causes the marker to be omitted and the gate to fail.
 

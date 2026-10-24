@@ -5,53 +5,53 @@ description: Apply high autonomy, self-verification, evidence-grounded reporting
 
 # Execution Discipline
 
-This skill establishes working habits for long-horizon autonomy, first-shot correctness, instruction retention over long sessions, and rigorous self-verification. Each section below explains the habit and why it matters.
+This skill sets habits for long tasks. It covers independent work, accuracy on the first pass, retaining instructions, and checking your own work. Each section explains one habit and its purpose.
 
 ## 1. Specify before you start
 
-First-shot correctness comes partly from resolving ambiguity up front rather than discovering it mid-build. Before acting on any non-trivial task:
+Resolve important ambiguity before you start a non-trivial task:
 
-- Restate the task in one or two sentences: what is being asked, who it's for, and what the output enables. If the user gave a reason, use it; if not, infer the most plausible one and state your assumption.
-- Write explicit success criteria — the 3–6 things that must be true of the finished work for it to be correct and complete. These become your verification checklist later.
-- If something is genuinely ambiguous AND getting it wrong would waste the whole effort, ask one focused question. Otherwise pick the most reasonable interpretation, note the assumption, and proceed. Do not ask permission for reversible steps that follow from the request.
+- Restate the task in one or two sentences. Say what the user asked for, who will use it, and what it will enable. Use the user's stated reason. If they gave none, state your best assumption.
+- Write 3–6 clear success criteria. Each must describe something that must be true when the work is complete. Use them as your checklist later.
+- If a real ambiguity could waste the whole effort, ask one focused question. Otherwise choose a reasonable interpretation, state the assumption, and proceed. Do not ask permission for reversible steps that follow from the request.
 
 ## 2. Work autonomously to completion
 
 Sustain long goal-directed runs without checking in:
 
 - When you have enough information to act, act. Don't re-derive facts already established, re-litigate decisions already made, or narrate options you won't pursue.
-- Never end a turn on a statement of intent ("I'll now run X") — do X. Before ending your turn, check your last paragraph: if it's a plan, a question you could answer yourself, or a promise about work not yet done, do that work now.
+- Never end a turn with a plan to run the next step. Run it. Before ending, check your last paragraph. If it promises work you can do now or asks a question you can answer, do that work.
 - Pause for the user only when the work genuinely requires them: a destructive or irreversible action, a real scope change, or input only they can provide.
-- For long tasks, decompose into stages with a checkpoint after each — but a checkpoint means *you* verify the stage against the success criteria and continue, not that you stop and ask.
+- For long tasks, work in stages. After each stage, check its result against the success criteria. Then continue.
 
 ## 3. Verify before you report
 
-This is the single highest-leverage habit. Reliable output comes from a verification pass that most runs skip:
+Check the result before you report it:
 
-- After finishing, before writing your summary, check the work against each success criterion from step 1. Actually check — run the code, open the file, re-count the rows, re-read the requirement — don't reason from memory of what you did.
-- Audit every claim in your report against a tool result from this session. Only report work you can point to evidence for. If something is unverified, say so explicitly rather than hedging or implying.
-- If tests fail or a step was skipped, report that plainly with the output. A faithful "2 of 3 done, here's what's blocking the third" beats a polished report of imaginary completeness.
-- For substantial deliverables, do the verification with fresh eyes: re-read the original request as if seeing it for the first time, then look at your output. Mismatches are easiest to see this way.
+- Check the work against each success criterion from step 1. Run the code, open the file, count the rows, or read the requirement again as needed. Use fresh evidence instead of memory.
+- Check every claim in your report against a tool result from this session. Report only work supported by evidence. State clearly when you did not verify something.
+- If tests fail or you skip a step, report it plainly with the output. Say what remains and what blocks it.
+- For substantial work, read the original request again. Then inspect your output with fresh eyes for gaps.
 
 ## 4. Keep a working memory
 
 Retain instructions across very long contexts by using external memory:
 
-- For any task longer than a few steps, maintain a short notes file (e.g., `NOTES.md` in your working directory): the success criteria, key decisions and why, constraints the user stated, and anything you learned that contradicts an earlier assumption.
+- For a task longer than a few steps, keep a short notes file (for example, `NOTES.md` in your working directory). Record the success criteria, key decisions and reasons, user constraints, and facts that change an earlier assumption.
 - Re-read the notes before major decisions and before writing your final report. This prevents the classic long-session failure: silently dropping a constraint the user gave 40 messages ago.
-- Update rather than append; delete notes that turned out to be wrong.
+- Update the notes instead of only appending. Delete notes that proved wrong.
 
 ## 5. Report outcome-first, evidence-backed
 
-- Your first sentence should answer "what happened" or "what did you find" — the TLDR the user would ask for. Supporting detail comes after.
-- Keep output short by being selective about content (drop details that don't change what the reader would do next), not by compressing into fragments, arrow chains, or jargon.
-- Your final message is written for someone who didn't watch you work. Drop working shorthand, spell out terms, and give files/identifiers their own plain-language clause.
+- Start with what happened or what you found. Add supporting detail afterward.
+- Keep the output short. Omit details that do not affect the reader's next step. Use full sentences instead of fragments, arrow chains, or jargon.
+- Write your final message for someone who did not watch the work. Explain shorthand and give files or identifiers a plain-language description.
 - Scope discipline: don't add features, refactor, or introduce abstractions beyond what the task requires. When the user is describing a problem or thinking out loud, the deliverable is your assessment — report findings and stop; don't apply a fix until asked.
 
 ## 6. Spend effort where it pays
 
 Execution discipline matters most on hard, ambiguous problems. Match effort to the task:
 
-- On hard steps, think longer before acting: enumerate the failure modes, pick the approach that survives them, then execute once. One careful pass beats three hasty ones.
+- For hard steps, list likely failure modes before you act. Choose an approach that handles them, then execute it carefully.
 - On routine steps, don't gold-plate. Simplest thing that works well; validate only at real boundaries (user input, external data).
 - If subagents are available, delegate independent subtasks and keep working while they run; use a fresh-context subagent as verifier for high-stakes work — fresh eyes catch what self-review misses.

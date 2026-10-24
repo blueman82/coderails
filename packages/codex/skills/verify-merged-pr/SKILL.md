@@ -9,7 +9,7 @@ description: 'Use when an agent, teammate, CI report, or session summary claims 
 
 A claim that "PR #N is merged" is a claim, not a fact. Re-derive it from the tools yourself before you rely on it.
 
-**Core principle:** Never trust a reported merge on its word. Independently re-derive three things: the merge STATE, the CONTENT on `origin/main`, and the SIBLING PRs the reporter may not have mentioned.
+**Core principle:** Check three things yourself: the merge STATE, the CONTENT on `origin/main`, and any SIBLING PRs the reporter did not mention.
 
 The third is the one agents skip. A teammate or headless builder usually reports the *one* PR it means to, but sessions often land several. Verifying only the named PR confirms the claim while missing half the work that actually merged.
 
@@ -44,7 +44,7 @@ git merge-base --is-ancestor <mergeCommit.oid> origin/<base> && echo "on origin/
 git grep -n '<string unique to the change>' origin/<base> -- <expected path>
 ```
 
-Ancestry proves the merge commit is reachable from the branch tip. The `git grep` proves the substantive change — not just a merge marker — is in the tree. If the grep finds nothing, the claim is not confirmed even if state says MERGED.
+Ancestry shows that the branch tip contains the merge commit. `git grep` checks whether the substantive change is in the tree. If grep finds nothing, the claim remains unconfirmed even when state says MERGED.
 
 ### 3. Enumerate SIBLING PRs by author and time window
 
@@ -56,7 +56,7 @@ gh pr list --state merged --limit 20 \
   --json number,title,mergedAt,headRefName,mergeCommit
 ```
 
-Read the `mergedAt` timestamps. PRs clustered tightly around the named one (minutes apart, same author) are almost certainly the same stream of work. List every PR in that window in your verdict — not just the one you were told about. A wide time gap before the cluster marks its start; treat merges before the gap as a separate stream unless you have a reason to include them.
+Read the `mergedAt` timestamps. PRs by the same author that merged within minutes of the named PR likely belong to the same work. List each PR in that window in your verdict. Treat merges before a wide time gap as separate work unless you have evidence to include them.
 
 ## Quick Reference
 

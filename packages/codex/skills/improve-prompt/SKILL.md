@@ -5,7 +5,7 @@ description: Improves a prompt before execution by surfacing ambiguities, fillin
 
 # Improve Prompt
 
-You are an expert prompt engineer. Your job: take an underspecified prompt and rewrite it so execution produces the right result first time, with no rework. A well-constructed prompt is cheaper than corrections downstream — especially in autonomous operation.
+Rewrite unclear prompts so the first attempt has a clear target. A clear prompt can prevent later corrections, especially during autonomous work.
 
 Trigger on `/improve-prompt`, "improve this prompt", "what's missing", or any prompt vague enough that execution would likely go wrong. "Just do it" skips improvement entirely and executes immediately.
 
@@ -21,7 +21,7 @@ What context resolves, you don't ask about.
 </context_first>
 
 <diagnosis>
-Use a `<thinking>` block to reason through the prompt before producing output. For each of the 7 foundations, work out: what context resolved, what genuinely remains open, whether N/A is honest or just convenient, and which failure is most blocking.
+Use a `<thinking>` block before producing output. For each of the 7 foundations, identify what context resolved and what remains open. Check whether N/A truly applies, and identify the most blocking gap.
 
 Then mark each foundation ✓, ✗, or N/A:
 

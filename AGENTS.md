@@ -76,7 +76,28 @@ Containment rests on the rendered settings' **allow-only write policy**, not srt
 
 Named residuals:
 - **Primary `.git`-write residual.** Must stay writable for worker commits, so a worker can still vandalise refs on other branches; only `hooks`/`config` under it are denied (above) — srt deliberately doesn't block `.git` wholesale. Contained by the PR gate chain + `git fsck`/reflog recoverability, not the sandbox.
-- **`~/.claude`-write residual — deliberate, bounded.** Claude Code needs `~/.claude`/`~/.claude.json` writable for the worker's own process, so worker containment excludes claude-home. That grants exec surfaces that run **unsandboxed** next session: `settings.json` only *names* hook scripts, so denying it alone leaves hook **bodies** writable; plugin manifests declare their own hooks too. Demonstrated live: a sandboxed worker wrote into `~/.claude/hooks/`, including `destructive_bash_gate` (the motivating `rm -rf` incident). Now `denyWrite`-protected at the same level as `.git/hooks`: `settings.json`, `settings.local.json`, `~/.claude/hooks`, `~/.claude/plugins` — mirroring srt's own block on `.claude/commands`/`.claude/agents`. General rule: a writable directory containing exec-capable files is an escape; denying only the file that *names* an executable is worthless while the executable's body stays writable. **Irreducible: `~/.claude.json`.** Mixes required session state with a live `mcpServers` block — writable intrinsically permits MCP command injection (a worker points an MCP server at an arbitrary command, which spawns unsandboxed with full network next session). No `denyWrite` fixes this without breaking the worker; only narrowing what Claude Code needs writable would. **Real, open hole**: a sandboxed worker is contained against filesystem escape, not against an agent editing `~/.claude.json`.
+- **`~/.claude`-write residual — deliberate, bounded.** Claude Code needs
+  `~/.claude` and `~/.claude.json` writable for its worker process. Worker
+  containment therefore excludes Claude home. Executable files there can run
+  **unsandboxed** in a later session. `settings.json` names hook scripts, but
+  the script bodies can also be writable. Plugin manifests can declare hooks.
+  Denying only the file that names an executable leaves its body exposed.
+
+  A sandboxed worker demonstrated this by writing to `~/.claude/hooks/`,
+  including `destructive_bash_gate` (the motivating `rm -rf` incident).
+  `denyWrite` now protects `settings.json`, `settings.local.json`,
+  `~/.claude/hooks`, and `~/.claude/plugins`, at the same level as
+  `.git/hooks`. This mirrors srt's block on `.claude/commands` and
+  `.claude/agents`. A writable directory with executable files remains an
+  escape even if the file that names them is denied.
+
+  **Irreducible: `~/.claude.json`.** It mixes required session state with a
+  live `mcpServers` block. A worker that can edit it can point an MCP server at
+  an arbitrary command, which can start unsandboxed with full network access
+  in the next session. Denying writes to this file breaks the worker. Only a
+  change to what Claude Code needs writable can close this gap. **Real, open
+  hole:** the sandbox contains worker filesystem writes, but it does not
+  prevent a worker from editing `~/.claude.json`.
 - **Shared-`$TMPDIR` residual (parallel workers only).** `$TMPDIR` is granted whole; each worker's scratch is a sibling dir under it, so concurrent workers aren't isolated from each other (worker A can corrupt B's `worker.log` or overwrite B's `srt-settings.json` mid-render). Not exploited today (serial dispatch). Narrowing means granting only each worker's own scratch subdir — but node/npx/git also write to `$TMPDIR`, so that needs its own probe.
 
 Sandboxing is write-containment, not a correctness/review substitute: a sandboxed worker's PR clears the same review/eval/hook-seam gates as any other. It contains filesystem writes only — not credential scope (the worker holds the operator's full `gh` token), not peer isolation (see `$TMPDIR` residual), not `~/.claude.json`.

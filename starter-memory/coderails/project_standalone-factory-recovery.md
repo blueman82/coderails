@@ -8,8 +8,10 @@ type: project
 
 ## Goal
 
-Build a local Factory web app in `factory/` that launches one selected provider
-headlessly, streams safe evidence, and follows the accepted Factory mockup.
+Build a local Factory web app in `factory/`. It must launch one selected
+provider headlessly, stream safe evidence, and follow the accepted Factory
+mockup.
+
 The existing dashboards must remain untouched.
 
 ## Decisions

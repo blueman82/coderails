@@ -1,6 +1,11 @@
 # coderails Component Reference
 
-Catalogue of coderails skills, hooks, commands, and scripts: what it does, when it's active, when it's NOT, and dependencies. General dev-workflow skills (planning, TDD, debugging, code review, worktrees) are provided by the required `superpowers@claude-plugins-official` plugin dependency, not bundled here. Ground truth: all entries verified from source files. See README for a lighter overview.
+This reference lists Coderails skills, hooks, commands, and scripts. For each,
+it describes its role, activation conditions, and dependencies. The required
+`superpowers@claude-plugins-official` plugin provides general development
+skills such as planning, TDD, debugging, code review, and worktrees. Coderails
+does not bundle those skills. All entries were verified from source files. See
+README for a shorter overview.
 
 ---
 
@@ -21,7 +26,10 @@ Catalogue of coderails skills, hooks, commands, and scripts: what it does, when 
 
 ## Skills
 
-Skills are loaded by Claude via the `Skill` tool. They encode a discipline, workflow, or method. There is no automatic activation — Claude must choose to invoke a skill, guided by each skill's `description` frontmatter (which is what the harness surfaces to Claude when deciding whether to fire).
+Claude loads skills through the `Skill` tool. Each skill defines a discipline,
+workflow, or method. Skills do not activate automatically. Claude chooses to
+invoke one based on its `description` frontmatter, which the harness shows to
+Claude.
 
 ### Coderails-original skills
 
@@ -29,13 +37,18 @@ These skills were written for coderails and are not vendored from elsewhere.
 
 #### `agentic-loop`
 
-**Purpose:** Multi-agent orchestration discipline for sessions where the user has authorised autonomous work across multiple PRs or agents.
+**Purpose:** Coordinate autonomous work across multiple PRs or agents when
+the user has authorised it.
 
 **When it triggers:** Any of: "spawn a team", "create a team", "team of agents", "no human gates", "self-merge", "crack on", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or 3+ PRs authorised in one instruction. Also triggers for single-PR autonomous merge+deploy+verify chains where the user has explicitly waived per-step confirmation.
 
 **When it does NOT apply:** Single-PR interactive work — that is `/coderails:workflow`. The agentic loop sits _above_ `/workflow` and uses it as a subroutine.
 
-**Key discipline:** Main context is a pure orchestrator. Every code change (even single-file edits) goes to a routed provider-native worker with explicit task instructions. The orchestrator never implements; it delegates to agents, verifies artifacts, and escalates to a spawned team only for ≥3 sequential PRs or dependency chains.
+**Key discipline:** The main context orchestrates. A routed provider-native
+worker receives explicit instructions for every code change, even a
+single-file edit. The orchestrator delegates implementation and verifies
+artifacts. It spawns a team only for at least three sequential PRs or a
+dependency chain.
 
 **Dependencies:** Reads and writes `progress.json` (ephemeral loop state — path computed by `hooks/scripts/lib/agentic_loop_path.py`, never manually). Invokes `superpowers:writing-plans`, `coderails:premortem`, `superpowers:brainstorming`, `coderails:handoff` as sub-skills. Interacts with `loop_state_guard` and `loop_stall_guard` Stop hooks.
 

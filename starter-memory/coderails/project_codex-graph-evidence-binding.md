@@ -10,7 +10,9 @@ type: project
 
 ## Goal
 
-Make Codex graph execution mechanically auditable without adding an automatic scheduler. Codex already performs real manually operated graph engineering; this change binds each graph node attempt to the native worker events already stored in the Codex session transcript.
+Make Codex graph execution mechanically auditable. Codex already runs the
+graph manually. Bind each graph node attempt to native worker events stored
+in the Codex session transcript. Do not add an automatic scheduler.
 
 After implementation and live acceptance, Codex must satisfy the complete agreed manual graph contract: durable state, dependency readiness, waves, native workers, exact result binding, joins, retries, resume, hard stops, ownership, transcript-backed evidence, and completion gates.
 

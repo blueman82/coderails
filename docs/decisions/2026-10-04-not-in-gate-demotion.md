@@ -1,6 +1,7 @@
 # Not-in gate demotion: confidence labels and Did Not Verify become advisory lints
 
-Status: accepted by user override, 2026-10-04. **Supersedes** `e1-confidence-gate-demotion.md`.
+Status: user override accepted on 2026-10-04. **Supersedes**
+`e1-confidence-gate-demotion.md`.
 
 ## Decision
 

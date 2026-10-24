@@ -5,14 +5,14 @@ description: Use when the user asks to look at recent sessions and find repeated
 
 # Workflow Audit
 
-Mines Codex session transcripts for tool-use patterns that repeat across sessions, judges which ones are genuine candidates for a new skill, and creates each proposed skill through `$skill-creator`, a fresh-subagent pressure test, and the native Codex PR workflow.
+Finds tool-use patterns that repeat across Codex sessions. A fresh judge selects candidates for new skills. Each proposed skill then goes through `$skill-creator`, a fresh-subagent pressure test, and the native Codex PR workflow.
 
 Set `SKILL_DIR` to the absolute directory containing this `SKILL.md`; run all
 bundled scripts through that path.
 
 ## Overview
 
-Four stages: scan transcripts into tool-use event sequences, cluster repeated n-grams across sessions, hand the clusters to a fresh judge subagent for propose/reject verdicts, then carry every `propose` verdict forward — straight to creation in-session by default, or to a dashboard queue entry if the run is in queue-mode (section 5), never both. Nothing is created that the judge rejected.
+The work has four stages. Scan transcripts into tool-use event sequences. Group repeated n-grams across sessions. Give those groups to a fresh judge subagent for `propose` or `reject` verdicts. Then act on each `propose` verdict. By default, create the skill in this session. In queue-mode (section 5), write a dashboard queue entry instead. Never use both paths for one verdict. Do not create a skill that the judge rejected.
 
 ## 1. Scope mapping
 
@@ -24,7 +24,7 @@ Map the user's phrasing onto scan arguments before running anything:
 | no scope given | `--all-projects --days 14` (default) |
 | "just this project" / a named project | `--project <slug>` |
 
-Corpus root is `WORKFLOW_AUDIT_ROOT` (default `~/.codex/sessions`) — override only if the user names a different root. Native Codex stores JSONL below dated directories; `--project` matches the basename of `session_meta.payload.cwd`, and child-agent threads are excluded so they cannot inflate cross-session support.
+Use `WORKFLOW_AUDIT_ROOT` as the corpus root. It defaults to `~/.codex/sessions`; override it only if the user names another root. Native Codex stores JSONL below dated directories. `--project` matches the basename of `session_meta.payload.cwd`. Exclude child-agent threads so they cannot inflate support across sessions.
 
 ## 2. Size sanity
 
@@ -48,7 +48,7 @@ Read `$SKILL_DIR/references/judge-contract.md` in full, then call `spawn_agent` 
 1. The cluster JSON — the full stdout object from `cluster_ngrams.py`.
 2. The existing-skill list — the `name` and `description` frontmatter lines from every `skills/*/SKILL.md` in the repo.
 
-**The judge receives nothing else.** No transcript content, no conversation history, no orchestrator commentary. This is a deliberate privacy boundary: the judge's entire vocabulary is tool names, whitelisted heads, counts, session ids, and n-gram lengths — the same boundary `scan_transcripts.py` and `cluster_ngrams.py` already enforce on their own output. The judge returns one propose/reject verdict per cluster per the contract's schema.
+**The judge receives nothing else.** Do not send transcript content, conversation history, or orchestrator commentary. The judge receives only tool names, whitelisted heads, counts, session ids, and n-gram lengths. `scan_transcripts.py` and `cluster_ngrams.py` apply the same privacy limit to their output. The judge returns one `propose` or `reject` verdict per cluster, as the contract's schema requires.
 
 ## 5. Queue-mode output (optional) — mutually exclusive with in-session creation
 
@@ -115,7 +115,7 @@ Only rows with `verdict: "propose"` go forward (to creation or a queue entry, pe
 
 ## 7. Proceed to creation
 
-Unless the run is in queue-mode (section 5), every candidate the judge marked `propose` goes straight to the section-8 create step without asking the owner again. In queue-mode, a `propose` verdict is written as a queue entry instead (section 5) and is NOT also created here — the dashboard Approve-click is its sole creation path. Either way, the judge's propose/reject verdict is the only filter that decides what gets built — nothing is created that the judge rejected, and zero `propose` verdicts is a complete, successful run, not a failure to escalate past.
+Unless the run is in queue-mode (section 5), send every `propose` candidate to the section-8 create step without asking the owner again. In queue-mode, write a queue entry instead. Do NOT also create the skill here. The dashboard Approve click is the only build trigger for a queue entry. The judge's verdict is the only filter for what gets built. Create nothing the judge rejected. A run with zero `propose` verdicts is complete and successful.
 
 ## 8. Create step — one skill at a time
 
@@ -134,4 +134,6 @@ Report, unscored:
 
 ## 10. On-demand invocation
 
-Native Codex does not bundle a scheduler. Invoke this skill on demand, either directly in Codex or from the dashboard's manually triggered `workflow-audit-weekly` routine (see the dashboard's `docs/routines.md` for the full operator guide). Despite its historical name, the routine does not run weekly or automatically. It scans transcripts from the last 7 days (`--days 7`), clusters repeated patterns, judges them, and writes any `propose` verdicts as queue entries on the dashboard. **Queue-mode is mandatory for this dashboard routine** — in-session skill creation is forbidden, and the owner's Approve click on a queue entry is the sole build trigger for each proposal. A direct interactive run can create skills in-session or defer to queue-mode at the user's discretion. The routine completes cleanly only if `proposals_written == proposals_attempted` (no queue write failures); a run with zero proposals is successful, not a failure.
+Native Codex has no scheduler. Invoke this skill on demand in Codex or from the dashboard's manually triggered `workflow-audit-weekly` routine. See the dashboard's `docs/routines.md` for the operator guide. Despite its name, the routine does not run weekly or automatically. It scans the last 7 days (`--days 7`), groups repeated patterns, judges them, and writes `propose` verdicts to the dashboard queue.
+
+**Queue-mode is mandatory for this dashboard routine.** Do not create a skill in-session. The owner's Approve click on a queue entry is the only build trigger for that proposal. In a direct interactive run, the user can choose in-session creation or queue-mode. The routine completes cleanly only if `proposals_written == proposals_attempted`, with no queue write failure. Zero proposals is a successful run.
