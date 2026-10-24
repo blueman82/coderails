@@ -60,10 +60,10 @@ class TrustedGitTests(unittest.TestCase):
             self.assertIn('select(.user.login == "writer")', run.call_args.args[-1])
 
     def test_integrity_creator_sha_and_newest_status(self) -> None:
-        """A success label alone cannot satisfy root-owned SHA attestation."""
-        good = '{"state":"success","creator":{"login":"machine"},"description":"integrity=pass sha=abc"}'
+        """A success label alone cannot satisfy GitHub Actions SHA attestation."""
+        good = '{"state":"success","creator":{"login":"github-actions[bot]"},"description":"integrity=pass sha=abc"}'
         for record in (
-            good.replace("machine", "attacker"),
+            good.replace("github-actions[bot]", "attacker"),
             good.replace("abc", "old"),
             good.replace("success", "pending"),
         ):
@@ -73,13 +73,13 @@ class TrustedGitTests(unittest.TestCase):
                 patch.object(git_common, "run", return_value=response),
                 self.assertRaises(git_common.WorkflowError),
             ):
-                verify_integrity_status("abc", "machine")
+                verify_integrity_status("abc")
         response = subprocess.CompletedProcess(["gh"], 0, f"[{good}]\n[]", "")
         with (
             patch.object(git_common, "repo", return_value="o/r"),
             patch.object(git_common, "run", return_value=response),
         ):
-            verify_integrity_status("abc", "machine")
+            verify_integrity_status("abc")
 
 
 if __name__ == "__main__":

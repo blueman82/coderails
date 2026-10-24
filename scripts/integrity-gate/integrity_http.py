@@ -69,8 +69,8 @@ def array_value(value: object) -> list[JsonObject]:
 class Client:
     """Keep credentials private while preserving injectable curl transport."""
 
-    def __init__(self, slug: str, token: str, machine_user: str) -> None:
-        """Bind one repository and machine identity for this polling tick."""
+    def __init__(self, slug: str, token: str, machine_user: str = "") -> None:
+        """Bind one repository and token; legacy daemon identity is optional."""
         self.slug = slug
         self.token = token
         self.machine_user = machine_user
@@ -149,9 +149,10 @@ class Client:
 
     def post_status(self, sha: str, state: str, description: str) -> None:
         """Verify the live token identity before every commit-status mutation."""
-        actual = self.get_object("https://api.github.com/user").get("login", "")
-        if actual != self.machine_user:
-            raise IntegrityError(f"integrity identity mismatch expected={self.machine_user} actual={actual}")
+        if self.machine_user:
+            actual = self.get_object("https://api.github.com/user").get("login", "")
+            if actual != self.machine_user:
+                raise IntegrityError(f"integrity identity mismatch expected={self.machine_user} actual={actual}")
         body = json.dumps({"state": state, "context": "integrity-review", "description": description})
         code = self.request(
             f"https://api.github.com/repos/{self.slug}/statuses/{sha}",

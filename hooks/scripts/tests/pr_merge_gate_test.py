@@ -25,7 +25,11 @@ class MergeEvidenceTests(HookTestCase):
     def test_integrity_newest_exact_head_creator_state_and_description(self) -> None:
         """Only the newest successful configured-machine attestation can authorize this head."""
         sha = "a" * 40
-        valid = {"state": "success", "creator": {"login": "machine"}, "description": f"integrity=pass sha={sha}"}
+        valid = {
+            "state": "success",
+            "creator": {"login": "github-actions[bot]"},
+            "description": f"integrity=pass sha={sha}",
+        }
         rows: list[object] = [
             [],
             [{**valid, "state": "pending"}],
@@ -40,7 +44,7 @@ class MergeEvidenceTests(HookTestCase):
         ]
         with (
             patch(MODULE + ".config_path", return_value="config"),
-            patch(MODULE + ".integrity_machine_user", return_value="machine"),
+            patch(MODULE + ".integrity_enabled", return_value=True),
             patch(MODULE + ".repo", return_value="owner/repo"),
         ):
             for row in rows:

@@ -1,10 +1,9 @@
 """Mechanical SHA-bound evidence and bounded policy checks for attestation."""
 
-import json
 import re
-from datetime import datetime, timezone
 from typing import Protocol
 
+from integrity_evidence import eval_valid, review_valid
 from integrity_http import IntegrityError, JsonObject, object_value
 
 
@@ -28,89 +27,78 @@ class EvidenceClient(Protocol):
         ...
 
     def post_status(self, sha: str, state: str, description: str) -> None:
-        """Post a status only with a live verified machine identity."""
+        """Post a commit status with the workflow's scoped token."""
         ...
 
 
-def should_gate(statuses: list[JsonObject], pending_ttl: int) -> bool:
-    """Consider fresh heads and retry expired pending statuses, preserving terminal ones."""
-    if not statuses:
-        return True
-    newest = statuses[0]
-    if newest.get("state") != "pending":
-        return False
-    created = newest.get("created_at")
-    if not isinstance(created, str):
-        return False
+def post_current(client: EvidenceClient, number: int, sha: str, state: str, description: str) -> int:
+    """Never post a result for a head that moved during evaluation."""
     try:
-        instant = datetime.strptime(created, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    except ValueError:
-        return False
-    return (datetime.now(timezone.utc) - instant).total_seconds() >= pending_ttl
+        current = object_value(client.get_object(f"pulls/{number}").get("head")).get("sha")
+        if current != sha:
+            print(f"skip: pr={number} sha={sha} reason=head_moved")
+            return 1
+        client.post_status(sha, state, description)
+    except IntegrityError:
+        print(f"skip: pr={number} sha={sha} reason=status_post_failed")
+        return 1
+    return 0
 
 
-def valid_evidence(body: str, sha: str) -> bool:
-    """Check the first embedded JSON object's schema and exact head binding."""
-    match = re.search(r"^```json\s*\n(.*?)^```\s*$", body, re.MULTILINE | re.DOTALL)
-    if not match:
-        return False
-    try:
-        value = object_value(json.loads(match[1]))
-    except (ValueError, IntegrityError):
-        return False
-    version = value.get("schema_version")
-    return (
-        isinstance(version, (int, float))
-        and not isinstance(version, bool)
-        and version >= 1
-        and isinstance(value.get("task_ref"), str)
-        and isinstance(value.get("frozen_sha"), str)
-        and value.get("head_sha") == sha
-        and isinstance(value.get("evals"), list)
+def fail(client: EvidenceClient, number: int, sha: str, reason: str, *, error: bool = False) -> int:
+    """Post a current-head refusal; a moved head has no stale status mutation."""
+    posted = post_current(
+        client, number, sha, "error" if error else "failure", f"integrity=fail sha={sha} reason={reason}"
     )
-
-
-def fail(client: EvidenceClient, sha: str, reason: str, *, error: bool = False) -> int:
-    """Post the mechanical refusal with its original retry-status semantics."""
-    client.post_status(sha, "error" if error else "failure", f"integrity=fail sha={sha} reason={reason}")
-    return 1 if error else 0
+    return 1 if posted or error else 0
 
 
 def check_inputs(client: EvidenceClient, number: int, sha: str, body: str, max_bytes: int) -> int:
     """Validate command evidence, policy paths and the bounded diff before success."""
-    if not valid_evidence(body, sha):
-        return fail(client, sha, "eval_evidence_invalid", error=True)
+    if not eval_valid(body, number, sha):
+        return fail(client, number, sha, "eval_evidence_invalid", error=True)
     try:
-        files = client.get_array(f"pulls/{number}/files?per_page=100")
+        files: list[JsonObject] = []
+        for page in range(1, 32):
+            batch = client.get_array(f"pulls/{number}/files?per_page=100&page={page}")
+            files.extend(batch)
+            if len(batch) < 100:
+                break
+        else:
+            return fail(client, number, sha, "file_list_over_limit", error=True)
     except IntegrityError:
-        return fail(client, sha, "files_fetch_failed", error=True)
+        return fail(client, number, sha, "files_fetch_failed", error=True)
     filenames = [item.get("filename") for item in files]
+    filenames.extend(item.get("previous_filename") for item in files if item.get("status") == "renamed")
     if not filenames or any(not isinstance(name, str) or not name for name in filenames):
-        return fail(client, sha, "file_list_invalid", error=True)
+        return fail(client, number, sha, "file_list_invalid", error=True)
     for name in filenames:
         if isinstance(name, str) and re.match(
-            r"^(skills/dashboard/|launchd/|scripts/integrity-gate/|\.github/workflows/)", name
+            r"^(skills/dashboard/|launchd/|scripts/integrity-gate/|scripts/(merge\.py|lib/(config\.py|eval_|integrity_status\.py|review_artifact\.py))|hooks/scripts/lib/pr_merge_gate\.py|packages/codex/scripts/(merge\.py|lib/(config\.py|eval_|integrity_status\.py|review_artifact\.py))|\.github/workflows/|config\.schema\.json$|packages/codex/config\.schema\.json$)",
+            name,
         ):
-            return fail(client, sha, f"policy_path_{name}")
+            return fail(client, number, sha, f"policy_path_{name}")
     try:
         diff = client.get(f"pulls/{number}", "application/vnd.github.v3.diff").rstrip("\n")
     except IntegrityError:
-        return fail(client, sha, "diff_fetch_failed", error=True)
+        return fail(client, number, sha, "diff_fetch_failed", error=True)
     if not diff or len(diff.encode()) > max_bytes:
-        return fail(client, sha, "diff_invalid_or_oversize")
-    client.post_status(sha, "pending", f"integrity=pending sha={sha}")
-    client.post_status(
+        return fail(client, number, sha, "diff_invalid_or_oversize")
+    posted = post_current(
+        client,
+        number,
         sha,
         "success",
-        f"integrity=pass sha={sha} evidence=review,eval,commands "
-        "policy=checked provenance=sha-bound independent=machine",
+        f"integrity=pass sha={sha} evidence=review,eval,commands policy=checked provenance=sha-bound source=actions",
     )
-    print(f"gated: pr={number} sha={sha} state=success integrity=pass")
-    return 0
+    if not posted:
+        print(f"gated: pr={number} sha={sha} state=success integrity=pass")
+    return posted
 
 
 def gate_pr(client: EvidenceClient, number: int, max_bytes: int, pending_ttl: int) -> int:
     """Attest only exact-head evidence and fail closed on live-fetch errors."""
+    del pending_ttl
     try:
         head = object_value(client.get_object(f"pulls/{number}").get("head"))
         sha = head.get("sha")
@@ -128,22 +116,16 @@ def gate_pr(client: EvidenceClient, number: int, max_bytes: int, pending_ttl: in
             if any(line.startswith(prefix) and line.endswith(" -->") for line in body.splitlines())
         ]
         if not bodies:
-            print(f"skip: pr={number} sha={sha} reason=no_eval_artifact")
-            return 0
-        statuses = [
-            item
-            for item in client.get_array(f"commits/{sha}/statuses?per_page=100")
-            if item.get("context") == "integrity-review"
-        ]
-        if not should_gate(statuses, pending_ttl):
-            print(f"skip: pr={number} sha={sha} reason=already_terminal_or_fresh_pending")
-            return 0
+            return fail(client, number, sha, "eval_evidence_missing", error=True)
         body = bodies[-1]
         if "result=GO" not in body.splitlines()[0]:
-            return fail(client, sha, "eval_result_not_go")
+            return fail(client, number, sha, "eval_result_not_go")
         review = f"<!-- coderails-review-summary v1 pr={number} head_sha={sha} -->"
-        if not any(review in comment.splitlines() for comment in client.comments(number)):
-            return fail(client, sha, "review_evidence_missing", error=True)
+        reviews = [comment for comment in comments if comment.splitlines()[:1] == [review]]
+        if not reviews:
+            return fail(client, number, sha, "review_evidence_missing", error=True)
+        if not review_valid(reviews[-1], number, sha):
+            return fail(client, number, sha, "review_evidence_invalid", error=True)
         return check_inputs(client, number, sha, body, max_bytes)
     except IntegrityError as error:
         print(f"skip: pr={number} sha={sha} reason={error}")

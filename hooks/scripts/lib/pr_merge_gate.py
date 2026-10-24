@@ -1,4 +1,4 @@
-"""Fetch and validate exact-head eval evidence and machine integrity attestation."""
+"""Fetch and validate exact-head eval evidence and GitHub Actions attestation."""
 
 from __future__ import annotations
 
@@ -11,15 +11,16 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from scripts.lib.config import config_path, integrity_machine_user
+from scripts.lib.artifact_io import array_value
+from scripts.lib.config import config_path, integrity_enabled
 from scripts.lib.git_common import branch, gate_eval_summary_for_pr, pr_field, pr_num, repo, run
 from scripts.post_evals import smoke_verify
 
 
 def integrity_reason(number: str, sha: str, cwd: str) -> str:
-    """Require the newest exact-SHA success from the configured machine login."""
-    machine = integrity_machine_user(config_path(cwd))
-    if not machine:
+    """Require the newest exact-SHA GitHub Actions success when configured."""
+    path = config_path(cwd)
+    if not path or not integrity_enabled(path):
         return ""
     prefix = f"Blocked: gh pr merge {number} — "
     try:
@@ -36,29 +37,30 @@ def integrity_reason(number: str, sha: str, cwd: str) -> str:
                 prefix + f"GitHub fetch failed, could not fetch integrity-review status for {sha}. Retry, "
                 f"or check gh auth/network."
             )
-        statuses = json.loads(result.stdout)
-        status = cast(dict[str, Any], statuses[0]) if isinstance(statuses, list) and statuses else {}
+        decoder = json.JSONDecoder()
+        remaining = result.stdout.lstrip()
+        statuses: list[object] = []
+        while remaining:
+            page, end = decoder.raw_decode(remaining)
+            if not isinstance(page, list):
+                raise ValueError("malformed status page")
+            statuses.extend(array_value(cast(object, page)))
+            remaining = remaining[end:].lstrip()
+        status = cast(dict[str, Any], statuses[0]) if statuses else {}
         state = status.get("state", "")
         creator = status.get("creator", {}).get("login", "")
         description = status.get("description", "")
     except (OSError, ValueError, AttributeError, TypeError):
-        return (
-            prefix + f"no integrity-review status found for {sha}. The integrity daemon has not attested this SHA yet."
-        )
+        return prefix + f"no integrity-review status found for {sha}. GitHub Actions has not attested this SHA yet."
     if not state:
-        return (
-            prefix + f"no integrity-review status found for {sha}. The integrity daemon has not attested this SHA yet."
-        )
+        return prefix + f"no integrity-review status found for {sha}. GitHub Actions has not attested this SHA yet."
     if state != "success":
         return (
-            prefix + f"integrity-review status for {sha} is '{state}' (not success). The integrity "
-            f"daemon has not attested this SHA."
+            prefix + f"integrity-review status for {sha} is '{state}' (not success). GitHub Actions "
+            f"has not attested this SHA."
         )
-    if creator != machine:
-        return (
-            prefix + f"integrity-review status for {sha} was posted by '{creator}', not the "
-            f"configured machine user '{machine}'."
-        )
+    if creator != "github-actions[bot]":
+        return prefix + f"integrity-review status for {sha} was posted by '{creator}', not the " "GitHub Actions bot."
     if (
         not isinstance(description, str)
         or not re.search(r"(^|\s)integrity=pass(\s|$)", description)

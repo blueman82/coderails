@@ -254,9 +254,9 @@ def _section(path: str | Path, key: str) -> dict[str, Any]:
     return cast("dict[str, Any]", value) if isinstance(value, dict) else {}
 
 
-def integrity_machine_user(path: str | Path) -> str:
-    """Read the configured root-owned attestor login; null or absent means inactive."""
-    return str(_section(path, "integrity_review").get("machine_user") or "")
+def integrity_enabled(path: str | Path) -> bool:
+    """Enable the local GitHub Actions status check after server-side rollout."""
+    return _section(path, "integrity_review").get("enabled") is True
 
 
 def require_signatures(path: str | Path) -> bool:

@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from integrity_http import IntegrityError, JsonObject
 from integrity_policy import gate_pr
 
+from scripts.lib.eval_integrity import suite_hash
+
 SHA = "0123456789012345678901234567890123456789"
 
 
@@ -25,12 +27,28 @@ class EvidenceFixture:
         """Build a valid exact-head review and structured eval comment."""
         self.document: JsonObject = {
             "schema_version": 1,
+            "scope": "pr",
             "task_ref": "7",
-            "frozen_sha": "base",
+            "verification_level": 1,
+            "verification_justification": "Run a direct artifact check.",
+            "frozen_at": "2026-10-24T11:42:17Z",
+            "frozen_sha": "a" * 40,
             "head_sha": SHA,
-            "evals": [],
+            "evals": [
+                {
+                    "id": "E1",
+                    "priority": "P0",
+                    "mode": "agent-run",
+                    "status": "pass",
+                    "assert": "The artifact behaves as required.",
+                    "expected": "A passing result.",
+                    "verifier_instruction": "Drive the final artifact.",
+                    "evidence": "Observed passing run.",
+                }
+            ],
         }
-        self.review = f"<!-- coderails-review-summary v1 pr=7 head_sha={SHA} -->"
+        self.document["frozen_hash"] = suite_hash(self.document)
+        self.review = f"<!-- coderails-review-summary v1 pr=7 head_sha={SHA} -->\n\n## No findings"
         self.marker = f"<!-- coderails-eval-summary v1 pr=7 head_sha={SHA} result=GO verification_level=1 -->"
         self.files: list[JsonObject] = [{"filename": "scripts/example.py"}]
         self.diff = "diff --git a/scripts/example.py b/scripts/example.py\n+x\n"
@@ -54,7 +72,10 @@ class EvidenceFixture:
     def get_array(self, target: str) -> list[JsonObject]:
         """Return independent changed-file or commit-status arrays."""
         self.check(target)
-        return copy.deepcopy(self.statuses if target.startswith("commits/") else self.files)
+        if target.startswith("commits/"):
+            return copy.deepcopy(self.statuses)
+        page = int(target.rsplit("page=", 1)[1]) if "page=" in target else 1
+        return copy.deepcopy(self.files[(page - 1) * 100 : page * 100])
 
     def get(self, target: str, accept: str = "application/vnd.github+json") -> str:
         """Return the reviewed diff only for the real diff media type."""
@@ -87,11 +108,11 @@ class GatePolicyTests(unittest.TestCase):
         """Fresh heads require an actual positive result with SHA-bound descriptions."""
         client = EvidenceFixture()
         self.assertEqual(self.gate(client), 0)
-        self.assertEqual([post[1] for post in client.posts], ["pending", "success"])
+        self.assertEqual([post[1] for post in client.posts], ["success"])
         for sha, _, description in client.posts:
             self.assertEqual(sha, SHA)
             self.assertIn("sha=" + SHA, description)
-        for token in ("integrity=pass", "evidence=review,eval,commands", "independent=machine", "provenance=sha-bound"):
+        for token in ("integrity=pass", "evidence=review,eval,commands", "source=actions", "provenance=sha-bound"):
             self.assertIn(token, client.posts[-1][2])
 
     def test_missing_review_and_protected_policy_paths(self) -> None:
@@ -119,8 +140,7 @@ class GatePolicyTests(unittest.TestCase):
         for endpoint in (
             "pulls/7",
             "comments",
-            f"commits/{SHA}/statuses?per_page=100",
-            "pulls/7/files?per_page=100",
+            "pulls/7/files?per_page=100&page=1",
             "diff",
         ):
             client = EvidenceFixture()
@@ -160,6 +180,76 @@ class GatePolicyTests(unittest.TestCase):
         client.head = ""
         self.assertEqual(self.gate(client), 1)
         self.assertEqual(client.posts, [])
+
+    def test_terminal_success_is_rechecked_after_comment_change(self) -> None:
+        """A previous success cannot hide a removed review."""
+        client = EvidenceFixture()
+        client.statuses = [{"context": "integrity-review", "state": "success"}]
+        client.review = ""
+        self.assertEqual(self.gate(client), 1)
+        self.assertEqual(client.posts[-1][1], "error")
+        self.assertIn("review_evidence_missing", client.posts[-1][2])
+
+    def test_empty_command_and_provenance_do_not_attest(self) -> None:
+        """A marker cannot replace missing command evidence."""
+        client = EvidenceFixture()
+        client.document["verification_level"] = 1
+        client.document["verification_justification"] = "Run the CLI against the final artifact."
+        client.document["frozen_at"] = "2026-10-24T11:42:17Z"
+        client.document["frozen_sha"] = "a" * 40
+        client.document["evals"] = [
+            {"id": "E1", "priority": "P0", "mode": "scripted", "status": "pass", "evidence": "ok"}
+        ]
+        self.assertEqual(self.gate(client), 1)
+        self.assertIn("eval_evidence_invalid", client.posts[-1][2])
+
+    def test_latest_head_must_match_attested_head_before_posting(self) -> None:
+        """A moved head gets no stale success status."""
+        client = EvidenceFixture()
+        original = client.get_object
+        reads = 0
+
+        def moving_head(target: str) -> JsonObject:
+            nonlocal reads
+            reads += 1
+            return {"head": {"sha": SHA if reads == 1 else "b" * 40}} if target == "pulls/7" else original(target)
+
+        client.get_object = moving_head  # type: ignore[method-assign]
+        self.assertNotEqual(self.gate(client), 0)
+        self.assertNotIn("success", [post[1] for post in client.posts])
+
+    def test_protected_path_after_first_file_page_is_checked(self) -> None:
+        """The file after the first page still blocks success."""
+        client = EvidenceFixture()
+        client.files = [{"filename": f"docs/safe-{index}.md"} for index in range(100)]
+        client.files.append({"filename": ".github/workflows/integrity-review.yml"})
+        self.assertEqual(self.gate(client), 0)
+        self.assertEqual(client.posts[-1][1], "failure")
+        self.assertIn("policy_path_", client.posts[-1][2])
+        self.assertIn("pulls/7/files?per_page=100&page=2", client.calls)
+
+    def test_renamed_protected_path_is_checked(self) -> None:
+        """A rename cannot hide the protected source path."""
+        client = EvidenceFixture()
+        client.files = [{"filename": "docs/old-gate.py", "previous_filename": "scripts/merge.py", "status": "renamed"}]
+        self.assertEqual(self.gate(client), 0)
+        self.assertEqual(client.posts[-1][1], "failure")
+
+    def test_tampered_frozen_oracle_cannot_attest(self) -> None:
+        """A changed oracle must fail its frozen hash check."""
+        client = EvidenceFixture()
+        client.document["evals"][0]["assert"] = "Changed after the freeze."
+        self.assertEqual(self.gate(client), 1)
+        self.assertIn("eval_evidence_invalid", client.posts[-1][2])
+
+    def test_removed_eval_comment_overrides_previous_success(self) -> None:
+        """Deleting the eval makes the next status a failure."""
+        client = EvidenceFixture()
+        client.statuses = [{"context": "integrity-review", "state": "success"}]
+        client.comments = lambda number: [client.review]  # type: ignore[method-assign]
+        self.assertEqual(self.gate(client), 1)
+        self.assertEqual(client.posts[-1][1], "error")
+        self.assertIn("eval_evidence_missing", client.posts[-1][2])
 
 
 if __name__ == "__main__":

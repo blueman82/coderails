@@ -1,6 +1,5 @@
 """Verify credential-safe transport and reviewed ruleset setup using local mocks."""
 
-import json
 import subprocess
 import sys
 import tempfile
@@ -10,7 +9,6 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from integrity_http import Client, IntegrityError, credentials
-from integrity_setup import configure_ruleset, ruleset_matches, ruleset_payload
 
 
 class TransportTests(unittest.TestCase):
@@ -60,28 +58,16 @@ class TransportTests(unittest.TestCase):
             with self.assertRaises(IntegrityError):
                 credentials(path)
 
-    def test_review_before_create_and_verify_after(self) -> None:
-        """Only affirmative owner approval permits the exact printed ruleset creation."""
-        expected = ruleset_payload()
-        self.assertTrue(ruleset_matches(expected))
-        self.assertFalse(ruleset_matches(dict(expected, bypass_actors=[{"actor_id": 1}])))
+    def test_actions_status_uses_token_without_user_account_lookup(self) -> None:
+        """The workflow token posts a status without a second login."""
+        client = Client("owner/repo", "workflow-token")
         with (
-            patch("integrity_setup.gh_array", return_value=[]),
-            patch("builtins.input", return_value="n"),
-            patch("integrity_setup.subprocess.run") as run,
+            patch.object(client, "get_object") as identity,
+            patch.object(client, "request", return_value="201") as request,
         ):
-            with self.assertRaisesRegex(IntegrityError, "cancelled"):
-                configure_ruleset("owner/repo")
-            run.assert_not_called()
-        with (
-            patch("integrity_setup.gh_array", side_effect=[[], [expected]]),
-            patch("builtins.input", return_value="y"),
-            patch("integrity_setup.subprocess.run") as run,
-        ):
-            run.return_value = subprocess.CompletedProcess([], 0)
-            configure_ruleset("owner/repo")
-            self.assertEqual(json.loads(run.call_args.kwargs["input"]), expected)
-            self.assertIn("POST", run.call_args.args[0])
+            client.post_status("a" * 40, "success", "integrity=pass")
+            identity.assert_not_called()
+            self.assertEqual(request.call_count, 1)
 
 
 if __name__ == "__main__":
