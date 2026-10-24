@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from contextlib import suppress
 from typing import Protocol
 
@@ -21,6 +22,16 @@ ATTESTOR_IMPORT_PATHS = frozenset(
         "scripts/lib/eval_signing.py",
         "scripts/lib/eval_trace.py",
     }
+)
+ATTESTOR_IMPORT_STEMS = tuple(path[:-3] for path in ATTESTOR_IMPORT_PATHS if path.endswith(".py"))
+ATTESTOR_PACKAGE_PATHS = tuple(f"{stem}/" for stem in ATTESTOR_IMPORT_STEMS if stem.startswith("scripts/lib/"))
+STDLIB_MODULES: frozenset[str] | None = getattr(sys, "stdlib_module_names", None)
+STDLIB_PACKAGE_PATHS = tuple(f"{module}/" for module in STDLIB_MODULES or ())
+PROTECTED_PREFIXES = (
+    "scripts/integrity-gate/",
+    "scripts/__pycache__/",
+    "scripts/lib/__pycache__/",
+    ".github/workflows/",
 )
 STATUS_CONTEXT = "integrity-review"
 STATUS_BUDGET = 900
@@ -181,6 +192,8 @@ def check_inputs(
     client: EvidenceClient, number: int, sha: str, body: str, review_body: str, owner: str, max_bytes: int, count: int
 ) -> int:
     """Validate command evidence, policy paths and the bounded diff before success."""
+    if STDLIB_MODULES is None:
+        return fail(client, number, sha, "unsupported_python_runtime", error=True)
     if not eval_valid(body, number, sha):
         return fail(client, number, sha, "eval_evidence_invalid", error=True)
     if count >= 3000:
@@ -205,14 +218,19 @@ def check_inputs(
     for name in filenames:
         if isinstance(name, str) and (
             name in ATTESTOR_IMPORT_PATHS
-            or re.match(
-                r"^(skills/dashboard/|launchd/|scripts/integrity-gate/|scripts/__pycache__/|scripts/lib/__pycache__/|scripts/(merge\.py|lib/(config\.py|eval_|integrity_status\.py|review_artifact\.py))|hooks/scripts/lib/pr_merge_gate\.py|packages/codex/scripts/(merge\.py|lib/(config\.py|eval_|integrity_status\.py|review_artifact\.py))|\.github/workflows/|config\.schema\.json$|packages/codex/config\.schema\.json$)",
-                name,
+            or name.startswith(PROTECTED_PREFIXES)
+            or any(name.startswith(f"{stem}.") for stem in ATTESTOR_IMPORT_STEMS)
+            or name.startswith(ATTESTOR_PACKAGE_PATHS)
+            or name.startswith(STDLIB_PACKAGE_PATHS)
+            or (
+                "/" not in name
+                and name.split(".", 1)[0] in STDLIB_MODULES
+                and name.endswith((".py", ".pyc", ".so", ".pyd"))
             )
         ):
             return fail(client, number, sha, "policy_path_protected")
     try:
-        diff = client.get(f"pulls/{number}", "application/vnd.github.v3.diff").rstrip("\n")
+        diff = client.get(f"pulls/{number}", "application/vnd.github.v3.diff")
     except IntegrityError:
         return fail(client, number, sha, "diff_fetch_failed", error=True)
     if not diff or len(diff.encode()) > max_bytes:

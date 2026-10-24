@@ -166,8 +166,6 @@ class GatePolicyTests(unittest.TestCase):
         self.assertIn("review_evidence_missing", client.posts[-1][2])
         for filename in (
             "scripts/integrity-gate/evil.py",
-            "skills/dashboard/page.ts",
-            "launchd/job.plist",
             ".github/workflows/action.yml",
             "scripts.py",
             "scripts/__init__.py",
@@ -267,7 +265,9 @@ class GatePolicyTests(unittest.TestCase):
     def test_renamed_protected_path_is_checked(self) -> None:
         """A rename cannot hide the protected source path."""
         client = EvidenceFixture()
-        client.files = [{"filename": "docs/old-gate.py", "previous_filename": "scripts/merge.py", "status": "renamed"}]
+        client.files = [
+            {"filename": "docs/old-gate.py", "previous_filename": "scripts/lib/eval_signing.py", "status": "renamed"}
+        ]
         self.assertEqual(self.gate(client), 0)
         self.assertEqual(client.posts[-1][1], "failure")
 

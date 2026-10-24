@@ -18,15 +18,15 @@ class TransportTests(unittest.TestCase):
         """Transport and HTTP failures cannot masquerade as valid evidence."""
         client = Client("owner/repo", "private-fixture-token", "machine")
         with patch("integrity_http.subprocess.run") as run:
-            run.return_value = subprocess.CompletedProcess([], 0, "{}\n403")
+            run.return_value = subprocess.CompletedProcess([], 0, b"{}\n403")
             with self.assertRaises(IntegrityError) as caught:
                 client.get("pulls/7")
             self.assertNotIn(client.token, str(caught.exception))
-            run.return_value = subprocess.CompletedProcess([], 1, "")
+            run.return_value = subprocess.CompletedProcess([], 1, b"")
             with self.assertRaises(IntegrityError) as caught:
                 client.get("pulls/7")
             self.assertNotIn(client.token, str(caught.exception))
-            run.return_value = subprocess.CompletedProcess([], 0, "{}\n200")
+            run.return_value = subprocess.CompletedProcess([], 0, b"{}\n200")
             self.assertEqual(client.get_object("pulls/7"), {})
 
     def test_live_identity_before_every_status(self) -> None:

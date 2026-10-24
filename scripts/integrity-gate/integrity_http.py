@@ -90,12 +90,15 @@ class Client:
             f"Authorization: Bearer {self.token}",
         ]
         try:
-            result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=False)
+            result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
         except OSError as error:
             raise IntegrityError("integrity transport unavailable") from error
         if result.returncode:
             raise IntegrityError("integrity transport failed")
-        return result.stdout
+        try:
+            return result.stdout.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise IntegrityError("integrity transport returned invalid UTF-8") from error
 
     def get(self, target: str, accept: str = "application/vnd.github+json") -> str:
         """Require a successful HTTP response for repository or absolute endpoints."""
