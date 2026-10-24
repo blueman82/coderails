@@ -110,9 +110,11 @@ change from reaching `main`. It can require a PR, reviews, and no direct
 push. A local agent cannot fake that server rule. Stop-hook gates have
 the same limit: they can require a declared step, but cannot prove its result.
 
-**This repo** does not enable general review-approval branch protection (2026-07-15, standing decision). The active integrity rule below is the server-side PR and status gate. It checks evidence structure, not whether an independent reviewer actually ran.
+**This repo** does not enable general review approval branch protection. This is a standing decision from 2026-07-15. The active integrity rule below requires a
+PR and a status check. It checks evidence structure. It cannot prove that an independent reviewer ran.
 
-**One server-side exception: integrity-review.** The active GitHub ruleset on `main` requires a PR and a successful `integrity-review` status from the GitHub Actions app. The workflow validates the head SHA's review/eval evidence and policy as data. Local hooks cannot substitute for the rule.
+**Server rule: `integrity-review`.** The active GitHub ruleset on `main` requires a PR. It also requires a successful `integrity-review` status from the GitHub
+Actions app. The workflow checks review evidence, eval evidence, and policy data for the head SHA. Local hooks cannot replace this rule.
 
 **Sandboxed workers.** With `config.sandbox_workers: true`, an implementation
 worker runs as a separate OS process. The pinned
@@ -133,7 +135,9 @@ is outside `allowWrite`. If a worker can write to `$HOME`, those files become
 exposed.
 
 Named residuals:
-- **Primary `.git`-write residual.** Must stay writable for worker commits, so a worker can still vandalise refs on other branches; only `hooks`/`config` under it are denied (above) — srt deliberately doesn't block `.git` wholesale. Contained by the PR gate chain + `git fsck`/reflog recoverability, not the sandbox.
+- **Primary `.git` write access.** Workers need write access to `.git` to commit. A worker can therefore change refs on other branches. The rendered settings
+  deny writes to `.git/hooks` and `.git/config` only. The sandbox does not protect the rest of `.git`. The PR gates limit what reaches the server. `git fsck`
+  and the reflog can help recover damaged refs.
 - **`~/.claude`-write residual — deliberate, bounded.** Claude Code needs
   `~/.claude` and `~/.claude.json` writable for its worker process. Worker
   containment therefore excludes Claude home. Executable files there can run
@@ -156,9 +160,12 @@ Named residuals:
   change to what Claude Code needs writable can close this gap. **Real, open
   hole:** the sandbox contains worker filesystem writes, but it does not
   prevent a worker from editing `~/.claude.json`.
-- **Shared-`$TMPDIR` residual (parallel workers only).** `$TMPDIR` is granted whole; each worker's scratch is a sibling dir under it, so concurrent workers aren't isolated from each other (worker A can corrupt B's `worker.log` or overwrite B's `srt-settings.json` mid-render). Not exploited today (serial dispatch). Narrowing means granting only each worker's own scratch subdir — but node/npx/git also write to `$TMPDIR`, so that needs its own probe.
+- **Shared `$TMPDIR` for parallel workers.** The policy grants access to all of `$TMPDIR`. Worker scratch directories are siblings there. One worker can change
+  another worker's `worker.log` or replace its `srt-settings.json` during rendering. Current dispatch is serial, so this case is not exercised. Granting only
+  each worker's scratch directory could reduce this risk. Node, npx, and git also write to `$TMPDIR`; test their needs before narrowing access.
 
-Sandboxing is write-containment, not a correctness/review substitute: a sandboxed worker's PR clears the same review/eval/hook-seam gates as any other. It contains filesystem writes only — not credential scope (the worker holds the operator's full `gh` token), not peer isolation (see `$TMPDIR` residual), not `~/.claude.json`.
+The sandbox limits filesystem writes. A worker PR must still pass the same review, eval, and hook gates as any other PR. The worker still has the operator's
+full `gh` token. Parallel workers can still affect each other through `$TMPDIR`. The worker can still edit `~/.claude.json`.
 
 ### Skills↔hooks seam convention
 
@@ -171,7 +178,9 @@ common action. The merge gate recognizes a
 spawned review group does not satisfy this local hook. The agentic loop must
 invoke the Skill.
 
-`/coderails:post-review <PR#>` runs after `review-pr` (and after findings are applied + pushed) to post the SHA-bound review artifact. `/merge` (`scripts/merge.py`) gates on a live-fetched PR comment carrying that artifact for the current head SHA — fail-closed: a `gh` fetch failure or no matching artifact both block.
+Apply review findings and push them before you run `/coderails:post-review <PR#>`. Run it after `review-pr`. It posts a review artifact bound to the head SHA.
+`/merge` (`scripts/merge.py`) fetches the PR comments and checks for this artifact. A failed `gh` fetch blocks the merge. An absent artifact for the current
+head SHA also blocks the merge.
 
 **Task eval gate.** `/coderails:task-evals` freezes an ungraded `evals.json`
 before implementation. It grades actual results afterward. See
@@ -188,9 +197,17 @@ compute the loop result. Do not write the result by hand. The result needs a
 valid `grading` stamp. Without it, the guard changes `GO` or
 `VERIFICATION_LEVEL0` to `UNSTAMPED` and blocks.
 
-Third, additive merge gate — GitHub Actions attestation: when `config.integrity_review.enabled` is true, `scripts/merge.py` and `enforce_pr_workflow` require the newest `integrity-review` status on the exact head SHA to be successful, posted by `github-actions[bot]`, carrying `integrity=pass sha=<head>`. Wrong creator, missing status, stale SHA, non-success state, malformed description, or fetch failure all block. The GitHub ruleset is the server boundary.
+**GitHub Actions merge gate.** When `config.integrity_review.enabled` is true, `scripts/merge.py` and `enforce_pr_workflow` require the newest
+`integrity-review` status for the exact head SHA. The status must be successful. Its creator must be `github-actions[bot]`. Its description must contain
+`integrity=pass sha=<head>`. A wrong creator, absent status, stale SHA, unsuccessful state, malformed description, or fetch failure blocks the merge. The GitHub
+ruleset provides the server boundary.
 
-Fourth seam instance: `agentic-loop` Phase 13 teardown writes `retro.json` (`schema_version` 2) beside `progress.json` before a `complete` declaration; `loop_stall_guard` gates that declaration on it, accepting `schema_version >= 1`. Resolution: do what Phase 13 says, then re-declare `complete`. At `schema_version` 2, Phase 13 step 1 also runs `python3 hooks/scripts/lib/loop_cost.py <session_id>`, writes the result as `retro.cost` (dated, once-frozen per-model token/USD breakdown), and lifts `models_used` to top-level `retro.models_used` — fail-open (miner failure → both empty, never blocks; caller error → self-describing error object). See `skills/agentic-loop/SKILL.md` Phase 13 / `teardown.md`.
+**Loop teardown gate.** Phase 13 writes `retro.json` beside `progress.json` before the loop declares `complete`. It uses `schema_version` 2. `loop_stall_guard`
+blocks a `complete` declaration without a valid retro. It accepts `schema_version >= 1`. Follow Phase 13 and declare `complete` again to clear this gate.
+
+For schema version 2, Phase 13 step 1 runs `python3 hooks/scripts/lib/loop_cost.py <session_id>`. It writes the dated, once-frozen token and USD totals by model
+to `retro.cost`. It copies `models_used` to top-level `retro.models_used`. A cost-miner failure leaves both fields empty and does not block teardown. A caller
+error produces a self-describing error object. See Phase 13 in `skills/agentic-loop/SKILL.md` and `teardown.md`.
 
 ## Hook event map (`hooks/hooks.json`)
 
@@ -368,12 +385,19 @@ Fourth seam instance: `agentic-loop` Phase 13 teardown writes `retro.json` (`sch
 
 ### Enforcement ceilings — deliberate, not bugs
 
-- **Bash blocklists are enumerated families, not exhaustive.** Obfuscated forms, variable filenames, quoted paths with spaces, here-docs, process substitution, `python -c open(...)` writes remain uncaught.
-- **Eval-gate coverage boundary.** Enforced only at `/coderails:merge` (config-independent) and `gh pr merge <N>` via `enforce_pr_workflow` (config-dependent, inactive under `NO_CONFIG`). NOT enforced on raw `git merge`/`git push` to main/master (no PR number to resolve an artifact against) or in any `NO_CONFIG` repo. Both enforced points then run `scripts.post_evals.smoke_verify` — three failure modes: `gh` fetch failure, `NO-GO`/missing artifact, failed re-execution.
-- **`no_edit_on_main` allowlist breadth is intentional (fail-safe).** `.sh` blocked on main, `.json`/`.yaml` config stays editable. Settings.json `Write`/`Edit` permission covers any legitimate override.
-- **Wiki/workflow sequence past merge is advisory.** `/wiki-ingest` + `/wiki-lint` after merge are slash commands; nothing enforces them.
-- **`check_verify_loop`, `check_confidence_labels`, both loop guards** all short-circuit on `stop_hook_active=true` (the two loop guards block at most once per turn; the two discipline lints are advisory and exit 0 either way) — intentional infinite-loop safety valve. `voice_announce` reads it too (via its shared loop helper), no observable effect (always exits 0).
-- **TDD is not enforced test-first.** `test_gate` only checks tests pass at commit time.
+- **Bash blocklists cover named command forms.** Obfuscation can bypass them. Variable filenames, quoted paths with spaces, here-docs, process substitution, and
+  `python -c open(...)` writes also remain outside them.
+- **Eval gate scope.** `/coderails:merge` checks evals in every config. `enforce_pr_workflow` checks them for `gh pr merge <N>` when config exists. Neither
+  checks raw `git merge` or `git push` to main or master. Those commands supply no PR number for an artifact lookup. `NO_CONFIG` also disables the `gh pr merge`
+  check. At each enforced point, `scripts.post_evals.smoke_verify` runs the checks again. A failed `gh` fetch, missing or `NO-GO` artifact, or failed run blocks
+  the merge.
+- **`no_edit_on_main` allows some config edits.** It blocks `.sh` files on main. It allows `.json` and `.yaml`. The `Write` and `Edit` permission for
+  `settings.json` permits a legitimate override.
+- **Wiki steps after merge are advisory.** `/wiki-ingest` and `/wiki-lint` are slash commands. No hook enforces them.
+- **Stop hooks have a loop guard.** `check_verify_loop`, `check_confidence_labels`, and both loop guards stop when `stop_hook_active=true`. The loop guards
+  block at most once per turn. The discipline lints are advisory and always exit 0. This avoids an infinite Stop loop. `voice_announce` reads the flag too, but
+  its exit behavior stays 0.
+- **TDD has no test-first gate.** `test_gate` checks tests at commit time.
 - **Retained test output.** Both providers keep complete command logs under
   `~/.coderails/test-output/`. `CODERAILS_TEST_OUTPUT_DIR` can change that
   path. The provider-local `hooks/scripts/test_output.py` reader measures
@@ -401,9 +425,12 @@ Fourth seam instance: `agentic-loop` Phase 13 teardown writes `retro.json` (`sch
   `crack_on/failed_open/authority_write_failed`. See
   [the authority decision](docs/decisions/e3-authority-object.md) and the
   runbook entry.
-- **Skill invocation, ask-on-ambiguity, verify-memory are structurally unenforceable by hooks** — they depend on Claude's internal reasoning, which a hook can't observe.
-- **No `SubagentStart` event exists.** `inject_bootstrap.py` can't inject `using-coderails` into subagents; they get it only via the orchestrator's system prompt.
-- **`/coderails:post-review` validates summary structure, not provenance.** Proves an auditable SHA-bound artifact exists, not that the review was substantive. The `review-pr` arm of `enforce_pr_workflow` is expected to demote block→nudge once the artifact gate is verified live — never before, or a window opens with neither gate active.
+- **Hooks cannot observe internal reasoning.** They cannot enforce skill invocation, when to ask about ambiguity, or memory verification.
+- **There is no `SubagentStart` event.** `inject_bootstrap.py` cannot send `using-coderails` to subagents. They receive it only from the orchestrator's system
+  prompt.
+- **`/coderails:post-review` checks structure, not review quality.** Its SHA-bound artifact proves that a review summary was posted. It does not prove the
+  review was substantive. Keep the `review-pr` block in `enforce_pr_workflow` until the artifact gate is verified live. Only then can that block become a nudge.
+  An earlier change would leave a gap.
 - **Model-role routing is advisory.** Phase 2.8 assigns each task a role:
   `fast-mechanical`, `default`, or `frontier`, plus effort. Its table gives
   defaults and the escalation rule in `model-routing.md`. Spawn sites in

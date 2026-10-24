@@ -14,7 +14,17 @@ orchestration skills, and discipline hooks. `/push` and `/merge` use GitHub's
 - An authenticated GitHub CLI (`gh auth login`). For enterprise GitHub: `gh auth login --hostname <your-git-host>` (e.g. `git.example.com`)
 - `pr-review-toolkit@claude-plugins-official` installed — required for the review stage of `/workflow`
 - `superpowers@claude-plugins-official` installed — required for dev-workflow skills (planning, TDD, systematic debugging, code review, git worktrees)
-- **For Jira features** (`/prep`, `/workflow`, `/push` auto-resolve): a Jira MCP server, reachable via your configured MCP tool namespace. Jira is optional — leave `jira: null` in `workflow.config.yaml` unless you've configured a Jira MCP server. The commands build Jira tool names at runtime from `config.jira.mcp_namespace` in `workflow.config.yaml` (default: `jira`, giving `mcp__jira__*`). Set `mcp_namespace` to match your server (e.g. `acme-jira`, `atlassian`) — no edits to command files needed. For non-default namespaces, add a `permissions.allow` rule to `.claude/settings.json` so calls run without prompting: `"mcp__<namespace>__*"`. Without a Jira MCP, `/prep` still creates branches and `/push` still opens PRs — only the Jira ticket/resolve steps no-op.
+- **For Jira features:** Connect a Jira MCP server under the configured
+  namespace. `/prep`, `/workflow`, and `/push` can then resolve Jira work.
+  Jira is optional. Leave `jira: null` in `workflow.config.yaml` when no
+  server is configured. The commands use `config.jira.mcp_namespace` to
+  build tool names. Its default is `jira`, which gives `mcp__jira__*`.
+  Set `mcp_namespace` to your server name, such as `acme-jira` or
+  `atlassian`. You do not need to edit the command files. For another
+  namespace, allow `"mcp__<namespace>__*"` in `.claude/settings.json` under
+  `permissions.allow`. This prevents a prompt for each call. Without Jira
+  MCP, `/prep` still creates branches and `/push` still opens PRs. Their
+  Jira ticket and resolve steps do nothing.
 
 ## Choose the provider
 
@@ -228,8 +238,23 @@ and unexpired — proceed autonomously instead of asking; revoke with
   you — only Claude sees it. To confirm the loop is live: `/help` lists
   `/assumptions /cite-check /notchecked /disconfirm`, and `~/.claude/discipline.log`
   starts filling with entries after a few responses.
-- **`/prep`'s Jira fields must be configured for your project.** Set `jira.epic_field` (e.g. `customfield_12345`), `jira.points_field` (e.g. `customfield_67890`), and `jira.fix_version` in `workflow.config.yaml` via `/coderails:init`. Transition names are also project-specific: `/prep` attempts `config.jira.transitions.start` then `config.jira.transitions.resolve`; the resolve transition failure is non-fatal. Run `get_jira_transitions` on one of your project's issues to find the correct names.
-- **`jira.mcp_namespace`** sets the MCP tool namespace used by all Jira calls (default: `jira`). Commands build tool names like `mcp__<mcp_namespace>__create_jira_issue` at runtime, so pointing at a different Jira MCP server requires only a config change — not a command edit. If you use a non-default namespace, add `"mcp__<namespace>__*"` to `.claude/settings.json` under `permissions.allow` to avoid per-call permission prompts. Background: the `allowed-tools` frontmatter is parsed statically before config substitution runs, so it always lists the default `mcp__jira__*` tools; the `permissions.allow` rule is the machine-local home for granting non-default MCP namespaces.
+- **Configure `/prep`'s Jira fields for your project.** Use
+  `/coderails:init` to set `jira.epic_field`, `jira.points_field`, and
+  `jira.fix_version` in `workflow.config.yaml`. Examples of custom fields
+  are `customfield_12345` and `customfield_67890`. Set the project's
+  transition names too. `/prep` tries `config.jira.transitions.start`,
+  then `config.jira.transitions.resolve`. A failed resolve transition does
+  not stop the command. Run `get_jira_transitions` on a project issue to
+  find the correct names.
+- **`jira.mcp_namespace` selects the Jira MCP tool namespace.** The default
+  is `jira`. Commands build names such as
+  `mcp__<mcp_namespace>__create_jira_issue` at runtime. A different server
+  needs a config change, not a command edit. For a custom namespace, add
+  `"mcp__<namespace>__*"` to `.claude/settings.json` under
+  `permissions.allow`. This avoids a prompt for each call. The
+  `allowed-tools` frontmatter is parsed before config substitution. It
+  always lists the default `mcp__jira__*` tools. The `permissions.allow`
+  rule grants access to non-default namespaces on this machine.
 - **`/merge` review and eval artifact trust rule:** The comment author must
   match the GitHub login used by `gh` for the merge. That login must have
   `ADMIN`, `MAINTAIN`, or `WRITE` access to this repo. The gate checks access
