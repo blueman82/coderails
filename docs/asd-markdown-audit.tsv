@@ -1,5 +1,5 @@
 path	sha256	read_only_audit	disposition	finding_at_review
-AGENTS.md	bf9df11dd175352b5db89fd58267646a951d615873ef6f17b0f1d1ff85d2b2b1	ISSUE	revised; independent regrade pending	133: One hook-table cell combines several stop, warning, and completion rules in a long paragraph that is hard to follow.
+AGENTS.md	20779c2d77aa1215d76cc855b078fd0fff513e811035225ca6ea955d83b78202	ISSUE	revised; independent regrade pending	133: One hook-table cell combines several stop, warning, and completion rules in a long paragraph that is hard to follow.
 CLAUDE.md	d52d2dd0f6df1d2e36cdf45a63dacf92ad36548b7add9743144aa89a576e5cab	PASS	reviewed; no edit needed	none
 INSTALLATION.md	2de68519b344a2f12e15f1c463298b7b9e8e53f3bb6e21dc065b3d6944751579	ISSUE	revised; independent regrade pending	209: The wiki gate reads repo-root `wiki.schema.json`, not the vault’s `AGENTS.md` Page types table.
 README.md	fa5902259144c9631b3b3d2d8f597ec72a484f5dcfb22e81e5a580c8c0863377	ISSUE	revised; independent regrade pending	178: `inject_context.py` adds the discipline reminder on the first prompt, not every prompt.
@@ -89,7 +89,7 @@ packages/codex/skills/wiki-query/SKILL.md	2aeac363a5e0772f586259b7d88e8b5c1e24de
 packages/codex/skills/workflow-audit/SKILL.md	f7a911307f5a921554dae78adc88a1ef54f288fb91afe927d0302caf89ed1d04	ISSUE	revised; independent regrade pending	125: The PR-scope task-evals step appears after creation and review, despite the required pre-build freeze.
 packages/codex/skills/workflow-audit/references/judge-contract.md	1aeaeef9e5113ea7a5cf90e910359fe4364e04e7ecd22e0cba77498a7a552065	PASS	reviewed; no edit needed	none
 packages/codex/skills/workflow/SKILL.md	3528fca15744ad493fe7879d6d5c9830b0f39cb3bf4818b7b2a0fde84e798a92	ISSUE	revised; independent regrade pending	43: It permits freezing evals during the review phase, after implementation.
-skills/agentic-loop/SKILL.md	dac14256c7e336bac109a47351a08cb2e8e91cee3105d7bd4579808ec44d8d9e	ISSUE	revised; independent regrade pending	154: It directs a new PR-scope task-evals invocation just before merge, conflicting with the pre-build freeze in `phases-setup.md`.
+skills/agentic-loop/SKILL.md	cd8995d5ac05a919013f44356e59d4a47bbbae9854cee8fddac704c6defc8bf6	ISSUE	revised; independent regrade pending	154: It directs a new PR-scope task-evals invocation just before merge, conflicting with the pre-build freeze in `phases-setup.md`.
 skills/agentic-loop/execution-graph.md	47a4ac86a55f28a694f9b791617d8bf5ff14918e61f7344516283d8b60ac90c9	ISSUE	revised; independent regrade pending	17–20: A missing Python script exits with an error; it cannot return “blocked.”
 skills/agentic-loop/finishing-out.md	f88f77e0ac29d9d54d6e0419fc1956979acb41ef242b4cb895dbe95d08ffa73f	ISSUE	revised; independent regrade pending	72–78: Says the locked path is not this session’s cwd, then says it may also be this session’s cwd.
 skills/agentic-loop/learned-failure-modes.md	db6251c58d367d873202da8fefed1b87d6da8d44b6a067310b1f114d5302099a	ISSUE	revised; independent regrade pending	95: One lesson combines diagnosis, ranked repairs, concurrent-write handling, and cautions in a single long bullet.

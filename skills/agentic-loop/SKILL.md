@@ -190,7 +190,18 @@ Deploy and push gotchas tied to a particular stack — skip-validation flags whe
 
 ### Phase 9 — Cluster wiki ingest, don't fragment
 
-Delegate wiki ingest and lint to a spawned agent, `subagent_type: general-purpose` with explicit instructions from `agents/wiki-writer.md`, once at the end of the loop, with all related PRs as a cluster — not once per PR. Lint must always pair with ingest. **Include the wiki-writer instructions explicitly** — wiki authoring requires schema-aware vault ingestion and self-linting against the AGENTS-wiki-schema; the push/PR sequence and Phase 3a's shared-checkout isolation must still travel in the prompt explicitly. One source page covers the cluster; avoid one-per-PR sprawl. After the cluster ingest+lint, run `/sync-docs` ONCE at the loop boundary (delegated to `subagent_type: general-purpose` with explicit instructions from `agents/docs-auditor.md`) to audit the repo's own in-tree docs for drift — fix only drift this loop's own PRs introduced; surface pre-existing drift rather than folding it into scope.
+At the end of the loop, delegate wiki ingest and lint to one spawned
+`general-purpose` agent. Give the agent the instructions from
+`agents/wiki-writer.md` and the related PRs as one cluster. Always pair lint
+with ingest. The agent must check the vault against the `## Wiki schema`
+section of `AGENTS.md` and the live directory rules in `wiki.schema.json`.
+Include the push and PR sequence in the prompt. Include Phase 3a's shared
+checkout isolation rules. Write one source page for the cluster.
+
+After wiki ingest and lint, run `/sync-docs` once at the loop boundary.
+Delegate it to a `general-purpose` agent with the instructions from
+`agents/docs-auditor.md`. The agent must audit this repo's own documents.
+Fix drift caused by this loop's PRs. Report older drift to the owner.
 
 **Read [phase-9-wiki-docs.md](phase-9-wiki-docs.md) in full before running this phase** for: the required first-line wiki-step-suppression instruction for spawned `/workflow` agents, the wiki-delivery verification mechanics (commit SHA vs. merged PR, ruleset-protected `main`, the `--is-ancestor` squash-merge trap), and the docs-drift findings disposition rule.
 

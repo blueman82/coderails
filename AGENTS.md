@@ -4,11 +4,17 @@ Single source read at conversation start. Covers the repo working guide (below) 
 
 Wiki vault: `../coderails-wiki` relative to the plugin, or wherever `/wiki-init` placed it.
 
-For any coderails question, lookup, or context, use the `wiki-query` skill; for staleness or health checks, use `wiki-lint`. Prefer both over grepping source or the vault directly — the wiki holds compounded understanding, not just facts derivable from re-reading code.
+Use the `wiki-query` skill for Coderails questions and context. Use `wiki-lint` to check wiki health or stale pages. The wiki combines earlier findings with source facts. Check it before you search the source or vault directly.
 
 ## Writing rule
 
-Use controlled English for new and revised Coderails Markdown and pull-request prose. Follow the `explainer-artifacts` writing guide: use short sentences, active voice, familiar words, and one main idea at a time. Define technical terms when readers need them. Keep commands, identifiers, evidence, and historical quotations exact. Apply the rule to roadmap work and later work. Do not claim strict ASD-STE100 compliance without a separate check.
+Use controlled English for new and revised Coderails Markdown and pull-request
+text. Follow the `explainer-artifacts` writing guide. Write short sentences in
+active voice. Use familiar words. Give each sentence one main idea. Define
+technical terms when readers need them. Keep commands, identifiers, evidence,
+and historical quotations exact. Apply this rule to roadmap work and later
+work. A separate check is necessary before you claim strict ASD-STE100
+compliance.
 
 ## Current integrity-gate replacement
 
@@ -123,29 +129,151 @@ Fourth seam instance: `agentic-loop` Phase 13 teardown writes `retro.json` (`sch
 | Event | Script | Mode |
 |---|---|---|
 | `SessionStart` | `inject_bootstrap.py` | silent — injects `using-coderails` skill into every new session |
-| `SessionStart` | `remember_inject_cap_guard.py` | warn-only by default (writes nothing unless `REMEMBER_INJECT_CAP_AUTOWRITE=1`): reports that the memory-injection byte cap (`REMEMBER_INJECT_MAX_BYTES`, default 8000) is absent from another plugin's `session-start-hook.sh`; stamped once per plugin version in `~/.claude/coderails/remember_inject_cap_warned`. Opted in, it patches that file (whole-block literal replace from `hooks/patches/`, refuses + asks for hand re-application on shape mismatch), leaves a rolling `.coderails-bak-*` backup. Scoped to the `for MFILE...done` loop only, not the enclosing `if`. Never blocks session start |
-| `UserPromptSubmit` | `inject_context.py` | silent — prepends `[ctx]` (cwd, branch, date); first prompt of a session also appends the discipline reminder |
-| `UserPromptSubmit` | `crack_on_gate.py` | context-only — "crack on" (case-insensitive, word-boundary; ignored inside `"..."` or backticks and after a negation) in the raw prompt writes an expiring authority object `<base>/<session_id>/authority.json` (base = `$CLAUDE_AGENTIC_LOOP_DIR` or `~/.coderails/agentic-loop`; exact session id, never sanitised; scope `autonomous_decisions`, 24h, revocable, `max_prs` 0, `merge` always approval-required; `loop_id` from `$CLAUDE_LOOP_ID` when set) and echoes it to the model via `additionalContext` with the revoke command. Never reads transcript/injected context (the phrase is in skill text + memory almost every session). Trace: `authority_granted` |
-| `Stop` + `SubagentStop` | `check_confidence_labels.py` | advisory lint, never blocks: a ≥200-char response with no `(verified)`/`(inferred)`/`(guess)` label emits an `[discipline-advisory]` `additionalContext`, logs `demoted=1 reason_code=confidence_label_missing`, appends an `outcome=demoted` trace row and exits 0 on every path (`Stop` in or out of a loop, `SubagentStop`; reads `last_assistant_message` directly, avoiding the parent-transcript flush race). `Stop` only: exempt (exit 0) when `CODERAILS_HEADLESS_RUN=1`. Demoted by user override of the unmet e1 criteria (`docs/decisions/2026-10-04-not-in-gate-demotion.md`) |
-| `Stop` + `SubagentStop` | `check_verify_loop.py` | advisory lint, never blocks: any untagged `## Did Not Verify` bullet (only `(unverifiable: <reason>)` clears it), or a missing section after a 3+-file turn, emits an `[discipline-advisory]` `additionalContext`, logs `demoted=1 reason_code=verify_loop_missing`, appends an `outcome=demoted` trace row and exits 0 on every path. `loop_state_guard`/`loop_stall_guard` stay Stop-only blocking guards. `Stop` only: exempt when `CODERAILS_HEADLESS_RUN=1` |
-| `Stop` | `voice_announce.py` | observe-only, always exits 0 — speaks a loop lifecycle event (complete/waiting-on-human/stopped/stall) via macOS `say`. Silent outside a loop or on empty text extraction. Debounced per kind. Runs first in the Stop array |
-| `Stop` | `loop_state_guard.py` | block when a loop is active but no session-owned `progress.json` exists (nag-once grace: stands down after one absent-block per session+invocation count; session-mismatch/stale-complete carry no grace). Also gates loop-scope evals when `work_units` ≥1: blocks unless a sibling `evals.json` grades `GO`/`VERIFICATION_LEVEL0` with a non-blank `verification_justification` and a valid stamp — `ABSENT`, `NO-GO`, `UNJUSTIFIED`, `UNSTAMPED` each block; fails open when `work_units` is absent |
+| `SessionStart` | `remember_inject_cap_guard.py` | warns when another plugin has no memory-injection byte cap. It does not block session start. See the rules below. |
+| `UserPromptSubmit` | `inject_context.py` | adds cwd, branch, and date. It adds the discipline reminder on the first prompt. |
+| `UserPromptSubmit` | `crack_on_gate.py` | grants or checks the session authority described below. |
+| `Stop` + `SubagentStop` | `check_confidence_labels.py` | warns about missing confidence labels. It never blocks. |
+| `Stop` + `SubagentStop` | `check_verify_loop.py` | warns about missing verification notes. It never blocks. |
+| `Stop` | `voice_announce.py` | speaks loop events on macOS. It never blocks. |
+| `Stop` | `loop_state_guard.py` | blocks invalid loop state or unstamped loop evals. See the rules below. |
 | `Stop` | `loop_stall_guard.py` | blocks an incomplete loop without a valid stop, and blocks an invalid completion claim. See the rules below. |
-| `Stop` | `unregistered_loop_guard.py` | nudge, never blocks — flags a dispatch-heavy session (≥3 Agent-dispatch turns) with no `progress.json` and no `agentic-loop` invocation |
-| `Stop` + `SubagentStop` | `offload_push_guard.py` | nudge, never blocks — final text names a `git push` to `main`/`master` AND an offload-to-user cue (`! ` prefix, "your own shell", "run this yourself"). At most once per session. Runs last in both arrays |
-| `PreToolUse` (Bash) | `destructive_bash_gate.py` | block — permanent blocklist: `rm -rf`, naked `git push --force`/`-f`, `git reset --hard`, SQL `DROP TABLE/DATABASE/SCHEMA` and `TRUNCATE TABLE`, `dd if=`, `mkfs.*`, `chmod -R 777`, `git commit --no-verify`, `git clean -f/--force`, `find -delete/--delete`, `truncate -s/--size`, `shred`, a `.env` literal path token read or write (`.envrc`/`.env.example`/`.sample`/`.template`/`.dist` allowed). Also blocks in-Bash source edits (`sed -i`, `perl -i`, redirects, `tee`, `cp`/`mv`/`dd of=` onto source/plugin-markdown) on main/master. Denies backtick/`$(...)`/process-substitution inside `push.py`/`merge.py`/`post_review.py`/`post_evals.py` args. `--force-with-lease` conditionally allowed |
-| `PreToolUse` (Bash) | `enforce_pr_workflow.py` | block — `gh pr create` without `/coderails:push`; `gh pr merge <N>` without `review-pr <N>` (per-PR, not consumed — one review satisfies later merges); `git merge` on main/master without review-pr since the last merge (consume-on-use); `git push` to main/master without review-pr. `scripts/merge.py <N>` gated identically. Scans subagent transcripts. `merge-base/-file/-tree`, `--abort/--continue/--quit/--skip` excluded. No-op without `workflow.config.yaml`. Post review-pr check, also blocked without a SHA-bound `GO` eval artifact for the head; `gate_smoke_verify` then re-executes every verification_level≥1 eval's `cmd`/`negative_control` in a detached worktree at the trusted SHA and denies independently on failure |
-| `PreToolUse` (Bash) | `test_gate.py` | block on `git commit` if tests fail — opt-in only; persist complete stdout/stderr per command run, report measurements and reader path instead of a fixed failure excerpt |
-| `PreToolUse` (Bash) | `verification_volume_ceiling.py` | block — hard-blocks the 3rd+ invocation per work-unit (branch) of `hooks/scripts/tests/run_all.py` or a `post_evals.py validate-structure` ceremony; no override |
-| `PreToolUse` (Bash) | `action_authority_gate.py` | opt-in, off by default — config `action_authority: enforce\|advisory` (anything else, or no config, is off and silent). Guards only `gh pr merge` and `git push` to main/master (same `operation()`/`targets_main()` matching as `enforce_pr_workflow`, which it does not alter). Advisory: trace row + stderr warning, never denies. Enforce: denies unless a single-use receipt minted by `scripts/action_receipt_cli.py approve-action` matches the exact command text, effective cwd (after a leading `cd`), branch and (when sha-bound) real HEAD/PR head, per guarded segment of a chained command, for this session (and loop); the match is consumed atomically (`O_CREAT\|O_EXCL`). Any hook error fails open, traced `action_authority_failed_open`. Limits: a receipt binds approval to an exact action but does NOT prove a human approved it (a same-user agent can run `approve-action`); the hash covers only the command text the hook sees (not env, aliases, `bash -c` wrappers, implicit-upstream push); a subagent's `session_id` may differ from its parent's (unverified), which would refuse worker-run actions as `foreign_session`. Codex has a vendored copy in `hook_common.py` plus `lib/action_match.py` (both parity-tested) but ships no receipt CLI. See [docs/decisions/e3-authority-object.md](docs/decisions/e3-authority-object.md) and the RUNBOOK entry |
-| `PreToolUse` (Bash) | `reviewer_bash_allowlist.py` | block — only for `agent_type` in `deploy-safety-reviewer`/`design-scout`/`disposition-scout`/`preflight-scout`/`source-auditor`: allows only a single read-only command (`ls`/`cat`/`head`/`tail`/`wc`/`grep`/`rg`/`sha256sum`, `git status\|log\|diff\|show\|blame`, `gh pr view\|list --json`); denies chaining, redirection, substitution, `--output`/`--pre`/`--ext-diff`, interpreters. Also allows the exact absolute path of `scripts/capability.py <repo.inspect\|diff.read\|tests.run\|pr.comment> --json-args '<json>'` only when `capabilities/profiles.json` grants that tool to the caller (`capability_denied_<tool>`); the guarded set is derived from that file. Typed args plus an argv-path match, not a harness-level typed tool; Codex has no per-agent Bash hook (sandbox_mode + instructions only), see [docs/CAPABILITIES.md](docs/CAPABILITIES.md). Absent `agent_type` is a no-op, as is any non-guarded one. Ceilings: [docs/decisions/e2-reviewer-bash-allowlist.md](docs/decisions/e2-reviewer-bash-allowlist.md) |
-| `PreToolUse` (AskUserQuestion) | `crack_on_gate.py` | block — denies `AskUserQuestion` while this session's `authority.json` is valid, unexpired and bound to the exact id (`authority_deny`); an expired object allows and is traced (`authority_expired_allow`); revoked/torn/foreign objects allow (foreign is traced `authority_refused_foreign`). A pre-existing legacy `crack_on_active` flag still denies, traced `crack_on_legacy_flag`, until `rm`'d (support removed next release). Scoped to that tool only — prose questions are NOT blocked (the Stop prose gate was retired). The loop hard-stops are `LOOP-STOP` declarations, not `AskUserQuestion` calls |
-| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.py` | block — on main/master, blocks edits to any file except `.md`/`.txt`/`.rst`, `.yaml`/`.yml`/`.json`/`.toml`/`.ini`/`.cfg`, `.gitignore`, `LICENSE`. Plugin source markdown (`skills/*/SKILL.md`, `commands/*.md`) also blocked when that repo carries `.claude-plugin/plugin.json` (keyed off the file's own repo). Separately blocks `.claude/settings.json`/`.claude/settings.local.json` edits on any branch, any repo |
-| `PreToolUse` (Write/Edit/MultiEdit) | `comment_citation_gate.py` | block — denies new/changed comments citing a session-artifact label (`E#:`, `F# fix/design`, `CHANGE B#/C#`, `Task A#`, `TA-I#`, "reviewer finding", `eval E#`, `WU#:`, `C2`, "per the plan/design/session", "per F#"). Scoped to comment-bearing fields; `.md` out of scope. `PR #NN` survives (durable checkable artifact) |
-| `PreToolUse` (Write/Edit/MultiEdit) | `wiki_taxonomy_gate.py` | block — writes into an unsanctioned top-level directory of an LLM wiki vault. Inert until `.coderails/workflow.config.yaml` exists. Sanctioned dirs read live from `wiki.schema.json` (`page_types` + `structural_dirs`), never hardcoded; a missing/invalid schema fails open with a `wiki_schema_missing`/`wiki_schema_invalid` trace row and the drift test guards this file's `## Page types` tables against it. Vault identified positively: `wiki_path` from `.coderails/workflow.config.yaml` (relative to `CLAUDE_PLUGIN_ROOT` unless absolute) must equal the write's repo root exactly; ≥2 parsed dirs existing on disk is a secondary sanity check only. Fails open on any ambiguity (schema/config absent, not a git repo, `wiki_path` null/unresolvable, zero page types, write outside vault, <2 dirs present). `raw/`, vault-root files (no directory component), and dotfile dirs (`.git/`, `.obsidian/`, `.claude/`) always allowed |
-| `PreToolUse` (`Bash\|Edit\|Write\|MultiEdit\|Read\|Grep\|Glob\|WebFetch\|NotebookEdit`) | `agent_only_gate.py` | nudge by default, block opt-in (`AGENT_ONLY_GATE_ENFORCE=1`) — steers the orchestrator from inline do-work calls toward `Agent`. `agent_id` present in the payload iff the call originates inside a dispatched subagent (empirically confirmed) → always allow. `agent_id` absent + the Bash command is entirely one whole-command carve-out (`gh`, `git`, `scripts/push\|merge\|post_review\|post_evals.py`, optional interpreter prefix, no chaining/substitution) → always allow. Otherwise: `additionalContext` nudge by default, hard `deny` under the env flag. `Agent`/`TodoWrite`/`TaskCreate`/`AskUserQuestion`/`ExitPlanMode` are never gated |
-| `PreToolUse` (`Agent`) | `agent_model_routing_nudge.py` | advisory nudge only, never denies — when `tool_input.model` is absent and the description/prompt carries a mechanical word (rename/format/boilerplate/scaffold/reformat/relabel/find-replace) or a complex one (design/architecture/redesign/re-architect), nudges `haiku`/`opus` respectively. Silent if `model` set, neither/both match |
-| `PreToolUse` (`Agent`) | `loop_dispatch_guard.py` | block — every graph-bound native Agent request must match the owned session, loop, current revision, active wave and node. Use an available native `subagent_type`; custom Coderails roles are optional. Nonempty work-unit rosters require owned frozen loop evals before implementation. Frozen suites bind session + loop only, not the evolving graph revision. Missing/foreign ownership fails closed. The Python sandbox launcher invokes this same guard directly before scratch allocation. Completion still requires final neutral grading, native evidence, proofs and retrospective. |
+| `Stop` | `unregistered_loop_guard.py` | warns when agents run without a registered loop. |
+| `Stop` + `SubagentStop` | `offload_push_guard.py` | warns once if a response tells the user to push to main. |
+| `PreToolUse` (Bash) | `destructive_bash_gate.py` | blocks listed destructive commands and source edits on main. See the rules below. |
+| `PreToolUse` (Bash) | `enforce_pr_workflow.py` | blocks PR actions without required workflow evidence. See the rules below. |
+| `PreToolUse` (Bash) | `test_gate.py` | blocks a commit when opted-in tests fail; keeps the full output. |
+| `PreToolUse` (Bash) | `verification_volume_ceiling.py` | blocks a third full-suite or structure-validation run per branch. |
+| `PreToolUse` (Bash) | `action_authority_gate.py` | checks optional action receipts for PR merges and main pushes. |
+| `PreToolUse` (Bash) | `reviewer_bash_allowlist.py` | limits named reviewer agents to read-only commands and granted capabilities. |
+| `PreToolUse` (AskUserQuestion) | `crack_on_gate.py` | grants or checks the session authority described below. |
+| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.py` | blocks source edits on main and settings edits on all branches. |
+| `PreToolUse` (Write/Edit/MultiEdit) | `comment_citation_gate.py` | blocks comments that cite ephemeral session labels. |
+| `PreToolUse` (Write/Edit/MultiEdit) | `wiki_taxonomy_gate.py` | blocks wiki writes outside the live schema when it can identify the vault. |
+| `PreToolUse` (`Bash\|Edit\|Write\|MultiEdit\|Read\|Grep\|Glob\|WebFetch\|NotebookEdit`) | `agent_only_gate.py` | steers top-level work to agents; enforcement is opt-in. |
+| `PreToolUse` (`Agent`) | `agent_model_routing_nudge.py` | suggests a model for mechanical or complex agent tasks. |
+| `PreToolUse` (`Agent`) | `loop_dispatch_guard.py` | blocks graph-bound agent requests without a valid ownership envelope. |
+
+### Session and command hook details
+
+- `remember_inject_cap_guard.py` checks another plugin's memory-injection
+  cap. The default cap is `REMEMBER_INJECT_MAX_BYTES=8000`. By default, the
+  hook writes nothing and warns once per plugin version. If
+  `REMEMBER_INJECT_CAP_AUTOWRITE=1`, it replaces only the expected memory loop
+  with the patch from `hooks/patches/`. It saves a rolling backup. A shape
+  mismatch leaves the file unchanged and asks for a manual update.
+- `crack_on_gate.py` reads only the raw prompt. It accepts an unquoted,
+  unnegated, whole-word `crack on`, without regard to case. It writes
+  `<base>/<session_id>/authority.json` for 24 hours. The base comes from
+  `$CLAUDE_AGENTIC_LOOP_DIR` or `~/.coderails/agentic-loop`. It binds the exact
+  session ID and, when set, `$CLAUDE_LOOP_ID`. The object grants
+  `autonomous_decisions`, sets `max_prs` to 0, and still requires merge
+  approval. The hook returns a revoke command and records
+  `authority_granted`. It does not read injected context or a transcript.
+- For `AskUserQuestion`, `crack_on_gate.py` denies only when that session has
+  valid, unexpired authority. It traces expiry and foreign-session cases.
+  A legacy `crack_on_active` flag still denies for one release. The hook
+  does not gate prose questions. Use `LOOP-STOP` for a loop hard stop.
+- `check_confidence_labels.py` warns on a response of at least 200 characters
+  without `(verified)`, `(inferred)`, or `(guess)`. It reads
+  `last_assistant_message`, emits an advisory, and records a demotion. It
+  always exits 0. A `Stop` event with `CODERAILS_HEADLESS_RUN=1` is exempt;
+  `SubagentStop` is not.
+- `check_verify_loop.py` warns when a `## Did Not Verify` bullet lacks
+  `(unverifiable: <reason>)`. It also warns when a turn edits at least three
+  files and omits that section. It records a demotion and always exits 0.
+  The same headless `Stop` exemption applies.
+- `voice_announce.py` uses macOS `say` for loop completion, waiting,
+  stopping, or stalling. It debounces each kind and is silent outside a loop.
+- `loop_state_guard.py` gives one missing-`progress.json` grace per session
+  and invocation count. It does not give grace for a foreign session or a
+  stale complete state. When `work_units` is at least 1, it requires a
+  sibling `evals.json` with a stamped `GO` or `VERIFICATION_LEVEL0` result
+  and a nonblank verification justification. It blocks `ABSENT`, `NO-GO`,
+  `UNJUSTIFIED`, and `UNSTAMPED`. It fails open when `work_units` is absent.
+- `unregistered_loop_guard.py` warns after at least three agent dispatches
+  if no `progress.json` or `agentic-loop` call exists. It never blocks.
+- `offload_push_guard.py` warns once per session when a final response both
+  names a push to main/master and tells the user to run it. It detects a
+  `! ` command or text such as "your own shell" or "run this yourself".
+  It runs last.
+- `destructive_bash_gate.py` blocks `rm -rf`, a naked force push, hard reset,
+  SQL `DROP` or `TRUNCATE`, `dd if=`, `mkfs.*`, `chmod -R 777`,
+  `git commit --no-verify`, forced `git clean`, `find -delete`, `truncate`,
+  and `shred`. It blocks literal `.env` path access, but permits example,
+  sample, template, dist, and `.envrc` paths. It blocks inline source edits
+  on main/master through `sed -i`, `perl -i`, redirects, `tee`, `cp`, `mv`,
+  or `dd of=`. It also blocks shell substitution inside arguments to
+  `push.py`, `merge.py`, `post_review.py`, and `post_evals.py`.
+  `--force-with-lease` remains conditional.
+- `enforce_pr_workflow.py` blocks `gh pr create` without `/coderails:push`.
+  It blocks `gh pr merge <N>` and `scripts/merge.py <N>` without a recorded
+  `review-pr <N>`. It requires a fresh review after each local merge or
+  push to main/master. It reads subagent transcripts. It excludes Git
+  merge inspection and in-progress controls. It stands down without
+  `workflow.config.yaml`. For a PR merge, it also needs a SHA-bound `GO`
+  eval artifact. `gate_smoke_verify` reruns each level-1-or-higher eval
+  command and negative control at the trusted SHA in a detached worktree.
+
+### Other hook details
+
+- `test_gate.py` runs only when enabled. It checks the configured tests
+  before `git commit`. It keeps full stdout and stderr for each command and
+  reports measurements and the reader path.
+- `verification_volume_ceiling.py` blocks the third and later invocation of
+  `hooks/scripts/tests/run_all.py` or `post_evals.py validate-structure`
+  on one work-unit branch. It has no override.
+- `action_authority_gate.py` is off unless config selects `advisory` or
+  `enforce`. It guards only `gh pr merge` and pushes to main/master. Advisory
+  mode logs a warning. Enforce mode needs one unused receipt for each guarded
+  command segment. The receipt binds the command text, effective directory,
+  branch, session, loop, and relevant SHA. It is consumed atomically. Hook
+  errors fail open and leave a trace. A same-user agent can mint a receipt,
+  so a receipt does not prove human approval. The command hash omits the
+  environment, aliases, shell wrappers, and implicit upstream pushes.
+  A subagent may have a different session ID; that case remains unverified.
+  Codex vendors the checker but does not ship the receipt CLI. See
+  [the authority decision](docs/decisions/e3-authority-object.md).
+- `reviewer_bash_allowlist.py` applies only to the named deploy, design,
+  disposition, preflight, and source-auditor roles. It permits one read-only
+  command from its allowlist: `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `rg`,
+  `sha256sum`, `git status/log/diff/show/blame`, or `gh pr view/list --json`.
+  It rejects command chains, redirects,
+  substitutions, interpreters, and output or external-diff flags. It also
+  permits a typed `scripts/capability.py` call for `repo.inspect`,
+  `diff.read`, `tests.run`, or `pr.comment` when
+  `capabilities/profiles.json` grants that tool. A different or absent
+  `agent_type` makes the hook a no-op. Codex has no per-agent Bash hook.
+  See [capability limits](docs/CAPABILITIES.md) and
+  [the reviewer decision](docs/decisions/e2-reviewer-bash-allowlist.md).
+- `no_edit_on_main.py` permits only listed text, config, license, and
+  ignore-file edits on main/master. This includes `.md`, `.txt`, `.rst`,
+  `.yaml`, `.yml`, `.json`, `.toml`, `.ini`, `.cfg`, `.gitignore`, and
+  `LICENSE`. It blocks plugin source Markdown there when the repo has
+  `.claude-plugin/plugin.json`.
+  It blocks `.claude/settings.json` and `.claude/settings.local.json` on
+  every branch.
+- `comment_citation_gate.py` rejects changed code comments that cite
+  ephemeral labels such as `E#:`, `Task A#`, or `per the plan`. It does not
+  apply to Markdown. Durable PR numbers remain allowed.
+- `wiki_taxonomy_gate.py` reads top-level directories from
+  `wiki.schema.json`. It needs an unambiguous vault from workflow config, a
+  matching Git root, and at least two known directories on disk. A missing
+  `.coderails/workflow.config.yaml` makes the hook inert. It allows
+  `raw/`, root files, and dotfile directories. Ambiguous config, schema, or
+  location makes it fail open with a trace.
+- `agent_only_gate.py` allows calls with `agent_id`. It also allows one
+  top-level `gh`, `git`, or workflow-script command without chaining. Other
+  top-level work gets a nudge. `AGENT_ONLY_GATE_ENFORCE=1` turns the nudge
+  into a block. Agent and task-control tools are outside this gate.
+- `agent_model_routing_nudge.py` suggests `haiku` for mechanical tasks and
+  `opus` for complex design tasks. It stays silent when a model is set or
+  both kinds of cue appear. It never blocks.
+- `loop_dispatch_guard.py` checks the session, loop, revision, wave, and
+  node for graph-bound agent calls. It requires frozen, owned loop evals
+  before a nonempty work-unit roster can dispatch. Frozen suites bind to
+  session and loop, not graph revision. Missing or foreign ownership blocks.
+  The Python sandbox launcher uses the same guard. Completion still needs
+  neutral grading, native evidence, proofs, and a retrospective.
 
 ### `loop_stall_guard.py` completion and stall rules
 
