@@ -16,8 +16,13 @@ The default per-file limit is 400 lines. Python function/method size defaults to
 100 lines. There are no grandfathered paths or function exceptions; previously
 oversized dashboard suites are split into cohesive tests and shared fixtures.
 
-Strict commit checks inspect changed tracked files, so existing debt is visible
-without making an unrelated edit uncommittable.
+Strict commit checks inspect changed files in the source roots listed by
+`scripts/quality/check.py`: `.claude-plugin/`, `agents/`, `commands/`,
+`hooks/`, `instructions/`, `packages/`, `scripts/`, and `skills/`. It also
+checks root `install.py` and `uninstall.py`. The default scan does not
+include root `AGENTS.md` or `docs/`. Use `--paths` to check one of those
+files directly. Existing debt in scanned files remains visible without
+blocking an unrelated edit.
 
 ## Enforcement
 

@@ -194,40 +194,23 @@ plugin, not bundled here.
 as durable PR comments; `task-evals` freezes a game-resistant success-eval set
 at task intake and gates `/merge` on it.
 
-Two UserPromptSubmit hooks run silently: inject_context, and crack_on_gate (which
-grants an expiring, revocable authority object when the raw prompt contains "crack on").
-Seven Stop hooks are registered; two of them block via exit 2: loop-state guard and
-loop-stall guard. The confidence-label and verify-loop checks are advisory lints; the rest
-(voice_announce, unregistered_loop_guard, offload_push_guard) nudge only. The crack-on prose
-gate was retired: prose questions are no longer blocked under crack-on, only AskUserQuestion.
-Verify-loop
-also advises when a turn edits 3+ files and the response omits the
-Did-Not-Verify section entirely, not just on untagged
-bullets. The same two
-content-discipline checks (confidence-label and verify-loop) also run on
-SubagentStop — so subagents are held to the same standards as the parent session.
-On PreToolUse, ten hooks can block: the destructive-bash gate, the opt-in test
-gate, the config-gated `enforce_pr_workflow` (opt-in via workflow.config.yaml,
-like the test gate — enforces the PR chain, e.g. blocks a direct `git push` to
-`main` unless `/pr-review-toolkit:review-pr` already ran this session),
-`no_edit_on_main` (blocks editing source files, but not docs/config, while on
-`main` — use `/coderails:prep` or a worktree instead; it also blocks editing
-`.claude/settings.json`/`settings.local.json` on any branch),
-`comment_citation_gate` (blocks new code comments that cite a session-artifact
-label like `E#:`/`Task A#`/`CHANGE B#` instead of stating the constraint the
-code enforces; `.md` files are exempt), `wiki_taxonomy_gate` (blocks a write into
-an LLM wiki vault's top-level directory that isn't sanctioned by the plugin
-repo's `wiki.schema.json`; fails open on any ambiguity),
-`verification_volume_ceiling` (hard-blocks, with no override, the 3rd+
-invocation per work-unit of `hooks/scripts/tests/run_all.py` or a
-`scripts/post_evals.py` validate-structure ceremony), `loop_dispatch_guard` on `Agent` dispatches
-(validates current graph schema, native ownership envelope and available provider role; nonempty work-unit rosters require owned frozen or valid graded evals before implementation), the
-opt-in `agent_only_gate` (nudges by default; blocks the orchestrator's own
-inline do-work tool calls only under `AGENT_ONLY_GATE_ENFORCE=1`), and
-`crack_on_gate` on
-`AskUserQuestion` (denies the tool while the session's crack-on authority is live
-and unexpired — proceed autonomously instead of asking; revoke with
-`python3 scripts/authority.py revoke --session <id>`).
+Two UserPromptSubmit hooks run silently. `inject_context` adds context.
+`crack_on_gate` grants an expiring, revocable authority object when the raw
+prompt contains "crack on". Its AskUserQuestion gate blocks that tool while
+the authority is live. It does not block prose questions. Revoke the grant
+with `python3 scripts/authority.py revoke --session <id>`.
+
+The loop-state and loop-stall Stop hooks can block. Confidence-label and
+verify-loop checks only advise on Stop and SubagentStop. Verify-loop also
+warns when a turn edits at least three files without a Did Not Verify
+section. Other Stop hooks announce or nudge.
+
+PreToolUse hooks enforce the PR workflow, source edit rules, test gate,
+verification volume limit, and graph dispatch ownership where configured.
+Other hooks check comments, wiki paths, reviewer tools, and action authority.
+`agent_only_gate` nudges by default; `AGENT_ONLY_GATE_ENFORCE=1` makes it
+block inline orchestrator work. Read the [hook event map](AGENTS.md#hook-event-map-hookshooksjson)
+for the current matcher, mode, and limit of each hook.
 
 ## Notes
 
