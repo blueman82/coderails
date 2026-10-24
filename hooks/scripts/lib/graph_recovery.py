@@ -243,8 +243,15 @@ def summarize(state: dict[str, Any]) -> dict[str, Any]:
     statuses = {node_id: node["status"] for node_id, node in graph["nodes"].items()}
     pending = sorted(n for n, s in statuses.items() if s not in {"done", "skipped"})
     ready = [] if graph["active_wave"] or graph["hard_stop"] else graph_semantics.ready(state)
-    decisions = cast(list[dict[str, Any]], state.get("worker_statuses") or [])
-    awaiting = [row for row in decisions if row.get("decision_pending") is True]
+    rows = state.get("worker_statuses")
+    decisions = cast(list[object], rows) if isinstance(rows, list) else []
+    awaiting: list[dict[str, Any]] = [
+        cast(dict[str, Any], row)
+        for row in decisions
+        if isinstance(row, dict)
+        and cast(dict[str, Any], row).get("decision_pending") is True
+        and all(key in row for key in ("node", "status", "seq"))
+    ]
     if graph["hard_stop"] is not None:
         phase, detail = (
             "waiting for human",

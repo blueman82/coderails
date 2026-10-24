@@ -253,6 +253,7 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
     def test_malformed_status_storage_inhibits_readiness(self) -> None:
         """Malformed rows fail closed instead of being mistaken for resolved decisions."""
         cases: list[Any] = [None, {}, [None], [{}], [{"node": NODE, "decision_pending": "false"}]]
+        cases += [{"bad": "row"}, [{"node": NODE, "decision_pending": True}]]
         for rows in cases:
             for provider in self.providers:
                 with self.subTest(provider=provider.name, rows=rows):
@@ -261,6 +262,8 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                     provider.write(state)
                     self.assertEqual(provider.success("inspect")["ready"], [])
                     before = provider.path.read_bytes()
+                    summary = provider.success("summarize")
+                    self.assertEqual((summary["ready"], summary["pending"]), ([], [NODE]))
                     self.assertEqual(provider.call("begin-wave").returncode, 1)
                     self.assertEqual(provider.path.read_bytes(), before)
 
