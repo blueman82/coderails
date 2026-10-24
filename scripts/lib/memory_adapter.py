@@ -353,7 +353,8 @@ def main(argv: list[str] | None = None) -> int:
     for flag in ("--confidence", "--valid-until", "--supersedes", "--contradicts", "--query"):
         ap.add_argument(flag)
     ap.add_argument("--tag", action="append", default=[])
-    sid = os.environ.get("CLAUDE_SESSION_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    sid = os.environ.get("CLAUDE_SESSION_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    sid = sid or os.environ.get("CODEX_SESSION_ID") or os.environ.get("CODEX_THREAD_ID", "")
     ap.add_argument("--session", default=sid)
     ap.add_argument("--memory-md", action="store_true")
     ap.add_argument("--standing-orders", action="store_true")

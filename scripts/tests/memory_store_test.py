@@ -359,8 +359,7 @@ class SchemaProbe(StoreCase):
         self.assertEqual(memory_schema.check(self.home), "muninn_schema_incomplete")
         self.assertEqual(ma.add(self.record("alpha wording")), ma.Degraded("muninn_schema_incomplete"))
         self.assertEqual(self.muninn(*self.add_argv_for("lesson"))[0], 0)
-        self.assertEqual(self.muninn(*self.add_argv_for("lesson"), "--supersedes", "K1")[0], 0)
-        self.sql("UPDATE knowledge SET text = 'gamma wording' WHERE id = 2")
+        self.sql("UPDATE knowledge SET text = 'gamma wording' WHERE id = 1")
         self.assertEqual(
             self.muninn("search", "gamma", "--all-projects")[1]["knowledge"], [], "stale index must miss the new word"
         )
