@@ -36,6 +36,22 @@ rc = orders.main(sys.argv[3:])
 print(json.dumps({'moves': moves, 'saved_rows': saved_rows}))
 raise SystemExit(rc)
 """
+SWAP_PROBE = r"""
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from scripts.lib import orders
+source = Path(sys.argv[2])
+replacement = source.with_name('replacement.md')
+replacement.write_text(sys.argv[3])
+real_update = orders.update
+def swapped_update(directory, change):
+    replacement.replace(source)
+    return real_update(directory, change)
+orders.update = swapped_update
+rc = orders.main(sys.argv[4:])
+raise SystemExit(rc)
+"""
 
 
 class LegacyPreservation(StoreCase):
@@ -115,6 +131,30 @@ class LegacyPreservation(StoreCase):
         self.assertEqual((self.repo / "orders.json").read_bytes(), self.prior)
         for path in backups:
             self.assertEqual(path.read_text(), f"Prior backup {path.name}\n")
+
+    def test_source_swap_before_lock_refuses_without_importing_stale_text(self) -> None:
+        """A replacement before the orders lock cannot make the ledger disagree with the archived source."""
+        changed = BODY.replace("Keep the whole lesson.", "Keep the changed lesson.")
+        for codex in (False, True):
+            with self.subTest(codex=codex):
+                root = REPO / "packages/codex" if codex else REPO
+                repo = self.tmp / f"source-swap-{codex}"
+                repo.mkdir()
+                source = repo / "standing-orders.md"
+                source.write_text(BODY)
+                (repo / "orders.json").write_bytes(self.prior)
+                args = ["--dir", str(repo), "--session", SESSION, "import-legacy"]
+                got = subprocess.run(
+                    [sys.executable, "-c", SWAP_PROBE, str(root), str(source), changed, *args],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                self.assertEqual(got.stderr, "")
+                self.assertEqual((got.returncode, json.loads(got.stdout).get("reason_code")), (2, "legacy_parse_error"))
+                self.assertEqual(source.read_text(), changed)
+                self.assertEqual((repo / "orders.json").read_bytes(), self.prior)
+                self.assertEqual(list(repo.glob("standing-orders.legacy*.md")), [])
 
     def test_legitimate_import_preserves_decay_text_and_prior_backup(self) -> None:
         """A real entry is saved as a tombstone with full provenance, and the original moves to a fresh backup."""

@@ -283,6 +283,8 @@ def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
         return _refuse("legacy_parse_error", entry=error.entry)
 
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
+        if src.is_symlink() or src.read_text(encoding="utf-8") != text:
+            raise ValueError("legacy_parse_error")
         new = {**ledger, "orders": list(ledger["orders"])}
         for row in parsed:
             lifecycle.check_staged_identity(repo_dir, ledger, row)
@@ -313,10 +315,9 @@ def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
         return None, {"imported": 0 if shared else len(parsed), "skipped": len(shared), "moved_to": str(dest)}
 
     payload, rc = update(repo_dir, change)
-    if rc:
-        return payload, rc
-    ol.trace("order.import", "imported", "legacy_uncited", a.session)
-    return payload, 0
+    if not rc:
+        ol.trace("order.import", "imported", "legacy_uncited", a.session)
+    return payload, rc
 
 
 def cmd_cite(a: argparse.Namespace, repo_dir: Path) -> Result:
