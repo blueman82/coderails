@@ -2,64 +2,51 @@
 
 from __future__ import annotations
 
+import builtins
 import io
+import runpy
 import subprocess
 import sys
-import tempfile
 import unittest
+from collections.abc import Mapping, Sequence
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from integrity_http import IntegrityError
 from integrity_install import LABEL, activate, sudo
 
-import install as installer
-
 
 class InstallBoundaryTests(unittest.TestCase):
     """Intercept every privileged operation; never mutate installed paths or launchd."""
 
-    def test_promotion_requires_review_of_changed_or_shared_install(self) -> None:
-        """Declining changed/shared runtime promotion prevents all privileged mutations."""
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            for clean, others in ((False, []), (True, ["other-daemon"])):
-                output = io.StringIO()
-                with (
-                    patch(
-                        "install.preflight",
-                        return_value=(root, root / "daemon.plist", root / "credentials", "owner/repo"),
-                    ),
-                    patch("install.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "[]")),
-                    patch("install.diff_before_promote", return_value=clean),
-                    patch("install.other_instance_labels", return_value=others),
-                    patch("builtins.input", return_value="n"),
-                    patch("install.promote") as promote,
-                    redirect_stdout(output),
-                    redirect_stderr(output),
-                ):
-                    self.assertEqual(installer.main(), 1)
-                promote.assert_not_called()
-                self.assertIn("installed copy left unchanged", output.getvalue())
-                if others:
-                    self.assertIn("other-daemon", output.getvalue())
-            with (
-                patch(
-                    "install.preflight", return_value=(root, root / "daemon.plist", root / "credentials", "owner/repo")
-                ),
-                patch("install.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "[]")),
-                patch("install.diff_before_promote", return_value=True),
-                patch("install.other_instance_labels", return_value=[]),
-                patch("builtins.input") as ask,
-                patch("install.promote") as promote,
-                redirect_stdout(io.StringIO()),
-            ):
-                self.assertEqual(installer.main(), 0)
-            ask.assert_not_called()
-            promote.assert_called_once()
-            self.assertEqual(list(root.iterdir()), [])
+    def test_retired_entrypoint_exits_before_legacy_installer_import(self) -> None:
+        """The public command cannot reach legacy preflight, promotion, or sudo."""
+        original_import = builtins.__import__
+
+        def reject_legacy_import(
+            name: str,
+            globals: Mapping[str, object] | None = None,
+            locals: Mapping[str, object] | None = None,
+            fromlist: Sequence[str] | None = (),
+            level: int = 0,
+        ) -> ModuleType:
+            if name in {"integrity_install", "integrity_http"}:
+                raise AssertionError(f"legacy installer imported: {name}")
+            return original_import(name, globals, locals, fromlist, level)
+
+        output = io.StringIO()
+        with (
+            patch("builtins.__import__", side_effect=reject_legacy_import),
+            redirect_stdout(output),
+            redirect_stderr(output),
+            self.assertRaises(SystemExit) as exit_status,
+        ):
+            runpy.run_path(str(Path(__file__).resolve().parents[1] / "install.py"), run_name="__main__")
+        self.assertEqual(exit_status.exception.code, 1)
+        self.assertIn("GitHub Actions", output.getvalue())
 
     def test_privileged_failures_are_required_unless_explicitly_optional(self) -> None:
         """A failed install operation cannot masquerade as a successful launchd change."""
