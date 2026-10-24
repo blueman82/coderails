@@ -16,7 +16,11 @@ Config: !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.py" resolve-config`
 
 **Non-interactive context**: If you are running as a sub-task (conductor, background agent) with no interactive user turn available, log any findings but proceed to push — do not block.
 
-**Trigger:** Determine the base branch with `git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@.*/@@'`. Use `main` if it is unset. Then run `git diff --name-only $(git merge-base HEAD <base>)..HEAD`. Check whether any changed file matches `config.engineering_principles_paths`.
+**Trigger:** Find the base branch with
+`git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@.*/@@'`.
+Use `main` if the command finds no branch. Then run
+`git diff --name-only $(git merge-base HEAD <base>)..HEAD`. Check the changed
+paths against `config.engineering_principles_paths`.
 
 If **no files match**, skip to push.
 

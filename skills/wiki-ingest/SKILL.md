@@ -22,7 +22,19 @@ that and stop rather than guessing which artifact to record.
 
 ### Step 0: Load the Schema
 
-The project's `CLAUDE.md` loads the git root's `AGENTS.md` at session start. Read its wiki schema section, or the `AGENTS-wiki-schema.md` file it links to. Coderails keeps the schema in `AGENTS.md` and the live page types in `wiki.schema.json`. If `AGENTS.md` is not in context, walk up from the current directory to the git root. Use the same walk-up pattern as `config_path` in `scripts/lib/config.py`. Check each level for `AGENTS.md`; a fork can start in a project subdirectory. If you do not find it, tell the user to run `/wiki-init` first. The wiki vault is a separate sibling repo, such as `../coderails-wiki`. The project's `.coderails/workflow.config.yaml` points to it. Do not look for `AGENTS.md` in the vault. A fork does not need to run from inside the vault.
+The project's `CLAUDE.md` loads the Git root's `AGENTS.md` at session start.
+Read its wiki schema section. Another project can link to a separate
+`AGENTS-wiki-schema.md` file. Coderails keeps its schema in `AGENTS.md` and
+its live page types in `wiki.schema.json`.
+
+If `AGENTS.md` is not in context, walk from the current directory to the Git
+root. Check each level for `AGENTS.md`. Use the same walk-up pattern as
+`config_path` in `scripts/lib/config.py`. A fork can start in a project
+subdirectory. If you do not find the file, tell the user to run `/wiki-init`.
+
+The wiki vault is a separate repo, for example `../coderails-wiki`. The
+project's `.coderails/workflow.config.yaml` points to the vault. Do not look
+for `AGENTS.md` in the vault. A fork can run outside the vault.
 
 The git/vault/supervision settings below are **not** read from AGENTS.md — they are flat
 keys in that same project's `.coderails/workflow.config.yaml` (the repo the source being

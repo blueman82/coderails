@@ -18,7 +18,18 @@ compliance.
 
 ## Current integrity-gate replacement
 
-The semantic judge is replaced by a mechanical `integrity-review` attestor in a trusted GitHub Actions workflow. It checks SHA-bound review/eval evidence, command/eval structure, policy paths, provenance fields, and bounded diff input. It never runs PR code or comment commands and never asks an LLM for a verdict. Authoritative: `docs/INTEGRITY-GATE.md`, `.github/workflows/integrity-review.yml`, `scripts/integrity-gate/integrity_actions.py`, and `integrity_review.enabled` config. GitHub ruleset `25788196` is active on `main` and requires the GitHub Actions app status. Source code alone does not activate the rule.
+The trusted GitHub Actions workflow runs a mechanical `integrity-review`
+attestor. It replaces the semantic judge. It checks review and eval evidence
+bound to the head SHA. It also checks command and eval structure, policy
+paths, provenance fields, and bounded diff input. It does not run PR code or
+commands from comments. It does not ask an LLM for a verdict.
+
+The authoritative sources are `docs/INTEGRITY-GATE.md`,
+`.github/workflows/integrity-review.yml`,
+`scripts/integrity-gate/integrity_actions.py`, and the
+`integrity_review.enabled` setting. GitHub ruleset `25788196` is active on
+`main`. It requires the status from the GitHub Actions app. Source code alone
+cannot activate this rule.
 
 ## What this repo is
 
@@ -31,9 +42,22 @@ Two independent plugins, not an application:
 2. Skills — agentic-loop, planning-sequence, premortem, handoff (`skills/*/SKILL.md`)
 3. Discipline loop — advisory lints on confidence labels and unverified claims; blocking hooks on destructive bash, failing tests (`hooks/`)
 
-The plugin instructions and Python runtime need no compilation. The dashboard TypeScript packages have their own build and test commands. Source = Markdown instructions, maintained Python hooks/workflow scripts, and dashboard TypeScript. Version-controlled in your own fork/repo. Former shell runtime and test entrypoints are maintained Python; generic shell-policy examples and external tools remain supported.
+The plugin instructions and Python runtime need no compilation. The dashboard
+TypeScript packages have separate build and test commands. Source includes
+Markdown instructions, maintained Python hooks and workflow scripts, and
+dashboard TypeScript. Keep it under version control in your fork or repo.
+Python replaces the former shell runtime and test entrypoints. Generic shell
+policy examples and external tools remain supported.
 
-**Agentic-loop graph runtime**: the `agentic-loop` skill creates durable graph state in `progress.json` (nodes, edges, joins, status, outcomes, retries) with readiness checks and plan/record helpers for dispatching and recording waves. Manually operated — the model reads the graph, dispatches ready work, records results; not an automatic scheduler. Each provider has its own graph adapter, locks and native evidence reader. The sole maintained pure semantics live in `packages/graph-semantics/graph_semantics.py`, materialized byte-for-byte into both independent installs. Current graph schema is 3 only; no legacy reader or alternate writer.
+**Agentic-loop graph runtime:** The `agentic-loop` skill stores nodes, edges,
+joins, status, outcomes, and retries in `progress.json`. Readiness checks and
+plan and record helpers support each dispatch wave. The model reads the graph,
+dispatches ready work, and records results. The graph is not an automatic
+scheduler. Each provider has its own graph adapter, locks, and native evidence
+reader. The maintained graph semantics live in
+`packages/graph-semantics/graph_semantics.py`. Both installs contain identical
+copies. Graph schema 3 is the only supported schema. There is no legacy
+reader or alternate writer.
 
 ## How the pieces wire together
 
@@ -74,15 +98,39 @@ examples/, launchd/             → sample configs and macOS scheduling plists
 
 "Make X mandatory" → a `PreToolUse` hook, not a command.
 
-**Enforcement ceiling.** A local hook checks evidence of *invocation*, not of *completion* — e.g. `enforce_pr_workflow` is satisfied by a hollow `/coderails:push` or `/pr-review-toolkit:review-pr` step that ran but did nothing. A hook runs inside the agent's own trust domain (no privilege boundary), so it's a **redirect-and-audit layer** (steers a cooperating agent, leaves a `discipline.log` trail), not a tamper-proof barrier. The real "no unreviewed change reaches `main`" guarantee is **server-side: GitHub branch protection** (required PR + reviews + no direct pushes) — no local agent can fake that; local hooks complement it, don't replace it. Same ceiling applies to Stop-hook gates: they force a declared step to *appear*, not to *be real*.
+**Enforcement ceiling.** A local hook can check invocation: it can tell that
+an agent called a step.
+It cannot prove that the step did the work. For example, a hollow
+`/coderails:push` or `/pr-review-toolkit:review-pr` can satisfy
+`enforce_pr_workflow`. A hook runs with the agent's own access. It has no
+separate privilege boundary. It can redirect a cooperating agent and leave a
+`discipline.log` record. This is a **redirect-and-audit layer**. It cannot
+prevent tampering. Server-side branch protection can block an unreviewed
+change from reaching `main`. It can require a PR, reviews, and no direct
+push. A local agent cannot fake that server rule. Stop-hook gates have
+the same limit: they can require a declared step, but cannot prove its result.
 
 **This repo** does not enable general review-approval branch protection (2026-07-15, standing decision). The active integrity rule below is the server-side PR and status gate. It checks evidence structure, not whether an independent reviewer actually ran.
 
 **One server-side exception: integrity-review.** The active GitHub ruleset on `main` requires a PR and a successful `integrity-review` status from the GitHub Actions app. The workflow validates the head SHA's review/eval evidence and policy as data. Local hooks cannot substitute for the rule.
 
-**Sandboxed workers narrow the ceiling for worker processes only, never the orchestrator.** With `config.sandbox_workers: true` (`skills/agentic-loop/SKILL.md` Phase 3/3a; status `read_by_prose_only`: the orchestrator reads it from the resolve-config text and no script does), an implementation-unit worker runs as a separate OS process via `@anthropic-ai/sandbox-runtime` (srt, pinned), Seatbelt/bubblewrap-enforced — outside the agent's trust domain, the first non-hook layer. The orchestrator itself is never sandboxed.
+**Sandboxed workers.** With `config.sandbox_workers: true`, an implementation
+worker runs as a separate OS process. The pinned
+`@anthropic-ai/sandbox-runtime` (`srt`) uses Seatbelt or bubblewrap to limit
+writes. This is the first boundary outside the agent's own process. It applies
+only to workers. The orchestrator is not sandboxed. In Phase 3 and 3a of
+`skills/agentic-loop/SKILL.md`, the orchestrator reads this setting from
+`resolve-config` text. No script reads it directly (`read_by_prose_only`).
 
-Containment rests on the rendered settings' **allow-only write policy**, not srt's mandatory `.git/hooks`/`.git/config` denies — those are cwd-anchored (`path.resolve(cwd,...)` + relative glob) and never reach the *primary* repo's `.git` (which allowWrite must grant for commits to work). This repo's rendered settings add explicit `denyWrite` on the primary `.git/hooks` and `.git/config` to close that gap. Corollary: srt's other mandatory denies (shell rc files, `.mcp.json`, etc.) are also cwd-anchored — protected at `$HOME` only because `$HOME` sits outside allowWrite; widening a worker's allowWrite toward `$HOME` would silently re-expose them.
+The rendered settings use an **allow-only write policy**. This policy is the
+main containment boundary. The mandatory srt denies for `.git/hooks` and
+`.git/config` use the worker's current directory. They do not reach the main
+repo's `.git`, which must remain writable for commits. The rendered settings
+therefore add an explicit `denyWrite` for those two paths in the main repo.
+Other mandatory srt denies, such as shell startup files and `.mcp.json`,
+also use the worker's current directory. `$HOME` stays protected because it
+is outside `allowWrite`. If a worker can write to `$HOME`, those files become
+exposed.
 
 Named residuals:
 - **Primary `.git`-write residual.** Must stay writable for worker commits, so a worker can still vandalise refs on other branches; only `hooks`/`config` under it are denied (above) — srt deliberately doesn't block `.git` wholesale. Contained by the PR gate chain + `git fsck`/reflog recoverability, not the sandbox.
@@ -114,11 +162,31 @@ Sandboxing is write-containment, not a correctness/review substitute: a sandboxe
 
 ### Skills↔hooks seam convention
 
-When a skill instructs an action a hook gates — `git merge`/`gh pr create`/`gh pr merge` → `enforce_pr_workflow`; code-file/plugin-source edits on main → `no_edit_on_main`; `git commit` → `test_gate` — the skill must name the gating hook and the resolution path. Adding a hook that gates a common action → update the skills that instruct it. `enforce_pr_workflow`'s merge gate recognises PR-review evidence as the `/pr-review-toolkit:review-pr <PR#>` Skill invocation (PR number in args), NOT a manually-spawned agent fanout — the agentic loop must invoke the Skill to clear the merge gate.
+When a skill asks for a gated action, name the hook and how to satisfy it.
+`enforce_pr_workflow` gates `git merge`, `gh pr create`, and `gh pr merge`.
+`no_edit_on_main` gates code and plugin-source edits on main. `test_gate`
+gates `git commit`. Update the relevant skills when you add a hook for a
+common action. The merge gate recognizes a
+`/pr-review-toolkit:review-pr <PR#>` Skill call with the PR number. A manually
+spawned review group does not satisfy this local hook. The agentic loop must
+invoke the Skill.
 
 `/coderails:post-review <PR#>` runs after `review-pr` (and after findings are applied + pushed) to post the SHA-bound review artifact. `/merge` (`scripts/merge.py`) gates on a live-fetched PR comment carrying that artifact for the current head SHA — fail-closed: a `gh` fetch failure or no matching artifact both block.
 
-Second, additive merge gate — task evals: `/coderails:task-evals` freezes an ungraded `evals.json` before implementation and grades actual results afterward (see `skills/task-evals/SKILL.md`); `/coderails:post-evals <PR#>` validates and posts it as a SHA-bound PR comment (`coderails-eval-summary`, via `scripts/lib/eval_artifact.py`). `scripts/merge.py` reads it right after the review-artifact gate — same fail-closed rc semantics: `gh` fetch failure or `NO-GO`/missing artifact both block. Loop scope: `loop_state_guard` also requires a loop-scope `evals.json` when `progress.json`'s `work_units` ≥1, blocking stop if none — fail-open when `work_units` is absent. A loop-scope `result` must be computed by `scripts/post_evals.py grade-loop` (never hand-written) and carry a valid `grading` stamp, or `loop_state_guard` demotes an otherwise-valid `GO`/`VERIFICATION_LEVEL0` to `UNSTAMPED` and blocks.
+**Task eval gate.** `/coderails:task-evals` freezes an ungraded `evals.json`
+before implementation. It grades actual results afterward. See
+`skills/task-evals/SKILL.md`. `/coderails:post-evals <PR#>` validates the
+suite and posts a SHA-bound `coderails-eval-summary` PR comment through
+`scripts/lib/eval_artifact.py`. `scripts/merge.py` reads this comment after
+the review artifact. A failed GitHub fetch, missing artifact, or `NO-GO`
+blocks the merge.
+
+For a loop with at least one `work_units` entry, `loop_state_guard` requires
+a sibling `evals.json`. Without it, Stop blocks. An absent `work_units`
+field makes this check stand down. Run `scripts/post_evals.py grade-loop` to
+compute the loop result. Do not write the result by hand. The result needs a
+valid `grading` stamp. Without it, the guard changes `GO` or
+`VERIFICATION_LEVEL0` to `UNSTAMPED` and blocks.
 
 Third, additive merge gate — GitHub Actions attestation: when `config.integrity_review.enabled` is true, `scripts/merge.py` and `enforce_pr_workflow` require the newest `integrity-review` status on the exact head SHA to be successful, posted by `github-actions[bot]`, carrying `integrity=pass sha=<head>`. Wrong creator, missing status, stale SHA, non-success state, malformed description, or fetch failure all block. The GitHub ruleset is the server boundary.
 
@@ -207,8 +275,10 @@ Fourth seam instance: `agentic-loop` Phase 13 teardown writes `retro.json` (`sch
   `--force-with-lease` remains conditional.
 - `enforce_pr_workflow.py` blocks `gh pr create` without `/coderails:push`.
   It blocks `gh pr merge <N>` and `scripts/merge.py <N>` without a recorded
-  `review-pr <N>`. It requires a fresh review after each local merge or
-  push to main/master. It reads subagent transcripts. It excludes Git
+  `review-pr <N>`. A raw `git merge` on main/master consumes the prior review
+  evidence, so the next raw merge needs a fresh review. A push to main/master
+  also needs a recorded review, but does not consume it. It reads subagent
+  transcripts. It excludes Git
   merge inspection and in-progress controls. It stands down without
   `workflow.config.yaml`. For a PR merge, it also needs a SHA-bound `GO`
   eval artifact. `gate_smoke_verify` reruns each level-1-or-higher eval
