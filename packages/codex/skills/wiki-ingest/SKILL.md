@@ -19,7 +19,7 @@ guessing which artifact to record.
 
 ### Step 0: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root. If no `AGENTS.md` is found by the git root, tell the user to invoke `$coderails-codex:wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.coderails/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
+The git root's `AGENTS.md` loads at session start. Use it for project conventions. `AGENTS.md` links to `AGENTS-wiki-schema.md`. Read that file for the full wiki schema: page types, page format, and the three layers. If `AGENTS.md` is not in context, walk up from the current directory to the git root. Check each level for `AGENTS.md`; a fork can start in a project subdirectory. If you do not find it, tell the user to invoke `$coderails-codex:wiki-init` first. The wiki vault is a separate sibling repo, such as `../coderails-wiki`. The project's `.coderails/workflow.config.yaml` points to it. Do not look for `AGENTS.md` in the vault. A fork does not need to run from inside the vault.
 
 The git/vault/supervision settings below are **not** read from AGENTS.md — they are flat
 keys in that same project's `.coderails/workflow.config.yaml` (the repo the source being

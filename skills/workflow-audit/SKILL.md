@@ -113,13 +113,17 @@ Only rows with `verdict: "propose"` go forward (to creation or a queue entry, pe
 
 ## 7. Proceed to creation
 
-Unless the run is in queue-mode (section 5), every candidate the judge marked `propose` goes straight to the section-8 create step, no `AskUserQuestion`, no waiting on the owner. In queue-mode, a `propose` verdict is written as a queue entry instead (section 5) and is NOT also created here — the dashboard Approve-click is its sole creation path. Either way, the judge's propose/reject verdict is the only filter that decides what gets built — nothing is created that the judge rejected, and zero `propose` verdicts is a complete, successful run, not a failure to escalate past.
+If the run is not in queue-mode (section 5), send every `propose` candidate to the create step in section 8. Do not call `AskUserQuestion` or wait for the owner.
+
+In queue-mode, write each `propose` verdict as a queue entry (section 5). Do not also create the skill here. The dashboard Approve click is the only way to create it.
+
+The judge's `propose` or `reject` verdict is the only filter. Create nothing that the judge rejected. A run with zero `propose` verdicts succeeds; it does not need escalation.
 
 ## 8. Create step — one skill at a time
 
 For each proposed candidate, in sequence, never batched:
 
-1. Author the skill via `/skill-creator:skill-creator` (per the owner's 2026-07-07 directive) fully specified from the candidate's own judge-contract fields, skipping its human-facing eval-viewer step in a headless run. Substitute `superpowers:writing-skills`'s RED/GREEN/REFACTOR discipline as the stop condition, since skill-creator itself has no autonomous "done" signal: RED — run a fresh-subagent baseline pressure-test scenario *without* the new skill present, and document what it actually does. GREEN — write the minimal `SKILL.md` addressing the observed baseline failures. REFACTOR — re-test under the same pressure and close any loopholes found.
+1. Author the skill via `/skill-creator:skill-creator`, as the owner directed on 2026-07-07. Specify it from the candidate's judge-contract fields. In a headless run, skip the human-facing eval-viewer step. Skill-creator has no autonomous "done" signal, so use `superpowers:writing-skills`'s RED/GREEN/REFACTOR discipline as the stop condition. RED: run a baseline pressure test with a fresh subagent and no new skill; record what it does. GREEN: write the smallest `SKILL.md` that addresses the observed failures. REFACTOR: repeat the test under the same pressure and close any loopholes.
 2. Land the new skill in the coderails repo as a plugin skill, via its own branch and PR, through the full gate sequence: `test_gate` → `pr-review-toolkit:review-pr` → security review → `post-review` → pr-scope evals → merge. Never commit straight to `main`, and never write into a user's personal `~/.claude/skills` directory — this is a repo skill, not a local one.
 3. **Stop after this skill is merged before starting the next proposed candidate.** Batching multiple skill creations without testing and shipping each individually is the exact anti-pattern `superpowers:writing-skills` prohibits — apply it here too.
 
@@ -132,4 +136,8 @@ Report, unscored:
 
 ## 10. Scheduled invocation
 
-This skill is invoked weekly via the `workflow-audit-weekly` routine (see `docs/routines.md` for the full operator guide). The routine scans transcripts from the last 7 days (`--days 7`), clusters repeated patterns, judges them, and writes any `propose` verdicts as queue entries on the dashboard. **Queue-mode is mandatory for scheduled runs** — in-session skill creation is forbidden, and the owner's Approve click on a queue entry is the sole build trigger for each proposal. This differs from an interactive run, which can create skills in-session or defer to queue-mode at the user's discretion. The routine completes cleanly only if `proposals_written == proposals_attempted` (no queue write failures); a run with zero proposals is a successful week, not a failure.
+The `workflow-audit-weekly` routine invokes this skill each week. See `docs/routines.md` for the operator guide. The routine scans the last 7 days of transcripts (`--days 7`). It clusters and judges repeated patterns, then writes `propose` verdicts as dashboard queue entries.
+
+**Scheduled runs must use queue-mode.** They must not create skills in-session. Only the owner's Approve click on a queue entry can start each build. An interactive run can create skills in-session or use queue-mode, at the user's discretion.
+
+The routine completes cleanly only when `proposals_written == proposals_attempted`, with no queue write failures. A week with zero proposals is successful.
