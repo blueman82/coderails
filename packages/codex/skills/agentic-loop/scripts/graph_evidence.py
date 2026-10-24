@@ -20,6 +20,7 @@ from graph_identity import (
     REFUSED_OUTCOME,
     GraphError,
     classify_worker_evidence,
+    is_contract_wave,
     is_legacy_task_name,
     new_evidence_writes_enabled,
     next_attempt,
@@ -70,9 +71,7 @@ def _verify_dispatch(
     state: dict[str, Any], node_id: str, attempt: int, wave_id: str, call_id: str, requests: Requests
 ) -> None:
     """Recheck the native message and consumed v2 record for a contract-era Codex spawn."""
-    start = state["graph"].get("contract_from_revision")
-    wave = re.fullmatch(r"wave-([1-9][0-9]*)", wave_id)
-    if type(start) is not int or not wave or int(wave.group(1)) < start:
+    if not is_contract_wave(state, wave_id):
         return
     calls = requests.get(call_id, [])
     if len(calls) != 1 or not isinstance(calls[0], dict):
@@ -382,9 +381,10 @@ def bind_worker_evidence(
         request = next(iter(requests.get(call_id, ())), None)
         message = request.get("message") if isinstance(request, dict) else None
         if isinstance(message, str) and not message.startswith(graph_contract.ENVELOPE_KEY + "="):
-            if not new_evidence_writes_enabled():
+            if new_evidence_writes_enabled():
+                reference["message_sha256"] = hashlib.sha256(message.encode()).hexdigest()
+            elif not message.startswith("CODERAILS_GRAPH_TASK=") or is_contract_wave(state, active_wave["wave_id"]):
                 raise GraphError("set CODERAILS_A6_EVIDENCE_WRITE=on after reader verification")
-            reference["message_sha256"] = hashlib.sha256(message.encode()).hexdigest()
         identifiers = {call_id, agent_thread_id, terminal}
         if used & identifiers:
             raise GraphError(f"node {node_id} reuses transcript evidence")

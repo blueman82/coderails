@@ -115,6 +115,13 @@ def next_attempt(node: dict[str, Any]) -> int:
     return int(node["retry"]["attempts"]) + int(node["respawn"]["generation"]) + 1
 
 
+def is_contract_wave(state: dict[str, Any], wave_id: str) -> bool:
+    """Whether this wave began at or after the native dispatch contract cutoff."""
+    start = state["graph"].get("contract_from_revision")
+    wave = re.fullmatch(r"wave-([1-9][0-9]*)", wave_id)
+    return type(start) is int and wave is not None and int(wave.group(1)) >= start
+
+
 def _task_suffix(attempt: object) -> str:
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
         raise GraphError("graph worker attempt must be a positive integer")
