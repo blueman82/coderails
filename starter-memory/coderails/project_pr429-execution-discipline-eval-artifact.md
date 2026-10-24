@@ -10,7 +10,11 @@ type: project
 
 ## Goal
 
-Finish the clean-break rename of the `fable-mode` skill to `execution-discipline` while preserving its behavior, and include the related Bash quality-script fix authorized by the user. The implementation and verification are complete; the only remaining delivery step is posting the frozen eval result as a SHA-bound PR artifact.
+Finish the clean-break rename from `fable-mode` to `execution-discipline` while
+preserving behavior. Include the related Bash quality-script fix the user
+authorized. At this historical checkpoint, implementation and verification
+were complete. Posting the frozen eval result as a SHA-bound PR artifact was
+the remaining delivery step.
 
 ## Decisions
 

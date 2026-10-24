@@ -4,7 +4,11 @@
 
 ## Problem and decision
 
-The Claude graph contract is defined by `skills/agentic-loop/loop-state.md` and `skills/agentic-loop/execution-graph.md`, while the Codex contract is implemented in `packages/codex/skills/agentic-loop/scripts/graph.py`. (verified) Their current state shapes differ, including the active-wave identifier. (verified)
+`skills/agentic-loop/loop-state.md` and
+`skills/agentic-loop/execution-graph.md` define the Claude graph contract.
+`packages/codex/skills/agentic-loop/scripts/graph.py` implements the Codex
+contract. (verified) Their state shapes differed, including the active-wave
+identifier. (verified)
 
 **Decision.** New graph state is interpreted and mutated by one canonical Python graph-semantic core. Claude and Codex call it through thin provider-local adapters. The core owns only graph validation, readiness, wave transitions, joins, retry transitions, and graph-completion eligibility. (verified)
 

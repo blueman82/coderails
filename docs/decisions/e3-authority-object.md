@@ -2,8 +2,9 @@
 
 ## What the two crack-on gates enforce today
 
-Read from source: `hooks/scripts/crack_on_gate.py` (88 lines) and `hooks/scripts/crack_on_prose_gate.py` (212 lines).
-Reproduce: `sed -n 1,88p hooks/scripts/crack_on_gate.py; sed -n 1,60p hooks/scripts/crack_on_prose_gate.py`.
+This section records the source read: `hooks/scripts/crack_on_gate.py` (88
+lines) and `hooks/scripts/crack_on_prose_gate.py` (212 lines). Reproduce with
+`sed -n 1,88p hooks/scripts/crack_on_gate.py; sed -n 1,60p hooks/scripts/crack_on_prose_gate.py`.
 
 | Piece | Event | What it does | Evidence |
 | --- | --- | --- | --- |

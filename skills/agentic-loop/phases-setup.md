@@ -1,14 +1,17 @@
 # Agentic loop — setup phases (-2 through 2.7)
 
-Everything before routing and delegation: starting `progress.json` via `graph.py start`, sharpening the
-authorising prompt, reading the envelope, pre-flight checks, resolving design forks
-and disposition, and committing the design to `spec.md`/`plan.md`.
+Complete these steps before routing and delegation. Start `progress.json` with
+`graph.py start`. Sharpen the authorising prompt, read the envelope, run
+pre-flight checks, and resolve design forks and disposition. Commit the design
+to `spec.md` and `plan.md`.
 
 Read this in full at loop start. Phase 2.8 onward lives in SKILL.md.
 
 ### `S-2` — Phase -2: Bootstrap a local repo, then start `progress.json`
 
-Before resolving the loop-state path, check whether the current folder is inside a Git repository with `git rev-parse --show-toplevel`. If it is not, create the local-only base required for worktree isolation:
+Before resolving the loop-state path, run `git rev-parse --show-toplevel` to
+check whether the current folder is in a Git repository. If it is not, create
+the local base needed for worktree isolation:
 
 ```bash
 git init -b main
@@ -16,9 +19,15 @@ git add -A
 git commit --allow-empty -m "Initial project"
 ```
 
-Stop and report the exact failing command if any of these commands fails (for example, Git author identity is not configured). Do not add a remote, create a hosted repository, push, or create a pull request. This is the only action before the loop's initial state is created: it ensures the path helper below keys the loop to the repository it just created rather than to the pre-Git folder path.
+If a command fails, stop and report that command. For example, Git may lack an
+author identity. Do not add a remote, create a hosted repository, push, or
+create a pull request. Take no other action before creating the initial loop state. The path
+helper then keys the loop to the new repository, not the earlier folder path.
 
-Before Phase -1 — before anything else — create the loop's durable state with the controller command. This guarantees `progress.json` exists before the first stop, so the `loop_state_guard` Stop hook never trips a compliant loop; the block degrades to a backstop for a skipped `start`. Never write or edit `progress.json` by hand for this.
+Before Phase -1, create durable loop state with the controller command.
+`progress.json` must exist before the first stop. The `loop_state_guard` Stop
+hook then acts only as a backstop if `start` was skipped. Never write or edit
+`progress.json` by hand for this step.
 
 **Resolve the path — never compute it yourself.** Run the path helper; it keys the path to the repo's `git --git-common-dir` (falling back to the raw cwd), so a mid-loop worktree hop resolves to the SAME path:
 

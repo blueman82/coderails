@@ -1,8 +1,8 @@
 # Dynamic context manifest replaces the static bootstrap
 
-Supersedes the "Bootstrap manifest: threshold not crossed, no change" section of
-`docs/decisions/e4-bootstrap-and-codex-routing.md` (that record is left as written). The Codex routing proposal in E4
-is untouched.
+This decision supersedes the "Bootstrap manifest: threshold not crossed, no
+change" section of `docs/decisions/e4-bootstrap-and-codex-routing.md`. That
+record remains as written. The Codex routing proposal in E4 is untouched.
 
 ## Decision
 

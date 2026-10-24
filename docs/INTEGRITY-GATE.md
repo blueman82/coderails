@@ -1,22 +1,57 @@
 # Integrity gate
 
-The gate reads review and eval comments for the exact pull request head. A trusted GitHub Actions workflow posts the `integrity-review` commit status. A GitHub rule on `main` must require that status and bind it to the GitHub Actions app.
+The gate reads review and eval comments for the exact pull request head. A
+trusted GitHub Actions workflow posts the `integrity-review` commit status. A
+GitHub rule on `main` must require that status. The rule must bind it to the
+GitHub Actions app.
 
-The workflow uses the built-in `GITHUB_TOKEN`. You do not need a second account, a personal access token, a Mac service, or sudo.
+The workflow uses the built-in `GITHUB_TOKEN`. You do not need a second account,
+a personal access token, a Mac service, or sudo.
 
 ## What the workflow checks
 
 - The review and eval markers name the current PR and head SHA. GitHub attributes both comments to the live repository owner login.
 - The review summary has the required headings.
-- The current Claude and Codex post-review helpers write a marker and summary. The gate accepts those existing comments. It also accepts a newer compatibility line directly after the marker when that line names the same PR and SHA. A malformed line or a `clean-break` finding count above zero fails. When the compatibility-line producers reach `main`, update the gate to require that line.
+- The current Claude and Codex post-review helpers write a marker and summary.
+  The gate accepts those existing comments. It also accepts a newer
+  compatibility line directly after the marker when that line names the same
+  PR and SHA. A malformed line fails. A `clean-break` finding count above zero
+  also fails. When the compatibility-line producers reach `main`, update the
+  gate to require that line.
 - The eval has a valid structure, a frozen hash, command and control fields, and recorded results. Every P0 eval has a passing result and evidence.
 - The complete changed-file list matches the PR file count and stays below GitHub's 3,000-file API cap. The PR does not change the workflow, gate code, its imported Python modules, or other protected paths. This includes `scripts/lib/artifact_io.py`, `eval_integrity.py`, `eval_signing.py`, `eval_trace.py`, `config.py`, and the package paths that could replace those imports.
 - The diff is present and below the byte limit.
 - The PR targets `main`. Before a passing status, the workflow reads all open PRs that target `main`. It refuses a shared head SHA. A PR that targets another branch cannot post a passing status.
 
-The workflow runs code from `main`. It reads PR files and comments as data. It never checks out the PR head or runs a command from an eval comment. It skips closed PRs. It reads the owner comments and PR head again just before it posts a passing status. One concurrency group prevents runs of this workflow from posting statuses at the same time. GitHub does not guarantee the order of queued runs. A queue can overflow and cancel a waiting run. Comment changes trigger a new check. An hourly run checks open PRs again if GitHub misses an event. Each run checks the evidence, then skips the status write if the latest Actions bot status has the same state and description. This preserves GitHub's [1,000-status limit per SHA and context](https://docs.github.com/en/rest/commits/statuses#create-a-commit-status). At 900 statuses, the workflow retires the SHA with a final error status. Push a new commit to restart the gate. If a SHA already has 1,000 statuses and its latest status passes, GitHub will reject the correction; move the PR head and inspect the failed run.
+The workflow runs code from `main`. It reads PR files and comments as data. It
+never checks out the PR head or runs a command from an eval comment. It skips
+closed PRs. Just before posting a passing status, it reads the owner comments
+and PR head again.
 
-**Trust limit:** This is a structure and consistency check. A passing status does not prove that the repository owner ran the commands or used an independent reviewer. The owner can change either comment. A comment can also change after the final read and before the status post. A newly opened PR can briefly inherit an earlier passing status at the same SHA, before its event runs. The next event or hourly run can correct that status, but there is a delay. If GitHub rejects the new status, the workflow cannot replace an old success. Inspect the failed run and status history. Another trusted workflow with `statuses:write` could post the same context; the app source rule cannot identify one workflow.
+One concurrency group prevents this workflow from posting statuses at the
+same time. GitHub does not guarantee the order of queued runs. A queue can
+overflow and cancel a waiting run. Comment changes trigger a new check. An
+hourly run checks open PRs again if GitHub misses an event.
+
+After checking the evidence, the workflow skips the status write if the latest
+Actions bot status already has the same state and description. This preserves
+GitHub's [1,000-status limit per SHA and context](https://docs.github.com/en/rest/commits/statuses#create-a-commit-status).
+At 900 statuses, the workflow retires the SHA with a final error status. Push
+a new commit to restart the gate. If a SHA already has 1,000 statuses and its
+latest status passes, GitHub will reject a correction. Move the PR head and
+inspect the failed run.
+
+**Trust limit:** This is a structure and consistency check. A passing status
+does not prove that the repository owner ran the commands or used an independent
+reviewer. The owner can change either comment. A comment can also change after
+the final read and before the status post.
+
+A newly opened PR can briefly inherit an earlier passing status at the same
+SHA before its event runs. The next event or hourly run can correct that
+status, but there is a delay. If GitHub rejects the new status, the workflow
+cannot replace an old success. Inspect the failed run and status history.
+Another trusted workflow with `statuses:write` could post the same context;
+the app source rule cannot identify one workflow.
 
 ## Turn on the gate
 

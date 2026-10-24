@@ -1,10 +1,14 @@
 # Runbook: hook and trace observability
 
-Trace rows are NON-AUTHORITATIVE: fail-open, append-only, one `event_id` per event, written by
-`hooks/scripts/lib/trace_row.py` to `<agentic-loop dir>/<session_id>/trace.jsonl` (the same per-session directory
-`crack_on_gate.py` uses, with or without a loop). Rows hold `schema_version`, `event_id`, `session_id`, `loop_id`
-(null outside a loop), `ts`, `command`, `outcome`, `reason_code` and sha256-hashed `inputs`. No gate decision
-reads them. Counters dedupe by `event_id`, skip torn lines, and key tallies as `command/outcome/reason_code`.
+Trace rows are NON-AUTHORITATIVE. They fail open and append one `event_id` per
+event. `hooks/scripts/lib/trace_row.py` writes them to
+`<agentic-loop dir>/<session_id>/trace.jsonl`. This is the same per-session
+directory that `crack_on_gate.py` uses, with or without a loop.
+
+Rows hold `schema_version`, `event_id`, `session_id`, `loop_id` (null outside a
+loop), `ts`, `command`, `outcome`, `reason_code`, and sha256-hashed `inputs`. No
+gate reads them to make a decision. Counters dedupe by `event_id`, skip torn
+lines, and tally by `command/outcome/reason_code`.
 
 Query every entry below with:
 

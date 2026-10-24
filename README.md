@@ -6,12 +6,12 @@ agents, and hooks; neither dispatches to the other. They provide:
 
 - **Workflow** — the `prep → push → merge → wiki` command chain plus the
   agentic-loop, planning-sequence, premortem, and handoff skills.
-- **Guardrails** — a self-checking discipline loop: Claude labels claims
-  (verified)/(inferred), is nudged at stop by advisory lints (never a block) to
-  add the `## Did Not Verify` section and resolve it, and is gated on destructive bash and
-  failing project tests.
-- **Integrity gate** — A three-layer evidence check (local gate, root-owned attestor,
-  GitHub ruleset) that blocks stale, missing, or malformed review/eval evidence.
+- **Guardrails** — Claude labels claims (verified)/(inferred). Advisory Stop
+  lints prompt Claude to add and resolve the `## Did Not Verify` section; they
+  never block. Gates block destructive Bash commands and failing project tests.
+- **Integrity gate** — Local checks, a trusted GitHub Actions attestor, and a
+  GitHub rule check review and eval evidence for the exact PR head. The workflow
+  uses GitHub's built-in token; it needs no second account or sudo.
   See [`docs/INTEGRITY-GATE.md`](./docs/INTEGRITY-GATE.md) for details.
 
 ## Install
@@ -34,10 +34,10 @@ plugin and installs its bundled agent definitions under `${CODEX_HOME:-~/.codex}
 Codex skips plugin hooks until you review and trust them. After installation,
 start a fresh Codex session, run `/hooks`, and review and trust the Coderails hooks.
 
-Owned shell entrypoints have been replaced by Python commands. Both providers
-accept graph schema 3 only and share one pure semantic source, materialized
-into independent installations. Dispatch, transcript evidence, and state locks
-remain provider-local. See [INSTALLATION.md](./INSTALLATION.md) before upgrading
+Python commands replaced Coderails-owned shell entrypoints. Both providers
+accept only graph schema 3. They share one source for pure graph semantics,
+copied into each installation. Each provider handles its own dispatch,
+transcript evidence, and state locks. See [INSTALLATION.md](./INSTALLATION.md) before upgrading
 an installation with older commands or loop state.
 
 Per project, run once: Claude Code users run `/coderails:init`; Codex users run

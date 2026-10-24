@@ -24,7 +24,15 @@ The orchestrator handles both ends: Phase 2 (plan-level wiki read before coding 
 
 **Delivery is repo-specific.** If `main` is ruleset-protected, the wiki agent must deliver via a branch + PR off freshly-fetched `origin/main`, merged like any other change. Only where a repo *deliberately* permits direct wiki commits (e.g. a wiki dir gated behind a bypass env var) is a direct push acceptable — and even then it must be verified to have landed.
 
-**Then verify, after `git fetch origin`:** confirm the content is on `origin/main` via the wiki PR's `mergedAt` or `git show origin/main:<wiki-file>`. Do **not** confirm a merge with `git merge-base --is-ancestor <agent-sha> origin/main` — a squash-merge rewrites the SHA, so the agent's commit is never an ancestor even when its content landed (`--is-ancestor` is the right probe only for *detecting* an unpushed commit before merge). A committed-but-unpushed SHA is a textbook false-success; the "committed" ping is a claim, not evidence (Phase 12).
+**Then verify delivery.** Run `git fetch origin`. Check the wiki PR's
+`mergedAt` or read `git show origin/main:<wiki-file>` to confirm that the
+content reached `origin/main`.
+
+Do **not** use `git merge-base --is-ancestor <agent-sha> origin/main` to confirm
+a merge. A squash merge rewrites the SHA, so the agent's commit is not an
+ancestor even when its content landed. Before merge, `--is-ancestor` can help
+detect an unpushed commit. A "committed" message alone is a claim, not Phase
+12 evidence of delivery.
 
 **Docs-drift check — run `/sync-docs` at the loop boundary**
 

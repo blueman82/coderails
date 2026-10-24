@@ -1,9 +1,9 @@
 # Installing coderails
 
-Two independent plugins are installed from this clone: Claude Code at the
-root, and Codex under `packages/codex/`. Both provide workflow commands,
-planning/orchestration skills, and discipline hooks. `/push` and `/merge`
-invoke GitHub's `gh` CLI.
+This clone installs two independent plugins: Claude Code at the root and Codex
+under `packages/codex/`. Both provide workflow commands, planning and
+orchestration skills, and discipline hooks. `/push` and `/merge` use GitHub's
+`gh` CLI.
 
 ## Requirements
 
@@ -29,14 +29,14 @@ This registers `coderails-codex@coderails` and installs the bundled native
 agent definitions under `${CODEX_HOME:-~/.codex}/agents`. It refuses unrelated
 agent-name collisions and backs up changed managed definitions. Start a fresh
 Codex session, run `/hooks`, and review and trust the Coderails hooks. Initialize
-each project with `$coderails-codex:init`. The memory-target and integrity-gate
-installer flags apply only to Claude.
+each project with `$coderails-codex:init`. The memory-target flag applies only
+to Claude. The integrity-gate setup prompt is available for both providers.
 
-Both providers use graph schema 3, with provider-local dispatch, evidence and
-locks. The shared pure graph semantics are materialized into each installation.
-Retired `.sh` entrypoints and schema-2 graph readers are not installed; invoke
-the current Python commands shown here. Existing schema-2 loop state must not
-be passed to the current graph helpers.
+Both providers use graph schema 3. Each provider handles its own dispatch,
+evidence, and locks. The installer copies the shared pure graph semantics into
+each provider. It does not install retired `.sh` entrypoints or schema-2 graph
+readers. Use the current Python commands shown here. Do not pass existing
+schema-2 loop state to the current graph helpers.
 
 ## Migrating from the old separate Claude plugins
 
@@ -96,21 +96,26 @@ It does everything that has to happen outside Claude Code:
 - seeds four feedback memories (won't overwrite)
 - aligns Python script permissions with their git index mode (tracked executables get `+x`, tracked import-only modules stay non-executable; untracked files default to `+x`)
 
-The installer also offers the optional integrity gate. It never runs `sudo`,
-reads a token, or grants privileged access to Claude, Codex, or any other
-agent. If you choose it, the installer prints one command for you to run
-yourself:
+The installer also offers the optional integrity gate. It does not run `sudo`,
+read a token, or give privileged access to either provider. It prints a setup
+command after you choose the gate. In this example, replace `123` with the
+number of your test PR:
 
 ```bash
-python3 scripts/integrity-gate/setup.py
+python3 scripts/integrity-gate/setup.py --candidate-pr 123 --apply
 ```
 
-That owner-run helper first uses your current `gh` login to create or verify an
-active `coderails-integrity-review` ruleset on `main`, with an explicit
-confirmation before creation. It then prompts for the dedicated GitHub
-machine-user token and installs the independent root-owned launchd validator.
-To select the prompt non-interactively, use `python3 install.py --integrity-gate`;
-to suppress it, use `python3 install.py --no-integrity-gate`.
+First, merge the trusted workflow and enable GitHub Actions. Allow the
+workflow's events through an active repository Actions policy. Then use a test
+PR to confirm that the workflow posts both passing and failing
+`integrity-review` statuses. The setup command checks that policy and the test
+PR's passing status before it creates the rule on `main`. It uses your current
+`gh` login for rule setup. The workflow uses GitHub's built-in `GITHUB_TOKEN`;
+you need no machine-user token, root-owned service, or sudo. See
+[INTEGRITY-GATE.md](docs/INTEGRITY-GATE.md) for the full order and migration
+steps. To select the prompt without interaction, use
+`python3 install.py --integrity-gate`. To suppress it, use
+`python3 install.py --no-integrity-gate`.
 
 **3. Restart Claude Code, then run in order:**
 

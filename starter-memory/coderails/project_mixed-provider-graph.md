@@ -13,7 +13,9 @@ type: project
 
 ## Goal
 
-Extend Coderails so selected graph stages can be reviewed independently by Claude and Codex, while preserving separate provider runtimes. A stage may proceed only after the configured cross-provider review policy is satisfied.
+The superseded goal was to let Claude and Codex review selected graph stages
+independently. Their runtimes would remain separate. A stage could proceed
+only after meeting the configured cross-provider review policy.
 
 ## Decisions
 

@@ -10,7 +10,10 @@ type: project
 
 ## Goal
 
-Investigate and fix PR #422's E1-E3 and related exact-head NO-GO findings, rerun the acceptance evals, and publish a new truthful SHA-bound review/eval result. The user explicitly prefers both investigation and repair; formally disclose any item that cannot be fixed within the PR contract instead of masking it.
+Investigate and fix PR #422's E1-E3 and related exact-head NO-GO findings.
+Rerun the acceptance evals and publish a truthful SHA-bound review/eval
+result. The user asked for both investigation and repair. Disclose any item
+that cannot be fixed within the PR contract.
 
 ## Decisions
 

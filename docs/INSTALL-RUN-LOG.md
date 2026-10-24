@@ -1,6 +1,10 @@
 # install.sh Verification Run — 2026-07-20
 
-> Historical verification record: this documents the July 2026 shell installer, not the current runtime. The Python cutover replaced `install.sh` with `install.py` and its provider-local installer modules. Current commands and dependencies are documented in [INSTALLATION.md](../INSTALLATION.md); the observations below are retained as dated evidence and must not be used as current installation instructions.
+> This historical record documents the July 2026 shell installer. The Python
+> cutover replaced `install.sh` with `install.py` and its provider-local
+> installer modules. [INSTALLATION.md](../INSTALLATION.md) lists current
+> commands and dependencies. The observations below are dated evidence. Do
+> not use them as current installation instructions.
 
 ## Summary
 

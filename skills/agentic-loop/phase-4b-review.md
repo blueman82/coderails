@@ -5,18 +5,30 @@ Detail-carrier for [SKILL.md](SKILL.md)'s Phase 4b. The main skill keeps the imp
 is the six-reviewer breakdown, the security/deploy-safety add-ons, the clean-break gate, and the
 worktree-teardown mechanics you consult while running it.
 
-**Graph dispatch boundary.** `U4b-review` and `U4b-merge-gate` deliberately have no direct target
-in `graph_dispatch.py`: each is a workflow gate with several required actions, not one agent job.
-the native graph CLI `plan` command therefore reports them as `unresolved:true`. Use the Skill-based review,
-artifact, eval, and merge sequence documented below.
+**Graph dispatch boundary.** `U4b-review` and `U4b-merge-gate` have no direct target
+in `graph_dispatch.py`. Each is a workflow gate that requires several actions.
+The native graph CLI `plan` command reports them as `unresolved:true`. Follow the
+Skill-based review, artifact, eval, and merge sequence below.
 
-When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill — passing the PR number as the argument — which itself fans out the six specialised reviewers plus a security pass. Do NOT hand-roll the reviewers as separate `Agent` or `Task` spawns; use the Skill invocation.
+After a `/workflow` agent pushes a PR and before merge, invoke the
+**`/pr-review-toolkit:review-pr <PR#>`** Skill with the PR number. It dispatches
+six specialised reviewers and a security pass. Use the Skill invocation. Do
+not spawn those reviewers yourself as separate `Agent` or `Task` calls.
 
-**Invoking `/pr-review-toolkit:review-pr <PR#>` with the PR number is REQUIRED to satisfy the merge gate, because `enforce_pr_workflow` only accepts the `review-pr` Skill (with the PR number in args) as merge evidence — a manually-spawned agent fanout leaves no evidence the gate recognises and the merge will block.** The gate also recognises `scripts/merge.py <PR#>` invocations (not just raw `gh pr merge`) as the same merge subcommand, so a hand-rolled review cannot merge through the wrapper script either.
+**Invoke `/pr-review-toolkit:review-pr <PR#>` with the PR number to satisfy the
+merge gate.** `enforce_pr_workflow` accepts only the `review-pr` Skill with the
+PR number in its args as review evidence. A manually spawned agent fanout
+leaves no evidence the gate recognises, so merge blocks. The gate checks
+`scripts/merge.py <PR#>` as well as raw `gh pr merge`. The wrapper script does
+not bypass this rule.
 
 **Review verification_level ladder.** All verification levels — regardless of the PR's own eval-artifact verification_level (a separate, orthogonal check) — invoke `/pr-review-toolkit:review-pr <PR#>` (the toolkit self-scales its reviewer fan-out by change shape) plus `/coderails:post-review <PR#>`. Only at verification_level 0 MAY the separate `/security-review` pass below be skipped, and only after checking the actual diff file list (`gh pr diff <PR#> --name-only` or `git diff origin/main...HEAD --name-only`): any path under `hooks/` or `scripts/`, or any change touching auth/exec/network-fetch code, FORCES the security pass regardless of declared verification_level. The override keys off the diff, never the self-assigned verification_level label. Verification level 1/2 PRs run the full Phase 4b unchanged, security pass included.
 
-**After `review-pr` completes and all applied findings (blocking and worthwhile) are committed and pushed, invoke `/coderails:post-review <PR#>`.** This posts the SHA-bound review artifact — a machine-marked GitHub comment — that the `/merge` gate requires before merging. Loop symmetry: this is the same artifact gate that `/coderails:workflow`'s Phase 3 wires in for non-loop use. Both paths produce the same artifact; `/merge` checks both the same way. Run `post-review` after findings are applied and the follow-up commit is pushed, so the artifact is stamped against the final head SHA.
+**After `review-pr` completes, apply the blocking and worthwhile findings.
+Commit and push them. Then invoke `/coderails:post-review <PR#>`.** It posts the
+SHA-bound review artifact as a machine-marked GitHub comment. The `/merge` gate
+requires that artifact for the final head SHA. `/coderails:workflow` Phase 3
+uses the same `post-review` artifact gate outside a loop.
 
 Before `/coderails:merge`, the loop must also produce a second, independent artifact: run `/coderails:task-evals` (scope: `pr`; docs-only/single-unit PRs that meet its verification_level-0 predicate get the lightweight exemption path) then `/coderails:post-evals`. `scripts/merge.py` hard-gates on this eval artifact separately from the review artifact above — same fail-closed posture, no config opt-out.
 

@@ -10,7 +10,10 @@ type: project
 
 ## Goal
 
-Migrate all Coderails-owned Bash runtime scripts for the root Claude plugin and `packages/codex` plugin to Python. Align both providers on one current graph contract while preserving provider-native dispatch, evidence binding, and safety gates.
+Migrate all Coderails-owned Bash runtime scripts to Python in both the root
+Claude plugin and `packages/codex`. Align both providers on one current graph
+contract.
+Preserve provider-native dispatch, evidence binding, and safety gates.
 
 ## Decisions
 

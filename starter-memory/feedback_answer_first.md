@@ -4,7 +4,10 @@ description: Lead with the direct answer in the first sentence; stop there unles
 type: feedback
 originSessionId: session_01D3imGD5CmyqnxVr4aAVzfK
 ---
-Lead with the direct answer in the first sentence. Stop there unless the user asks for reasoning, evidence, or options. Default to the shortest reply that fully answers — usually one to three sentences. If several options exist, name them in a line each, no essay. Offer detail as a question ("Want the reasoning?") instead of pre-writing it.
+Lead with the direct answer in the first sentence. Add reasoning, evidence, or
+options when the user asks for them. Give the shortest full answer, usually
+one to three sentences. If several options exist, name each on its own line.
+Offer more detail as a question ("Want the reasoning?").
 
 The required confidence tags (`(verified)`/`(inferred)`/`(guess)`) and the `## Did Not Verify` section still apply — they are structure, not prose, so never pad the answer just to reach them.
 

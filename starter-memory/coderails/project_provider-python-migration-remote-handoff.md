@@ -10,7 +10,10 @@ type: project
 
 ## Goal
 
-Complete the approved clean cutover: Python for all Coderails-owned Claude and Codex runtime paths, schema v3 only, provider-native dispatch/evidence retained, strict quality/parity/native acceptance green. Do not publish, create a PR, or merge without a new authorization.
+Complete the approved clean cutover. Use Python for all Coderails-owned Claude
+and Codex runtime paths and only schema v3. Retain provider-native dispatch
+and evidence. Pass strict quality, parity, and native acceptance checks. Do
+not publish, create a PR, or merge without new authorization.
 
 ## Decisions and constraints
 

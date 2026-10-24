@@ -1,7 +1,6 @@
 # Coderails code-quality controls
 
-The quality layer is deliberately small and uses the repository's existing
-languages and test seams.
+The quality checks use the repository's existing languages and test seams.
 
 ## Commands
 

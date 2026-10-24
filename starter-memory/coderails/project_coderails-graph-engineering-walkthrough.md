@@ -10,7 +10,10 @@ type: project
 
 ## Goal
 
-Teach the user the complete current Coderails graph-engineering loop until they can explain it confidently to another person. Cover the working examples first, then every relevant code path, document, hook, script, node, edge, wave, retry, evidence link, and every field in every JSON file created or consumed by the loop.
+Teach the user the Coderails graph-engineering loop until they can explain it
+to another person. Start with working examples. Then cover every relevant
+code path, document, hook, script, node, edge, wave, retry, evidence link, and
+field in each JSON file the loop creates or consumes.
 
 This is a teaching session, not an implementation session. Work from the current merged source and move one small concept at a time; never dump the whole architecture at once.
 

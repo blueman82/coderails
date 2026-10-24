@@ -5,7 +5,7 @@ description: 'Run the full three-stage planning sequence — Pre-Parade, Premort
 
 # Planning Sequence
 
-This skill runs three anticipatory planning techniques in sequence on a plan, idea, or decision. The goal is to surface structural gaps, execution failures, and adversarial weaknesses *before* commitment, while there's still time to act.
+Run three planning techniques in order on a plan, idea, or decision. Find missing conditions, likely failures, and weaknesses an opponent could exploit before making a commitment.
 
 The three techniques are:
 1. **Pre-Parade** — what does success actually require?

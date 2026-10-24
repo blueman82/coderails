@@ -1,6 +1,11 @@
 # Memory Index
 
-The Coderails implementation handoffs below are historical checkpoints, not current task authorization or live progress. The Python/schema-3 cutover supersedes their old paths and resume instructions; use the current owned session graph, [implementation plan](../../docs/superpowers/plans/2026-09-03-provider-graph-alignment-implementation.md), and [component reference](../../docs/REFERENCE.md). The standalone Factory record remains a separate project.
+The Coderails implementation handoffs below record historical checkpoints.
+They do not grant current task authority or show live progress. The
+Python/schema-3 cutover supersedes their old paths and resume instructions.
+Use the current owned session graph, [implementation plan](../../docs/superpowers/plans/2026-09-03-provider-graph-alignment-implementation.md),
+and [component reference](../../docs/REFERENCE.md). The standalone Factory
+record describes a separate project.
 
 - `project-stop-hook-human-escalation.md` — historical handoff to replace repeated raw Claude/Codex loop-stop prompts with one clear, deduplicated human escalation.
 

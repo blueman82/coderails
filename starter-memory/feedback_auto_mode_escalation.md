@@ -4,7 +4,9 @@ description: In auto mode, after 3 failed attempts at the same action or goal, s
 type: feedback
 originSessionId: 445479ca-d469-4749-b261-83394794c9a4
 ---
-In auto mode, after 3 failed attempts at the same action, command, or goal, stop retrying autonomously and escalate to the user via AskUserQuestion. Do not loop on retries indefinitely.
+In auto mode, count failed attempts at each action, command, or goal. After
+three failures at the same target, stop retrying and ask the user how to
+proceed via AskUserQuestion.
 
 **Why:** Auto mode's bias toward action becomes harmful when an action keeps failing — repeated retries waste tokens, hide root cause, and may mask a structural blocker (permission, missing config, broken assumption). The user established this rule on 2026-05-01 after observing retry-heavy behavior during the self-checking-loop build.
 

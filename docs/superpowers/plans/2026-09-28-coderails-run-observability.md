@@ -4,7 +4,11 @@
 
 **Goal:** Add a local, read-only session trace and a measured post-cutover baseline for native Claude and Codex runs.
 
-**Architecture:** Each independently installed provider dashboard discovers and parses its own native session, worker, graph, hook, and completion evidence. It builds an OpenTelemetry-aligned trace in a rebuildable local JSONL cache, then serves a paginated session timeline without changing authoritative files. Baseline metrics are reported with explicit cohort, denominators, exclusions, and evidence.
+**Architecture:** Each provider dashboard finds and parses its own native
+session, worker, graph, hook, and completion evidence. It builds an
+OpenTelemetry-aligned trace in a rebuildable local JSONL cache. It then serves
+a paginated session timeline without changing authoritative files. Baseline
+metrics name the cohort, denominators, exclusions, and evidence.
 
 **Tech Stack:** Existing TypeScript/Next.js dashboards, Node filesystem APIs, Vitest; no new runtime dependency, OTel SDK/collector, LangSmith integration, or remote exporter.
 
