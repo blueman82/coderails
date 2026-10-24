@@ -25,6 +25,29 @@ class SchemaRegression(unittest.TestCase):
             store.create(home)
             self.assertIsNone(memory_schema.check(home))
 
+    def test_migrated_v2_table_name_is_accepted(self) -> None:
+        """Accept SQLite's quoted table name after the v1-to-v2 table swap."""
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "store"
+            path = store.create(home)
+            with sqlite3.connect(path) as connection:
+                connection.execute("ALTER TABLE knowledge RENAME TO knowledge_v2")
+                connection.execute("ALTER TABLE knowledge_v2 RENAME TO knowledge")
+                ddl = connection.execute("SELECT sql FROM sqlite_master WHERE name = 'knowledge'").fetchone()[0]
+                self.assertIn('CREATE TABLE "knowledge"', ddl)
+            self.assertIsNone(memory_schema.check(home))
+
+    def test_migrated_v2_missing_index_is_incomplete(self) -> None:
+        """Keep the index check after SQLite quotes the knowledge name."""
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "store"
+            path = store.create(home)
+            with sqlite3.connect(path) as connection:
+                connection.execute("ALTER TABLE knowledge RENAME TO knowledge_v2")
+                connection.execute("ALTER TABLE knowledge_v2 RENAME TO knowledge")
+                connection.execute("DROP INDEX citation_target")
+            self.assertEqual(memory_schema.check(home), "muninn_schema_incomplete")
+
     def test_missing_write_columns_are_incomplete(self) -> None:
         """Reject stores whose missing columns break ordinary inserts."""
         cases = (

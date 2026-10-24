@@ -104,13 +104,15 @@ def store_path(data_home: str | Path | None = None) -> Path:
 
 
 def _canonical_sql(sql: str) -> str:
-    """Ignore comments, case, and whitespace outside SQL string literals."""
+    """Ignore formatting and SQLite's quotes around the knowledge identifier."""
+
+    def normalized(token: str) -> str:
+        if token.casefold() == '"knowledge"':
+            return "KNOWLEDGE"
+        return token if token.startswith(("'", '"')) else token.upper()
+
     tokens = (match.group() for match in SQL_TOKENS.finditer(sql))
-    return "".join(
-        token if token.startswith(("'", '"')) else token.upper()
-        for token in tokens
-        if not (token.isspace() or token.startswith(("/*", "--")))
-    )
+    return "".join(normalized(token) for token in tokens if not (token.isspace() or token.startswith(("/*", "--"))))
 
 
 def check(data_home: str | Path | None = None) -> str | None:
