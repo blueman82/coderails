@@ -20,7 +20,7 @@ from integrity_policy import gate_pr
 class GateEnvelopeTests(unittest.TestCase):
     """Check both sides of the protected source and input size boundaries."""
 
-    def gate(self, client: EvidenceFixture, maximum: int = 524288) -> int:
+    def gate(self, client: EvidenceFixture, maximum: int = 786432) -> int:
         """Run the real policy with a local evidence fixture."""
         with redirect_stdout(io.StringIO()):
             return gate_pr(client, 7, maximum, 0)
@@ -62,9 +62,9 @@ class GateEnvelopeTests(unittest.TestCase):
 
     def test_diff_boundary_is_inclusive_and_bounded(self) -> None:
         """The gate admits the limit and refuses the next byte."""
-        limit = 524288
+        limit = 786432
         prefix = "diff --git a/docs/safe.txt b/docs/safe.txt\n"
-        for size, state in ((limit, "success"), (limit + 1, "failure")):
+        for size, state in ((566762, "success"), (limit, "success"), (limit + 1, "failure")):
             with self.subTest(size=size):
                 client = EvidenceFixture()
                 client.diff = prefix + "x" * (size - len(prefix) - 1) + "\n"
@@ -73,7 +73,7 @@ class GateEnvelopeTests(unittest.TestCase):
 
     def test_raw_crlf_diff_boundary_through_transport(self) -> None:
         """Curl output keeps CRLF bytes through HTTP parsing and the gate."""
-        limit = 524288
+        limit = 786432
         prefix = b"diff --git a/docs/safe.txt b/docs/safe.txt\r\n"
         with tempfile.TemporaryDirectory() as directory:
             payload = Path(directory) / "response"
