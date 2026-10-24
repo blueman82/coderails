@@ -187,9 +187,20 @@ verdicts to the dashboard approval queue. **Queue-mode is mandatory.** The
 routine cannot create a skill in the session. Each proposal waits in the queue
 for the owner's Approve click; it is never built automatically.
 
-The routine's run note lives at `~/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md` and records `proposals_written: <N>` (count of queue entries actually written this run). The artifact gate checks for the completion marker `## [{date}] workflow-audit complete`, which the routine emits **only** if it finishes cleanly **and** `proposals_written == proposals_attempted` (no queue write failures). A week with zero proposals (`proposals_written: 0` with no failures) is a **successful run** — the marker is emitted and the gate passes. A crash, or a shortfall where some proposals failed to write, causes the marker to be omitted and the gate to fail.
+The run note is at
+`~/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md`.
+It records `proposals_written: <N>`, the number of queue entries written.
+The artifact gate checks for `## [{date}] workflow-audit complete`. The
+routine writes that marker only after a clean finish with
+`proposals_written == proposals_attempted`. A run with zero proposals
+and no write failures still gets the marker and passes. A crash or failed
+queue write omits the marker and fails the gate.
 
-The 8-day artifact-gate freshness window (`maxAgeSeconds: 691200`) provides catch-up grace for a run that fires late (e.g. the machine was asleep at the scheduled time) — a run inside that window still passes the gate. Read `proposals_written: 0` plainly: no repeated patterns reached the proposal threshold this week, and zero proposals is not a failure or a request to lower the threshold — it's the expected norm in a healthy workflow. Report it as a green, completed run just like any other passing gate.
+The artifact gate allows eight days of freshness
+(`maxAgeSeconds: 691200`). A late run can still pass within that window,
+such as after the machine wakes. `proposals_written: 0` means no pattern
+met the proposal threshold that week. It is a successful run, not a
+reason to lower the threshold. Report it as completed with a passing gate.
 
 ## `sync-docs-nightly`: self-merging documentation drift fixer
 

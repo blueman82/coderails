@@ -1,10 +1,10 @@
 # E3: authority objects (originally additive; now consumed by crack_on_gate, see the Superseded section)
 
-## What the two crack-on gates enforce today
+## What the two crack-on gates enforced before the cutover
 
-This section records the source read: `hooks/scripts/crack_on_gate.py` (88
-lines) and `hooks/scripts/crack_on_prose_gate.py` (212 lines). Reproduce with
-`sed -n 1,88p hooks/scripts/crack_on_gate.py; sed -n 1,60p hooks/scripts/crack_on_prose_gate.py`.
+This table records the source state before authority objects replaced the
+bare flag. The old `crack_on_prose_gate.py` was later deleted. The current
+tree cannot reproduce this historical read with the old file paths.
 
 | Piece | Event | What it does | Evidence |
 | --- | --- | --- | --- |
