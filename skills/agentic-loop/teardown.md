@@ -38,15 +38,48 @@ than an honest unscored list because it is more likely to be trusted uncriticall
 
 **The two core facts:**
 
-- **`LOOP-STOP` category counts, broken down by type** — the per-category counts of this loop's `LOOP-STOP` declarations (`progress.json` `loop_stop_counts`: `hard-stop`, `approval-gate`, `awaiting-input`, `complete`). HOOK-OWNED — the `loop_stall_guard` hook increments it on every consumed stop (a recorded `progress.json` `stops[]` row, else the legacy text declaration); `stops[]` is the model-written intent, `loop_stop_counts` is the hook-owned count of consumed stops. Read it as-is, do not compute or edit it yourself. Report the raw breakdown with no verdict attached. A high `awaiting-input` count is worth the human's attention, but this section states the count, not a judgement on it.
-- **Decisions absorbed** — a flat, unscored list of in-scope decisions the loop made autonomously without asking (e.g. a Phase 2.5 design-fork auto-adopted, a Phase 2.6 disposition defaulted to clean-break, a Phase 2.8 routing assignment set, a Phase 5 disconfirm-skip, a Phase 6 in-scope action taken without a check-in). No self-justification text per entry, no automated "this looks calibrated" stamp — just what was decided and where (phase/work-unit). COPIED VERBATIM from `progress.json`'s `decisions_absorbed` array, chronological (oldest first) — never reconstructed from conversation memory, which is exactly the kind of after-the-fact self-report this phase exists to avoid.
+- **`LOOP-STOP` counts by category.** Report the `hard-stop`,
+  `approval-gate`, `awaiting-input`, and `complete` counts in
+  `progress.json.loop_stop_counts`. `loop_stall_guard` owns this field. It
+  increments a count for each consumed stop, from a `stops[]` row or a
+  legacy text declaration. `stops[]` records the model's intent; the count
+  records what the hook consumed. Read the counts as stored. Do not
+  calculate or edit them. Report them without a verdict. A high
+  `awaiting-input` count can draw the human's attention.
+- **Decisions absorbed.** Copy `progress.json.decisions_absorbed` verbatim
+  in oldest-first order. Report what was decided and the phase or work unit.
+  Include in-scope choices made without asking, such as Phase 2.5 design,
+  Phase 2.6 disposition, Phase 2.8 model routing, Phase 5 disconfirm skips,
+  and Phase 6 actions. Give no self-justification or automated score.
+  Do not rebuild the list from conversation memory.
 
 **Also report, unscored:**
 
 - **Artifacts produced** — PRs merged, deploys done, each with the verifying check (Phase 12), not the agent's claim.
-- **Loop cost** — report the per-model token and dated-USD breakdown from `retro.json`'s `cost` field to the human. Include the price age: "prices as of `<cost.prices_as_of>`, N days old". This is a report deliverable as well as a stored artifact. On every `complete` declaration, `loop_stall_guard` prints `retro.cost` verbatim via `systemMessage`. This mechanical report is like `check_verify_loop.py`'s enforcement of the CLAUDE.md DNV rule: it does not replace the prose obligation below. The cost reporter stays silent for a legacy retro without cost data and never blocks on a miner failure. The orchestrator must still assemble and write the field correctly. The price table (`hooks/scripts/lib/model_prices.json`) is HAND-MAINTAINED; no pricing API updates it. After `ALS_PRICE_STALE_DAYS` (14) days, the reporter asks a human to check the rates. It checks the date only. An old date does not prove that the rates are wrong.
-- **Disposition violations** — work-units where `clean-break` was recorded in `progress.json` but a shim/compat path shipped anyway (caught at the Phase 4b gate, or by the human afterward). Audit as a diff between the `progress.json` disposition record and the merged artifact. Critically, distinguish **"0 violations"** from **"no disposition record found"**: the latter is an **audit failure** — the record was not maintained — not a pass, otherwise the report reads "clean" when the record was simply absent. Separately, surface any `preserve-compat` unit whose `removal_ticket` is still **open at loop end** as a compat-debt drift signal, so deferred removals cannot silently rot.
-- **Loop-scope eval result** — graded via `post_evals.py grade-loop` (never hand-written into `evals.json`), the loop's final `evals.json` `result` (`GO`/`NO-GO`/a verification_level-0-exemption-with-justification), reported unscored, plus any `amendments` entries (post-freeze eval edits with recorded reasons). An amendment made after a grader verdict must carry its fresh re-grade (`regraded_by` recorded; `grade-loop` refuses otherwise): a verdict flipped by an orchestrator-written status is an audit failure, not a pass. **"No `evals.json` record found" for a ≥1-work-unit loop is an audit failure, not a pass** — distinguish it from a genuine `GO` the same way "0 disposition violations" is distinguished from "no disposition record found".
+- **Loop cost.** Report the token and dated USD totals by model from
+  `retro.json.cost`. Include "prices as of `<cost.prices_as_of>`, N days
+  old". `loop_stall_guard` also prints `retro.cost` through
+  `systemMessage` on each `complete` declaration. That output does not
+  replace this report. The reporter is silent for an old retro without
+  cost data and does not block if mining fails. The orchestrator still
+  writes the field. `hooks/scripts/lib/model_prices.json` is maintained by
+  hand. No pricing API updates it. After `ALS_PRICE_STALE_DAYS` (14) days,
+  the reporter asks a human to check the rates. It checks age only; an old
+  date does not prove the rates are wrong.
+- **Disposition violations.** Compare each `clean-break` decision in
+  `progress.json` with the merged code. Report any shipped shim or
+  compatibility path. Phase 4b or the human can find it. Distinguish
+  **"0 violations"** from **"no disposition record found"**. A missing
+  record is an audit failure. Also list each `preserve-compat` unit whose
+  `removal_ticket` remains open at loop end.
+- **Loop eval result.** Run `post_evals.py grade-loop` to compute the final
+  `evals.json.result`. Do not write it by hand. Report `GO`, `NO-GO`, or a
+  justified level-0 exemption without a score. Include recorded
+  `amendments` and their reasons. An amendment after a grader verdict needs
+  a fresh `regraded_by` value; `grade-loop` rejects its absence. A status
+  written by the orchestrator to reverse a verdict is an audit failure.
+  For a loop with at least one work unit, a missing `evals.json` is also an
+  audit failure. Do not report it as a passing result.
 
 ## Step 1 — Run every `proof.json` cmd
 
@@ -125,7 +158,10 @@ At the repo-key dir. Match this loop's retro failure modes against existing entr
 - A **match** resets that entry's `loops_since_recurrence` to 0, updates `last_recurred`, and appends evidence.
 - A genuinely **new** failure mode appends a new entry (fields: `id`, `created`, `failure_mode`, `lesson`, `evidence`, `last_recurred`, `loops_since_recurrence`).
 - **Increment** `loops_since_recurrence` on every non-matched surviving entry.
-- When an entry's `loops_since_recurrence` reaches **K=5** (a constant stated here, not config), MOVE it to `standing-orders-decayed.md` — a tombstone, **never a delete**; the graduation predicate's "one clean decay" is checked against this file.
+- When `loops_since_recurrence` reaches **K=5**, move the entry to
+  `standing-orders-decayed.md`. K is fixed here; it is not config. Keep the
+  entry as a tombstone. Do not delete it. The graduation check looks for
+  one clean decay in this file.
 
 This step is additive-or-recurrence-only: no metric-based removal anywhere.
 
@@ -135,14 +171,21 @@ each new or recurred lesson as a record with
 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" add --type lesson --scope loop --loop <session_id> --run <session_id> --claim "<lesson>" --cite <muninn ref> --quote "<verbatim quote>"`
 (an uncited write is refused with reason `uncited_write`), then regenerate the view with
 `... memory_adapter.py render --standing-orders --loop <session_id> --write <repo-key dir>/standing-orders-generated.md`
-(it only overwrites a file whose first line is the generator marker, never the hand-written `standing-orders.md`). Any
-nonzero exit prints `{"degraded": "<reason_code>"}` and a trace row is appended; keep the manual edits above as the only
-path. Runbook: `docs/RUNBOOK.md`, "Memory silently using Markdown".
+(it only overwrites a file whose first line is the generator marker, never
+the hand-written `standing-orders.md`). A `Degraded` result makes the CLI
+exit 3 and print `{"degraded": "<reason_code>"}`. Use that JSON reason and
+exit code to choose the manual edits above. Some failure paths attempt to
+append a trace row. Trace writes can fail open, and `probe` degradation
+does not attempt one. Trace counters can therefore be partial. Runbook:
+`docs/RUNBOOK.md`, "Memory silently using Markdown".
 
 ## Steps 4 and 5
 
 4. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
-5. **Only then** run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session_id>` to validate the current native graph and identity-bound artifacts. Then run `loop_state_common.py mark-complete <cwd> <session_id>` to
+5. **Only then** run
+   `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session_id>`.
+   This checks the current graph and identity-bound artifacts. Then run
+   `loop_state_common.py mark-complete <cwd> <session_id>` to
    set `progress.json` `status: "complete"` and stamp `completed_marker` together — e.g.
    `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete "$PWD" "<session_id>"`.
    Never write `status: "complete"` via a bare atomic update — that leaves
