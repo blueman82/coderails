@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Create, inspect, narrow and revoke a session's authority object.
+"""Grant, inspect, narrow and revoke a session's authority object.
 
+`grant` is the only way to mint one (the phrase 'crack on' no longer does).
 crack_on_gate consumes it; per-action approvals live in action_receipt_cli.py.
 """
 
@@ -8,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -58,9 +60,9 @@ def items(values: list[str] | None) -> list[str]:
     return list(dict.fromkeys(part for part in flat if part))
 
 
-def create(args: argparse.Namespace, path: Path) -> int:
-    """Write a new object; never overwrites, and merge approval is always required."""
-    if path.exists():
+def grant(args: argparse.Namespace, path: Path) -> int:
+    """Write a typed-grant object (granted_by=command); a live one is never replaced, an expired or torn one is."""
+    if read_authority(args.session) is not None:
         return refuse(
             "authority_refused_exists", "an authority object already exists for this session", args.session, args.loop
         )
@@ -75,13 +77,15 @@ def create(args: argparse.Namespace, path: Path) -> int:
         "expires_at": (now + timedelta(hours=args.expires_in_hours)).isoformat(timespec="seconds"),
         "revocable": not args.not_revocable,
         "approval_required_for": list(dict.fromkeys([MERGE, *items(args.approval_for)])),
+        "granted_by": "command",
     }
     problems = validate(obj, now)
     if problems:
         return refuse("authority_refused_create_invalid", ",".join(problems), args.session, args.loop)
     if not write_authority(path, obj):
         return refuse("authority_refused_write_failed", "write failed", args.session, args.loop)
-    append_row("authority", "created", "authority_created", args.session, obj["loop_id"])
+    clear_legacy_flags(args.session)
+    append_row("authority", "granted", "authority_granted_command", args.session, obj["loop_id"])
     print(json.dumps(obj, indent=2, sort_keys=True))
     return 0
 
@@ -129,10 +133,16 @@ def main(argv: list[str] | None = None) -> int:
     """Dispatch one subcommand for one exact session id."""
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("create", "inspect", "narrow", "revoke"):
+    for name in ("grant", "create", "inspect", "narrow", "revoke"):  # create: one-release alias of grant
         command = sub.add_parser(name)
-        command.add_argument("--session", required=True, help="exact session id (never sanitised)")
-        if name == "create":
+        minting = name in ("grant", "create")
+        command.add_argument(
+            "--session",
+            required=not minting,
+            default=None,
+            help="exact session id (never sanitised)" + ("; default $CLAUDE_CODE_SESSION_ID" if minting else ""),
+        )
+        if minting:
             command.add_argument("--loop", default=None)
             command.add_argument("--scope", action="append", default=[])
             command.add_argument("--denied", action="append", default=[])
@@ -144,11 +154,13 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--scope", action="append", default=None)
             command.add_argument("--max-prs", type=int, default=None)
     args = parser.parse_args(argv)
+    if args.command in ("grant", "create"):
+        args.session = args.session or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
     path = authority_path(args.session)
     if path is None:
-        return refuse("authority_refused_unsafe_session", "session id must be nonempty and contain no '/' or '..'")
-    if args.command == "create":
-        return create(args, path)
+        return refuse("authority_refused_unsafe_session", "session id must be nonempty, without '/', '..', '$', '{'")
+    if args.command in ("grant", "create"):
+        return grant(args, path)
     current = read_authority(args.session)
     if args.command == "inspect":
         print(json.dumps(current, indent=2, sort_keys=True))

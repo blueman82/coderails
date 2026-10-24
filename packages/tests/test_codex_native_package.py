@@ -26,7 +26,7 @@ class NativePackageTests(unittest.TestCase):
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue(all(isinstance(value, str) and value for value in manifest.values()))
         directories = sorted(path for path in (PACKAGE / "skills").iterdir() if path.is_dir())
-        self.assertEqual(len(directories), 37)
+        self.assertEqual(len(directories), 38)
         for directory in directories:
             text = (directory / "SKILL.md").read_text(encoding="utf-8")
             match = re.match(r"^---\n(.*?)\n---(?:\n|$)", text, re.DOTALL)
@@ -37,6 +37,7 @@ class NativePackageTests(unittest.TestCase):
             self.assertRegex(match.group(1), r"(?m)^description:\s*\S.+$")
         for name in (
             "assumptions",
+            "authorize",
             "disconfirm",
             "init",
             "merge",
