@@ -266,7 +266,7 @@ def cmd_render(a: argparse.Namespace, repo_dir: Path) -> Result:
 
 
 def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
-    """Load the hand-written file into the ledger (legacy_uncited), then move it aside."""
+    """Load one hand-written snapshot and archive its bytes without moving the source."""
     src = Path(a.file) if a.file else repo_dir / "standing-orders.md"
     if src.is_symlink() or src.resolve().parent != repo_dir.resolve():
         return _refuse("legacy_parse_error", entry=str(src))
@@ -288,7 +288,7 @@ def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
         if src.is_symlink() or src.read_bytes() != raw:
             raise ValueError("legacy_parse_error")
-        return None, legacy_import.apply(repo_dir, src, raw, text, parsed, ledger)
+        return None, legacy_import.apply(repo_dir, raw, text, parsed, ledger)
 
     payload, rc = update(repo_dir, change)
     if not rc:

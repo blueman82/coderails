@@ -259,9 +259,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   refused with `order_chain_broken` naming the order.
 - Fix: read the reason in the table above. For `no_user_cite` / `legacy_uncited` run
   `orders.py --dir <repo-key dir> cite <id> --quote "<verbatim words the owner typed>"` from the owning session. To
-  adopt the old hand-written file run `orders.py import-legacy` once (it moves the original to
-  `standing-orders.legacy.md`, never deletes it), then `orders.py render`.
-  This importer is for one-time cutover only; retire it after conversion and use typed orders thereafter.
+  adopt the old hand-written file run `orders.py import-legacy`. It archives an exact byte copy under the next free
+  `standing-orders.legacy*.md` name and retains the source (`archived_to`, `source_retained: true`). Check the ledger
+  and archive; retire the hand-written `standing-orders.md` before `orders.py render`. Use typed orders thereafter.
 - Apply contract: use `--dir <repo-key dir> --session <provider session>` with the separate logical `--loop` copied
   from `<repo-key dir>/<session>/progress.json`. Stage `record` inputs before completion. The native `graph.py
   complete` command prepares orders before the progress lock, rechecks the prepared source under that lock, saves
@@ -321,11 +321,11 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   promotion and views exclude them. Owner-cited lesson text is legitimate typed memory; advisory transcript
   observations remain metadata only. Failed reads exit 3, with no ledger-text fallback. A fresh cited claim can
   supersede prior text. Legacy import retains full source text and first-seen provenance, preserves decayed counters,
-  and refuses duplicate/incomplete/colliding entries or an external source path without moving the original.
-- Legacy retry: after a saved ledger and failed source move, ordinary `import-legacy` resumes only an entirely equal
-  parsed cohort at one saved creation timestamp, excluding only seal fields from row comparison. It skips ledger save
-  and moves intact source to an unused bounded backup slot. Mixed/new/divergent rows refuse. This proves parsed-row
-  equivalence, not whole-source/preamble hash identity, own-attempt identity or a two-file atomic transaction.
+  and refuses incomplete/colliding entries or an external source path without changing the original.
+- Legacy retry: each row seals the SHA-256 of the exact source bytes. `import-legacy` skips a complete cohort only
+  when saved rows, timestamp and source hash match. It reuses only an exact archive, else publishes a new copy without
+  replacing an occupied name. Mixed or divergent rows refuse. Archive publication precedes ledger save. A failed or
+  uncertain save keeps source and archive; success requires a canonical ledger equal to the expected sealed rows.
 - Graduation still requires >=10 distinct completed source-bound retros, recurrence and decay. Schema2 records need
   complete typed fields and their genuine completed progress hash. Schema3 delegates to `retro_check.check`; an absent
   validator returns `order_retro_validator_unavailable`, rather than a known zero count. Both ledger and source hashes

@@ -95,12 +95,12 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
   update `completed_marker` and the complete Stop count; those bookkeeping changes do not revoke admission. A changed
   graph source or any D4 preparation, observation or ledger effect blocks the exception. This same-user receipt records
   a review; it cannot prove that an owner approved a new lesson. New loops need the full D4 completion lifecycle.
-- Legacy import preserves titles, counters including decay, full source text and first-seen provenance. Duplicate,
-  incomplete, malformed or colliding entries and foreign paths are refused without moving the source. The original
-  remains in a local backup. A retry after ledger save but failed source move resumes only when the entire parsed
-  cohort equals every saved typed row, excluding only seal fields, at one common saved creation timestamp. It skips
-  ledger save and moves intact source to an unused backup. This is parsed-row equivalence, not whole-source/preamble
-  hash identity or atomicity across the ledger and source move; no live migration is claimed by fixture tests.
+- Legacy import preserves titles, counters including decay, full source text and first-seen provenance. Incomplete,
+  malformed or colliding entries and foreign paths refuse without changing the source. It publishes a separate
+  exact-byte archive before ledger save and retains the original. Each imported row seals the source SHA-256.
+  A complete-cohort retry requires equal rows, one saved creation timestamp, and the same source hash. It skips
+  ledger save and reuses only an exact-byte archive. This does not make archive and ledger one atomic transaction;
+  a failed or uncertain save keeps the archive for inspection. Fixture tests do not claim a live migration.
 
 Runbook: `docs/RUNBOOK.md` "Standing order stored without a cite, or a lesson missing from dispatch". Measurement:
 `docs/typed-records-measurement.md`. Related: `docs/decisions/2026-10-05-memory-authoritative.md`.

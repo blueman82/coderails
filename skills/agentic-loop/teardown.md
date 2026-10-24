@@ -166,7 +166,8 @@ degradation. The cite must anchor in a user prompt (`--quote`): with none, the s
 `$O cite <id> --quote "<owner's words>"` attaches it later. Exit 3 prints `{"muninn": {... "reason_code": ...}}`:
 **report that reason code in the retro; never skip it silently and never write the lesson to Markdown instead.**
 `memory.backend: off` (reason `memory_backend_off`, exit 0) is the only explicit opt-out. A first-time adoption of an old
-hand-written file is `$O import-legacy` (the original is moved to `standing-orders.legacy.md`, not deleted). Runbook:
+hand-written file is `$O import-legacy` (it archives a byte copy and retains the original). Verify the archive and
+ledger, then retire the hand-written source before generating `standing-orders.md`. Runbook:
 `docs/RUNBOOK.md`, "Standing order stored without a cite"; decision records:
 `docs/decisions/2026-10-05-memory-authoritative.md`, `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 
