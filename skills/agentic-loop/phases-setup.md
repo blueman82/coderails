@@ -21,20 +21,28 @@ Stop and report the exact failing command if any of these commands fails (for ex
 
 Before Phase -1 — before anything else — create the loop's durable state with the controller command. This guarantees `progress.json` exists before the first stop, so the `loop_state_guard` Stop hook never trips a compliant loop; the block degrades to a backstop for a skipped `start`. Never write or edit `progress.json` by hand for this.
 
-**Resolve the path — never compute it yourself.** Run the path helper; it keys the path to the repo's `git --git-common-dir` (falling back to the raw cwd), so a mid-loop worktree hop resolves to the SAME path:
+**Resolve the plugin root, then the state path.** Use `${CLAUDE_PLUGIN_ROOT}`
+when it is set. Otherwise, use the plugin root in this session's rendered
+context: the current skill's "Base directory for this skill:" line points to
+`skills/agentic-loop`, two directories below the root. Verify that the
+resolved root contains `hooks/scripts/lib/agentic_loop_path.py` and
+`skills/agentic-loop/scripts/graph.py`. If no rendered path is available, or
+either script is missing, stop and report the resolution failure. Do not wait
+for a Stop hook to supply the plugin root. Set `PLUGIN_ROOT` to that verified
+absolute path in each Bash call that uses it, or put the absolute path in the
+command. Do not use the invoking repository as the plugin root.
 
-> `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"`
-
-If `${CLAUDE_PLUGIN_ROOT}` is not set, do **not** guess the path. Proceed without `start`. The `loop_state_guard`
-hook blocks once and gives you the exact path. Put the authorising prompt, verbatim, in a file. Then run
-`python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<unique non-blank id>" --prompt-file "$PROMPT_FILE"`.
+Run `python3 "${PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"`. The
+helper keys the state path to the repo's `git --git-common-dir` (or raw cwd),
+so a worktree hop resolves to the same state. Put the owner's exact prompt
+in a file. Then run `python3 "${PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<unique non-blank id>" --prompt-file "$PROMPT_FILE"`.
 
 `start` writes schema-v3 state atomically with `in-progress` status, revision 1 and an empty graph. A repeat with
 the same loop id is a no-op. A completed loop is re-armed: the command carries `completed_marker` forward and
 drops the prior loop's `loop_stop_counts`. If an unfinished loop already owns the session, the command refuses with
 a `[reason_code=...]`. Resume that loop instead.
 
-Then register every work unit with `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" add-unit "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<same id>" --unit N [--depends-on M ...] [--join] [--manifest GLOB ...]`. It adds the work unit, its `U3[N]` node, the dependency edges and, with `--join`, the `J12-all-units` input in one locked write. `--manifest` (repeatable) records the globs the unit may touch as `unit.manifest`, which `scripts/diff_manifest.py --progress ... --unit N` compares with the diff. Never edit `progress.json` by hand for either step.
+Then register every work unit with `python3 "${PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" add-unit "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<same id>" --unit N [--depends-on M ...] [--join] [--manifest GLOB ...]`. It adds the work unit, its `U3[N]` node, the dependency edges and, with `--join`, the `J12-all-units` input in one locked write. `--manifest` (repeatable) records the globs the unit may touch as `unit.manifest`, which `scripts/diff_manifest.py --progress ... --unit N` compares with the diff. Never edit `progress.json` by hand for either step.
 
 The graph starts empty: running `start` is an orchestrator action, not a fabricated native worker dispatch. Do not create a running `S-2` wave or insert synthetic completion evidence for it.
 
@@ -59,9 +67,9 @@ It surfaces ambiguities, fills gaps with grounded assumptions, and produces a re
 owner quote used by decisions, evals, and proofs. Do not edit `progress.json`
 by hand or replace the owner quote with model-written text.
 
-Compare the rewrite with the original prompt. A compatible rewrite can make
-steps and success checks clearer, but it cannot add authority or change the
-requested goal. If it changes scope, the original loop has no supported
+Compare the rewrite with the original prompt. It may clarify steps and
+success checks. It must keep the owner's goal and authority limits. If it
+changes scope, the original loop has no supported
 post-start operation to replace its authorisation oracle. Stop this loop with
 a recorded reason and start a new authorised loop from the owner's exact new
 request in a new session. Record the stop with `graph.py stop` and preserve
@@ -287,7 +295,7 @@ Each `cmd` must be a single self-contained shell command, runnable verbatim as i
 For a loop with no executable surface, leave `proof.json` absent. First record the reason with `record-decision` in `decisions_absorbed`. Get the current revision from `inspect`. Then run:
 
 ```bash
-python3 "$CLAUDE_PLUGIN_ROOT/skills/agentic-loop/scripts/graph.py" \
+python3 "$PLUGIN_ROOT/skills/agentic-loop/scripts/graph.py" \
   record-proof-disposition "$STATE" --session "$SESSION" \
   --loop-id "$LOOP" --revision "$REVISION" \
   --disposition none --reason "no executable surface"
