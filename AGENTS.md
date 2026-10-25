@@ -6,6 +6,13 @@ Wiki vault: `../coderails-wiki` relative to the plugin, or wherever `/wiki-init`
 
 For any coderails question, lookup, or context, use the `wiki-query` skill; for staleness or health checks, use `wiki-lint`. Prefer both over grepping source or the vault directly — the wiki holds compounded understanding, not just facts derivable from re-reading code.
 
+## Markdown writing
+
+For every new or edited Markdown file, use short, active-voice sentences in
+plain English. Define a necessary technical term on first use. Keep exact
+command, file, role, and state identifiers. State the action, condition, and
+result. Omit boilerplate. Preserve the meaning and date of historical records.
+
 ## Current integrity-gate replacement
 
 The semantic judge is replaced by a mechanical `integrity-review` attestor in a trusted GitHub Actions workflow. It checks SHA-bound review/eval evidence, command/eval structure, policy paths, provenance fields, and bounded diff input. It never runs PR code or comment commands and never asks an LLM for a verdict. Authoritative: `docs/INTEGRITY-GATE.md`, `.github/workflows/integrity-review.yml`, `scripts/integrity-gate/integrity_actions.py`, and `integrity_review.enabled` config. The GitHub rule must be activated separately; source code alone does not make it live.

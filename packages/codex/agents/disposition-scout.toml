@@ -22,7 +22,7 @@ fact that would flip it. Do not write `progress.json` or any other file.
 Output:
 
 ```text
-## Disposition recommendation: <unit>
+## Compatibility decision: <unit>
 
 **Recommendation:** clean-break | preserve-compat
 **Evidence:** <file:line-backed reason>
