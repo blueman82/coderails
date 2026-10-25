@@ -298,33 +298,39 @@ class CliTests(ConfigCase):
                     data = json.loads(result.stdout)
                     self.assertEqual((data["valid"], data["findings"][0]["key"]), (False, key))
                     self.assertEqual(data["findings"][0]["code"], "config_bad_type")
-            quoted_null = subprocess.run(
-                [sys.executable, str(provider / "scripts/lib/config.py"), "resolve-config", "--json"],
-                cwd=self.repo("wiki_path: 'null'\n"),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(quoted_null.returncode, 0, quoted_null.stderr)
-            self.assertEqual(json.loads(quoted_null.stdout)["values"]["wiki_path"], "null")
-            quoted_bool = subprocess.run(
-                [sys.executable, str(provider / "scripts/lib/config.py"), "resolve-config", "--json"],
-                cwd=self.repo('wiki_path: "true"\n'),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(quoted_bool.returncode, 0, quoted_bool.stderr)
-            self.assertEqual(json.loads(quoted_bool.stdout)["values"]["wiki_path"], "true")
-            quoted_number = subprocess.run(
-                [sys.executable, str(provider / "scripts/lib/config.py"), "resolve-config", "--json"],
-                cwd=self.repo('wiki_path: "3.14"\n'),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(quoted_number.returncode, 0, quoted_number.stderr)
-            self.assertEqual(json.loads(quoted_number.stdout)["values"]["wiki_path"], "3.14")
+            for value in ("null", "true", "3.14"):
+                with self.subTest(provider=provider.name, quoted=value):
+                    quoted = subprocess.run(
+                        [sys.executable, str(provider / "scripts/lib/config.py"), "resolve-config", "--json"],
+                        cwd=self.repo(f'wiki_path: "{value}"\n'),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(quoted.returncode, 0, quoted.stderr)
+                    self.assertEqual(json.loads(quoted.stdout)["values"]["wiki_path"], value)
+
+    def test_json_rejects_mixed_scalar_list_and_mapping_shapes(self) -> None:
+        """Malformed child shapes cannot turn off a Boolean control or eval signing."""
+        cases = (
+            "evals: false\n  require_signatures: false\n",
+            "sandbox_workers: false\n  - junk\n",
+            "evals:\n  require_signatures: false\n  - junk\n",
+        )
+        for provider in (ROOT, CODEX):
+            for source in cases:
+                with self.subTest(provider=provider.name, source=source):
+                    result = subprocess.run(
+                        [sys.executable, str(provider / "scripts/lib/config.py"), "resolve-config", "--json"],
+                        cwd=self.repo(source),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    data = json.loads(result.stdout)
+                    self.assertFalse(data["valid"])
+                    self.assertIn("config_unparseable_line", [finding["code"] for finding in data["findings"]])
 
     def test_json_unreadable_path_never_raises(self) -> None:
         """A discovered path that cannot be read yields JSON with a config_unreadable finding, not a traceback."""

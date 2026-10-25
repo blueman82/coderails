@@ -151,8 +151,14 @@ def _entries(text: str, findings: list[dict[str, str]] | None = None) -> dict[st
             else:
                 flag("config_unparseable_line", where)
         elif current is not None and stripped.startswith("- "):
+            if current["raw"] or current.get("quoted") or current["children"]:
+                flag("config_unparseable_line", where)
+                continue
             current["items"].append(_without_comment(stripped[2:]).strip().strip("\"'"))
         elif current is not None and match:
+            if current["raw"] or current.get("quoted") or current["items"]:
+                flag("config_unparseable_line", where)
+                continue
             indent = len(match[1]) if indent is None else indent
             kids = cast("list[dict[str, Any]]", list(current["children"].values()))
             if len(match[1]) > indent and current_top == "jira" and kids and kids[-1]["raw"] == "":

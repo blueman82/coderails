@@ -264,7 +264,7 @@ to `receipts` and `trust`: `authority_denied`, `approval_requirement_missing`, `
 `scripts/merge.py` all land in the same counters (`denied_`, `advisory_` and `merge_py_` prefixes are stripped).
 Baseline: none yet on a real loop. The shipped workflow sets the receipt gate to advisory. An absent setting leaves it off. Explicit `action_authority: enforce` blocks actions without a valid receipt.
 What to read: `approval_requirement_missing` above 0 means a guarded action's permit verdict omitted its approval requirement and was refused before consuming a receipt. `authority_denied` / `max_prs_exceeded` above 0 mean the authority is refusing actions it should (inspect it
-  with `authority.py inspect`); `no_receipt` can be expected in advisory mode. In enforce mode, a high `no_receipt` count means merges lack valid receipts. An unknown config value leaves the optional gate off.
+  with `authority.py inspect`); `no_receipt` can be expected in advisory mode. In enforce mode, a high `no_receipt` count means merges lack valid receipts. An invalid config value blocks a guarded action with `config_rejected`.
 Wiring `gate_summary` into `measure_graph_alignment.py` itself is a handoff to the lane that owns that file; until then
 the stdin CLI above is the supported route.
 
@@ -274,8 +274,9 @@ Guarded actions read `.coderails/workflow.config.yaml` through `strict_settings`
 (trace `action_authority/denied/config_rejected`, `diff-manifest/refused/config_rejected`,
 `wiki_taxonomy_gate/failed_closed/config_rejected`). Once the vault is positively identified, a missing or invalid
 `wiki.schema.json` also denies (`wiki_taxonomy_gate/failed_closed/wiki_schema_missing|wiki_schema_invalid`). Safety
-controls default ON in `config.schema.json`: `sandbox_workers`, `action_authority`, `evals.require_signatures`, and
-`diff_manifest` (the latter remains inactive until a policy path is configured). The receipt CLI is shipped for both
+controls default ON in `config.schema.json`: `sandbox_workers`, `evals.require_signatures`, and
+`diff_manifest` (the latter remains inactive until a policy path is configured). `action_authority` defaults to `off`;
+the shipped config sets it to `advisory`, so routine PR work needs no signing passphrase. The receipt CLI is shipped for both
 providers in this stack. Limits: no config file keeps non-action config consumers inert; `dispatch_mode` is computed in
 `plan()` and consumed in Phase 3c; the srt probe checks `npx` and `gh` on PATH, not whether runtime sandbox startup works.
 

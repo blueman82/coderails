@@ -186,6 +186,8 @@ class StrictTests(ScratchCase):
             ("evals:\n  require_signatures: no\n", True),
             ("evals:\n  require_signatures: false\n", False),
             ("evals:\n  require_signatures: false\n  require_signaturez: x\n", True),
+            ("evals: false\n  require_signatures: false\n", True),
+            ("evals:\n  require_signatures: false\n  - junk\n", True),
         ):
             with self.subTest(text):
                 self.assertIs(require_signatures(self.write(text)), expected)
