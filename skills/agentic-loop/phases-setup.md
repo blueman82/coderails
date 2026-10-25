@@ -270,6 +270,17 @@ Past failure (loop 0d3fb487, 2026-07-16): this sub-step was a trailing sentence 
 
 **Preserve the blind-input contract explicitly.** Include the proof-author instructions in the native worker prompt, with only the authorized inputs above. A custom label does not establish independence.
 
-Each `cmd` must be a single self-contained shell command, runnable verbatim as its own Bash call BY THE ORCHESTRATOR in its own session (never a worker), in the FOREGROUND (never `run_in_background` — the gate's transcript miner excludes backgrounded launches, since their immediate result is not a pass/fail outcome), using absolute paths, exiting 0 on success (beware grep-style non-zero-on-no-match), with no command substitution mixed into a gated script's own invocation line and no destructive pattern. This is unconditional for every loop with an executable surface, even when the rest of Phase 2.7 is skipped (2.7a/2.7b's `design_doc_min_units` threshold does not gate 2.7e); a loop with nothing executable writes no `proof.json` and records that choice in `decisions_absorbed` **and** sets `progress.json`'s `proof_disposition` to `"none: <reason>"` (e.g. `"none: no executable surface"`) — write the current schema-3 `progress.json`: the `loop_stall_guard` proof gate requires that recorded disposition before allowing an absent `proof.json`; there is no legacy-schema exemption, so skipping it is a visible, mechanically-required decision, not a silent gap.
+Each `cmd` must be a single self-contained shell command, runnable verbatim as its own Bash call BY THE ORCHESTRATOR in its own session (never a worker), in the FOREGROUND (never `run_in_background` — the gate's transcript miner excludes backgrounded launches, since their immediate result is not a pass/fail outcome), using absolute paths, exiting 0 on success (beware grep-style non-zero-on-no-match), with no command substitution mixed into a gated script's own invocation line and no destructive pattern. This is unconditional for every loop with an executable surface, even when the rest of Phase 2.7 is skipped (2.7a/2.7b's `design_doc_min_units` threshold does not gate 2.7e).
+
+For a loop with no executable surface, leave `proof.json` absent. First record the reason with `record-decision` in `decisions_absorbed`. Get the current revision from `inspect`. Then run:
+
+```bash
+python3 "$CLAUDE_PLUGIN_ROOT/skills/agentic-loop/scripts/graph.py" \
+  record-proof-disposition "$STATE" --session "$SESSION" \
+  --loop-id "$LOOP" --revision "$REVISION" \
+  --disposition none --reason "no executable surface"
+```
+
+The command saves `none: no executable surface` under the graph lock. It refuses a foreign owner, a stale revision, an active wave, an existing proof file, or a repeated decision. The `loop_stall_guard` proof gate requires the saved disposition when `proof.json` is absent.
 
 The `status` field is written `"pending"` but is present, never consulted — the proof verifier never reads `.status`, so the field cannot grade itself even by accident. The `loop_stall_guard` hook's `loop_proofs.validate_proofs` mines THIS session's own transcript for a matching Bash tool_use/tool_result pair per proof; only an actually-executed, non-erroring command satisfies a proof, never the `status` string. See [loop-state.md](loop-state.md) for the full field contract and honest boundary.

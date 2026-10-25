@@ -43,6 +43,7 @@ def parser() -> argparse.ArgumentParser:
         "record-decision",
         "flush-decisions",
         "record-repair",
+        "record-proof-disposition",
         "respawn-stale",
         "hard-stop",
         "stop",
@@ -74,6 +75,11 @@ def parser() -> argparse.ArgumentParser:
         if name == "record-repair":
             for field in ("session", "unit", "failed-node", "kind", "identity", "diagnosis"):
                 command.add_argument(f"--{field}", required=True)
+        if name == "record-proof-disposition":
+            command.add_argument("--loop-id", required=True)
+            command.add_argument("--revision", required=True, type=int)
+            command.add_argument("--disposition", required=True)
+            command.add_argument("--reason", required=True)
         if name in {"start", "add-unit", "instantiate"}:
             command.add_argument("--session", required=True)
             command.add_argument("--loop-id", required=True)
@@ -104,6 +110,7 @@ def parser() -> argparse.ArgumentParser:
             "hard-stop",
             "authorize-dispatch",
             "record-unit",
+            "record-proof-disposition",
             "complete",
             "verify-completion",
             "recover-wave",
@@ -231,6 +238,39 @@ def record_repair(
     return output
 
 
+def record_proof_disposition(
+    path: Path, session: str, loop_id: str, revision: int, disposition: str, reason: str
+) -> dict[str, Any]:
+    """Save an owner's no-proof decision under the sole Claude state lock."""
+    inputs = {"session": session, "loop_id": loop_id, "revision": revision, "disposition": disposition}
+    observed: dict[str, Any] = {}
+
+    def update(state: dict[str, Any]) -> dict[str, Any]:
+        observed.update(state)
+        if state["session_id"] != session or state["loop_id"] != loop_id:
+            raise ValueError("wrong owner or loop")
+        if state["revision"] != revision:
+            raise ValueError("stale revision")
+        if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
+            raise ValueError("no-proof decision requires an idle in-progress loop")
+        if disposition != "none" or not reason.strip() or reason.strip().lower().startswith("none:"):
+            raise ValueError("disposition must be none with a nonblank reason and no prefix")
+        if path.with_name("proof.json").exists():
+            raise ValueError("proof.json exists; no-proof decision is invalid")
+        if state.get("proof_disposition") is not None:
+            raise ValueError("proof disposition is already recorded")
+        state["proof_disposition"] = f"none: {reason.strip()}"
+        return state
+
+    try:
+        transition(path, update)
+    except ValueError:
+        trace(path, observed, "refused", "proof_disposition_refused", inputs, [], "record-proof-disposition")
+        raise
+    trace(path, observed, "ok", "proof_disposition_recorded", inputs, [], "record-proof-disposition")
+    return {"proof_disposition": f"none: {reason.strip()}", "revision": revision}
+
+
 def main() -> int:
     """Run one explicit graph operation with fail-closed CLI status."""
     args = parser().parse_args()
@@ -289,6 +329,10 @@ def main() -> int:
         elif args.command == "record-repair":
             output = record_repair(
                 args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis
+            )
+        elif args.command == "record-proof-disposition":
+            output = record_proof_disposition(
+                args.state, args.session, args.loop_id, args.revision, args.disposition, args.reason
             )
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = native_transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)

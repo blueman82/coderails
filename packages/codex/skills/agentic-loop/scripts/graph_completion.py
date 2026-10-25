@@ -45,6 +45,7 @@ def validate_work_units(state: dict[str, Any]) -> None:
 
 
 def _validate_completion(
+    path: Path,
     state: dict[str, Any],
     session: str,
     revision: int,
@@ -53,6 +54,8 @@ def _validate_completion(
     retro_path: Path,
     transcript_path: Path | None,
 ) -> None:
+    if state.get("proof_disposition") is not None and proof_path.absolute() != path.with_name("proof.json").absolute():
+        raise GraphError("proof path must be beside progress.json for a no-proof decision")
     if state["session_id"] != session:
         raise GraphError("session does not own this loop")
     eligibility = graph_semantics.can_complete(state)
@@ -69,7 +72,9 @@ def complete(
     """Prepare orders, save validated completion, then apply the lifecycle outside both locks."""
     current = _load(path)
     if current["status"] != "complete":
-        _validate_completion(current, session, current["revision"], evals_path, proof_path, retro_path, transcript_path)
+        _validate_completion(
+            path, current, session, current["revision"], evals_path, proof_path, retro_path, transcript_path
+        )
     orders = _orders()
     try:
         digest = orders.prepare(path, session, current["loop_id"]) if current["status"] != "complete" else None
@@ -86,7 +91,7 @@ def complete(
         else:
             revision = state["revision"]
         with traced_refusal(path, state, "complete", session):
-            _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
+            _validate_completion(path, state, session, revision, evals_path, proof_path, retro_path, transcript_path)
             if not already_complete:
                 if digest is None:
                     raise GraphError("order_source_mismatch")
@@ -98,7 +103,7 @@ def complete(
             state["status"] = "complete"
             state["revision"] += 1
             state["completion"] = {"revision": revision}
-            _write(path, state)
+            _write(path, state, preserve_updated_at=True)
     result = {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
     result.update(orders.finish(path, session, state["loop_id"]))
     return result
@@ -116,7 +121,7 @@ def verify_completion(
     if state["status"] != "complete" or revision != state["revision"] - 1:
         raise GraphError("graph has no valid completion record")
     with traced_refusal(path, state, "verify-completion", session):
-        _validate_completion(state, session, revision, evals_path, proof_path, retro_path, transcript_path)
+        _validate_completion(path, state, session, revision, evals_path, proof_path, retro_path, transcript_path)
         try:
             _orders().status(path, session)
         except (OSError, ValueError) as error:

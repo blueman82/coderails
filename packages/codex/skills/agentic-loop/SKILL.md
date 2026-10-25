@@ -79,8 +79,18 @@ degraded Muninn sync, and stop on an invalid decision chain. Then update and reg
 against the graph's exact current revision and write beside the state:
 
 - graded `evals.json` for the current session, loop, and revision;
-- non-empty `proof.json` for the same session and loop, with every proof carrying a nonblank executable `cmd` and `status: "pass"`;
+- non-empty `proof.json` for the same session and loop, with every proof carrying a nonblank executable `cmd` and `status: "pass"`; or a saved no-proof reason when there is no executable surface;
 - `retro.json` for the same session and loop, schema version 1 or newer, with `status: "complete"`.
+
+For a loop with no executable surface, record the reason in `decisions_absorbed`. Leave `proof.json` absent. Get the current revision from `inspect`. Then run:
+
+```bash
+python3 "$SKILL_DIR/scripts/graph.py" record-proof-disposition "$STATE" \
+  --session "$SESSION" --loop-id "$LOOP" --revision "$REVISION" \
+  --disposition none --reason "no executable surface"
+```
+
+The command saves `none: no executable surface`. It refuses a foreign owner, a stale revision, an active wave, an existing proof file, or a repeated decision.
 
 Prepare standing orders from the retro with code, never by editing Markdown. With `D` the repo-key dir (the grandparent of `$STATE`), `LOOP` the separate logical `loop_id` from owned progress, and `O="python3 $SKILL_DIR/../../scripts/lib/orders.py --dir $D --session $SESSION"`: run `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop "$LOOP" --quote "<verbatim words of the owner's own prompt, 12-300 chars>"` for each failure mode (add `--scope agnostic` for a lesson that applies to any repo). The native `complete` command runs `prepare` after final progress updates, including when none were recorded. Preparation binds the eligible owned source and records `orders_prepared`, with no recurrence or aging effect. Exit 3 prints a `reason_code`: report it and never write a Markdown fallback. `memory.backend: off` is the explicit opt-out. The current Muninn installation uses a newer API, so live lesson activation remains pending (see `docs/RUNBOOK.md`, "Standing order stored without a cite").
 
@@ -93,10 +103,13 @@ replacement whose receipt failed needs ordinary unchanged `prepare` to repair it
 Apply `superpowers:verification-before-completion` to the orchestrator's completion claim. Then run:
 
 ```bash
+PROOF="${STATE%/*}/proof.json"
 python3 "$SKILL_DIR/scripts/graph.py" complete "$STATE" \
   --session "$SESSION" --evals "$EVALS" --proof "$PROOF" --retro "$RETRO" \
   --transcript "$TRANSCRIPT_PATH"
 ```
+
+Keep this sibling `proof.json` path when the saved no-proof disposition leaves the file absent.
 
 That command runs `prepare` before the graph lock, checks the prepared source under the graph lock, saves completion,
 then runs `$O tick --loop "$LOOP"` and `$O render --loop "$LOOP"` after it releases the lock. Apply validates the
@@ -109,11 +122,11 @@ An old complete loop without D4 receipts needs explicit reviewed legacy admissio
 decision and runbook. Admission checks the exact file hash, then permits completion bookkeeping while binding the
 graph source. It does not age orders; new loops cannot use it.
 
-Run each proof command through `functions.exec` using this canonical nested-result output; replace the placeholder with the proof's exact command so transcript matching remains exact:
+When `proof.json` exists, run each proof command through `functions.exec` using this canonical nested-result output; replace the placeholder with the proof's exact command so transcript matching remains exact:
 
 ```javascript
 const result = await tools.exec_command({cmd: "<exact proof command>"});
 text(JSON.stringify({loop_id: "<current loop id>", exit_code: result.exit_code, output: result.output}));
 ```
 
-Completion refuses an active wave, pending/running/hard-stop nodes, a graph hard-stop, unreleased joins, missing or invalid native worker transcript references, wrong-loop evidence, stale eval revision, missing or ungraded evals, missing proof, or missing retro. It rechecks every stored worker reference against the owning parent and child transcripts, then mines this session's Codex JSONL rollout and requires the last exact trimmed execution of every proof command in the current loop to carry a nested integer `exit_code` of zero and, for canonical results, the current `loop_id`; commands explicitly recorded under an earlier loop's turn context cannot replay. The outer `functions.exec` text `Script completed` alone is never proof of the inner command's success. This is local redirect-and-audit evidence, not a privilege boundary. Success atomically marks the loop complete and increments its revision. The provider-local Stop hook recomputes the same observed proof result before allowing a completed loop to end. A hard-stop, approval-gate or awaiting-input pause ends only via a recorded `graph.py stop` row; the final line is a rendering that is never read.
+Completion refuses an active wave, pending/running/hard-stop nodes, a graph hard-stop, unreleased joins, missing or invalid native worker transcript references, wrong-loop evidence, stale eval revision, missing or ungraded evals, missing proof without a saved no-proof disposition, or missing retro. It rechecks every stored worker reference against the owning parent and child transcripts. When `proof.json` exists, it mines this session's Codex JSONL rollout and requires the last exact trimmed execution of every proof command in the current loop to carry a nested integer `exit_code` of zero and, for canonical results, the current `loop_id`; commands explicitly recorded under an earlier loop's turn context cannot replay. The outer `functions.exec` text `Script completed` alone is never proof of the inner command's success. This is local redirect-and-audit evidence, not a privilege boundary. Success atomically marks the loop complete and increments its revision. The provider-local Stop hook recomputes the same observed proof result before allowing a completed loop to end. A hard-stop, approval-gate or awaiting-input pause ends only via a recorded `graph.py stop` row; the final line is a rendering that is never read.
