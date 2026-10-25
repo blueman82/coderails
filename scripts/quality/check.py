@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import json
 import os
 import re
 import subprocess
 import sys
+from collections.abc import Generator
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -57,10 +59,46 @@ def source_files(root: Path, paths: list[str]) -> list[Path]:
     )
 
 
+class Finding(str):
+    """A printable `path[:line]: message` finding that also carries its parts for `--json`."""
+
+    path: str
+    line: int | None
+    message: str
+
+    def __new__(cls, path: str, message: str, line: int | None = None) -> Finding:
+        """Format the text form and keep the structured fields."""
+        item = super().__new__(cls, f"{path}{f':{line}' if line else ''}: {message}")
+        item.path, item.line, item.message = path, line or None, message
+        return item
+
+    def record(self) -> dict[str, object]:
+        """The `--json` shape of one finding."""
+        return {"path": self.path, "line": self.line, "message": self.message}
+
+
 def finding(path: Path, message: str, line: int | None = None) -> str:
     """Format one quality finding."""
-    suffix = f":{line}" if line else ""
-    return f"{path}{suffix}: {message}"
+    return Finding(str(path), message, line)
+
+
+def record(issue: str) -> dict[str, object]:
+    """Structured form of a finding; text from `git diff --check` has no path or line of its own."""
+    return issue.record() if isinstance(issue, Finding) else {"path": "", "line": None, "message": issue}
+
+
+@contextlib.contextmanager
+def stdout_to_stderr() -> Generator[None, None, None]:
+    """Send file descriptor 1 to stderr so external tools cannot pollute the JSON on stdout."""
+    sys.stdout.flush()
+    saved = os.dup(1)
+    os.dup2(2, 1)
+    try:
+        yield
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved, 1)
+        os.close(saved)
 
 
 def check_format(path: Path, text: str) -> list[str]:
@@ -171,6 +209,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--strict", action="store_true", help="return non-zero when findings exist")
     parser.add_argument("--changed", action="store_true", help="scan only changed tracked files")
+    parser.add_argument(
+        "--json", action="store_true", help="print {scanned, findings[{path,line,message}], external_ok}"
+    )
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--paths", nargs="*", default=[])
     parser.add_argument("--max-loc", type=int, default=int(os.environ.get("MAX_LOC", DEFAULT_LOC)))
@@ -211,6 +252,11 @@ def main() -> int:
         issues.extend(check_commented_code(path, text))
     if root == Path.cwd().resolve() and not args.paths:
         issues.extend(check_diff(root))
+    if args.json:
+        with stdout_to_stderr():
+            tools_passed = external_checks(files, root, args.strict)
+        print(json.dumps({"scanned": len(files), "findings": [record(i) for i in issues], "external_ok": tools_passed}))
+        return 1 if args.strict and (issues or not tools_passed) else 0
     for issue in issues:
         print(issue, file=sys.stderr)
     print(f"quality: scanned {len(files)} file(s), {len(issues)} finding(s)")

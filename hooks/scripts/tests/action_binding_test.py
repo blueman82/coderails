@@ -78,6 +78,9 @@ class PushTests(unittest.TestCase):
         self.assertEqual(self.bind("git push origin feature:refs/heads/main")["ref"], "refs/heads/main")  # type: ignore[index]
         self.assertEqual(self.bind("git push -o ci.skip origin main")["sha"], self.main)  # type: ignore[index]
         self.assertEqual(ab.binding("git_push", "git -C r push origin main", str(self.repo.parent))["sha"], self.main)  # type: ignore[index]
+        selected = f"git --no-pager -C '{self.repo}' push origin main"
+        self.assertEqual(self.bind(selected), self.bind("git push origin main"))
+        self.assertEqual(self.bind(f"git -C '{self.repo}' --no-pager push origin main"), self.bind(selected))
 
     def test_head_without_dest_binds_the_current_branch(self) -> None:
         """`git push origin HEAD` pushes to the current branch's ref, never refs/heads/HEAD; detached is unknowable."""

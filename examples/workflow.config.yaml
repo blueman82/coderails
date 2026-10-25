@@ -38,10 +38,11 @@ action_authority: advisory
 # integrity_review:
 #   machine_user: null
 # diff_manifest / diff_manifest_policy: additional check run by scripts/push.py
-# (before `git push`) and scripts/merge.py (after the existing gates). The policy is a
+# (before `git push`), scripts/merge.py and direct-merge hooks. The policy is a
 # JSON file {allow:[glob], deny:[glob], manifest:[glob], docs_sync:{allow,deny},
 # require_linked_worktree:bool}; the diff is `git diff --raw -z -M origin/<main>...<head>`.
 # diff_manifest: off | advisory | enforce (default enforce = refuses with
-# diff_manifest:<reason_code>; advisory = warning + trace row). No policy file = inactive.
+# diff_manifest:<reason_code>; advisory = warning + trace row). No policy file uses
+# the shipped policy/diff-policy.default.json.
 # diff_manifest: enforce
 # diff_manifest_policy: .coderails/diff-policy.json

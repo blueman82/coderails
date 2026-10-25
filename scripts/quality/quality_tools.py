@@ -43,7 +43,7 @@ def mypy_environment(directory: Path, root: Path, native_workflow: bool = False)
         )
     if provider == root:
         paths.append(root / "scripts/integrity-gate")
-    else:
+    elif directory != codex / "scripts":
         paths.append(provider / "hooks/scripts")
     environment = dict(os.environ)
     environment["MYPYPATH"] = os.pathsep.join(str(path) for path in paths)

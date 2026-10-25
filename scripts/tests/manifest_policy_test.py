@@ -239,13 +239,14 @@ class GateTests(RepoCase):
         rows = [r for r in self.rows() if r["outcome"] != "legacy"]
         self.assertEqual([(r["outcome"], r["reason_code"]) for r in rows], [("refused", "denied_path")])
 
-    def test_off_and_no_policy_do_nothing(self) -> None:
-        """Off, or no policy file, skips the check and writes nothing."""
+    def test_off_skips_and_no_policy_uses_default(self) -> None:
+        """Off skips; no policy path checks the shipped default."""
         with self.configure("off"):
             manifest_policy.gate()
+        self.assertEqual(self.rows(), [])
         with self.configure("enforce", policy=False):
             manifest_policy.gate()
-        self.assertEqual(self.rows(), [])
+        self.assertIn("diff_manifest_ok", [row["reason_code"] for row in self.rows()])
 
     def test_counters(self) -> None:
         """manifest_counters tallies only diff-manifest rows from a by_reason map."""
@@ -265,18 +266,18 @@ class MergeCallTests(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, "", "")
 
         with (
-            mock.patch.object(merge, "verify_gates"),
-            mock.patch.object(merge, "require_merge_receipt"),  # the receipt seam has its own suite
+            mock.patch.object(merge, "verify_gates", return_value="a" * 40),
+            mock.patch.object(merge, "require_merge_receipt", return_value=None),  # receipt seam has its own suite
             mock.patch.object(git, "require_repo"),
             mock.patch.object(git, "main", return_value="main"),
             mock.patch.object(git, "pr_field", return_value="OPEN"),
             mock.patch.object(git, "protected", return_value=False),
             mock.patch.object(git, "run", side_effect=fake_run),
             mock.patch.object(merge, "cleanup"),
-            mock.patch.object(manifest_policy, "gate", side_effect=gate_effect) as gate,
+            mock.patch("scripts.lib.publication_gate.enforce", side_effect=gate_effect) as gate,
         ):
             status = merge.main(["7"])
-        gate.assert_called_once_with("7")
+        gate.assert_called_once_with("7", "a" * 40, unit="", progress="")
         return status, [a for a in seen if a[:3] == ("gh", "pr", "merge")]
 
     def test_enforce_refusal_blocks_merge(self) -> None:
@@ -296,7 +297,7 @@ class WiringTests(unittest.TestCase):
     def test_call_sites_present(self) -> None:
         """Negative control target: removing a call site fails this test."""
         self.assertIn("manifest_policy.gate(", (REPO / "scripts/push.py").read_text())
-        self.assertIn("manifest_policy.gate(", (REPO / "scripts/merge.py").read_text())
+        self.assertIn("publication_gate.enforce(", (REPO / "scripts/merge.py").read_text())
 
     def test_codex_mirror_is_byte_identical(self) -> None:
         """Lib, CLI and push are byte-identical in the Codex package."""

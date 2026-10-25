@@ -38,7 +38,7 @@ import { runClaude } from "./exec.ts";
 import { appendRun, type RunRecord } from "./runlog.ts";
 import { checkArtifact } from "./artifactGate.ts";
 import { escalate, checkForeignSkillExists, writeRunNote, defaultNotify } from "./escalate.ts";
-import { localDateIso, recordTimeoutMarker } from "./timeoutMarker.ts";
+import { ensureTerminalRow, localDateIso, recordTimeoutMarker, routineLogBoundary } from "./timeoutMarker.ts";
 
 export interface SweepOptions {
   queueDir: string;
@@ -256,11 +256,20 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
         continue;
       }
 
-      // Pass the same outputPath already recorded in the ledger above so the
-      // run's stdout/stderr is persisted to disk — otherwise a RED routine
-      // leaves no transcript to diagnose (the motivating gap). See exec.ts.
-      const execResult = await runClaudeImpl(argv, button.cwd, { outputPath: startRecord.outputPath });
+      const artifactContext = {
+        date: localDateIso(opts.clock?.() ?? new Date()),
+        runId: outputRunId,
+        vault: (opts.config.wikiPaths ?? [])[0] ?? "",
+      };
+      const boundary = routine ? routineLogBoundary(routine, artifactContext) : null;
+      const execResult = await runClaudeImpl(argv, button.cwd, {
+        outputPath: startRecord.outputPath, ...(routine ? { routineRunId: outputRunId } : {}),
+      });
       appendRun({ ...startRecord, endedAt: Date.now(), exitCode: execResult.exitCode }, { runsDir: opts.runsDir });
+
+      const terminalResult = routine && execResult.spawnFailure !== "spawn-failed"
+        ? ensureTerminalRow(routine, artifactContext, boundary, execResult.spawnFailure !== "timeout")
+        : { passed: true, reason: "" };
 
       if (execResult.spawnFailure) {
         // Distinct from a routine's own non-zero exit ("exec-error"): the
@@ -277,12 +286,8 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
           // place, so there's nothing to correct for that case. A timeout
           // kill DID claim it and will never write its own terminal marker
           // now, so the runner writes the failure marker on its behalf.
-          if (execResult.spawnFailure === "timeout") {
-            recordTimeoutMarker(routine, {
-              date: localDateIso(opts.clock?.() ?? new Date()),
-              runId: outputRunId,
-              vault: (opts.config.wikiPaths ?? [])[0] ?? "",
-            });
+          if (execResult.spawnFailure === "timeout" && !["routine_merged_incomplete", "routine_merge_state_unknown"].includes(terminalResult.reason)) {
+            recordTimeoutMarker(routine, artifactContext);
           }
           escalate({
             routine,
@@ -306,11 +311,7 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
           });
         }
       } else if (routine) {
-        const artifactResult = checkArtifact(routine.expectedArtifact, {
-          date: localDateIso(opts.clock?.() ?? new Date()),
-          runId: outputRunId,
-          vault: (opts.config.wikiPaths ?? [])[0] ?? "",
-        });
+        const artifactResult = terminalResult.passed ? checkArtifact(routine.expectedArtifact, artifactContext) : terminalResult;
         if (artifactResult.passed) {
           result.succeeded++;
           if (opts.vaultNotesDir) {

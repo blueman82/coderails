@@ -341,11 +341,12 @@ class GateTests(ReceiptHookCase):
         for command in (
             "git -c push.default=current push origin main", "git --no-pager push origin main",
             "git --git-dir=.git push origin main", "git -C . push origin main",
+            f"git --no-pager -C '{self.repo}' push origin main",
         ):  # fmt: skip
             with self.subTest(command=command):
                 self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
-        self.assertEqual(self.reasons().count("denied_no_receipt"), 1)  # only the clean -C form can be bound
-        self.assertEqual(self.reasons().count("denied_binding_unknown"), 3)
+        self.assertEqual(self.reasons().count("denied_no_receipt"), 3)
+        self.assertEqual(self.reasons().count("denied_binding_unknown"), 2)
 
     def test_ref_moved_earlier_in_the_same_command_is_denied(self) -> None:
         """Negative control: `git branch -f feature <sha> && git push origin feature:main` binds a stale sha."""

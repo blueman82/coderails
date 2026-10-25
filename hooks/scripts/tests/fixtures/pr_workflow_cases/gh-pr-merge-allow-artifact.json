@@ -27,7 +27,7 @@
       "{sandbox}/repo_feat": "feature/my-thing"
     },
     "env": {
-      "MOCK_GH_COMMENT_BODY": "<!-- coderails-eval-summary v1 pr=42 head_sha={head_sha} result=GO verification_level=1 -->\n```json\n{\"verification_level\":0,\"verification_justification\":\"stub\",\"head_sha\":\"{head_sha}\",\"evals\":[]}\n```",
+      "MOCK_GH_COMMENT_BODY": "<!-- coderails-eval-summary v1 pr=42 head_sha={head_sha} result=GO verification_level=0 -->\n```json\n{\"verification_level\":0,\"verification_justification\":\"stub\",\"head_sha\":\"{head_sha}\",\"evals\":[]}\n```",
       "MOCK_GH_HEAD_SHA": "{head_sha}"
     },
     "returncode": 0,

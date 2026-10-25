@@ -737,7 +737,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 |---|---|---|---|---|---|
 | `project` | string/null | `null` | - | read_by_prose_only | Project name written by /coderails:init; read by command prose only. |
 | `wiki_path` | string/null | `null` | - | enforced_by_code | LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate. |
-| `wiki_stale_days` | integer | `30` | - | read_by_prose_only | Page age in days before wiki-lint considers staleness; age alone does not mark a page stale. |
+| `wiki_stale_days` | integer | `30` | - | enforced_by_code | Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Age alone never makes a page stale (a source must also have moved). |
 | `wiki_supervision` | string/null | `"discuss"` | - | read_by_prose_only | wiki-ingest mode: discuss (pause before writing) or autonomous. |
 | `wiki_git_worktree` | boolean/null | `true` | - | read_by_prose_only | true = PR flow for wiki commits; false = commit directly to the vault. |
 | `wiki_git_bypass_flag` | string/null | `null` | - | read_by_prose_only | Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1. |
@@ -751,8 +751,10 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `sandbox_workers` | boolean/null | `true` | `true` | enforced_by_code | Default ON. Claude graph_dispatch.plan() reports sandboxed or in-process-fallback:<reason> for U3 nodes, and the Claude worker launcher consumes that mode. Codex native workers inherit the parent session sandbox; this setting does not configure or prove per-worker Codex containment. |
 | `subagent_identity_gate` | string | `"on"` | `"on"` | enforced_by_code | on (default) denies an untyped Bash subagent in a graph-bound Claude session; off disables that hook. |
 | `action_authority` | string/null | `"off"` | `"advisory"` | enforced_by_code | Absent = off; the shipped workflow uses advisory. Explicit enforce requires a signed receipt for guarded merges and pushes. Invalid values are rejected by strict config consumers. |
-| `diff_manifest` | string/null | `"enforce"` | `"enforce"` | enforced_by_code | off \| advisory \| enforce, read by scripts/push.py and scripts/merge.py. Default enforce but inert until diff_manifest_policy names a policy file (the default policy is a Phase 4 deliverable). |
-| `diff_manifest_policy` | string/null | `null` | - | enforced_by_code | Path to the diff-manifest policy JSON; null or absent = the diff check is inactive. |
+| `diff_manifest` | string/null | `"enforce"` | `"enforce"` | enforced_by_code | Diff-manifest publication gate for push.py, merge.py and direct-merge hooks. Default enforce uses the shipped policy; invalid values are rejected by strict config consumers. |
+| `review_passes` | string | `"enforce"` | - | enforced_by_code | Required-reviewer check in the publication gate (policy/review_policy.json): off skips it; enforce (default) and any other value apply it. |
+| `eval_level` | string | `"enforce"` | - | enforced_by_code | Derived-eval-level and suite-integrity check in the publication gate (policy/surface_policy.json): off skips it; enforce (default) and any other value apply it. |
+| `diff_manifest_policy` | string/null | `null` | - | enforced_by_code | Path to the diff-manifest policy JSON; null or absent uses policy/diff-policy.default.json. |
 | `integrity_review` | object/null | `null` | - | enforced_by_code | Integrity attestation settings. |
 | `integrity_review.enabled` | boolean/null | `false` | - | enforced_by_code | true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live. |
 | `integrity_review.machine_user` | string/null | `null` | - | enforced_by_code | Deprecated. A non-empty legacy login remains the required local status author until enabled is true. |

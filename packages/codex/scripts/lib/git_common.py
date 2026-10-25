@@ -9,8 +9,9 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from typing import Any
 
-from . import eval_artifact, review_artifact
+from . import eval_artifact, review_artifact, review_passes
 from .eval_validation import extract_json_block
 
 
@@ -145,6 +146,7 @@ class EvalSummary:
     verification_level: str = ""
     embed: str = ""
     failure_reason: str = ""
+    facts: str = ""  # line 2 of the body when it is a coderails-eval-facts line, else empty
 
 
 def gate_eval_summary_for_pr(number: str, sha: str) -> EvalSummary:
@@ -155,12 +157,15 @@ def gate_eval_summary_for_pr(number: str, sha: str) -> EvalSummary:
         return EvalSummary(2, failure_reason=str(error))
     summary = EvalSummary(1)
     for body in bodies:
-        for line in body.splitlines():
+        lines = body.splitlines()
+        for index, line in enumerate(lines):
             if eval_artifact.matches_marker(line, number, sha):
+                following = lines[index + 1] if index + 1 < len(lines) else ""
                 summary = EvalSummary(
                     0 if eval_artifact.parse_result(line) == "GO" else 1,
                     eval_artifact.parse_verification_level(line),
                     extract_json_block(body),
+                    facts=following if eval_artifact.parse_facts(following) else "",
                 )
     return summary
 
@@ -173,6 +178,28 @@ def gate_review_summary_for_pr(number: str, sha: str) -> tuple[int, str]:
         return 2, str(error)
     matched = any(review_artifact.matches_marker(line, number, sha) for body in bodies for line in body.splitlines())
     return (0 if matched else 1), ""
+
+
+@dataclass(frozen=True)
+class ReviewPasses:
+    """Newest trusted review artifact for a head: status 0 found, 1 absent, 2 fetch failed; passes None: malformed."""
+
+    status: int
+    passes: tuple[dict[str, Any], ...] | None = ()
+    failure_reason: str = ""
+
+
+def review_passes_for_pr(number: str, sha: str) -> ReviewPasses:
+    """Passes of the newest trusted artifact whose first marker line names this PR head (a v1 artifact has none)."""
+    try:
+        bodies = trusted_comment_bodies(number)
+    except (TrustFetchError, OSError) as error:
+        return ReviewPasses(2, None, str(error))
+    newest = [b for b in bodies if any(review_artifact.matches_marker(x, number, sha) for x in b.splitlines())]
+    if not newest:
+        return ReviewPasses(1)
+    parsed = review_passes.parse(newest[-1], number, sha)
+    return ReviewPasses(0, None if parsed is None else tuple(parsed))
 
 
 def has_coderails_review_for_head(number: str, sha: str) -> int:

@@ -9,7 +9,7 @@ Create the durable review comment consumed by the Coderails merge gate.
 
 ## Input gate
 
-Require an explicitly supplied PR number. Inspect it before using it in any command: it must be non-empty and contain digits only. Stop without making a network change if it is invalid.
+Require an explicitly supplied PR number. Inspect it before using it in any command: it must be non-empty and contain digits only. The script validates it again in code (`pr_number_invalid`) before any network call; never paste a non-numeric value into a command.
 
 ## Native Codex review evidence
 
@@ -22,7 +22,9 @@ Stop without posting when:
 - the PR head changes before posting; or
 - findings were fixed after the review, making the review stale. Review the new head first.
 
-Record the reviewer-reported counts. If every reviewer reports no findings, the summary body must contain only:
+The merge gate computes which reviews the diff needs from `policy/review_policy.json`: a diff touching `hooks/`, `scripts/`, `install.py`, `uninstall.py`, `.claude-plugin/` or the Codex hook/script trees needs a `security-review` pass (spawn `security-reviewer`); `launchd/`, `scripts/integrity-gate/`, `scripts/installer/`, `.github/workflows/` or `skills/dashboard/runner/` needs a `deploy-safety` pass (spawn `deploy-safety-reviewer`). A pass verdict is derived from the validated summary text (a bullet under `## Critical` fails it), never asserted.
+
+Record the reviewer-reported counts. Write one summary file per pass. If a reviewer reports no findings, its file must contain only:
 
 ```markdown
 ## No findings
@@ -43,28 +45,19 @@ None
 
 Keep the reviewer names and exact critical, important, and suggestion counts in the posting report. Do not add them to a no-findings body because the validator's no-findings form is intentionally exact.
 
-## Package helpers
+## Package helper
 
-Resolve these links relative to this `SKILL.md`, never relative to the repository working directory:
+Resolve [post_review.py](../../scripts/post_review.py) relative to this `SKILL.md`, never relative to the repository working directory. It must exist and load. Stop if it is missing or fails; do not substitute another helper or build the marker by hand.
 
-- [post_review.py](../../scripts/post_review.py) validates the summary.
-- [review_artifact.py](../../scripts/lib/review_artifact.py) constructs the marker shared with the merge gate.
+## Post
 
-The helpers must exist and load successfully. Stop if either is missing or fails. Do not substitute another helper or construct the marker by hand.
+Write the summary files with the file-writing tool (not a shell heredoc), then run the one command, replacing `<PR>` with the validated number:
 
-## Validate and post
+```bash
+python3 <resolved post_review.py> post <PR> --summary <review-summary-file> --pass security-review=<security-summary-file>
+```
 
-1. Create private temporary summary and body files with `mktemp`, and register a cleanup trap.
-2. Write the review summary using the required grammar.
-3. Run the resolved `post_review.py validate <summary-file>`. Stop on any non-zero result.
-4. Fetch `headRefOid` again and require exact equality with the reviewed SHA.
-5. Run `python3 <resolved review_artifact.py> <PR> <reviewed-SHA>`. Require a non-empty marker.
-6. Prepend the marker as the first line of the body file.
-7. Resolve `nameWithOwner` with `gh repo view`. Require a non-empty value.
-8. Fetch all issue comments for the PR with `gh api`. Treat any fetch or parse failure as fatal. If an existing comment starts with the exact marker, do not post a duplicate; use its URL.
-9. Fetch `headRefOid` once more and require exact equality with the reviewed SHA.
-10. If no matching artifact exists, post the body with `gh api` and require a returned comment URL. Do not use `gh pr comment`.
-11. Fetch `headRefOid` after posting. If it changed, report that the new artifact is stale and must not satisfy the merge gate.
+Omit `--pass NAME=FILE` for passes the diff does not need. The script validates every file, resolves the head, builds the marker and the passes line, reuses an identical existing artifact, refuses if the head moved before or after posting (`stale`), and posts with `gh api`. A non-zero exit means nothing usable was posted; fix the cause and re-run.
 
 The GitHub PR comment is authoritative. Do not read or write local review caches.
 

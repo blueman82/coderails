@@ -26,8 +26,8 @@
         "integer"
       ],
       "default": 30,
-      "status": "read_by_prose_only",
-      "description": "Page age in days before wiki-lint considers staleness; age alone does not mark a page stale."
+      "status": "enforced_by_code",
+      "description": "Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Age alone never makes a page stale (a source must also have moved)."
     },
     "wiki_supervision": {
       "type": [
@@ -173,7 +173,19 @@
       "status": "enforced_by_code",
       "control": true,
       "on_value": "enforce",
-      "description": "off | advisory | enforce, read by scripts/push.py and scripts/merge.py. Default enforce but inert until diff_manifest_policy names a policy file (the default policy is a Phase 4 deliverable)."
+      "description": "Diff-manifest publication gate for push.py, merge.py and direct-merge hooks. Default enforce uses the shipped policy; invalid values are rejected by strict config consumers."
+    },
+    "review_passes": {
+      "type": [
+        "string"
+      ],
+      "default": "enforce",
+      "status": "enforced_by_code",
+      "description": "Required-reviewer check in the publication gate (policy/review_policy.json): off skips it; enforce (default) and any other value apply it."
+    },
+    "eval_level": {
+      "type": ["string"], "default": "enforce", "status": "enforced_by_code",
+      "description": "Derived-eval-level and suite-integrity check in the publication gate (policy/surface_policy.json): off skips it; enforce (default) and any other value apply it."
     },
     "diff_manifest_policy": {
       "type": [
@@ -182,7 +194,7 @@
       ],
       "default": null,
       "status": "enforced_by_code",
-      "description": "Path to the diff-manifest policy JSON; null or absent = the diff check is inactive."
+      "description": "Path to the diff-manifest policy JSON; null or absent uses policy/diff-policy.default.json."
     },
     "integrity_review": {
       "type": [
@@ -194,11 +206,21 @@
       "description": "Integrity attestation settings.",
       "properties": {
         "enabled": {
-          "type": ["boolean", "null"], "default": false, "status": "enforced_by_code",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": false,
+          "status": "enforced_by_code",
           "description": "true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live."
         },
         "machine_user": {
-          "type": ["string", "null"], "default": null, "status": "enforced_by_code",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "status": "enforced_by_code",
           "description": "Deprecated. A non-empty legacy login remains the required local status author until enabled is true."
         }
       }
@@ -228,11 +250,21 @@
       }
     },
     "memory": {
-      "type": ["object", "null"], "default": null, "status": "enforced_by_code",
+      "type": [
+        "object",
+        "null"
+      ],
+      "default": null,
+      "status": "enforced_by_code",
       "description": "Typed-memory settings.",
       "properties": {
         "backend": {
-          "type": ["string", "null"], "default": "muninn", "status": "enforced_by_code",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": "muninn",
+          "status": "enforced_by_code",
           "description": "muninn (default) = Muninn is the authoritative typed-memory store and a missing or refusing Muninn fails with a reason code; off = no typed memory at all (reason memory_backend_off, traced, Markdown is never read or written). Any other value fails with memory_backend_invalid."
         }
       }

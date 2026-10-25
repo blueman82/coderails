@@ -2,6 +2,7 @@
 """Provide native process-boundary GitHub responses for offline hook verification."""
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -18,6 +19,8 @@ def main() -> int:
         print("99")
     elif arguments.startswith("pr view ") and "--json headRefOid" in arguments:
         print(os.environ.get("MOCK_GH_HEAD_SHA", os.environ["FIXTURE_HEAD_SHA"]))
+    elif arguments.startswith("pr view ") and "--json baseRefOid" in arguments:
+        print(os.environ["FIXTURE_HEAD_SHA"])
     elif arguments.startswith("api user "):
         print("testuser")
     elif arguments.startswith("repo view ") and "--json viewerPermission" in arguments:
@@ -26,23 +29,32 @@ def main() -> int:
         if os.environ.get("MOCK_GH_COMMENTS_FAIL"):
             return 1
         body = os.environ.get("MOCK_GH_COMMENT_BODY")
+        number = re.search(r"/issues/([0-9]+)/comments", arguments)
+        sha = os.environ.get("MOCK_GH_HEAD_SHA", os.environ["FIXTURE_HEAD_SHA"])
         if body is None:
-            number = re.search(r"/issues/([0-9]+)/comments", arguments)
             if number is None:
                 return 1
-            sha = os.environ.get("MOCK_GH_HEAD_SHA", os.environ["FIXTURE_HEAD_SHA"])
             suite: dict[str, Any] = {
                 "verification_level": 0,
                 "verification_justification": "stub",
                 "head_sha": sha,
                 "evals": [],
             }
+            # The frozen hash follows the documented definition of suite_hash.
+            oracle = {"task_ref": None, "scope": None, "verification_level": 0, "evals": []}
+            canonical = json.dumps(oracle, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            suite["frozen_hash"] = hashlib.sha256(canonical.encode()).hexdigest()
             body = (
-                f"<!-- coderails-eval-summary v1 pr={number[1]} head_sha={sha} result=GO verification_level=1 -->\n"
+                f"<!-- coderails-eval-summary v1 pr={number[1]} head_sha={sha} "
+                f"result=GO verification_level={suite['verification_level']} -->\n"
                 f"```json\n{json.dumps(suite)}\n```\n"
             )
         if body:
             print(base64.b64encode(body.encode()).decode())
+        if number and not os.environ.get("MOCK_GH_NO_REVIEW"):
+            # A v1 review marker without a passes line suffices for the empty fixture diff.
+            review = f"<!-- coderails-review-summary v1 pr={number[1]} head_sha={sha} -->\n## No findings\n"
+            print(base64.b64encode(review.encode()).decode())
     elif "/statuses" in arguments:
         if os.environ.get("MOCK_TR_STATUSES_FAIL"):
             return 1

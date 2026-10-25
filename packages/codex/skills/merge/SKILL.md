@@ -22,14 +22,8 @@ Do not merge when GitHub state cannot be fetched, approval is missing when requi
 
 Resolve [merge.py](../../scripts/merge.py) relative to this `SKILL.md`. Run `python3 <absolute package-local merge.py> <PR number, branch, or auto>`. When `action_authority: enforce` applies, fetch the current head SHA and add `--expected-head <40-hex SHA>`. Mint any required receipt for this exact `python3` command, including the absolute helper path and SHA. Direct executable invocation has a different command hash and is unsupported in enforce mode. Do not reconstruct the helper's checks manually or bypass a failure. The `action_authority_gate` hook can consume a receipt before the helper; the helper checks it again when run directly.
 
-The package-local helper must:
+For a graph work unit, add `--unit <id> --progress <absolute progress.json>`. The default-on diff manifest gate checks the PR head and the frozen unit manifest. The Codex `pr_publication_gate` hook checks direct merges.
 
-- resolve the pull request and reject an unmerged closed request;
-- verify required approval and trusted current-head review and eval artifacts;
-- re-run scripted eval smoke checks against the trusted head;
-- verify any configured integrity attestation and wiki-debt gate;
-- merge remotely only after every gate passes;
-- synchronize the repository's main branch;
-- remove the merged branch where safe, without reporting an already successful merge as failed when another worktree still holds the local branch.
+Run `merge.py --describe` to read the gate list the helper enforces. It prints JSON generated from the registries the script actually runs (the verify stages, then the publication gate checks), contacts no remote, and exits 0, so the list cannot drift from the code. After every gate passes the helper merges remotely, synchronizes the repository's main branch and removes the merged branch where safe, without reporting an already successful merge as failed when another worktree still holds the local branch.
 
 Report the pull request number, merged head SHA, final branch state, and any branch cleanup warning.

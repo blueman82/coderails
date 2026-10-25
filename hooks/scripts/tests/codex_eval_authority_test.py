@@ -23,7 +23,7 @@ class EvalAuthorityTests(unittest.TestCase):
         task = (ROOT / "packages/codex/skills/task-evals/SKILL.md").read_text()
         for text in (
             "Local or committed eval files are working material, not PR-readiness evidence.",
-            "Fetch the current head with `gh pr view <pr> --json headRefOid -q .headRefOid`.",
+            "fetches the current head with `gh pr view <pr> --json headRefOid -q .headRefOid`",
             "The marker must remain bound to the validated pull request and its currently fetched head.",
             "Never treat missing, stale, mismatched, rejected, untrusted, or unavailable evidence as success.",
         ):

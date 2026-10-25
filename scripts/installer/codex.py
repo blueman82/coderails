@@ -15,6 +15,7 @@ NAMES = (
     "loop-worker",
     "preflight-scout",
     "proof-author",
+    "security-reviewer",
     "source-auditor",
     "spec-reviewer",
     "wiki-writer",
@@ -29,8 +30,8 @@ def preflight(root: Path, home: Path, timestamp: str) -> list[tuple[Path, Path]]
     if source_dir.is_symlink() or not source_dir.is_dir():
         raise ValueError(f"Invalid Codex agent source directory: {source_dir}")
     count = len([path for path in source_dir.glob("*.toml") if path.is_file() and not path.is_symlink()])
-    if count != 10:
-        raise ValueError(f"Expected 10 Codex agents, found {count}")
+    if count != len(NAMES):
+        raise ValueError(f"Expected {len(NAMES)} Codex agents, found {count}")
     for directory in (home, target_dir):
         if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
             raise ValueError(f"Invalid Codex agents directory: {directory}")

@@ -55,7 +55,7 @@ class MergeReceiptTests(unittest.TestCase):
         self.tmp = Path(temporary.name)
         self.repo = make_repo(self.tmp / "repo").resolve()
         (self.repo / ".coderails").mkdir()
-        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: enforce\n")
+        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: enforce\ndiff_manifest: off\n")
         keys = self.tmp / "home" / ".coderails" / "keys"
         self.key, signers = make_owner(keys)
         signers.rename(keys / "receipt_signers")
@@ -66,9 +66,9 @@ class MergeReceiptTests(unittest.TestCase):
         gh.parent.mkdir()
         gh.write_text(
             "#!/bin/sh\n"
-            f'case "$1 $2" in\n"pr view") echo \'{{"baseRefName":"main","headRefOid":"{SHA}"}}\';;\n'
+            f'case "$1 $2" in\n"pr view") echo \'{{"number":7,"baseRefName":"main","headRefOid":"{SHA}"}}\';;\n'
             f'"pr merge") if [ "$GH_MERGE_FAIL" = 1 ]; then exit 1; fi; echo "$$" >> "{self.log}";;\n'
-            '"pr list") echo \'[{"number":7}]\';;\nesac\n'
+            '"pr list") case " $* " in *" -q "*) echo 7;; *) echo \'[{"number":7}]\';; esac;;\nesac\n'
         )
         gh.chmod(0o755)
         self.env = {
@@ -245,7 +245,7 @@ class MergeReceiptTests(unittest.TestCase):
 
     def test_advisory_still_obeys_live_merge_denial_and_cap(self) -> None:
         """A missing receipt is advisory, but a live authority denial or spent cap stops the remote merge."""
-        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: advisory\n")
+        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: advisory\ndiff_manifest: off\n")
         self.grant(denied=["merge"])
         self.refused("authority_denied")
         self.grant(denied=[], max_prs=0)
@@ -253,7 +253,7 @@ class MergeReceiptTests(unittest.TestCase):
 
     def test_advisory_unreceipted_merge_spends_one_live_budget_slot(self) -> None:
         """One successful advisory merge without a receipt uses the live max_prs budget."""
-        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: advisory\n")
+        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: advisory\ndiff_manifest: off\n")
         self.grant(max_prs=1)
         first, err = self.run_merge()
         self.assertEqual(first, 0, err)
@@ -267,7 +267,7 @@ class MergeReceiptTests(unittest.TestCase):
 
     def test_confirmed_failed_advisory_merge_releases_budget_slot(self) -> None:
         """A failed remote merge whose PR remains open does not spend the session cap."""
-        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: advisory\n")
+        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: advisory\ndiff_manifest: off\n")
         self.grant(max_prs=1)
         failed, _ = self.run_merge(GH_MERGE_FAIL="1")
         self.assertNotEqual(failed, 0)
@@ -296,7 +296,9 @@ class MergeReceiptTests(unittest.TestCase):
         """Explicit switches: `off` and `advisory` reach gh without a receipt."""
         for value in ("off", "advisory"):
             (self.repo / ".coderails").mkdir(exist_ok=True)
-            (self.repo / ".coderails/workflow.config.yaml").write_text(f"action_authority: {value}\n")
+            (self.repo / ".coderails/workflow.config.yaml").write_text(
+                f"action_authority: {value}\ndiff_manifest: off\n"
+            )
             rc, err = self.run_merge()
             self.assertEqual(rc, 0, err)
         self.assertEqual(self.merges(), 2)

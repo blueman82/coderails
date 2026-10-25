@@ -14,7 +14,14 @@ from hooks.scripts.tests.native_hook_test_support import HookCase
 
 ROOT = Path(__file__).resolve().parents[3]
 HOOK = "reviewer_bash_allowlist"
-GUARDED = ("deploy-safety-reviewer", "design-scout", "disposition-scout", "preflight-scout", "source-auditor")
+GUARDED = (
+    "deploy-safety-reviewer",
+    "design-scout",
+    "disposition-scout",
+    "preflight-scout",
+    "security-reviewer",
+    "source-auditor",
+)
 ALLOWED = (
     "ls -la hooks",
     "cat README.md",
@@ -132,6 +139,20 @@ class ReviewerAllowlistTests(HookCase):
                 self.assertTrue(self.denied(HOOK, request("python3 -c 1", agent)))
                 self.assertEqual(self.output(HOOK, request("ls", agent)), {})
         self.assertEqual(self.output(HOOK, request("python3 -c 1", "coderails:loop-worker")), {})
+
+    def test_security_capability_grants_do_not_inherit_another_role(self) -> None:
+        """Actual hook payloads grant security-reviewer only its two declared read capabilities."""
+        capability = ROOT / "scripts/capability.py"
+        for tool, allowed in (("repo.inspect", True), ("diff.read", True), ("tests.run", False), ("pr.comment", False)):
+            command = f"{capability} {tool} --json-args '{{}}'"
+            with self.subTest(tool=tool):
+                self.assertEqual(self.denied(HOOK, request(command, "security-reviewer")), not allowed)
+                if not allowed:
+                    self.assertIn(
+                        f"capability_denied_{tool}", self.invoke(HOOK, request(command, "security-reviewer")).stdout
+                    )
+        self.assertTrue(self.denied(HOOK, request("python3 -c 1", "security-reviewer")))
+        self.assertFalse(self.denied(HOOK, request("python3 -c 1", "loop-worker")))
 
     def test_other_identities_are_a_noop(self) -> None:
         """A coder agent, a foreign type, a top-level call and a non-Bash tool are never restricted."""

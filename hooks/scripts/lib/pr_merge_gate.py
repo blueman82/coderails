@@ -11,10 +11,11 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.trace_row import append_row
+from scripts.lib import merge_target, publication_gate
 from scripts.lib.artifact_io import array_value
 from scripts.lib.config import config_path, integrity_enabled, integrity_status_login
 from scripts.lib.config_strict import ConfigRejected, strict_settings
-from scripts.lib.git_common import branch, gate_eval_summary_for_pr, pr_field, pr_num, repo, run
+from scripts.lib.git_common import gate_eval_summary_for_pr, pr_field, repo, run
 from scripts.lib.integrity_attestation import parse_attestation
 from scripts.post_evals import smoke_verify
 
@@ -65,7 +66,7 @@ def integrity_reason(number: str, sha: str, cwd: str, session: str = "") -> str:
     return ""
 
 
-def merge_reason(number: str, cwd: str, session: str = "") -> str:
+def merge_reason(number: str, cwd: str, session: str = "", unit: str = "", progress: str = "") -> str:
     """Return the fail-closed merge denial, or empty after live evidence re-execution."""
     try:
         os.chdir(cwd)
@@ -74,7 +75,7 @@ def merge_reason(number: str, cwd: str, session: str = "") -> str:
             "Blocked: could not resolve working directory to verify the eval artifact for "
             "gh pr merge. Retry from a valid repo directory."
         )
-    number = number or pr_num(branch())
+    number = merge_target.resolve(number)
     if not number:
         return (
             "Blocked: gh pr merge — could not resolve a PR number to verify the eval "
@@ -127,4 +128,9 @@ def merge_reason(number: str, cwd: str, session: str = "") -> str:
             prefix + "local temporary file allocation failed for the smoke-verify gate. Check /tmp "
             "disk space or permissions, then retry."
         )
+    if violations := publication_gate.evaluate(number, sha, unit=unit, progress=progress):
+        first = violations[0]
+        fix = publication_gate.remediation(first["code"])
+        detail = first["detail"] or "no detail"
+        return f"{first['code']}: {prefix}the publication gate refused this head ({detail}). {fix}"
     return integrity_reason(number, sha, cwd, session)

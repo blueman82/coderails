@@ -75,6 +75,30 @@ class DestructiveGateTests(unittest.TestCase):
             )
             self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
 
+    def test_no_verify_is_seen_behind_global_options_and_wrappers(self) -> None:
+        """Git -C/-c commit --no-verify and -n are denied with the established identifier; quoted text is not."""
+        denied = ("git -C d commit --no-verify", "git commit -n", "git -c a=b commit -nm x", "env A=1 git commit -n")
+        allowed = (
+            "git commit -m x",
+            "git -C d commit -m x",
+            'echo "git commit -n"',
+            "git commit -m -n",
+            'echo "git commit -m x --no-verify"',
+            'git commit -m "text --no-verify"',
+        )
+        for command, expected in [(c, True) for c in denied] + [(c, False) for c in allowed]:
+            with self.subTest(command=command):
+                result = subprocess.run(
+                    [sys.executable, str(HOOK)],
+                    input=json.dumps({"tool_input": {"command": command}}),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                decoded: dict[str, Any] = json.loads(result.stdout) if result.stdout.strip() else {}
+                output: dict[str, Any] = decoded.get("hookSpecificOutput", {})
+                self.assertEqual(output.get("patternId") == "git-commit-no-verify", expected)
+
     def test_routes_are_specific_and_identifiers_are_mention_safe(self) -> None:
         """Every route has a safe identifier and names a concrete alternative."""
         for identifier, route in ROUTES.items():

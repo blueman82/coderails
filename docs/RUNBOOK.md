@@ -86,7 +86,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 ## Guarded role has no tools or no shell
 
 - Symptom: a reviewer/scout reports it cannot run a command or read a file, or a skill step is UNSUPPORTED.
-- Cause: by design the five guarded agents hold only `mcp__plugin_coderails_cap-<role>__*` tools (+`Skill` for
+- Cause: by design the six guarded agents hold only `mcp__plugin_coderails_cap-<role>__*` tools (+`Skill` for
   preflight-scout). If the tools are missing entirely, `.claude-plugin/plugin.json` lacks `mcpServers` or
   `capabilities/mcp.json` is stale: run `python3 scripts/capability_profiles_validate.py --check`, and `--write-mcp` to
   regenerate. Codex: launch the role with `scripts/codex_role_session.py`; a native Codex child of a guarded role has no
@@ -441,19 +441,217 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
 - Off-switch: none, by design. The proof gate is intentionally non-disableable on both providers (default ON, no config
   key or env var); the previous transcript-based check was removed, so there is no earlier behaviour to fall back to.
 
+## A routine run ended incomplete, aborted or refused
+
+- Symptom: the dashboard gate for `docs-sync` or `loop-retro-promotion` reads red; the run log's last marker is
+  `abort=incomplete-run`, `abort=<code>`, `refused=<gate>`, `incomplete=merged` or `incomplete=merge-unknown`.
+- Query: the JSONL beside the run log (`run-{date}.jsonl`, `promotion-runs.jsonl`): the last row for the newest
+  `run_id` gives `stage`, `outcome` (`stage_ok`, `run_ok`, `run_abort`, `run_refused`, `run_incomplete`) and
+  `reason_code`. Counters: `trace.by_reason` keys `routine/<outcome>/<reason_code>`, tallied by
+  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py` (key `routine`).
+- Codes: `incomplete-run` (the session ended after `begin`), `stage_out_of_order`, `runner_exit_no_terminal` (the runner
+  saw the child exit with no terminal row), `audit_failed`/`mining_failed`, the diff-manifest codes from the
+  `manifest_check` stage (`out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `special_file_type`,
+  `status_not_allowed`, `too_many_paths`, `manifest_unreadable`, `manifest_internal_error`), and a gate name
+  (`push`, `review`, `post_review`, `post_evals`, `merge`) for `run_refused`.
+- Remediation: `incomplete-run` and `runner_exit_no_terminal` mean the agent session stopped early; read the run
+  output under the runner's runs dir and fix the cause. `begin` refuses an open run even across midnight, or a same-day
+  abort/refusal. Use `begin --new` explicitly to replace it; an open previous run first gets `run_abort incomplete-run`.
+  A refusal names the gate that exited non-zero or could not start (`gate_spawn_failed` on stderr). Cleanup prints
+  `cleanup_failed: <step>` when a PR or local branch could not be closed; inspect the exact PR before any manual
+  cleanup. The remote branch is retained. `routine_unknown`/`reason_code_invalid`/`outcome_invalid` (exit 2)
+  mean a caller used a value outside the closed lists.
+- `merged_incomplete` means GitHub confirms the pinned PR merged but the local
+  run did not finish. Do not abort it or close its PR. `merge_state_unknown`
+  means GitHub could not confirm the pinned PR and head; restore that read
+  before you retry or clean up. A changed head also remains unknown.
+- `log_unwritable` refuses advancement or terminal state: inspect both event logs and the persisted state for partial
+  output from an interrupted/failed write, then repair the destination. `routine_mismatch` means the log belongs to a
+  different routine; select the correct routine log. Do not finish or replace another routine's state.
+- Limits: see `docs/routines.md` "Routine state machine and event log".
+
 ## Diff-manifest check warned or refused
 
-- Symptom: `push.py` or `merge.py` prints `! diff_manifest <code>: <path>`, or refuses with `diff_manifest:<code>`
-  (config `diff_manifest: enforce`). `scripts/diff_manifest.py --policy FILE` shows the same verdict without hooks.
+- Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)
+  refuses with `diff_manifest:<code>` and prints `! diff_manifest <code>: <path>` on stderr. The check is ON by default
+  (`diff_manifest: enforce`, no config file needed, shipped policy `policy/diff-policy.default.json`); `off` and
+  `advisory` (warn only) are the explicit switches. `scripts/diff_manifest.py [--policy FILE]` is a diagnostic verdict
+  reader: it reports unreadable inputs with exit 0; the publication callers refuse them under enforce.
 - Query: `trace.by_reason` for `diff-manifest/ok/diff_manifest_ok`, `diff-manifest/warned|refused/<code>` (rows are keyed by
-  `<repo>@<branch>` or `<repo>@pr-<N>`), plus `diff-manifest/failed_open/manifest_unreadable`,
+  `<repo>@<branch>` or `<repo>@pr-<N>`), `publication/refused/diff_manifest:<code>` (one row per refusal from the single
+  publication gate, every path), plus `diff-manifest/failed_open/manifest_unreadable` (advisory only),
   `diff-manifest/legacy/manifest_legacy_absent` (policy file without a manifest key; also written by the gate) and `diff-manifest/refused/foreign_session`. Tally them with
-  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/manifest_counters.py`.
-- Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink).
+  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`
+  (`manifest_counters.py` still tallies only `diff-manifest`). See `docs/workflow-gates-measurement.md`.
+- Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink), `mode_change`, `status_not_allowed` (policy `statuses`), `too_many_paths` (policy `max_paths`), `manifest_unreadable`, `manifest_internal_error`, `diff_manifest_mode_invalid` (unknown mode, treated as enforce).
 - Remediation: a real violation means the diff left its declared scope; fix the diff, or widen `unit.manifest`
-  (re-register with `add-unit --manifest`) or the policy file on purpose. `manifest_unreadable` means the policy file,
-  progress.json or diff could not be read (fails open when advisory; refuses under enforce); fix the path. Set
-  `diff_manifest: off` to disable.
+  (re-register with `add-unit --manifest`) or the policy file on purpose. `push.py`/`merge.py --unit N --progress PATH`
+  bound the diff to that unit's manifest. `manifest_unreadable` means the policy file, progress.json or diff (or an
+  unresolved PR head) could not be read: it refuses under enforce (fails open only under advisory); fix the path.
+  `manifest_internal_error` refuses under enforce; advisory records `failed_open` and continues, including when repository
+  metadata lookup fails. Set `diff_manifest: off` to disable. Invalid modes, including an empty mode, enforce and report
+  `diff_manifest_mode_invalid`. A null policy value selects the shipped default; the typed config grammar also coerces
+  an empty nullable scalar to null.
+- Limits: a cooperating-agent safeguard. A same-user agent can edit the config to `off`; direct hooks only see merges
+  `guarded_segments` can match; Codex hooks need `/hooks` trust before they run. Claude checks the manifest even without
+  config or a transcript; its review/eval sequence still needs both.
+- Hardening notes: `mode_change` refuses a chmod (100644 to 100755). The default denylist is best-effort secret shapes
+  (`.env*`, `*.pem`, `*.key`, `*.p12`, `credentials*.json`, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa|dsa|ecdsa|ed25519*`)
+  and the gate's own files (`.coderails/workflow.config.yaml`, `policy/diff-policy*.json`, the Codex copy), so a PR that
+  edits or deletes them is refused; deleting a secret-shaped path is allowed. It cannot catch a secret under another name. The gate reads config
+  and policy from the local checkout: a same-user boundary, not a defence against someone who controls that checkout.
+  `--unit` without `--progress` (or the reverse) refuses `manifest_unreadable`. Both separated and `--unit=N`/`--progress=PATH`
+  forms are supported; empty or repeated flag values refuse. A requested unit must exist and carry a string-list `manifest`
+  and a nonblank absolute `worktree` whose real path equals the current Git repository root. The progress object must carry
+  nonblank string `session_id` and `loop_id` fields. Missing, malformed or mismatched metadata refuses `manifest_unreadable`;
+  `manifest: []` allows no changed paths. A session that owns a graph unit in this worktree must supply both flags.
+  Without a matching graph unit, standalone publication uses the policy alone. Unit and policy
+  manifests both apply, so a unit cannot widen policy scope. Custom policies retain the default denylist. An unreadable config
+  refuses `manifest_internal_error` and emits its refusal trace. Direct-merge hooks parse
+  the target with `scripts/lib/merge_target.py` (flag values skipped, URL and branch resolved through gh); `-R/--repo`, another
+  repo's URL, multiple targets or an unknown branch deny `pr_number_invalid`; `GH_REPO` retargeting denies `pr_repo_override`.
+  A same-call `gh pr edit` or `gh api .../pulls/N` plus merge denies `pr_base_mutation`; make the edit in a separate call so the next check sees
+  the new base.
+  The diff uses the PR's live `baseRefOid` and checked head, not the local default branch. `merge.py` accepts one number, URL or branch
+  and pins all gates and the merge to the same head
+  with `--match-head-commit`; a hook
+  cannot pin the agent's own `gh pr merge`, so a push or out-of-band base retarget between the hook check and that merge
+  is a known gap. Unit metadata
+  is a shape and worktree check, not publisher authentication: a same-user actor can forge owner fields for the same
+  worktree. It does not compare a worker's session with its parent's. Raw Git operations and unseen aliases remain
+  outside this manifest arm.
+
+## Required review passes refused a merge
+
+- Symptom: `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`) refuses with
+  `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`,
+  `review_artifact_missing` or `review_policy_unreadable`. The check is the second entry of the single publication gate
+  (`scripts/lib/publication_gate.py`), ON by default with no config. The required names come only from
+  `policy/review_policy.json` (`review-pr` always; `security-review` for `hooks/`, `scripts/`, `install.py`,
+  `uninstall.py`, `.claude-plugin/`, `packages/codex/hooks/`, `packages/codex/scripts/`, and the control files
+  `policy/`, `capabilities/`, `agents/`, `commands/`, `AGENTS.md`, `workflow.config.yaml`, `.coderails/`, their Codex
+  copies and the Codex post-review/merge skills; `deploy-safety` for `launchd/`,
+  `scripts/integrity-gate/`, `scripts/installer/`, `.github/workflows/`, `skills/dashboard/runner/`), matched against
+  the PR diff from its live `baseRefOid` to the checked head (renames count both sides). Config `review_passes: off` skips the check (absent or any other value
+  enforces; `diff_manifest: off` does not touch it). The policy file is the control, and deleting or corrupting it
+  refuses (`review_policy_unreadable`), it does not allow.
+- Artifact: line 1 is the unchanged v1 marker; line 2 is `<!-- coderails-review-passes v1 {"head_sha":...,"passes":[...]} -->`
+  with `{name, verdict, blocking, summary_sha256}` per pass. `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]`
+  validates each summary, derives each verdict from the text (a bullet under `## Critical` is `fail`) and posts it. A v1
+  artifact with no passes line counts as no passes: `review-pr` is satisfied by the marker, but a `hooks/` PR is refused
+  until it is re-posted. A passes line naming another `head_sha` is ignored.
+- Query: `trace.by_reason` for `review-passes/ok/review_passes_ok` and `review-passes/refused/<code>`, plus
+  `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
+- Remediation: spawn the missing reviewer (`security-reviewer`, `deploy-safety-reviewer`; both providers ship them),
+  write its findings to a file in the post-review grammar, re-run `post_review.py post` with `--pass NAME=FILE`. A
+  `failed` pass needs the Critical finding fixed and the artifact re-posted for the new head. `review_artifact_missing`
+  also covers a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
+- Limits: the gate re-derives each pass from the posted sections (hash and verdict; a mismatch is
+  `review_passes_malformed`), so a hand-posted passes line without its text is refused. A pass still proves only that a
+  summary was posted for that name, not that a reviewer wrote it or that the review was substantive: `post_review.py`
+  takes any file for any pass, so the PR author can self-issue a `## No findings` security-review or deploy-safety
+  pass. The same user can write any summary, so this is a cooperating-agent safeguard. `blocking` is derived and never waives a
+  required pass. The Codex hook only sees merges `guarded_segments` can match and needs `/hooks` trust. Row-9 wording in
+  the closure matrix (`.json` policy file) is not recorded in this repo: the matrix lives outside it.
+
+## Eval level or suite integrity refused a merge
+
+- Symptom: `post_evals.py post`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex
+  `pr_publication_gate`) refuses with `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`,
+  `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, `integrity_stripped`, `not_frozen`,
+  `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed`,
+  `eval_head_mismatch`, `eval_result_mismatch` or `eval_level_diff_unavailable`.
+  The check is the third entry of the single publication gate, ON by default (config
+  `eval_level: off` is the optional switch). The minimum level comes from `policy/surface_policy.json` applied to the PR diff
+  from its live `baseRefOid` to the checked head (`scripts/lib/eval_level.py`). An unavailable PR base refuses the check and
+  cannot certify an on-time freeze. Level 2 applies to an irreversible path (`install.py`, `launchd/`, `.github/workflows/`,
+  `hooks/hooks.json`, ...) or three work units, level 1 for any outward path (`hooks/`, `scripts/`, `skills/`, ...) or two
+  units, else 0; only the anchored docs and test directories are neutral, every unlisted path (`AGENTS.md`, `.claude-plugin/`, ...) is outward.
+- Artifact: line 1 is the unchanged v1 marker, line 2 is `<!-- coderails-eval-facts v1 derived_min_level=N
+  late_freeze=0|1 suite=<16 hex> -->`, then the summary and the fenced embed whose `gate_facts` block is stamped by
+  `post_evals.py post <PR> <evals.json> [--progress PROGRESS]`. The merge side ignores the stamped level and recomputes it
+  from the live diff, the embed's declared `facts` and posted `gate_facts` (lower bounds), and the optional
+  `--unit N --progress PATH` flags of `merge.py`. Omitting progress on a direct hook call cannot erase a posted count.
+  The facts-line displayed minimum is informational at merge; the enforced floor is recomputed. The late-freeze
+  flag and suite hash are checked against the embedded suite, and the marker and embedded levels must agree.
+  The selected suite must name the current PR head and every P0 must pass under the same neutral GO rule used
+  by posting; a valid frozen hash or signature does not establish those volatile head/status fields.
+- Query: `trace.by_reason` for `eval-level/ok/eval_level_ok` and `eval-level/refused/<code>`, plus
+  `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
+- Remediation: `level_below_derived` means the suite was frozen at a lower level than the diff needs; write a suite at the
+  derived level (the level is part of the suite hash, so editing it after the freeze is `suite_hash_mismatch`), smoke-run
+  it and re-post. `suite_hash_mismatch` after an intentional oracle edit: `post_evals.py amend <evals.json> <eval_id>
+  <reason> <actor>`, then re-post. `late_freeze_unstamped`/`eval_facts_missing`: re-post with the current
+  `post_evals.py post` (an artifact posted by the old recipe has no facts line and is refused for outward diffs).
+  `eval_artifact_unreadable` is a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
+  `not_frozen` also rejects a missing, abbreviated or symbolic `frozen_sha` at level 1 or 2 on every merge route;
+  stamping it late does not satisfy the full 40-hex commit requirement.
+  `eval_head_mismatch` means the selected suite's head is absent or stale; `eval_result_mismatch` means its P0
+  statuses contradict GO. Correct the head/evidence, rerun and regrade the evals, then re-post with
+  `post_evals.py post <PR> <evals.json>`; the existing eval-level and publication trace rows/counters expose both codes.
+- Limits: a cooperating-agent safeguard. The work-unit count of a diff cannot be derived from the diff, so the floor
+  without `--progress` (and without a declared lower bound) assumes one unit; the PR author can omit the progress file.
+  `verify_suite` is tamper-evident, not tamper-proof: the suite hash and amendment chain are unkeyed and a signature is
+  optional, so a same-user agent can recompute `frozen_hash`/`suite_hash` after editing a cmd and post it with `gh api`;
+  nothing ties the embed to the hash recorded at smoke-run time (see `skills/task-evals/SKILL.md`). Only a naive edit is
+  caught. `late_freeze` is attestation, not evidence: an empty, abbreviated or rev-expression `frozen_sha` counts as late
+  (a level-0 suite may omit it) and level >= 1 needs a full 40-hex sha, but an honest-looking real sha cannot be proven to
+  be the freeze commit, and the
+  disclosure requirement is a substring match for "freeze"/"frozen" in the justification or an amendment `why`. The surface
+  classes are globs: irreversible wins, then the anchored docs and test directories (`none`), and every other path is
+  outward (level 1), so a new control directory needs no entry to be covered, only an irreversible one does. The policy and
+  `eval_level.py`/`publication_gate.py` are themselves irreversible (editing them forces level 2), but they are read from the
+  running checkout, so run `merge.py` from main, not from the PR branch. The gate trusts the posted comment's author (the
+  authenticated, write-permission login), not the content. Config `eval_level: off` skips the check (absent or any other
+  value enforces) and records `eval-level/skipped/eval_level_off`.
+
+## Commit, push or ceiling gate behaves differently than the text suggests (argv classifier)
+
+- Symptom: `test_gate` did not run (or ran) for a `git commit`; `destructive_bash_gate` denied or allowed a
+  `--no-verify`/`-n` commit; `enforce_pr_workflow` / the Codex action hook missed a `git -C d push origin main`; the
+  verification-volume ceiling denied the 3rd `run_all.py`, `test_codex_hooks.py` or `post_evals.py post|validate-structure`
+  after a branch rename, or did not deny in a second repo; an edit on main was denied with `protected_paths_unreadable`.
+- Mechanism: the byte-identical `lib/shell_context.py` copies produce exact source segments, unwrapped argv and local
+  invocation directories; `lib/argv_match.py` classifies their Git/script operations. The producer splits the command on `; && || | & ( )`,
+  backticks and newlines outside quotes, drops shell comments, and unwraps assignments, leading redirections, shell
+  keywords, per-wrapper options (`env/sudo/command/exec/time/nohup/nice/timeout/stdbuf/setsid/xargs/uv run`), absolute
+  paths and `bash [-o x] -c '...'`. Literal `cd`, `env --chdir` and shell-c directories are local to their
+  shell scope; successive relative Git `-C` options compose. Repository-dependent test/workflow/receipt reads replay
+  the original Git prefix (including separate/attached `--git-dir` and `--work-tree`) from the pre-Git directory.
+  Help and dry-run flags exempt only their own operation. It recognises Git by subcommand (`-nm` decoded) and
+  scripts by basename plus the first positional operation after supported leading `--progress` options. A path named
+  `post` in `validate-embed` does not count as a ceremony. Quoted text is one token, so `echo "git commit"` matches
+  nothing. If shlex cannot parse (unbalanced quote), whitespace splitting may over-match plain words, but a split `-c`
+  body is seen only as its first word.
+- Ceiling key: `sha1(realpath(git common dir) + realpath(toplevel))` plus the target, in
+  `<loop dir>/verification-ceiling/` (Codex `$PLUGIN_DATA/verification-ceiling/`). A renamed branch keeps its count; a
+  linked worktree or a second clone starts at zero. To reset, delete the one count file (the digest is printed in no
+  message; compute it, or list the directory by mtime). The count is mirrored into `progress.json`
+  `work_units[u].verification{run_all,post_evals}` only when the actual payload session and existing `CLAUDE_LOOP_ID`
+  exactly own a schema-3 in-progress loop, exactly one physical worktree unit matches, and that unit has a running
+  `U3[<id>]` node registered in `active_wave.nodes`. Unknown, foreign or ambiguous input is left unchanged. Codex
+  reuses the native progress file's persistent regular flock, nonblocking, and preserves its mode on atomic save;
+  Claude retains its existing directory lock. A busy/erroring optional mirror cannot exempt the file counter.
+  The native add-unit producer still supplies status/manifest without worktree registration; this integration is
+  a separate producer dependency, so fixture mirroring alone does not prove native unit accounting.
+- `protected_paths_unreadable`: `policy/protected_paths.json` (both plugin copies) is missing, torn or ill-shaped, so
+  `no_edit_on_main` and the in-Bash source-write check refuse every non-owner edit on main/master until it is repaired.
+  Owner permission files stay denied on every branch. Keys: `source_extensions`, `plugin_source_globs`, `doc_extensions`,
+  `doc_names`, `settings_files`. Adding `.rs` to `source_extensions` protects `sed -i x.rs` on main with no code change;
+  `no_edit_on_main` treats every suffix not in `doc_extensions`/`doc_names` as protected already. The hardcoded
+  `policy/protected_paths.json` path also denies Edit/apply_patch and supported in-Bash writes on main for both copies,
+  including normalized `./` and `..` aliases. Owner settings paths are normalized before matching on every branch.
+- Query: `trace.by_reason` for `argv/denied/ceiling_exceeded` and `argv/denied/protected_paths_unreadable`
+  (`python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`).
+  See `docs/workflow-gates-measurement.md`.
+- Limits: still no full shell parser. Literal `eval` bodies are checked. Aliases, shell functions, ANSI-C quoted or run-time-built command names,
+  backticks inside double quotes and scripts that themselves run `git commit` or `run_all.py` are not seen. Wrapper
+  options are only partly modelled; variable expansion and command-local `GIT_DIR`/`GIT_WORK_TREE` assignments are not
+  evaluated. Merge-script matching retains its existing anchored source policy, including its interpreter-option
+  boundary; Git/GH operations use the shared context. Abbreviated `--no-verify` flags are recognised.
+  A new worktree/clone starts a fresh
+  counter; subagent calls bypass the ceiling and the same user can edit its count files. A cooperating-agent
+  safeguard, not a barrier.
 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
@@ -604,3 +802,24 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   `no PR` units) stay prose: `skip_when_met` is only the machine predicate and is a hint, not a recorded skip. Same-user
   boundary: the spec, policy and `progress.json` are plain files the session user can edit; this is drift detection for a
   cooperating agent, not tamper evidence.
+## A procedure script (wiki_lint, verify_merged, merge --describe, memory_dir, detect_test_command, check --json) answered unexpectedly
+
+- `wiki_lint.py stale --repo R --vault V`: typed `wiki_stale_days` (default 30; zero valid) sets candidate age.
+  A source commit more than 7 days after the page date proves potential drift. `data_gaps` names unresolvable sources,
+  missing commit dates, missing `last_updated` and `no_repo_sources`. Missing directories exit 2 (`repo_unavailable`, `vault_unavailable`);
+  bad thresholds report `wiki_stale_days_invalid`. Repair and rerun. Point-in-time/structural directories are excluded.
+- `verify_merged.py <PR> [--grep STR --path P]` exits 0 only when confirmed (`content` or `merge-commit-ancestry`).
+  Refusals: `gh_failed`, `not_merged`, `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`,
+  `content_preexisting` (needle predates merge), `content_check_failed` (Git error/missing parent), `content_check_required`
+  (no needle and no true two-parent ancestry). A squash needs `--grep`. Choose a new needle or restore missing history.
+  Rows `verify-merged/<ok|refused>/<reason>` feed `trace.by_reason` and the `verify-merged` counter.
+- `merge.py --describe` prints JSON from `VERIFY_STAGES` then `publication_gate.CHECKS`, without remote contact.
+  Conditional stages may skip; earlier refusals stop execution. Target/auth/state/approval checks precede those stages.
+- `memory_dir.py [--provider claude|codex]` prints a path even if absent: realpath, every non-alphanumeric becomes `-`.
+  `detect_test_command.py` returns null for zero/several candidates; callers ask before writing configuration. Missing
+  projects exit 2 (`directory_unavailable`); malformed/blank npm test scripts are not candidates. Repair input and rerun.
+- `scripts/quality/check.py --json` emits `{scanned, findings[{path,line,message}], external_ok}` with tools on stderr.
+  Both feedback hooks disclose findings, unusable JSON, nonzero checker exits and external failures, with bounded diagnostics.
+  The Codex adapter runs built-in checks only; `external_ok: true` means no external tools were attempted.
+- Limits: skills choose these helpers; verification writes a trace. Same-user `gh`/clone/dates/sources/config are trusted.
+  Wiki lint is advisory; presence on base and absence at the first parent do not prove PR authorship.

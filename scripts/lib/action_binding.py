@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The one place that computes (repository, ref, sha) for a guarded action; None means unknowable (callers deny).
 
-git push: needs `git [-C dir] push [opts] <remote> <refspec>`. repository = the remote's PUSH url (host/owner/name),
+git push: needs `git [--no-pager] [-C dir] push [opts] <remote> <refspec>`.
+repository = the remote's PUSH url (host/owner/name),
 ref = the DESTINATION full ref (`HEAD` alone means the current branch; a detached HEAD is unknowable), sha = the
 rev-parse of the refspec SOURCE. A non-literal refspec ($VAR, globs) and a remote with several push urls are None.
 A bare or remote-only push, `-c`/`--git-dir`/`--work-tree`, and env-prefixed commands
@@ -91,10 +92,21 @@ def _full_ref(name: str) -> str:
 def _push(tokens: list[str], cwd: str) -> dict[str, str] | None:
     at = tokens.index("push")
     head = tokens[:at]
-    if head[:1] != ["git"] or (len(head) != 1 and not (len(head) == 3 and head[1] == "-C")):
-        return None  # env prefix, -c, --git-dir, --work-tree ... can retarget the push
-    if len(head) == 3:
-        cwd = os.path.normpath(os.path.join(cwd, head[2]))
+    if head[:1] != ["git"]:
+        return None  # env prefix can retarget the push
+    index = 1
+    while index < len(head):
+        option = head[index]
+        if option == "--no-pager":
+            index += 1
+        elif option == "-C" and index + 1 < len(head):
+            cwd = os.path.normpath(os.path.join(cwd, head[index + 1]))
+            index += 2
+        elif option.startswith("-C") and len(option) > 2:
+            cwd = os.path.normpath(os.path.join(cwd, option[2:]))
+            index += 1
+        else:
+            return None  # -c, --git-dir, --work-tree and unknown globals may retarget the push
     positional: list[str] = []
     skip = False
     for token in tokens[at + 1 :]:

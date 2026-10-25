@@ -21,7 +21,7 @@ MERGE_SHA = "f" * 40
 
 MIRRORS = (
     "scripts/lib/action_receipt.py", "scripts/lib/receipt_signing.py", "scripts/lib/action_binding.py",
-    "scripts/action_receipt_cli.py", "scripts/authority_keys.py", "scripts/lib/authority_permits.py",
+    "scripts/authority_keys.py", "scripts/lib/authority_permits.py",
     "scripts/lib/receipt_gate.py", "scripts/lib/merge_budget.py",
 )  # fmt: skip
 
@@ -34,6 +34,21 @@ class MirrorTests(unittest.TestCase):
         for name in MIRRORS:
             with self.subTest(name):
                 self.assertTrue(filecmp.cmp(ROOT / name, CODEX / name, shallow=False), name)
+
+    def test_receipt_cli_diff_is_provider_import(self) -> None:
+        """Receipt commands differ only in the provider-local command classifier import."""
+        claude = (ROOT / "scripts/action_receipt_cli.py").read_text()
+        codex = (CODEX / "scripts/action_receipt_cli.py").read_text()
+        self.assertEqual(
+            claude.replace(
+                "from hooks.scripts.lib.pr_workflow_match import operations",
+                "from hooks.scripts.lib.action_match import operations",
+            ).replace(
+                "from hooks.scripts.lib.action_match import operations\nfrom hooks.scripts.lib.trace_row",
+                "from hooks.scripts.lib.action_match import operations\n\nfrom hooks.scripts.lib.trace_row",
+            ),
+            codex,
+        )
 
     def test_hook_common_has_no_vendored_receipt_code(self) -> None:
         """The vendored receipt_* functions are gone and the file is under its 400-line ceiling."""
@@ -74,3 +89,16 @@ class MatchParityTests(unittest.TestCase):
                         for fn in ("guarded_segments", "state_mutated_before_guard"):
                             args = (command, tmp)[: 2 if fn == "guarded_segments" else 1]
                             self.assertEqual(getattr(claude_match, fn)(*args), getattr(codex_match, fn)(*args))
+
+    def test_unknown_cwd_stays_unbindable_inside_nested_shell(self) -> None:
+        """A shell wrapper cannot restore the old cwd after an unknown cd."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for matcher in (claude_match, codex_match):
+                for command in (
+                    'cd $UNKNOWN_DIR && bash -c "gh pr merge 516"',
+                    "cd $UNKNOWN_DIR && bash -c 'git push origin HEAD:main'",
+                ):
+                    with self.subTest(matcher=matcher.__name__, command=command):
+                        found = matcher.guarded_segments(command, tmp)
+                        self.assertEqual(len(found), 1)
+                        self.assertTrue(found[0][1].startswith(matcher.UNBINDABLE), found)
