@@ -9,7 +9,7 @@ from graphlib import CycleError, TopologicalSorter
 from typing import Any, NoReturn, cast
 
 import graph_driver_mode
-from graph_vocab import decision_pending, decision_sync_pending
+from graph_vocab import completion_pending_nodes, decision_pending, decision_sync_pending
 from node_metadata import LABELS
 from node_metadata import describe_node as _describe_node
 from node_metadata import node_names as _node_names
@@ -382,10 +382,18 @@ def inspect(state: object) -> dict[str, Any]:
 
 def can_complete(state: object) -> dict[str, Any]:
     """Return canonical completion eligibility, excluding provider work-unit gates."""
-    graph = validate(state)["graph"]
+    root = validate(state)
+    graph = root["graph"]
     blockers = [key for key in ("active_wave", "hard_stop") if graph[key] is not None]
+    if decision_sync_pending(root):
+        blockers.append("decision_sync_pending")
+    pending = completion_pending_nodes(root, graph["nodes"])
+    if pending:
+        blockers.append("decision_pending:" + ",".join(pending))
     unfinished = sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] not in SUCCESS)
-    blockers += ["unfinished:" + ",".join(unfinished)] if unfinished else []
+    if unfinished:
+        blockers.append("unfinished:" + ",".join(unfinished))
     unreleased = sorted(join_id for join_id, join in graph["joins"].items() if not join["released"])
-    blockers += ["unreleased:" + ",".join(unreleased)] if unreleased else []
+    if unreleased:
+        blockers.append("unreleased:" + ",".join(unreleased))
     return {"eligible": not blockers, "blockers": blockers}
