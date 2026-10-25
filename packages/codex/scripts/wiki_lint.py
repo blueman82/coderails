@@ -2,8 +2,9 @@
 """Wiki staleness check: `wiki_lint.py stale --repo R --vault V` prints JSON {stale_days, candidates, stale, data_gaps}.
 
 A page is a candidate when `last_updated` is more than `wiki_stale_days` (typed config, default 30) old. A candidate
-is stale when a resolvable source's last commit date is after `last_updated`; a candidate with no comparable repo
-source is a data gap, never proof of drift. Sources resolve as the wiki-lint skill says:
+is stale when a resolvable source's last commit date is more than seven days after `last_updated`;
+a candidate with no comparable repo source is a data gap, never proof of drift.
+Sources resolve as the wiki-lint skill says:
 `$repo/<entry>`, then `$repo/<entry minus .md>/SKILL.md`, then a vault page (skipped), else unresolvable (a data gap).
 """
 
@@ -108,7 +109,7 @@ def stale_report(repo: Path, vault: Path, today: date) -> dict[str, object]:
                     gaps.append({"page": name, "source": entry, "reason": "no_commit_date"})
                     continue
                 comparable += 1
-                if found > updated:
+                if found > updated + timedelta(days=7):
                     moved.append({"source": relative, "commit_date": found.isoformat()})
         if moved:
             stale.append({"page": name, "last_updated": updated.isoformat(), "basis": "sources", "moved": moved})

@@ -13,6 +13,7 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts/wiki_lint.py"
+CODEX_SCRIPT = REPO / "packages/codex/scripts/wiki_lint.py"
 TODAY = "2026-10-05"
 
 
@@ -63,12 +64,12 @@ class WikiLintCase(unittest.TestCase):
         target.parent.mkdir(exist_ok=True)
         target.write_text("project: x\n" if days is None else f"project: x\nwiki_stale_days: {days}\n")
 
-    def run_stale(self) -> dict[str, Any]:
+    def run_stale(self, script: Path = SCRIPT) -> dict[str, Any]:
         """Run the CLI and return its JSON."""
         result = subprocess.run(
             [
                 sys.executable,
-                str(SCRIPT),
+                str(script),
                 "stale",
                 "--repo",
                 str(self.repo),
@@ -94,20 +95,33 @@ class WikiLintCase(unittest.TestCase):
 class StaleTests(WikiLintCase):
     """The staleness rule from skills/wiki-lint/SKILL.md Step 2, run by code."""
 
-    def test_zero_threshold_and_next_day_source_change(self) -> None:
-        """Zero is a typed threshold; any source commit after the page date counts as moved."""
-        self.commit_source("hooks/moved.py", "2026-10-04")
-        self.write_page("recent.md", "2026-10-03", "[hooks/moved.py]")
+    def test_source_commit_grace_boundary_in_both_providers(self) -> None:
+        """A day-seven commit is still in grace; a day-eight commit is drift."""
+        self.write_page("grace.md", "2026-08-01", "[hooks/moved.py]")
+        for script in (SCRIPT, CODEX_SCRIPT):
+            with self.subTest(script=script, day=7):
+                self.commit_source("hooks/moved.py", "2026-08-08")
+                report = self.run_stale(script)
+                self.assertEqual(report["candidates"], ["hooks/grace.md"])
+                self.assertEqual(self.stale_pages(report), [])
+            with self.subTest(script=script, day=8):
+                self.commit_source("hooks/moved.py", "2026-08-09")
+                self.assertEqual(self.stale_pages(self.run_stale(script)), ["grace.md"])
+
+    def test_zero_threshold_and_eighth_day_source_change(self) -> None:
+        """Zero is a typed threshold; an eighth-day source commit counts as moved."""
+        self.commit_source("hooks/moved.py", "2026-09-28")
+        self.write_page("recent.md", "2026-09-20", "[hooks/moved.py]")
         self.config(0)
         report = self.run_stale()
         self.assertEqual(report["stale_days"], 0)
         self.assertEqual(self.stale_pages(report), ["recent.md"])
 
-    def test_source_change_one_day_after_an_old_page_is_drift(self) -> None:
-        """There is no extra grace period beyond the configured page age threshold."""
+    def test_source_change_one_day_after_an_old_page_is_in_grace(self) -> None:
+        """The source grace period applies to an old candidate page too."""
         self.commit_source("hooks/moved.py", "2026-08-02")
         self.write_page("old.md", "2026-08-01", "[hooks/moved.py]")
-        self.assertEqual(self.stale_pages(self.run_stale()), ["old.md"])
+        self.assertEqual(self.stale_pages(self.run_stale()), [])
 
     def test_old_pages_without_comparable_sources_are_only_data_gaps(self) -> None:
         """Missing, untracked and vault-only sources cannot prove source drift."""
@@ -138,7 +152,7 @@ class StaleTests(WikiLintCase):
         self.assertIn("vault_unavailable", result.stderr)
 
     def test_old_page_with_moved_source_is_stale_and_unmoved_is_not(self) -> None:
-        """Candidate age plus a source commit after last_updated is stale; otherwise not."""
+        """Candidate age plus a source commit past grace is stale; otherwise not."""
         self.commit_source("hooks/moved.py", "2026-09-20")
         self.commit_source("hooks/still.py", "2026-06-01")
         self.write_page("moved.md", "2026-08-01", "[hooks/moved.py]")
@@ -149,21 +163,21 @@ class StaleTests(WikiLintCase):
         self.assertEqual(sorted(Path(c).name for c in data["candidates"]), ["moved.md", "still.md"])
 
     def test_config_value_changes_the_result_and_default_is_30(self) -> None:
-        """A 10-day-old page with a moved source flips on wiki_stale_days; no key means the default 30 (control)."""
+        """Page age controls candidacy; no key means the default 30 (control)."""
         self.commit_source("hooks/moved.py", "2026-09-30")
         self.write_page("fresh.md", "2026-09-25", "[hooks/moved.py]")
         self.write_page("moved.md", "2026-09-10", "[hooks/moved.py]")
         self.config(None)
         self.assertEqual(self.stale_pages(self.run_stale()), [])
         self.config(1)
-        self.assertEqual(self.stale_pages(self.run_stale()), ["fresh.md", "moved.md"])
+        self.assertEqual(self.stale_pages(self.run_stale()), ["moved.md"])
         self.config(100)
         self.assertEqual(self.stale_pages(self.run_stale()), [])
         self.config(None)
         self.assertEqual(self.run_stale()["stale_days"], 30)
 
     def test_skill_shorthand_and_vault_entries(self) -> None:
-        """Every later commit is drift; shorthand resolves to SKILL.md; vault-only sources are data gaps."""
+        """Shorthand resolves to SKILL.md; commits within grace are excluded; vault sources are gaps."""
         self.commit_source("hooks/lag.py", "2026-08-04")
         self.commit_source("skills/foo/SKILL.md", "2026-09-20")
         self.write_page("lag.md", "2026-08-01", "[hooks/lag.py]")
@@ -172,10 +186,9 @@ class StaleTests(WikiLintCase):
         (self.vault / "sources/pr_1_x.md").write_text(page("2026-01-01", "[]"))
         self.config(None)
         data = self.run_stale()
-        self.assertEqual(sorted(self.stale_pages(data)), ["lag.md", "short.md"])
+        self.assertEqual(sorted(self.stale_pages(data)), ["short.md"])
         by_name = {Path(s["page"]).name: s for s in data["stale"]}
         self.assertEqual(by_name["short.md"]["basis"], "sources")
-        self.assertEqual(by_name["lag.md"]["basis"], "sources")
         self.assertEqual(data["data_gaps"], [{"page": "hooks/vaultonly.md", "source": "", "reason": "no_repo_sources"}])
 
     def test_unresolvable_source_is_a_data_gap_not_unchanged(self) -> None:

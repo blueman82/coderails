@@ -75,7 +75,8 @@ hit: `$repo/<entry>`, then `$repo/<entry-without-.md>/SKILL.md` (the `skills/foo
 (another wiki page, skipped, tested by existence); nothing existing is unresolvable. Repo forms are tried before the
 vault because a wiki page that mirrors a repo file has the same path in both trees. For each repo source it compares
 `git log -1 --format=%cs` (commit date, never mtime; an empty result is a gap, not "unchanged") with `last_updated`,
-and counts a source as moved when its commit date is later than the page date. There is no additional grace period.
+and counts a source as moved when its commit date is more than 7 days after the page date. The 7-day window covers
+authoring lag between a source commit and a page's date stamp; a source committed on day 7 remains in grace.
 
 Classify each entry of `stale`:
 - `basis: sources` — read each `moved` source's diff over the drifted span before reporting. Find the base commit

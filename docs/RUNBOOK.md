@@ -744,8 +744,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 ## A procedure script (wiki_lint, verify_merged, merge --describe, memory_dir, detect_test_command, check --json) answered unexpectedly
 
 - `wiki_lint.py stale --repo R --vault V`: typed `wiki_stale_days` (default 30; zero valid) sets candidate age.
-  Only later source commits prove drift, without grace. `data_gaps` names unresolvable sources, missing commit dates,
-  missing `last_updated` and `no_repo_sources`. Missing directories exit 2 (`repo_unavailable`, `vault_unavailable`);
+  A source commit more than 7 days after the page date proves potential drift. `data_gaps` names unresolvable sources,
+  missing commit dates, missing `last_updated` and `no_repo_sources`. Missing directories exit 2 (`repo_unavailable`, `vault_unavailable`);
   bad thresholds report `wiki_stale_days_invalid`. Repair and rerun. Point-in-time/structural directories are excluded.
 - `verify_merged.py <PR> [--grep STR --path P]` exits 0 only when confirmed (`content` or `merge-commit-ancestry`).
   Refusals: `gh_failed`, `not_merged`, `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`,
