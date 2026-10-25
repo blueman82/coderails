@@ -91,8 +91,11 @@ def eval_level_check(number: str, sha: str, unit: str, progress: str) -> list[Vi
     stamped = eval_artifact.parse_facts(found.facts)
     if stamped is None:
         codes += ["eval_facts_missing"] if minimum or late else []
-    elif stamped[1] != late:
-        codes.append("late_freeze_unstamped")
+    else:
+        if stamped[0] != minimum:
+            codes.append("eval_facts_level_mismatch")
+        if stamped[1] != late:
+            codes.append("late_freeze_unstamped")
     try:
         eval_level.check_suite(data, found.verification_level, stamped=True)
     except IntegrityError as error:

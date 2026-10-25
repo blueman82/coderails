@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,9 +20,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.agentic_loop_path import resolve_path
 from hooks.scripts.lib.dir_lock import acquire_dir_lock, release_dir_lock
 from hooks.scripts.lib.discipline_common import content, records, tool_uses
-from hooks.scripts.lib.trace_row import append_row
 
-LOOP_STOP_VOCAB = "hard-stop|approval-gate|awaiting-input|complete"
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loop/scripts"))
+from graph_vocab import STOP_CATEGORIES  # the one shared enum, materialized beside graph_semantics
 
 
 def log(message: str) -> None:
@@ -43,7 +43,10 @@ def read_state(path: Path) -> dict[str, Any]:
 
 
 def atomic_progress_update(
-    path: Path, update: Callable[[dict[str, Any]], dict[str, Any]], create: bool = False
+    path: Path,
+    update: Callable[[dict[str, Any]], dict[str, Any]],
+    create: bool = False,
+    preserve_updated_at: bool = False,
 ) -> bool:
     """Serialize one provider-local read, transform, and atomic file replacement.
 
@@ -64,13 +67,25 @@ def atomic_progress_update(
         state: object = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
         if not isinstance(state, dict):
             return False
-        proposed = update(cast(dict[str, Any], state))
+        source = cast(dict[str, Any], state)
+        proposed = update(source)
+        if path.name == "progress.json":  # stamped only on a write that happens; a refused update raises above
+            stamp = (
+                source.get("updated_at")
+                if preserve_updated_at
+                else datetime.now(timezone.utc).isoformat(timespec="seconds")
+            )
+            if not isinstance(stamp, str) or not stamp:
+                return False
+            proposed = {**proposed, "updated_at": stamp}
         with tempfile.NamedTemporaryFile(
             mode="w", dir=path.parent, prefix=f"{path.name}.tmp.", delete=False, encoding="utf-8"
         ) as stream:
             temporary = stream.name
             json.dump(proposed, stream, indent=2)
             stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, path)
         return True
     except (OSError, ValueError, TypeError, KeyError):
@@ -166,52 +181,6 @@ def loop_active_incomplete(transcript: str, cwd: str, session: str) -> bool:
     return count > 0 and not load_progress(cwd, session, count).complete
 
 
-def record_absent_block(state: LoopState) -> None:
-    """Persist the invocation ordinal of an absent-state block in hook_state.json; fail open, never raise."""
-
-    def update(data: dict[str, Any]) -> dict[str, Any]:
-        ordinals = data.setdefault("ordinals", {})
-        if not isinstance(ordinals, dict):
-            raise ValueError("ordinals must be an object")
-        cast(dict[str, Any], ordinals)["absent_blocked"] = state.invocations
-        return data
-
-    atomic_progress_update(state.path.with_name("hook_state.json"), update, create=True)
-
-
-def unstubbed_grace(state: LoopState, hook: str) -> bool:
-    """Release only an absent-file block already recorded at this invocation ordinal.
-
-    Typed hook_state.json decides when it holds an integer ordinal; the discipline.log regex is the legacy
-    fallback (traced as legacy_log_parse) for a missing or torn state file.
-    """
-    if state.path.is_file():
-        return False
-    ordinals = read_state(state.path.with_name("hook_state.json")).get("ordinals")
-    recorded = cast(dict[str, Any], ordinals).get("absent_blocked") if isinstance(ordinals, dict) else None
-    if isinstance(recorded, int) and not isinstance(recorded, bool):
-        released = recorded == state.invocations
-    else:
-        path = Path(os.environ.get("CLAUDE_DISCIPLINE_LOG", str(Path.home() / ".claude/discipline.log")))
-        try:
-            lines = path.read_text()
-        except OSError:
-            return False
-        prefix = f"hook=loop_state_guard session={state.session} invocations={state.invocations} "
-        released = bool(re.search(re.escape(prefix) + r".*reason=absent blocked=1", lines))
-        if released:
-            append_row(hook, "fallback", "legacy_log_parse", state.session)
-    if released:
-        log(f"hook={hook} session={state.session} invocations={state.invocations} unstubbed_grace=released blocked=0")
-    return released
-
-
-def stop_category(text: str) -> str:
-    """Legacy text fallback: the last anchored declaration's category; an inline mention is prose (H06)."""
-    matches = re.findall(rf"^\s*LOOP-STOP:\s*({LOOP_STOP_VOCAB})(?:[^a-z0-9]|$)", text, re.I | re.M)
-    return matches[-1] if matches else ""
-
-
 def consume_stop(data: dict[str, Any], seq: object) -> None:
     """Mark exactly one unconsumed stop row consumed; raise so the enclosing atomic write is abandoned otherwise."""
     rows = cast(list[object], data.get("stops") or [])
@@ -235,15 +204,15 @@ def recorded_stop(data: dict[str, Any]) -> dict[str, Any] | None:
         if (
             stop.get("consumed") is False
             and stop.get("revision") == data.get("revision")
-            and stop.get("category") in LOOP_STOP_VOCAB.split("|")
+            and stop.get("category") in STOP_CATEGORIES
         ):
             return stop
     return None
 
 
-def stop_ran_this_turn(transcript: str) -> bool:
-    """Report whether `graph.py stop` ran after the last user prompt, so an old row cannot release a later turn."""
-    ran = False
+def stop_in_this_turn(transcript: str, stop: dict[str, Any]) -> bool:
+    """Report whether the row was recorded after the last user prompt (row `at` vs prompt timestamp)."""
+    prompt_at = 0.0
     for record in records(transcript):
         value = content(record)
         if record.get("type") == "user" and (
@@ -256,28 +225,34 @@ def stop_ran_this_turn(transcript: str) -> bool:
                 )
             )
         ):
-            ran = False
-        for tool in tool_uses(record):
-            data = tool.get("input")
-            command = cast(dict[str, Any], data).get("command") if isinstance(data, dict) else None
-            if tool.get("name") == "Bash" and isinstance(command, str) and re.search(r"graph\.py\s+stop\b", command):
-                ran = True
-    return ran
+            if "timestamp" not in record:
+                prompt_at = float("inf")  # unknown turn boundary cannot authorize an older row
+                continue
+            try:
+                prompt_at = datetime.fromisoformat(str(record["timestamp"]).replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                prompt_at = float("inf")  # an unreadable prompt time fails closed
+    at = stop.get("at")
+    return isinstance(at, (int, float)) and not isinstance(at, bool) and at >= prompt_at
 
 
 def mark_complete(cwd: str, session: str) -> bool:
-    """Stamp completion with this session's actual native loop-invocation ordinal."""
+    """Use native completion gates and the orders lifecycle with this session's invocation ordinal."""
     projects = Path(os.environ.get("CLAUDE_PROJECTS_DIR", str(Path.home() / ".claude/projects")))
     transcript = next((path for path in sorted(projects.glob(f"*/{session}.jsonl")) if path.is_file()), None)
     if transcript is None or not (count := stable_invocations(str(transcript))):
         return False
 
-    def stamp(state: dict[str, Any]) -> dict[str, Any]:
-        if state.get("schema_version") != 3 or state.get("session_id") != session:
-            raise ValueError("completion requires current state owned by this session")
-        return {**state, "status": "complete", "completed_marker": count}
+    from hooks.scripts.lib.graph_dispatch import complete  # noqa: PLC0415
 
-    return atomic_progress_update(resolve_path(cwd, session), stamp)
+    try:
+        result = complete(resolve_path(cwd, session), session, completed_marker=count)
+    except (OSError, ValueError) as error:
+        print(f"mark-complete: {error}", file=sys.stderr)
+        return False
+    if result.get("pending_teardown") is True:
+        print("mark-complete: standing-orders teardown pending; retry mark-complete", file=sys.stderr)
+    return result.get("pending_teardown") is False
 
 
 if __name__ == "__main__":

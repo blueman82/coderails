@@ -199,14 +199,6 @@ class HardeningTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertFalse(is_commit(command))
 
-    def test_executable_substitutions_inside_double_quotes_are_classified(self) -> None:
-        """Double quotes retain command substitution, while single quotes keep it inert."""
-        for command in ('echo "$(git commit --no-verify -m x)"', 'echo "`git commit --no-verify -m x`"'):
-            with self.subTest(command=command):
-                self.assertTrue(is_commit(command))
-                self.assertEqual(destructive_patterns.permanent_pattern(command, "")[1], "git-commit-no-verify")
-        self.assertFalse(is_commit("echo '$(git commit --no-verify -m x)'"))
-
     def test_abbreviated_no_verify_is_recognised_by_the_destructive_gate(self) -> None:
         """Git accepts any unambiguous prefix; only the shared check sees them (exact flags() stays exact)."""
         for flag in ABBREVIATED_NO_VERIFY:

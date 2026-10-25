@@ -12,7 +12,7 @@ export function localDateIso(date: Date): string {
 
 export function recordTimeoutMarker(routine: RoutineDef, ctx: ArtifactCheckContext): void {
   const predicate = routine.expectedArtifact.predicate;
-  if (predicate.kind !== "last-marker") return;
+  if (predicate.kind !== "last-marker" || mergeAttemptState(routine, ctx) !== "none") return;
   const path = resolveArtifactPath(routine.expectedArtifact.artifactPath, ctx);
   const marker = resolveArtifactPath(predicate.failures[0], ctx);
   try {
@@ -30,6 +30,7 @@ interface RoutineRow {
   run_id: string;
   routine: string;
   outcome: string;
+  reason_code?: string;
 }
 
 function readLog(path: string): Buffer {
@@ -60,6 +61,18 @@ function readRows(contents: Buffer): RoutineRow[] {
   return rows;
 }
 
+function mergeAttemptState(routine: RoutineDef, ctx: ArtifactCheckContext): "none" | "attempt" | "unavailable" {
+  const template = routine.expectedArtifact.artifactPath.replace("{date}", "active");
+  const human = resolveArtifactPath(template, ctx);
+  try {
+    const state = JSON.parse(readFileSync(`${human.slice(0, -4)}.state.json`, "utf-8"));
+    if (state.v !== 1 || state.run_id !== ctx.runId || state.routine !== routine.name) return "unavailable";
+    return state.merge_attempt ? "attempt" : "none";
+  } catch {
+    return "unavailable";
+  }
+}
+
 // Only rows appended after the caller's prelaunch boundary can establish this invocation's terminal evidence.
 // The fallback appends remain unlocked against concurrent Python emits; its result still prevents false success.
 export function ensureTerminalRow(
@@ -78,24 +91,30 @@ export function ensureTerminalRow(
       return { passed: false, reason: "routine_log_changed: existing event log changed during invocation" };
     }
     const mine = readRows(contents.subarray(boundary.length));
-    const last = mine[mine.length - 1];
-    const runId = last ? last.run_id : ctx.runId;
-    const terminal = mine.filter((row) => row.run_id === runId && TERMINAL_OUTCOMES.has(row.outcome)).pop();
+    const own = mine.filter((row) => row.run_id === ctx.runId && row.routine === routine.name);
+    const terminal = own.filter((row) => TERMINAL_OUTCOMES.has(row.outcome)).pop();
     if (terminal) return { passed: terminal.outcome === "run_ok", reason: `routine_terminal:${terminal.outcome}` };
+    if (own.some((row) => row.outcome === "run_incomplete" && row.reason_code === "merged_incomplete")) {
+      return { passed: false, reason: "routine_merged_incomplete" };
+    }
+    const mergeAttempt = mergeAttemptState(routine, ctx);
+    if (mergeAttempt === "unavailable") return { passed: false, reason: "routine_state_unavailable" };
+    const pendingMerge = mergeAttempt === "attempt";
     const ts = new Date().toISOString();
     const row = {
       v: 1,
       ts,
-      run_id: runId,
-      routine: last ? last.routine : routine.name,
+      run_id: ctx.runId,
+      routine: routine.name,
       stage: "runner",
-      outcome: "run_abort",
-      reason_code: "runner_exit_no_terminal",
+      outcome: pendingMerge ? "run_incomplete" : "run_abort",
+      reason_code: pendingMerge ? "merge_state_unknown" : "runner_exit_no_terminal",
     };
     mkdirSync(dirname(jsonl), { recursive: true });
     appendFileSync(jsonl, `${JSON.stringify(row)}\n`);
-    if (writeMarker) appendFileSync(human, `${ts} ${resolveArtifactPath(predicate.failures[0], ctx)}runner_exit_no_terminal\n`);
-    return { passed: false, reason: "runner_exit_no_terminal" };
+    if (pendingMerge) appendFileSync(human, `${ts} incomplete=merge-unknown\n`);
+    else if (writeMarker) appendFileSync(human, `${ts} ${resolveArtifactPath(predicate.failures[0], ctx)}runner_exit_no_terminal\n`);
+    return { passed: false, reason: pendingMerge ? "routine_merge_state_unknown" : "runner_exit_no_terminal" };
   } catch (err) {
     return { passed: false, reason: `routine_log_unavailable: ${err instanceof Error ? err.message : String(err)}` };
   }

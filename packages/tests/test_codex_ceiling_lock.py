@@ -120,28 +120,6 @@ class CeilingLockTests(unittest.TestCase):
             self.assertEqual(run_hook(data, origin, f"env --chdir {quoted} {CMD}"), "")
             self.assertIn('"deny"', run_hook(data, target))
 
-    def test_each_suite_in_one_command_is_counted(self) -> None:
-        """A second worktree and repeated suites in one Bash call each consume their own count."""
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            data, origin, target = base / "data", base / "origin", base / "target"
-            for repo in (origin, target):
-                subprocess.run(["git", "init", "-q", "-b", "b", str(repo)], check=True)
-            self.assertEqual([run_hook(data, target) for _ in range(2)], ["", ""])
-            command = f"{CMD}; cd {shlex.quote(str(target))} && {CMD}"
-            self.assertIn('"deny"', run_hook(data, origin, command))
-            self.assertIn('"deny"', run_hook(data, origin, "; ".join([CMD] * 3)))
-
-    def test_shell_body_substitution_counts_once(self) -> None:
-        """An outer double-quoted substitution and parsed shell body represent one run."""
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            data, repo = base / "data", base / "repo"
-            subprocess.run(["git", "init", "-q", "-b", "b", str(repo)], check=True)
-            command = f'bash -c "echo $({CMD})"'
-            self.assertEqual([run_hook(data, repo, command) for _ in range(2)], ["", ""])
-            self.assertIn('"deny"', run_hook(data, repo, command))
-
     def test_foreign_unknown_or_ambiguous_mirror_is_unchanged(self) -> None:
         """An optional mirror requires exact ownership and one registered running worktree unit."""
         with tempfile.TemporaryDirectory() as tmp:

@@ -52,6 +52,13 @@ class ParityTests(unittest.TestCase):
                     self.assertTrue(codex["log"].startswith("~/.codex/"))
                     self.assertTrue(claude["log"].startswith("~/.claude/"))
 
+    def test_retro_predicate_failure_codes_are_closed_in_both_specs(self) -> None:
+        """Both providers accept the three typed predicate failure exits as abort reasons."""
+        for root in (ROOT, CODEX):
+            spec = json.loads((root / "routines/loop-retro-promotion.json").read_text())
+            codes = {"predicate_refused", "predicate_degraded", "predicate_unavailable"}
+            self.assertTrue(codes <= set(spec["reason_codes"]))
+
     def test_codex_skills_call_the_script_once_and_drop_the_prose_chain(self) -> None:
         """Each Codex SKILL spells the gate chain once through routine_run.py."""
         for routine in ROUTINES:

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Mint, inspect and revoke action receipts (approval bound to one exact command).
+"""Mint, inspect and revoke signed action receipts (approval bound to repository + ref + SHA + exact command).
 
-A receipt binds an approval to an exact action; it does NOT prove a human approved it: a same-user agent can run
-approve-action too. Hash coverage is the command text the hook sees (not aliases, functions, eval).
+OWNER-RUN: approve-action computes the binding itself (the owner never types a SHA), signs with the
+passphrase-protected owner key and refuses without a controlling terminal (receipt_refused_no_tty), so an agent
+that lacks the passphrase cannot mint. With the user-tier trust root this is a cooperating-agent safeguard, not a
+boundary; see docs/decisions/p3-human-only-minting.md. Receipts are always single-use.
 Limits: scope <= 500 chars, 50 receipts per session.
 """
 
@@ -10,17 +12,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from hooks.scripts.lib.destructive_patterns import git_output
 from hooks.scripts.lib.pr_workflow_match import operations
 from hooks.scripts.lib.trace_row import append_row
 from scripts.lib import action_receipt as ar
+from scripts.lib import receipt_signing as rs
+from scripts.lib.action_binding import binding, git_out
+from scripts.lib.authority_object import read_authority
 
 KINDS = ("merge", "git_push")
 
@@ -34,41 +39,58 @@ def refuse(code: str, message: str, session: str | None = None, loop: str | None
 
 
 def approve(args: argparse.Namespace) -> int:
-    """Write one new receipt for the exact command, cwd and branch; never overwrites."""
+    """Write one new signed receipt for the exact command, cwd, branch and computed binding; never overwrites."""
     now = datetime.now(timezone.utc)
     cwd = args.cwd or str(Path.cwd())
-    call = next((value for value in operations(args.action_command, cwd) if value.name == args.kind), None)
-    branch = (
-        args.branch
-        if args.branch is not None
-        else (
-            git_output(call.git_cwd, *call.prefix, "branch", "--show-current")
-            if call is not None
-            else git_output(cwd, "branch", "--show-current")
+    calls = [call for call in operations(args.action_command, cwd) if call.name == args.kind]
+    if len(calls) != 1:
+        return refuse(
+            "receipt_refused_binding_unknown", "command must select one bound action", args.session, args.loop
         )
-    )
-    proposed = ar.proposed_action(args.kind, args.action_command, cwd, branch, args.artifact_sha)
+    call = calls[0]
     if len(args.scope) > ar.MAX_SCOPE:
         return refuse("receipt_refused_scope_too_long", f"scope over {ar.MAX_SCOPE} chars", args.session, args.loop)
+    bind = binding(args.kind, call.segment, call.cwd)
+    if bind is None:
+        return refuse("receipt_refused_binding_unknown", "cannot compute repository+ref+sha", args.session, args.loop)
+    branch = args.branch if args.branch is not None else git_out(call.git_cwd, *call.prefix, "branch", "--show-current")
+    try:
+        hours = args.expires_in_hours
+        if not math.isfinite(hours) or hours <= 0:
+            raise ValueError("expiry must be finite and positive")
+        expires = (now + timedelta(hours=hours)).isoformat(timespec="seconds")
+    except (OverflowError, ValueError) as error:
+        return refuse("receipt_refused_expiry_invalid", str(error), args.session, args.loop)
+    proposed = ar.proposed_action(args.kind, call.segment, call.cwd, branch, bind)
     receipt_id = str(uuid.uuid4())
+    live = read_authority(args.session)
     obj: dict[str, Any] = {
         "receipt_id": receipt_id,
-        "authority_id": args.authority_id,
+        "authority_id": args.authority_id or (live["authority_id"] if live else None),  # max_prs counts by this id
         "session_id": args.session,
         "loop_id": args.loop,
         "action": args.kind,
         "exact_payload_hash": proposed["exact_payload_hash"],
-        "artifact_sha": args.artifact_sha,
+        "repository": bind["repository"],
+        "ref": bind["ref"],
+        "artifact_sha": bind["sha"],
+        "nonce": uuid.uuid4().hex,
         "scope": args.scope,
         "issued_at": now.isoformat(timespec="seconds"),
-        "expires_at": (now + timedelta(hours=args.expires_in_hours)).isoformat(timespec="seconds"),
-        "single_use": not args.reusable,
+        "expires_at": expires,
+        "single_use": True,
         "revoked": False,
+        "signature": None,
     }
+    try:
+        obj["signature"] = rs.sign(ar.body_text(obj), Path(args.key) if args.key else rs.keys_dir() / "receipt_ed25519")
+    except rs.SigningError as error:
+        return refuse(f"receipt_refused_{error.code}", str(error), args.session, args.loop)
+    signers = Path(args.signers) if args.signers else rs.resolve_trust_root()[0]
     path = ar.receipt_path(args.session, receipt_id)
-    ok, code = ar.verify(obj, proposed, now, args.session, args.loop)
+    ok, code = ar.verify(obj, proposed, now, args.session, args.loop, signers=signers)
     if path is None or not ok:
-        return refuse(f"receipt_refused_{code}", "receipt would be invalid", args.session, args.loop)
+        return refuse(f"receipt_refused_{code}", "receipt would not verify", args.session, args.loop)
     if len(list(path.parent.glob("*.json"))) >= ar.MAX_RECEIPTS:
         return refuse("receipt_refused_too_many", f"over {ar.MAX_RECEIPTS} receipts", args.session, args.loop)
     if not ar.write_receipt(path, obj):
@@ -91,8 +113,8 @@ def locate(args: argparse.Namespace) -> tuple[Path, dict[str, Any]] | int:
     return path, data
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Dispatch one subcommand."""
+def main(argv: list[str] | None = None, tty_ok: Callable[[], bool] = rs.have_tty) -> int:
+    """Dispatch one subcommand. tty_ok is a function argument (tests only): no flag or env var can skip the tty rule."""
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     mint = sub.add_parser("approve-action")
@@ -103,16 +125,18 @@ def main(argv: list[str] | None = None) -> int:
     mint.add_argument("--command", dest="action_command", required=True, help="exact command text the hook sees")
     mint.add_argument("--cwd", default=None)
     mint.add_argument("--branch", default=None, help="default: current branch of --cwd")
-    mint.add_argument("--artifact-sha", default=None)
+    mint.add_argument("--key", default=None, help="owner private key (default ~/.coderails/keys/receipt_ed25519)")
+    mint.add_argument("--signers", default=None, help="signers file to self-verify against (default: trust root)")
     mint.add_argument("--scope", default="")
     mint.add_argument("--expires-in-hours", type=float, default=1.0)
-    mint.add_argument("--reusable", action="store_true")
     for name in ("inspect-receipt", "revoke-receipt"):
         other = sub.add_parser(name)
         other.add_argument("--session", required=True)
         other.add_argument("--receipt-id", required=True)
     args = parser.parse_args(argv)
     if args.command == "approve-action":
+        if not tty_ok():
+            return refuse("receipt_refused_no_tty", "minting needs the owner at a terminal", args.session, args.loop)
         return approve(args)
     found = locate(args)
     if isinstance(found, int):

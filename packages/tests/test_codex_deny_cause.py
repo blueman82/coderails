@@ -67,10 +67,12 @@ class DenyCauseTests(unittest.TestCase):
             self.assertEqual((code, out, causes), (0, "", ["ok"]))
             self.run_hook("verification_volume_ceiling", payload, tmp)
             code, out, causes = self.run_hook("verification_volume_ceiling", payload, tmp)
-            self.assertEqual((code, causes[2:]), (0, ["deny"]))
-            reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
-            self.assertIn("run 3 of the same full-suite", reason)
-            self.assertIn(f"worktree '{os.path.realpath(tmp)}'", reason)
+            reason = (
+                "This is run 3 of the same full-suite on branch 'no-branch'. The third and later full "
+                "re-runs are blocked; use a focused check or delegate verification with spawn_agent."
+            )
+            expected = ENVELOPE.format(rest=f'"permissionDecisionReason": {json.dumps(reason)}')
+            self.assertEqual((code, out, causes[2:]), (0, expected, ["deny"]))
 
     def test_test_gate(self) -> None:
         """Test a failing trusted test command records deny; a passing one records ok."""

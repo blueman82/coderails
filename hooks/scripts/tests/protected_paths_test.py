@@ -72,6 +72,9 @@ class PolicyDrivenHookTests(unittest.TestCase):
         self.plugin = self.directory / "plugin"
         shutil.copytree(ROOT / "hooks", self.plugin / "hooks", ignore=shutil.ignore_patterns("tests", "__pycache__"))
         shutil.copytree(ROOT / "policy", self.plugin / "policy")
+        shutil.copytree(
+            ROOT / "scripts", self.plugin / "scripts", ignore=shutil.ignore_patterns("tests", "__pycache__")
+        )
         self.policy = self.plugin / "policy/protected_paths.json"
         self.repo = self.directory / "repo"
         self.repo.mkdir()

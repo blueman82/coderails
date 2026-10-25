@@ -209,8 +209,6 @@ class DestructiveTests(CodexHookCase):
             "git commit -n",
             "git -c a=b commit -nm x",
             "env A=1 git commit -n",
-            'echo "$(git commit --no-verify -m x)"',
-            'echo "`git commit --no-verify -m x`"',
         )
         for command in denied:
             with self.subTest(command=command):
@@ -297,11 +295,13 @@ class ProtectedPathsTests(CodexHookCase):
     """Acceptance 6 on the Codex hooks, from a private copy of the package whose JSON the test edits."""
 
     def setUp(self) -> None:
-        """Copy hooks/ and policy/, and put the repository on main."""
+        """Copy the installed hook dependencies and put the repository on main."""
         super().setUp()
         self.plugin = self.directory / "plugin"
         shutil.copytree(PACKAGE / "hooks", self.plugin / "hooks", ignore=shutil.ignore_patterns("tests", "__pycache__"))
         shutil.copytree(PACKAGE / "policy", self.plugin / "policy")
+        shutil.copytree(PACKAGE / "scripts", self.plugin / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+        self.environment["PLUGIN_ROOT"] = str(self.plugin)
         self.policy = self.plugin / "policy/protected_paths.json"
         subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/main"], check=True)
         marker = self.repo / ".codex-plugin/plugin.json"

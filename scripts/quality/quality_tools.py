@@ -9,12 +9,11 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from scripts.installer.files import SEMANTIC_TARGETS
+
 from .source_kind import is_python_source
 
-GENERATED_SEMANTICS = (
-    "skills/agentic-loop/scripts/graph_semantics.py",
-    "packages/codex/skills/agentic-loop/scripts/graph_semantics.py",
-)
+GENERATED_SEMANTICS = tuple(target for _, targets in SEMANTIC_TARGETS for target in targets)
 
 
 def run_tool(arguments: list[str], root: Path, environment: dict[str, str] | None = None) -> bool:
@@ -44,7 +43,7 @@ def mypy_environment(directory: Path, root: Path, native_workflow: bool = False)
         )
     if provider == root:
         paths.append(root / "scripts/integrity-gate")
-    else:
+    elif directory != codex / "scripts":
         paths.append(provider / "hooks/scripts")
     environment = dict(os.environ)
     environment["MYPYPATH"] = os.pathsep.join(str(path) for path in paths)
@@ -88,15 +87,15 @@ def python_checks(files: list[Path], root: Path, config: Path) -> bool:
 
 def check_materialization(root: Path) -> bool:
     """Require generated provider semantic copies to equal their maintained source."""
-    source = root / "packages/graph-semantics/graph_semantics.py"
-    if not source.is_file():
-        return True
     passed = True
-    for relative in GENERATED_SEMANTICS:
-        copy = root / relative
-        if not copy.is_file() or copy.read_bytes() != source.read_bytes():
-            print(f"quality: generated graph semantics drift: {copy}", file=sys.stderr)
-            passed = False
+    for source_relative, targets in SEMANTIC_TARGETS:
+        source = root / source_relative
+        if source.is_file():
+            for relative in targets:
+                copy = root / relative
+                if not copy.is_file() or copy.read_bytes() != source.read_bytes():
+                    print(f"quality: generated graph module drift: {copy}", file=sys.stderr)
+                    passed = False
     output_source = root / "hooks/scripts/test_output.py"
     output_copy = root / "packages/codex/hooks/scripts/test_output.py"
     if output_source.is_file() and (

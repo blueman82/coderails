@@ -166,7 +166,7 @@ Query: `jq -r 'select(.outcome!="ok")|[.command,.outcome,.reason_code]|@tsv' <lo
 | `pass_exit_nonzero` | gate: eval recorded `pass` but `cmd` exits non-zero | the PASS is wrong or the build regressed; re-grade |
 | `fixture_formula_not_in_cmd` | `fixtures.formula` is not the literal tail of `cmd` | make the fixtures run the real checker text |
 
-**Signing trust boundary.** Signing detects edits made without the key. It binds the suite hash, the chain head and loop_id/session_id to the signer. It lets a different party who holds only the public key (an `allowed_signers` entry) verify. It does NOT stop a same-user agent, which can read the 0600 key and re-sign. It does NOT detect a rollback to an earlier validly-signed state (the `grading.chain_len` check is the only partial guard). Keys: `$CODERAILS_KEYS_DIR` or `~/.coderails/keys` (`evals_ed25519`, `.pub`, `allowed_signers`, all 0600, created on first sign). Config: `evals:` section, `require_signatures: true` in `.coderails/workflow.config.yaml` (default false) makes unsigned and key-less verification block. Sign rows: `command=sign` (`ok|signed`, `degraded|key_missing`); verify rows: `command=verify` (`ok|verified`, `legacy|legacy_unsigned`, `degraded|key_missing`); refusals keep the existing command names. Counters need no change: `eval_trace_counts` keys on `command|outcome|reason_code` and dedupes by `event_id`.
+**Signing trust boundary.** Signing detects edits made without the key. It binds the suite hash, the chain head and loop_id/session_id to the signer. It lets a different party who holds only the public key (an `allowed_signers` entry) verify. It does NOT stop a same-user agent, which can read the 0600 key and re-sign. It does NOT detect a rollback to an earlier validly-signed state (the `grading.chain_len` check is the only partial guard). Keys: `$CODERAILS_KEYS_DIR` or `~/.coderails/keys` (`evals_ed25519`, `.pub`, `allowed_signers`, all 0600, created on first sign). Config: `evals.require_signatures` defaults to `true` when a workflow config exists, so unsigned and key-less verification blocks. Only an explicit `false` turns it off. Sign rows: `command=sign` (`ok|signed`, `degraded|key_missing`); verify rows: `command=verify` (`ok|verified`, `legacy|legacy_unsigned`, `degraded|key_missing`); refusals keep the existing command names. Counters need no change: `eval_trace_counts` keys on `command|outcome|reason_code` and dedupes by `event_id`.
 
 Rows are deduped at write time per (evals.json sha256, command, outcome, reason_code) and the sink stops growing at 1 MiB, so hook polling does not inflate counters; `smoke-run|ok|frozen` records each freeze.
 
@@ -240,13 +240,17 @@ python3 -m unittest scripts.tests.measure_graph_alignment_test
 ## Typed stop intent and hook state (measurement note)
 
 `graph.py stop` records a `progress.stops[]` row; `loop_stall_guard` consumes the newest unconsumed row at the current
-revision in the same atomic write that increments the hook-owned `loop_stop_counts`, and falls back to the final
-anchored `LOOP-STOP:` line (trace `legacy_text_parse`). Absent-state grace reads `hook_state.json`
-`ordinals.absent_blocked`, falling back to the discipline.log regex (trace `legacy_log_parse`). The Claude hook honours a recorded row only if `graph.py stop` ran after the last user prompt (else trace
-`stale_stop_row`). The Codex guard writes the same `legacy_text_parse` trace row (command `graph_completion_guard`), so the
-ratio covers both providers; before this change Codex fallbacks appeared only in discipline.log and were not counted.
-Counters live in `scripts/graph_alignment_stops.py`. Flip condition: if `legacy_text_parse` still dominates `stops_consumed` over the
-first few loops, agents are not recording stops; tighten the parse and block text-only stops instead.
+revision in the same atomic write that increments the hook-owned `loop_stop_counts`. Final text is never read: with no
+row the Stop blocks with trace `stop_row_missing` (`legacy_text_parse` is no longer emitted). Absent-state grace reads `hook_state.json`
+`ordinals.absent_blocked` only; there is no discipline.log fallback any more (`legacy_log_parse` is no longer emitted, the
+name stays in `FALLBACKS` so history counts). The Claude hook honours a recorded row only if `graph.py stop` ran after the last user prompt (else trace
+`stale_stop_row`). The Codex guard writes the same `stop_row_missing` trace row (command `graph_completion_guard`), so the
+ratio covers both providers. Counters live in `scripts/graph_alignment_stops.py` (block codes from `scripts/lib/stop_counters.py`,
+which also counts `convert_ok` / `convert_refused_<code>`). Flip condition: a high `stop_row_missing` against `stops_consumed`
+over the first few loops means agents are not recording stops; fix the prompt, the hook is already strict. Limit: the Stop
+payload has no turn id (unverified), so a recorded row counts only when its `at` time is at or after the latest user
+prompt timestamp; a prompt without a readable timestamp blocks it. `voice_announce` is async and may run after the guard consumed the row (it then says
+"may have stalled").
 
 **Reproduce.**
 
@@ -254,4 +258,125 @@ first few loops, agents are not recording stops; tighten the parse and block tex
 python3 scripts/graph_alignment_stops.py --json
 python3 hooks/scripts/tests/loop_stall_guard_test.py && python3 hooks/scripts/tests/loop_state_guard_test.py
 PYTHONPATH=. python3 -m unittest packages/tests/test_provider_stop_record.py scripts/tests/graph_alignment_stops_test.py
+```
+
+## Gate counters (measurement note)
+
+`python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py` prints a `gate` object next
+to `receipts` and `trust`: `authority_denied`, `approval_requirement_missing`, `max_prs_exceeded`, `action_authority_bad_mode`,
+`authority_denied_destructive_shell`, `no_receipt` and `merge_py_receipt_executed`. The hook, `enforce_pr_workflow` and
+`scripts/merge.py` all land in the same counters (`denied_`, `advisory_` and `merge_py_` prefixes are stripped).
+Baseline: none yet on a real loop. The shipped workflow sets the receipt gate to advisory. An absent setting leaves it off. Explicit `action_authority: enforce` blocks actions without a valid receipt.
+What to read: `approval_requirement_missing` above 0 means a guarded action's permit verdict omitted its approval requirement and was refused before consuming a receipt. `authority_denied` / `max_prs_exceeded` above 0 mean the authority is refusing actions it should (inspect it
+  with `authority.py inspect`); `no_receipt` can be expected in advisory mode. In enforce mode, a high `no_receipt` count means merges lack valid receipts. An invalid config value blocks a guarded action with `config_rejected`.
+Wiring `gate_summary` into `measure_graph_alignment.py` itself is a handoff to the lane that owns that file; until then
+the stdin CLI above is the supported route.
+
+## Strict typed config and wiki fail-closed (measurement note)
+
+Guarded actions read `.coderails/workflow.config.yaml` through `strict_settings` and deny with `config_rejected`
+(trace `action_authority/denied/config_rejected`, `diff-manifest/refused/config_rejected`,
+`wiki_taxonomy_gate/failed_closed/config_rejected`). Once the vault is positively identified, a missing or invalid
+`wiki.schema.json` also denies (`wiki_taxonomy_gate/failed_closed/wiki_schema_missing|wiki_schema_invalid`). Safety
+controls default ON in `config.schema.json`: `sandbox_workers`, `evals.require_signatures`, and
+`diff_manifest` (the latter remains inactive until a policy path is configured). `action_authority` defaults to `off`;
+the shipped config sets it to `advisory`, so routine PR work needs no signing passphrase. The receipt CLI is shipped for both
+providers in this stack. Limits: no config file keeps non-action config consumers inert; `dispatch_mode` is computed in
+`plan()` and consumed in Phase 3c; the srt probe checks `npx` and `gh` on PATH, not whether runtime sandbox startup works.
+
+**Reproduce.**
+
+```
+python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py
+PYTHONPATH=. python3 -m unittest hooks/scripts/tests/authority_permits_test.py
+python3 scripts/lib/config_counters.py
+python3 hooks/scripts/tests/config_strict_test.py && python3 hooks/scripts/tests/wiki_taxonomy_gate_test.py
+```
+
+## One attestation parser (measurement note)
+
+For operator steps and reason codes, see [Typed state and attestation](typed-state-runbook.md).
+
+`scripts/lib/integrity_attestation.py` replaces two hand-written regex copies (merge.py path and the PreToolUse merge
+hook). Each denial under a session writes trace `pr_merge_gate/denied/<attest_code>`; `scripts/lib/state_counters.py`
+tallies them. A nonzero `attest_not_bound` with a passing Actions run can mean the status description changed.
+The parser accepts the whole `integrity=pass` and `sha=<head>` tokens and permits extra fields. The Actions workflow
+does not import the local parser; the description test checks this seam. `merge.py` itself writes no trace row.
+
+**Reproduce.**
+
+```
+python3 scripts/tests/integrity_attestation_test.py
+python3 scripts/lib/state_counters.py
+```
+
+## Typed hook state, verdicts and readiness (measurement note)
+
+`hook_state.json` (hooks/scripts/lib/hook_state.py) replaces `discipline.log` greps for grace and nudge dedupe:
+`hook_state_unreadable` (outcome `missing` | `torn`), `nudge_first` and `nudge_suppressed` are trace rows; `arms[]` records
+each absent-state block. `EvalVerdict` blocked completions write `eval_verdict_<status>`; graph readiness writes
+`predecessor_pending` / `node_unknown` / `node_not_pending` / `graph_blocked` / `join_not_dispatchable`. All tally with `python3 scripts/lib/state_counters.py` (own module because
+`scripts/measure_graph_alignment.py` is at its line limit; integration into that script is a handoff). Flip condition:
+`hook_state_unreadable` with outcome `torn` above zero means a state write is failing (grace can no longer release);
+`nudge_suppressed` far above `nudge_first` is normal (one nudge per session). Limits: GO verdicts and `state_unreadable`
+readiness are not traced; first-Stop `missing` is expected once per unregistered loop session.
+
+**Reproduce.**
+
+```
+python3 scripts/lib/state_counters.py
+python3 hooks/scripts/tests/hook_state_test.py && python3 hooks/scripts/tests/graph_readiness_test.py
+```
+
+## Stop text retired, shared vocabulary, versioned conversion (measurement note)
+
+Neither provider reads final text any more: `loop_stall_guard` and the Codex `graph_completion_guard` release only on a
+recorded `stops[]` row, and `voice_announce` takes its category from the same row (async, so it can lose the race to the
+guard that consumes the row and then says "may have stalled"). The enum lives once in
+`packages/graph-semantics/graph_vocab.py`, materialized byte-for-byte into both script dirs next to `graph_semantics.py`
+and `graph_convert.py` by `scripts/installer/files.py` (a list of source/targets pairs, reused by later units).
+`graph.py convert` writes trace `convert_ok` / `convert_refused_<code>` to `recovery-trace.jsonl`; `stop_row_missing` and
+`stale_stop_row` go to `trace.jsonl`; `python3 scripts/lib/stop_counters.py` tallies all of them (own module because
+`scripts/measure_graph_alignment.py` is at its line limit; folding it in is a handoff). Flip condition: any
+`convert_refused_active_wave_ambiguous` means a loop was upgraded mid-wave (finish or recover the wave first); a
+sustained `stop_row_missing` means the prompt is not teaching `graph.py stop`. Limits: the Stop payload has no turn id
+(unverified), so the hook compares the row timestamp with the latest user prompt timestamp; a missing prompt clock
+blocks the row. `convert` refuses rather than
+guesses, so an in-flight wave on a pre-history file needs manual recovery.
+
+**Reproduce.**
+
+```
+python3 scripts/lib/stop_counters.py
+python3 hooks/scripts/tests/graph_convert_test.py && python3 hooks/scripts/tests/loop_stall_guard_test.py
+PYTHONPATH=. python3 -m unittest packages.tests.test_provider_stop_record packages.tests.test_provider_graph_lifecycle
+```
+
+## Machine-readable graph spec and policy (measurement note)
+
+The node table that only lived in prose is now data: `packages/graph-semantics/graph-spec.yaml` (nodes, requirements,
+phases, instruction sources, machine skip predicates) and `policy.yaml` (thresholds, retry bounds, default graph profile),
+JSON-syntax YAML read with `json.loads`, validated and expanded by the shared `graph_spec.py`, and materialized
+byte-for-byte into both script dirs by `scripts/installer/files.py`. Both providers refuse every load whose graph omits a
+spec edge between two nodes it holds (`spec_edge_missing`); a graph built by `graph.py instantiate` is stamped with
+`graph.spec_sha256` and also refuses unknown nodes, missing spec nodes and a changed spec. `add-unit` and `plan` take
+wiring, instruction sources and skip thresholds from the spec (the old `TARGETS` table and `before_freeze` regex are
+gone), and `scripts/gen_graph_docs.py --check` keeps the execution-graph table, its mermaid diagram and the threshold block
+generated from the same files. Rows go to `recovery-trace.jsonl` (`load/refused/spec_*`, `instantiate/<status>/instantiate_ok|
+instantiate_noop|instantiate_refused_*`, `plan/reported/skip_when_met`); `python3 scripts/lib/spec_counters.py` tallies them
+(own module because `scripts/measure_graph_alignment.py` is at its line limit; folding it in is a handoff). Flip
+condition: a sustained `spec_edge_missing` after the first week means hand-built or foreign graphs are loading; any
+`spec_hash_mismatch` means a spec edit landed while a stamped loop was live. `skip_when_met` against actual skipped nodes
+shows whether the machine predicate matches what orchestrators record. Limits: the default profile is `full`; explicitly choosing
+`units-only` omits the preparation and lifecycle nodes. Join inputs are enforced on stamped graphs only (`spec_join_inputs`)
+and a stamp below the policy profile is `spec_profile_downgrade`; unstamped graphs and a deleted stamp stay the weaker check;
+`CODERAILS_GRAPH_SPEC=off` disables the check;
+judgement skip rules stay prose; the spec files are plain same-user files, so this is drift detection, not tamper evidence.
+
+**Reproduce.**
+
+```
+python3 scripts/lib/spec_counters.py
+python3 scripts/gen_graph_docs.py --check && python3 scripts/tests/gen_graph_docs_test.py
+PYTHONPATH=. python3 -m unittest packages.tests.test_graph_spec
 ```

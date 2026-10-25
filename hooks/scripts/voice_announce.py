@@ -13,8 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import read_payload
 from hooks.scripts.lib.agentic_loop_path import sanitise_session_id
-from hooks.scripts.lib.discipline_common import stable_text
-from hooks.scripts.lib.loop_state_common import load_progress, log, stable_invocations, stop_category
+from hooks.scripts.lib.loop_state_common import load_progress, log, recorded_stop, stable_invocations
 
 
 def announce(path: Path, session: str, kind: str, phrase: str) -> None:
@@ -64,26 +63,17 @@ def main() -> int:
     state = load_progress(str(payload.get("cwd") or ""), session, count)
     if not count or state.complete:
         return 0
-    text, _ = stable_text(
-        transcript,
-        int(os.environ.get("CLAUDE_HOOK_TAIL_LINES", "300")),
-        int(os.environ.get("CLAUDE_HOOK_MAX_ATTEMPTS", "5")),
-        float(os.environ.get("CLAUDE_HOOK_SLEEP_S", "0.3")),
-    )
-    if not text:
-        log(f"hook=voice_announce session={session} reason=extract_failed")
-        return 0
-    category = stop_category(text)
     phrases = {
         "complete": ("complete", "Loop complete."),
         "approval-gate": ("waiting", "Loop is waiting on you."),
         "awaiting-input": ("waiting", "Loop is waiting on you."),
         "hard-stop": ("stopped", "Loop has hit a hard stop."),
     }
-    if not category:
+    stop = recorded_stop(state.data)  # the category is the recorded row's; final text is never read
+    if stop is None:
         announce(state.path, session, "stall", "Loop may have stalled.")
-    elif category in phrases:
-        announce(state.path, session, *phrases[category])
+    else:
+        announce(state.path, session, *phrases[str(stop["category"])])
     return 0
 
 

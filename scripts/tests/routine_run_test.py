@@ -79,10 +79,11 @@ class RoutineCase(unittest.TestCase):
         shim.chmod(0o755)
         for name in ("push", "post_review", "post_evals", "merge"):
             gate = self.plugin / "scripts" / f"{name}.py"
+            merged = "if code == 0: pathlib.Path(__file__).with_name('merged').touch()\n" if name == "merge" else ""
             gate.write_text(
                 "#!/usr/bin/env python3\nimport pathlib, sys\n"
                 "(pathlib.Path(__file__).parent / 'ran').open('a').write('ran\\n')\n"
-                "raise SystemExit(1 if len(sys.argv) > 1 and sys.argv[1] == '1' else 0)\n"
+                "code = 1 if len(sys.argv) > 1 and sys.argv[1] == '1' else 0\n" + merged + "raise SystemExit(code)\n"
             )
             gate.chmod(0o755)
         self.ran = self.plugin / "scripts" / "ran"
@@ -108,6 +109,7 @@ class RoutineCase(unittest.TestCase):
         """Run routine_run.py for this routine in the work tree with the shim on PATH."""
         env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}", "GH_LOG": str(self.gh_log)}
         env |= {"CLAUDE_AGENTIC_LOOP_DIR": str(Path(self.tmp.name) / "loop"), "PYTHONDONTWRITEBYTECODE": "1"}
+        env["GH_MERGED_FILE"] = str(self.plugin / "scripts/merged")
         argv = [sys.executable, str(self.script), "--log", str(self.log), self.routine, *args]
         return subprocess.run(argv, cwd=self.work, capture_output=True, text=True, env=env)
 
@@ -210,7 +212,7 @@ class DocsSyncRunTests(RoutineCase):
         last = self.rows()[-1]
         self.assertEqual((last["outcome"], last["reason_code"], last["stage"]), ("run_refused", "merge", "merge"))
         self.assertIn("refused=merge", self.log.read_text())
-        self.assert_cleaned_once()
+        self.assertIn("pr close 1", self.gh_calls())
 
     def test_push_before_manifest_check_is_out_of_order(self) -> None:
         """Negative control: the gate command is not run and the run aborts stage_out_of_order."""

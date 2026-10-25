@@ -7,9 +7,6 @@ import subprocess
 from contextlib import suppress
 from pathlib import Path
 
-from . import argv_match, protected_paths
-from .shell_context import invocations
-
 try:
     from hooks.scripts.lib.hook_telemetry import note_child
 except ImportError:  # telemetry must never be able to break the hook
@@ -20,6 +17,10 @@ except ImportError:  # telemetry must never be able to break the hook
 
     def note_child(hook: str, returncode: int) -> None:
         """Telemetry unavailable: no-op."""
+
+
+from . import argv_match, protected_paths
+from .shell_context import invocations
 
 
 def normalize_ifs(command: str) -> str:

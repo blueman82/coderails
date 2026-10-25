@@ -81,22 +81,31 @@ def validate_completion_evidence(
     transcript_path: Path | None,
 ) -> None:
     """Validate proof, retrospective, eval, and transcript completion evidence."""
-    proof = load_evidence(proof_path, "proof")
+    disposition = state.get("proof_disposition")
+    no_proof = isinstance(disposition, str) and disposition.startswith("none: ") and bool(disposition[6:].strip())
+    if disposition is not None and not no_proof:
+        raise GraphError("proof disposition is invalid")
+    if no_proof and proof_path.exists():
+        raise GraphError("proof.json conflicts with no-proof disposition")
+    proof = None if no_proof else load_evidence(proof_path, "proof")
     retro = load_evidence(retro_path, "retro")
     for label, evidence in (("proof", proof), ("retro", retro)):
+        if evidence is None:
+            continue
         _matching(evidence, state, label)
     validate_evals(state, revision, evals_path)
-    proofs = array_value(proof.get("proofs"), "proof.proofs")
-    if not proofs:
-        raise GraphError("proof evidence is missing or not passing")
-    for index, raw_proof in enumerate(proofs):
-        item = object_value(raw_proof, f"proof.proofs[{index}]")
-        if item.get("status") != "pass":
+    if proof is not None:
+        proofs = array_value(proof.get("proofs"), "proof.proofs")
+        if not proofs:
             raise GraphError("proof evidence is missing or not passing")
-        nonempty(item.get("id"), f"proof.proofs[{index}].id")
-        nonempty(item.get("cmd"), f"proof.proofs[{index}].cmd")
-        nonempty(item.get("evidence"), f"proof.proofs[{index}].evidence")
-    _validate_observed_proofs(proofs, transcript_path, state["loop_id"])
+        for index, raw_proof in enumerate(proofs):
+            item = object_value(raw_proof, f"proof.proofs[{index}]")
+            if item.get("status") != "pass":
+                raise GraphError("proof evidence is missing or not passing")
+            nonempty(item.get("id"), f"proof.proofs[{index}].id")
+            nonempty(item.get("cmd"), f"proof.proofs[{index}].cmd")
+            nonempty(item.get("evidence"), f"proof.proofs[{index}].evidence")
+        _validate_observed_proofs(proofs, transcript_path, state["loop_id"])
     schema_version = retro.get("schema_version")
     if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version < 1:
         raise GraphError("retro evidence is incomplete")

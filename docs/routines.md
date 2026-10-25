@@ -157,31 +157,31 @@ The current skill ships in-repo and needs no `foreignSkillPath`.
 
 ## `loop-retro-promotion-weekly`: a dormant-by-default routine
 
-Before doing anything else, `skills/loop-retro-promotion/SKILL.md` checks:
+The run first resolves its repo-key directory and calls `routine_run.py begin`.
+This writes a provisional `run_incomplete` row. Before mining, branching or
+editing, it calls `scripts/lib/lessons.py predicate` with the caller's native
+session id. The typed predicate requires at least ten distinct completed
+retros with owned progress and matching source hashes, one recurred order in
+`orders.json`, and one order with `status: decayed`.
 
-1. At least ten `retro.json` files under the repo-key directory.
-2. A `standing-orders.md` entry with `last_recurred` different from `created`.
-3. An entry in `standing-orders-decayed.md`.
+A refused read (exit 2) ends with `RR abort predicate_refused`. A degraded
+read (exit 3) ends with `predicate_degraded`. Malformed output or another
+unexpected result ends with `predicate_unavailable`. These results are
+unknown; none can declare a dormant success. Schema 3 history requires its
+matching `retro_check` validator. Do not count files or read a generated
+Markdown view as a substitute for the typed predicate.
 
-Until all three hold, append
-`<ISO8601> predicate=unmet retros=<n> lifecycle=<0|1> decay=<0|1>` to
-`promotion-runs.log`, finish with `run=ok` and stop without a branch, PR or gate
-chain. Dormancy is a successful steady state and must not cause weekly escalation.
+For a valid unmet result, append the predicate line to `promotion-runs.log`,
+then run `RR finish no_drift`. It writes the terminal `run=ok` marker. The
+routine opens no branch or PR and runs no delivery gate. Dormancy is the
+expected steady state.
 
-The met path calls `routine_run.py begin` before mining/drafting/delivery.
-Its provisional `run_incomplete`/derived `abort=incomplete-run` makes an early
-death red. The append-only log uses `last-marker` with success `run=ok` and
-failures `abort=`, `delivery=started`; the latter supports pre-state-machine logs.
-
-Promotion may change exactly `skills/agentic-loop/learned-failure-modes.md`;
-otherwise abort with cleanup. Its merge rail is the manifest check,
-`/pr-review-toolkit:review-pr` and `scripts/merge.py`'s internal artifact gates.
-Like docs-sync, its button uses `bypass`; the security limits below apply.
-
-A July 2026 snapshot contained only a predicate-unmet line
-(`2026-07-12T23:32:06Z predicate=unmet retros=14 lifecycle=1 decay=0`), predating
-the terminal-marker change. It did not prove a live full promotion chain.
-That snapshot must not be treated as current production validation.
+For a valid met result, the provisional `run_incomplete` row stays in place
+through mining, drafting and delivery. A stopped run remains red until all
+gates pass and `RR finish ok` writes the terminal success row. Promotion may
+change only `skills/agentic-loop/learned-failure-modes.md`; the manifest,
+review and merge gates check that scope. The source-bound predicate does not
+by itself prove that a full promotion run has completed.
 
 ## Routine state machine and event log (`docs-sync`, `loop-retro-promotion`)
 
@@ -210,7 +210,9 @@ Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
   `scripts/` directory, directly or through the active Python interpreter.
   Same-basename files elsewhere are refused with `gate_argv_not_allowed`.
 - A nonzero gate exit becomes `run_refused` for that gate, including a command
-  that cannot spawn (`gate_spawn_failed` on stderr).
+  that cannot spawn (`gate_spawn_failed` on stderr). At the merge stage, the
+  exact PR and head are saved first. A live `MERGED` result takes precedence
+  over the merge command's exit code.
 - `abort`, `refuse` and failed checks clean up once using Git/gh: close the PR
   and delete the current local branch, never a remote or default branch. No
   `rm`. Cleanup proceeds only while still on the branch recorded at
@@ -222,6 +224,17 @@ Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
   State includes the routine name; another routine is refused with
   `routine_mismatch`. State is keyed by the log template, with paths pinned
   at begin so a run crossing midnight keeps its log.
+- The runner passes its 16-character run ID to the child as
+  `CODERAILS_ROUTINE_RUN_ID`. `begin` validates it; a manual run without it
+  generates an ID. The runner accepts terminal rows for its own ID only.
+- After a merge attempt, a failed PR fetch or changed head keeps the run red
+  and blocks cleanup. A confirmed merge cannot be aborted or cleaned up.
+  If later state is incomplete, the row is `run_incomplete merged_incomplete`
+  and the human log says `incomplete=merged`. If that log write failed, the
+  runner reads its own persisted merge attempt and writes
+  `run_incomplete merge_state_unknown` with `incomplete=merge-unknown`.
+  Check that PR and its head
+  before recovery. Only `finish ok` after all stages records success.
 - State uses atomic replacement. A state flock covers load/handler/child gate/
   cleanup; the separate JSONL flock is acquired inside it, never in reverse.
 
@@ -231,8 +244,9 @@ Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
 under its log lock. Outcomes are `stage_ok`, `run_ok`, `run_abort`,
 `run_refused`, `run_incomplete`; reason codes are closed per routine. Unknown
 outcomes/codes exit 2 and append nothing. The human marker is `run=ok`,
-`abort=<code>`, `refused=<gate>`, `abort=incomplete-run` or `stage=<name>`,
-so the existing last-marker predicate is unchanged. Both files open before either
+`abort=<code>`, `refused=<gate>`, `abort=incomplete-run`,
+`incomplete=merged`, `incomplete=merge-unknown` or `stage=<name>`. The runner reads JSONL for a merged
+incomplete run and keeps it red. Both files open before either
 append. A failed write returns `log_unwritable` without advancing/ending state.
 The files are **not a transaction**: write/close errors or a crash can leave
 partial output. Inspect both logs and persisted state after a write error.
@@ -247,8 +261,9 @@ The runner captures the existing JSONL bytes before child launch and accepts
 only appended rows with that prefix intact. A changed prefix, read/write error,
 missing terminal, abort or refusal returns failed evidence and cannot pass via
 an old human `run=ok`. It pins the artifact date/context for that invocation.
-Among new rows it chooses the latest run id, falling back to its own id; it does
-not hand an id to the child. Fallback appends do not take the Python log lock or
+It checks only its own run ID; another child cannot make this invocation green.
+A `merged_incomplete` row stays red without a fallback abort. Fallback
+appends do not take the Python log lock or
 perform branch/PR cleanup. Concurrent producers remain an integration limit.
 An editable state/log, redirected `--log`, or manual `routine_log.py emit` can
 forge success under the same user. This is a cooperating-agent safeguard.
@@ -257,7 +272,8 @@ There is no separate routine-state off switch. Events emit non-authoritative
 `routine/<outcome>/<reason_code>` trace/counter rows; see
 [workflow-gates-measurement.md](workflow-gates-measurement.md) and the RUNBOOK
 entry “A routine run ended incomplete, aborted or refused.” The runner is an
-integrity-daemon policy path; daemon-attested runner changes need a human merge.
+integrity-review policy path. GitHub Actions checks the current head SHA
+before a merge; the required rule must be active on `main`.
 
 ## Install / uninstall
 

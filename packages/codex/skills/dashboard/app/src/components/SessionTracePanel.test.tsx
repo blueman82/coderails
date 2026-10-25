@@ -31,6 +31,24 @@ function response(value: unknown): Response {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("SessionTracePanel", () => {
+  it("shows the named graph job beside its stable node ID", async () => {
+    const traceEvent = event("worker_turn", 1, { attributes: {
+      "coderails.actor.kind": "worker", "coderails.node.name": "Builder",
+      "coderails.node.lane_code": "A-1", "coderails.node.id": "U3[1]" } });
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = new URL(input, "http://localhost");
+      if (url.pathname === "/api/sessions") return response({ sessions: [{ nativeSessionId: FIRST,
+        provider: "codex", projectLabel: "p", displayLabel: "first", lastActivity: { value: null, basis: "unavailable" } }] });
+      return response({ events: [traceEvent], nextCursor: null, complete: true });
+    }));
+    render(<SessionTracePanel token="secret" />);
+    await screen.findByRole("option", { name: /first/ });
+    fireEvent.change(screen.getByLabelText("Native session"), { target: { value: FIRST } });
+    await screen.findByText(/node.name: Builder/);
+    expect(screen.getByText(/node.lane_code: A-1/)).toBeTruthy();
+    expect(screen.getByText(/node.id: U3\[1\]/)).toBeTruthy();
+  });
+
   it("shows a derived timestamp method and source references separately from record provenance", async () => {
     const derived = event("derived_time", 1, { startTimeUnixNano: "1727524800000000000",
       attributes: { "coderails.actor.kind": "orchestrator", "coderails.start_time.basis": "derived",

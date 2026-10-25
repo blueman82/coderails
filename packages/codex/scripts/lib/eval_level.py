@@ -1,7 +1,8 @@
 """Derived minimum verification level, late-freeze computation and suite integrity for a PR-scope eval suite.
 
-The level is a floor computed from the diff (policy/surface_policy.json), never a self-assignment: level 0 only for
-one work unit with no outward surface, level 1 for any outward surface or 2 units, level 2 for irreversible surfaces
+The level is a floor computed from the diff (surface policy plus fixed protection for its own gate), never a
+self-assignment: level 0 only for one work unit with no outward surface, level 1 for any outward surface or 2 units,
+level 2 for irreversible surfaces
 or >= `level_2_work_units` units (skills/task-evals/SKILL.md "Verification level rules"). Declared `facts` in the
 suite count only as a lower bound. Limit: the work-unit count comes from progress.json when `--progress` resolves,
 else from the declared lower bound; a diff alone cannot show how many units produced it.
@@ -21,6 +22,16 @@ from .eval_integrity import INTEGRITY_STRIPPED, IntegrityError, verify_suite
 POLICY = Path(__file__).resolve().parents[2] / "policy" / "surface_policy.json"
 NOT_FROZEN = "not_frozen"
 SURFACES = ("outward", "irreversible")  # ascending severity
+PROTECTED_LEVEL_TWO = frozenset(
+    {
+        "policy/surface_policy.json",
+        "packages/codex/policy/surface_policy.json",
+        "scripts/lib/eval_level.py",
+        "packages/codex/scripts/lib/eval_level.py",
+        "scripts/lib/publication_gate.py",
+        "packages/codex/scripts/lib/publication_gate.py",
+    }
+)
 Changes = list[tuple[str, list[str]]]
 
 
@@ -46,6 +57,8 @@ def classify(path: str, policy: dict[str, Any]) -> str:
     """Classify a path: irreversible first, then none (anchored docs and test dirs), else outward (fail closed)."""
     from .manifest_policy import matches  # lazy: manifest_policy imports git_common, which imports eval_validation
 
+    if path in PROTECTED_LEVEL_TWO:
+        return "irreversible"
     for name in ("irreversible", "none"):
         if matches(path, policy[name]):
             return name

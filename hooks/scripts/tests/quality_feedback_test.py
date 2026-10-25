@@ -87,8 +87,18 @@ class QualityFeedbackTests(HookCase):
         """A file with no findings produces no feedback."""
         good = self.directory / "good.py"
         good.write_text('"""Fixture."""\n', encoding="utf-8")
-        result = self.invoke("quality_feedback", {"tool_input": {"file_path": str(good)}})
-        self.assertEqual((result.returncode, result.stdout), (0, ""))
+        with (
+            mock.patch.object(quality_feedback, "read_payload", return_value={"tool_input": {"file_path": str(good)}}),
+            mock.patch(
+                "hooks.scripts.quality_feedback.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    [], 0, '{"scanned": 1, "findings": [], "external_ok": true}', ""
+                ),
+            ),
+            mock.patch("builtins.print") as output,
+        ):
+            self.assertEqual(quality_feedback.main(), 0)
+            output.assert_not_called()
 
 
 if __name__ == "__main__":

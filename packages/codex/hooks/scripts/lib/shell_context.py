@@ -147,62 +147,16 @@ def shell_body(argv: list[str]) -> str | None:
     return None
 
 
-def quoted_substitutions(segment: str) -> list[str]:
-    """Extract commands that execute inside double quotes, preserving inert single quotes."""
-    bodies: list[str] = []
-    quote = ""
-    index = 0
-    while index < len(segment):
-        char = segment[index]
-        if char == "\\" and quote != "'":
-            index += 2
-            continue
-        if char == quote:
-            quote = ""
-        elif not quote and char in "'\"":
-            quote = char
-        elif quote == '"' and segment.startswith("$(", index):
-            start = index + 2
-            depth = 1
-            inner_quote = ""
-            index = start
-            while index < len(segment) and depth:
-                inner = segment[index]
-                if inner == "\\" and inner_quote != "'":
-                    index += 2
-                    continue
-                if inner == inner_quote:
-                    inner_quote = ""
-                elif not inner_quote and inner in "'\"":
-                    inner_quote = inner
-                elif inner_quote != "'" and segment.startswith("$(", index):
-                    depth += 1
-                    index += 2
-                    continue
-                elif not inner_quote and inner == "(":
-                    depth += 1
-                elif not inner_quote and inner == ")":
-                    depth -= 1
-                index += 1
-            if depth == 0:
-                bodies.append(segment[start : index - 1])
-            continue
-        elif quote == '"' and char == "`":
-            start = index + 1
-            index = start
-            while index < len(segment) and segment[index] != "`":
-                index += 2 if segment[index] == "\\" else 1
-            if index < len(segment):
-                bodies.append(segment[start:index])
-        index += 1
-    return bodies
-
-
 def invocations(command: str, cwd: str = "", depth: int = 0) -> list[tuple[str, list[str], str]]:
     """Yield exact source, unwrapped argv and effective cwd, with local shell/subshell scope."""
     found: list[tuple[str, list[str], str]] = []
     directories: list[str] = []
+    cursor = 0
     for segment, tokens in split_all(command):
+        at = command.find(segment, cursor)
+        if at < 0:
+            at = cursor
+        cursor = at + len(segment)
         if segment == "(":
             directories.append(cwd)
             continue
@@ -215,19 +169,19 @@ def invocations(command: str, cwd: str = "", depth: int = 0) -> list[tuple[str, 
             continue
         if argv[0] == "cd":
             args = argv[2:] if len(argv) > 1 and argv[1] == "--" else argv[1:]
-            if len(args) == 1:
+            before = command[:at].rstrip()
+            after = command[cursor:].lstrip()
+            child_shell = (before.endswith(("|", "&")) and not before.endswith(("||", "&&"))) or (
+                after.startswith(("|", "&")) and not after.startswith(("||", "&&"))
+            )
+            if len(args) == 1 and not child_shell:
                 cwd = move(where, args[0])
             continue
         found.append((segment, argv, where))
-        if depth < 5:
-            substitutions = quoted_substitutions(segment)
-            if (body := shell_body(argv)) is not None:
-                found.extend(invocations(body, where, depth + 1))
-                for duplicate in quoted_substitutions('"' + body.replace('"', '\\"') + '"'):
-                    if duplicate in substitutions:
-                        substitutions.remove(duplicate)
-            for substitution in substitutions:
-                found.extend(invocations(substitution, where, depth + 1))
+        if (body := shell_body(argv)) is not None and depth < 5:
+            found.extend(invocations(body, where, depth + 1))
+        elif argv[0] == "eval" and len(argv) > 1 and depth < 5:
+            found.extend(invocations(" ".join(argv[1:]), where, depth + 1))
     return found
 
 

@@ -49,17 +49,6 @@ def target_for(command: object) -> str | None:
     return None
 
 
-def counted_invocations(command: str, cwd: str) -> list[tuple[str, str]]:
-    """Return each counted script with its effective worktree context."""
-    found: list[tuple[str, str]] = []
-    for _, argv, where in invocations(command, cwd):
-        if argv_match.is_script(argv, SUITES):
-            found.append((where, "full-suite"))
-        elif argv_match.is_script(argv, "post_evals.py", CEREMONIES):
-            found.append((where, "eval-ceremony"))
-    return found
-
-
 def deny(reason: str) -> None:
     """Emit the native PreToolUse denial envelope."""
     print(
@@ -125,11 +114,16 @@ def main() -> int:
     tool_input = payload.get("tool_input")
     typed_tool_input = cast(dict[str, object], tool_input) if isinstance(tool_input, dict) else {}
     command = typed_tool_input.get("cmd", typed_tool_input.get("command"))
-    if not isinstance(command, str) or isinstance(payload.get("agent_id"), str) and payload["agent_id"]:
+    target = target_for(command)
+    if target is None or isinstance(payload.get("agent_id"), str) and payload["agent_id"]:
         return 0
-    calls = counted_invocations(command, payload_cwd(payload))
-    if not calls:
-        return 0
+
+    cwd = next(
+        where
+        for _, argv, where in invocations(str(command), payload_cwd(payload))
+        if argv_match.is_script(argv, SUITES) or argv_match.is_script(argv, "post_evals.py", CEREMONIES)
+    )
+    digest, top = worktree_key(cwd)
     data_root = Path(os.environ.get("PLUGIN_DATA", str(Path.home() / ".coderails" / "codex")))
     state_dir = data_root / "verification-ceiling"
     try:
@@ -138,33 +132,30 @@ def main() -> int:
         deny(STATE_ERROR)
         return 0
 
+    count_path = state_dir / f"{digest}__{target}.count"
+    lock_path = Path(f"{count_path}.lock")
+    if not acquire_dir_lock(lock_path, 15, 0.1)[0]:
+        deny(LOCK_ERROR)
+        return 0
     session = payload.get("session_id")
-    for cwd, target in calls:
-        digest, top = worktree_key(cwd)
-        count_path = state_dir / f"{digest}__{target}.count"
-        lock_path = Path(f"{count_path}.lock")
-        if not acquire_dir_lock(lock_path, 15, 0.1)[0]:
-            deny(LOCK_ERROR)
-            return 0
+    try:
+        count = count_for(count_path)
         try:
-            count = count_for(count_path)
-            try:
-                count_path.write_text(f"{count + 1}\n", encoding="utf-8")
-            except OSError:
-                deny(WRITE_ERROR)
-                return 0
-            mirror_count(cwd, session if isinstance(session, str) else "", top, target, count + 1)
-        finally:
-            release_dir_lock(lock_path)
-
-        if count >= 2:
-            append_trace_row("argv", "denied", "ceiling_exceeded", session if isinstance(session, str) else "")
-            deny(
-                f"This is run {count + 1} of the same {target} in worktree '{top}'. "
-                "The third and later full re-runs are blocked; use a focused check or "
-                "delegate verification with spawn_agent."
-            )
+            count_path.write_text(f"{count + 1}\n", encoding="utf-8")
+        except OSError:
+            deny(WRITE_ERROR)
             return 0
+        mirror_count(cwd, session if isinstance(session, str) else "", top, target, count + 1)
+    finally:
+        release_dir_lock(lock_path)
+
+    if count >= 2:
+        append_trace_row("argv", "denied", "ceiling_exceeded", session if isinstance(session, str) else "")
+        deny(
+            f"This is run {count + 1} of the same {target} in worktree '{top}'. "
+            "The third and later full re-runs are blocked; use a focused check or "
+            "delegate verification with spawn_agent."
+        )
     return 0
 
 

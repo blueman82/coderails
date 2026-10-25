@@ -26,7 +26,11 @@ class MergeEvidenceTests(HookTestCase):
     def test_integrity_newest_exact_head_creator_state_and_description(self) -> None:
         """Only the newest successful configured-machine attestation can authorize this head."""
         sha = "a" * 40
-        valid = {"state": "success", "creator": {"login": "machine"}, "description": f"integrity=pass sha={sha}"}
+        valid = {
+            "state": "success",
+            "creator": {"login": "github-actions[bot]"},
+            "description": f"integrity=pass sha={sha}",
+        }
         rows: list[object] = [
             [],
             [{**valid, "state": "pending"}],
@@ -39,9 +43,11 @@ class MergeEvidenceTests(HookTestCase):
             [{**valid, "state": "failure"}, valid],
             "malformed",
         ]
+        config = self.directory / "workflow.config.yaml"
+        config.write_text("integrity_review:\n  enabled: true\n")
         with (
-            patch(MODULE + ".config_path", return_value="config"),
-            patch(MODULE + ".integrity_machine_user", return_value="machine"),
+            patch(MODULE + ".config_path", return_value=config),
+            patch(MODULE + ".integrity_enabled", return_value=True),
             patch(MODULE + ".repo", return_value="owner/repo"),
         ):
             for row in rows:
@@ -54,6 +60,22 @@ class MergeEvidenceTests(HookTestCase):
                 self.assertEqual(integrity_reason("1", sha, str(self.directory)), "")
             with patch(MODULE + ".run", return_value=subprocess.CompletedProcess([], 1, "")):
                 self.assertIn("GitHub fetch failed", integrity_reason("1", sha, str(self.directory)))
+
+    def test_legacy_integrity_hook_accepts_only_configured_login(self) -> None:
+        """An old config keeps the same status author rule until enabled becomes true."""
+        config = self.directory / "workflow.config.yaml"
+        config.write_text("integrity_review:\n  machine_user: machine\n  enabled: false\n")
+        sha = "a" * 40
+        old = {"state": "success", "creator": {"login": "machine"}, "description": f"integrity=pass sha={sha}"}
+        bot = {**old, "creator": {"login": "github-actions[bot]"}}
+        with patch(MODULE + ".config_path", return_value=config), patch(MODULE + ".repo", return_value="owner/repo"):
+            with patch(MODULE + ".run", return_value=subprocess.CompletedProcess([], 0, json.dumps([old]))):
+                self.assertEqual(integrity_reason("1", sha, str(self.directory)), "")
+            with patch(MODULE + ".run", return_value=subprocess.CompletedProcess([], 0, json.dumps([bot]))):
+                self.assertTrue(integrity_reason("1", sha, str(self.directory)))
+            config.write_text("integrity_review:\n  machine_user: machine\n  enabled: true\n")
+            with patch(MODULE + ".run", return_value=subprocess.CompletedProcess([], 0, json.dumps([bot]))):
+                self.assertEqual(integrity_reason("1", sha, str(self.directory)), "")
 
     def test_eval_failures_and_actual_smoke_gate_result_propagation(self) -> None:
         """Missing head, fetch failure, NO-GO, missing embeds and failed verification all deny."""
@@ -148,7 +170,7 @@ class MergeEvidenceTests(HookTestCase):
                 patch(module + ".merge_reason", return_value="") as gate,
             ):
                 enforce_pr_workflow.main()
-                gate.assert_called_once_with("42", directory, unit="2", progress="p.json")
+                gate.assert_called_once_with("42", directory, "", unit="2", progress="p.json")
 
     def test_gh_repo_retarget_denies_before_evidence_lookup(self) -> None:
         """A merge retargeted by GH_REPO cannot borrow this repository's review and eval evidence."""
@@ -265,6 +287,15 @@ class MergeEvidenceTests(HookTestCase):
                     )
             self.assertEqual(guarded_segments(f"gh pr merge 42 {value}", str(self.directory)), [])
 
+    def test_api_merge_with_leading_options_is_guarded(self) -> None:
+        """A valid API merge keeps its gate when method options precede the endpoint."""
+        from hooks.scripts.lib.pr_workflow_match import guarded_segments
+
+        command = "gh api -X PUT repos/o/r/pulls/42/merge"
+        self.assertEqual(guarded_segments(command, str(self.directory)), [("merge", command, str(self.directory))])
+        unrelated = "gh api -f note=repos/o/r/pulls/42/merge repos/o/r/issues/42"
+        self.assertEqual(guarded_segments(unrelated, str(self.directory)), [])
+
     def test_lifecycle_body_values_are_guarded(self) -> None:
         """Git lifecycle text in an option value cannot exempt a PR merge."""
         from hooks.scripts.lib.pr_workflow_match import guarded_segments, operation
@@ -282,6 +313,7 @@ class MergeEvidenceTests(HookTestCase):
         from hooks.scripts.lib.pr_workflow_match import guarded_segments
 
         cwd, other = str(self.directory), str(self.directory / "other")
+        Path(other).mkdir()
         for prefix in (f"(cd {other} && gh pr merge 42)", f"(cd {other} && bash -c 'gh pr merge 42')"):
             with self.subTest(prefix=prefix):
                 self.assertEqual(

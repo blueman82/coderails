@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Count typed stop intents against legacy text/log fallbacks; read-only, counts only, never row content.
 
-Flip rule: if legacy_text_parse still dominates stops_consumed after the first few loops, agents are not running
-`graph.py stop`; tighten the text parse instead of retiring it.
+Flip rule: final text is never read, so a high stop_row_missing against stops_consumed means agents are ending turns
+without running `graph.py stop`; fix the prompt that tells them to, not the hook.
 """
 
 from __future__ import annotations
@@ -13,9 +13,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.lib.stop_counters import BLOCK_CODES
 from scripts.measure_graph_alignment import as_dict, as_list, loop_state_roots
 
-FALLBACKS = ("legacy_text_parse", "legacy_log_parse")
+# legacy_* are no longer emitted (stop text is never read); kept so history counts. BLOCK_CODES are the live blocks.
+FALLBACKS = ("legacy_text_parse", "legacy_log_parse", *BLOCK_CODES)
 
 
 def count() -> dict[str, int]:

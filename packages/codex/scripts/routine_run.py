@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
-"""The one state machine for the docs-sync and loop-retro-promotion routines; needs no hooks, so it works headless.
+"""Run the headless state machine for docs-sync and loop-retro-promotion.
 
-    routine_run.py [--log PATH] ROUTINE begin | stage NAME | run-gate STAGE -- ARGV... | abort CODE | refuse GATE
-                                      | finish ok|no_drift
-
-`begin` writes the state file and a provisional run_incomplete row. `stage` and `run-gate` enforce the spec's stage
-order (an out-of-order call aborts the run: stage_out_of_order). `stage manifest_check` runs diff_manifest.py with the
-spec's policy and aborts on any violation. `run-gate` runs a gate command and maps any non-zero exit to run_refused for
-that gate. `abort` and `refuse` end the run and clean up with git and gh only (close the PR and delete the current
-local branch, never the remote or default branch), once. `finish` emits run_ok. Exit: 0 ok; 1 abort/refused; 2 refused.
-Events go through routine_log.emit; the human log is the JSONL path with a .log suffix.
+Usage: routine_run.py [--log PATH] ROUTINE begin|stage NAME|run-gate STAGE -- ARGV...
+                                     |abort CODE|refuse GATE|finish ok|no_drift
+Stages follow the spec; manifest and gate commands can refuse a run.
+Abort/refusal cleans only an unmerged PR and local branch. Merge attempts are pinned before execution and checked live.
+Events go through routine_log.emit; exits are 0 success, 1 abort/refusal, 2 refusal.
 """
 
 from __future__ import annotations
@@ -17,8 +13,8 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -32,10 +28,7 @@ from typing import Any, cast
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from scripts import routine_log  # noqa: E402
-from scripts.lib import (  # noqa: E402
-    artifact_io,
-    merge_target,
-)
+from scripts.lib import artifact_io, routine_merge  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
 
 
@@ -94,26 +87,49 @@ class Run:
         return routine_log.emit(self.jsonl, run_id, self.routine, stage, outcome, code, self.human, self.spec)
 
     def end(self, stage: str, outcome: str, code: str) -> str:
-        """Emit the terminal row, persist the ended state, then clean up (once, because the state is already ended)."""
+        """Persist success before its marker; persist failures before one cleanup."""
+        if outcome in ("run_abort", "run_refused") and self.state.get("merge_attempt"):
+            status = self.merge_status()
+            if status != "OPEN":
+                code = "merged_incomplete" if status == "MERGED" else "merge_state_unknown"
+                return self.incomplete(code) or code
+        if outcome == "run_ok":
+            self.state["ended"], self.state["outcome"] = True, outcome
+            self.save()  # never publish a green marker before the terminal state is durable
         refusal = self.emit(stage, outcome, code)
         if refusal:
             return refusal
-        self.state["ended"], self.state["outcome"] = True, outcome
-        self.save()
         if outcome != "run_ok":
+            self.state["ended"], self.state["outcome"] = True, outcome
+            self.save()
             self.cleanup()
         return ""
 
+    def incomplete(self, code: str) -> str:
+        """Leave a red, recoverable run when a merge may already have happened."""
+        if self.state.get("blocked_reason") != code:
+            if refusal := self.emit("merge", "run_incomplete", code):
+                return refusal
+            self.state["blocked_reason"] = code
+            self.save()
+        return ""
+
+    def merge_status(self) -> str:
+        """Read only the pinned PR/head; an unknown or changed target cannot authorize cleanup."""
+        return routine_merge.status(self.state.get("merge_attempt"))
+
     def cleanup(self) -> None:
         """Close the PR and delete only this run's current local branch; report failures."""
+        if self.state.get("merge_attempt") and self.merge_status() != "OPEN":
+            print("cleanup_blocked: merge state is not confirmed OPEN", file=sys.stderr)
+            return
         branch = str(self.state.get("branch", ""))
         default = git.main()
         if not branch or branch != git.branch() or branch in (default, "main", "master"):
             return
         steps = cast(list[str], self.spec.get("cleanup", []))
         if "close_pr" in steps:
-            listing = ("gh", "pr", "list", "--head", branch, "--state", "open")
-            for number in git.run(*listing, "--json", "number", "--jq", ".[].number").stdout.split():
+            for number in routine_merge.cleanup_numbers(branch, self.state.get("merge_attempt")):
                 report("close_pr", git.run("gh", "pr", "close", number))
         if "delete_local_branch" in steps:
             if git.branch() == branch:
@@ -137,6 +153,9 @@ class Run:
 
     def advance(self, name: str) -> int:
         """Record a passed stage."""
+        if name == "merge" and (refusal := self.incomplete("merged_incomplete")):
+            print(refusal, file=sys.stderr)
+            return 2
         refusal = self.emit(name, "stage_ok")
         if refusal:
             print(refusal, file=sys.stderr)
@@ -189,6 +208,10 @@ def cmd_begin(run: Run, args: argparse.Namespace) -> int:
 
     Refused while a run is open, or after a same-day abort/refusal, unless --new closes the previous run.
     """
+    run_id = os.environ.get("CODERAILS_ROUTINE_RUN_ID")
+    if run_id is not None and not re.fullmatch(r"[0-9a-f]{16}", run_id):
+        print("run_id_invalid: expected 16 lowercase hex characters", file=sys.stderr)
+        return 2
     human = run.human
     if run.state_path.exists():
         if not run.load():
@@ -204,7 +227,7 @@ def cmd_begin(run: Run, args: argparse.Namespace) -> int:
                 print(refusal, file=sys.stderr)
                 return 2
     run.human, run.jsonl = human, human.with_suffix(".jsonl")
-    run.state = {"v": 1, "run_id": uuid.uuid4().hex[:12], "next": 0, "branch": "", "ended": False}
+    run.state = {"v": 1, "run_id": run_id or uuid.uuid4().hex[:12], "next": 0, "branch": "", "ended": False}
     run.state |= {"routine": run.routine, "date": run.today, "human": str(run.human)}
     run.save()
     refusal = run.emit("begin", "run_incomplete", "incomplete-run")
@@ -243,30 +266,6 @@ def gate_allowed(script: str, argv: list[str]) -> bool:
     )
 
 
-def merge_scope_code(run: Run, argv: list[str]) -> str:
-    """Bind a merge gate to this run's branch and check that PR's exact diff with the routine policy."""
-    target, _, _ = merge_target.parse(shlex.join(argv))
-    branch, head = git.branch(), git.output("git", "rev-parse", "HEAD")
-    if not target.isdecimal() or not branch or branch != run.state.get("branch") or not head:
-        return "gate_argv_not_allowed"
-    done = git.run("gh", "pr", "view", target, "--json", "number,headRefName,headRefOid,baseRefOid")
-    try:
-        pr = cast(dict[str, Any], json.loads(done.stdout))
-        base = pr["baseRefOid"]
-        if (
-            done.returncode
-            or pr["number"] != int(target)
-            or pr["headRefName"] != branch
-            or pr["headRefOid"] != head
-            or not isinstance(base, str)
-            or not re.fullmatch(r"[0-9a-fA-F]{40}", base)
-        ):
-            return "gate_argv_not_allowed"
-    except (ValueError, KeyError, TypeError):
-        return "gate_argv_not_allowed"
-    return manifest_code(run, base, head)
-
-
 def cmd_run_gate(run: Run, args: argparse.Namespace) -> int:
     """Run a gate command in order; any non-zero exit is a refusal for that gate."""
     argv = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
@@ -284,15 +283,42 @@ def cmd_run_gate(run: Run, args: argparse.Namespace) -> int:
         return 2
     if args.stage == "push" and manifest_check(run, "push"):  # a late edit is caught before it is pushed
         return 1
-    if args.stage == "merge" and (scope_code := merge_scope_code(run, argv)):
-        print(f"merge_scope_refused: {scope_code}", file=sys.stderr)
-        run.end(args.stage, "run_abort", scope_code)
-        return 2
+    if args.stage == "merge":
+        if run.state.get("merge_attempt"):
+            status = run.merge_status()
+            if status == "MERGED":
+                return run.advance(args.stage)
+            if status != "OPEN":
+                run.incomplete("merge_state_unknown")
+                return 2
+            print("merge_not_confirmed: previous attempt is still OPEN", file=sys.stderr)
+            run.end(args.stage, "run_abort", "merge_not_confirmed")
+            return 2
+        scope_code, attempt = routine_merge.scope_attempt(
+            argv, str(run.state.get("branch", "")), lambda base, head: manifest_code(run, base, head)
+        )
+        if scope_code:
+            print(f"merge_scope_refused: {scope_code}", file=sys.stderr)
+            run.end(args.stage, "run_abort", scope_code)
+            return 2
+        run.state["merge_attempt"] = attempt
+        run.save()
     try:
         code = subprocess.run(argv, check=False).returncode
     except OSError as error:
         print(f"gate_spawn_failed: {error}", file=sys.stderr)
         code = 127
+    if args.stage == "merge":
+        status = run.merge_status()
+        if status == "MERGED":
+            return run.advance(args.stage)
+        if status != "OPEN":
+            run.incomplete("merge_state_unknown")
+            return 2
+        if code == 0:
+            print("merge_not_confirmed: PR remains OPEN", file=sys.stderr)
+            run.end(args.stage, "run_abort", "merge_not_confirmed")
+            return 2
     if code == 0:
         return run.advance(args.stage)
     print(f"refused: gate {args.stage} exited {code}", file=sys.stderr)
@@ -323,6 +349,9 @@ def cmd_finish(run: Run, args: argparse.Namespace) -> int:
     complete = delivered == len(run.stages) if args.result == "ok" else delivered == 0
     if run.state.get("ended") or not complete:
         return run.out_of_order(f"finish {args.result}")
+    if args.result == "ok" and run.merge_status() != "MERGED":
+        run.incomplete("merge_state_unknown")
+        return 2
     refusal = run.end("merge" if args.result == "ok" else "no_drift", "run_ok", "")
     if refusal:
         print(refusal, file=sys.stderr)

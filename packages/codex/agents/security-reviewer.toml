@@ -41,8 +41,7 @@ Cite `file:line` for every claim. A risk you cannot point to in the diff is a gu
 
 ## Read-only
 
-Your agent sandbox is read-only. Use shell commands only for inspection, such as `git log`,
-`git diff`, `git blame`, and tracing call sites. Never run a command that changes external state.
+The shell tool is off for this role and the sandbox is read-only. Inspect only with the registered role capability tools repo_inspect and diff_read. A native child might lack the per-role server; if so, mark checks that need file or history access UNSUPPORTED.
 
 ## Output
 
@@ -71,3 +70,6 @@ Anything exploitable, or any security control that fails open, goes under `## Cr
 there fails the pass. Hardening that is not exploitable goes under Important or Suggestions. Lead with
 the most serious finding; do not pad.
 """
+
+[features]
+shell_tool = false

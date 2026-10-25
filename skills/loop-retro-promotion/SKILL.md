@@ -30,18 +30,30 @@ limits are in `docs/routines.md`.
 
 ## 1. Predicate evaluation (always runs, even when dormant)
 
-Every scheduled run evaluates the graduation predicate first, before doing
-anything else:
+Start the run log, then evaluate the graduation predicate before mining,
+branching or editing:
 
 1. Resolve the repo-key dir: `dirname` of `dirname` of the path printed by
    `hooks/scripts/lib/agentic_loop_path.py`.
-2. Count `<repo-key-dir>/*/retro.json` — must be **>= 10**.
-3. Confirm `standing-orders.md` has **>= 1** entry whose `last_recurred` !=
-   `created` — one full lifecycle (created, then recurred at least once).
-4. Confirm `standing-orders-decayed.md` has **>= 1** entry — one clean decay.
+2. Run `RR begin`. It writes the provisional `run_incomplete` row before the
+   predicate read, so an interrupted or refused read cannot look like a
+   successful dormant run.
+3. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/lessons.py" --dir <repo-key-dir> --session <native caller session id> predicate`
+   and read `graduation` from its JSON; do not count files or read Markdown by hand.
+   It checks **>= 10 distinct completed retros** with owned validated progress and matching source hashes,
+4. `recurred` **>= 1** — an order in `orders.json` whose typed `last_recurred` !=
+   `created` (one full lifecycle: created, then recurred at least once), and
+5. `decayed` **>= 1** — an order with `status: decayed` (one clean decay).
+   `met` is true only when all three hold.
 
-Run `RR begin` (state file plus a provisional `run_incomplete` row), then
-append one line to `<repo-key-dir>/promotion-runs.log`:
+On exit 2, run `RR abort predicate_refused`. On exit 3, run
+`RR abort predicate_degraded`. For malformed output or any other unexpected
+result, run `RR abort predicate_unavailable`. Never turn these cases into
+`finish no_drift`; do not use a generated view or ledger claim as fallback.
+Schema3 history requires the matching `retro_check` validator; unavailable validation is an explicit refusal.
+Pass the actual caller's native session id so degraded reads remain attributable; do not infer environment presence.
+
+After a successful evaluation, append one line to `<repo-key-dir>/promotion-runs.log`:
 
 ```
 <ISO8601> predicate=<met|unmet> retros=<n> lifecycle=<0|1> decay=<0|1>
@@ -62,7 +74,11 @@ RED regardless of which step it died in. (The runner also appends `run_abort`
 ## 2. Mining
 
 If the predicate is met, read all `retro.json` files under
-`<repo-key-dir>/*/retro.json` plus `standing-orders.md` (the overlay).
+`<repo-key-dir>/*/retro.json` plus the `candidates` list from the
+`lessons.py ... predicate` output of §1 (the typed standing orders; the
+generated `standing-orders.md` is only a view of them).
+Candidates carry current, live, verified owner-cited lesson text from Muninn. Retros lacking complete owned sources
+cannot inflate the graduation count; free-text notes cannot substitute for typed recurrence fields.
 Select ONLY failure modes that:
 
 - recurred **>= 2** times, and
@@ -71,7 +87,9 @@ Select ONLY failure modes that:
   agentic-loop skill, not just this one.
 
 Reject repo-specific lessons even if they meet the recurrence bar — they
-stay in the overlay (`standing-orders.md`), they do not get promoted.
+stay in the typed standing orders (`scope: repo`), they do not get promoted.
+`lessons.py predicate` already applies the recurrence, distinct-session and
+`scope: agnostic` bars; the repo-agnostic judgement is confirmed here.
 
 ## 3. Drafting
 
@@ -127,8 +145,11 @@ enforce it (a call out of order aborts the run: `stage_out_of_order`).
    after the `merge` stage row, so `run=ok` is the log's true last terminal
    marker for a completed delivery.
 
-`run-gate` exits non-zero when the gate command does, and that is a refusal:
+`run-gate` exits non-zero when a gate fails and the PR is still open:
 it records `run_refused` for that gate, cleans up and never emits `run_ok`.
+For merge, the runner checks the exact PR and head after the command. A
+confirmed merge can advance despite a CLI error; an unknown result stays red
+and blocks cleanup. A merged PR is never closed or logged as an abort.
 Never wait, poll or retry for a gate, and never invent a marker (`RR abort
 CODE` / `RR refuse GATE` accept only the spec's closed reason codes). Cleanup
 runs once, in code, with `git` and `gh` only: close the PR and delete the

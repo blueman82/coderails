@@ -114,7 +114,9 @@ class HookRepo(Repo):
     def reason(self, **comment: object) -> str:
         """Permission-decision reason for `gh pr merge 7` given the eval comment, or empty when allowed."""
         (self.dir / ".coderails").mkdir(exist_ok=True)
-        (self.dir / ".coderails/workflow.config.yaml").write_text("review_passes: off\n")  # this test is eval-only
+        (self.dir / ".coderails/workflow.config.yaml").write_text(
+            "review_passes: off\nevals:\n  require_signatures: false\n"
+        )  # this test isolates eval-level behavior
         comment.setdefault("frozen_sha", self.base)
         eval_file = write_comment(self.tmp, self.sha, **comment)  # type: ignore[arg-type]
         env = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}

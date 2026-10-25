@@ -48,11 +48,15 @@ class ParseTests(unittest.TestCase):
         """No positional means the current branch; the api form carries the number in the path."""
         self.assertEqual(self.target("gh pr merge --merge"), "")
         self.assertEqual(self.target("gh api repos/o/r/pulls/9/merge -X PUT"), "https://github.com/o/r/pull/9")
+        self.assertEqual(self.target("gh api -X PUT repos/o/r/pulls/9/merge"), "https://github.com/o/r/pull/9")
 
     def test_endpoint_text_in_body_is_not_a_target(self) -> None:
         """Only the API endpoint argument selects an API merge target."""
         self.assertEqual(self.target("gh pr merge --body '/pulls/1/merge' 42"), "42")
         self.assertEqual(self.target("gh api repos/x/y/pulls/9/merge -X PUT"), "https://github.com/x/y/pull/9")
+        self.assertEqual(
+            self.target("gh api -f note=repos/x/y/pulls/9/merge repos/x/y/issues/9"), merge_target.AMBIGUOUS
+        )
 
     def test_ambiguous_is_marked(self) -> None:
         """-R/--repo and two positionals cannot be resolved against the local repo."""
@@ -74,6 +78,13 @@ class ParseTests(unittest.TestCase):
         got = merge_target.parse("python3 scripts/merge.py --unit 2 --progress p.json 5")
         self.assertEqual(got, ("5", "2", "p.json"))
         self.assertEqual(merge_target.parse("python3 scripts/merge.py auto"), ("", "", ""))
+
+    def test_merge_script_expected_head_value_is_not_a_second_target(self) -> None:
+        """The pinned head is an option value; the hook still resolves the named PR."""
+        sha = "a" * 40
+        self.assertEqual(merge_target.parse(f"python3 scripts/merge.py 516 --expected-head {sha}"), ("516", "", ""))
+        self.assertEqual(merge_target.parse(f"python3 scripts/merge.py --expected-head={sha} 516"), ("516", "", ""))
+        self.assertEqual(merge_target.parse("python3 scripts/merge.py 516 --expected-head 517"), ("516", "", ""))
 
     def test_unit_flags_inline_missing_and_duplicates(self) -> None:
         """Wrapper flags support equals syntax and refuse missing or ambiguous values."""
@@ -99,16 +110,19 @@ class ResolveTests(unittest.TestCase):
 
     def test_number_url_branch(self) -> None:
         """Digits pass through; a same-repo URL and a branch go through gh; no target is the current branch."""
+
+        def number(name: str) -> str:
+            return "3" if name == "cur" else "7"
+
         with (
             mock.patch.object(git, "repo", return_value="o/r"),
-            mock.patch.object(git, "pr_field", return_value="7") as field,
-            mock.patch.object(git, "pr_num", return_value="3"),
+            mock.patch.object(git, "pr_num", side_effect=number) as lookup,
             mock.patch.object(git, "branch", return_value="cur"),
         ):
             self.assertEqual(merge_target.resolve("42"), "42")
             self.assertEqual(merge_target.resolve("https://github.com/o/r/pull/7"), "7")
             self.assertEqual(merge_target.resolve("feat-b"), "7")
-            self.assertEqual(field.call_args.args, ("feat-b", "number"))
+            self.assertEqual(lookup.call_args.args, ("feat-b",))
             self.assertEqual(merge_target.resolve(""), "3")
 
     def test_unresolvable_is_empty(self) -> None:
@@ -116,7 +130,7 @@ class ResolveTests(unittest.TestCase):
         with (
             mock.patch.object(git, "repo", return_value="o/r"),
             mock.patch.object(git, "pr_field", return_value=""),
-            mock.patch.object(git, "pr_num", return_value="3"),
+            mock.patch.object(git, "pr_num", return_value=""),
         ):
             self.assertEqual(merge_target.resolve(merge_target.AMBIGUOUS), "")
             self.assertEqual(merge_target.resolve("https://github.com/x/y/pull/7"), "")

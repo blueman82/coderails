@@ -19,14 +19,14 @@ from scripts.lib.eval_artifact import facts_line
 from scripts.lib.eval_integrity import suite_hash
 
 
-def frozen_eval(level: int) -> git.EvalSummary:
+def frozen_eval(level: int, head: str = "deadbeef") -> git.EvalSummary:
     """A trusted eval artifact as post_evals.py post writes it: frozen suite, matching facts line, no late freeze."""
     data: dict[str, object] = {
         "verification_level": level,
         "task_ref": "1",
         "evals": [],
         "frozen_sha": "a" * 40,
-        "head_sha": "deadbeef",
+        "head_sha": head,
     }
     data["frozen_hash"] = suite_hash(data)
     stamp = facts_line(level, False, suite_hash(data)[:16])
@@ -35,6 +35,8 @@ def frozen_eval(level: int) -> git.EvalSummary:
 
 class MergeContractTests(unittest.TestCase):
     """Intercept every external operation; no test can contact GitHub or modify Git."""
+
+    merge_arguments: tuple[str, ...] = ()
 
     def invoke(
         self,
@@ -50,7 +52,7 @@ class MergeContractTests(unittest.TestCase):
     ) -> tuple[int, str, bool, bool]:
         """Run the real merge entrypoint over controlled provider and evidence replies."""
         if summary is None:
-            summary = frozen_eval(0)
+            summary = frozen_eval(0, sha)
         merged: list[tuple[str, ...]] = []
 
         def command(*arguments: str, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -58,6 +60,7 @@ class MergeContractTests(unittest.TestCase):
             del check
             if arguments[:3] == ("gh", "pr", "merge"):
                 merged.append(arguments)
+                self.merge_arguments = arguments
             return subprocess.CompletedProcess(arguments, 0, "", "")
 
         def field(number: str, name: str, fallback: str = "") -> str:
@@ -98,6 +101,7 @@ class MergeContractTests(unittest.TestCase):
             stack.enter_context(patch("scripts.lib.eval_level.suite_late", return_value=False))
             stack.enter_context(patch.object(merge, "config_path", return_value=""))
             stack.enter_context(patch.object(merge, "has_wiki_ingest_for_merged_prs"))
+            stack.enter_context(patch.object(merge, "require_merge_receipt", return_value=None))
             if temporary_failure:
                 stack.enter_context(
                     patch(
@@ -143,6 +147,12 @@ class MergeContractTests(unittest.TestCase):
         )
         self.assertIn("required_review_failed:security-review", text)
         self.assertFalse(merged)
+
+    def test_merge_pins_the_head_sha_the_gates_verified(self) -> None:
+        """The remote merge carries --match-head-commit <verified sha>, so a head that moved later is refused."""
+        code, _, merged, _ = self.invoke(sha="cafe1234")
+        self.assertEqual((code, merged), (0, True))
+        self.assertEqual(self.merge_arguments, ("gh", "pr", "merge", "7", "--merge", "--match-head-commit", "cafe1234"))
 
     def test_fetch_diagnostics_distinguish_identity_permission_and_local_failure(self) -> None:
         """Name each trust-failure stage without relabelling local failures as network errors."""

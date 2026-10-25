@@ -13,10 +13,6 @@ from pathlib import Path
 from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.lib.argv_match import git_invocation, git_prefix
-from hooks.scripts.lib.destructive_patterns import git_output
-from hooks.scripts.lib.shell_context import invocations, payload_cwd
-
 try:
     from hooks.scripts.lib.hook_telemetry import note_child
 except ImportError:  # telemetry must never be able to break the hook
@@ -26,6 +22,9 @@ except ImportError:  # telemetry must never be able to break the hook
 
 
 from hooks.scripts.hook_common import output as hook_output
+from hooks.scripts.lib.argv_match import git_invocation, git_prefix
+from hooks.scripts.lib.destructive_patterns import git_output
+from hooks.scripts.lib.shell_context import invocations, payload_cwd
 from hooks.scripts.test_output import begin_run, finish_run
 
 
@@ -96,16 +95,19 @@ def main() -> int:
         call = git_invocation(argv, cwd)
         if call is None or call[0] != "commit":
             continue
-        project = Path(git_output(cwd, *git_prefix(argv, call[2]), "rev-parse", "--show-toplevel") or call[1])
-        if project in checked or not (test_command := configured_test_command(project)):
+        prefix = git_prefix(argv, call[2])
+        directory = Path(git_output(cwd, *prefix, "rev-parse", "--show-toplevel") or call[1]).resolve()
+        if directory in checked:
             continue
-        checked.add(project)
+        checked.add(directory)
+        if not (test_command := configured_test_command(directory)):
+            continue
         try:
-            run = begin_run("claude", project, test_command)
+            run = begin_run("claude", directory, test_command)
             with (run / "output.log").open("wb") as log_file:
                 result = subprocess.run(
                     ["/bin/bash", "-c", test_command],
-                    cwd=project,
+                    cwd=directory,
                     stdout=log_file,
                     stderr=subprocess.STDOUT,
                     check=False,

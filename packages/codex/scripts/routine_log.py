@@ -42,7 +42,7 @@ def marker(outcome: str, stage: str, reason_code: str) -> str:
         "run_ok": "run=ok",
         "run_abort": f"abort={reason_code}",
         "run_refused": f"refused={reason_code}",
-        "run_incomplete": "abort=incomplete-run",
+        "run_incomplete": "incomplete=merged" if reason_code == "merged_incomplete" else "abort=incomplete-run",
     }.get(outcome, f"stage={stage}")
 
 

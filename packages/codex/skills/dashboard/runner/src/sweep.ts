@@ -232,7 +232,9 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
         vault: (opts.config.wikiPaths ?? [])[0] ?? "",
       };
       const boundary = routine ? routineLogBoundary(routine, artifactContext) : null;
-      const execResult = await runCodexImpl(argv, button.cwd, { outputPath: startRecord.outputPath });
+      const execResult = await runCodexImpl(argv, button.cwd, {
+        outputPath: startRecord.outputPath, ...(routine ? { routineRunId: outputRunId } : {}),
+      });
       appendRun({ ...startRecord, endedAt: Date.now(), exitCode: execResult.exitCode }, { runsDir: opts.runsDir });
 
       const terminalResult = routine && execResult.spawnFailure !== "spawn-failed"
@@ -254,7 +256,7 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
           // place, so there's nothing to correct for that case. A timeout
           // kill DID claim it and will never write its own terminal marker
           // now, so the runner writes the failure marker on its behalf.
-          if (execResult.spawnFailure === "timeout") {
+          if (execResult.spawnFailure === "timeout" && !["routine_merged_incomplete", "routine_merge_state_unknown"].includes(terminalResult.reason)) {
             recordTimeoutMarker(routine, artifactContext);
           }
           escalate({
