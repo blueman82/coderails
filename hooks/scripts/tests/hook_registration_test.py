@@ -54,6 +54,13 @@ class HookRegistrationTests(unittest.TestCase):
         self.assertNotIn("loop_state_guard", subagent)
         self.assertNotIn("loop_stall_guard", subagent)
 
+    def test_identity_gate_registered_right_after_reviewer_allowlist(self) -> None:
+        """Negative control: unregistering the identity hook leaves agent_id-without-agent_type unguarded."""
+        group = json.loads((ROOT / "hooks/hooks.json").read_text())["hooks"]["PreToolUse"][0]
+        self.assertEqual(group["matcher"], "Bash")
+        names = [Path(item["command"].strip('"')).name for item in group["hooks"]]
+        self.assertEqual(names[names.index("reviewer_bash_allowlist.py") + 1], "subagent_identity_gate.py")
+
     def test_manifest_versions_and_honest_ceiling(self) -> None:
         """Version synchronization and the invocation-only boundary cannot disappear silently."""
         plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())["version"]

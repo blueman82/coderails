@@ -17,7 +17,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts import merge  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
-from scripts.lib import manifest_counters, manifest_policy, publication_gate  # noqa: E402
+from scripts.lib import manifest_counters, manifest_policy  # noqa: E402
 
 CLI = REPO / "scripts" / "diff_manifest.py"
 
@@ -227,24 +227,26 @@ class GateTests(RepoCase):
             manifest_policy.gate()
         self.assertEqual(str(caught.exception), "diff_manifest:denied_path")
 
-    def test_default_is_enforce(self) -> None:
-        """No mode key means enforce (the old default was advisory, which only warned)."""
+    def test_default_is_enforced(self) -> None:
+        """No mode key uses the enforce default and refuses the denied change."""
         self.cfg.write_text(f"diff_manifest_policy: {self.policy_path}\n")
         with (
             mock.patch.object(manifest_policy, "config_path", return_value=str(self.cfg)),
-            self.assertRaises(git.WorkflowError),
+            self.assertRaises(git.WorkflowError) as caught,
         ):
             manifest_policy.gate()
-        self.assertEqual([r["outcome"] for r in self.rows() if r["outcome"] != "legacy"], ["refused"])
+        self.assertEqual(str(caught.exception), "diff_manifest:denied_path")
+        rows = [r for r in self.rows() if r["outcome"] != "legacy"]
+        self.assertEqual([(r["outcome"], r["reason_code"]) for r in rows], [("refused", "denied_path")])
 
-    def test_off_does_nothing_and_no_policy_uses_the_shipped_one(self) -> None:
-        """Off skips the check and writes nothing; no policy file means the shipped default, which passes a doc edit."""
+    def test_off_skips_and_no_policy_uses_default(self) -> None:
+        """Off skips; no policy path checks the shipped default."""
         with self.configure("off"):
             manifest_policy.gate()
         self.assertEqual(self.rows(), [])
         with self.configure("enforce", policy=False):
             manifest_policy.gate()
-        self.assertEqual([r["outcome"] for r in self.rows() if r["outcome"] != "legacy"], ["ok"])
+        self.assertIn("diff_manifest_ok", [row["reason_code"] for row in self.rows()])
 
     def test_counters(self) -> None:
         """manifest_counters tallies only diff-manifest rows from a by_reason map."""
@@ -264,17 +266,18 @@ class MergeCallTests(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, "", "")
 
         with (
-            mock.patch.object(merge, "verify_gates", return_value="sha7"),
+            mock.patch.object(merge, "verify_gates", return_value="a" * 40),
+            mock.patch.object(merge, "require_merge_receipt", return_value=None),  # receipt seam has its own suite
             mock.patch.object(git, "require_repo"),
             mock.patch.object(git, "main", return_value="main"),
             mock.patch.object(git, "pr_field", return_value="OPEN"),
             mock.patch.object(git, "protected", return_value=False),
             mock.patch.object(git, "run", side_effect=fake_run),
             mock.patch.object(merge, "cleanup"),
-            mock.patch.object(publication_gate, "enforce", side_effect=gate_effect) as gate,
+            mock.patch("scripts.lib.publication_gate.enforce", side_effect=gate_effect) as gate,
         ):
             status = merge.main(["7"])
-        gate.assert_called_once_with("7", "sha7", unit="", progress="")
+        gate.assert_called_once_with("7", "a" * 40, unit="", progress="")
         return status, [a for a in seen if a[:3] == ("gh", "pr", "merge")]
 
     def test_enforce_refusal_blocks_merge(self) -> None:

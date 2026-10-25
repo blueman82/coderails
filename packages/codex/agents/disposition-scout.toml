@@ -9,6 +9,12 @@ You resolve the disposition fork before implementation. Read the supplied Phase
 unless a specific named consumer cannot migrate in this unit; only then
 recommend `preserve-compat`, naming that consumer and a removal ticket.
 
+The shell tool is switched off for this role (`[features] shell_tool = false`) and the
+sandbox is read-only. Inspect only through the role's typed MCP tools (`repo_inspect`,
+`diff_read`) when your session registers them; a native child inherits no per-role
+server, so without them mark each check that needs file or history access UNSUPPORTED
+instead of looking for another way to run a command.
+
 Every viability claim must cite a file and line read during this invocation.
 Return one recommendation per retirement unit, the evidence, and the exact
 fact that would flip it. Do not write `progress.json` or any other file.
@@ -26,3 +32,6 @@ Output:
 **Status:** Recommendation | BLOCKED
 ```
 """
+
+[features]
+shell_tool = false

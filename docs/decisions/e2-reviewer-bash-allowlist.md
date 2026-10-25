@@ -54,3 +54,16 @@ read-only, and a declared suite can still write caches in the repo. It is a type
 match on Bash, not a harness-level typed tool (that needs an MCP server; none ships). On Codex there is no per-agent
 Bash hook, so the same script ships in `packages/codex/scripts` but per-agent gating there is `sandbox_mode` plus
 instruction text only, and a read-only sandbox may block the suite's cache writes (inferred). See `docs/CAPABILITIES.md`.
+
+## Addendum: Bash removed from the guarded agents; this hook is defence in depth
+
+The five guarded Claude agents no longer list `Bash`: their `tools:` are exactly their per-role MCP tools
+(`mcp__plugin_coderails_cap-<role>__<tool>`, +`Skill` for `preflight-scout`), with native `Read`/`Grep`/`Glob` removed too
+(decision D4). Observed with the real CLI against a loopback API fixture
+(`hooks/scripts/tests/reviewer_tools_probe_test.py`): the request's `tools` array holds none of Bash, Write, Edit,
+NotebookEdit, Agent, Read. The "Known cost" above and the capability-path allowance are therefore reached through
+`tests_run`/`cmd_run` instead of a Bash argv. This hook is unchanged and stays registered: it still guards an install whose
+agent file lists Bash (an older copy, or a re-added tool), and `subagent_identity_gate.py` closes the shape this hook
+cannot see (`agent_id` present, `agent_type` absent) in a graph-bound session. Codex: `[features] shell_tool = false`
+in each guarded role TOML plus `scripts/codex_role_session.py`; there is still no Codex hook, because the Codex PreToolUse
+payload has no `agent_type`. See `docs/CAPABILITIES.md` (Role binding).

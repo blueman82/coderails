@@ -31,7 +31,7 @@ Collect:
 - Worktree script path relative to the repository root, or `none`.
 - Engineering-principles path globs and skill. Detect a default from repository files: Go for `go.mod`; TypeScript for a `package.json` project containing TypeScript; Bash for a shell-only project; otherwise Python. Use the installed native Coderails Codex skill name, such as `coderails-codex:engineering-principles-python`, without command syntax. Accept `none` to disable it.
 - Sandbox workers. Default to `false`. Preserve this field exactly during migration.
-- Integrity-review machine user. Default to `none`; this is only for a dedicated GitHub identity that posts SHA-bound `integrity-review` attestations.
+- Integrity review. Default to `false`; set `true` after the GitHub Actions ruleset is live.
 
 ## Write the file
 
@@ -62,8 +62,9 @@ engineering_principles_paths:
   - "**/container.py"
 engineering_principles_skill: coderails-codex:engineering-principles-python
 sandbox_workers: false
+action_authority: advisory
 integrity_review:
-  machine_user: null
+  enabled: false
 ```
 
 Use `jira: null`, `engineering_principles_paths: null`, or other `null` values where the user disabled an optional feature.

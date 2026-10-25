@@ -26,7 +26,7 @@ class NativePackageTests(unittest.TestCase):
         self.assertEqual(manifest["skills"], "./skills/")
         self.assertTrue(all(isinstance(value, str) and value for value in manifest.values()))
         directories = sorted(path for path in (PACKAGE / "skills").iterdir() if path.is_dir())
-        self.assertEqual(len(directories), 37)
+        self.assertEqual(len(directories), 38)
         for directory in directories:
             text = (directory / "SKILL.md").read_text(encoding="utf-8")
             match = re.match(r"^---\n(.*?)\n---(?:\n|$)", text, re.DOTALL)
@@ -37,6 +37,7 @@ class NativePackageTests(unittest.TestCase):
             self.assertRegex(match.group(1), r"(?m)^description:\s*\S.+$")
         for name in (
             "assumptions",
+            "authorize",
             "disconfirm",
             "init",
             "merge",
@@ -93,7 +94,9 @@ class NativePackageTests(unittest.TestCase):
         for path in files:
             text = path.read_text(encoding="utf-8")
             header, separator, body = text.partition('developer_instructions = """')
-            self.assertTrue(separator and body.endswith('"""\n'))
+            # guarded roles end with a [features] table (shell tool off); it must follow the string, never precede it
+            tail = "\n[features]\nshell_tool = false\n" if path.stem in readonly - {"spec-reviewer"} else ""
+            self.assertTrue(separator and body.endswith('"""\n' + tail))
             self.assertRegex(header, rf'(?m)^name = "{path.stem}"$')
             self.assertRegex(header, r'(?m)^description = ".+"$')
             modes = re.findall(r'^sandbox_mode = "([^"]+)"$', header, re.MULTILINE)

@@ -37,6 +37,12 @@ class TraceRowTests(unittest.TestCase):
         self.assertIsNone(row["loop_id"])
         self.assertEqual(row["session_id"], "s1")
 
+    def test_surrogate_input_is_hashed_without_raising(self) -> None:
+        """A JSON-escaped surrogate in untrusted input remains traceable."""
+        self.assertTrue(append_row("gate", "blocked", "bad_name", "s1", inputs={"name": "\ud800"}, base=self.base))
+        row = json.loads((self.base / "s1" / "trace.jsonl").read_text())
+        self.assertEqual(row["inputs"]["name"], hashlib.sha256(b"\\ud800").hexdigest())
+
     def test_nul_and_dot_ids_refused_without_raising(self) -> None:
         """A NUL byte or '.' id must return False (never raise ValueError, never alias the root file)."""
         for bad in ("a\0b", ".", "?"):

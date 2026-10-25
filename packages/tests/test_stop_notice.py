@@ -27,6 +27,18 @@ class StopNoticeTests(StopNoticeBase):
         left = ROOT / "hooks/scripts/lib/stall_notice.py"
         self.assertTrue(filecmp.cmp(left, ROOT / "packages/codex/hooks/scripts/lib/stall_notice.py", shallow=False))
 
+    def test_status_lists_keep_registered_names_and_stable_ids(self) -> None:
+        """Graph status displays names without discarding machine-readable IDs."""
+        summary = {
+            "phase": "ready to dispatch",
+            "detail": "begin-wave then spawn the ready nodes",
+            "ready": ["U3[1]"],
+            "node_names": {"U3[1]": {"display": "Builder · A-1 [U3[1]]"}},
+        }
+        with mock.patch.object(stall_notice, "_graph", return_value=(True, json.dumps(summary))):
+            text = stall_notice.status_notice(Path("graph.py"), Path("progress.json"), "session")
+        self.assertIn("Builder · A-1 [U3[1]]", text)
+
     def test_key_changes_with_session_wave_hard_stop(self) -> None:
         """Each component changes the marker; identical state does not."""
         base = {"loop_id": "l", "revision": 3, "graph": {"active_wave": None, "hard_stop": None}}

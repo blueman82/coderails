@@ -23,6 +23,8 @@ Resolve the linked helper relative to this `SKILL.md`, then run it from the user
 - The helper stages tracked modifications with `git add -u`; do not run a separate broad `git add`.
 - For each new file created for this work, pass one explicit `--add path/to/file` argument. Never pass directories, globs, unrelated files, or multiple paths through one `--add`.
 - Pass `--force-with-lease` only when the user explicitly requested it. Never use an unconditional force push.
+- If this session owns a graph unit in this worktree, pass its exact `--unit <id> --progress <absolute state path>`.
+  Read both values from the active graph. Do not guess them.
 
 The helper must fail if the branch is protected, the commit or push fails, the remote branch does not match local `HEAD`, or pull-request creation fails. Do not report success without its resulting pull-request URL.
 
