@@ -273,6 +273,12 @@ Active and just-completed runs are protected, so the budget may be exceeded.
 Compact metrics and expiry records persist separately. Emitted bytes do not establish model delivery. See
 [reader examples and measurement limits](docs/REFERENCE.md#retained-test-gate-output).
 
+Source measurement notes cover [graph dispatch](docs/graph-dispatch-measurement.md),
+[typed records](docs/typed-records-measurement.md),
+[workflow gates](docs/workflow-gates-measurement.md), and
+[session observations](docs/OBSERVATION-REPORT.md). Each note separates source checks from installed and operational
+evidence. A local test does not prove that an installed provider used a control.
+
 ## Sandboxed workers
 
 With `sandbox_workers: true` (the default), the Claude implementation launcher
