@@ -268,7 +268,10 @@ server still accepts TCP but serves nothing.
 
 **Purpose:** Establishes how to find and use skills at session start. Requires skill invocation before ANY response including clarifying questions.
 
-**When it triggers:** When starting any conversation. Also injected automatically at every session start by the `inject_bootstrap.py` `SessionStart` hook — Claude receives the full SKILL.md content as context so it can self-bootstrap without being told.
+**When it triggers:** When starting a conversation. The `inject_bootstrap.py`
+`SessionStart` hook now injects a compact context manifest and a skill-use
+constraint. It does not inject the full `SKILL.md`; Claude loads that skill
+through the `Skill` tool when it applies.
 
 ---
 
@@ -409,9 +412,9 @@ How strong that guarantee is varies per agent, and the difference matters:
 
 - **Enforced.** `spec-reviewer` declares `tools: Read, Grep, Glob` and has no
   write capability at all.
-- **Partly enforced.** `source-auditor` withholds `Write`/`Edit` via
-  `disallowedTools` but keeps `Bash` (it must re-run commands), and `Bash` can
-  mutate — so its read-only property is partly discipline.
+- **Bounded execution.** `source-auditor` has typed inspection and diff tools.
+  It can also run declared tests and commands. Those can write repository
+  caches, so its work is not read-only.
 - **Not enforced.** `pr-review-toolkit:code-reviewer` declares no `tools:` key
   and therefore has full tool access. Naming it buys a pinned model and a
   maintained rubric, not an inability to edit what it reviews.
@@ -429,8 +432,8 @@ They do **not** support `hooks`, `mcpServers` or `permissionMode`.
 file contents, git output, fresh command output — and returns a sourced
 PASS / FAIL / UNSUPPORTED verdict per claim.
 
-**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit`. Not read-only by construction: rule 3 requires re-running commands to re-derive numbers, so `Bash` stays — and `Bash` can mutate. `Write`/`Edit` are withheld; the rest is the agent's stated discipline.
-**Model:** `sonnet`.
+**Tools:** typed `repo_inspect`, `diff_read`, `tests_run`, and `cmd_run`;
+no shell. Declared tests and commands can write caches. **Model:** `sonnet`.
 
 **Used by:** `/coderails:cite-check`, which forks into it so the audit runs with no
 access to the conversation that produced the claim. Verifying a claim inside the
@@ -481,7 +484,7 @@ existing document. Mandatory primitive-contract read whenever a shared lock,
 queue, transaction, or similar is called in nested/recursive/parallel/
 re-entrant contexts.
 
-**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit` (read-only discipline, not a tool guarantee — `Bash` can mutate). **Model:** `inherit` — pass an explicit model at dispatch; `agentic-loop` Phase 2.5 routes `default` or `frontier` per Phase 2.8's table.
+**Tools:** typed `repo_inspect` and `diff_read`; no shell. **Model:** `inherit` — pass an explicit model at dispatch; `agentic-loop` Phase 2.5 routes `default` or `frontier` per Phase 2.8's table.
 
 **Used by:** `agentic-loop` Phase 2.5 design forks.
 
@@ -493,7 +496,7 @@ actual consumers and constraints. Defaults to clean-break; preserve-compat
 requires a specific named consumer that cannot migrate in this unit, plus a
 removal ticket.
 
-**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit` (read-only discipline, not a tool guarantee — `Bash` can mutate). **Model:** `inherit` — pass an explicit model at dispatch; `agentic-loop` Phase 2.6 assigns its role inline per Phase 2.8's table (see `model-routing.md`'s "Inline sites elsewhere").
+**Tools:** typed `repo_inspect` and `diff_read`; no shell. **Model:** `inherit` — pass an explicit model at dispatch; `agentic-loop` Phase 2.6 assigns its role inline per Phase 2.8's table (see `model-routing.md`'s "Inline sites elsewhere").
 
 **Used by:** `agentic-loop` Phase 2.6 disposition decisions.
 
@@ -517,7 +520,7 @@ premortem, assumptions, notchecked, wiki-query) plus a retro-intake pass over
 consolidated pre-flight report. Additive-only — never relaxes a gate, skips a
 phase, or pre-justifies an eval amendment.
 
-**Tools:** `Read, Grep, Glob, Bash, Skill`, with `disallowedTools: Write, Edit, NotebookEdit`. **Model:** `sonnet`.
+**Tools:** typed `repo_inspect`, `diff_read`, and `Skill`; no shell. **Model:** `sonnet`.
 
 **Used by:** `agentic-loop` Phase 2 pre-flight.
 
@@ -545,7 +548,7 @@ and returns ONE verdict with a named risk boundary. Distinct from
 (swallowed exceptions, error-handling correctness) — this agent owns whether
 a correct, secure, non-silently-failing change is still unsafe to deploy.
 
-**Tools:** `Read, Grep, Glob, Bash`, with `disallowedTools: Write, Edit, NotebookEdit` (read-only discipline, not a tool guarantee, same framing as `source-auditor`/`design-scout`). **Model:** `sonnet`.
+**Tools:** typed `repo_inspect` and `diff_read`; no shell. **Model:** `sonnet`.
 
 **Used by:** any change with a runtime/production surface, before merge — see
 "Agents deliberately not shipped" below for why it exists alongside the

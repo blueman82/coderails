@@ -283,8 +283,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   result retains any prior K-id. `lessons` never prints ledger text when Muninn is down (`memory.backend: off` is the
   explicit switch). Trace rows: `order.record|prepare|tick|render|import|cite`, `lesson.query|predicate`.
 - Query: `python3 scripts/lib/lessons.py --dir <repo-key dir> --session <known native caller id> query --format contract`
-  reads current cited lessons. Diagnostic `orders.py ... lessons` also returns an `excluded` list naming entries
-  is retracted, expired or superseded, reason `lesson_not_current`), or
+  reads current cited lessons. Diagnostic `orders.py ... lessons` returns an
+  `excluded` list for retracted, expired, or superseded entries (reason
+  `lesson_not_current`). You can also query
   `grep -E '"command": "(order|lesson)\.' <agentic-loop dir>/<session_id>/trace.jsonl`. A hand edit of `orders.json` is
   refused with `order_chain_broken` naming the order.
 - Fix: read the reason in the table above. For `no_user_cite` / `legacy_uncited` run
@@ -425,8 +426,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `marker_cleanup_failed` means cleanup failed: consumed markers stay in place if execution state is uncertain.
   Fix the file fault and mint a new receipt. A killed hook can leave a partial spend; confirm the command did not
   run before any manual recovery.
-- Remediation for optional enforce mode: one-time `python3 scripts/authority_keys.py init` (passphrase-protected
-  key; `show` prints fingerprints), then mint for the exact command:
+- Remediation for optional enforce mode: run `python3 scripts/authority_keys.py init`
+  once. It accepts an optional passphrase; an empty passphrase gives no
+  passphrase barrier. `show` prints fingerprints. Then mint for the exact command:
   `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge|git_push --command '<exact command>' --cwd <directory it runs in>`
   (single-use, 1h by default; the CLI computes repository+ref+SHA itself, signs, and refuses without a tty with
   `receipt_refused_no_tty`; add `--loop <loop id>` when the session authority has a loop; `inspect-receipt` /
