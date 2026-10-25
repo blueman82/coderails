@@ -313,11 +313,11 @@ class Cli(StoreCase):
         self.assertEqual((rc, out), (3, {"degraded": "handwritten_protected"}))
         self.assertEqual(hand.read_text(), "# hand written\n")
 
-    def test_import_legacy_preserves_counters_and_moves_the_file_aside(self) -> None:
-        """(e) 5 entries keep titles and counters, are legacy_uncited, and the original is moved not deleted."""
+    def test_import_legacy_preserves_counters_and_archives_a_copy(self) -> None:
+        """(e) 5 entries keep titles and counters; source and archive both remain."""
         shutil.copy(LEGACY, self.dir / "standing-orders.md")
         rc, out = self.run_cli("import-legacy")
-        self.assertEqual((rc, out["imported"]), (0, 5))
+        self.assertEqual((rc, out["imported"], out["source_retained"]), (0, 5, True))
         orders = self.ledger()["orders"]
         self.assertEqual(len(orders), 5)
         self.assertEqual(
@@ -332,7 +332,8 @@ class Cli(StoreCase):
             all(o["muninn"] == {"id": None, "state": "degraded", "reason_code": "legacy_uncited"} for o in orders)
         )
         self.assertEqual((self.dir / "standing-orders.legacy.md").read_bytes(), LEGACY.read_bytes())
-        self.assertFalse((self.dir / "standing-orders.md").exists())
+        self.assertEqual((self.dir / "standing-orders.md").read_bytes(), LEGACY.read_bytes())
+        (self.dir / "standing-orders.md").unlink()  # explicit retirement permits generated view rendering
         self.assertEqual(self.run_cli("render")[0], 0)
         self.assertEqual(ol.verify(self.ledger()), [])
 

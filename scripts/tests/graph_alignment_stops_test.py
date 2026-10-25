@@ -42,17 +42,35 @@ class GraphAlignmentStopsTests(unittest.TestCase):
             root = Path(name)
             self.assertEqual(
                 self.run_script(root),
-                {"stops_recorded": 0, "stops_consumed": 0, "legacy_text_parse": 0, "legacy_log_parse": 0},
+                {
+                    "stops_recorded": 0,
+                    "stops_consumed": 0,
+                    "legacy_text_parse": 0,
+                    "legacy_log_parse": 0,
+                    "stop_row_missing": 0,
+                    "stale_stop_row": 0,
+                },
             )
             stops = [{"consumed": True}, {"consumed": False}, "junk"]
             write(root / "loops/p/S1/progress.json", json.dumps({"stops": stops}))
             write(root / "loops/p/S2/progress.json", '{"stops": "torn"}')
             write(root / "loops/p/S3/progress.json", "{torn")
             write(root / "loops/S1/trace.jsonl", row("legacy_text_parse", "a") * 2 + row("legacy_log_parse", "b"))
-            write(root / "loops/S2/trace.jsonl", row("legacy_text_parse", "c") + "{torn\n" + row("other", "d"))
+            write(
+                root / "loops/S2/trace.jsonl",
+                row("legacy_text_parse", "c") + "{torn\n" + row("other", "d") + row("stop_row_missing", "e"),
+            )
             counts = self.run_script(root)
             self.assertEqual(
-                counts, {"stops_recorded": 2, "stops_consumed": 1, "legacy_text_parse": 2, "legacy_log_parse": 1}
+                counts,
+                {
+                    "stops_recorded": 2,
+                    "stops_consumed": 1,
+                    "legacy_text_parse": 2,
+                    "legacy_log_parse": 1,
+                    "stop_row_missing": 1,
+                    "stale_stop_row": 0,
+                },
             )
 
 

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any, cast
 
+import graph_convert
 import graph_semantics
 from graph_identity import GraphError
 from graph_io import load, locked, write
+from graph_recovery import trace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts.lib import decision_record  # noqa: E402
@@ -56,6 +59,8 @@ def record_decision(args: Any) -> dict[str, Any]:  # noqa: ANN401
         args.session,
         args.phase,
         args.decision,
+        expected_loop_id=args.loop_id,
+        expected_revision=args.revision,
         transition=decision_transition,
         flip_condition=args.flip_condition,
         unit=args.unit,
@@ -71,3 +76,30 @@ def flush_decisions(args: Any) -> dict[str, Any]:  # noqa: ANN401
         transition=decision_transition,
         cite_quote=args.cite_quote,
     )
+
+
+def convert_state(path: Path, session: str, check: bool) -> dict[str, Any]:
+    """Convert progress.json under the Codex lock and keep a backup."""
+    inputs: dict[str, Any] = {"session": session, "check": check}
+    backup: Path | None = None
+    report: dict[str, Any] = {}
+    try:
+        with locked(path):
+            try:
+                raw: object = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as error:
+                raise GraphError(f"cannot read state: {error}") from error
+            converted, report = graph_convert.convert(raw, session)
+            if report["changed"] and not check:
+                try:
+                    graph_semantics.validate(converted)
+                except ValueError as error:
+                    raise graph_convert.ConvertRefusedError("invalid_result", str(error)) from error
+                backup = graph_convert.write_backup(path)
+                write(path, converted)
+                load(path)
+    except graph_convert.ConvertRefusedError as error:
+        trace(path, {"session_id": session}, "refused", f"convert_refused_{error.code}", inputs, [], "convert")
+        raise GraphError(str(error)) from error
+    trace(path, {"session_id": session}, "ok", "convert_ok", inputs, [], "convert")
+    return {**report, "check": check, "backup": backup.name if backup else None}

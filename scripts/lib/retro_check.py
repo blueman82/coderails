@@ -129,7 +129,7 @@ def evals_section(state_dir: Path) -> dict[str, Any]:
 
 
 def _prepared_sources(state: dict[str, Any], revision: int) -> list[dict[str, Any]]:
-    """Allow only the final complete Stop and hook counter added after D4 preparation."""
+    """Match the final pre-preparation Stop after the Claude hook consumes it."""
     source = copy.deepcopy(state)
     root = Path(__file__).resolve().parents[2]
     if (root / ".codex-plugin/plugin.json").is_file() and source.get("status") == "complete":
@@ -145,58 +145,19 @@ def _prepared_sources(state: dict[str, Any], revision: int) -> list[dict[str, An
         source["revision"] = completion_record["revision"]
     elif "completion" in source:
         return []
+    teardown_steps.normalize_consumed_complete_stop(source)
     for key in ("status", "completion", "completed_marker"):
         source.pop(key, None)
     counts = source.get("loop_stop_counts")
     if isinstance(counts, dict):
         typed_counts = cast("dict[str, Any]", counts)
-        source["loop_stop_counts"] = {k: v for k, v in typed_counts.items() if k != "complete"}
+        remaining = {k: v for k, v in typed_counts.items() if k != "complete"}
+        source.pop("loop_stop_counts")
+        if remaining:
+            source["loop_stop_counts"] = remaining
     if revision != source.get("revision"):
         return []
-    candidates = [source]
-    if isinstance(counts, dict) and "Complete" in counts:
-        # The Stop hook records this display spelling after the D4 preparation
-        # receipt. Accept its removal only when it makes the bound source hash
-        # match; a pre-existing counter remains part of the source otherwise.
-        without_complete_counter = copy.deepcopy(source)
-        without_complete_counter["loop_stop_counts"].pop("Complete", None)
-        if not without_complete_counter["loop_stop_counts"]:
-            without_complete_counter.pop("loop_stop_counts")
-        candidates.append(without_complete_counter)
-    for candidate in tuple(candidates):
-        stops = candidate.get("stops")
-        if (
-            not isinstance(stops, list)
-            or not stops
-            or not all(isinstance(s, dict) for s in cast("list[object]", stops))
-        ):
-            continue
-        typed_stops = cast("list[dict[str, Any]]", stops)
-        last = typed_stops[-1]
-        previous = typed_stops[:-1]
-        prior_sequences = [s.get("seq") for s in previous]
-        if not all(type(seq) is int for seq in prior_sequences):
-            continue
-        prior_seq = max(cast("list[int]", prior_sequences), default=0)
-        if (
-            set(last) != {"seq", "category", "reason_code", "reason", "revision", "consumed"}
-            or last.get("category") != "complete"
-            or last.get("revision") != revision
-            or type(last.get("consumed")) is not bool
-            or type(last.get("seq")) is not int
-            or last["seq"] != prior_seq + 1
-            or not isinstance(last.get("reason"), str)
-            or not last["reason"].strip()
-            or not isinstance(last.get("reason_code"), str)
-            or not last["reason_code"].strip()
-        ):
-            continue
-        before_stop = copy.deepcopy(candidate)
-        before_stop["stops"].pop()
-        if not before_stop["stops"]:
-            before_stop.pop("stops")
-        candidates.append(before_stop)
-    return candidates
+    return [source]
 
 
 def _preparation_evidence(state: dict[str, Any], state_dir: Path, rows: list[dict[str, Any]]) -> str | None:
@@ -264,7 +225,7 @@ def _preparation_evidence(state: dict[str, Any], state_dir: Path, rows: list[dic
 
 def _evidence_problem(state: dict[str, Any], state_dir: Path, rows: list[dict[str, Any]]) -> str:
     """Name the first required step whose latest row's evidence_sha256 does not recompute from the live sources."""
-    latest = {r["step"]: r.get("evidence_sha256") for r in rows}
+    latest = {r["step"]: r for r in rows}
     pre = retro_step_hashes(state, state_dir)
     expected: dict[str, object] = {
         "proof_run": teardown_steps.file_sha(state_dir / proof_results.RESULTS_NAME),
@@ -272,14 +233,25 @@ def _evidence_problem(state: dict[str, Any], state_dir: Path, rows: list[dict[st
         "decisions_flushed": teardown_steps.sha_json(state.get("decisions_absorbed")),
         "retro_assembled": teardown_steps.sha_json(pre),
     }
-    return next(
-        (
-            step
-            for step in teardown_steps.REQUIRED
-            if (step == "orders_prepared" and expected[step] is None) or latest.get(step) != expected[step]
-        ),
-        "",
-    )
+    base_fields = {"step", "ts", "session_id", "loop_id", "evidence_sha256"}
+    for step in teardown_steps.REQUIRED:
+        row = latest.get(step)
+        if (
+            row is None
+            or row.get("session_id") != state.get("session_id")
+            or row.get("loop_id") != state.get("loop_id")
+        ):
+            return step
+        if step != "orders_prepared":
+            if set(row) != base_fields or not isinstance(row.get("ts"), str):
+                return step
+            try:
+                datetime.datetime.fromisoformat(row["ts"])
+            except ValueError:
+                return step
+        if (step == "orders_prepared" and expected[step] is None) or row.get("evidence_sha256") != expected[step]:
+            return step
+    return ""
 
 
 def memory_disclosure(state: dict[str, Any], retro: dict[str, Any]) -> list[str]:

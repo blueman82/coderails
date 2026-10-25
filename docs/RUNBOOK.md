@@ -23,13 +23,36 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 - Symptom: a configured gate (wiki taxonomy, wiki-debt, integrity, eval signing) does nothing, or a config key seems ignored.
 - Query: `python3 scripts/lib/config.py resolve-config --json | jq .unknown_keys` (also `.findings`); counts via
-  `python3 scripts/lib/config_counters.py` for `config_unknown_key`, `config_bad_type`, `config_unreadable`,
+  `python3 scripts/lib/config_counters.py` for `config_unknown_key`, `config_bad_type`, `config_bad_value`, `config_unreadable`,
   `wiki_schema_missing`, `wiki_schema_invalid`, `wiki_schema_legacy` (scope with `--since 2026-10-05T00:00:00`; the same rows
-  also appear in `measure_graph_alignment.py --json` under `trace.by_reason`; trace rows: `config/warned/<code>`, `wiki_taxonomy_gate/failed_open/<code>`).
-- Remediation: fix the key (the finding carries a did-you-mean hint) or the value type; for `wiki_schema_*` restore or
-  repair `wiki.schema.json` (`page_types` non-empty list of directory names). Both are fail-open by design: findings never
-  change a gate's decision, and a stale AGENTS.md Page types table fails the build (`config_docs_drift_test.py`), not the hook. `wiki_schema_legacy` means a vault still has only
-  `AGENTS-wiki-schema.md`: policing continues from its Page types table; add `wiki.schema.json` to retire the fallback.
+  also appear in `measure_graph_alignment.py --json` under `trace.by_reason`; trace rows: `config/warned/<code>`, `wiki_taxonomy_gate/failed_closed/<code>`).
+- Remediation: fix the key (the finding carries a did-you-mean hint) or the value; `resolve-config --json` prints
+  `valid:false` and exits 1 while any finding remains. Reading is non-authoritative for ordinary gates (they warn and
+  trace), but the guarded actions below fail closed. `wiki_schema_legacy` identifies an older vault record. The wiki
+  gate requires `wiki.schema.json`; restore that file to allow writes in an identified vault.
+
+## Guarded action denied: config_rejected or wiki schema fail-closed
+
+- Symptom: `gh pr merge` or `git push` to main (action-authority hook), `push.py`/`merge.py` (diff-manifest check) or a
+  write inside the wiki vault is denied with `config_rejected` ("did you mean ..."), `wiki_schema_missing` or
+  `wiki_schema_invalid`.
+- Query: trace rows `action_authority/denied/config_rejected`, `diff-manifest/refused/config_rejected`,
+  `wiki_taxonomy_gate/failed_closed/<config_rejected|wiki_schema_missing|wiki_schema_invalid>`; counts via
+  `python3 scripts/lib/config_counters.py` (`config_rejected`, `config_bad_value`, `wiki_schema_fail_closed`).
+- Remediation: run `python3 scripts/lib/config.py resolve-config --json`, fix each finding (typo'd key, wrong type, value
+  outside the enum), or restore `wiki.schema.json` (`page_types` non-empty list of directory names). Only the guarded
+  action is denied; every other command and tool passes. With NO config file nothing is read and every gate stays inert
+  (repos not using coderails), and an ambiguous wiki identity (no `wiki_path`, other repository, vault not a directory)
+  still allows.
+- Limit: the controls are only as strong as the config file. A same-user agent can `mv` it away (every gate goes inert)
+  or edit a control to `off` in place; no hook guards `.coderails/workflow.config.yaml`. Review config diffs like code
+  (the diff-manifest policy can list it as a protected path). `evals.require_signatures` fails closed: only an
+  explicit `false` turns it off. Malformed lines and duplicate keys are `config_unparseable_line` /
+  `config_duplicate_key` findings.
+- Defaults: an existing config with no other keys enables `sandbox_workers: true`,
+  `evals.require_signatures: true`, and `diff_manifest: enforce` (inert until `diff_manifest_policy` names a file).
+  `action_authority` defaults to `off`. The shipped config sets it to `advisory`, which warns about missing receipts
+  without a passphrase. Set `enforce` only when signed receipts are required.
 
 ## Discipline lint advisories climbing
 
@@ -51,6 +74,26 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Remediation: rerun the inspection with a single allowlisted read-only command (no chaining, redirection or
   interpreters). If a legitimate command is missing, add its exact argv prefix to the allowlist with a test.
 
+## Subagent Bash denied for absent agent_type
+
+- Symptom: a subagent's Bash call is denied with `bash_agent_type_absent`.
+- Query: `trace.by_reason` for `subagent_identity_gate/denied/bash_agent_type_absent`; the discipline log line
+  `hook=subagent_identity_gate` carries the session. Counters: `python3 scripts/measure_graph_alignment.py --root . --json`.
+- Remediation: dispatch the role by its `subagent_type` (for example `coderails:design-scout`) so the payload carries an
+  `agent_type`; guarded roles act through their MCP tools and have no Bash. Do not widen the hook: it denies only
+  `agent_id` without `agent_type` in a graph-bound session. Codex has no counterpart (no `agent_type` at PreToolUse).
+
+## Guarded role has no tools or no shell
+
+- Symptom: a reviewer/scout reports it cannot run a command or read a file, or a skill step is UNSUPPORTED.
+- Cause: by design the five guarded agents hold only `mcp__plugin_coderails_cap-<role>__*` tools (+`Skill` for
+  preflight-scout). If the tools are missing entirely, `.claude-plugin/plugin.json` lacks `mcpServers` or
+  `capabilities/mcp.json` is stale: run `python3 scripts/capability_profiles_validate.py --check`, and `--write-mcp` to
+  regenerate. Codex: launch the role with `scripts/codex_role_session.py`; a native Codex child of a guarded role has no
+  shell and no capability tools. The launcher refuses a cwd under a project `.codex/` directory
+  (move the audit elsewhere or remove it). Set `subagent_identity_gate: off` in the repo config to disable the
+  identity gate (default ON).
+
 ## Capability tool refused or denied
 
 - Symptom: a reviewer/scout (usually `source-auditor` running `tests.run`) is refused a `scripts/capability.py` call.
@@ -67,6 +110,19 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   deliberately (the validator test keeps frontmatter and Codex sandboxes in step), never widen Bash. `bad_argv` means
   the call was not exactly `<abs path>/scripts/capability.py <tool> --json-args '<json>'`; the path must be absolute.
   `tests_unknown_name` means the name is not in `profiles.json` `tests`.
+
+## Capability MCP server refused a call or will not start
+
+- Symptom: a role's `capability_mcp.py` exits 2 at launch, or a `tools/call` returns an error or `isError`.
+- Query: `python3 scripts/lib/capability_counters.py` (counts per reason code over `CLAUDE_AGENTIC_LOOP_DIR`), or
+  `trace.by_reason` for `capability/refused/capability_mcp_refused` (startup), `capability_wrong_role` (a tool outside the
+  role's profile), `capability_args_invalid|path_denied|bad_ref` (arguments) and `capability/ok/<tool>` (grants). Rows carry
+  hashed inputs `{tool, role, via: mcp}`; MCP servers read the session id from `CLAUDE_SESSION_ID`, then
+  `CLAUDE_CODE_SESSION_ID`, then `CODEX_THREAD_ID`, else the `unattributed` directory.
+- Remediation: `capability_mcp_refused` means the `--role` is missing from `capabilities/profiles.json`, holds no capability
+  tool, or the flags are wrong (stderr names which). `capability_wrong_role` means the profile does not grant that tool;
+  change the profile deliberately (the validator keeps agent files in step). `path_denied` on a `worktree` argument means
+  the path is not in `git worktree list` of the server's cwd repo. `cmd.run` only runs `named_commands` entries.
 
 ## Authority object refused or changed
 
@@ -94,18 +150,25 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 ## Crack-on denial wrong (stuck on, or off too early)
 
 - Symptom: `AskUserQuestion` / `request_user_input` is denied when the user no longer wants autonomy, or is allowed
-  right after "crack on".
-- Query: `trace.by_reason` for `crack_on/granted/authority_granted`, `crack_on/blocked/authority_deny`,
+  right after "crack on" (the phrase grants nothing: only `/coderails:authorize` or `authority.py grant` does).
+- Query: `trace.by_reason` for `authority/granted/authority_granted_command` (the typed grant),
+  `crack_on/ignored/authority_phrase_ignored` (the phrase was seen and ignored; the hint with the grant command was shown),
+  `crack_on/blocked/authority_deny`,
   `crack_on/allowed/authority_expired_allow`, `crack_on/blocked/crack_on_legacy_flag`,
   `crack_on/ignored/authority_corrupt_ignored` (authority.json unparseable: treated as none; legacy flag still honoured),
-  `crack_on/failed_open/authority_write_failed` (user said "crack on" but no authority was written, so nothing is
-  suppressed; if the trace dir is also unwritable only the `stamped=0 err=write_failed` discipline.log line remains),
+  `authority/refused/authority_refused_write_failed` (the grant could not write, so nothing is suppressed),
   `authority/refused/authority_refused_foreign`. Inspect with
   `python3 scripts/authority.py inspect --session <exact id>`.
 - Remediation: revoke with `python3 scripts/authority.py revoke --session <id>` (also deletes any legacy flag). An old flag
   (`crack_on_legacy_flag`) is cleared with `rm <loop dir>/<id>/crack_on_active` (Codex:
-  `$PLUGIN_DATA/sessions/<id>/crack_on_active`). Allowed right after "crack on": the phrase was quoted, backticked,
-  negated or asked as a question (by design), or `authority_expired_allow` shows the 24h object lapsed; say "crack on" again to re-grant.
+  `$PLUGIN_DATA/sessions/<id>/crack_on_active`). Allowed right after "crack on": by design, the phrase only prints the grant command
+  (`authority_phrase_ignored`); type `/coderails:authorize` (fixed defaults, `max_prs` 0; Codex: `$coderails-codex:authorize`) or run
+  `python3 <abs>/scripts/authority.py grant --session <id> --max-prs N` to grant. `authority_expired_allow` shows the 24h object lapsed;
+  grant again (an expired file is replaced; a live one is refused `authority_refused_exists`). `authority_refused_unsafe_session` also
+  means `/coderails:authorize` got an empty or unsubstituted (`${...}`) session id: the substitution in the command file is not
+  live-probed (see `docs/decisions/e3-authority-object.md`), so run `authority.py grant --session <id>` yourself. Objects written before this change have no `granted_by`
+  (read as `legacy_phrase`) and are honoured until expiry. Limit: an agent with shell access can also run `grant`
+  (cooperating-agent safeguard against accidental or pasted-text grants, not a hostile same-user agent). Same-user boundary: `granted_by` is an unsigned, self-asserted label. Besides running `grant`, an agent can write `authority.json` directly (Write or a shell redirect, with any `granted_by` or none) or touch the legacy `crack_on_active` flag (no expiry, still honoured), and nothing guards those paths; the crack-on hint tells agents not to grant.
 - Baseline note: the old 103 fires / 5 blocks figure (`docs/graph-alignment-measurement.md`) came from discipline-log
   telemetry; after-numbers come from trace rows, so they are not comparable. Reproduce:
   `python3 scripts/measure_graph_alignment.py --root . --json`.
@@ -129,13 +192,13 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `memory_backend_off` | memory.backend is off in the workflow config; set it to muninn (or remove the key) to write typed memory. |
 | `memory_backend_invalid` | memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml. |
 | `muninn_absent` | muninn is not on PATH; install it (the Markdown path is not a fallback). |
-| `muninn_old_ledger` | muninn lacks the Part A flags (--scope-loop, --confidence, ...); upgrade muninn. |
+| `muninn_old_ledger` | the D4 adapter expects retired Muninn flags. Keep the result degraded until a current request-bound adapter is designed. |
 | `muninn_timeout` | muninn hung past 10s; run `muninn know list` by hand and check store locks. |
 | `muninn_error` | muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and read stderr. |
-| `muninn_bad_output` | muninn wrote the entry but printed no K-id; run `muninn know list --scope-loop <id>` to find it. |
+| `muninn_bad_output` | the retired D4 write protocol returned no numeric K-id. Inspect current Muninn records without a legacy scope flag. |
 | `muninn_store_missing` | no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once. |
-| `muninn_schema_old` | the store is schema v1 (PRAGMA user_version != 2); upgrade it with muninn itself, never by hand. |
-| `muninn_schema_incomplete` | the store lacks a typed column or table (confidence, valid_until, sensitivity, contradicts, tags, fts); run `muninn doctor`. |
+| `muninn_schema_old` | the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2. |
+| `muninn_schema_incomplete` | the D4 adapter expects retired v2 columns or tables. Inspect the current store with `muninn doctor`, then redesign the adapter. |
 | `uncited_write` | give a verbatim --quote (and --cite ref); a record without a quote is never written. |
 | `restricted_refused` | restricted records are never written by the adapter; write a normal-sensitivity claim. |
 | `bad_record` | the record failed validation (type, scope, tag, date, empty claim, or loop scope without a loop id). |
@@ -162,6 +225,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `refused_no_caller_session` | quote-only writes need CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID in the environment. |
 | `refused_other` | muninn refused with a code not listed here; the reason is `refused_<code>`, read it and the muninn docs. |
 | `decision_wrong_session` | the loop state belongs to another session; record only from the owning session. |
+| `decision_wrong_loop` | the loop changed after the caller read it; read the current loop ID before recording. |
+| `decision_wrong_revision` | the graph changed after the caller read it; read the current revision before recording. |
 | `decision_blank_phase` | a decision needs a non-blank phase (for example 2.5). |
 | `decision_blank_decision` | a decision needs a non-blank decision text; nothing was written. |
 | `decision_invalid_chain` | the decision chain is damaged; inspect and preserve the loop state before any further sync. |
@@ -188,15 +253,20 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
 | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
 | `lesson_not_current` | no unambiguous current cited claim exists; inspect conflicting current evidence, or explicitly re-record a retracted/expired lesson with a fresh quote. |
-| `retro_not_assembled` | Assemble schema-3 retro.json with `retro.py assemble`; preserve the source artifacts. |
+| `retro_not_assembled` | For a new loop, assemble schema-3 retro.json with `retro.py assemble` after the final stop and orders preparation. Preserve the source artifacts. For an old completed loop, see the recovery rule below. |
 | `retro_source_mismatch` | A named source changed after assembly; finish that source and re-assemble. |
 | `retro_decisions_chain_broken` | Restore the damaged decision row; record decisions through the graph CLI. |
 | `retro_steps_missing` | Run the missing proof, decision flush or orders preparation step, then re-assemble. |
+| `decisions_not_flushed` | Flush decisions before the final stop and orders preparation. If an incomplete loop already has a stale preparation, use the supported `prepare --refresh-from-sha256` path after the final source update, then assemble the retro. |
 | `retro_state_error` | Restore the owned, readable progress.json before assembly. |
 | `retro_wrong_session` | Use the session that owns progress.json. |
 | `retro_free_invalid` | Supply one JSON object in the free-file. |
 | `handoff_state_unreadable` | Pass the readable, owned progress.json to handoff_derive. |
 | `graph_unavailable` | Run graph.py summarize and inspect to diagnose the unavailable graph. |
+
+Retained schema-1 and schema-2 retros are historical records. This version requires schema 3 when it checks completion. An old completed loop can lack the proof results and orders receipts that schema 3 binds. Do not rewrite its retro or claim that an install upgrades it. For a historical completion check or teardown retry, use the prior plugin version in an isolated checkout. Start a new session and loop for new work, and use the current teardown sequence.
+
+After this version writes a schema-3 retro, a code rollback to the preceding proof-only version cannot validate that retro. Its orders command can refuse graduation with `order_retro_validator_unavailable`. Keep a matching version with `retro_check.py` in an isolated checkout for a completion check or orders retry on that loop. Preserve its progress, proof, retro and orders receipts together; a code rollback does not convert them.
 
 - Limits: only the orchestrator session can write (subagent threads are not citable); cites must anchor in a user
   prompt; the hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Measurement note: compare
@@ -233,17 +303,24 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   refused with `order_chain_broken` naming the order.
 - Fix: read the reason in the table above. For `no_user_cite` / `legacy_uncited` run
   `orders.py --dir <repo-key dir> cite <id> --quote "<verbatim words the owner typed>"` from the owning session. To
-  adopt the old hand-written file run `orders.py import-legacy` once (it moves the original to
-  `standing-orders.legacy.md`, never deletes it), then `orders.py render`.
-  This importer is for one-time cutover only; retire it after conversion and use typed orders thereafter.
+  adopt the old hand-written file run `orders.py import-legacy`. It archives an exact byte copy under the next free
+  `standing-orders.legacy*.md` name and retains the source (`archived_to`, `source_retained: true`). Check the ledger
+  and archive; retire the hand-written `standing-orders.md` before `orders.py render`. Use typed orders thereafter.
 - Apply contract: use `--dir <repo-key dir> --session <provider session>` with the separate logical `--loop` copied
-  from `<repo-key dir>/<session>/progress.json`. Stage `record` inputs, then `prepare --loop <logical loop>` after
-  the final progress-source mutations. Preparation validates ownership, revision, eligibility and hashes, and appends
-  `orders_prepared`; it ages nothing. Run the existing native provider completion checks and durable save under the
-  progress lock. After releasing that lock, run `tick --loop <logical loop>` and `render`. Tick holds only the orders
-  lock and emits `orders_ticked` after its ledger save. A failed completion save ages nothing. A failed postcompletion
-  ledger save or observation returns exit 3 and `pending_teardown: true`; retry the same tick to recover idempotently.
-  Automatic provider completion wiring is pending in this source checkpoint; the instructed caller remains advisory.
+  from `<repo-key dir>/<session>/progress.json`. Stage `record` inputs before completion. The native `graph.py
+  complete` command prepares orders before the progress lock, rechecks the prepared source under that lock, saves
+  completion, then ticks and renders after it releases the lock. Claude `mark-complete` uses this same path and also
+  stamps the invocation marker. Preparation ages nothing. The tick holds the orders lock and records `orders_ticked`
+  after its ledger save. A failed completion save ages nothing. Repeat the native completion command to resume a
+  pending tick or render without a second age change; do not edit `progress.json`.
+  Render holds the orders lock while it writes both views. The receipt checks the ledger and both view hashes under
+  that lock. If they differ, completion stays pending; repeat the native completion command to render again.
+  The Claude Stop guard and Codex `verify-completion` block when the tick or bound generated views are incomplete.
+  If render fails on the installed Muninn API, the pending result and later verifier show its actual reason code.
+  The installed Muninn uses a current request-bound API that this D4 adapter does not support. Treat live lesson
+  activation as pending; do not use ledger text as a substitute for a current cited claim.
+- Pre-D4 complete loop: review its retained evidence before the exact-hash admission. The receipt then follows only
+  completion bookkeeping; other graph changes still block. See `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 - Completed text replacement: when this session/loop observation already exists, explicit `record` captures
   `replaces_source` in the prepared row. The canonical `lesson_source` hashes owned binding, authored fields and that
   predecessor, excluding mutable store observations, and is sealed/saved with the lesson. Ordinary tick recovers only
@@ -288,11 +365,11 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   promotion and views exclude them. Owner-cited lesson text is legitimate typed memory; advisory transcript
   observations remain metadata only. Failed reads exit 3, with no ledger-text fallback. A fresh cited claim can
   supersede prior text. Legacy import retains full source text and first-seen provenance, preserves decayed counters,
-  and refuses duplicate/incomplete/colliding entries or an external source path without moving the original.
-- Legacy retry: after a saved ledger and failed source move, ordinary `import-legacy` resumes only an entirely equal
-  parsed cohort at one saved creation timestamp, excluding only seal fields from row comparison. It skips ledger save
-  and moves intact source to an unused bounded backup slot. Mixed/new/divergent rows refuse. This proves parsed-row
-  equivalence, not whole-source/preamble hash identity, own-attempt identity or a two-file atomic transaction.
+  and refuses incomplete/colliding entries or an external source path without changing the original.
+- Legacy retry: each row seals the SHA-256 of the exact source bytes. `import-legacy` skips a complete cohort only
+  when saved rows, timestamp and source hash match. It reuses only an exact archive, else publishes a new copy without
+  replacing an occupied name. Mixed or divergent rows refuse. Archive publication precedes ledger save. A failed or
+  uncertain save keeps source and archive; success requires a canonical ledger equal to the expected sealed rows.
 - Graduation still requires >=10 distinct completed source-bound retros, recurrence and decay. Schema2 records need
   complete typed fields and their genuine completed progress hash. Schema3 delegates to `retro_check.check`; an absent
   validator returns `order_retro_validator_unavailable`, rather than a known zero count. Both ledger and source hashes
@@ -304,22 +381,17 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   that id through query, predicate, diagnostic lessons and render to underlying degraded adapter traces. Environment
   support in source and private fixtures does not prove a variable is exported in an installed provider session.
 
-## Stop declared in text instead of recorded, or a stop released unexpectedly
+## A stop has no recorded row
 
-- Symptom: the Stop hook releases or blocks a loop and the model says it recorded nothing; or `progress.json`
-  `loop_stop_counts` disagrees with the declared turn category. Stops are model-written intent rows
-  (`progress.stops[]`, written by `graph.py stop`); `loop_stop_counts` stays the hook-owned count of consumed stops.
-- Query: `python3 scripts/graph_alignment_stops.py --json` gives `stops_recorded`, `stops_consumed`,
-  `legacy_text_parse` (the hook fell back to the final-line text, trace `loop_stall_guard/fallback/legacy_text_parse`)
-  and `legacy_log_parse` (absent-state grace fell back to the discipline.log regex because `hook_state.json` was
-  missing or torn). Inspect one loop with `python3 -c "import json;print(json.load(open('<progress.json>')).get('stops'))"`.
-- Remediation: a high `legacy_text_parse` against `stops_consumed` means agents are not running `graph.py stop`: fix
-  the prompt, and if it persists tighten the text parse rather than retiring it. An unconsumed row at the current
-  revision releases the next Stop once, and only when `graph.py stop` ran after the last user prompt (an older row is
-  ignored with trace `stale_stop_row`, so recording a stop early cannot excuse later undeclared turns); a row at an older revision is ignored by design. A refused `graph.py stop`
-  prints the refusal on stderr (foreign session, unknown category or reason code, `complete` while the graph is
-  unresolved); fix the argument, never edit `stops` by hand. Codex records the same row but only a `hard-stop` row on a
-  typed hard-stopped graph releases its guard (`consume-stop`); other categories are recorded and ignored there.
+- Symptom: the Stop hook blocks with `stop_row_missing`. Final text cannot release it. Run `graph.py stop` in the
+  current turn with a valid category, reason code, reason, state path, and session. The command writes `stops[]`.
+- Query: run `python3 scripts/graph_alignment_stops.py --json` for `stops_recorded`, `stops_consumed`, and
+  `stop_row_missing`. Run `python3 scripts/lib/stop_counters.py` for refusal codes. A stale row reports
+  `stale_stop_row`. The hook owns `loop_stop_counts`; never edit it or `stops[]` by hand.
+- Remediation: use the refusal code from `graph.py stop`. A foreign session, unknown category or reason code, or
+  unresolved graph on `complete` needs a source correction. A valid row is consumed once. Codex can release an
+  `awaiting-input` or `approval-gate` row while graph work is pending. `complete` needs a resolved graph and its evidence.
+  See `docs/graph-alignment-measurement.md` for limits and commands.
 
 ## Proof gate blocked a `complete` declaration
 
@@ -334,21 +406,38 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   out; fix the cause, re-run. `proof_expect_mismatch`: exit code or stdout did not match the frozen `expect`.
   `proof_stale_cmd`: proof.json changed after the freeze row, or the run row hashes a different cmd; run
   `proof.py freeze` then `run`. `proof_stale_head`: the run belongs to another checkout or an earlier HEAD; run it
-  again from the current repository checkout. `proof_chain_broken`: `proof_results.jsonl` was edited or lost rows; never hand-edit it,
-  re-freeze and re-run (a fresh file). `proof_cmd_destructive`: the cmd matches the destructive classifier and was never
-  executed; reword the proof. `proof_disposition_no_reason`: with no proof.json record `proof.py disposition <state-dir>
+  again from the current repository checkout. `proof_chain_broken`: a retained row was edited or a nonfinal row was
+  lost. Preserve `proof_results.jsonl` and start a new session and loop. `proof_cmd_destructive`: the cmd matches the
+  destructive classifier and was never executed; reword the proof. `proof_sandbox_unavailable`: the pinned sandbox did
+  not start. Prepare and check the pinned runtime, then run the proof again:
+
+  ```bash
+  npx --yes @anthropic-ai/sandbox-runtime@0.0.65 --help
+  npx --offline --yes @anthropic-ai/sandbox-runtime@0.0.65 --help
+  ```
+
+  The first command can download the runtime. The second confirms that the offline command used by `proof.py` works.
+  `proof_disposition_no_reason`: with no proof.json record `proof.py disposition <state-dir>
   --none --reason-code <code> --reason <text>`; a bare `none` or a code outside `DISPOSITION_CODES` (`docs_only`,
   `no_executable_surface`, `research_only`, `superseded`, `other`) is rejected, and a valid disposition is echoed in the
   gate output. `proof_no_proofs`: proof.json holds no non-withdrawn proof (an empty or withdrawn-only document); freeze a
   real proof or record a disposition. `proof_disposition_legacy` is a trace note
   only (string `none: <reason>` accepted). `proof_withdrawn_unobserved`: a withdrawn proof needs a failed/timeout run row
   and a reason.
-- Limit: a same-user agent can forge rows and recompute the chain, as it could forge a transcript; this is a
-  cooperating-agent safeguard, not a trust boundary. Also not covered: the destructive classifier is literal-pattern,
-  not a sandbox, so obfuscated or interpreter-wrapped deletes (`python3 -c 'shutil.rmtree(...)'`, quote-split `rm`) still
-  run; the latest freeze wins, so an agent can weaken a cmd or move a failing proof
-  to `withdrawn_proofs` and re-freeze (only the frozen set is checked, not the loop's first one); schema 1 is refused at
-  freeze; a disposition's reason is checked for presence and an enum code, not truth.
+- The proof command runs inside a separate pinned OS sandbox. It can read host files. It can write only to a fresh
+  temporary directory, named by `TMPDIR`, and cannot use the network. The repository and loop state stay read-only to
+  the proof command. The controller writes the result row after the command ends. A proof that needs temporary files
+  must write them under `TMPDIR`. If the runtime is absent or the sandbox does not start, the run fails closed.
+  This proof runner uses `/tmp` for its private scratch on macOS and Linux. Windows proof runs fail closed until a
+  Windows scratch policy is implemented and checked. The live containment probe for this release ran on macOS.
+- Limit: a same-user agent can forge rows and recompute the chain, as it could forge a transcript. The chain detects
+  changes to retained rows and removal of a nonfinal row. It cannot detect removal of a final row when the remaining
+  rows form a valid prefix. The latest freeze wins, so an agent can weaken a command or withdraw a failing proof and
+  re-freeze. If the controller is killed before it appends a refusal, an earlier pass can remain the latest row.
+  A disposition's reason is checked for presence and an enum code, not truth.
+- Retained schema 1 proof files are historical evidence. Do not edit or convert them. For new work, start a new
+  session and loop with a schema 2 proof. The current runner cannot recheck completion or retry teardown for an old
+  schema 1 loop. Use the prior plugin version in an isolated checkout for that historical recovery operation.
 - Off-switch: none, by design. The proof gate is intentionally non-disableable on both providers (default ON, no config
   key or env var); the previous transcript-based check was removed, so there is no earlier behaviour to fall back to.
 
@@ -369,30 +458,149 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
 - Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a
-  stderr "action_authority (advisory)" warning appears. Only when config `action_authority` is `enforce` or `advisory`;
-  absent or any other value is off.
+  stderr "action_authority (advisory)" warning appears. The gate is off unless config explicitly sets
+  `action_authority: enforce` or `action_authority: advisory`.
 - Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
-  `sha_mismatch`, `expired`, `revoked`, `consumed`, `foreign_session`, `foreign_loop`, `kind_mismatch`, `no_session` (payload had no session_id; traced under session dir `_no_session`), `malformed`;
-  `receipt_consumed` (allowed); `action_authority_failed_open` (the hook itself errored and allowed);
-  `receipt_approved` / `receipt_revoked` (CLI).
+  `repository_mismatch`, `ref_mismatch`, `sha_mismatch`, `signature_missing`, `signature_invalid`, `signer_unknown`, `trust_root_missing`, `binding_unknown` (repository+ref+sha not computable: fail closed), `state_mutated_before_guard` (a ref/HEAD/remote-moving step precedes the guarded one in the same command), `expired`, `revoked`, `consumed`, `foreign_session`, `foreign_loop`, `kind_mismatch`, `no_session` (payload had no session_id; traced under session dir `_no_session`), `malformed`;
+  `receipt_consumed` (allowed); `trust_root_user_tier` (an allow that rested on the agent-writable trust root: cooperating-agent safeguard); `action_authority_failed_open` (advisory without loaded live authority errored and allowed); `denied_gate_error` (unexpected error under enforce or loaded live authority); `denied_budget_lock_unavailable` / `denied_budget_release_failed` (merge budget lock or cleanup failed; ambiguous reservation remains spent);
+  `receipt_approved` / `receipt_revoked` / `receipt_refused_no_tty` (CLI).
+  Authority codes (also from `enforce_pr_workflow`, which denies before consuming anything): `denied_authority_denied` (the session's authority lists the category in `denied`; a receipt cannot override it),
+  `denied_max_prs_exceeded` (executed merges in the session, counted from `.executed` markers of every merge receipt whatever its `authority_id`, reached `max_prs`; 0 = none; narrow/grant again with `authority.py`), `approval_requirement_missing` (a guarded action's permit verdict omitted its required approval; refused before consuming a receipt), `authority_denied_destructive_shell` (destructive gate, force-with-lease family),
+  `scripts/merge.py` rows are `merge_py_<code>` (refused: `no_receipt`, `no_session`, `binding_unknown`, `sha_mismatch`, `consumed`, ...)
+  and `merge_py_receipt_executed` (allowed). Counters: `scripts/lib/receipt_counters.py` `gate_summary(by_reason)` (the CLI below prints it as `gate`; wiring it into `measure_graph_alignment.py` itself is a handoff to the lane that owns that file).
+  Optional enforce-mode mint command for a merge: `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge --command 'python3 <absolute merge.py path> <N> --expected-head <40-hex PR head>' --cwd <repo dir>`;
+  `gh pr merge <N> --match-head-commit <40-hex PR head>` works with its own exact command text. `max_prs` counts every executed merge receipt in the session, including one minted before the authority was granted.
+- In advisory mode, a live authority reserves a budget slot before a plain `gh pr merge` runs. The hook cannot read
+  that command's result. A failed command can leave a pending entry in `<loop dir>/<session>/merges/` and block a
+  later merge. Check the exact PR and head on GitHub. If the merge did not happen and the PR is still open, an
+  operator can release only that pending entry with `scripts.lib.merge_budget.settle(path, False)` while holding
+  `merge_budget.lock(session)`. Keep completed entries; they record used budget.
+- If reservation cleanup or lock teardown fails, the hook denies the command. It keeps any reservation whose
+  release is uncertain. Check the PR and head before releasing a pending entry by the procedure above.
 - `action_authority_failed_open`: the row carries `inputs.error_class` (sha256 of the exception class name; compare with
   `printf ZeroDivisionError | shasum -a 256`) and `loop_id` when known; the hook's stderr (hook log) prints
   `action_authority failed open: <Class>: <message>`. A session-less failure is traced under `_no_session`.
-- Remediation: mint a receipt for the exact command:
+- `marker_write_failed` or `executed_marker_unavailable`: a receipt note or execution marker failed. The hook
+  denies the command and rolls back only this batch's new markers while holding its claim lock.
+  `marker_cleanup_failed` means cleanup failed: consumed markers stay in place if execution state is uncertain.
+  Fix the file fault and mint a new receipt. A killed hook can leave a partial spend; confirm the command did not
+  run before any manual recovery.
+- Remediation for optional enforce mode: one-time `python3 scripts/authority_keys.py init` (passphrase-protected
+  key; `show` prints fingerprints), then mint for the exact command:
   `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge|git_push --command '<exact command>' --cwd <directory it runs in>`
-  (receipts are single-use, 1h by default; `inspect-receipt` / `revoke-receipt` take `--receipt-id`). `hash_mismatch`
-  means args, cwd or branch differ from the minted command. `foreign_session` can also mean a worker whose
-  `session_id` differs from the minter's (unverified guess): mint under the session the hook reports. Or set
-  `action_authority: off` in `.coderails/workflow.config.yaml`.
+  (single-use, 1h by default; the CLI computes repository+ref+SHA itself, signs, and refuses without a tty with
+  `receipt_refused_no_tty`; add `--loop <loop id>` when the session authority has a loop; `inspect-receipt` /
+  `revoke-receipt` take `--receipt-id`). `signer_unknown` / `trust_root_missing`
+  mean the signers file does not list the key that signed (or does not exist). `hash_mismatch` means args, cwd or branch differ from the minted
+  command; `sha_mismatch` means HEAD (push source) or the PR head moved since minting: re-mint. `git push origin feature:main` binds
+  the sha of `feature`, not HEAD. `foreign_session` means the receipt was minted for a different `session_id`: subagents share their parent's `session_id`, so mint under the session the hook reports. Or set `action_authority: off` in `.coderails/workflow.config.yaml`.
 - Scope of one receipt: each guarded segment of a chained command (`a && b`) needs its own receipt; a leading
-  `cd <dir>` moves the directory the hash binds (mint with `--cwd` set to where the command really runs). A receipt
-  minted with `--artifact-sha` verifies only against the real HEAD (push) or PR head via `gh pr view` (merge, 4s
-  timeout; unknowable means `sha_mismatch`, fail closed).
-- Codex: the hook is vendored and parity-tested, but `scripts/action_receipt_cli.py` is NOT shipped in the Codex
-  package; mint receipts from a coderails repo checkout (same session id) or leave `action_authority` off.
-- Limits: a receipt binds approval to an exact action but does not prove a human approved it (a same-user agent can run
-  `approve-action`). The hash covers only the command text the hook sees, not aliases, functions, eval/xargs or scripts that
-  push (env/sudo/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped). Limits: scope 500 chars, 8 KB per receipt,
+  `cd <dir>` moves the directory the hash binds (mint with `--cwd` set to where the command really runs). The binding comes from
+  `scripts/lib/action_binding.py` (push: refspec source sha and destination ref; merge: live PR head via `gh pr view`, 4s timeout);
+  unknowable means `binding_unknown`, fail closed. Bindable forms only: `git [-C dir] push <remote> <ref>` (no env prefix,
+  `-c`, `--git-dir`; a push without an explicit refspec is guarded but is `binding_unknown`; `HEAD` alone means the current branch; the repository is the push url) and
+  `gh pr merge <n> --match-head-commit <live head sha>` (or `gh api .../merge -f sha=<sha>`).
+  `scripts/merge.py <n> --expected-head <live head sha>` binds a helper receipt. Bare `scripts/merge.py <n>` is
+  unbindable under receipt enforcement because it fetches the head after the hook. The receipt must name the same
+  helper path that runs. For Codex this is the absolute `packages/codex/scripts/merge.py` path.
+  Use `python3 <absolute helper path>` for enforce mode. Direct executable invocation is unsupported because it has
+  a different command hash.
+  `gh api --method PUT .../pulls/<n>/merge-async -f sha=<sha>` is guarded but unbindable: GitHub may merge open
+  downstack requests too, so one receipt or budget slot cannot cover its effects. Enforce mode and advisory mode
+  with a live authority deny it. Advisory mode without live authority warns and permits it.
+  Run ref-moving steps (`commit`, `branch -f`, `reset`, `config`, ...) as separate commands before the guarded one.
+- Counters: `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py` prints `receipts`
+  and `trust` (signature, trust-root, binding and `state_mutated_before_guard` counts). Measurement: one hook run is well under 1 s
+  with one receipt (single run, not a benchmark; 50 receipts could approach the 10 s hook timeout).
+- Residuals (docs/decisions/p3-human-only-minting.md): `.consumed`/`.revoked` markers are agent-writable files, so unlinking one
+  replays or un-revokes a receipt until it expires; junk files can crowd the 50-receipt cap (deny, not allow);
+  unexpected errors deny under enforce or loaded live authority, and fail open in advisory without live authority.
+  An unreadable authority file appears absent in advisory mode. A same-user agent can also write a deeply nested file (`[` x 7000) into `authority.json` or `receipts/`: it is read
+  as malformed (`RecursionError` is caught in `read_receipt`/`read_authority`), so it denies rather than crashing the hook open; it is the
+  same same-user class as the markers above.
+- Unmatched merge routes (Limits): `gh api` merge forms are matched with the endpoint anywhere in argv and the GraphQL
+  `mergePullRequest`/`enablePullRequestAutoMerge` mutations (unbindable, so always denied); other routes (the web UI, `git merge` into main via
+  a script, a tool that calls the API directly) are not seen by any command hook.
+- Codex: the hook imports the byte-identical mirrored libs and the package ships `scripts/action_receipt_cli.py` and
+  `scripts/authority_keys.py` (same owner-run rules).
+- Limits: the user-tier trust root (`~/.coderails/keys/receipt_signers`) is agent-writable, so it is a
+  cooperating-agent safeguard. An agent with Accessibility or control of the owner's terminal is out of scope
+  (docs/decisions/p3-human-only-minting.md). The hash covers only the command text the hook sees, not aliases, functions, eval/xargs or scripts that
+  push (sudo/time/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped; an env assignment prefix is kept and makes the command unbindable). Limits: scope 500 chars, 8 KB per receipt,
   50 receipts per session (`receipt_refused_scope_too_long`, `receipt_refused_too_many`). Protected branches are main and master only.
+
+## Typed state, verdicts and attestation (merge blocked by `attest_*`, eval verdict, hook state)
+
+- Symptom: `gh pr merge` or `merge.py` is refused with `attest_missing`, `attest_not_success`, `attest_wrong_creator`
+  or `attest_not_bound`. One parser (`scripts/lib/integrity_attestation.py`, mirrored byte-identically into
+  `packages/codex/scripts/lib/`) is the only code that knows `integrity=pass` / `sha=`; `integrity_status.py` (merge.py)
+  and `pr_merge_gate.py` (hook) fetch with `gh` and render the message from its closed code.
+- Query: `python3 scripts/lib/state_counters.py [--since <ISO ts>]` counts `attest_*` (trace `pr_merge_gate/denied/<code>`,
+  written when the hook payload carries a session id), `hook_state_unreadable`, `nudge_first`/`nudge_suppressed` and
+  `eval_verdict_<status>`.
+- Remediation: `attest_missing`/`attest_not_success` mean the root-owned daemon has not attested this head yet (wait or
+  push a fresh head); `attest_wrong_creator` means `integrity_review.machine_user` disagrees with the status poster;
+  `attest_not_bound` means the description is not exactly `integrity=pass sha=<head>` as whole tokens. Never bypass.
+- Limit: the daemon (`scripts/integrity-gate`, root-installed separately) does not import the parser; a test asserts the
+  daemon's real success description parses. Codex has no PreToolUse merge hook; only `integrity_status.py` applies there.
+- Eval verdicts: `loop_evals.read_loop_evals()` returns a frozen `EvalVerdict{status, tamper_code}` (`status` is one of
+  GO, VERIFICATION_LEVEL0, FROZEN, NO-GO, ABSENT, UNJUSTIFIED, UNSTAMPED, STALE, TAMPERED); callers match on the fields,
+  never on `TAMPERED:<code>` text. A blocked completion writes trace `loop_state_guard/blocked/eval_verdict_<status>`.
+  The cost line in the retro is a `CostReport{state, message}` whose state is logged as `cost_report=<state>`.
+- Readiness: `graph_readiness.py <progress.json> <node>` prints JSON `{"ready": bool, "reason_code": ...}` (exit 0 iff
+  ready): `ready`, `predecessor_pending`, `node_unknown`, `node_not_pending`, `graph_blocked`,
+  `join_not_dispatchable`, `state_unreadable`. A missing script or non-JSON output is a
+  resolution failure, not a not-ready verdict. Not-ready verdicts on a readable state write trace
+  `graph_readiness/not_ready/<code>`; `state_unreadable` has no session to trace under. Every `progress.json` write now
+  carries `updated_at` (Claude `atomic_progress_update`, Codex `graph_io.write`); a refused transition leaves bytes unchanged.
+- Hook state: `<loop dir>/<session>/hook_state.json` `{schema_version, ordinals{absent_blocked}, arms[{hook,ordinal}],
+  nudged{<hook>:true}}` is the only source for absent-state grace and `offload_push_guard` / `unregistered_loop_guard`
+  nudge dedupe (exact session directory, so session `ab` never matches `abc`). `discipline.log` is audit output and is
+  never read for these decisions. A missing or torn file never releases grace and is traced
+  `hook_state_unreadable` (outcome `missing` on the first Stop of a session, which is expected once; `torn` is a fault).
+  A torn file also suppresses the nudge, traced the same way: an advisory must not repeat unrecorded. Nudges trace
+  `nudge_first` / `nudge_suppressed`. Remediation for `torn`: delete the file by hand (the hook will not repair it).
+  Limit (same-user boundary): `hook_state.json` is a plain file owned by the session user, so state is advisory, not
+  tamper-evident. An agent with Bash/Write can pre-create it (an `ordinals.absent_blocked` equal to the current
+  invocation count releases absent-state grace with no prior block) or set `nudged.<hook>=true` to silence a nudge.
+  Grace and nudge dedupe are guard-rails against accident, not a defence against a hostile same-user agent.
+- Limits: Codex has no corresponding hooks (`hooks.json` carries no `loop_state_guard`, `offload_push_guard` or
+  `unregistered_loop_guard`), so hook state, `EvalVerdict` and `CostReport` are Claude-side; Codex gets the shared
+  attestation parser and the `updated_at` stamp. `mine_hook_blocks` still counts the log's exact `session=` token;
+  moving it to trace rows needs every gate to emit rows (Phase 6).
+
+## Graph refused with `spec_*`, or `instantiate` refused
+
+- Symptom: any graph command (`inspect`, `begin-wave`, `add-unit`, `complete`, ...) fails with `spec_edge_missing`,
+  `spec_unknown_node`, `spec_node_missing` or `spec_hash_mismatch`; or `graph.py instantiate` fails with
+  `instantiate_refused_<foreign|state|nonempty|bad_id>`.
+- Query: `python3 scripts/lib/spec_counters.py [--since <ISO ts>]` counts those codes plus `instantiate_ok`,
+  `instantiate_noop` and `skip_when_met` (one count per `plan` call in which a node's skip predicate held). Each refused
+  load also leaves a `load/refused/<code>` row in the loop's `recovery-trace.jsonl`.
+- Remediation: `spec_edge_missing` names the missing edge (for example `J2.8 -> U3[2]`): the spec requires it whenever both
+  nodes exist, so add the edge by registering units with `graph.py add-unit` (which wires it) rather than editing
+  `progress.json`. For a graph stamped by `instantiate`: `spec_hash_mismatch` means `graph-spec.yaml` changed after the
+  graph was built (finish that loop on the old spec checkout, or start a new loop); `spec_unknown_node` /
+  `spec_node_missing` mean nodes were added or removed by hand. `instantiate` builds only into an empty started loop
+  (`instantiate_refused_nonempty` otherwise); a re-run with the same profile and units is `instantiate_noop`.
+- Edit the graph structure in `packages/graph-semantics/graph-spec.yaml` / `policy.yaml` (JSON syntax) and run
+  `python3 scripts/gen_graph_docs.py`; `scripts/tests/gen_graph_docs_test.py` fails the run when the generated tables drift.
+  The installer materializes both files next to `graph_spec.py` in each provider's `agentic-loop/scripts`.
+- Off-switch: `CODERAILS_GRAPH_SPEC=off` (also `0` or `false`) in the environment skips the whole spec check on load
+  (default ON; unset to re-enable). Use it only to rescue a loop whose graph a spec change has stranded, then rebuild it.
+  `spec_join_inputs` (a stamped graph's join is missing or lacks a unit's input) and `spec_profile_downgrade` (the stamp is
+  below `policy.yaml` `graph.profile`) are the other refusal codes.
+- Limits: `policy.yaml` default `graph.profile` is `full`. Every spec node must belong to FULL; a spec
+  that removes one from FULL is refused with `spec_profile` before instantiate. `instantiate --profile units-only`
+  requires the owner to lower the policy floor to `units-only` first; the flag alone is refused. Spec edges are
+  enforced only between nodes that exist, so an unstamped (hand-built or `start`-built) graph that never creates `J2.8` or
+  the prep nodes is not refused: making `start` stamp via `instantiate`, or having `plan`/`begin-wave` refuse an unstamped
+  graph once `full` is chosen, is an open owner decision. Join inputs are enforced on stamped graphs only. Downgrade path:
+  a hand-editing agent can delete `graph.spec_sha256` (back to the weaker unstamped check) or rewrite `spec_profile` and drop
+  the extra nodes, edges and joins; the policy profile floor refuses the second only while `policy.yaml` says `full`.
+  `loop_evals_min_units` is documented but not read by any hook yet. Judgement skip rules (irreversible-surface triggers,
+  `no PR` units) stay prose: `skip_when_met` is only the machine predicate and is a hint, not a recorded skip. Same-user
+  boundary: the spec, policy and `progress.json` are plain files the session user can edit; this is drift detection for a
+  cooperating agent, not tamper evidence.

@@ -19,27 +19,19 @@ def read_object(path: str | Path) -> JsonObject:
     return cast(JsonObject, data)
 
 
-def write_bytes(path: str | Path, data: bytes) -> None:
-    """Publish complete bytes through an unpublished sibling; failed writes leave the destination untouched."""
+def write_object(path: str | Path, data: JsonObject) -> None:
+    """Replace an artifact atomically using a temporary sibling."""
     destination = Path(path)
     descriptor, temporary = tempfile.mkstemp(prefix=destination.name + ".", dir=destination.parent)
     try:
-        with os.fdopen(descriptor, "wb") as stream:
-            remaining = memoryview(data)
-            while remaining:
-                written = os.write(stream.fileno(), remaining)
-                if written <= 0:
-                    raise OSError("incomplete artifact write")
-                remaining = remaining[written:]
+        with os.fdopen(descriptor, "w") as stream:
+            json.dump(data, stream, indent=2, ensure_ascii=False)
+            stream.write("\n")
+            stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, destination)
     finally:
         Path(temporary).unlink(missing_ok=True)
-
-
-def write_object(path: str | Path, data: JsonObject) -> None:
-    """Replace an object artifact with its existing indented UTF-8 JSON and terminal newline."""
-    write_bytes(path, (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
 
 
 def object_value(value: object) -> JsonObject:

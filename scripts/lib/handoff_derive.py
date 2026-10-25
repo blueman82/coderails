@@ -80,6 +80,13 @@ def decisions(
         muninn: object = row.get("muninn")
         kid: object = cast("dict[str, Any]", muninn).get("id") if isinstance(muninn, dict) else None
         found = records.get(str(kid)) if kid else None
+        if not isinstance(listed, ma.Degraded):
+            field = cast("dict[str, Any]", muninn) if isinstance(muninn, dict) else {}
+            if field.get("state") != "written":
+                reason = field.get("reason_code")
+                degraded.append({"source": "decisions", "reason": str(reason) if reason else "decision_not_cited"})
+            elif not kid or not found or not found.cite:
+                degraded.append({"source": "decisions", "reason": "decision_cite_missing"})
         seen.update([str(kid)] if kid else [])
         out.append(
             {
@@ -118,15 +125,38 @@ def lesson_rows(repo_dir: Path, degraded: list[dict[str, str]]) -> list[dict[str
     return cast("list[dict[str, Any]]", lessons.contract(got)["lessons"])
 
 
-def proof_lines(state_dir: Path, degraded: list[dict[str, str]]) -> list[str]:
-    """One `proof <id>: <verdict>` line per proof that has a run row."""
+def proof_lines(state_dir: Path, degraded: list[dict[str, str]]) -> tuple[list[str], list[str]]:
+    """Show recorded proof verdicts separately from verified work and name unresolved proofs."""
     try:
         rows = proof_results.read_rows(state_dir / proof_results.RESULTS_NAME)
     except proof_results.ChainError:
         degraded.append({"source": "proofs", "reason": "proof_chain_broken"})
-        return []
+        return [], []
+    proof_path = state_dir / "proof.json"
+    if not proof_path.exists():
+        return [], []
+    try:
+        document: object = json.loads(proof_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        degraded.append({"source": "proofs", "reason": "proof_unreadable"})
+        return [], []
+    if not isinstance(document, dict) or not isinstance(cast("dict[str, Any]", document).get("proofs"), list):
+        degraded.append({"source": "proofs", "reason": "proof_unreadable"})
+        return [], []
+    proof_doc = cast("dict[str, Any]", document)
     latest = {r["proof_id"]: r["verdict"] for r in rows if r["kind"] == "run"}
-    return [f"proof {k}: {v}" for k, v in sorted(latest.items())]
+    recorded: list[str] = []
+    next_steps: list[str] = []
+    for item in cast("list[object]", proof_doc["proofs"]):
+        if not isinstance(item, dict) or not isinstance(cast("dict[str, Any]", item).get("id"), str):
+            degraded.append({"source": "proofs", "reason": "proof_unreadable"})
+            return [], []
+        name = cast("dict[str, Any]", item)["id"]
+        verdict = latest.get(name, "unexecuted")
+        line = f"proof {name}: {verdict}"
+        recorded.append(line)
+        next_steps.append(f"verify {line}" if verdict == "satisfied" else line)
+    return recorded, next_steps
 
 
 def derive(state_path: Path, session: str) -> tuple[dict[str, Any], int]:
@@ -157,11 +187,18 @@ def derive(state_path: Path, session: str) -> tuple[dict[str, Any], int]:
     completed = [name for name in _names(summary.get("done")) if name not in skipped]
     prompt = " ".join(str(state.get("authorising_prompt_raw") or "").split())
     hard_stop: object = inspected.get("hard_stop")
+    proof_recorded, proof_next = proof_lines(state_path.parent, degraded)
     skeleton: dict[str, Any] = {
         "goal": prompt[:GOAL_MAX],
         "decisions": decisions(state, str(state.get("loop_id") or ""), session, degraded),
-        "done": [*completed, *proof_lines(state_path.parent, degraded)],
-        "next_steps": [*_names(summary.get("active")), *_names(summary.get("ready")), *_names(summary.get("pending"))],
+        "done": completed,
+        "recorded_proof_results": proof_recorded,
+        "next_steps": [
+            *_names(summary.get("active")),
+            *_names(summary.get("ready")),
+            *_names(summary.get("pending")),
+            *proof_next,
+        ],
         "open_questions": ([f"hard stop: {json.dumps(hard_stop, sort_keys=True)}"] if hard_stop else [])
         + (["skipped work: " + ", ".join(skipped)] if skipped else []),
         "lessons": lesson_rows(state_path.parent.parent, degraded),

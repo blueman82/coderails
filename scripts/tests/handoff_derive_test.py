@@ -18,7 +18,7 @@ sys.path.insert(0, str(REPO))
 from hooks.scripts.lib.graph_executor import transition as claude_transition  # noqa: E402
 from hooks.scripts.tests.lib import claude_transcript_fixture as fixture  # noqa: E402
 from scripts.lib import decision_record as dr  # noqa: E402
-from scripts.lib import handoff_derive, orders  # noqa: E402
+from scripts.lib import handoff_derive, orders, proof_results  # noqa: E402
 from scripts.lib import memory_adapter as ma  # noqa: E402
 from scripts.tests.fake_muninn_case import PROMPT, SESSION, StoreCase  # noqa: E402
 
@@ -46,7 +46,16 @@ class Derive(StoreCase):
         state["graph"]["nodes"]["U3[1]"]["outcome"] = "skipped"
         self.path.write_text(json.dumps(state))
         for text in ("adopt shape A", "clean-break"):
-            dr.record(self.path, SESSION, "2.5", text, transition=claude_transition)
+            current = json.loads(self.path.read_text())
+            dr.record(
+                self.path,
+                SESSION,
+                "2.5",
+                text,
+                expected_loop_id=current["loop_id"],
+                expected_revision=current["revision"],
+                transition=claude_transition,
+            )
 
     def derive(self) -> tuple[dict[str, Any], int]:
         """Run the CLI path and parse its JSON."""
@@ -99,6 +108,71 @@ class Derive(StoreCase):
         self.assertEqual([d["text"] for d in got["decisions"]], ["adopt shape A", "clean-break"])
         self.assertTrue(all(d["id"] for d in got["decisions"]))  # the K-ids recorded earlier stay printed
         self.assertTrue(all(d["cite"] is None for d in got["decisions"]))  # but without the store the cite is unknown
+
+    def test_recorded_degraded_decision_is_disclosed_with_reachable_store(self) -> None:
+        """A successful list cannot make an uncited progress decision appear sound."""
+        state = json.loads(self.path.read_text())
+        state["decisions_absorbed"][0]["muninn"] = {
+            "state": "degraded",
+            "id": None,
+            "reason_code": "muninn_absent",
+        }
+        self.path.write_text(json.dumps(state))
+        got, code = self.derive()
+        self.assertEqual(code, 3)
+        self.assertIn({"source": "decisions", "reason": "muninn_absent"}, got["degraded"])
+        self.assertIsNone(got["decisions"][0]["cite"])
+
+    def test_unexecuted_and_failed_proofs_stay_out_of_done(self) -> None:
+        """A frozen proof without a satisfied run stays a next step."""
+        document = {
+            "schema_version": 2,
+            "session_id": SESSION,
+            "loop_id": "L1",
+            "proofs": [{"id": "P1", "cmd": "false"}, {"id": "P2", "cmd": "true"}],
+        }
+        self.path.with_name("proof.json").write_text(json.dumps(document))
+        got, code = self.derive()
+        self.assertEqual(code, 0)
+        self.assertIn("proof P1: unexecuted", got["next_steps"])
+        self.assertIn("proof P2: unexecuted", got["next_steps"])
+        digest = proof_results.doc_sha(document)
+        result_path = self.path.with_name("proof_results.jsonl")
+        proof_results.append(result_path, kind="freeze", proof_json_sha256=digest, session_id=SESSION, loop_id="L1")
+        proof_results.append(
+            result_path,
+            kind="run",
+            proof_id="P1",
+            cmd_sha256=proof_results.sha("false"),
+            proof_json_sha256=digest,
+            verdict="failed",
+            cwd=str(self.repo_dir),
+            head_sha="0" * 40,
+            session_id=SESSION,
+            loop_id="L1",
+        )
+        got, code = self.derive()
+        self.assertEqual(code, 0)
+        self.assertIn("proof P1: failed", got["next_steps"])
+        self.assertIn("proof P2: unexecuted", got["next_steps"])
+        self.assertFalse(any("proof P1" in line for line in got["done"]))
+        proof_results.append(
+            result_path,
+            kind="run",
+            proof_id="P1",
+            cmd_sha256=proof_results.sha("false"),
+            proof_json_sha256=digest,
+            verdict="satisfied",
+            cwd=str(self.repo_dir),
+            head_sha="0" * 40,
+            session_id="foreign",
+            loop_id="other",
+        )
+        got, code = self.derive()
+        self.assertEqual(code, 0)
+        self.assertIn("proof P1: satisfied", got["recorded_proof_results"])
+        self.assertIn("verify proof P1: satisfied", got["next_steps"])
+        self.assertFalse(any("proof P1" in line for line in got["done"]))
 
     def test_backend_off_is_an_explicit_opt_out(self) -> None:
         """memory.backend off lists its reason but exits 0."""

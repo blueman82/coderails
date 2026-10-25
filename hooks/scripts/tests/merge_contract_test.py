@@ -18,6 +18,8 @@ from scripts.lib import git_common as git
 class MergeContractTests(unittest.TestCase):
     """Intercept every external operation; no test can contact GitHub or modify Git."""
 
+    merge_arguments: tuple[str, ...] = ()
+
     def invoke(
         self,
         *,
@@ -38,6 +40,7 @@ class MergeContractTests(unittest.TestCase):
             del check
             if arguments[:3] == ("gh", "pr", "merge"):
                 merged.append(arguments)
+                self.merge_arguments = arguments
             return subprocess.CompletedProcess(arguments, 0, "", "")
 
         def field(number: str, name: str, fallback: str = "") -> str:
@@ -64,6 +67,7 @@ class MergeContractTests(unittest.TestCase):
             stack.enter_context(patch.object(merge, "smoke_verify", return_value=smoke))
             stack.enter_context(patch.object(merge, "config_path", return_value=""))
             stack.enter_context(patch.object(merge, "has_wiki_ingest_for_merged_prs"))
+            stack.enter_context(patch.object(merge, "require_merge_receipt", return_value=None))
             if temporary_failure:
                 stack.enter_context(
                     patch(
@@ -86,6 +90,12 @@ class MergeContractTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(merged)
         self.assertTrue(eval_called)
+
+    def test_merge_pins_the_head_sha_the_gates_verified(self) -> None:
+        """The remote merge carries --match-head-commit <verified sha>, so a head that moved later is refused."""
+        code, _, merged, _ = self.invoke(sha="cafe1234")
+        self.assertEqual((code, merged), (0, True))
+        self.assertEqual(self.merge_arguments, ("gh", "pr", "merge", "7", "--merge", "--match-head-commit", "cafe1234"))
 
     def test_fetch_diagnostics_distinguish_identity_permission_and_local_failure(self) -> None:
         """Name each trust-failure stage without relabelling local failures as network errors."""

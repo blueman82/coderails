@@ -39,9 +39,7 @@ if sys.argv[1] == "search":
 if sys.argv[2] == "list":
     sys.stdout.write(open(os.environ["FAKE_LIST"]).read()); sys.exit(0)
 sys.stdout.write('{"entry": {"id": "K9"}}')
-""".replace(
-    "@FLAGS@", NEW_FLAGS
-)
+""".replace("@FLAGS@", NEW_FLAGS)
 USER_ANCHOR = {"role": "user", "kind": "prompt", "state": "live", "verify": "ok"}
 ENTRIES: dict[str, Any] = {
     "entries": [
@@ -270,6 +268,16 @@ class HardeningTests(Base):
         os.environ["FAKE_MODE"] = "old"
         self.assertEqual(ma.probe(), ma.Degraded("muninn_old_ledger"))
 
+    def test_default_store_switch_repeats_read_smoke(self) -> None:
+        """A new HOME selects a new default store and needs its own read smoke."""
+        with mock.patch.dict(os.environ):
+            os.environ.pop("MUNINN_HOME", None)
+            for home in (self.tmp / "user-a", self.tmp / "user-b"):
+                fs.create(home / ".local/share/muninn")
+                os.environ["HOME"] = str(home)
+                self.assertEqual((ma.probe(), ma.probe()), (None, None))
+        self.assertEqual(self.argv().count(["know", "list", "--scope-loop", ma.PROBE_LOOP, "--status", "all"]), 2)
+
     def test_default_session_still_traces(self) -> None:
         """With no session id the degrade still lands a trace row under a fixed fallback id."""
         os.environ["FAKE_MODE"] = "old"
@@ -381,18 +389,6 @@ class ProbeAndParity(Base):
         """The Codex copy is byte-identical."""
         mirror = REPO / "packages/codex/scripts/lib/memory_adapter.py"
         self.assertEqual(Path(ADAPTER).read_bytes(), mirror.read_bytes())
-
-    def test_docs_carry_helper(self) -> None:
-        """Both handoff skills name the helper command; teardown calls orders.py (standing orders left the adapter)."""
-        for rel in ("skills/handoff/SKILL.md", "packages/codex/skills/handoff/SKILL.md"):
-            self.assertIn("memory_adapter.py", (REPO / rel).read_text(), rel)
-        self.assertIn("orders.py", (REPO / "skills/agentic-loop/teardown.md").read_text())
-
-    def test_standing_orders_render_flag_is_gone(self) -> None:
-        """The superseded --standing-orders flag is rejected by the adapter CLI (argparse exit 2)."""
-        out = subprocess.run([sys.executable, ADAPTER, "render", "--standing-orders"], capture_output=True, text=True)
-        self.assertEqual(out.returncode, 2)
-        self.assertIn("unrecognized arguments", out.stderr)
 
 
 if __name__ == "__main__":

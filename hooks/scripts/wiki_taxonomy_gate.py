@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Reject unsanctioned top-level page types only inside a positively identified wiki."""
+"""Reject unsanctioned top-level page types only inside a positively identified wiki.
+
+Once the vault is positively identified, a missing or invalid wiki.schema.json or a rejected workflow config DENIES
+the write (wiki_schema_missing / wiki_schema_invalid / config_rejected, trace outcome failed_closed). Ambiguous
+identity (no config, no wiki_path, other repository, vault not a directory) still allows.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +17,8 @@ from hooks.scripts.hook_common import deny, read_payload
 from hooks.scripts.lib.destructive_patterns import git_output
 from hooks.scripts.lib.loop_state_common import log
 from hooks.scripts.lib.trace_row import append_row
-from scripts.lib.config import settings, wiki_page_types
+from scripts.lib.config import load_config, wiki_page_types
+from scripts.lib.config_strict import ConfigRejected, strict_settings
 
 
 def main() -> int:
@@ -34,16 +40,26 @@ def main() -> int:
     plugin = Path(os.environ.get("CLAUDE_PLUGIN_ROOT", "/"))
     config = plugin / ".coderails/workflow.config.yaml"
     session = str(payload.get("session_id") or "")
-    wiki = str(settings(config, session).get("wiki_path") or "") if config.is_file() else ""
+    wiki = str(load_config(config)[0].get("wiki_path") or "") if config.is_file() else ""
     if not wiki:
         return 0
     vault = Path(wiki) if Path(wiki).is_absolute() else plugin / wiki
     if not vault.is_dir() or str(vault.resolve()) != root:
         return 0
     schema = plugin / "wiki.schema.json"
-    types, problem = wiki_page_types(schema)
+    why = ""
+    try:
+        strict_settings(config, session)
+        types, problem = wiki_page_types(schema)
+        why = f"{schema} is {problem}"
+    except ConfigRejected as error:
+        types, problem, why = [], "config_rejected", str(error)
     if problem:
-        append_row("wiki_taxonomy_gate", "failed_open", problem, str(payload.get("session_id") or ""))
+        append_row("wiki_taxonomy_gate", "failed_closed", problem, session)
+        deny(
+            f"Blocked: wiki write inside the vault while {why} ({problem}). Fix it (python3 scripts/lib/config.py "
+            "resolve-config --json lists config findings) and retry."
+        )
         return 0
     sanctioned = [name + "/" for name in types]
     if sum((Path(root) / directory).is_dir() for directory in sanctioned) < 2:

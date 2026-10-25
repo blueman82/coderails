@@ -180,7 +180,8 @@ as durable PR comments; `task-evals` freezes a game-resistant success-eval set
 at task intake and gates `/merge` on it.
 
 Two UserPromptSubmit hooks run silently: inject_context, and crack_on_gate (which
-grants an expiring, revocable authority object when the raw prompt contains "crack on").
+only prints the `/coderails:authorize` grant command when the raw prompt contains "crack on"; the typed
+`authority.py grant` is the only thing that mints an expiring, revocable authority object).
 Seven Stop hooks are registered; two of them block via exit 2: loop-state guard and
 loop-stall guard. The confidence-label and verify-loop checks are advisory lints; the rest
 (voice_announce, unregistered_loop_guard, offload_push_guard) nudge only. The crack-on prose

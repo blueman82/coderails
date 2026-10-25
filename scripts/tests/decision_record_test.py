@@ -78,7 +78,17 @@ class Base(StoreCase):
         **kw: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
         """Call record with the given provider lock."""
-        return dr.record(self.path, SESSION, phase, text, transition=tr, **kw)
+        state = self.state()
+        return dr.record(
+            self.path,
+            SESSION,
+            phase,
+            text,
+            expected_loop_id=state["loop_id"],
+            expected_revision=state["revision"],
+            transition=tr,
+            **kw,
+        )
 
 
 class LocalFirstAndChain(Base):
@@ -114,7 +124,18 @@ class LocalFirstAndChain(Base):
         """(f) a wrong session, a blank decision and a blank phase are refused and the file is untouched."""
         before = self.path.read_bytes()
         cases = (
-            (dr.record(self.path, "other", "2.5", "x", transition=claude_transition), "decision_wrong_session"),
+            (
+                dr.record(
+                    self.path,
+                    "other",
+                    "2.5",
+                    "x",
+                    expected_loop_id="L1",
+                    expected_revision=self.state()["revision"],
+                    transition=claude_transition,
+                ),
+                "decision_wrong_session",
+            ),
             (self.rec(text="   "), "decision_blank_decision"),
             (self.rec(phase=" "), "decision_blank_phase"),
         )
@@ -127,7 +148,7 @@ class LocalFirstAndChain(Base):
     def test_control_pure_add_does_not_mutate_its_input(self) -> None:
         """add_decision returns a new state; the caller's dict is unchanged."""
         before = copy.deepcopy(self.state())
-        out = dr.add_decision(self.state(), SESSION, "2.5", "x")
+        out = dr.add_decision(self.state(), SESSION, "2.5", "x", "L1", self.state()["revision"])
         self.assertEqual(self.state(), before)
         self.assertEqual(len(out["state"]["decisions_absorbed"]), 1)
 

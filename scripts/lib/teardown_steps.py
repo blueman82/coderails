@@ -14,14 +14,56 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import math
 import os
 import runpy
 from pathlib import Path
 from typing import Any, cast
 
 NAME = "teardown.jsonl"
-STEPS = ("proof_run", "decisions_flushed", "orders_prepared", "retro_assembled", "orders_ticked", "lessons_written")
+STEPS = (
+    "proof_run",
+    "decisions_flushed",
+    "orders_prepared",
+    "retro_assembled",
+    "orders_ticked",
+    "orders_rendered",
+    "lessons_written",
+)
 REQUIRED = STEPS[:4]  # orders_ticked is a post-completion apply observation; lessons_written is optional
+
+
+def normalize_consumed_complete_stop(state: dict[str, Any]) -> None:
+    """Undo only the final same-revision complete Stop hook consumption for D4 source checks."""
+    if state.get("status") != "complete":
+        return
+    stops: object = state.get("stops")
+    if (
+        not isinstance(stops, list)
+        or not stops
+        or not all(isinstance(row, dict) for row in cast("list[object]", stops))
+    ):
+        return
+    last = cast("dict[str, Any]", stops[-1])
+    previous = cast("list[dict[str, Any]]", stops[:-1])
+    if (
+        set(last) != {"seq", "category", "reason_code", "reason", "revision", "consumed", "at"}
+        or last.get("category") != "complete"
+        or last.get("consumed") is not True
+        or type(last.get("revision")) is not int
+        or last["revision"] != state.get("revision")
+        or type(last.get("seq")) is not int
+        or any(type(row.get("seq")) is not int for row in previous)
+        or last["seq"] != max((row["seq"] for row in previous), default=0) + 1
+        or not isinstance(last.get("reason_code"), str)
+        or not last["reason_code"].strip()
+        or not isinstance(last.get("reason"), str)
+        or not last["reason"].strip()
+        or type(last.get("at")) not in (int, float)
+        or not math.isfinite(last["at"])
+    ):
+        return
+    last["consumed"] = False
 
 
 def as_list(value: object) -> list[Any]:

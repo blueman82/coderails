@@ -68,6 +68,23 @@ class ProviderParityTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.providers = [Provider(Path(temporary.name), name) for name in ("claude", "codex")]
 
+    def test_pending_decision_blocks_wave_on_both_providers(self) -> None:
+        """A claimed decision cannot be bypassed before its sync is accepted."""
+        for provider in self.providers:
+            baseline = provider.state()
+            for pending in ("pending", "syncing", "unknown", "degraded"):
+                with self.subTest(provider=provider.name, state=pending):
+                    state = copy.deepcopy(baseline)
+                    state["decisions_absorbed"] = [{"seq": 1, "row_sha256": "hash", "muninn": {"state": pending}}]
+                    provider.write(state)
+                    before = provider.path.read_bytes()
+                    self.assertEqual(provider.call("begin-wave").returncode, 1)
+                    self.assertEqual(provider.path.read_bytes(), before)
+            state = copy.deepcopy(baseline)
+            state["decisions_absorbed"] = [{"seq": 1, "row_sha256": "hash", "muninn": {"state": "written"}}]
+            provider.write(state)
+            self.assertEqual(provider.success("begin-wave")["nodes"], ["U3[1]"])
+
     def test_malformed_legacy_unknown_and_exact_wave_atomicity(self) -> None:
         """No provider mutates state on malformed graphs or partial/extra wave results."""
         for provider in self.providers:

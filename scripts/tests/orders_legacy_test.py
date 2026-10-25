@@ -1,4 +1,4 @@
-"""Legacy import preserves source text and every prior backup, including refusal paths."""
+"""Legacy import retains source text and every prior archive, including refusal paths."""
 
 from __future__ import annotations
 
@@ -21,20 +21,52 @@ MOVE_PROBE = r"""
 import json, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
-from scripts.lib import orders, orders_ledger as ol
+from scripts.lib import orders, orders_ledger as ol, orders_legacy_import as legacy
 source = Path(sys.argv[2])
-real_replace, moves, saved_rows = orders.os.replace, 0, 0
-def replace(src, dst):
+real_link, moves, saved_rows = legacy.os.link, 0, 0
+def link(src, dst):
     global moves, saved_rows
-    if Path(src) == source:
+    if Path(dst).name.startswith('standing-orders.legacy'):
         moves += 1
         saved_rows = len(ol.open_ledger(source.parent)['orders'])
-        raise OSError('injected move failure after durable ledger save')
-    return real_replace(src, dst)
-orders.os.replace = replace
+        raise OSError('injected archive publication failure')
+    return real_link(src, dst)
+legacy.os.link = link
 rc = orders.main(sys.argv[3:])
 print(json.dumps({'moves': moves, 'saved_rows': saved_rows}))
 raise SystemExit(rc)
+"""
+SWAP_PROBE = r"""
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from scripts.lib import orders
+source = Path(sys.argv[2])
+replacement = source.with_name('replacement.md')
+replacement.write_text(sys.argv[3])
+real_update = orders.update
+def swapped_update(directory, change):
+    replacement.replace(source)
+    return real_update(directory, change)
+orders.update = swapped_update
+rc = orders.main(sys.argv[4:])
+raise SystemExit(rc)
+"""
+SAVE_SWAP_PROBE = r"""
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from scripts.lib import orders, orders_ledger as ol
+source = Path(sys.argv[2])
+changed = sys.argv[3]
+real_save = ol.save
+def save(path, ledger):
+    replacement = source.with_name('replacement.md')
+    replacement.write_text(changed)
+    replacement.replace(source)
+    return real_save(path, ledger)
+ol.save = save
+raise SystemExit(orders.main(sys.argv[4:]))
 """
 
 
@@ -116,23 +148,74 @@ class LegacyPreservation(StoreCase):
         for path in backups:
             self.assertEqual(path.read_text(), f"Prior backup {path.name}\n")
 
+    def test_source_swap_before_lock_refuses_without_importing_stale_text(self) -> None:
+        """A replacement before the orders lock cannot make the ledger disagree with the archived source."""
+        changed = BODY.replace("Keep the whole lesson.", "Keep the changed lesson.")
+        for codex in (False, True):
+            with self.subTest(codex=codex):
+                root = REPO / "packages/codex" if codex else REPO
+                repo = self.tmp / f"source-swap-{codex}"
+                repo.mkdir()
+                source = repo / "standing-orders.md"
+                source.write_text(BODY)
+                (repo / "orders.json").write_bytes(self.prior)
+                args = ["--dir", str(repo), "--session", SESSION, "import-legacy"]
+                got = subprocess.run(
+                    [sys.executable, "-c", SWAP_PROBE, str(root), str(source), changed, *args],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                self.assertEqual(got.stderr, "")
+                self.assertEqual((got.returncode, json.loads(got.stdout).get("reason_code")), (2, "legacy_parse_error"))
+                self.assertEqual(source.read_text(), changed)
+                self.assertEqual((repo / "orders.json").read_bytes(), self.prior)
+                self.assertEqual(list(repo.glob("standing-orders.legacy*.md")), [])
+
+    def test_source_swap_at_ledger_save_preserves_matching_archived_bytes(self) -> None:
+        """The ledger must describe captured backup bytes even if an editor writes a new source during save."""
+        changed = BODY.replace("Keep the whole lesson.", "Keep the changed lesson.")
+        for codex in (False, True):
+            with self.subTest(codex=codex):
+                root = REPO / "packages/codex" if codex else REPO
+                repo = self.tmp / f"save-swap-{codex}"
+                repo.mkdir()
+                source = repo / "standing-orders.md"
+                source.write_text(BODY)
+                (repo / "orders.json").write_bytes(self.prior)
+                args = ["--dir", str(repo), "--session", SESSION, "import-legacy"]
+                got = subprocess.run(
+                    [sys.executable, "-c", SAVE_SWAP_PROBE, str(root), str(source), changed, *args],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                self.assertEqual(got.stderr, "")
+                self.assertEqual((got.returncode, json.loads(got.stdout)["imported"]), (0, 1))
+                self.assertEqual(source.read_text(), changed)
+                backup = repo / "standing-orders.legacy.md"
+                self.assertEqual(backup.read_text(), BODY)
+                imported = ol.open_ledger(repo)["orders"][1]
+                self.assertEqual(imported["lesson"], "Keep the whole lesson.")
+
     def test_legitimate_import_preserves_decay_text_and_prior_backup(self) -> None:
-        """A real entry is saved as a tombstone with full provenance, and the original moves to a fresh backup."""
+        """A real entry is sealed with full provenance and the source stays in place."""
         old = self.repo / "standing-orders.legacy.md"
         old.write_text("Prior backup\n")
         self.source.write_text(BODY)
         rc, out = self.cli()
         self.assertEqual((rc, out["imported"], out["skipped"]), (0, 1, 0))
-        self.assertFalse(self.source.exists())
+        self.assertEqual(self.source.read_text(), BODY)
         self.assertEqual(old.read_text(), "Prior backup\n")
-        self.assertEqual(Path(out["moved_to"]).read_text(), BODY)
+        self.assertEqual(Path(out["archived_to"]).read_text(), BODY)
+        self.assertTrue(out["source_retained"])
         imported = ol.open_ledger(self.repo)["orders"][1]
         self.assertEqual((imported["status"], imported["loops_since_recurrence"]), ("decayed", 5))
         self.assertEqual((imported["legacy_first_seen"], imported["lesson"]), ("session old", "Keep the whole lesson."))
         self.assertEqual(imported["legacy_text"], "\n".join(BODY.splitlines()[1:]))
 
-    def test_retry_after_own_ledger_save_and_failed_source_move_resumes_exact_import(self) -> None:
-        """The move fault occurs after real publication; a normal retry neither duplicates nor drops evidence."""
+    def test_failed_source_capture_leaves_ledger_and_source_for_retry(self) -> None:
+        """A failed archive link cannot publish rows; a normal retry imports them once."""
         for codex in (False, True):
             with self.subTest(codex=codex):
                 root = REPO / "packages/codex" if codex else REPO
@@ -152,7 +235,7 @@ class LegacyPreservation(StoreCase):
                 self.assertEqual(first.stderr, "")
                 out, probe = map(json.loads, first.stdout.splitlines())
                 self.assertEqual((first.returncode, out.get("reason_code")), (2, "order_state_error"))
-                self.assertEqual(probe, {"moves": 1, "saved_rows": 2})
+                self.assertEqual(probe, {"moves": 1, "saved_rows": 1})
                 self.assertEqual(source.read_text(), BODY)
                 self.assertEqual(backup.read_text(), "Prior backup\n")
                 saved = (repo / "orders.json").read_bytes()
@@ -165,11 +248,22 @@ class LegacyPreservation(StoreCase):
                 self.assertEqual(retried.stderr, "")
                 out = json.loads(retried.stdout)
                 self.assertEqual(retried.returncode, 0, out)
-                self.assertFalse(source.exists())
-                self.assertEqual(Path(out["moved_to"]).read_text(), BODY)
+                self.assertEqual(source.read_text(), BODY)
+                self.assertEqual(Path(out["archived_to"]).read_text(), BODY)
                 self.assertEqual(backup.read_text(), "Prior backup\n")
-                self.assertEqual((repo / "orders.json").read_bytes(), saved)
+                self.assertEqual(saved, self.prior)
                 self.assertEqual(len(ol.open_ledger(repo)["orders"]), 2)
+                repeated = subprocess.run(
+                    [sys.executable, str(root / "scripts/lib/orders.py"), *args],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                self.assertEqual(repeated.stderr, "")
+                self.assertEqual(repeated.returncode, 0, repeated.stdout)
+                self.assertEqual(json.loads(repeated.stdout)["skipped"], 1)
+                self.assertEqual(json.loads(repeated.stdout)["archived_to"], out["archived_to"])
+                self.assertEqual(len(list(repo.glob("standing-orders.legacy*.md"))), 2)
 
     def test_unrelated_colliding_legacy_row_is_not_a_resume_receipt(self) -> None:
         """Matching ids alone never authorize accepting different imported content on retry."""
@@ -184,8 +278,8 @@ class LegacyPreservation(StoreCase):
         self.assertEqual((self.repo / "orders.json").read_bytes(), before)
         self.assertEqual(self.source.read_text(), BODY)
 
-    def test_interrupted_two_row_cohort_with_raw_body_divergence_refuses_resume(self) -> None:
-        """One unchanged row cannot authorize a second changed raw body with the same normalized lesson."""
+    def test_colliding_two_row_cohort_with_raw_body_divergence_refuses_resume(self) -> None:
+        """Matching normalized lessons cannot authorize different raw legacy source text."""
         for codex in (False, True):
             with self.subTest(codex=codex):
                 root = REPO / "packages/codex" if codex else REPO
@@ -194,26 +288,19 @@ class LegacyPreservation(StoreCase):
                 (repo / "orders.json").write_bytes(self.prior)
                 source, backup = repo / "standing-orders.md", repo / "standing-orders.legacy.md"
                 body = BODY + BODY.replace("Keep source text", "Second source text")
-                source.write_text(body)
                 backup.write_text("Prior backup\n")
-                args = ["--dir", str(repo), "--session", SESSION, "import-legacy"]
-                failed = subprocess.run(
-                    [sys.executable, "-c", MOVE_PROBE, str(root), str(source), *args],
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-                self.assertEqual(failed.stderr, "")
-                self.assertEqual(failed.returncode, 2)
-                self.assertEqual(json.loads(failed.stdout.splitlines()[1]), {"moves": 1, "saved_rows": 3})
-                saved = (repo / "orders.json").read_bytes()
                 changed = body.rsplit("Keep the whole lesson.", 1)
                 text = "    Keep the whole lesson.".join(changed)
                 self.assertEqual(
                     [o["lesson"] for o in ol.parse_legacy(body, "same")],
                     [o["lesson"] for o in ol.parse_legacy(text, "same")],
                 )
+                ledger = ol.open_ledger(repo)
+                ledger["orders"] += ol.parse_legacy(body, "2026-10-01")
+                ol.save(repo / "orders.json", ol.seal(ledger))
+                saved = (repo / "orders.json").read_bytes()
                 source.write_text(text)
+                args = ["--dir", str(repo), "--session", SESSION, "import-legacy"]
                 retry = subprocess.run(
                     [sys.executable, str(root / "scripts/lib/orders.py"), *args],
                     capture_output=True,

@@ -63,8 +63,11 @@ so and stop rather than inventing a design space to explore.
 
 ## Read-only
 
-Use shell commands only for read-only inspection. Never write, commit, or
-change state.
+The shell tool is switched off for this role (`[features] shell_tool = false`) and the
+sandbox is read-only. Inspect only through the role's typed MCP tools (`repo_inspect`,
+`diff_read`) when your session registers them; a native child inherits no per-role
+server, so without them mark each check that needs file or history access UNSUPPORTED
+instead of looking for another way to run a command.
 
 ## Output
 
@@ -87,3 +90,6 @@ recommendation>
 **Status:** Recommendation | BLOCKED (primitive contract unreadable) | WRONG_AGENT (given a document, not a question)
 ```
 """
+
+[features]
+shell_tool = false

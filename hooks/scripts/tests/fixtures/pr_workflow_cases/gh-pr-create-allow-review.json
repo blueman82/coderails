@@ -17,7 +17,7 @@
     },
     "env": {},
     "returncode": 0,
-    "denied": false,
+    "denied": true,
     "fixture_index": 0
   },
   {
@@ -38,7 +38,7 @@
     },
     "env": {},
     "returncode": 0,
-    "denied": false,
+    "denied": true,
     "fixture_index": 1
   },
   {

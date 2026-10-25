@@ -28,6 +28,28 @@ class Provider:
         self.name = name
         self.home = root / name
         self.home.mkdir()
+        self.checkout = self.home
+        subprocess.run(["git", "init", "-q", str(self.home)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.home),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
+            check=True,
+        )
+        config = self.home / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
+        config.write_text("memory:\n  backend: off\n")
         self.plugin = ROOT if name == "claude" else ROOT / "packages/codex"
         self.session = "fixture-session" if name == "claude" else "parent"
         self.parent = claude.parent(self.home) if name == "claude" else codex.transcripts(self.home)
@@ -82,7 +104,7 @@ class Provider:
             text=True,
             check=False,
             env=self.environment,
-            cwd=ROOT if operation in ("complete", "verify-completion") else self.home,
+            cwd=self.checkout,
         )
 
     def success(self, operation: str, *arguments: str) -> dict[str, Any]:
@@ -95,7 +117,7 @@ class Provider:
     def freeze(self) -> None:
         """Write a stable-identity ungraded suite accepted before implementation."""
         value = claude.frozen_evals()
-        value.update(session_id=self.session, loop_id="fixture-loop", task_ref="fixture-loop")
+        value.update(session_id=self.session, loop_id=self.read()["loop_id"], task_ref=self.read()["loop_id"])
         self.write(value, "evals.json")
 
     def launch(self, outcome: str = "done") -> dict[str, Any]:
@@ -120,7 +142,7 @@ class Provider:
         suite = {
             **identity,
             "scope": "loop",
-            "task_ref": "fixture-loop",
+            "task_ref": state["loop_id"],
             "revision": state["revision"],
             "verification_level": 1,
             "verification_justification": "independent provider parity",
@@ -172,8 +194,8 @@ class Provider:
             cmd_sha256=proof_results.sha("true"),
             proof_json_sha256=digest,
             verdict="satisfied",
-            cwd=str(ROOT),
-            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+            cwd=str(self.checkout),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.checkout, text=True).strip(),
             **identity,
         )
         assembled_retro.write(self.path.parent, identity["session_id"])  # last: the retro binds every source above
@@ -219,5 +241,5 @@ class Provider:
             text=True,
             check=False,
             env=self.environment,
-            cwd=ROOT if name == "graph_completion_guard" else self.home,
+            cwd=self.checkout,
         )

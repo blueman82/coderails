@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from hooks.scripts.lib.loop_evals import read_loop_evals_result
+from hooks.scripts.lib.loop_evals import read_loop_evals
 from hooks.scripts.tests.eval_integrity_test import Base, code_of
 from hooks.scripts.tests.lib.post_evals_fixture import ArtifactCase, command
 from scripts.lib import eval_trace
@@ -168,7 +168,7 @@ class LoopReaderLegacyTests(ArtifactCase):
         self.save()
         grade_loop(self.path)
         for _ in range(3):
-            self.assertEqual(read_loop_evals_result(Path(self.directory)), "GO")
+            self.assertEqual(read_loop_evals(Path(self.directory)).status, "GO")
         rows = (self.directory / "eval_trace.jsonl").read_text().splitlines()
         self.assertEqual(sum("loop-evals-read" in row for row in rows), 1)
 

@@ -17,10 +17,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 import graph
-from graph_completion import complete, verify_completion
+import graph_dispatch
 
 from hooks.scripts.tests.lib import assembled_retro
-from packages.tests.codex_fixture import append, frozen_evals, node, read_json, spawn, state, transcripts, write_json
+from packages.tests.codex_fixture import (
+    append,
+    complete,
+    frozen_evals,
+    node,
+    read_json,
+    spawn,
+    state,
+    transcripts,
+    verify_completion,
+    write_json,
+)
 from scripts.lib import proof_results as pr
 
 LEASE = 600
@@ -36,10 +47,34 @@ class RecoverChainTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
+        previous = Path.cwd()
+        subprocess.run(["git", "init", "-q", str(self.directory)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.directory),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
+            check=True,
+        )
+        config = self.directory / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
+        config.write_text("memory:\n  backend: off\n")
+        os.chdir(self.directory)
+        self.addCleanup(os.chdir, previous)
         self.addCleanup(patch.stopall)
         patch("pathlib.Path.home", return_value=self.directory).start()
-        self.path = self.directory / "parent" / "progress.json"
-        self.path.parent.mkdir()
+        self.path = self.directory / "loops/project/parent/progress.json"
+        self.path.parent.mkdir(parents=True)
         initial = state()
         initial.update(
             created="2026-10-19T00:00:00+00:00",
@@ -58,7 +93,7 @@ class RecoverChainTests(unittest.TestCase):
         """Record every unit done."""
         wave = read_json(self.path)["graph"]["active_wave"]["wave_id"]
         results = {unit: {"outcome": "done", "evidence": "ok"} for unit in UNITS}
-        graph.record_wave(self.path, json.dumps({"wave_id": wave, "results": results}))
+        graph_dispatch.record_wave(self.path, json.dumps({"wave_id": wave, "results": results}))
 
     def _assemble_retro(self) -> None:
         """Run the prepare CLI, then bind its receipt into the final retro assembly."""
@@ -151,13 +186,13 @@ class RecoverChainTests(unittest.TestCase):
 
     def test_stalled_then_late_a1_completion_then_a2_done_verifies(self) -> None:
         """A late a1 finish neither breaks a2 validation nor completion."""
-        graph.begin_wave(self.path)
+        graph_dispatch.begin_wave(self.path)
         first = self._spawn(terminal=False)
         self.assertTrue(graph.recover_wave(self.path, "parent", LEASE, now=STALLED)["recovered"])
         late = {"timestamp": "2026-09-21T01:00:00Z", "type": "event_msg", "payload": {"type": "task_complete"}}
         for child in first:  # the abandoned a1 workers finish after recovery
             append(child, late)
-        wave = graph.begin_wave(self.path)
+        wave = graph_dispatch.begin_wave(self.path)
         self.assertTrue(all(name.endswith("_a2") for name in wave["task_names"].values()))
         self._spawn(terminal=True)
         self._record_done()
@@ -165,7 +200,7 @@ class RecoverChainTests(unittest.TestCase):
 
     def test_no_spawn_node_is_never_recorded_and_a_late_spawn_verifies(self) -> None:
         """A node that was never spawned changes nothing; spawning it late then records and verifies normally."""
-        graph.begin_wave(self.path)
+        graph_dispatch.begin_wave(self.path)
         before = self.path.read_text(encoding="utf-8")
         report = graph.recover_wave(self.path, "parent", LEASE, now=STALLED)
         self.assertEqual((report["recovered"], report["reason_code"]), (False, "no_spawn_dispatch"))

@@ -24,8 +24,8 @@ Generate two artefacts that allow a fresh Claude Code session to continue the cu
 
 If a native loop graph exists for this session, first run
 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/handoff_derive.py" <state> --session <session_id>`. It reads the recorded state
-read-only and prints a JSON skeleton `{goal, decisions[{id, cite, text}], done, next_steps, open_questions, lessons,
-degraded[]}` (decisions carry their Muninn K-ids and cites; proof status is in `done`). Use it for Goal, Decisions, Done
+read-only and prints a JSON skeleton `{goal, decisions[{id, cite, text}], done, recorded_proof_results, next_steps, open_questions, lessons,
+degraded[]}` (decisions carry their Muninn K-ids and cites; proof verdicts are recorded claims, not `done`). Use it for Goal, Decisions, Done
 and Next steps instead of reconstructing them from the conversation. **State `degraded[]` to the user in the handoff
 under a "Memory degraded" line**, reason code by reason code (exit 3 means it is non-empty); never skip it and never
 replace it with hand-written Markdown. The commands it wraps, for reference or when you need a field it does not print:
@@ -37,6 +37,8 @@ replace it with hand-written Markdown. The commands it wraps, for reference or w
 "Memory degraded (Muninn authoritative)"); never skip the read silently and never substitute hand-written Markdown for
 the typed decisions. A missing loop graph (`graph.py` unavailable) only drops the graph commands; Step 1 still supplies
 the rest.
+
+When reporting graph work, use `inspect`/`summarize`'s `node_names` entry to show each node's one-word job name and lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.
 
 ### Step 1: Extract from current session
 

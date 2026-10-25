@@ -18,8 +18,9 @@ def write(state_dir: Path, session: str, free: dict[str, Any] | None = None) -> 
     Muninn is made unreachable while assembling (PATH without it), so a fixture row still pending or degraded stays
     degraded with `muninn_absent` and no test ever reaches a real store. Exit 3 (a degrade) is accepted; 2 is a failure.
     """
+    state: dict[str, Any] = json.loads((state_dir / "progress.json").read_text(encoding="utf-8"))
     teardown_steps.record(
-        state_dir, "proof_run", session, None, teardown_steps.file_sha(state_dir / "proof_results.jsonl")
+        state_dir, "proof_run", session, state["loop_id"], teardown_steps.file_sha(state_dir / "proof_results.jsonl")
     )
     with mock.patch.dict(os.environ, {"PATH": "/nonexistent"}):
         payload, code = retro.assemble(state_dir, session, free)

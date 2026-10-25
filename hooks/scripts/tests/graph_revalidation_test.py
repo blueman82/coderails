@@ -57,6 +57,18 @@ class RevalidationTests(GraphCase):
             self.save(variant)
             self.refuse_completion("wave")
 
+    def test_never_dispatched_graph_has_empty_history_but_bound_refs_still_need_it(self) -> None:
+        """An absent wave_history is {} (nothing was ever dispatched); a node holding refs still fails on it."""
+        state = self.finish()
+        never = copy.deepcopy(state)
+        never["graph"].update(nodes={}, edges=[], joins={})
+        never["graph"].pop("wave_history")
+        revalidate_all(never)  # the reproduced 'native wave history must be an object' no longer raises
+        bound = copy.deepcopy(state)
+        bound["graph"].pop("wave_history")
+        with self.assertRaisesRegex(ValueError, "wave history"):
+            revalidate_all(bound)
+
     def test_each_raw_reference_field_revalidates(self) -> None:
         """Real UUID, role, identity, ownership and attempt sequence remain authoritative."""
         state = self.finish()

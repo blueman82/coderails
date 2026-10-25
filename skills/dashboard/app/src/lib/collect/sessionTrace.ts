@@ -2,6 +2,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { readdir } from "node:fs/promises";
 import { TRACE_SCHEMA_VERSION, serializeTraceEvent, nonempty, type SourceRef, type TraceCollectionDeps, type TraceDetail, type TraceEvent, type TraceManifest, type TracePage, type NativeSessionSummary } from "./sessionTraceSchema";
 import { CLAUDE_PARSER_VERSION, safeReadError, type NativeRecord, type Source, obj, safeSession, cacheDir, parentPath, source, artifactSource, auditSource, auditEvents, toolBlocks, dispatch, makeEvent, childValid, graphEvent, pointerPart, completedNotification, terminalChild, saveCache, clearCache, cacheEventPath, teammateChild, explicitBlockedLaunch, claudeSessionSummary, claudeUnavailableSummary } from "./sessionTraceClaudeHelpers";
+import { nodeAttributes } from "./nodeDisplay";
 export * from "./sessionTraceSchema";
 
 const SESSION_SUMMARY_MAX_BYTES = 64 * 1024 * 1024;
@@ -208,16 +209,15 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
           const node = obj(value);
           if (!node) { errors.push(`malformed graph node ${nodeId}`); continue; }
           const pointer = `/graph/nodes/${pointerPart(nodeId)}`;
-          events.push(graphEvent(sessionId, graphSource, ++ordinal, "graph_node", pointer,
-            { "coderails.node.id": nodeId }));
+          events.push(graphEvent(sessionId, graphSource, ++ordinal, "graph_node", pointer, nodeAttributes(nodeId)));
           const retry = obj(node.retry);
           if (typeof retry?.attempts === "number" && retry.attempts > 0)
             events.push(graphEvent(sessionId, graphSource, ++ordinal, "graph_retry", `${pointer}/retry`,
-              { "coderails.node.id": nodeId, "coderails.attempt": retry.attempts }));
+              { ...nodeAttributes(nodeId), "coderails.attempt": retry.attempts }));
           const respawn = obj(node.respawn);
           if (typeof respawn?.generation === "number" && respawn.generation > 0)
             events.push(graphEvent(sessionId, graphSource, ++ordinal, "graph_respawn", `${pointer}/respawn`,
-              { "coderails.node.id": nodeId, "coderails.attempt": respawn.generation }));
+              { ...nodeAttributes(nodeId), "coderails.attempt": respawn.generation }));
           if (!Array.isArray(node.evidence)) continue;
           for (const [index, raw] of node.evidence.entries()) {
             const ref = obj(raw);
@@ -242,7 +242,7 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
                 completedNotification(parent, String(ref.tool_use_id), ref.agent_id)))
               errors.push(`graph evidence lacks native completion notification or terminal child: ${nodeId} item ${index}`);
             events.push(graphEvent(sessionId, graphSource, ++ordinal, "graph_evidence",
-              `${pointer}/evidence/${index}`, { "coderails.node.id": nodeId,
+              `${pointer}/evidence/${index}`, { ...nodeAttributes(nodeId),
                 "coderails.evidence.kind": "claude_agent",
                 "coderails.native.call_id": typeof ref.tool_use_id === "string" ? ref.tool_use_id : null,
                 "coderails.attempt": typeof ref.attempt === "number" ? ref.attempt : null }));
@@ -251,7 +251,7 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
         if (obj(graph?.hard_stop)) {
           const stop = obj(graph?.hard_stop);
           events.push(graphEvent(sessionId, graphSource, ++ordinal, "graph_hard_stop", "/graph/hard_stop",
-            { "coderails.node.id": typeof stop?.node === "string" ? stop.node : null }));
+            typeof stop?.node === "string" ? nodeAttributes(stop.node) : {}));
         }
       } catch (error) { errors.push(`unreadable graph progress: ${safeReadError(error)}`); }
       for (const name of ["evals", "proof", "retro"] as const) {

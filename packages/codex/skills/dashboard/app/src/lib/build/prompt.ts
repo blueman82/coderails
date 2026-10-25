@@ -95,9 +95,9 @@ Stop condition: RED — use spawn_agent for a fresh baseline pressure-test witho
 
 Transcript mining: you MAY read the sessions transcripts listed above locally for understanding. You MUST NOT put verbatim transcript prose, file contents, or paths into the skill, its tests, the PR description, or any committed artifact — generic derived intent only.
 
-Local completion: freeze $coderails-codex:task-evals, use spawn_agent to run the installed spec-reviewer, source-auditor, and deploy-safety-reviewer custom agents, resolve their findings, and run the focused tests. Do not commit, push, or open a pull request. Do not invoke any delivery, posting, or merge skill. Never write into ~/.codex/skills.
+Local completion: freeze $coderails-codex:task-evals and spawn the installed spec-reviewer. Write self-contained task files for source-auditor and deploy-safety-reviewer, then run each through the package-local codex_role_session.py command: python3 packages/codex/scripts/codex_role_session.py --role <role> --prompt-file <file> --cwd <builder-worktree>. The native guarded children have no capability server. Read the actual results, resolve findings, and run the focused tests. Do not commit, push, or open a pull request. Do not invoke any delivery, posting, or merge skill. Never write into ~/.codex/skills.
 
 Terminal: stop after the local edits, pressure test, focused tests, and reviewer findings are complete. Leave the worktree changes for a person to review and deliver.
 
-Do not spawn further headless codex sessions or agent teams.`;
+Do not spawn headless Codex sessions other than the two guarded reviewer sessions required above, or any agent teams.`;
 }

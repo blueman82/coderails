@@ -12,8 +12,10 @@ from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny,
 from hooks.scripts.lib.loop_state_common import log
 from hooks.scripts.lib.pr_merge_gate import merge_reason
 from hooks.scripts.lib.pr_workflow_match import operation, pr_number, step_found, targets_main, transcript_entries
+from hooks.scripts.lib.trace_row import append_row
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.lib.authority_permits import permits
 from scripts.lib.config import config_path
 
 
@@ -30,6 +32,11 @@ def main() -> int:
         return 0
     name, segment, target = operation(command)
     cwd = str(payload.get("cwd") or os.getcwd())
+    session = str(payload.get("session_id") or "")
+    if name == "merge" and not (verdict := permits(session, "merge"))["allow"]:  # early; nothing is consumed
+        append_row("action_authority", "denied", f"denied_{verdict['reason']}", session)
+        deny(f"Blocked: gh pr merge — this session's authority refuses it ({verdict['reason']}); authority.py inspect.")
+        return 0
     if not name or not config_path(cwd) or not targets_main(command, cwd, target, name):
         return 0
     paths = [
@@ -38,6 +45,8 @@ def main() -> int:
         if isinstance(payload.get(key), str) and Path(str(payload[key])).is_file()
     ]
     if not paths:
+        deny("Blocked: protected PR action requires a readable session transcript.")
+        log(f"hook=enforce_pr_workflow decision=deny subcommand={name.replace('_', '-')} required=transcript")
         return 0
     number = pr_number(segment) if name == "merge" else ""
     if not step_found(transcript_entries(paths), name, number):
@@ -53,7 +62,7 @@ def main() -> int:
         return 0
     if name == "merge":
         try:
-            reason = merge_reason(number, cwd)
+            reason = merge_reason(number, cwd, str(payload.get("session_id") or ""))
         except (OSError, ValueError, RuntimeError) as error:
             reason = f"Blocked: gh pr merge — eval artifact verification failed: {error}. Do not bypass."
         if reason:

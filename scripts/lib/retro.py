@@ -99,6 +99,29 @@ def memory_section(session: str, loop_id: str | None) -> dict[str, Any]:
 
 def _flush(state_dir: Path, state: dict[str, Any], session: str) -> dict[str, Any]:
     """Retry decisions that never reached Muninn, then make sure the step is recorded."""
+    rows = teardown_steps.read_rows(state_dir)
+    if any(row.get("step") == "orders_prepared" for row in rows):
+        decisions = [
+            cast("dict[str, Any]", item)
+            for item in teardown_steps.as_list(state.get("decisions_absorbed"))
+            if isinstance(item, dict)
+        ]
+        if any(
+            isinstance(row.get("muninn"), dict) and row["muninn"].get("state") in {"syncing", "unknown"}
+            for row in decisions
+        ):
+            return {"synced": [], "reason_code": "decision_sync_unknown", "exit_code": 3}
+        latest_flush = next((row for row in reversed(rows) if row.get("step") == "decisions_flushed"), None)
+        if latest_flush is None or latest_flush.get("evidence_sha256") != teardown_steps.sha_json(
+            state.get("decisions_absorbed")
+        ):
+            return {"synced": [], "reason_code": "decisions_not_flushed", "exit_code": 2}
+        degraded = [
+            {"seq": row["seq"], "muninn": row["muninn"]}
+            for row in decisions
+            if isinstance(row.get("muninn"), dict) and row["muninn"].get("state") == "degraded"
+        ]
+        return {"synced": degraded, "exit_code": 3 if degraded else 0}
     value: object = state.get("decisions_absorbed")
     todo = 0
     for item in teardown_steps.as_list(value):
@@ -109,7 +132,6 @@ def _flush(state_dir: Path, state: dict[str, Any], session: str) -> dict[str, An
     if todo:
         return decision_record.flush_pending(state_dir / "progress.json", session, transition=provider_transition())
     evidence = teardown_steps.sha_json(state.get("decisions_absorbed"))
-    rows = teardown_steps.read_rows(state_dir)
     positions = {row["step"]: index for index, row in enumerate(rows)}
     latest_flush = next((row for row in reversed(rows) if row.get("step") == "decisions_flushed"), None)
     proof_ran_after_flush = positions.get("proof_run", -1) > positions.get("decisions_flushed", -1)

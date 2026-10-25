@@ -92,7 +92,7 @@ function EventRow({ event, token, nativeSessionId, parentName }: {
   const parentJoinMethod = attribute(event, "coderails.parent_join.method");
   const parentJoinParentRef = attribute(event, "coderails.parent_join.parent_source_ref");
   const parentJoinChildRef = attribute(event, "coderails.parent_join.child_source_ref");
-  const refs = ["coderails.loop.id", "coderails.wave.id", "coderails.node.id", "coderails.attempt",
+  const refs = ["coderails.loop.id", "coderails.wave.id", "coderails.node.name", "coderails.node.lane_code", "coderails.node.id", "coderails.attempt",
     "coderails.evidence.kind", "coderails.evidence.id"].flatMap((key) => {
     const value = attribute(event, key);
     return value === null ? [] : [`${key.replace("coderails.", "")}: ${value}`];

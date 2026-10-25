@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, cast
 
 from scripts.lib import retro_check
@@ -11,25 +13,47 @@ from scripts.lib import retro_check
 from .loop_proofs import validate_proofs
 from .loop_state_common import LoopState, log
 
+ABSENT_TEXT = "cost not recorded"
+MINER_FAILED_TEXT = "cost unavailable (miner returned no data)"
+INCOMPLETE_TEXT = "cost recorded but incomplete (missing "
 
-def cost_message(retro: dict[str, Any]) -> str:
+
+class CostState(str, Enum):
+    """Closed outcome of the retro cost report, fixed where the report is built, never read back from its text."""
+
+    REPORTED = "reported"
+    SKIPPED = "skipped_legacy_or_bad_sv"
+    MINER_FAILED_OPEN = "miner_failed_open"
+    ABSENT = "cost_absent"
+    INCOMPLETE = "cost_incomplete"
+
+
+@dataclass(frozen=True)
+class CostReport:
+    """The cost outcome and the human message rendered for it."""
+
+    state: CostState
+    message: str
+
+
+def cost_message(retro: dict[str, Any]) -> CostReport:
     """Render the recorded cost and date caveats without recomputing frozen usage."""
     version = retro.get("schema_version")
     if not isinstance(version, (int, float)) or isinstance(version, bool) or version < 2:
-        return ""
+        return CostReport(CostState.SKIPPED, "")
     cost = retro.get("cost")
     if not isinstance(cost, dict):
-        return "cost not recorded"
+        return CostReport(CostState.ABSENT, ABSENT_TEXT)
     cost = cast(dict[str, Any], cost)
     if not cost:
-        return "cost unavailable (miner returned no data)"
+        return CostReport(CostState.MINER_FAILED_OPEN, MINER_FAILED_TEXT)
     absent = [
         name
         for name in ("total_usd_estimate", "total_tokens")
         if not isinstance(cost.get(name), (int, float, str)) or isinstance(cost.get(name), bool) or cost.get(name) == ""
     ]
     if absent:
-        return "cost recorded but incomplete (missing " + ", ".join(absent) + ")"
+        return CostReport(CostState.INCOMPLETE, INCOMPLETE_TEXT + ", ".join(absent) + ")")
     usd, tokens = cost["total_usd_estimate"], cost["total_tokens"]
     date = cost.get("prices_as_of", "")
     age = date if isinstance(date, str) else ""
@@ -48,7 +72,7 @@ def cost_message(retro: dict[str, Any]) -> str:
     except (ValueError, TypeError):
         usd_display = str(usd)
     text = f"Loop cost: ${usd_display} ({tokens} tokens), {age}"
-    return "".join(character if character.isprintable() else " " for character in text)
+    return CostReport(CostState.REPORTED, "".join(character if character.isprintable() else " " for character in text))
 
 
 def validate_work_units(state: dict[str, Any]) -> None:
@@ -102,14 +126,5 @@ def validate_completion(state: LoopState, transcript: str) -> list[str]:
         log(f"hook=loop_stall_guard session={state.session} retro_gate={error.code} blocked=1")
         raise
     cost = cost_message(retro)
-    outcome = "reported"
-    if not cost:
-        outcome = "skipped_legacy_or_bad_sv"
-    elif cost.startswith("cost unavailable"):
-        outcome = "miner_failed_open"
-    elif cost.startswith("cost not recorded"):
-        outcome = "cost_absent"
-    elif cost.startswith("cost recorded but incomplete"):
-        outcome = "cost_incomplete"
-    log(f"hook=loop_stall_guard session={state.session} cost_report={outcome}")
-    return [message for message in (withdrawn, cost, *memory) if message]
+    log(f"hook=loop_stall_guard session={state.session} cost_report={cost.state.value}")
+    return [message for message in (withdrawn, cost.message, *memory) if message]

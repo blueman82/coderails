@@ -14,7 +14,9 @@ from typing import Any, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from hooks.scripts.lib.loop_completion import cost_message, validate_completion
+from hooks.scripts.lib import loop_completion
+from hooks.scripts.lib.loop_completion import CostState, validate_completion
+from hooks.scripts.lib.loop_completion import cost_message as cost_report
 from hooks.scripts.lib.loop_state_common import LoopState
 from hooks.scripts.tests.lib import assembled_retro
 from hooks.scripts.tests.lib.hook_test_support import HookTestCase
@@ -59,6 +61,11 @@ def prepared_retro(state_dir: Path, session: str) -> dict[str, Any]:
     if code == 2:
         raise AssertionError(payload)
     return cast("dict[str, Any]", json.loads((state_dir / "retro.json").read_text(encoding="utf-8")))
+
+
+def cost_message(retro: dict[str, Any]) -> str:
+    """Message text of the typed cost report."""
+    return cost_report(retro).message
 
 
 class CostReportTests(HookTestCase):
@@ -133,6 +140,27 @@ class CostReportTests(HookTestCase):
         age = int((datetime.now(timezone.utc) - stamp).total_seconds() / 86400)
         self.assertIn(date, actual)
         self.assertEqual("verify at" in actual, age > 14)
+
+    def test_state_is_set_at_construction_not_derived_from_wording(self) -> None:
+        """Rewording the message text leaves each branch's state unchanged: state is set at construction."""
+        full = {"total_tokens": 42, "total_usd_estimate": 1, "prices_as_of": "2026-01-01"}
+        rows: list[tuple[dict[str, Any], CostState]] = [
+            ({"schema_version": 1}, CostState.SKIPPED),
+            ({"schema_version": 2}, CostState.ABSENT),
+            ({"schema_version": 2, "cost": {}}, CostState.MINER_FAILED_OPEN),
+            ({"schema_version": 2, "cost": {"total_tokens": 42}}, CostState.INCOMPLETE),
+            ({"schema_version": 2, "cost": full}, CostState.REPORTED),
+        ]
+        with (
+            patch.object(loop_completion, "ABSENT_TEXT", "no figures"),
+            patch.object(loop_completion, "MINER_FAILED_TEXT", "miner gave nothing"),
+            patch.object(loop_completion, "INCOMPLETE_TEXT", "gaps: "),
+        ):
+            for retro, state in rows:
+                report = cost_report(retro)
+                self.assertIs(report.state, state)
+                if state in {CostState.ABSENT, CostState.MINER_FAILED_OPEN, CostState.INCOMPLETE}:
+                    self.assertFalse(report.message.startswith("cost "), report.message)
 
     def test_outcome_logs_are_fixed_tokens_without_retro_injection(self) -> None:
         """Every report class logs a bounded outcome and no untrusted artifact values."""

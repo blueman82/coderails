@@ -39,7 +39,7 @@ edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Decision record
 | Lifecycle effect before durable completion | prose ticked before completion | none: record/prepare stage inputs, tick applies only saved owned completion | `orders_lifecycle_test.py` |
 | Changed preparation recovery | no separately bound preparation | explicit current-hash compare-and-swap; staged records preserved without effects | `orders_prepare_test.py` |
 | Citation chronology | cached ledger/preparation could restore older claims or ids | cite reconciles without authoring; tick reads fresh metadata, preserving later known ids during outages | `orders_current_test.py` |
-| Legacy move interruption | saved imported rows made ordinary retry collide | full parsed-cohort equality resumes only the source move, without another ledger save | `orders_legacy_test.py` |
+| Legacy archive interruption | a source move could separate the saved rows from their backup | an exact-byte archive is published before ledger save; the source stays in place, and an equal full-cohort retry skips another save | `orders_import_capture_test.py`, `orders_legacy_test.py` |
 | Completed lesson replacement recovery | existing evidence could acknowledge an unsaved same-loop edit | captured predecessor and sealed authored-source token recover only the accepted row | `orders_retry_view_test.py` |
 
 Counters: `order.record|prepare|tick|render|import|cite` and `lesson.query|predicate` trace rows are counted by
@@ -47,17 +47,24 @@ Counters: `order.record|prepare|tick|render|import|cite` and `lesson.query|predi
 under the `memory` key; no edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Standing order stored without
 a cite, or a lesson missing from dispatch". Decision: `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 
-Limits: the instructed prepare/native-complete/apply caller is advisory at this checkpoint; automatic provider wiring
-remains pending. `orders_ticked` is a post-save observation, and a failed apply/receipt after completion means pending
-teardown. The one same-user lock covers currentness, reconciliation, bounded sync and atomic ledger save, with no
+Limits: Claude and Codex native completion now enforce prepare, validated graph save, tick and render. Both Stop paths
+refuse missing or stale D4 receipts and views. An explicitly reviewed old complete graph can carry a separate
+source-bound admission that never changes progress or ages orders. The exact file hash is checked at admission; later
+completion bookkeeping does not revoke it. `orders_ticked` is a post-save observation, and a
+failed apply/receipt after completion means pending teardown. The one same-user lock covers currentness,
+reconciliation, bounded sync, ledger save and both render writes. The rendered receipt also checks the ledger and
+both view hashes under the lock, with no
 exactly-once network claim. New completed recurrences revive tombstones; replay cannot reset counters. Current live,
 verified owner-cited lesson text is legitimate typed memory; transcript advisory observations remain metadata only.
 Uncited claims are diagnostic and excluded from dispatch, promotion and views. Claims over 500 collapsed characters
 are refused, never truncated. Schema3 history needs the matching `retro_check` validator; absence is unknown/refused.
 The chain and source hashes are cooperating-agent safeguards. Legacy fixture imports preserve all five entries,
 counters, full text and first-seen provenance; a live hand-written-file migration was not verified.
-Legacy retry equivalence covers every parsed row except seal fields, not a whole-source/preamble hash or own-attempt
-identity. Current reads exclude nonfinite expiries; scope labels remain opaque as supplied by Muninn's cwd-filtered
+Each imported row seals the SHA-256 of the full raw source, including its preamble. A retry requires that hash and
+every saved row to match. The archive is a separate copy, so the source stays in place. After a save error, success
+requires the canonical ledger to equal the expected sealed rows. Otherwise import refuses and keeps the archive.
+Archive and ledger publication are not one atomic operation. Current reads
+exclude nonfinite expiries; scope labels remain opaque as supplied by Muninn's cwd-filtered
 repository list. Receipt parsing requires physical LF records and finite JSON numbers; Unicode inside a legitimate
 JSON string remains supported. Linked preparation/receipt/sidecar paths refuse before content read/open/create.
 
@@ -109,10 +116,10 @@ matrix owner's to update after merge.
 
 | Measure | Before | After | How measured |
 | --- | ---: | ---: | --- |
-| Who executes a frozen proof cmd | the model, as its own Bash call; the gate string-matched the transcript | the controller: `proof.py run` via `/bin/bash -c`, verbatim | `scripts/tests/proof_run_test.py` (verbatim nested-quote cmd gives exit 3, the same `cmd_sha256`) |
+| Who executes a frozen proof cmd | the model, as its own Bash call; the gate string-matched the transcript | the controller runs the frozen command unchanged in pinned sandbox-runtime 0.0.65 | `proof_sandbox_test.py` (both providers, compound command, blocked host write and loopback connection) |
 | Evidence the gate reads | a transcript tool pair (Claude) or an exec result frame plus `status == pass` (Codex) | hash-chained run rows on both providers | `proof_run_test.py` (a perfectly matching transcript no longer satisfies a proof) |
 | `expect` | prose, never evaluated | `{exit_code, stdout_contains, stdout_not_contains}`, evaluated | `proof_run_test.py` expect tests; skipping the evaluation fails them |
-| Tamper detection | none | edited proof.json, wrong cmd hash and deleted row each block (`proof_stale_cmd`, `proof_chain_broken`) | `proof_run_test.py` mutation controls |
+| Tamper detection | none | edited proof.json, wrong cmd hash and removal of a nonfinal row block (`proof_stale_cmd`, `proof_chain_broken`); removal of a valid-prefix tail is undetected | `proof_run_test.py` mutation controls and current-head review |
 | Codex loop with no executable surface | could not complete | completes with `none: <reason>` or the typed disposition | `packages/tests/test_codex_completion.py` |
 
 Counters: `proof.freeze|run|gate` trace rows are counted by `scripts/lib/memory_counters.py` (prefix `proof.`), embedded under

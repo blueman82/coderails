@@ -266,6 +266,8 @@ def parse_add(argv: list[str]) -> dict[str, Any]:
     i = 0
     while i < len(argv):
         f = argv[i]
+        if i + 1 == len(argv) and f != "--global":
+            raise RefusedError("bad_usage")
         if f == "--global":
             a["global"] = True
         elif f == "--cite":

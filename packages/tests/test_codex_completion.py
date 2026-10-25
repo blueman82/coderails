@@ -7,7 +7,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -16,133 +15,24 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
-import graph
-from graph_artifacts import validate_evals
-from graph_completion import complete, verify_completion
+from graph_artifacts import validate_completion_evidence, validate_evals
 from graph_identity import GraphError
 
+from packages.tests.codex_completion_fixture import IDENTITY, CompletionFixture, assemble_test_retro
 from packages.tests.codex_completion_head_case import assert_changed_head, assert_empty_proof_disposition
-from packages.tests.codex_fixture import append, frozen_evals, read_json, spawn, state, transcripts, write_json
+from packages.tests.codex_fixture import (
+    complete,
+    frozen_evals,
+    read_json,
+    verify_completion,
+    write_json,
+)
 from scripts.lib import proof_results as pr
 from scripts.lib import retro, retro_check, teardown_steps
 
-IDENTITY = {"session_id": "parent", "loop_id": "loop"}
 
-
-def assemble_test_retro(state_dir: Path, session: str) -> dict[str, Any]:
-    """Build source-bound D4 preparation evidence for this isolated completion fixture."""
-    path = state_dir / "progress.json"
-    current: dict[str, Any] = read_json(path)
-    loop_id = str(current.get("loop_id") or "")
-    teardown_steps.record(
-        state_dir, "proof_run", session, loop_id, teardown_steps.file_sha(state_dir / "proof_results.jsonl")
-    )
-    # Repeated fixture refreshes model a new completion attempt while keeping the latest receipt order canonical.
-    rows = teardown_steps.read_rows(state_dir)
-    rank = {name: index for index, name in enumerate(teardown_steps.REQUIRED)}
-    rows.sort(key=lambda row: rank.get(row["step"], len(rank)))
-    (state_dir / teardown_steps.NAME).write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
-    retro.assemble(state_dir, session)  # explicit decision flush must precede preparation
-    current = read_json(path)
-    source = dict(current)
-    if source.get("status") == "complete" and isinstance(source.get("completion"), dict):
-        source["revision"] = source["completion"]["revision"]
-    for key in ("status", "completion", "completed_marker"):
-        source.pop(key, None)
-    if isinstance(source.get("loop_stop_counts"), dict):
-        source["loop_stop_counts"].pop("complete", None)
-    binding = {
-        "repo_dir": str(state_dir.parent.resolve()),
-        "state_dir": str(state_dir.resolve()),
-        "session_id": session,
-        "loop_id": loop_id,
-        "revision": source["revision"],
-        "progress_sha256": teardown_steps.sha_json(source),
-    }
-    prepared: dict[str, Any] = {"schema": 1, "binding": binding, "records": []}
-    prep_path = state_dir / f"orders-prepared-{hashlib.sha256(loop_id.encode()).hexdigest()}.json"
-    prep_path.write_text(json.dumps(prepared), encoding="utf-8")
-    row = {
-        "step": "orders_prepared",
-        "session_id": session,
-        "loop_id": loop_id,
-        "revision": source["revision"],
-        "binding": binding,
-        "evidence_sha256": teardown_steps.sha_json(prepared),
-        "ts": "2026-10-19T00:00:00+00:00",
-    }
-    with (state_dir / teardown_steps.NAME).open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps(row) + "\n")
-    payload, code = retro.assemble(state_dir, session)
-    if code == 2:
-        raise AssertionError(payload)
-    return read_json(state_dir / "retro.json")
-
-
-class CompletionTests(unittest.TestCase):
+class CompletionTests(CompletionFixture):
     """Only current native evidence and successful observed proofs permit completion."""
-
-    def setUp(self) -> None:
-        """Create a completed worker with independent proof and eval artifacts."""
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.directory = Path(temporary.name)
-        self.addCleanup(patch.stopall)
-        patch("pathlib.Path.home", return_value=self.directory).start()
-        self.path = self.directory / "loops/project/parent/progress.json"
-        self.path.parent.mkdir(parents=True)
-        write_json(self.path, state())
-        self.evals = self.path.with_name("evals.json")
-        write_json(self.evals, frozen_evals())
-        parent = transcripts(self.directory)
-        graph.begin_wave(self.path)
-        self.child = spawn(parent, read_json(self.path))
-        graph.record_wave(
-            self.path,
-            json.dumps({"wave_id": "wave-2", "results": {"U3[1]": {"outcome": "done", "evidence": "checked"}}}),
-        )
-        suite: dict[str, Any] = frozen_evals() | {
-            "verification_level": 0,
-            "revision": 3,
-            "evals": [],
-            "amendments": [],
-            "result": "VERIFICATION_LEVEL0",
-            "grading": {
-                "by": "post_evals.py grade-loop",
-                "checksum": hashlib.sha256(b"[]\nVERIFICATION_LEVEL0").hexdigest(),
-                "amendments_at_grade": 0,
-            },
-        }
-        write_json(self.evals, suite)
-        self.proof, self.retro = self.path.with_name("proof.json"), self.path.with_name("retro.json")
-        self.document: dict[str, Any] = {
-            "schema_version": 2,
-            "session_id": "parent",
-            "loop_id": "loop",
-            "proofs": [{"id": "P1", "cmd": "true", "expect": {"exit_code": 0}}],
-        }
-        write_json(self.proof, self.document)
-        self.results = self.path.with_name(pr.RESULTS_NAME)
-        pr.append(self.results, kind="freeze", proof_json_sha256=pr.doc_sha(self.document), **IDENTITY)
-        self.proof_result("satisfied")
-        assemble_test_retro(self.path.parent, "parent")
-        self.transcript = self.path.with_name("proof.jsonl")
-        append(self.transcript, {"type": "turn_context", "payload": {"loop_id": "loop"}})
-        self.arguments = (self.path, "parent", self.evals, self.proof, self.retro, self.transcript)
-
-    def proof_result(self, verdict: str, cmd: str = "true", **identity: str) -> None:
-        """Append one controller run row for proof P1."""
-        pr.append(
-            self.results,
-            kind="run",
-            proof_id="P1",
-            cmd_sha256=pr.sha(cmd),
-            proof_json_sha256=pr.doc_sha(self.document),
-            verdict=verdict,
-            cwd=str(Path.cwd()),
-            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-            **(IDENTITY | identity),
-        )
 
     def test_success_and_revalidation(self) -> None:
         """A completed graph is revalidated against the latest run row."""
@@ -231,17 +121,10 @@ class CompletionTests(unittest.TestCase):
         for disposition in accepted:
             write_json(self.path, current | {"proof_disposition": disposition})
             assemble_test_retro(self.path.parent, "parent")
-            complete(*self.arguments)
-            write_json(self.path, current)
-
-    def decide(self, text: str = "adopt shape A", muninn: dict[str, Any] | None = None) -> None:
-        """Put one hashed decision row into progress.json, then re-assemble the retro over it."""
-        from scripts.lib import decision_record as dr
-
-        added = dr.add_decision(read_json(self.path), "parent", "2.5", text)["state"]
-        added["decisions_absorbed"][-1]["muninn"] = muninn or {"state": "written", "id": "K1", "reason_code": "ok"}
-        write_json(self.path, added)
-        assemble_test_retro(self.path.parent, "parent")
+            validate_completion_evidence(
+                read_json(self.path), current["revision"], self.evals, self.proof, self.retro, self.transcript
+            )
+        complete(*self.arguments)
 
     def test_retro_gate_recomputes_hashes_on_the_codex_gate(self) -> None:
         """(a)(b)(c)(d)(e) The Codex gate refuses a hand-written, edited, step-less or chain-broken retro."""
@@ -304,7 +187,10 @@ class CompletionTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphError, "retro_not_assembled"):
             verify_completion(*self.arguments)
         with patch.object(retro_check, "check", return_value=[]):
-            verify_completion(*self.arguments)  # control: reverting the wiring lets the hand-written retro through
+            state = read_json(self.path)
+            validate_completion_evidence(
+                state, state["completion"]["revision"], self.evals, self.proof, self.retro, self.transcript
+            )  # removing this one gate would admit the hand-written retro
 
     def test_empty_proof_file_uses_a_valid_disposition(self) -> None:
         """An owned empty proof document follows the same disposition rule as Claude."""

@@ -31,9 +31,11 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
 ## Consequences and limits
 
 - K=5 is a code constant (`orders_ledger.K`), not config.
-- The caller is advisory on both providers: the record/prepare/native-complete/tick/render sequence is instructed in
-  `skills/agentic-loop/teardown.md` and `packages/codex/skills/agentic-loop/SKILL.md`; no hook or completion command
-  automatically runs it in this checkpoint. Later provider wiring must use this interface without a second gate.
+- The native completion command now prepares orders before it takes the progress lock. It validates the exact prepared
+  source again under that lock, saves completion, then releases the lock before it ticks and renders. A repeat of the
+  same completion command resumes the tick and render without a second age change. The renderer returns its input
+  ledger hash; the completion caller checks that hash under the orders lock before it records `orders_rendered`.
+  Claude `mark-complete` uses the same validated path. Both native guards block when bound teardown is pending.
 - Preparation validates genuine eligible progress at `<repo-key dir>/<session>/progress.json` and binds the resolved
   directories, owning session, separate logical loop, revision and source hash. Prospective eligibility permits
   preparation only. Actual recurrence/aging requires that owned progress be durably saved complete. Failed completion
@@ -57,6 +59,9 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
   `retro_count` requires distinct completed logical loops, valid owned progress and complete source-bound retros.
   Schema2 uses complete typed fields and the saved progress hash. Schema3 delegates to the matching `retro_check`;
   absence of that validator is an explicit refusal, never a known zero count. The same user can rewrite these sources.
+- The installed Muninn service on the current machine uses a newer request-bound API. The D4 adapter still requires
+  the earlier schema-2 CLI. Its currentness check degrades explicitly on that installation. No ledger-text fallback
+  or implicit store upgrade is part of this completion change; live activation remains unaccepted.
 - A recurrence revives a decayed order (status back to `active`, record kept), so the predicate's "one decayed order"
   is a snapshot, not a history.
 - Current tagged claims are reconciled even for degraded/pending local rows before another add. A failed currentness
@@ -81,12 +86,21 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
 - `render` omits orders Muninn no longer holds as current; with Muninn unreachable it exits 3 and leaves the existing
   view untouched, so a view can lag a Muninn retraction until the next successful render.
 - Import of the old hand-written `standing-orders-decayed.md` is not provided; it was never created in this repo.
-- Legacy import preserves titles, counters including decay, full source text and first-seen provenance. Duplicate,
-  incomplete, malformed or colliding entries and foreign paths are refused without moving the source. The original
-  remains in a local backup. A retry after ledger save but failed source move resumes only when the entire parsed
-  cohort equals every saved typed row, excluding only seal fields, at one common saved creation timestamp. It skips
-  ledger save and moves intact source to an unused backup. This is parsed-row equivalence, not whole-source/preamble
-  hash identity or atomicity across the ledger and source move; no live migration is claimed by fixture tests.
+- Pre-D4 complete schema-3 loops have no D4 preparation or tick/render receipt. The new guards keep them pending
+  until an operator reviews the retained graph, eval, proof, retro and transcript evidence. For an eligible old loop,
+  read the exact progress hash with `shasum -a 256 <repo-key dir>/<session>/progress.json`, then run
+  `python3 scripts/lib/orders_completion.py admit-legacy --dir <repo-key dir> --session <session> --loop <loop> --progress-sha256 <hash> --reason "<reviewed historical evidence>"`.
+  This writes a separate session/loop receipt after checking that exact file hash. It also binds the substantive
+  graph source. It never edits progress, imports a lesson, ticks a loop or ages an order. Native retry and Stop may
+  update `completed_marker` and the complete Stop count; those bookkeeping changes do not revoke admission. A changed
+  graph source or any D4 preparation, observation or ledger effect blocks the exception. This same-user receipt records
+  a review; it cannot prove that an owner approved a new lesson. New loops need the full D4 completion lifecycle.
+- Legacy import preserves titles, counters including decay, full source text and first-seen provenance. Incomplete,
+  malformed or colliding entries and foreign paths refuse without changing the source. It publishes a separate
+  exact-byte archive before ledger save and retains the original. Each imported row seals the source SHA-256.
+  A complete-cohort retry requires equal rows, one saved creation timestamp, and the same source hash. It skips
+  ledger save and reuses only an exact-byte archive. This does not make archive and ledger one atomic transaction;
+  a failed or uncertain save keeps the archive for inspection. Fixture tests do not claim a live migration.
 
 Runbook: `docs/RUNBOOK.md` "Standing order stored without a cite, or a lesson missing from dispatch". Measurement:
 `docs/typed-records-measurement.md`. Related: `docs/decisions/2026-10-05-memory-authoritative.md`.

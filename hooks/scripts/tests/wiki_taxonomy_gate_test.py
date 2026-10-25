@@ -76,15 +76,42 @@ class WikiTaxonomyTests(HookTestCase):
         self.assertEqual(self.decision(self.plugin / "hooks/new.py"), {})
         self.assertEqual(self.reasons(), [])
 
-    def test_schema_problems_fail_open_with_reason(self) -> None:
-        """Negative control: the old gate returned 0 silently; now missing/invalid/empty schema leaves a reason row."""
+    def test_schema_problems_fail_closed_with_reason(self) -> None:
+        """Negative control: restoring `return 0` on a schema problem makes these writes pass again."""
         target = self.vault / "decisions/a.md"
         self.schema.unlink()
-        self.assertEqual(self.decision(target), {})
+        denial = self.decision(target)
+        self.assertEqual(denial["permissionDecision"], "deny")
+        self.assertIn("wiki_schema_missing", str(denial["permissionDecisionReason"]))
         for bad in ("not json", "[]", '{"page_types": "x"}', '{"page_types": []}', '{"page_types": [1, "../x"]}'):
             self.schema.write_text(bad)
-            self.assertEqual(self.decision(target), {}, bad)
+            denial = self.decision(target)
+            self.assertEqual(denial["permissionDecision"], "deny", bad)
+            self.assertIn("wiki_schema_invalid", str(denial["permissionDecisionReason"]))
         self.assertEqual(self.reasons(), ["wiki_schema_missing"] + ["wiki_schema_invalid"] * 5)
+
+    def test_ambiguous_identity_stays_open_with_broken_schema(self) -> None:
+        """Only a positively identified vault fails closed: an unrelated repo is untouched."""
+        self.schema.write_text("not json")
+        self.assertEqual(self.decision(self.plugin / "hooks/new.py"), {})
+        self.assertEqual(self.reasons(), [])
+
+    def test_heading_rename_in_agents_md_has_no_effect(self) -> None:
+        """The allowlist comes from wiki.schema.json, not from AGENTS.md headings."""
+        (self.vault / "AGENTS.md").write_text("## Wiki taxonomy\n\n| `decisions/` | x |\n")
+        self.assertEqual(self.decision(self.vault / "decisions/a.md")["permissionDecision"], "deny")
+        (self.vault / "AGENTS.md").write_text("## Renamed heading\n\n| `decisions/` | x |\n")
+        self.assertEqual(self.decision(self.vault / "decisions/a.md")["permissionDecision"], "deny")
+        self.assertEqual(self.decision(self.vault / "concepts/a.md"), {})
+
+    def test_rejected_config_denies_a_vault_write(self) -> None:
+        """A typo'd config inside the identified vault denies the write with config_rejected and a hint."""
+        self.config.write_text(f"wiki_path: {self.vault}\nwiki_pth: x\n")
+        denial = self.decision(self.vault / "concepts/a.md")
+        self.assertEqual(denial["permissionDecision"], "deny")
+        self.assertIn("config_rejected", str(denial["permissionDecisionReason"]))
+        self.assertIn("wiki_path", str(denial["permissionDecisionReason"]))
+        self.assertEqual(self.decision(self.plugin / "hooks/new.py"), {})
 
     def test_unconfigured_wiki_is_silent(self) -> None:
         """Inert (no wiki_path) stays silent even with a broken schema."""
