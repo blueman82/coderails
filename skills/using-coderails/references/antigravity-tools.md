@@ -15,9 +15,9 @@ Antigravity CLI (`agy`), use these tools:
 | Fetch a URL | `read_url_content` |
 | Search the web | `search_web` |
 | Pose a structured question to your human partner | `ask_question` |
-| Dispatch a subagent (a skill naming an agent, e.g. `coderails:loop-worker`) | `invoke_subagent` with a built-in `TypeName` — `self` for full-capability work, `research` for read-only (see [Subagent support](#subagent-support)) |
+| Dispatch a subagent (a skill naming an agent, e.g. `coderails:loop-worker`) | `invoke_subagent` with an installed custom role when its tool policy fits; `self` is full-capability, while `research` is optimized for research without a documented read-only guarantee (see [Subagent support](#subagent-support)) |
 | Multiple parallel dispatches | Multiple entries in one `invoke_subagent` call's `Subagents` array |
-| Task tracking ("create a todo", "mark complete") | a **task artifact** — `write_to_file` with `IsArtifact: true` and `ArtifactType: "task"` (see [Task tracking](#task-tracking)). **Not** `manage_task`, which manages background processes. |
+| Task tracking ("create a todo", "mark complete") | a **task artifact** — `write_to_file` with `IsArtifact: true` and `ArtifactMetadata.ArtifactType: "task"` (see [Task tracking](#task-tracking)). **Not** `manage_task`, which manages background processes. |
 
 ## Invoking a skill — read its `SKILL.md`
 
@@ -42,9 +42,10 @@ without `define_subagent`:
   `write_to_file`/`replace_file_content`/`run_command`). The safe default for
   general-purpose work: implementing, fixing, anything that edits files or runs
   commands.
-- **`research`** — read-only (file reading, `grep_search`, web/URL fetch; no write
-  or command access). Use it when you specifically want a subagent that can't make
-  changes — investigation and read-only review.
+- **`research`** — optimized for codebase research, file navigation, and
+  structural exploration. The [provider subagent guide](https://www.agy.dev/docs/subagents?tab=cli)
+  does not promise a read-only tool set. Do not use this type alone as proof
+  that a reviewer cannot edit files or run commands.
 
 Use `define_subagent` only when you need a custom system prompt or capability
 mix. Set `enable_write_tools: true` to grant file edits and `run_command`.
@@ -66,12 +67,13 @@ When no installed custom role fits:
 | Skill dispatch form | Antigravity equivalent |
 |---------------------|----------------------|
 | An implementer agent (`coderails:loop-worker`) — writes code, runs tests | Read the agent file, then `invoke_subagent` with `TypeName: "self"` and its body as the prompt prefix |
-| A read-only agent (`pr-review-toolkit:code-reviewer`, `coderails:spec-reviewer`, `coderails:source-auditor`) | `invoke_subagent` with `TypeName: "research"` and the agent's body as the prompt prefix |
-| Inline prompt (no agent named) | `invoke_subagent` with `TypeName: "self"` (or `"research"` if the task only reads) and your inline prompt |
+| A read-only agent (`pr-review-toolkit:code-reviewer`, `coderails:spec-reviewer`, `coderails:source-auditor`) | Use an installed custom role with an explicit read-only `tools` allowlist; if none is available, report that the required tool boundary is unverified |
+| Inline prompt (no agent named) | `invoke_subagent` with `TypeName: "self"` for general work; `research` can help with investigation when a hard read-only boundary is not required |
 
-`TypeName: "research"` is the closest match to a read-only `tools:` list — use it
-for every reviewer/auditor agent so the read-only constraint is enforced by the
-runtime rather than only by the prompt text.
+An installed custom agent can declare a `tools` allowlist in its Markdown
+frontmatter. Inspect that list before a review that requires read-only
+tools. The built-in `research` type has no documented read-only guarantee;
+its name and prompt are not proof of a tool boundary.
 
 ### Prompt filling
 

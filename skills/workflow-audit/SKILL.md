@@ -18,11 +18,16 @@ Map the user's phrasing onto scan arguments before running anything:
 
 | User says | Args |
 |---|---|
-| "last N sessions" | `--last-sessions N` |
+| "last N sessions in this project" | `--project <slug> --last-sessions N` |
 | no scope given | `--all-projects --days 14` (default) |
 | "just this project" / a named project | `--project <slug>` |
 
 Corpus root is `WORKFLOW_AUDIT_ROOT` (default `~/.claude/projects`) — override only if the user names a different root.
+
+`--last-sessions N` selects up to N sessions **per project**. If the user
+asks for the last N sessions across all projects, the scanner cannot select
+that exact global set. State this limit and ask for a project scope. Do not
+present N-per-project results as the last N sessions overall.
 
 ## 2. Size sanity
 
