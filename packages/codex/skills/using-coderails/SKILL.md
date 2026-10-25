@@ -13,14 +13,17 @@ If a skill applies to the task, invoke it.
 
 ## Instruction Priority
 
-Follow this order when instructions conflict:
+Follow the runtime instruction hierarchy. A Coderails skill gives task
+guidance within that hierarchy:
 
-1. **User's explicit instructions** (`AGENTS.md` and direct requests) — highest priority
-2. **coderails skills** — override default system behavior where they conflict
-3. **Default system prompt** — lowest priority
+1. **System and developer instructions** — highest priority.
+2. **User instructions** — direct requests and applicable project files,
+   subject to higher-priority instructions.
+3. **Coderails skills** — follow them unless a higher-priority instruction
+   conflicts.
 
-For example, follow a user's `AGENTS.md` instruction to omit TDD when a
-skill asks for TDD.
+For example, follow an applicable `AGENTS.md` instruction to omit TDD when
+a skill asks for it, unless a higher-priority instruction requires TDD.
 
 ## How to Access Skills
 

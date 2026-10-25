@@ -6,6 +6,8 @@ description: Post a fail-closed, SHA-bound GitHub PR artifact from a completed r
 # Post review
 
 Create the durable review comment consumed by the Coderails merge gate.
+Set `SKILL_DIR` to the absolute directory containing this `SKILL.md`
+before running a package-local helper.
 
 ## Input gate
 

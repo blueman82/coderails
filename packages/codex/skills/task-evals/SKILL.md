@@ -189,7 +189,8 @@ At level 0, state why the exemption applies.
 At level 1 or 2, name the predicate that applies.
 Examples are "2 work-units, no irreversible surface" and "≥3 work-units".
 A blank justification is refused by `"$SKILL_DIR/../../scripts/post_evals.py" validate-structure` (check 2) at PR scope.
-At loop scope, the native agentic-loop orchestrator must reject a blank justification before completion; no loop hook supplies that check.
+At loop scope, `graph_artifacts.validate_evals` rejects a blank value at
+dispatch and completion. The Codex Stop guard calls graph verification.
 
 Verification level fields remain planning metadata for selecting an appropriate eval set.
 The trusted GitHub Actions workflow does not judge verification_level semantics.
@@ -353,20 +354,22 @@ Both `validate-structure` and `smoke-verify` use this check.
 A freeze-time `smoke` still accepts a non-zero `cmd` exit before the feature exists.
 When `fixtures` are present, `fixtures.formula` must be the literal tail of `cmd` (`fixture_formula_not_in_cmd`), so fixtures run against the real checker text.
 
-This file is the schema's only tracked copy.
+The Claude and Codex skill files both describe this eval format.
 The package-local `$SKILL_DIR/../../scripts/lib/eval_artifact.py` defines the marker and result format.
 `$SKILL_DIR/../../scripts/post_evals.py` validates structure, computes results, and checks fixture discrimination for `$coderails-codex:post-evals`.
 At loop scope, the native agentic-loop orchestrator must read and verify the artifact before reporting completion.
 
 ## Where evals.json lives
 
-- **Loop scope** → the task-specific scratch directory beside the native agentic loop's optional `progress.json`, outside the repo and never committed.
+- **Loop scope** → the state directory beside required `progress.json`,
+  outside the repo. `grade-loop` refuses a missing or invalid state file.
 - **PR scope** → the file is working material only. The durable artifact is the SHA-bound PR comment posted by `$SKILL_DIR/../../scripts/post_evals.py` (marker `<!-- coderails-eval-summary v1 pr=<N> head_sha=<SHA> result=<GO|NO-GO> verification_level=<0|1|2> -->`) — see the invocation contract below.
 
 ## Invocation contract
 
 The package-local `$SKILL_DIR/../../scripts/merge.py` reads the PR-scope artifact posted by `$coderails-codex:post-evals`.
-For loop scope, the native agentic-loop orchestrator reads the `evals.json` beside its optional `progress.json`; no custom loop hook is claimed.
+For loop scope, native graph validation reads `evals.json` beside required
+`progress.json`. The completion guard calls it; no eval-specific hook runs.
 
 This skill is invoked at four points:
 
