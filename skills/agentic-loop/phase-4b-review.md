@@ -12,7 +12,8 @@ Skill-based review, artifact, eval, and merge sequence below.
 
 After a `/workflow` agent pushes a PR and before merge, invoke the
 **`/pr-review-toolkit:review-pr <PR#>`** Skill with the PR number. It dispatches
-six specialised reviewers and a security pass. Use the Skill invocation. Do
+six specialised reviewers. Run the separate `/security-review` pass when the
+level rule below requires it. Use the Skill invocation. Do
 not spawn those reviewers yourself as separate `Agent` or `Task` calls.
 
 **Invoke `/pr-review-toolkit:review-pr <PR#>` with the PR number to satisfy the

@@ -48,12 +48,16 @@ project repo location, check each directory up to its git root for
 - `wiki_git_worktree` — whether to use git worktree/PR flow (`true`) or write directly
   (`false`). Default when absent: **`true`** (PR flow) — the fail-safe choice, since
   defaulting to direct-write would silently start committing straight to the vault for a
-  project that expected review.
+  project that expected review. If the key is present with `null` or any
+  value other than `true` or `false`, stop and report the invalid setting.
 - `wiki_git_bypass_flag` — env var to set when creating/merging PRs (e.g. `BYPASS_REVIEW=1`)
 - `wiki_git_pull_path` — path to `git pull` from after a human merges the ingest PR (this
   skill no longer merges or pulls itself — see Step 6). Default when absent: no pull path is
   suggested in Step 7's report.
 - `wiki_supervision` — `discuss` (default) or `autonomous`; see Step 3.
+
+If no config or no usable `wiki_path` resolves, stop and ask the user to run
+`/wiki-init`. The skill needs a vault path before it can read or write pages.
 
 **Example `.coderails/workflow.config.yaml` (team repo with PR flow):**
 ```yaml
@@ -69,7 +73,7 @@ wiki_path: ../my-project-wiki
 wiki_git_worktree: false
 wiki_supervision: autonomous   # opt into autonomous curation
 ```
-If no config file resolves, or it resolves but has no `wiki_supervision` key, or the key
+If the resolved config has no `wiki_supervision` key, or the key
 is set to anything other than `autonomous`, treat it as `discuss` — the field must be
 explicitly set to `autonomous` to skip Step 3's pause. Never infer autonomy from context,
 momentum, or a prior authorization earlier in the same turn.
@@ -107,7 +111,7 @@ WORKTREE_PATH="$vault"
 setting means. Do not add your own confirmation checkpoint before Step 6's commit either;
 `autonomous` covers the whole ingest, not just this step.
 
-**Otherwise (the default — `discuss`, the field absent, or no config file resolved):** before
+**Otherwise (the default — `discuss` or the field absent):** before
 writing anything, discuss
 with the user:
 - What are the key changes / main ideas?
@@ -126,11 +130,11 @@ Read `$vault/index.md`. Before adding content, check existing coverage. Curator 
 
 ### Step 5: Write/Update Pages
 
-1. **Source page** in `$vault/sources/` — YAML frontmatter (title, type, origin, date, tags), key takeaways, context, impact
-2. **Update affected pages** — concept, entity, service pages as needed. Update `last_updated` in frontmatter
-3. **Create new pages** if the source introduces something deserving its own page. Use `[[wiki-links]]`
-4. **Update `$vault/index.md`** — new entries, updated summaries, source table
-5. **Append to `$vault/log.md`**: `## [YYYY-MM-DD] ingest | <description>`
+1. **Source page** in `$WORKTREE_PATH/sources/` — YAML frontmatter (title, type, origin, date, tags), key takeaways, context, impact
+2. **Update affected pages** in `$WORKTREE_PATH` — concept, entity, service pages as needed. Update `last_updated` in frontmatter
+3. **Create new pages** in `$WORKTREE_PATH` if the source introduces something deserving its own page. Use `[[wiki-links]]`
+4. **Update `$WORKTREE_PATH/index.md`** — new entries, updated summaries, source table
+5. **Append to `$WORKTREE_PATH/log.md`**: `## [YYYY-MM-DD] ingest | <description>`
 
 Cross-reference aggressively with `[[wiki-links]]`. Flag contradictions: `> ⚠️ CONTRADICTION: <description>`.
 
@@ -142,7 +146,11 @@ cd "$WORKTREE_PATH"
 git add -A
 git commit -m "wiki: ingest <description>"
 git push -u origin "$BRANCH"
-${wiki_git_bypass_flag} gh pr create --title "wiki: ingest <description>" --body "Pages created/updated: <list>"
+if [ -n "$wiki_git_bypass_flag" ]; then
+  env "$wiki_git_bypass_flag" gh pr create --title "wiki: ingest <description>" --body "Pages created/updated: <list>"
+else
+  gh pr create --title "wiki: ingest <description>" --body "Pages created/updated: <list>"
+fi
 # STOP here. Do not merge the PR — not in interactive, autonomous, or
 # backgrounded/detached execution. wiki-ingest never merges its own PR: report
 # the PR URL/number back (Step 7) and end. A human, or an explicit separate
@@ -154,7 +162,7 @@ ${wiki_git_bypass_flag} gh pr create --title "wiki: ingest <description>" --body
 # Note: enforce_pr_workflow gates `gh pr create` only in a repo that has a
 # workflow.config.yaml (a wiki vault usually has none → no-op). When it does apply, the
 # satisfier is /coderails:push having run this session, or a settings.json Bash permission.
-# ${wiki_git_bypass_flag} is the wiki's own delivery bypass, separate from that hook.
+# The bypass flag belongs to wiki delivery; it does not satisfy the PR hook.
 ```
 
 **If `wiki_git_worktree` is `false`**:
