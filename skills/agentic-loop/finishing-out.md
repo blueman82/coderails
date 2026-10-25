@@ -56,28 +56,19 @@ remove`.** `git worktree remove` fails when run from inside the worktree being r
 `cd` to the main repo root FIRST, then remove — mandatory, not optional, when the loop's
 own cwd is inside the worktree being finished.
 
-**Caveat — a locked worktree splits into two cases that need opposite actions, and the
-cwd check takes precedence.** Step 6 checks lock state before removing. The operative
-test is executable directly: is the locked worktree path this session's own cwd? Nothing
-in this repo gives an agent its own harness session pid to compare against the lock's
-pid, so pid-naming is explanation, not the check to run.
+**Caveat — establish lock ownership before removal.** The shell's cwd
+does not prove who owns a worktree lock. Check the lock reason and whether
+this session created the worktree with `EnterWorktree`.
 
-- **The locked path is this session's own cwd** — NOT a defer case, even if the lock
-  reason also happens to name a pid. The lock exists because the harness locked the
-  worktree on the calling session's behalf, not because another session is using it. Use
-  the native `ExitWorktree` tool with `action: "remove"` (subject to the scope limit
-  above), which exits the session from the worktree and removes it in one step — `git
-  worktree remove` cannot do this from inside the worktree it's removing, and forcing the
-  git path would break the running session.
-- **The locked path is NOT this session's own cwd** — some other session is still
-  working in the worktree. Report and defer, never force, regardless of whether the
-  worktree is also this session's cwd for some other reason. A merged PR does not by
-  itself mean the worktree is safe to remove — forcing it out mid-loop would yank that
-  other session. This precedence holds even when the lock also happens to be reachable
-  from this session: a live pid naming a different session always wins over any other
-  fact about the worktree.
-
-Locked by a dead pid still means: clear the stale lock and remove, with a notice.
+- If a live lock names another session, report it and defer removal, even
+  when this session also uses the path.
+- If this session's `EnterWorktree` owns the locked path and no other live
+  owner is known, use `ExitWorktree` with `action: "remove"`. It can leave
+  the current worktree and remove it in one step.
+- If ownership is unclear, defer. Do not force removal based on cwd alone.
+- If the lock names a provably dead pid, clear that stale lock and remove
+  the worktree, with a notice. Use the main repo as the cwd for the git
+  fallback.
 
 **Caveat — the squash-merge safety check must use content identity, not ancestry.**
 `ExitWorktree` with `action: "remove"` refuses when the worktree has uncommitted files or
@@ -90,8 +81,13 @@ forever, even though their content already landed. Checking ancestry after a squ
 reproduces the exact failure this caveat exists to prevent: the agent can never pass
 `discard_changes: true`, so it defers forever on work that is genuinely done.
 
-Confirm the content actually merged instead: `git diff origin/main HEAD` shows no
-differences (the worktree's content is already present on `origin/main`, byte for byte —
-squash preserves content identity even though it discards ancestry) AND the PR reports
-`state: MERGED` (`gh pr view <n> --json state`). Only pass `discard_changes: true` once
-both hold. Never pass `discard_changes: true` on a refusal you haven't verified this way.
+Confirm that the PR reports `state: MERGED` and read its `mergeCommit` with
+`gh pr view <n> --json state,mergeCommit`. Compare the branch's patch from
+its merge base with the merged commit's patch, using the PR's changed paths.
+Confirm that each branch change landed in that commit or is present on
+current `origin/main`. Check any different hunk before deciding to discard.
+An empty `git diff origin/main HEAD` is sufficient when main has not gained
+other changes, but it is not required: another PR can advance main after
+the squash. Only pass `discard_changes: true` when the merged PR and the
+patch check account for all branch work. Do not discard on an unverified
+refusal.

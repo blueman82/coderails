@@ -1,8 +1,9 @@
 # Agentic loop — setup phases (-2 through 2.7)
 
-Everything before routing and delegation: starting `progress.json` via `graph.py start`, sharpening the
-authorising prompt, reading the envelope, pre-flight checks, resolving design forks
-and disposition, and committing the design to `spec.md`/`plan.md`.
+This file covers setup before worker routing. Start `progress.json` with
+`graph.py start`. Then clarify the prompt, read the authority envelope, run
+pre-flight checks, resolve design and disposition, and write `spec.md` and
+`plan.md` when required.
 
 Read this in full at loop start. Phase 2.8 onward lives in SKILL.md.
 
@@ -24,7 +25,14 @@ Before Phase -1 — before anything else — create the loop's durable state wit
 
 > `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"`
 
-If `${CLAUDE_PLUGIN_ROOT}` is not set, do **not** guess the path: proceed without `start`; the `loop_state_guard` hook blocks once and hands you the exact path. Put the authorising prompt, verbatim, in a file, then run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<unique non-blank id>" --prompt-file "$PROMPT_FILE"`. It writes the schema-v3 state atomically (`in-progress`, revision 1, empty graph), treats a repeat of the same loop id as a no-op, re-arms a completed loop (carrying `completed_marker` forward and dropping the finished loop's `loop_stop_counts`), and refuses with a `[reason_code=...]` when an unfinished loop already owns the session: resume it instead.
+If `${CLAUDE_PLUGIN_ROOT}` is not set, do **not** guess the path. Proceed without `start`. The `loop_state_guard`
+hook blocks once and gives you the exact path. Put the authorising prompt, verbatim, in a file. Then run
+`python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<unique non-blank id>" --prompt-file "$PROMPT_FILE"`.
+
+`start` writes schema-v3 state atomically with `in-progress` status, revision 1 and an empty graph. A repeat with
+the same loop id is a no-op. A completed loop is re-armed: the command carries `completed_marker` forward and
+drops the prior loop's `loop_stop_counts`. If an unfinished loop already owns the session, the command refuses with
+a `[reason_code=...]`. Resume that loop instead.
 
 Then register every work unit with `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" add-unit "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<same id>" --unit N [--depends-on M ...] [--join] [--manifest GLOB ...]`. It adds the work unit, its `U3[N]` node, the dependency edges and, with `--join`, the `J12-all-units` input in one locked write. `--manifest` (repeatable) records the globs the unit may touch as `unit.manifest`, which `scripts/diff_manifest.py --progress ... --unit N` compares with the diff. Never edit `progress.json` by hand for either step.
 
@@ -80,7 +88,9 @@ On **C**: proceed with the original prompt unchanged; Phase 0 reads it verbatim.
 
 On adopting an improved envelope (outcome **A** or **B**), update `progress.json.authorising_prompt_raw` to the adopted text so the field stays the canonical post-Phase-0 envelope. Outcome **C** needs no update — `graph.py start` at Phase -2 already wrote the original prompt verbatim.
 
-The improved-and-approved prompt (or the original, if C was chosen; or the auto-adopted improved prompt, in a full-autonomous envelope) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
+The improved and approved prompt is the Phase 0 authorisation envelope. Use
+the original if the user selected C, or the auto-adopted prompt in a fully
+autonomous envelope. Quote the selected prompt in the Phase 0 summary.
 
 ### `S0` — Phase 0: Read the authorisation envelope
 
@@ -88,23 +98,25 @@ Before doing anything, ask: what did the user actually authorise?
 
 The envelope is the standing instruction. Read it once at the start of the loop and keep it in mind.
 
-Before responding to the first user message in an authorised loop, do this in a `<thinking>` block (this is the one place in the skill where the slow-down pass is worth the ceremony — misreading the envelope is the root of most over-asking):
+Before responding to the first user message in an authorised loop, make a
+short envelope summary for the user. Do not expose private reasoning. Include
+these facts:
 
-```
-<thinking>
-- Verbatim quote of the user's authorising language: "..."
-- Envelope class: full-autonomous / narrow-fix / diagnostic-only / ambiguous
-- 3 sub-actions INSIDE the envelope: ...
-- 3 sub-actions OUTSIDE the envelope (would require fresh ask): ...
-- Stop conditions specific to this envelope: ...
-- Clean-break auto-demote authority explicitly granted? yes/no — if yes, quote the exact clause naming it (not inferred from a general full-autonomous classification)
-</thinking>
-```
+- The user's authorising words, quoted exactly.
+- Envelope class: full-autonomous, narrow-fix, diagnostic-only, or ambiguous.
+- Three actions within the envelope and three that need new authority.
+- Stop conditions that apply to this envelope.
+- Whether the user explicitly granted clean-break auto-demote authority. If
+  so, quote the clause that grants it.
 
 Then respond.
 
 **Envelope examples:**
-- "Ship N PRs without asking" → full-autonomous. Includes deploys, post-deploy cleanup, follow-up tickets within the same theme. Merges are included only up to the live authority's `max_prs` and each needs an owner-signed receipt (the envelope class never mints either: `authority.py grant --max-prs N` plus `action_receipt_cli.py approve-action`). With no authority, or `max_prs` 0, the loop prepares the PR and asks the owner to mint a receipt.
+- "Ship N PRs without asking" → full-autonomous. Includes deploys,
+  post-deploy cleanup, and related follow-up tickets. If a live authority sets
+  `max_prs`, do not exceed it. If `action_authority: enforce` is configured,
+  obtain the required signed receipt before a guarded merge. The phrase alone
+  creates neither authority nor a receipt.
 - "Fix this bug" → narrow-fix. Confirm before scope creep into adjacent files.
 - "Crack on / human is dead" → full-autonomous. All routine sub-steps autonomous; only break the loop on verification failure, destructive/irreversible actions, or a merge/push-to-main the authority and receipt gate refuses (`authority_denied`, `max_prs_exceeded`, `no_receipt`).
 - "Help me debug" → diagnostic-only. Do not write code without explicit go-ahead.
@@ -117,11 +129,15 @@ Match the confirmation cadence to the envelope class for the rest of the session
 
 ### `S0.5` — Phase 0.5: Orchestrator operating rules (the conductor obeys its own rules)
 
-The orchestrator (main context) is subject to the same discipline it imposes on workers. Inside an active, incomplete loop, the two discipline Stop hooks — confidence-label and verify-loop — demote a would-be block to a model-visible warn (`additionalContext` on the Stop event) rather than stopping the turn outright; the discipline itself hasn't changed, the warn is the correction signal the orchestrator acts on next turn. Outside an active loop, and for worker output (SubagentStop), both hooks still block outright. Even at warn-level, a missed warn is still a cost — it's the cost this skill exists to keep to a minimum, just paid as a drifted transcript instead of a forced regeneration.
+The orchestrator follows the same writing rules as workers. The confidence
+label and verify-loop Stop hooks are advisory in and out of a loop. They emit
+`additionalContext` when they find a problem and do not block Stop or
+SubagentStop. Correct the reported problem in the next turn.
 
 Main context must, in its own output (not just in spawned-agent prompts):
 - Confidence-label every substantive status claim — `(verified)` / `(inferred)` / `(guess)` (same taxonomy as Phase 11).
-- Pre-tag any `## Did Not Verify` bullet that genuinely can't be checked, in the same turn it's written — an untagged bullet blocks the stop outside a loop and for workers, and is the first thing the in-loop warn will name.
+- Tag each `## Did Not Verify` bullet that cannot be checked in the same
+  turn. The advisory hook flags an untagged bullet.
 - Never narrate a claim about an artifact (PR merged, deploy live) without having run the check this turn (Phase 12).
 - Before ending any stopping turn inside an active loop, run `graph.py stop --category <hard-stop|approval-gate|awaiting-input|complete> --reason-code <code> --reason "<why>" <state> --session <id>` in the SAME turn — the hook releases only on that recorded row and blocks with `stop_row_missing` otherwise. Then end the turn with the rendering line `LOOP-STOP: <category> — <reason>` as the FINAL line, emitted together with the confidence-label and Did-Not-Verify requirements above: the final line is a rendering that hooks never read. Bundling all three matters more, not less, in the warn era: the confidence-label and verify-loop hooks no longer block the orchestrator's in-loop Stop turns, so nothing else forces those labels and DNV tags into the transcript — the bundle is what keeps them present for post-hoc audit, and one composed ending beats clearing one stop hook only to trip another (`loop_stall_guard` still blocks). Declaring `complete` means the loop is done: also set `progress.json` `status: "complete"` and run the Phase 13 teardown. The recorded row is all that's required — `loop_stop_counts` is HOOK-OWNED: the `loop_stall_guard` hook itself increments the matching category when it consumes the row; never write or compute this field yourself.
 

@@ -15,12 +15,15 @@ paths: "**/*.go"
 ## Go Idioms (MANDATORY)
 
 ### Interface & Struct Patterns
-- **Accept interfaces, return structs** — Functions should accept interface parameters for flexibility, return concrete struct types for clarity
+- **Use small interfaces at the consumer** when callers need more than one
+  implementation. Accept a concrete type when no substitution is needed.
+  Return a concrete type when it keeps useful methods available.
 - **Package-level organization** — No class-level thinking; organize by package responsibility
 
 ### Error Handling
 - **Errors are values** — Handle them or return them, never ignore with `_ =`
-- **Wrap errors with context** — Use `fmt.Errorf("context: %w", err)` for stack traces
+- **Wrap errors with context** — `fmt.Errorf("context: %w", err)` preserves
+  error identity for `errors.Is` and `errors.As`; it does not add a stack trace.
 - **Early returns** — Check errors immediately, return early
 
 ### Testing
@@ -42,14 +45,15 @@ paths: "**/*.go"
 | Error wrapping | `return err` | `return fmt.Errorf("context: %w", err)` |
 | No empty structs | `Type{}` without purpose | Remove or use `var t Type` |
 | No unused vars | `_ = validateInput(data)` | `if err := validateInput(data); err != nil { ... }` |
-| Named returns | `func() (int, error)` | `func() (count int, err error)` for docs |
+| Named returns | Unnamed results | Name results only when the names clarify the API or a deferred function must update one. |
 | No TODO comments | `// TODO: fix later` | Fix now or remove |
 
 ---
 
 ## Imperative → Idiomatic Patterns (MANDATORY)
 
-Go is intentionally imperative — no map/filter/reduce. Instead, enforce Go-specific idioms that reduce verbosity and improve clarity.
+Go uses loops instead of map, filter, and reduce. Apply Go idioms that make
+the code shorter and clearer.
 
 ### Loop Anti-Patterns
 
@@ -59,12 +63,12 @@ Go is intentionally imperative — no map/filter/reduce. Instead, enforce Go-spe
 | Manual string building in loop | `strings.Builder` or `strings.Join` | `s += item + ","` → `b.WriteString(item)` |
 | Append without pre-allocation | `make([]T, 0, len(src))` when size known | `var result []T` → `result := make([]T, 0, len(src))` |
 | Manual map building without size | `make(map[K]V, len(src))` when size known | `m := map[K]V{}` → `m := make(map[K]V, len(src))` |
-| Manual contains check on slice | `map[T]bool` or `map[T]struct{}` lookup | `for _, v := range items { if v == target }` → `if lookup[target]` |
-| Range over index only | Use `_` or range value directly | `for i := range items { items[i].X }` → `for _, item := range items { item.X }` |
-| Manual reverse iteration | `slices.Reverse` (1.21+) or reverse index | `for i := len(s)-1; i >= 0; i--` → `slices.Reverse(s)` |
+| Repeated contains checks on the same slice | Build a set once when many lookups justify it | Keep a direct loop or use `slices.Contains` for one check. Build `lookup` before reading `lookup[target]`. |
+| Range over index only | Use a range value when a copy is sufficient | Keep `for i := range items` when assigning through `items[i]` or taking its address. |
+| Manual reverse iteration | Reverse index when the slice must stay unchanged | `slices.Reverse(s)` mutates the slice; use it only when that mutation is intended. |
 | Manual min/max in loop | `min()`/`max()` builtins (1.21+) | `if x < current { current = x }` → `current = min(current, x)` |
 | Manual slice contains | `slices.Contains` (1.21+) | `for _, v := range s { if v == target }` → `slices.Contains(s, target)` |
-| Manual sort + unique | `slices.Sort` + `slices.Compact` (1.21+) | Manual dedup loop → `slices.Sort(s); slices.Compact(s)` |
+| Manual sort + unique | `slices.Sort` + `slices.Compact` (1.21+) only when changing order is allowed | Keep a stable-order dedup loop when original order matters. |
 
 ### Conditional Anti-Patterns
 
@@ -84,8 +88,8 @@ Go is intentionally imperative — no map/filter/reduce. Instead, enforce Go-spe
 | Manual goroutine + WaitGroup | `errgroup.Group` (handles errors + waiting) |
 | Manual channel collect | `errgroup` or pipeline pattern |
 | Unbounded goroutine spawn | Worker pool with semaphore channel |
-| Manual mutex map | `sync.Map` (for append-heavy, read-many patterns) |
-| Select without `default` or timeout | Add `context.Context` deadline or `default` |
+| Manual mutex map | `sync.Map` when keys are written once then read many times, or goroutines use disjoint keys; otherwise use a typed map with a mutex |
+| Select that must stop waiting | Use a `context.Context` deadline; do not add `default` to a blocking wait without a behavior reason |
 | Channel for single value | Direct return or callback |
 
 ### Stdlib Shortcuts
@@ -176,10 +180,8 @@ func summarize(groups [][]string) string {
     foundSpecial := false
     for _, group := range groups {
         for _, item := range group {
-            if b.Len() > 0 {
-                b.WriteString(", ")
-            }
             b.WriteString(item)
+            b.WriteString(", ")
             if !foundSpecial && strings.Contains(item, "!") {
                 foundSpecial = true
             }
@@ -227,40 +229,15 @@ func TestProcessData(t *testing.T) {
 
 ---
 
-## Interface Pattern Template
-
-```go
-// Accept interface
-type DataProcessor interface {
-    Process(ctx context.Context, data []byte) (Result, error)
-}
-
-// Return struct
-type processor struct {
-    timeout time.Duration
-    logger  Logger
-}
-
-func NewProcessor(timeout time.Duration, logger Logger) *processor {
-    return &processor{timeout: timeout, logger: logger}
-}
-
-func (p *processor) Process(ctx context.Context, data []byte) (Result, error) {
-    // implementation
-}
-```
-
----
-
 ## Checklist
 
 Before completing Go code changes:
 
 - [ ] All errors handled or returned (no `_ =`)
-- [ ] Errors wrapped with `fmt.Errorf("context: %w", err)`
+- [ ] Errors wrapped with context when the caller needs cause inspection
 - [ ] Early returns used (no nested if/else)
-- [ ] Functions accept interfaces where appropriate
-- [ ] Functions return concrete structs
+- [ ] Small interfaces defined at consumers only when substitution is needed
+- [ ] Concrete return types preserve useful methods where appropriate
 - [ ] Tests are table-driven with subtests
 - [ ] No TODO comments
 - [ ] No empty structs without purpose
@@ -268,7 +245,7 @@ Before completing Go code changes:
 - [ ] `strings.Builder`/`strings.Join` over `+=` in loops
 - [ ] Pre-allocate slices/maps when size is known
 - [ ] `map[T]bool` or `slices.Contains` over manual contains loops
-- [ ] `errgroup.Group` over manual goroutine + WaitGroup
+- [ ] Use `errgroup.Group` only when error collection justifies the dependency
 - [ ] Type switch over repeated type assertions
 - [ ] Map dispatch over long switch/if-else chains (5+)
 - [ ] Guard clauses over nested conditionals 3+ deep

@@ -1,21 +1,20 @@
 # Teardown write contract — `retro.json` and standing-orders
 
-Detail-carrier for Phase 13's teardown. The main skill keeps the imperative (run the five steps in
-order, before the `complete` declaration); this file is the field spec and the mechanics you
-consult **while writing the retro**.
+This file gives the Phase 13 teardown steps and `retro.json` fields. Run all
+five steps in order before you declare `complete`.
 
-`loop_stall_guard` blocks a `complete` declaration when `retro.json` is absent, malformed, or
-below `schema_version` 1 (the hook accepts `schema_version >= 1`, forward-compatible with the cost
-fields added at 2) — so the retro must be written before the declaration. It separately blocks
-when a sibling `proof.json` exists but any of its frozen proofs is unexecuted-in-transcript or
-last-failed — so every proof cmd must be run, in the foreground, in the orchestrator's own
-session, before the declaration too (Step 1 below).
+`loop_stall_guard` blocks `complete` if `retro.json` is absent, malformed, or
+has `schema_version` below 1. Version 2 adds cost fields. The guard also
+blocks if a sibling `proof.json` has a proof that did not run in this session
+or whose last run failed. Run each proof command in the foreground before you
+declare `complete`.
 
-Before assembling the retro, run `graph.py flush-decisions <progress.json> --session <id>` through the
-current provider's graph CLI. If it returns 3, record the named Muninn degradation or uncertain
-sync and preserve the local decision rows; reconcile `decision_sync_unknown` against the store
-before any manual retry. If it returns 2, stop and inspect the chain. Copy the resulting
-`decisions_absorbed` rows verbatim into the retro.
+Before you assemble the retro, run `graph.py flush-decisions <progress.json>
+--session <id>` through the current provider's graph CLI. On exit 3, record
+the Muninn degradation or uncertain sync. Preserve local decision rows.
+Check `decision_sync_unknown` against the store before a manual retry. On exit
+2, stop and inspect the chain. Copy the resulting `decisions_absorbed` rows
+verbatim into the retro.
 
 **Graph dispatch boundary.** `S13-proof`, `S13-retro`, and `S13-complete` deliberately have no
 entry in the Claude role map, so the native graph CLI `plan` command reports them as `unresolved:true`. These are orchestrator actions. Keep them in the phase/artifact record; do not create fake worker-completed graph nodes for them. An actual graph dispatch requires a resolved instruction source and native worker evidence.
@@ -32,23 +31,44 @@ entry in the Claude role map, so the native graph CLI `plan` command reports the
 
 ## The Phase 13 self-audit report
 
-The orchestrator audits its own autonomy from the `progress.json` counters and reports raw,
-unscored facts — no numeric pass/fail scorecard, no "target: approaching zero" framing. The human
-is the only party positioned to judge "should I have been asked about that?"; hand them the raw
-list rather than have the process pre-grade itself. A clean-looking scorecard is more dangerous
-than an honest unscored list because it is more likely to be trusted uncritically.
+Read the autonomy counters in `progress.json`. Report the facts without a
+score or target. The user judges whether the loop should have asked for
+approval. Do not pre-grade that decision.
 
 **The two core facts:**
 
-- **`LOOP-STOP` category counts, broken down by type** — the per-category counts of this loop's recorded stops (`progress.json` `loop_stop_counts`: `hard-stop`, `approval-gate`, `awaiting-input`, `complete`). HOOK-OWNED — the `loop_stall_guard` hook increments it when it consumes a valid `progress.json` `stops[]` row. Read it as-is; do not compute or edit it. Report the raw breakdown with no verdict attached.
-- **Decisions absorbed** — a flat, unscored list of in-scope decisions the loop made autonomously without asking (e.g. a Phase 2.5 design-fork auto-adopted, a Phase 2.6 disposition defaulted to clean-break, a Phase 2.8 routing assignment set, a Phase 5 disconfirm-skip, a Phase 6 in-scope action taken without a check-in). No self-justification text per entry, no automated "this looks calibrated" stamp — just what was decided and where (phase/work-unit). COPIED VERBATIM from `progress.json`'s `decisions_absorbed` array, chronological (oldest first) — never reconstructed from conversation memory, which is exactly the kind of after-the-fact self-report this phase exists to avoid.
+- **`LOOP-STOP` counts.** Report `loop_stop_counts` from `progress.json` by
+  category: `hard-stop`, `approval-gate`, `awaiting-input`, and `complete`.
+  `loop_stall_guard` owns this field and increments it when it consumes a
+  valid `stops[]` row. Read it as stored. Do not compute or edit it. Do not
+  attach a verdict.
+- **Decisions absorbed.** Copy `progress.json.decisions_absorbed` verbatim,
+  oldest first. Include the phase and work unit for each decision. Examples
+  include an adopted design, a disposition, a routing choice, or a skipped
+  disconfirm check. Do not reconstruct the list from memory, justify each
+  choice, or give the list a score.
 
 **Also report, unscored:**
 
 - **Artifacts produced** — PRs merged, deploys done, each with the verifying check (Phase 12), not the agent's claim.
-- **Loop cost** — the per-model token + dated-USD breakdown mined into `retro.json`'s `cost` field, printed to the human WITH a price-staleness age: "prices as of `<cost.prices_as_of>`, N days old". This is a human-facing report deliverable, not just a stored artifact. `loop_stall_guard`'s cost reporter now prints it mechanically via `systemMessage` on every `complete` declaration, the same way `check_verify_loop.py` mechanically enforces the CLAUDE.md DNV rule — but the prose obligation below is still the floor, not something the hook replaces: the hook reports `retro.cost` verbatim (silent on a legacy pre-cost-miner retro, and never blocking on a miner failure), it does not relieve the orchestrator of assembling and writing that field correctly in the first place. The price table (`hooks/scripts/lib/model_prices.json`) is HAND-MAINTAINED — there is no pricing API, so nothing auto-updates it. Past `ALS_PRICE_STALE_DAYS` (14) days old, the reporter also nags a human to go check the rates; the nag verifies the DATE only, never the rates themselves, since staleness of a self-reported date can't prove the rates are wrong.
-- **Disposition violations** — work-units where `clean-break` was recorded in `progress.json` but a shim/compat path shipped anyway (caught at the Phase 4b gate, or by the human afterward). Audit as a diff between the `progress.json` disposition record and the merged artifact. Critically, distinguish **"0 violations"** from **"no disposition record found"**: the latter is an **audit failure** — the record was not maintained — not a pass, otherwise the report reads "clean" when the record was simply absent. Separately, surface any `preserve-compat` unit whose `removal_ticket` is still **open at loop end** as a compat-debt drift signal, so deferred removals cannot silently rot.
-- **Loop-scope eval result** — graded via `post_evals.py grade-loop` (never hand-written into `evals.json`), the loop's final `evals.json` `result` (`GO`/`NO-GO`/a verification_level-0-exemption-with-justification), reported unscored, plus any `amendments` entries (post-freeze eval edits with recorded reasons). An amendment made after a grader verdict must carry its fresh re-grade (`regraded_by` recorded; `grade-loop` refuses otherwise): a verdict flipped by an orchestrator-written status is an audit failure, not a pass. **"No `evals.json` record found" for a ≥1-work-unit loop is an audit failure, not a pass** — distinguish it from a genuine `GO` the same way "0 disposition violations" is distinguished from "no disposition record found".
+- **Loop cost.** Report tokens and dated USD estimates by model from
+  `retro.cost`. Tell the user: "prices as of `<cost.prices_as_of>`, N days
+  old". `loop_stall_guard` also prints this field on `complete`, but it does
+  not create or check the field. A miner failure does not block completion.
+  The price table in `hooks/scripts/lib/model_prices.json` needs manual
+  updates. After `ALS_PRICE_STALE_DAYS` (14), the hook asks the user to
+  check its rates. It checks the date, not the price values.
+- **Disposition violations.** Compare each `clean-break` decision in
+  `progress.json` with the merged code. Report any old path that still runs.
+  Say "0 violations" only if a disposition record exists and the check found
+  none. If no record exists, report an audit failure. Also report each
+  `preserve-compat` unit with an open `removal_ticket` at loop end.
+- **Loop eval result.** Run `post_evals.py grade-loop`. Report the
+  `evals.json` result (`GO`, `NO-GO`, or a justified verification_level-0
+  exemption) and all amendments without a score. An amendment after a
+  verdict needs a new grade with `regraded_by`; `grade-loop` refuses it
+  otherwise. A missing `evals.json` in a loop with at least one work unit
+  is an audit failure. Do not write the result by hand.
 
 ## Step 1 — Run every `proof.json` cmd
 
@@ -86,12 +106,13 @@ retro records what happened, it does not grade it.
 
 ## Cost-mining sub-step
 
-Same step 1, after assembling the fields above. Run `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_cost.py" <session_id>`. It enumerates this loop's transcripts (the orchestrator's own
-`~/.claude/projects/<slug>/<sid>.jsonl` plus every worker transcript under
-`<proj>/<sid>/subagents/`, recursively), dedupes by `message.id` so a transcript read twice isn't
-double-counted, sums per-model token usage, prices it from a dated price table, and returns a
-single object carrying `prices_as_of`, `per_model`, `total_tokens`, `total_usd_estimate`, and
-`models_used` all as siblings.
+After you assemble the fields above, run `python3
+"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_cost.py" <session_id>`. It reads
+the orchestrator transcript at `~/.claude/projects/<slug>/<sid>.jsonl` and
+worker transcripts under `<proj>/<sid>/subagents/`. It removes duplicate
+`message.id` entries, sums tokens by model, and uses a dated price table.
+The result has `prices_as_of`, `per_model`, `total_tokens`,
+`total_usd_estimate`, and `models_used` fields.
 
 **Fold-in is a split, not a copy.** Write the miner's returned object as `retro.cost` (its own
 nested `schema_version` 1, independent of the retro's), then lift its `models_used` array OUT to
@@ -99,17 +120,14 @@ nested `schema_version` 1, independent of the retro's), then lift its `models_us
 inside `cost`. This split is what bumps the retro's own `schema_version` to 2; the
 `cost`/`models_used` fields don't exist under `schema_version` 1.
 
-**Fail-open.** The miner never blocks teardown — on any environmental error (missing/invalid
-price file) it returns `{}`, so both `retro.cost` and `retro.models_used` end up empty and a
-`complete` declaration proceeds exactly as it would with populated values. `loop_stall_guard`
-checks the retro's presence and `schema_version`, never the cost field's correctness, so a miner
-failure cannot stall a loop. There are two CALLER-error paths — invoking the miner with no session
-id, or with a session id that resolves to no transcript anywhere under the projects dir — each
-returning a self-describing `{"error":...,"hint":...}` object on stdout instead of `{}` (see the
-lib's own header comment). Both can happen even when this sub-step believes it has `<session_id>`
-in hand — a stale or wrong id is easier to pass than no id at all. Read the miner's output and, if
-`.error` is present, record the error text in the retro rather than treating it as a normal empty
-cost.
+**A cost-miner failure does not block teardown.** An environmental error, such
+as a missing or invalid price file, returns `{}`. Leave `retro.cost` and
+`retro.models_used` empty. `loop_stall_guard` checks the retro's presence and
+schema version, not its cost fields.
+
+A missing session ID or an ID with no transcript returns an object with
+`error` and `hint` fields. Read the output. If `.error` is present, record the
+error text in the retro. Do not treat it as a normal empty cost.
 
 ## Pricing is computed once and frozen
 
@@ -124,23 +142,33 @@ number at teardown is the number.
 
 Standing orders are typed records in `<repo-key dir>/orders.json` (the grandparent of the `progress.json` path), changed
 only by `scripts/lib/orders.py`; `standing-orders.md` and `standing-orders-decayed.md` are generated, read-only views.
-Never write those files by hand (`render` refuses an unmarked file with `handwritten_protected`). Run, in order, from the
-orchestrator session (`O="python3 ${CLAUDE_PLUGIN_ROOT}/scripts/lib/orders.py --dir <repo-key dir> --session <session_id>"`).
+Never write those files by hand (`render` refuses an unmarked file with `handwritten_protected`).
+For each manual subcommand, use the full prefix:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/orders.py" --dir "<repo-key dir>" --session "<session_id>" <subcommand>
+```
+
+Run the steps below in order from the orchestrator session.
 Pass the separate logical `loop_id` copied from owned `progress.json`; it is not the session directory name.
 
-1. For each failure mode in this loop's retro, `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop <loop_id> --quote "<verbatim words of the owner's own prompt, 12-300 chars>"`. Add `--scope agnostic` for a lesson that applies
-   to any repo. Before completion this stages the observation and any cited sync; it changes no lifecycle counters.
-   An id must name the same failure mode and scope. A claim over 500 collapsed characters is refused, never truncated.
-2. After final progress updates, the native completion command runs `$O prepare --loop <loop_id>`. It validates the
+1. For each failure mode in the retro, run the `record` subcommand with the
+   prefix above. Pass `--failure-mode`, `--lesson`, `--loop`, and `--quote`.
+   The quote must contain 12–300 verbatim characters from the owner's prompt.
+   Use `--scope agnostic` for a lesson that applies to any repo. This stages
+   the observation before completion; it does not change lifecycle counts.
+   An ID must identify the same failure mode and scope. The command refuses
+   a claim over 500 collapsed characters.
+2. After final progress updates, the native completion command runs `orders.py prepare --loop <loop_id>`. It validates the
    owned eligible graph and work units, binds the source directory, session, logical loop, revision and progress hash,
    and records `orders_prepared`. This also runs when the retro has no failure mode. Prospective eligibility authorizes
    preparation only.
    A changed source is refused by default. For a legitimate incomplete-source retry, pass
-   `$O prepare --loop <loop_id> --refresh-from-sha256 <CURRENT evidence_sha256>` using the canonical hash returned by
+   `orders.py prepare --loop <loop_id> --refresh-from-sha256 <CURRENT evidence_sha256>` using the canonical hash returned by
    the current preparation. It preserves staged records, refuses rollback/foreign/already-applied sources, and has
    no lifecycle effect. A saved replacement whose receipt failed needs ordinary unchanged `prepare` to repair it.
    Flush and reload pending source updates before final preparation. Never refresh after durable completion.
-3. After native completion is durably saved, that command runs `$O tick --loop <loop_id>` and `$O render --loop
+3. After native completion is durably saved, that command runs `orders.py tick --loop <loop_id>` and `orders.py render --loop
    <loop_id>`. It applies staged recurrences and ages every unmatched active order once. A new completed session+loop
    recurrence resets the counter and revives a tombstone; replay does neither. At **K=5** an order becomes `decayed`,
    **never deleted**. A decayed order appears only in `standing-orders-decayed.md`.
@@ -155,7 +183,7 @@ An old complete loop without D4 receipts needs explicit reviewed legacy admissio
 runbook. Admission checks the exact file hash, then permits completion bookkeeping while binding the graph source.
 It does not age orders. New loops cannot use it.
 
-The graduation predicate and the promotion selection are `$O predicate` and `lessons.py predicate`. This step is
+The graduation predicate and the promotion selection are `orders.py predicate` and `lessons.py predicate`. This step is
 additive-or-recurrence-only: no metric-based removal anywhere.
 
 **Typed lessons (Muninn authoritative).** The cited claim of each order lives in Muninn as a `lesson` tagged `order` and
@@ -163,10 +191,10 @@ additive-or-recurrence-only: no metric-based removal anywhere.
 Current claims are reconciled even for degraded/pending local rows; a failed lookup retains a prior K-id and reports
 degradation. The cite must anchor in a user prompt (`--quote`): with none, the staged or completed local row has
 `muninn.state=degraded` and reason `no_user_cite`, exit 3, and
-`$O cite <id> --quote "<owner's words>"` attaches it later. Exit 3 prints `{"muninn": {... "reason_code": ...}}`:
+`orders.py cite <id> --quote "<owner's words>"` attaches it later. Exit 3 prints `{"muninn": {... "reason_code": ...}}`:
 **report that reason code in the retro; never skip it silently and never write the lesson to Markdown instead.**
 `memory.backend: off` (reason `memory_backend_off`, exit 0) is the only explicit opt-out. A first-time adoption of an old
-hand-written file is `$O import-legacy` (it archives a byte copy and retains the original). Verify the archive and
+hand-written file is `orders.py import-legacy` (it archives a byte copy and retains the original). Verify the archive and
 ledger, then retire the hand-written source before generating `standing-orders.md`. Runbook:
 `docs/RUNBOOK.md`, "Standing order stored without a cite"; decision records:
 `docs/decisions/2026-10-05-memory-authoritative.md`, `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.

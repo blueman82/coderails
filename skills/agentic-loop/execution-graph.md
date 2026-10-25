@@ -44,8 +44,10 @@ non-terminal predecessor), `node_unknown` (the node is not in the graph),
 code as a different next step, never as one undifferentiated "blocked". Conversely, a node with no recorded incoming edges is vacuously
 `ready` — register the candidate's node and edges before querying, not after.
 Run ready independent nodes in one wave, but preserve every listed dependency.
-The orchestrator is the only writer of `progress.json`: collect a wave's results, then do one
-read-modify-write before releasing its join. Inside an authorised loop, the
+The orchestrator alone calls the graph commands that change `progress.json`.
+Collect a wave's results, then call `record-wave` once. The CLI locks, checks,
+and writes the state before it releases the join. Never hand-edit the file.
+Inside an authorised loop, the
 `U*` lane below repeats per work-unit.
 
 **Resolving and recording a wave — the native Python CLI.** Use

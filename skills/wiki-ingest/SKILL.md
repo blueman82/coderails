@@ -22,7 +22,19 @@ that and stop rather than guessing which artifact to record.
 
 ### Step 0: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root (same pattern as `config_path` in `scripts/lib/config.py`) — a fork's cwd may be a subdirectory of the project repo. If no `AGENTS.md` is found by the git root, tell the user to run `/wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.coderails/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
+The project's `CLAUDE.md` loads the Git root's `AGENTS.md` at session start.
+Read its wiki schema section. Another project can link to a separate
+`AGENTS-wiki-schema.md` file. Coderails keeps its schema in `AGENTS.md` and
+its live page types in `wiki.schema.json`.
+
+If `AGENTS.md` is not in context, walk from the current directory to the Git
+root. Check each level for `AGENTS.md`. Use the same walk-up pattern as
+`config_path` in `scripts/lib/config.py`. A fork can start in a project
+subdirectory. If you do not find the file, tell the user to run `/wiki-init`.
+
+The wiki vault is a separate repo, for example `../coderails-wiki`. The
+project's `.coderails/workflow.config.yaml` points to the vault. Do not look
+for `AGENTS.md` in the vault. A fork can run outside the vault.
 
 The git/vault/supervision settings below are **not** read from AGENTS.md — they are flat
 keys in that same project's `.coderails/workflow.config.yaml` (the repo the source being
@@ -31,17 +43,21 @@ walk-up pattern as `config_path` in `scripts/lib/config.py`: starting from the
 project repo location, check each directory up to its git root for
 `.coderails/workflow.config.yaml`; the first one found wins.
 
-- `wiki_path` — the wiki vault path; resolved relative to the directory containing that
-  `workflow.config.yaml` unless already absolute. Referred to as `vault` below.
+- `wiki_path` — the wiki vault path. Resolve a relative path from the project
+  repo root. Use an absolute path as given. This is `vault` below.
 - `wiki_git_worktree` — whether to use git worktree/PR flow (`true`) or write directly
   (`false`). Default when absent: **`true`** (PR flow) — the fail-safe choice, since
   defaulting to direct-write would silently start committing straight to the vault for a
-  project that expected review.
+  project that expected review. If the key is present with `null` or any
+  value other than `true` or `false`, stop and report the invalid setting.
 - `wiki_git_bypass_flag` — env var to set when creating/merging PRs (e.g. `BYPASS_REVIEW=1`)
 - `wiki_git_pull_path` — path to `git pull` from after a human merges the ingest PR (this
   skill no longer merges or pulls itself — see Step 6). Default when absent: no pull path is
   suggested in Step 7's report.
 - `wiki_supervision` — `discuss` (default) or `autonomous`; see Step 3.
+
+If no config or no usable `wiki_path` resolves, stop and ask the user to run
+`/wiki-init`. The skill needs a vault path before it can read or write pages.
 
 **Example `.coderails/workflow.config.yaml` (team repo with PR flow):**
 ```yaml
@@ -57,7 +73,7 @@ wiki_path: ../my-project-wiki
 wiki_git_worktree: false
 wiki_supervision: autonomous   # opt into autonomous curation
 ```
-If no config file resolves, or it resolves but has no `wiki_supervision` key, or the key
+If the resolved config has no `wiki_supervision` key, or the key
 is set to anything other than `autonomous`, treat it as `discuss` — the field must be
 explicitly set to `autonomous` to skip Step 3's pause. Never infer autonomy from context,
 momentum, or a prior authorization earlier in the same turn.
@@ -95,18 +111,17 @@ WORKTREE_PATH="$vault"
 setting means. Do not add your own confirmation checkpoint before Step 6's commit either;
 `autonomous` covers the whole ingest, not just this step.
 
-**Otherwise (the default — `discuss`, the field absent, or no config file resolved):** before
-writing anything, discuss
-with the user:
+**Otherwise (the default — `discuss` or the field absent):** use the user's
+existing instructions and approvals. If they already cover wiki content and
+delivery, proceed. Ask only when a material content choice remains open:
 - What are the key changes / main ideas?
 - What should the wiki emphasise?
 - Are there decisions or patterns worth capturing?
 - Does this relate to existing wiki pages?
 
-Don't auto-ingest silently. The human stays involved. A prior authorization earlier in the same
-turn (e.g. approving the code change, PR, or merge this source documents) does not satisfy this
-step — the wiki content itself has not been discussed yet, regardless of momentum from a chain of
-already-approved actions.
+Report the content and delivery result to the user. Approval of a code PR
+alone does not define what the wiki should say. An explicit wiki instruction
+or standing authorization can supply that decision.
 
 ### Step 4: Check What's Already Known
 
@@ -114,11 +129,11 @@ Read `$vault/index.md`. Before adding content, check existing coverage. Curator 
 
 ### Step 5: Write/Update Pages
 
-1. **Source page** in `$vault/sources/` — YAML frontmatter (title, type, origin, date, tags), key takeaways, context, impact
-2. **Update affected pages** — concept, entity, service pages as needed. Update `last_updated` in frontmatter
-3. **Create new pages** if the source introduces something deserving its own page. Use `[[wiki-links]]`
-4. **Update `$vault/index.md`** — new entries, updated summaries, source table
-5. **Append to `$vault/log.md`**: `## [YYYY-MM-DD] ingest | <description>`
+1. **Source page** in `$WORKTREE_PATH/sources/` — YAML frontmatter (title, type, origin, date, tags), key takeaways, context, impact
+2. **Update affected pages** in `$WORKTREE_PATH` — concept, entity, service pages as needed. Update `last_updated` in frontmatter
+3. **Create new pages** in `$WORKTREE_PATH` if the source introduces something deserving its own page. Use `[[wiki-links]]`
+4. **Update `$WORKTREE_PATH/index.md`** — new entries, updated summaries, source table
+5. **Append to `$WORKTREE_PATH/log.md`**: `## [YYYY-MM-DD] ingest | <description>`
 
 Cross-reference aggressively with `[[wiki-links]]`. Flag contradictions: `> ⚠️ CONTRADICTION: <description>`.
 
@@ -130,7 +145,11 @@ cd "$WORKTREE_PATH"
 git add -A
 git commit -m "wiki: ingest <description>"
 git push -u origin "$BRANCH"
-${wiki_git_bypass_flag} gh pr create --title "wiki: ingest <description>" --body "Pages created/updated: <list>"
+if [ -n "$wiki_git_bypass_flag" ]; then
+  env "$wiki_git_bypass_flag" gh pr create --title "wiki: ingest <description>" --body "Pages created/updated: <list>"
+else
+  gh pr create --title "wiki: ingest <description>" --body "Pages created/updated: <list>"
+fi
 # STOP here. Do not merge the PR — not in interactive, autonomous, or
 # backgrounded/detached execution. wiki-ingest never merges its own PR: report
 # the PR URL/number back (Step 7) and end. A human, or an explicit separate
@@ -142,7 +161,7 @@ ${wiki_git_bypass_flag} gh pr create --title "wiki: ingest <description>" --body
 # Note: enforce_pr_workflow gates `gh pr create` only in a repo that has a
 # workflow.config.yaml (a wiki vault usually has none → no-op). When it does apply, the
 # satisfier is /coderails:push having run this session, or a settings.json Bash permission.
-# ${wiki_git_bypass_flag} is the wiki's own delivery bypass, separate from that hook.
+# The bypass flag belongs to wiki delivery; it does not satisfy the PR hook.
 ```
 
 **If `wiki_git_worktree` is `false`**:
@@ -154,10 +173,10 @@ git commit -m "wiki: ingest <description>"
 
 ### Step 7: Report
 
-Pages created/updated, new wiki-links added, gaps identified. **If worktree flow: the PR URL/number is the final deliverable — report it and stop. The PR is not merged by this skill; a human, or an explicit separate follow-up instruction, merges it.** Also report `WORKTREE_PATH` and the cleanup command from Step 6, so whoever merges the PR knows to remove the worktree afterward.
+Report the pages changed, new wiki links, and gaps. **For worktree flow, report the PR URL or number and stop.** This skill does not merge the PR. A human or an explicit follow-up instruction handles that step. Also report `WORKTREE_PATH` and the Step 6 cleanup command.
 
 ### Step 8: Run wiki-lint
 
-**If `wiki_git_worktree` is `false` (direct-write): always run `coderails:wiki-lint` immediately after ingest completes.** An ingest without a follow-up lint leaves the new/updated pages unverified — treat ingest and lint as one combined step, not two independently optional ones. (`agentic-loop` batches this at the cluster level when running many ingests across a loop's PRs; a solo invocation of this skill still pairs immediately, since there's no larger batch to wait for.)
+**If `wiki_git_worktree` is `false` (direct-write), run `coderails:wiki-lint` after ingest.** It checks the vault after the changed pages enter it. A solo ingest pairs with lint. During an agentic loop, the loop can batch lint across several wiki ingests.
 
-**If `wiki_git_worktree` is `true` (PR flow): do not run wiki-lint yet.** The ingest PR from Step 6 is still open — `wiki-lint` audits the vault's current merged state (`origin/main`), which does not yet include these pages, so running it now would not verify them. Run `coderails:wiki-lint` as a separate follow-up once the ingest PR has actually merged.
+**If `wiki_git_worktree` is `true` (PR flow), wait to run wiki-lint.** The ingest PR is open. `wiki-lint` reads merged `origin/main`, which does not yet contain the new pages. Run `coderails:wiki-lint` after the ingest PR merges.

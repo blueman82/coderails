@@ -2,9 +2,9 @@
 
 Detail-carrier for the loop's durable state artifact, referenced from the main skill's
 "Context-window persistence" section. The imperatives stay in SKILL.md (start it with `graph.py start` at Phase -2,
-resolve the path via the helper, overwrite at every phase boundary, re-read it to re-orient);
+resolve the path via the helper, update it through graph commands at each phase boundary, re-read it to re-orient);
 this file is the field-by-field spec, the lifecycle, and the concurrency/ownership rules —
-consult it when writing or repairing the file.
+consult it when recording or repairing state through the supported commands.
 
 ## Contents
 
@@ -26,7 +26,7 @@ another session's file in the same directory. Resolve the path by running the he
 never compute it yourself. The helper reads `$CLAUDE_CODE_SESSION_ID` (set in every Bash tool
 call) when no session_id argument is given, so you normally don't need to pass one explicitly.
 
-It is overwritten (not appended) on every phase boundary. A single overwritten JSON object — read
+The graph commands replace it (not append) at each phase boundary. A single JSON object — read
 the whole file in one shot to know current state. Do not use an append-log (`.jsonl`) that has to
 be replayed to derive position, and that can leave a torn tail line after a crash.
 
@@ -119,7 +119,15 @@ grace and block every time.
 - **Start (Phase -2):** run `graph.py start` (see phases-setup.md). It stamps this `session_id`, your unique non-blank `loop_id`, `revision: 1` and `status: "in-progress"` with an empty graph and no active wave, then `graph.py add-unit` registers each work unit. Never hand-write these; the initial state is validated, not decorative. A different `loop_id` over an unfinished loop is refused: resume it.
 - **Phase 0:** the envelope is already in `authorising_prompt_raw`; update it only when an improved envelope is adopted.
 - **Update at each phase boundary:** `graph` node states, work-unit states, disposition fields, `last_updated` — these fields are written through the graph commands (`add-unit`, `begin-wave`, `record-wave`, `record-unit`, `hard-stop`) and read back with `inspect` or `summarize`; never hand-edit `progress.json` and never touch `loop_stop_counts`.
-- **Teardown at Phase 13:** after final progress updates, stage any orders with `orders.py record` and run `orders.py --dir <repo-key dir> --session <session> prepare --loop <logical loop>` even when none were recorded. Preparation binds the eligible owned source and emits `orders_prepared`; it changes no lifecycle counters. Run `python3 "${PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session>` after final grading, proofs and retro exist. Then run `python3 "${PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete <cwd> <session>` to set status and the live invocation-count marker together under the state lock. Only after a successful durable completion save, run the bound `orders.py tick --loop <logical loop>` and `render`. `orders_ticked` follows the ledger save; a failed postcompletion apply or observation is pending teardown, recoverable by idempotent retry. Automatic provider wiring remains pending in this checkpoint. Never hand-derive or increment `completed_marker`.
+- **Teardown at Phase 13:** record any standing-order candidates with
+  `orders.py record` before completion. After final grading, proofs, and
+  retro, run `python3 "${PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session>`.
+  Then run `python3 "${PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete <cwd> <session>`.
+  The helper prepares orders, saves native completion with the live
+  invocation marker, then ticks and renders orders. It also handles a loop
+  with no recorded candidates. A pending apply or render needs an idempotent
+  `mark-complete` retry. Do not call `prepare`, `tick`, or `render` separately,
+  and never hand-derive or increment `completed_marker`.
 
 ## Recency
 
@@ -155,11 +163,39 @@ is still your job; the guard only catches its absence.
 - **`retro.json`** — session-keyed, beside `progress.json`, written once by the Phase 13 teardown contract.
 - **`orders-prepared-<logical-loop sha256>.json`** and **`teardown.jsonl`** — session-keyed preparations and honest lifecycle observations. Preparations bind the repo directory, state directory, session, separate logical loop, revision and progress hash. They stage claims without recurrence/aging effects; a receipt alone cannot authorize apply.
 - **`evals.json`** — loop-scope and pr-scope, frozen at Phase 2.7c/2.7d via `/coderails:task-evals`; see `skills/agentic-loop/SKILL.md` for the field contract.
-- **`proof.json`** — loop-scope, frozen at Phase 2.7e beside `evals.json`, by a SEPARATE agent given only `authorising_prompt_raw`, `session_id`, and `loop_id` as explicit dispatch inputs (never the plan/spec/conversation, never a `progress.json` read) — generalising `task-evals`' grader-independence to the author. Schema: `{"schema_version":1,"session_id","loop_id","frozen_at","frozen_sha","proofs":[{"id","claim","cmd","expect","status":"pending"}]}`. A loop with no executable surface leaves this file absent. Record that choice in `decisions_absorbed` and use the supported `record-proof-disposition` graph CLI to save the reason in state (see the Fields table above). The proof gate reads the saved disposition.
+- **`proof.json`** — loop-scope, frozen at Phase 2.7e beside `evals.json`.
+  A separate agent writes it from only `authorising_prompt_raw`, `session_id`,
+  and `loop_id`. Do not give that agent the plan, spec, design conversation,
+  or `progress.json`. Schema:
+  `{"schema_version":1,"session_id","loop_id","frozen_at","frozen_sha","proofs":[{"id","claim","cmd","expect","status":"pending"}]}`.
+  A loop with no executable surface writes no proof file. It records that
+  choice in `decisions_absorbed`. Use the supported
+  `graph.py record-proof-disposition` command to save the no-proof reason in
+  state. The proof gate reads that disposition.
 
-  **`proof.json` feeds the `loop_stall_guard` proof gate** (`loop_proofs.validate_proofs`). On a recorded `complete` stop, the gate mines THIS session's own transcript for a Bash `tool_use`/`tool_result` pair matching each proof's `cmd`, run in the FOREGROUND ONLY (never `run_in_background` — a backgrounded launch's immediate result is not an outcome) (trimmed, EXACT string equality — never substring), and blocks naming any proof whose verdict isn't `satisfied`. The offenders list a user will actually see: `unexecuted` (no matching call, or the matching call's result never returned), `failed` (the LAST matching call's result carried `is_error: true`), `badcmd` (the proof's own `cmd` is missing, non-string, or empty/whitespace-only — cannot even be searched for), or `unverifiable` (the proofs-array entry itself is not a JSON object, so no `id`/`cmd` can be read from it at all). The `status` field inside `proof.json` is present but never consulted — the verifier never reads `.status`, so an orchestrator-written `"pass"` cannot rescue an unexecuted proof.
+  **The proof gate reads the orchestrator's transcript.** On a recorded
+  `complete` stop, `loop_stall_guard` looks for a Bash `tool_use` and
+  `tool_result` pair for each proof command. The match uses trimmed exact
+  command text, never a substring. Run each command in the foreground;
+  `run_in_background` does not supply a final outcome. The gate blocks
+  when a proof is not satisfied. It reports:
 
-  **A proof can be withdrawn instead of fixed via a sibling `withdrawn_proofs` array** (same file, same schema_version): `[{"id","cmd","withdrawn_reason"}]`. The gate mines it in the same transcript pass as `.proofs`, but STRICTER — a withdrawal claims a failure was witnessed, so only a matching call whose LAST result was an observed `is_error: true` passes; `.proofs`' null-tolerance ("ran, no clear signal, let it through") does not apply here. An entry blocks `complete` unless its `cmd` executed in this session, its last result was a genuine failure, `withdrawn_reason` is non-empty, and its `id` does not also appear in `.proofs` (no double-dipping between pending and withdrawn). `.proofs` and `withdrawn_proofs` share a combined cap of 100 entries — checked before any transcript mining, to close a timeout-based bypass (an inflated proof.json making the gate's own scan time out, rather than satisfying it). A withdrawal that clears all its checks is reported, never blocking, in the `complete` systemMessage.
+  - `unexecuted`: no matching call or no returned result;
+  - `failed`: the last matching result has `is_error: true`;
+  - `badcmd`: the command is absent, non-string, or blank;
+  - `unverifiable`: the proof entry is not a JSON object.
+
+  The gate does not read a proof's `status` field. Writing `"pass"` there
+  cannot replace an observed command run.
+
+  **A failed proof can be withdrawn.** Add it to `withdrawn_proofs` in the
+  same file: `[{"id","cmd","withdrawn_reason"}]`. The gate requires a
+  matching command run in this session whose last result has
+  `is_error: true`. It also requires a non-empty `withdrawn_reason` and an
+  ID absent from `.proofs`. A withdrawal cannot use the proof rule that
+  tolerates a run with no clear result. The two arrays have a combined
+  100-entry cap, checked before transcript mining. A valid withdrawal is
+  reported in the `complete` system message and does not block.
 
   **Absence requires a disposition.** Missing `proof.json` requires `proof_disposition` to equal `"none"` or start with `"none:"`. No legacy schema exemption exists. A present proof file must carry this session and loop identity and a numeric schema version >= 1. A malformed file, non-array proof collection or unprovable entry blocks. Empty/absent proof arrays are allowed only after the file-level checks; populated withdrawals are always checked. The combined cap is 100 entries. Proofs execute in the orchestrator's own foreground Bash transcript; a worker's execution cannot satisfy them.
 

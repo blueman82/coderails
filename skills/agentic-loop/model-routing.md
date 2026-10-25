@@ -1,9 +1,10 @@
 # Model routing — stamp reference
 
-Detail-carrier for Phase 2.8. The main skill keeps the imperative (assign a role to every Phase
-3/3a build task before any worker spawns, record the set once, use the role table); this file is
-the escalation and effort rules you consult **when writing a `Model:` stamp** or deciding whether
-a task justifies a stronger verification_level — plus a closing note on the orchestrator's own model (Phase 0.4).
+This file gives the model and effort rules for Phase 2.8. Before workers
+start, assign a role to each Phase 3 or 3a build task. Record the roles once
+and use the role table. Consult this file when you write a `Model:` stamp or
+decide if a task needs a higher verification_level. The last section explains
+the orchestrator's model (Phase 0.4).
 
 ## Contents
 
@@ -17,15 +18,15 @@ a task justifies a stronger verification_level — plus a closing note on the or
 
 ## frontier resolves to opus
 
-**Never automatically to fable.** Anthropic's model-selection guidance places complex agentic
-coding on Opus at `xhigh` effort; Fable targets next-generation-intelligence needs at roughly
-twice the price. Auto-picking the most expensive model is a cost decision the loop has no
-authority to make silently.
+**Never select fable automatically.** Anthropic's model guidance assigns
+complex agentic coding to Opus at `xhigh` effort. Fable targets
+next-generation intelligence and costs about twice as much. The loop has no
+authority to select the more costly model without notice.
 
 Escalating a task to fable requires BOTH:
 
-1. A named reason why opus-at-`xhigh` is insufficient for that specific task — not "it's
-   important", but *what capability is missing* — recorded in the task's `Model:` stamp.
+1. Record in the task's `Model:` stamp the capability that Opus at `xhigh`
+   lacks for this task. The phrase "it is important" is not a reason.
 2. The same fallback-valve discipline as every other stamp.
 
 Tune effort first; escalate model second.
@@ -46,38 +47,39 @@ not exist for the worker.
 
 ## Investigations get frontier FIRST
 
-Not escalated-to. For a genuinely ambiguous investigation, spawn `frontier` from the start — a
-weak investigator burns wall-clock discovering it's out of its depth, then a second run re-does
-the work anyway. This is the one place `default`-first cost control does not apply; everywhere
-else `default` is the floor and `frontier` needs a reason.
+For an ambiguous investigation, start with `frontier`. A weaker investigator
+can use time before it finds that it cannot complete the task. Then a second
+agent must repeat the work. For other tasks, start with at least `default`.
+Give a reason if you select `frontier`.
 
 ## Fallback valves live in the stamp
 
-Never improvised by a worker. If a task needs an escape hatch (e.g. "fast-mechanical; default
-fallback after two failed gate attempts"), write the exact valve condition into the plan's
-`Model:` stamp (`superpowers:writing-plans`) or, for a loop below the plan.md threshold, into the
-task description's `Model:` bullet (Phase 3/3a). The valve must already be named in the prompt, or
-it does not exist for the worker.
+Set fallback conditions before a worker starts. For example, a task can use
+`fast-mechanical` and switch to `default` after two failed gate attempts.
+Write the exact condition in the plan's `Model:` stamp
+(`superpowers:writing-plans`). For a loop that needs no plan.md, put it in the
+task's `Model:` bullet (Phase 3/3a). The worker can use only a fallback named
+in its prompt.
 
 ## Escalation is safe by construction
 
-Not a correctness control. PR gates (review, evals, hook-seam) are model-independent — a
-`frontier` worker's PR clears the same gates a `default` worker's PR does. Routing exists for cost
-and latency, never for correctness; do not read a role mismatch as a quality risk in itself.
+Routing controls cost and time. Every PR must clear the same review, eval, and
+hook gates, regardless of the worker's model. A role mismatch alone does not
+show a quality defect.
 
 ## Inline sites elsewhere
 
-Phase 2.8 routes Phase 3/3a *build* tasks only. Agents spawned at other phases — the Phase 2
-pre-flight agent, the Phase 2.5 design-fork agent, the Phase 2.6 disposition agent, and Phase 9's wiki and sync-docs delegates —
-are each assigned their role inline at their own spawn point, using Phase 2.8's vocabulary and
-table.
+Phase 2.8 routes only Phase 3 and 3a build tasks. Assign roles for agents in
+other phases when you spawn them. This includes the Phase 2 pre-flight agent,
+the Phase 2.5 design agent, the Phase 2.6 disposition agent, and the Phase 9
+wiki and docs agents. Use the Phase 2.8 role table and terms.
 
 ## The orchestrator's own model (Phase 0.4)
 
-This concerns the orchestrator's own (main-context) model, not worker routing — everything above
-this section is about the `Model:` stamp assigned to spawned workers. Why it matters: the
-orchestrator re-reads its whole growing context on every turn for the life of the loop, so
-whatever cache-read rate its own model carries compounds across the entire session, and that rate
-differs sharply by verification_level — see `hooks/scripts/lib/model_prices.json` for current per-model rates.
-The orchestrator cannot act on this itself (Phase 0.4 — `/model` is the user's to type); the mechanism here is only
-why the token-burn notice to the user matters.
+This section concerns the orchestrator's model. The sections above concern
+worker models. On each turn, the orchestrator reads its growing context again.
+Its cache-read costs add up through the session. Rates differ by model; see
+`hooks/scripts/lib/model_prices.json` for current rates. The loop's
+verification_level can change how much work the session does. In Phase 0.4,
+the orchestrator tells the user about token use. Only
+the user can type `/model` to change the orchestrator's model.

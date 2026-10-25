@@ -6,10 +6,9 @@ model: sonnet
 
 # Dashboard
 
-Launch the local observability HUD for coderails: a live web view of what the
-agentic system is doing right now, backed by files already on disk (sessions,
-loop progress, wiki/memory, PR state, run history) — no new services, no
-telemetry leaving the machine.
+Launch the local Coderails dashboard. It shows current sessions, loop
+progress, wiki and memory activity, PR state, and run history. It reads
+files already on this machine. It sends no telemetry away.
 
 ## What it shows
 
@@ -51,37 +50,33 @@ Seven panels:
 ## Starting
 
 ```
-scripts/start_dashboard.py
+python3 skills/dashboard/scripts/start_dashboard.py
 ```
 
-First run installs dependencies (`npm ci`) and builds the app (`npm run
-build`); later runs skip both when `node_modules` and a fresh `.next` build
-already exist, so a re-launch is fast. Starts the production server
-(`npm run start`) on `127.0.0.1:4173`, writes its pid to
-`~/.claude/coderails-dashboard/dashboard.pid`, and opens the dashboard in the
-browser.
+The first run installs dependencies with `npm ci` and builds the app with
+`npm run build`. Later runs skip these steps when `node_modules` and a fresh
+`.next` build exist. The command starts the production server with
+`npm run start` on `127.0.0.1:4173`. It writes the PID to
+`~/.claude/coderails-dashboard/dashboard.pid` and opens the browser.
 
 Override the port with `DASHBOARD_PORT`:
 
 ```
-DASHBOARD_PORT=4200 scripts/start_dashboard.py
+DASHBOARD_PORT=4200 python3 skills/dashboard/scripts/start_dashboard.py
 ```
 
 ## LAN access (opt-in)
 
-By default the dashboard binds to `127.0.0.1` and only accepts requests whose
-Host/Origin resolve to loopback — nothing on the network can reach it. Set
-`DASHBOARD_HOST` to your machine's LAN IP to allow other devices on the same
-network to reach it too:
+By default, the dashboard binds to `127.0.0.1`. It accepts only Host and
+Origin values that resolve to loopback. Set `DASHBOARD_HOST` to your machine's
+LAN IP to allow access from other devices on that network:
 
 ```
-DASHBOARD_HOST=192.168.50.140 scripts/start_dashboard.py
+DASHBOARD_HOST=192.168.50.140 python3 skills/dashboard/scripts/start_dashboard.py
 ```
 
-This does two things together, from the one variable: the server binds to
-that exact address instead of `127.0.0.1`, and the request guard additionally
-accepts that exact host (and only that host) alongside loopback on both the
-Host and Origin headers. From any other device on the LAN, open
+The server then binds to that exact address. Its request guard accepts that
+host and loopback in the Host and Origin headers. From another LAN device, open
 `http://<LAN-IP>:<port>` (e.g. `http://192.168.50.140:4173`).
 
 For the persistent launchd agent, set `DASHBOARD_HOST` in the `plist`'s
@@ -89,26 +84,24 @@ For the persistent launchd agent, set `DASHBOARD_HOST` in the `plist`'s
 fill in your LAN IP), then reinstall the agent
 (`launchd/install_dashboard_agent.py`) so launchd picks it up.
 
-Leaving `DASHBOARD_HOST` unset (or empty) is unchanged from before this
-option existed: bind and guard are loopback-only, identical to today.
-Wildcard binds (`0.0.0.0`, `::`, `*`) and `host:port` forms are rejected at
-startup with a non-zero exit — the guard exact-matches one host, so a
-wildcard bind would silently 403 real LAN requests.
+If `DASHBOARD_HOST` is unset or empty, the server binds to loopback.
+The validator rejects wildcard binds (`0.0.0.0`, `::`, `*`) and dotted
+IPv4 addresses with a port. Supply only the host address. The validator
+also accepts some other colon-containing strings, which can fail when the
+server tries to bind. The request guard matches the configured host.
 
-**SECURITY NOTE:** the dashboard has an unauthenticated command-execution
-surface — the COMMAND DECK's `POST /run` and workflow-audit Approve/Deny both
-execute declared commands with no login of any kind. The Host/Origin guard
-defends against a hostile web page or DNS-rebinding attack reaching the
-dashboard from your browser; it does **not** authenticate LAN devices. Any
-device on your LAN that can reach the port can trigger declared runs. Only
-enable LAN access on a trusted home network, and use a DHCP reservation or
-static lease for the host — if the host's LAN IP changes, the dashboard will
-fail to bind on next start rather than break silently.
+**Security:** The dashboard does not require a login. COMMAND DECK's
+`POST /run` and workflow-audit Approve/Deny execute declared commands.
+The Host/Origin guard limits browser and DNS-rebinding requests. It does not
+authenticate LAN devices. Any LAN device that can reach the port can start
+declared runs. Enable LAN access only on a trusted network. Give the host a
+DHCP reservation or static lease. If its LAN IP changes, the next start
+fails to bind.
 
 ## Stopping
 
 ```
-scripts/stop_dashboard.py
+python3 skills/dashboard/scripts/stop_dashboard.py
 ```
 
 Kills the process recorded in the pidfile and removes it. The dashboard keeps

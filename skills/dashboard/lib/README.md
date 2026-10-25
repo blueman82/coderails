@@ -1,18 +1,17 @@
 # @coderails/dashboard-lib
 
-The single source of truth for the intent-queue/runner contract's
-consumer-side pieces: the `Intent` schema and the `RoutineDef`/routines
-section of `DashboardConfig`. The base `ButtonDef`/`PermissionProfile`/
-`loadConfig` and the `buildArgv` profile→flag mapping are NOT owned here —
-they live in `skills/dashboard/app/src/lib/config.ts` and `argv.ts`
-(merged via PR #25) and this package imports them rather than
-re-implementing them.
+This package defines the consumer-side parts of the intent queue and runner
+contract. It owns the `Intent` schema and the `RoutineDef`/routines section
+of `DashboardConfig`.
 
-This README covers the schema contract only. For how to actually stand
-the system up on a fresh clone (`npm install` in this package and in
-`skills/dashboard/runner`, where the dashboard's data directory comes
-from, how the `claude` binary is located under `launchd`) see
-[`docs/routines.md`](../../../docs/routines.md)'s Prerequisites section.
+It imports the base `ButtonDef`, `PermissionProfile`, `loadConfig`, and
+`buildArgv` profile→flag mapping. Those definitions live in
+`skills/dashboard/app/src/lib/config.ts` and `argv.ts` (merged via PR #25).
+
+This README covers the schema contract. For setup on a fresh clone, see the
+Prerequisites section in [`docs/routines.md`](../../../docs/routines.md).
+It covers `npm install` in this package and `skills/dashboard/runner`, the
+dashboard data directory, and how `launchd` finds the `claude` binary.
 
 ## The queue seam is LIVE
 
@@ -29,24 +28,22 @@ interface Intent {
 }
 ```
 
-`parseIntent(raw: unknown): Intent` validates and returns a typed `Intent`,
-throwing `IntentValidationError` on any malformed input. A compile-time
-test (`test/schema-compat.test.ts`) type-checks this `Intent` type against
-the obsidian plugin's own `IntentFile` type on every build, so producer
-and consumer cannot silently drift apart.
+`parseIntent(raw: unknown): Intent` validates input and returns a typed
+`Intent`. It throws `IntentValidationError` for malformed input. The
+package's `npm test` command runs `test/schema-compat.test.ts` through Vitest.
+That test checks this type against the
+Obsidian plugin's `IntentFile` type so the two types stay compatible.
 
-`IntentFile.source` is presently the single literal `"obsidian"` on the
-wire (the only merged producer); `Intent.source`'s wider union exists to
-admit future producers (`"web"`, `"cli"`), not because they exist today.
+The Obsidian button writes `source: "obsidian"`. The runner's routine seed
+writes `source: "scheduler"` (see `runner/src/seed.ts`). The wider
+`Intent.source` type also permits future web and CLI producers; it does
+not establish that either exists now.
 
-**Interim producer behaviour, not part of this contract:** the obsidian
-plugin currently ALSO direct-execs `claude` itself after writing the
-intent file (see `obsidian/src/exec.ts`'s `pressButton`) — it does not
-yet wait for the runner to claim and execute the queued intent. This is
-the producer's own transitional behaviour on the way to the runner
-becoming the sole executor; it is not something this package's contract
-endorses going forward, and it is out of scope for this loop to change
-(see Global Constraints: `app/`/`obsidian/` code is not modified here).
+**Current producer behavior:** After writing an intent file, the Obsidian
+plugin also runs `claude` directly. See `pressButton` in
+`obsidian/src/exec.ts`. It does not yet wait for the runner to claim the
+intent. This temporary behavior is outside this package's contract.
+Changing `app/` or `obsidian/` code is outside this loop's scope.
 
 ## The runner is the sole executor (target state)
 
@@ -61,14 +58,15 @@ interim behaviour (above) does not yet honor it.
 A queued intent file moves through exactly these directories, atomically
 claimed by rename (never copied, never edited in place):
 
-1. `queue/<runId>.json` — written by a producer (web click, Obsidian
-   command, routine scheduler). Not yet claimed. Directory is created
+1. `queue/<runId>.json` — written by a current producer (Obsidian command
+   or routine scheduler). Not yet claimed. Directory is created
    with mode `0o700` by producers (see `obsidian/src/main.ts`).
 2. `processing/<runId>.json` — claimed by the runner via `fs.renameSync`.
    The atomicity of a same-filesystem rename is what prevents two runner
    instances from double-claiming the same intent.
-3. On success: `archive/<runId>.json` — never deleted, subject to a
-   configurable retention prune.
+3. On success: `archive/<runId>.json`. The current runner moves the file
+   here and does not prune this directory. Retention pruning is a future
+   operational decision.
 4. On malformed input (fails `parseIntent`): `quarantine/<runId>.json` —
    the sweep continues past it rather than crash-looping.
 

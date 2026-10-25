@@ -10,11 +10,25 @@ How to run an autonomous multi-agent / multi-PR session so the user doesn't have
 
 ## Why this skill exists
 
-In long agentic sessions the assistant drifts back into bad habits: running skills in main context instead of delegating; asking "want me to spawn an agent for X?" when X is obviously in scope; holding at human gates the session already removed; trusting an "idle" notification as proof-of-failure when the agent often finished silently; spawning fix workers without disproving the symptom premise. Each unnecessary stall is a manual prompt the user has to write — a stalled loop loses the autonomy the session was authorised for.
+In a long agentic session, the assistant can drift from the agreed workflow. It can run skills in the main context
+instead of delegating. It can ask whether to spawn an agent when that work is already in scope. It can stop at a
+human gate that the session has already removed. It can treat an "idle" notice as proof of failure even when the
+agent finished silently. It can assign a fix before it checks whether the reported symptom is real. Each avoidable
+stop makes the user write another prompt and reduces the autonomy the user authorised.
 
 Repo-agnostic lessons promoted from accumulated loop retros live in [learned-failure-modes.md](learned-failure-modes.md) — machine-maintained via the `loop-retro-promotion` pipeline; read it alongside this skill.
 
-**Authoring rule — every instruction in this skill must name an action its reader can actually perform.** Before writing any directive, confirm the reader has a tool call, command, or file write that executes it, and that the condition it tests can actually come out both ways. An instruction the reader cannot carry out is not a weak instruction, it is a no-op: it gets silently skipped or reported as done without happening. Three instances of this defect class were found across this skill and its sibling `superpowers:finishing-a-development-branch` in a single loop on 2026-07-29 — a cwd-equality test whose two sides were assigned from the same source and whose pid was a bash subshell's, never the harness session's, so both branches were dead; a squash-merge safety predicate asserting `git log --oneline origin/main..HEAD` is empty, which a squash's SHA rewrite makes unsatisfiable (both fixed in PR #317); and Phase 0.4's instruction to pin the orchestrator's own model via `/model`, a command the orchestrator cannot invoke.
+**Authoring rule: name an action the reader can perform.** Before you add a directive, check that the reader has
+a tool call, command or file write that can execute it. Check that a condition can return both true and false.
+An impossible instruction is a no-op. The reader can skip it or report it as complete when it did not run.
+
+A loop on 2026-07-29 found three examples in this skill and `superpowers:finishing-a-development-branch`:
+
+- A cwd equality test read both sides from the same source. It also read a Bash subshell PID instead of the harness
+  session PID. Neither branch could run.
+- A squash-merge check required `git log --oneline origin/main..HEAD` to be empty. A squash rewrites the SHA, so
+  this condition could not pass. PR #317 fixed these two checks.
+- Phase 0.4 told the orchestrator to pin its own model with `/model`. The orchestrator cannot invoke that command.
 
 ## The phases
 
@@ -91,7 +105,7 @@ The delegation decision is a two-rung ladder, not "delegate vs. do it yourself":
 
 The only work that legitimately stays in main context: reading for orchestration decisions (git status, `gh pr view`, log reads, the Phase 12 artifact checks), and the planning/cadence the skill describes. If you catch yourself running `Edit`/`Write`/`MultiEdit` in main context inside an authorised loop, stop — that work belongs in a routed worker agent.
 
-**Orchestrator never authors deliverable files inline (token-burn rule, row 3 of 3).** The orchestrator's own `Write`/`Edit` calls are for loop-state only — `progress.json`, `spec.md`, `plan.md`, `retro.json`, and the like. Every deliverable artifact (code, docs, config, any file that ends up in a PR) is authored by a spawned worker, never typed inline in main context. Workers report back structured, confidence-labelled verdicts (Phase 11) — a short claim plus the command that verified it — not long narrative prose; a verbose report re-inflates the same context this rule is trying to keep small.
+**Orchestrator never authors deliverable files inline (token-burn rule, row 3 of 3).** The orchestrator writes loop planning and teardown artifacts such as `spec.md`, `plan.md`, and `retro.json`. It changes `progress.json` only through the graph commands; never hand-edit it. Every deliverable artifact (code, docs, config, any file that ends up in a PR) is authored by a spawned worker, never typed inline in main context. Workers report back structured, confidence-labelled verdicts (Phase 11) — a short claim plus the command that verified it — not long narrative prose; a verbose report re-inflates the same context this rule is trying to keep small.
 
 If the user has explicitly asked for a spawned team in their prompt, it is non-negotiable — spawn named teammates even if a flat sequence of solo `Agent` calls would technically work.
 
@@ -106,7 +120,37 @@ Each task description must be **self-contained** so the spawned agent can act wi
 Include this line in every agent prompt:
 > "Don't go silently idle — send a completion message via SendMessage. Past agents have failed this way."
 
-**Provider-native worker contract.** Claude dispatch uses its native `Agent` tool and available `subagent_type` (normally `general-purpose`); installed custom types remain optional. The role map identifies instruction sources, not a required runtime label. Begin each worker prompt with the exact `CODERAILS_GRAPH_DISPATCH=<JSON>` ownership envelope. Immediately after it, include the printed `CODERAILS_GRAPH_NODE_NAME=<job> · <lane> [<node-id>]` display marker as a separate human-readable line. It is descriptive only; keep the stable node ID in the task brief and never use the display marker for authorization or evidence matching. Before every implementation dispatch, read `${CLAUDE_PLUGIN_ROOT}/agents/loop-worker.md` and include its instruction body explicitly after both markers, followed by the task brief and current user restrictions. Carry scoped implementation, test-first for testable changes, actual verification results, self-review, and honest reporting. Never infer these instructions from a worker name. User restrictions on commits, remote writes, or test scope override the template. The envelope correlates the graph node/wave; provider tool-use/result identity and task notification bind the actual worker. Keep native `subagent_type` in evidence and revalidate it against the original dispatch. A `name` is only a native label, never completion evidence; graph completion still refuses mailbox-only teammate results. `loop_dispatch_guard.py` requires session-owned state, the exact active wave and frozen evals regardless of native role. Frozen dispatch evals bind session_id + loop_id only, never the current graph revision; the dispatch envelope binds the exact active revision, wave and node. Completion requires final-revision neutral grading. Resolve a denial by correcting the state/envelope/evals, never changing the role to evade it.
+**Provider-native worker contract.** Claude dispatch uses its native `Agent`
+tool with an available `subagent_type`, usually `general-purpose`.
+Installed custom types are optional. The role map names instruction sources;
+it does not require a runtime label.
+
+Start each worker prompt with the exact `CODERAILS_GRAPH_DISPATCH=<JSON>`
+ownership envelope. Put the printed
+`CODERAILS_GRAPH_NODE_NAME=<job> · <lane> [<node-id>]` marker on the next
+line. This marker helps a reader; use the stable node ID for authorization
+and evidence matching.
+
+Before each implementation dispatch, read
+`${CLAUDE_PLUGIN_ROOT}/agents/loop-worker.md`. Put its instruction body
+after both markers, followed by the task brief and current user
+restrictions. Require scoped implementation, tests first for testable
+changes, actual verification results, self-review, and honest reporting.
+Do not infer these instructions from a worker name. User restrictions on
+commits, remote writes, and test scope override the template.
+
+The envelope identifies the graph node and wave. Provider tool-use/result
+identity and the task notification bind the actual worker. Keep native
+`subagent_type` in evidence and check it against the original dispatch.
+A native `name` is only a label; graph completion rejects mailbox-only
+teammate results.
+
+`loop_dispatch_guard.py` requires session-owned state, the exact active
+wave, and frozen evals for every native role. Frozen dispatch evals bind
+`session_id` and `loop_id`, not the changing graph revision. The dispatch
+envelope binds the exact revision, wave, and node. Completion requires
+final-revision neutral grading. If the guard denies a dispatch, correct
+the state, envelope, or evals; do not change the role to evade the guard.
 
 ### Phase 3a — Single routed agent for impl + verify (the spawned-team-is-overkill case)
 
@@ -150,7 +194,7 @@ The same rationale applies beyond Bash: independent non-Bash tool calls — `Rea
 
 ### Phase 4b — PR review invokes `/pr-review-toolkit:review-pr <PR#>` as a Skill, then `/coderails:post-review <PR#>`
 
-When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill — passing the PR number as the argument — which itself fans out six specialised reviewers plus a security pass. Do NOT hand-roll the reviewers as separate `Agent`/`Task` spawns. **This is REQUIRED to satisfy the merge gate** — `enforce_pr_workflow` only accepts the `review-pr` Skill (with the PR number in args) as merge evidence; a hand-rolled fanout leaves no evidence the gate recognises. After findings are applied and pushed, invoke `/coderails:post-review <PR#>` to post the SHA-bound review artifact `/merge` requires. Before `/coderails:merge`, also produce the independent eval artifact via `/coderails:task-evals` (scope `pr`) then `/coderails:post-evals` — `scripts/merge.py` hard-gates on both artifacts, no config opt-out. Immediately after `/coderails:merge` confirms the PR merged, tear down this work-unit's worktree (`superpowers:finishing-a-development-branch` Step 6, mechanics in [finishing-out.md](finishing-out.md)).
+When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill with the PR number. It dispatches six specialised reviewers. Run `/security-review` separately when the rule in [phase-4b-review.md](phase-4b-review.md) requires it. Do not spawn the six reviewers by hand: `enforce_pr_workflow` accepts the numbered Skill invocation as merge evidence. Apply and push findings, then invoke `/coderails:post-review <PR#>` for the current head. Before merge, grade the PR eval suite frozen in Phase 2.7d and post it with `/coderails:post-evals`. `scripts/merge.py` requires both SHA-bound artifacts. After `/coderails:merge` confirms the merge, clean up this unit's worktree using [finishing-out.md](finishing-out.md).
 
 **Read [phase-4b-review.md](phase-4b-review.md) in full before running this phase** for: the six-reviewer table and when each runs, the review-verification_level ladder (when `/security-review` may be skipped), the mandatory `/security-review` and `deploy-safety-reviewer` add-ons, and the clean-break MERGE-BLOCKER gate (the orchestrator cannot downgrade a surviving-compat finding unilaterally on a `clean-break` unit).
 
@@ -206,7 +250,8 @@ Add to every spawned agent's prompt:
 > - `(inferred)` — pattern-matched, recalled, or assumed from context
 > - `(guess)` — best-effort with low confidence
 >
-> The user's stop hook enforces this. Propagate it into your work.
+> The stop hook gives an advisory when labels are missing. It does not block.
+> Propagate this rule into your work.
 
 ### Phase 12 — Status reports from agents are claims, not evidence
 
@@ -239,15 +284,33 @@ This is the factory's own audit — raw facts for the human to judge, not a self
 
 1. **If `proof.json` exists, run every one of its `cmd`s VERBATIM as its own single Bash call in THIS (the orchestrator's) session, in the foreground (never `run_in_background`), and confirm each exits 0.** Do this BEFORE assembling the retro — a proof run inside a dispatched worker's session, or launched in the background, never appears (as an outcome) in this transcript and cannot satisfy the gate. If a proof still fails, fix the underlying issue and re-run that proof's `cmd` (not a modified version of it) until it passes, or the `complete` declaration blocks below.
 2. **Assemble `retro.json` (`schema_version` 2) beside `progress.json`** — envelope, `loop_stop_counts` and `decisions_absorbed` copied verbatim from `progress.json` (never recomputed or reconstructed from memory), disposition record, evals, artifacts, hook blocks, `models_used`, and `cost`. The schema has **no `verdict` field** — raw and unscored is structural: the retro records what happened, it does not grade it. Mine cost via `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_cost.py" <session_id>` (fail-open: it never blocks teardown, though a caller-error — no/unresolvable session id — returns a self-describing `{"error":...}` object instead of `{}`; check `.error` before treating the result as an empty mine), and price once — nothing downstream re-prices.
-3. **Prepare standing orders with `scripts/lib/orders.py --dir <repo-key dir> --session <session_id>`.** `record` this loop's failure modes with the separate owned logical `--loop <loop_id>`, then `prepare --loop <loop_id>` after final progress updates, including when no failure mode was recorded. Preparation validates and binds the eligible source and emits `orders_prepared`; it changes no recurrence or aging counters. Step 5 applies the staged observations after durable native completion. Commands, degraded sync, stale-source refusal and retry behavior are in [teardown.md](teardown.md) Step 3. Never hand-edit generated `standing-orders*.md`. Additive-or-recurrence-only: no metric-based removal anywhere.
+3. **Record this loop's standing-order candidates.** Use
+   `scripts/lib/orders.py --dir <repo-key dir> --session <session_id> record`
+   with the owned `--loop <loop_id>` for each failure mode. Do this before
+   native completion. `mark-complete` prepares the orders automatically,
+   including when none were recorded. Do not call `prepare` a second time.
+   See [teardown.md](teardown.md) for degraded sync and retry rules. Never
+   hand-edit generated `standing-orders*.md`.
 4. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
-5. **Only then** run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session_id>`, then call `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete <cwd> <session_id>` to set `progress.json` `status: "complete"` and stamp `completed_marker` together — never a bare write of `status: "complete"`, which leaves `completed_marker` unstamped and false-positives `loop_state_guard` on later turns. After that save succeeds, run `orders.py --dir <repo-key dir> --session <session_id> tick --loop <loop_id>` and `render`. Apply requires that owned complete source; K=5 decay is a tombstone, never a delete. `orders_ticked` follows the ledger save; a failed save ages nothing, and failed postcompletion apply or observation means pending teardown and an idempotent retry (see [teardown.md](teardown.md) step 5). This checkpoint defines the interface; automatic provider wiring remains pending. Then declare `LOOP-STOP: complete`. First apply `superpowers:verification-before-completion` to the orchestrator's own completion claim, per [finishing-out.md](finishing-out.md). The `loop_stall_guard` proof gate blocks the declaration itself when any proof is unexecuted-in-transcript or last-failed — it does not need a separate manual check here, but the declaration will bounce back with the offending proof id(s) named if step 1 was skipped or incomplete.
+5. **Verify and complete the loop.** Run
+   `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session_id>`.
+   Then run
+   `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete <cwd> <session_id>`.
+   This helper sets `status: "complete"` and `completed_marker` together. It
+   also prepares, ticks, and renders standing orders through the native
+   completion path. Do not write `status` directly or apply the order
+   lifecycle a second time. If it reports pending teardown, retry
+   `mark-complete` as [teardown.md](teardown.md) describes. Before declaring
+   `LOOP-STOP: complete`, apply `superpowers:verification-before-completion`
+   to the orchestrator's claim; see [finishing-out.md](finishing-out.md).
+   The `loop_stall_guard` still blocks a declaration if a frozen proof was
+   not run in this session or last failed.
 
 ## Context-window persistence
 
 Do not stop work early because the context window is filling or a token budget is approaching. Context will compact and the session will continue — treat that as a non-event, not a stop condition. Never artificially truncate a task or declare "done" mid-loop because of token pressure. If a genuine stop condition (see below) is not met, keep going.
 
-**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper — resolve it by running the helper (Phase -2), never compute it yourself. Create it with `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start <state> --session <session> --loop-id <id> --prompt-file <file>` and register units with `graph.py add-unit` (never hand-write the stub). Overwrite it (never append) at every phase boundary, recording the authorisation envelope verbatim, the `graph` node states, work-unit states, and each phase's absorbed decisions. Field-by-field schema, the start→update→teardown lifecycle, the hook-owned `loop_stop_counts` rule, and the concurrency/ownership rules: see [loop-state.md](loop-state.md).
+**Loop state lives in a durable artifact, not in the conversation.** Maintain a single `progress.json` at the path printed by the loop-state path helper — resolve it by running the helper (Phase -2), never compute it yourself. Create it with `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start <state> --session <session> --loop-id <id> --prompt-file <file>` and register units with `graph.py add-unit` (never hand-write the stub). At each phase boundary, use graph commands to record the authorisation envelope, node states, work-unit states, and absorbed decisions. The commands replace the JSON state atomically; never hand-edit or append it. Field-by-field schema, the start→update→teardown lifecycle, the hook-owned `loop_stop_counts` rule, and the concurrency/ownership rules: see [loop-state.md](loop-state.md).
 
 After any compaction, drift, or "wait, where are we" moment, the orchestrator RE-READS `progress.json` — never the conversation — to re-orient. If the user ever has to remind the loop that it's mid-loop, the artifact wasn't being maintained. Git remains the authoritative checkpoint for code (commit all in-progress work before compaction); `progress.json` is the authoritative checkpoint for loop position.
 

@@ -22,12 +22,14 @@ paths: "**/*.py"
 
 ### Imports
 - Explicit imports (no star imports)
-- No lazy imports
-- No `TYPE_CHECKING` blocks — fix architecture if circular imports exist
+- Prefer top-level imports. Use a local import when an optional dependency
+  or a measured import cycle requires it, and explain the reason.
+- Use `TYPE_CHECKING` for type-only imports when it avoids a runtime cycle.
 - Use `from __future__ import annotations` for forward references
 
 ### Idioms
-- **EAFP over LBYL** — `try/except` not `if`-checks for existence/validity
+- **EAFP for race-prone operations** — catch the operation's documented
+  exception. Keep explicit checks for input validation and policy rules.
 - **Context managers** for all resources (`with open(...)`, `async with ...`)
 - **f-strings** over `.format()` or `%`
 - **List/dict comprehensions** over explicit loops where readable
@@ -55,15 +57,15 @@ paths: "**/*.py"
 
 ## Imperative → Declarative Patterns (MANDATORY)
 
-Scan for these anti-patterns and replace with idiomatic Python.
+Find these patterns and replace them with the matching Python idiom.
 
 ### Loop Anti-Patterns
 
 | Anti-Pattern | Replacement | Example |
 |-------------|-------------|---------|
-| Nested loops 3+ deep | `itertools.product`, comprehension, or extract function | `for a in x: for b in y: for c in z:` → `for a, b, c in product(x, y, z):` |
-| Manual counter | `enumerate()` | `i = 0; for x in items: i += 1` → `for i, x in enumerate(items):` |
-| Parallel iteration by index | `zip()` | `for i in range(len(a)): a[i], b[i]` → `for x, y in zip(a, b):` |
+| Independent nested loops 3+ deep | `itertools.product` or extract function | Use `product(x, y, z)` only when each iterable is independent of the outer loop. |
+| Manual counter | `enumerate()` | If the original loop increments from 0 before use, use `for i, x in enumerate(items, start=1):`. |
+| Parallel iteration by index | `zip()` | Use `zip(a, b, strict=True)` when unequal lengths must fail; ordinary `zip` truncates. |
 | Loop with early break on condition | `any()` / `all()` | `for x in items: if pred(x): found = True; break` → `found = any(pred(x) for x in items)` |
 | Loop building dict | dict comprehension | `d = {}; for k, v in pairs: d[k] = f(v)` → `{k: f(v) for k, v in pairs}` |
 | Loop building set | set comprehension | `s = set(); for x in items: s.add(f(x))` → `{f(x) for x in items}` |
@@ -90,10 +92,10 @@ Scan for these anti-patterns and replace with idiomatic Python.
 | Manual `list.extend` equivalent | `list.extend()` or `[*a, *b]` |
 | Manual dict merge | `{**a, **b}` or `a \| b` (3.9+) |
 | Manual max/min tracking | `max()` / `min()` with `key=` |
-| Manual grouping by key | `itertools.groupby()` or `defaultdict(list)` |
+| Manual grouping by key | `defaultdict(list)`; use `itertools.groupby()` only when matching keys are consecutive |
 | Manual counting | `collections.Counter` |
 | Manual deduplication | `set()` or `dict.fromkeys()` (order-preserving) |
-| Manual retry loop | `tenacity` or backoff decorator |
+| Repeated retry logic | A bounded shared helper when several call sites need the same policy; avoid a new dependency for one loop |
 | Manual path string operations | `pathlib.Path` |
 | Manual datetime arithmetic | `timedelta` |
 
@@ -163,7 +165,8 @@ def summarize(groups: list[list[str]]) -> str:
     flat = list(chain.from_iterable(groups))
     found_special = any(item.startswith("!") for item in flat)
     label = "Found special" if found_special else "No special"
-    return f"{label} in {len(flat)} items: {', '.join(flat)}"
+    output = ", ".join(flat) + (", " if flat else "")
+    return f"{label} in {len(flat)} items: {output}"
 ```
 
 ---
@@ -238,12 +241,14 @@ When inserting untrusted text (AI output, user input, external API responses) in
 | **Slack mrkdwn** | `<!channel>`, `<!here>`, `<!everyone>`, `<@U...>` | `re.sub(r'<[!@][^>]+>', '', text)` |
 | **HTML** | `<script>`, `onclick=`, entity injection | `html.escape(text)` |
 | **SQL** | `'; DROP TABLE`, `OR 1=1` | Parameterized queries only, never f-strings |
-| **Shell** | `$(cmd)`, `` `cmd` ``, `; rm -rf` | `shlex.quote(text)` |
+| **Shell** | `$(cmd)`, `` `cmd` ``, `; rm -rf` | Pass arguments as an argv list. Use `shlex.quote` only when a shell command string is unavoidable. |
 | **JSON in templates** | Unescaped quotes, newlines | `json.dumps(text)` |
 
 **Rule:** Any text from AI models, user input, or external APIs MUST be treated as untrusted. Sanitize at the point of insertion, not at the point of collection.
 
-**Allowlist > blocklist:** When building status/result dicts consumed by callers, prefer allowlist checks (`if status not in ("success", "disabled")`) over blocklist checks (`if status == "error"`) — fail-closed prevents silent failures from unhandled return values.
+**Allowlist > blocklist:** Callers must handle every unexpected status. Check
+`if status not in ("success", "disabled")` when you build a status or result
+dict. A check for only `if status == "error"` can miss a new failure value.
 
 ---
 
@@ -257,11 +262,11 @@ Before completing Python code changes:
 - [ ] No mutable default arguments
 - [ ] f-strings used (not `.format()` or `%`)
 - [ ] Context managers for resources
-- [ ] EAFP pattern (try/except not if-checks)
+- [ ] Catch documented operation errors; keep explicit input and policy checks
 - [ ] No redundant else after return
 - [ ] Comprehensions where readable
 - [ ] No nested loops 3+ deep — flatten or extract
-- [ ] `enumerate`/`zip` over manual indexing
+- [ ] `enumerate`/`zip` over manual indexing where behavior matches; check unequal-length handling
 - [ ] `any`/`all` over loop-with-break boolean checks
 - [ ] `sum`/`max`/`min` over manual accumulation
 - [ ] `Counter`/`defaultdict` over manual counting/grouping

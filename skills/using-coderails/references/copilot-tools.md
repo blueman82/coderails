@@ -5,26 +5,32 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 | Action skills request | Copilot CLI equivalent |
 |----------------------|----------------------|
 | Read a file | `view` |
-| Create / edit / delete a file | `apply_patch` (Copilot CLI has no separate create/edit/write tools) |
+| Create a file | `create` or `apply_patch` |
+| Edit a file | `edit` or `apply_patch` |
+| Delete a file | `apply_patch` |
 | Run a shell command | `bash` |
-| Search file contents | `rg` (ripgrep; Copilot CLI does not expose a `grep` tool) |
+| Search file contents | `grep` or `rg` |
 | Find files by name | `glob` |
 | Fetch a URL | `web_fetch` |
-| Search the web | `web_search` |
+| Search the web | Use an available search extension or `web_fetch` for a known URL; check the live tool list. |
 | Invoke a skill | `skill` |
 | Dispatch a subagent (a skill naming an agent, e.g. `coderails:loop-worker`) | `task` with `agent_type: "general-purpose"` (other accepted types: `explore`, `task`, `code-review`, `research`, `configure-copilot`) |
 | Multiple parallel dispatches | Multiple `task` calls in one response |
 | Subagent status/output/control | `read_agent`, `list_agents`, `write_agent` |
-| Task tracking ("create a todo", "mark complete") | `update_todo` |
+| Task tracking ("create a todo", "mark complete") | Use the CLI's task view or a concise session checklist; check the live tool list for an installed todo tool. |
 | Enter / exit plan mode | No equivalent — stay in the main session |
+
+The [Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)
+lists the current file, search, and agent tools. Check the live tool list
+if your installed version differs.
 
 ## Instructions file
 
-When a skill mentions "your instructions file", on Copilot CLI this is **`AGENTS.md`** at the repository root. If both `AGENTS.md` and `.github/copilot-instructions.md` are present, Copilot reads both.
+On Copilot CLI, "your instructions file" means **`AGENTS.md`** at the repository root. If `.github/copilot-instructions.md` also exists, Copilot reads both.
 
 ## Personal skills directory
 
-User-level skills live at **`~/.copilot/skills/`**. Copilot CLI also recognizes the cross-runtime alias **`~/.agents/skills/`**, which is shared with Codex and Gemini CLI. Each skill is a subdirectory containing a `SKILL.md` (with `name` and `description` frontmatter).
+User-level skills live at **`~/.copilot/skills/`**. Copilot CLI also reads **`~/.agents/skills/`**, which Codex and Gemini CLI share. Each skill has a `SKILL.md` with `name` and `description` frontmatter.
 
 ## Async shell sessions
 

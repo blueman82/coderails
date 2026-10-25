@@ -17,12 +17,12 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 
 ## Skills
 
-Pi discovers skills from configured skill directories and installed Pi packages. A coderails plugin should expose `skills/` through its `pi.skills` manifest entry. Pi does not expose Claude Code's `Skill` tool, but the agent should still follow the coderails rule: when a skill applies, load and follow it before responding.
+Pi finds skills in configured directories and installed packages. A Coderails plugin should expose `skills/` through `pi.skills` in its manifest. Pi has no Claude Code `Skill` tool. When a skill applies, load and follow it before responding.
 
 ## Subagents
 
-Pi core does not ship a standard subagent tool. The `pi-subagents` package is a strong optional companion and provides a `subagent` tool with single-agent, chain, parallel, async, forked-context, and resume/status workflows. If no subagent tool is available, do not fabricate `Task` calls; execute sequentially in the current session or explain that the optional subagent capability is not installed.
+Pi core has no standard subagent tool. The optional `pi-subagents` package adds a `subagent` tool. It supports single-agent, chain, parallel, async, forked-context, and resume/status work. If it is unavailable, work in sequence or explain that the optional capability is missing. Do not invent `Task` calls.
 
 ## Task lists
 
-Pi core does not ship a standard task-list tool. If a todo/task extension is installed, use its documented tool. Otherwise use coderails plan files, checklists in Markdown, or a repo-local `TODO.md` for task tracking. Older coderails docs may refer to `TodoWrite`; treat that as the task-tracking action above.
+Pi core has no standard task-list tool. Use an installed task extension if one exists. Otherwise, use a Coderails plan, a Markdown checklist, or a repo-local `TODO.md`. Older Coderails docs may say `TodoWrite`; treat it as this task-tracking action.

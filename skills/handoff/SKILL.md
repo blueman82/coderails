@@ -22,15 +22,27 @@ Generate two artefacts that allow a fresh Claude Code session to continue the cu
 
 ### Step 0: Read recorded state (Muninn authoritative)
 
-If a native loop graph exists for this session, first run
-`python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" summarize <state>` (JSON: `phase`, `detail`, `done`,
-`active`, `ready`, `pending`) and `... graph.py inspect <state>` (JSON: `revision`, `active_wave`, `running`, `ready`,
-`hard_stop`), plus `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" list --type decision --scope loop --loop <session_id>`
-(JSON records with `cite`). Use them for Goal, Decisions, Done and Next steps. If the adapter exits nonzero it prints
-`{"degraded": "<reason_code>"}`: put that reason code in the handoff under a "Memory degraded" line (see `docs/RUNBOOK.md`,
-"Memory degraded (Muninn authoritative)"); never skip the read silently and never substitute hand-written Markdown for
-the typed decisions. A missing loop graph (`graph.py` unavailable) only drops the graph commands; Step 1 still supplies
-the rest.
+If this session has a native loop graph:
+
+1. Read the session-owned state path and session ID from SessionStart.
+2. Run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" summarize <state>`.
+   Read `phase`, `detail`, `done`, `active`, `ready`, and `pending`.
+3. Run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" inspect <state>`.
+   Read `loop_id`, `revision`, `active_wave`, `running`, `ready`, and
+   `hard_stop`.
+4. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" list --type decision --scope loop --loop <loop_id from inspect> --session <session_id>`.
+   Read the decision records and their `cite` fields.
+
+Use successful results for Goal, Decisions, Done, and Next steps. If one
+graph command fails, omit only its result. Do not pass a session ID as
+`--loop`; the adapter uses that argument to filter by logical loop ID.
+With no loop graph or known loop ID, report that the loop-scope memory
+read was unavailable and continue to Step 1.
+
+If the adapter exits nonzero, it prints `{"degraded": "<reason_code>"}`.
+Put the code under "Memory degraded" in the handoff. See
+`docs/RUNBOOK.md`, "Memory degraded (Muninn authoritative)". Do not
+silently skip the read or replace typed decisions with handwritten Markdown.
 
 When reporting graph work, use `inspect`/`summarize`'s `node_names` entry to show each node's one-word job name and lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.
 
