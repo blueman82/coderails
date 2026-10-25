@@ -384,12 +384,30 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
   `repository_mismatch`, `ref_mismatch`, `sha_mismatch`, `signature_missing`, `signature_invalid`, `signer_unknown`, `trust_root_missing`, `binding_unknown` (repository+ref+sha not computable: fail closed), `state_mutated_before_guard` (a ref/HEAD/remote-moving step precedes the guarded one in the same command), `expired`, `revoked`, `consumed`, `foreign_session`, `foreign_loop`, `kind_mismatch`, `no_session` (payload had no session_id; traced under session dir `_no_session`), `malformed`;
-  `receipt_consumed` (allowed); `trust_root_user_tier` (an allow that rested on the agent-writable trust root: cooperating-agent safeguard); `action_authority_failed_open` (the hook itself errored and allowed);
+  `receipt_consumed` (allowed); `trust_root_user_tier` (an allow that rested on the agent-writable trust root: cooperating-agent safeguard); `action_authority_failed_open` (advisory without loaded live authority errored and allowed); `denied_gate_error` (unexpected error under enforce or loaded live authority); `denied_budget_lock_unavailable` / `denied_budget_release_failed` (merge budget lock or cleanup failed; ambiguous reservation remains spent);
   `receipt_approved` / `receipt_revoked` / `receipt_refused_no_tty` (CLI).
+  Authority codes (also from `enforce_pr_workflow`, which denies before consuming anything): `denied_authority_denied` (the session's authority lists the category in `denied`; a receipt cannot override it),
+  `denied_max_prs_exceeded` (executed merges in the session, counted from `.executed` markers of every merge receipt whatever its `authority_id`, reached `max_prs`; 0 = none; narrow/grant again with `authority.py`), `approval_requirement_missing` (a guarded action's permit verdict omitted its required approval; refused before consuming a receipt), `authority_denied_destructive_shell` (destructive gate, force-with-lease family),
+  `scripts/merge.py` rows are `merge_py_<code>` (refused: `no_receipt`, `no_session`, `binding_unknown`, `sha_mismatch`, `consumed`, ...)
+  and `merge_py_receipt_executed` (allowed). Counters: `scripts/lib/receipt_counters.py` `gate_summary(by_reason)` (the CLI below prints it as `gate`; wiring it into `measure_graph_alignment.py` itself is a handoff to the lane that owns that file).
+  Optional enforce-mode mint command for a merge: `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge --command 'python3 <absolute merge.py path> <N> --expected-head <40-hex PR head>' --cwd <repo dir>`;
+  `gh pr merge <N> --match-head-commit <40-hex PR head>` works with its own exact command text. `max_prs` counts every executed merge receipt in the session, including one minted before the authority was granted.
+- In advisory mode, a live authority reserves a budget slot before a plain `gh pr merge` runs. The hook cannot read
+  that command's result. A failed command can leave a pending entry in `<loop dir>/<session>/merges/` and block a
+  later merge. Check the exact PR and head on GitHub. If the merge did not happen and the PR is still open, an
+  operator can release only that pending entry with `scripts.lib.merge_budget.settle(path, False)` while holding
+  `merge_budget.lock(session)`. Keep completed entries; they record used budget.
+- If reservation cleanup or lock teardown fails, the hook denies the command. It keeps any reservation whose
+  release is uncertain. Check the PR and head before releasing a pending entry by the procedure above.
 - `action_authority_failed_open`: the row carries `inputs.error_class` (sha256 of the exception class name; compare with
   `printf ZeroDivisionError | shasum -a 256`) and `loop_id` when known; the hook's stderr (hook log) prints
   `action_authority failed open: <Class>: <message>`. A session-less failure is traced under `_no_session`.
-- Remediation (OWNER, at a terminal; an agent cannot): one-time `python3 scripts/authority_keys.py init` (passphrase-protected
+- `marker_write_failed` or `executed_marker_unavailable`: a receipt note or execution marker failed. The hook
+  denies the command and rolls back only this batch's new markers while holding its claim lock.
+  `marker_cleanup_failed` means cleanup failed: consumed markers stay in place if execution state is uncertain.
+  Fix the file fault and mint a new receipt. A killed hook can leave a partial spend; confirm the command did not
+  run before any manual recovery.
+- Remediation for optional enforce mode: one-time `python3 scripts/authority_keys.py init` (passphrase-protected
   key; `show` prints fingerprints), then mint for the exact command:
   `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge|git_push --command '<exact command>' --cwd <directory it runs in>`
   (single-use, 1h by default; the CLI computes repository+ref+SHA itself, signs, and refuses without a tty with
@@ -397,22 +415,34 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `revoke-receipt` take `--receipt-id`). `signer_unknown` / `trust_root_missing`
   mean the signers file does not list the key that signed (or does not exist). `hash_mismatch` means args, cwd or branch differ from the minted
   command; `sha_mismatch` means HEAD (push source) or the PR head moved since minting: re-mint. `git push origin feature:main` binds
-  the sha of `feature`, not HEAD. `foreign_session` can also mean a worker whose `session_id` differs from the minter's
-  (unverified guess): mint under the session the hook reports. Or set `action_authority: off` in `.coderails/workflow.config.yaml`.
+  the sha of `feature`, not HEAD. `foreign_session` means the receipt was minted for a different `session_id`: subagents share their parent's `session_id`, so mint under the session the hook reports. Or set `action_authority: off` in `.coderails/workflow.config.yaml`.
 - Scope of one receipt: each guarded segment of a chained command (`a && b`) needs its own receipt; a leading
   `cd <dir>` moves the directory the hash binds (mint with `--cwd` set to where the command really runs). The binding comes from
   `scripts/lib/action_binding.py` (push: refspec source sha and destination ref; merge: live PR head via `gh pr view`, 4s timeout);
   unknowable means `binding_unknown`, fail closed. Bindable forms only: `git [-C dir] push <remote> <ref>` (no env prefix,
   `-c`, `--git-dir`; a push without an explicit refspec is guarded but is `binding_unknown`; `HEAD` alone means the current branch; the repository is the push url) and
-  `gh pr merge <n> --match-head-commit <live head sha>` (or `gh api .../merge -f sha=<sha>`). Bare
-  `scripts/merge.py <n>` is unbindable under receipt enforcement because it fetches the head after the hook.
+  `gh pr merge <n> --match-head-commit <live head sha>` (or `gh api .../merge -f sha=<sha>`).
+  `scripts/merge.py <n> --expected-head <live head sha>` binds a helper receipt. Bare `scripts/merge.py <n>` is
+  unbindable under receipt enforcement because it fetches the head after the hook. The receipt must name the same
+  helper path that runs. For Codex this is the absolute `packages/codex/scripts/merge.py` path.
+  Use `python3 <absolute helper path>` for enforce mode. Direct executable invocation is unsupported because it has
+  a different command hash.
+  `gh api --method PUT .../pulls/<n>/merge-async -f sha=<sha>` is guarded but unbindable: GitHub may merge open
+  downstack requests too, so one receipt or budget slot cannot cover its effects. Enforce mode and advisory mode
+  with a live authority deny it. Advisory mode without live authority warns and permits it.
   Run ref-moving steps (`commit`, `branch -f`, `reset`, `config`, ...) as separate commands before the guarded one.
 - Counters: `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py` prints `receipts`
   and `trust` (signature, trust-root, binding and `state_mutated_before_guard` counts). Measurement: one hook run is well under 1 s
   with one receipt (single run, not a benchmark; 50 receipts could approach the 10 s hook timeout).
 - Residuals (docs/decisions/p3-human-only-minting.md): `.consumed`/`.revoked` markers are agent-writable files, so unlinking one
-  replays or un-revokes a receipt until it expires; junk files can crowd the 50-receipt cap (deny, not allow); the hook fails open on
-  its own exceptions.
+  replays or un-revokes a receipt until it expires; junk files can crowd the 50-receipt cap (deny, not allow);
+  unexpected errors deny under enforce or loaded live authority, and fail open in advisory without live authority.
+  An unreadable authority file appears absent in advisory mode. A same-user agent can also write a deeply nested file (`[` x 7000) into `authority.json` or `receipts/`: it is read
+  as malformed (`RecursionError` is caught in `read_receipt`/`read_authority`), so it denies rather than crashing the hook open; it is the
+  same same-user class as the markers above.
+- Unmatched merge routes (Limits): `gh api` merge forms are matched with the endpoint anywhere in argv and the GraphQL
+  `mergePullRequest`/`enablePullRequestAutoMerge` mutations (unbindable, so always denied); other routes (the web UI, `git merge` into main via
+  a script, a tool that calls the API directly) are not seen by any command hook.
 - Codex: the hook imports the byte-identical mirrored libs and the package ships `scripts/action_receipt_cli.py` and
   `scripts/authority_keys.py` (same owner-run rules).
 - Limits: the user-tier trust root (`~/.coderails/keys/receipt_signers`) is agent-writable, so it is a

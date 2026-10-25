@@ -73,14 +73,17 @@ Optional receipt minting uses a key with a passphrase:
   receipts directory. `O_EXCL` stops races, not `unlink`: a same-user agent can delete `<id>.consumed` to replay a
   receipt until it expires (owner-chosen, default 1 h) or delete `<id>.revoked` to un-revoke it. Only a consumed
   ledger outside the agent's write reach (root-owned or append-only) would close this; it is not built.
-- A session lock lets one command select and claim distinct receipts for several guarded segments. If a later
-  claim fails, the hook removes markers this call created before it denies. A process killed between marker
-  creates can leave a partial spend. The batch is not crash-atomic.
+- A session lock covers selection, claim, note writes and execution markers for every guarded segment in one
+  command. A synchronous failure denies and removes markers this call created. If an execution marker cannot be
+  removed, consumed markers stay in place so the receipt cannot be reused. A process killed between marker writes
+  can leave a partial spend. The batch is not crash-atomic; confirm the command did not run before recovery.
 - An agent that fills the receipts directory with junk `*.json` sorted ahead of the real one can push the real
   receipt past the 50-receipt cap (`MAX_RECEIPTS`). That denies, never allows (a denial-of-service, not a bypass).
-- The hook fails open on its own exceptions (`action_authority_failed_open`, traced and written to stderr), so an
-  input that makes `binding()` or `guarded_segments()` raise would allow. No such input is known; `binding()`
-  returns None rather than raising for malformed commands. Fail-closed for enforce mode is not built.
+- An unexpected hook error denies a guarded command under `enforce` or after live authority loads
+  (`denied_gate_error`). Advisory mode without live authority still fails open and traces
+  `action_authority_failed_open`. A failed budget lock or reservation release denies and keeps an ambiguous
+  reservation spent. `read_authority()` maps a file read error to no authority; in advisory mode, an unreadable
+  authority can therefore take the no-authority path. The user owns that file and can also turn the mode off.
 
 ## Binding rules and mode
 
@@ -92,27 +95,27 @@ unbindable (`binding_unknown`, denied) when it:
   `--work-tree` (they retarget the action; the prefix is kept in the hashed segment so it is never silently stripped);
 - is a bare or remote-only `git push` (push.default, `branch.*.remote` and `remote.*.push` decide the destination);
 - is `gh pr merge` without `--match-head-commit <live head sha>` (or `gh api .../merge` without `sha=`). GitHub then
-  refuses a merge whose head moved after the hook ran. Bare `scripts/merge.py <n>` is unbindable in enforce mode:
-  it fetches the head after the hook. B5 must add a literal expected SHA argument before that helper can consume
-  an enforced receipt;
-- names the PR ambiguously (a branch name, two PRs, a `-R` that disagrees with the PR URL, a combined short flag
-  hiding a value option). The repository comes from `-R`, the PR URL or the api path, else `origin`.
+  refuses a merge whose head moved after the hook ran. Bare `scripts/merge.py <n>` is unbindable in enforce mode.
+  Use `scripts/merge.py <n> --expected-head <live head sha>` to bind a helper receipt;
+- names the PR ambiguously in `gh pr merge` (a branch name, two PRs, a `-R` that disagrees with the PR URL, a
+  combined short flag hiding a value option). The helper resolves its `auto` or branch target before it binds.
+  The repository comes from `-R`, the PR URL or the api path, else `origin`.
 
-`git push origin HEAD` binds the current branch (a detached HEAD is unbindable); the repository is the PUSH url
-(`git remote get-url --push --all`), so `remote.<n>.pushurl` / `pushInsteadOf` are seen, and a remote with more than one
-push url is unbindable (it would push to all of them while the receipt names one). A guarded segment that follows ANY
-segment that is not a known read-only command in the same command (allowlist: `status`, `log`, `diff`, `show`,
-`rev-parse`, `ls-remote`, `cd`, `echo`, `grep`, a `git push` to a remote other than `.`, a `gh pr merge`, ...; a
-redirect, command substitution or unknown program is a mover) is denied `state_mutated_before_guard`: the bound sha
-would be stale at execution (`git push . evil:feature`, `git worktree add -B`, `git filter-branch`, a write into
-`.git`, ...). Scripts and aliases that mutate are seen only as unknown commands, and only within the same command: a
-ref moved by an earlier, separate command is the state the hook binds.
-A `cd` is parsed like a shell: a plain existing path moves the bound directory; a variable, `cd -`, a missing path, a
-`( cd x && ... )` group, or a `cd` before `bash -c`/`eval` makes later guards unbindable (a pipeline `cd` is a subshell
-and moves nothing).
-Git global options before the subcommand (`-c`, `-C`, `--git-dir`, `--no-pager`) no longer hide a push from the
-matcher, which also tightens `enforce_pr_workflow`. Codex has no `receipt_counters` mirror on purpose: the counters
-read trace rows through the shared measurement script, which is provider independent.
+`git push origin HEAD` binds the current branch. A detached HEAD is unbindable. The repository is the push URL from
+`git remote get-url --push --all`, including `remote.<n>.pushurl` and `pushInsteadOf`. More than one push URL is
+unbindable because the command would push to each URL while a receipt names one.
+
+The hook checks earlier segments in the same command. A guarded segment after an unknown or state-changing segment
+is denied as `state_mutated_before_guard`: its bound SHA could be stale. Known read-only commands include `status`,
+`log`, `diff`, `show`, `rev-parse`, `ls-remote`, `cd`, `echo` and `grep`. A redirect, command substitution or unknown
+program may change state. Negative probes include `git push . evil:feature`, `git worktree add -B`, `git
+filter-branch` and a write into `.git`. A ref changed by a separate earlier command is the state the hook binds.
+
+A plain `cd` to an existing path changes the binding directory. A variable path, `cd -`, a missing path, a
+`( cd x && ... )` group, or `cd` before `bash -c` or `eval` makes later guards unbindable. A pipeline `cd` runs in a
+subshell and changes no directory for later segments. Git global options (`-c`, `-C`, `--git-dir`, `--no-pager`) no
+longer hide a push from the matcher; this also tightens `enforce_pr_workflow`. Codex has no `receipt_counters` mirror:
+the shared measurement script reads trace rows from both providers.
 
 ## Counters and reason codes
 

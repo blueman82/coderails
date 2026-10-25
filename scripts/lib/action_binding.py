@@ -7,9 +7,10 @@ rev-parse of the refspec SOURCE. A non-literal refspec ($VAR, globs) and a remot
 A bare or remote-only push, `-c`/`--git-dir`/`--work-tree`, and env-prefixed commands
 are None (push.default, branch.*.remote, pushurl and GIT_* could redirect them).
 gh pr merge / gh api .../merge: ref = the PR base, sha = the live PR headRefOid, repository = origin, -R, the PR URL or
-the api path. The command must pin that sha (`--match-head-commit <sha>` / `sha=<sha>`) so a head that moves after the
-hook is refused by GitHub. The merge.py helper fetches the head later and cannot bind a receipt to the hook's
-snapshot. Option values are skipped when finding the PR argument. Used by the hook and receipt CLI.
+the api path. The command must pin that sha (`--match-head-commit <sha>` / `sha=<sha>`). The merge.py helper must
+name the same literal sha with `--expected-head <sha>` before a receipt can bind. Option values are skipped when
+finding the PR argument. merge-async is guarded but unbindable because it may merge a stack. Used by the hook,
+the receipt CLI and merge.py's direct receipt check.
 Refuses (None) --all/--mirror/--tags/--delete, several refspecs, deletes, and remotes that are not host/owner/name.
 """
 
@@ -28,6 +29,7 @@ _SCHEME_URL = re.compile(
 _SCP_URL = re.compile(r"^(?:[^@/\s]+@)?([^:/\s]+):([^/\s]+/[^/?#\s]+?)(?:\.git)?/?$", re.I)
 _BARE_URL = re.compile(r"^([^:/\s]+)/([^/\s]+/[^/?#\s]+?)(?:\.git)?/?$", re.I)
 _PR_URL = re.compile(r"^https://([^/\s]+)/([^/\s]+/[^/\s]+)/pull/(\d+)/?$")
+_SCRIPT = re.compile(r"(?:^|/)merge\.py$")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _NON_LITERAL = re.compile(r"[$`*?\[\]{}()\\]")
 _VALUE_OPTS = {"-o", "--push-option"}
@@ -61,6 +63,24 @@ def pr_view(number: str, cwd: str, repo: str | None = None) -> tuple[str, str] |
         data: Any = json.loads(done.stdout)
         return str(data["baseRefName"]), str(data["headRefOid"])
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+
+
+def pr_number_for_branch(branch: str, cwd: str) -> str | None:
+    """Resolve the first PR for a branch as merge.py does; refuse an empty or failed lookup."""
+    if not branch:
+        return None
+    try:
+        done = subprocess.run(
+            ["gh", "pr", "list", "--head", branch, "--json", "number"], cwd=cwd,
+            capture_output=True, text=True, timeout=4, check=False,
+        )  # fmt: skip
+        if done.returncode:
+            return None
+        rows: Any = json.loads(done.stdout)
+        number = rows[0]["number"]
+        return str(number) if isinstance(number, int) and number > 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError, TypeError):
         return None
 
 
@@ -102,11 +122,34 @@ def _push(tokens: list[str], cwd: str) -> dict[str, str] | None:
     return {"repository": repository, "ref": _full_ref(dest), "sha": sha} if repository and sha else None
 
 
-def _pr_target(tokens: list[str], segment: str) -> tuple[str, str | None, str | None] | None:
-    """(PR number, repo spec or None, pinned sha or None) for gh pr merge or gh api .../merge."""
-    if (api := re.search(r"repos/([^/\s]+/[^/\s]+)/pulls/(\d+)/merge", segment)) and tokens[:2] == ["gh", "api"]:
+def _pr_target(tokens: list[str], segment: str, cwd: str) -> tuple[str, str | None, str | None] | None:
+    """(PR number, repo spec or None, pinned sha or None) for gh pr merge | gh api .../merge | merge script."""
+    api = re.search(r"repos/([^/\s]+/[^/\s]+)/pulls/(\d+)/merge(?=\s|$)", segment)
+    if api and tokens[:2] == ["gh", "api"]:
         pin = next((t[4:] for t in tokens if t.startswith("sha=")), None)
         return api[2], api[1], pin
+    script = next((i for i, token in enumerate(tokens[:2]) if _SCRIPT.search(token)), None)
+    if script is not None:
+        if script == 1 and os.path.basename(tokens[0]) not in {"python", "python3"}:
+            return None
+        args = tokens[script + 1 :]
+        if len(args) == 3 and args[1] == "--expected-head":
+            arg, pin = args[0], args[2]
+        elif len(args) == 2 and args[1].startswith("--expected-head="):
+            arg, pin = args[0], args[1].split("=", 1)[1]
+        else:
+            return None
+        if not _SHA.fullmatch(pin):
+            return None
+        if arg == "auto":
+            branch = git_out(cwd, "branch", "--show-current")
+            default = git_out(cwd, "symbolic-ref", "refs/remotes/origin/HEAD").rsplit("/", 1)[-1] or "main"
+            if branch == default:
+                return None
+            arg = pr_number_for_branch(branch, cwd) or ""
+        elif not arg.isdigit():
+            arg = pr_number_for_branch(arg, cwd) or ""
+        return (arg, None, pin) if arg.isdigit() else None
     if tokens[:3] != ["gh", "pr", "merge"]:
         return None
     args, i = tokens[3:], 0
@@ -138,7 +181,7 @@ def _pr_target(tokens: list[str], segment: str) -> tuple[str, str | None, str | 
 
 
 def _merge(tokens: list[str], segment: str, cwd: str) -> dict[str, str] | None:
-    target = _pr_target(tokens, segment)
+    target = _pr_target(tokens, segment, cwd)
     if target is None:
         return None
     number, repo, pin = target
@@ -148,6 +191,15 @@ def _merge(tokens: list[str], segment: str, cwd: str) -> dict[str, str] | None:
     where = repo or git_out(cwd, "remote", "get-url", "origin")
     repository = normalise_repository(f"github.com/{where}" if repo and repo.count("/") == 1 else where)
     return {"repository": repository, "ref": _full_ref(view[0]), "sha": view[1]} if repository else None
+
+
+def merge_number(segment: str, cwd: str) -> str:
+    """Resolve the PR number named by a merge command, including merge.py branch and auto targets."""
+    try:
+        target = _pr_target(shlex.split(segment), segment, cwd)
+    except ValueError:
+        return ""
+    return target[0] if target else ""
 
 
 def binding(kind: str, segment: str, cwd: str) -> dict[str, str] | None:

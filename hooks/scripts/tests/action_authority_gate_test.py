@@ -1,80 +1,27 @@
 #!/usr/bin/env python3
-"""Pin the opt-in action-authority hook: off/advisory/enforce, signed+bound receipts, consume, fail-open."""
+"""Pin the opt-in action-authority hook: modes, signed receipts, and error policy."""
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import subprocess
 import sys
 import unittest
 from pathlib import Path
-from typing import Any
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts import action_authority_gate as gate
-from hooks.scripts.tests.native_hook_test_support import HookCase
-from hooks.scripts.tests.receipt_test_support import REPOSITORY, git, make_owner, make_repo, signed_receipt, store
-from scripts.lib import action_binding as ab
+from hooks.scripts.tests.receipt_hook_case import MERGE, MERGE_SHA, PIN, PUSH, ReceiptHookCase
+from hooks.scripts.tests.receipt_test_support import git, make_repo
 
 ROOT = Path(__file__).resolve().parents[3]
-MERGE_SHA = "f" * 40
-PIN = f"--match-head-commit {MERGE_SHA}"
-MERGE = f"gh pr merge 12 --squash {PIN}"
-PUSH = "git push origin main"
 
 
-class GateTests(HookCase):
-    """A real temp repo on main with a config file drives the hook as a subprocess."""
-
-    def setUp(self) -> None:
-        """Repo on main with an origin and a commit, a fake gh, and an owner key in the user-tier trust root."""
-        super().setUp()
-        self.repo = make_repo(self.directory / "repo")
-        keys = self.directory / "home" / ".coderails" / "keys"
-        self.key, signers = make_owner(keys)
-        signers.rename(keys / "receipt_signers")
-        self.agent_key, _ = make_owner(self.directory / "agent")
-        gh = self.directory / "bin" / "gh"
-        gh.parent.mkdir()
-        gh.write_text(f'#!/bin/sh\necho \'{{"baseRefName":"main","headRefOid":"{MERGE_SHA}"}}\'\n')
-        gh.chmod(0o755)
-        self.environment = self.environment | {"PATH": f"{gh.parent}:{self.environment['PATH']}"}
-
-    def configure(self, value: str | None) -> None:
-        """Write (or skip) the action_authority config line."""
-        if value is not None:
-            (self.repo / ".coderails").mkdir(exist_ok=True)
-            (self.repo / ".coderails/workflow.config.yaml").write_text(f"action_authority: {value}\n")
-
-    def payload(self, command: str, session: str = "s1") -> dict[str, Any]:
-        """A Bash PreToolUse payload."""
-        return {
-            "hook_event_name": "PreToolUse",
-            "session_id": session,
-            "cwd": str(self.repo),
-            "tool_name": "Bash",
-            "tool_input": {"command": command},
-        }
-
-    def mint(
-        self, command: str, kind: str, session: str = "s1", cwd: Path | None = None, rid: str = "r1",
-        key: Path | None = None, **over: object,
-    ) -> str:  # fmt: skip
-        """Store a signed receipt matching the hook's view of `command` run in `cwd` (default the repo) on main."""
-        where = str(cwd or self.repo)
-        bind = (
-            {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": MERGE_SHA}
-            if kind == "merge" else ab.binding(kind, command, where)
-        )  # fmt: skip
-        rec = signed_receipt(key or self.key, kind, command, where, "main", bind, session, receipt_id=rid, **over)
-        store(self.loop, rec, session)
-        return rid
-
-    def reasons(self, session: str = "s1") -> list[str]:
-        """Reason codes traced for a session."""
-        path = self.loop / session / "trace.jsonl"
-        return [json.loads(line)["reason_code"] for line in path.read_text().splitlines()] if path.exists() else []
+class GateTests(ReceiptHookCase):
+    """Drive the hook as a subprocess against the shared receipt fixture."""
 
     def test_only_explicit_modes_run_the_gate(self) -> None:
         """Absent config, off, and invalid values do not require a receipt."""
@@ -105,7 +52,7 @@ class GateTests(HookCase):
         self.assertEqual(self.reasons(), ["advisory_no_receipt"])
 
     def test_enforce_denies_without_receipt_and_allows_with_one_once(self) -> None:
-        """(a)+(d) Enforce: denied without; allowed and consumed with a signed receipt; replay denied."""
+        """Enforce denies without, allows and consumes with a receipt, and denies replay."""
         self.configure("enforce")
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
         self.mint(MERGE, "merge")
@@ -113,6 +60,25 @@ class GateTests(HookCase):
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
         expected = ["denied_no_receipt", "trust_root_user_tier", "receipt_consumed", "denied_consumed"]
         self.assertEqual(self.reasons(), expected)
+
+    def test_enforce_accepts_auto_and_branch_merge_script_targets(self) -> None:
+        """Both documented merge.py targets can be bound and claimed by the hook."""
+        self.configure("enforce")
+        git(self.repo, "switch", "-q", "-c", "feature/x")
+        for target in ("auto", "feature/x"):
+            with self.subTest(target=target):
+                command = f"python3 scripts/merge.py {target} --expected-head {MERGE_SHA}"
+                self.mint(command, "merge", rid=target.replace("/", "_"))
+                self.assertFalse(self.denied("action_authority_gate", self.payload(command)))
+
+    def test_enforce_async_merge_is_unbindable(self) -> None:
+        """One receipt cannot authorize an async request that may merge a whole stack."""
+        self.configure("enforce")
+        command = (
+            "gh api --method PUT repos/acme/widgets/pulls/12/merge-async " f"-f sha={MERGE_SHA} -f merge_method=merge"
+        )
+        self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+        self.assertIn("denied_binding_unknown", self.reasons())
 
     def test_self_minted_receipts_are_denied(self) -> None:
         """(b) Unsigned hand-written JSON, an agent-made key, and a body edited after signing are all denied."""
@@ -191,21 +157,24 @@ class GateTests(HookCase):
         self.mint(PUSH, "git_push")
         self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))
 
-    def test_hook_error_fails_open_with_reason(self) -> None:
-        """An injected exception exits 0 without denying and traces action_authority_failed_open."""
+    def test_hook_error_denies_under_enforce(self) -> None:
+        """An unexpected error after enforce scope is known emits a denial."""
         self.configure("enforce")
         payload = self.payload(MERGE)
+        output = io.StringIO()
         with (
             mock.patch.object(gate, "read_payload_strict", return_value=payload),
-            mock.patch.object(gate, "find_valid", side_effect=RuntimeError("boom")),
+            mock.patch.object(gate, "check_and_consume", side_effect=RuntimeError("boom")),
             mock.patch.object(gate, "binding", return_value={"repository": "r", "ref": "f", "sha": "s"}),
             mock.patch.dict("os.environ", {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}),
+            contextlib.redirect_stdout(output),
         ):
             self.assertEqual(gate.main(), 0)
-        self.assertEqual(self.reasons(), ["action_authority_failed_open"])
+        self.assertEqual(json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(self.reasons(), ["denied_gate_error"])
 
-    def test_subagent_session_id_differs_is_foreign(self) -> None:
-        """A worker whose session_id differs from the minter's is refused (documented limit)."""
+    def test_a_different_session_id_is_a_different_session(self) -> None:
+        """A receipt belongs only to its minted session."""
         self.configure("enforce")
         self.mint(MERGE, "merge", session="parent")
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE, "worker")))
@@ -228,6 +197,17 @@ class GateTests(HookCase):
         self.assertTrue(self.denied("action_authority_gate", self.payload(chain)))
         self.mint(f"gh pr merge 2 {PIN}", "merge", rid="r3")
         self.assertFalse(self.denied("action_authority_gate", self.payload(chain)))
+
+    def test_two_merge_segments_cannot_spend_one_budget_twice(self) -> None:
+        """A denied shell line cannot consume a receipt or spend the session budget."""
+        self.configure("enforce")
+        self.grant(max_prs=1)
+        first, second = f"gh pr merge 1 {PIN}", f"gh pr merge 2 {PIN}"
+        self.mint(first, "merge", rid="r1")
+        self.mint(second, "merge", rid="r2")
+        self.assertTrue(self.denied("action_authority_gate", self.payload(f"{first} && {second}")))
+        self.assertEqual(self.reasons().count("receipt_consumed"), 0)
+        self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
 
     def test_cd_into_other_repo_binds_the_real_directory(self) -> None:
         """A receipt for `git push` in repoA does not authorise `cd repoB && git push`; one minted for repoB does."""
@@ -257,7 +237,7 @@ class GateTests(HookCase):
 
     def test_failed_open_row_carries_error_class_and_loop(self) -> None:
         """The failed-open row records the error class (hashed input) and stderr names the class and message."""
-        self.configure("enforce")
+        self.configure("advisory")
         payload = self.payload(MERGE)
         with (
             mock.patch.object(gate, "read_payload_strict", return_value=payload),
@@ -329,7 +309,12 @@ class GateTests(HookCase):
         for command in wrapped:
             with self.subTest(command=command):
                 self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
-        for command in ("sudo gh pr merge 5", "(gh pr merge 5)", "gh api repos/o/r/pulls/5/merge -X PUT"):
+        for command in (
+            "sudo gh pr merge 5", "(gh pr merge 5)", "gh api repos/o/r/pulls/5/merge -X PUT",
+            "gh api -X PUT repos/o/r/pulls/5/merge", "gh api --method PUT -f sha=abc repos/o/r/pulls/5/merge",
+            "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { id } }'",
+            "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { id } }'",
+        ):  # fmt: skip
             with self.subTest(command=command):
                 self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
         self.mint(PUSH, "git_push")

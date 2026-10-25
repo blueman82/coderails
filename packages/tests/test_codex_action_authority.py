@@ -2,24 +2,25 @@
 
 from __future__ import annotations
 
-import filecmp
+import contextlib
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 CODEX = ROOT / "packages/codex"
 HOOKS = CODEX / "hooks/scripts"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HOOKS))
-from lib import action_match as codex_match  # noqa: E402  # isort: skip
-from hooks.scripts.lib import pr_workflow_match as claude_match  # noqa: E402  # isort: skip
+import action_authority_gate as codex_gate  # noqa: E402  # isort: skip
 from hooks.scripts.tests.receipt_test_support import (  # noqa: E402  # isort: skip
     REPOSITORY,
     git,
@@ -33,10 +34,7 @@ from scripts.lib import action_binding as ab  # noqa: E402  # isort: skip
 MERGE_SHA = "f" * 40
 PIN = f"--match-head-commit {MERGE_SHA}"
 MERGE = f"gh pr merge 12 --squash {PIN}"
-MIRRORS = (
-    "scripts/lib/action_receipt.py", "scripts/lib/receipt_signing.py", "scripts/lib/action_binding.py",
-    "scripts/action_receipt_cli.py", "scripts/authority_keys.py",
-)  # fmt: skip
+
 
 PROBE = """
 import json, sys
@@ -55,137 +53,6 @@ else:
     r, c = ar.find_valid("s1", prop, now, None, base, True, signers)
     print(r["receipt_id"] if r else "NONE:" + c)
 """
-
-
-class MirrorTests(unittest.TestCase):
-    """The Codex copies of the receipt modules are the Claude files, byte for byte."""
-
-    def test_mirrors_byte_identical(self) -> None:
-        """Every mirrored file matches its Claude source."""
-        for name in MIRRORS:
-            with self.subTest(name):
-                self.assertTrue(filecmp.cmp(ROOT / name, CODEX / name, shallow=False), name)
-
-    def test_hook_common_has_no_vendored_receipt_code(self) -> None:
-        """The vendored receipt_* functions are gone and the file is under its 400-line ceiling."""
-        text = (HOOKS / "hook_common.py").read_text()
-        for vendored in ("def receipt_", "RECEIPT_FIELDS", "_receipt_claim"):
-            self.assertNotIn(vendored, text)
-        self.assertLess(len(text.splitlines()), 400)
-
-
-class CodexModuleTests(unittest.TestCase):
-    """(b)-(e) through the Codex package modules only, in a child process whose path has no Claude scripts/lib."""
-
-    tmp: tempfile.TemporaryDirectory[str]
-    key: Path
-    signers: Path
-    agent_key: Path
-    bind: dict[str, str]
-    command: str
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        """Owner and agent keys."""
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.addClassCleanup(cls.tmp.cleanup)
-        base = Path(cls.tmp.name)
-        cls.key, cls.signers = make_owner(base / "owner")
-        cls.agent_key, _ = make_owner(base / "agent")
-        cls.bind = {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": "a" * 40}
-        cls.command = "git push origin feature:main"
-
-    def receipt(self, key: Path | None = None, /, **over: object) -> dict[str, Any]:
-        """A signed receipt for the command."""
-        return signed_receipt(key or self.key, "git_push", self.command, "/repo", "feature", self.bind, **over)
-
-    def proposed(self, **over: object) -> dict[str, Any]:
-        """The action as the Codex hook would compute it, with overrides."""
-        from scripts.lib import action_receipt as claude  # the hash function is identical in the mirror
-
-        return {**claude.proposed_action("git_push", self.command, "/repo", "feature", self.bind), **over}
-
-    def probe(self, **case: object) -> str:
-        """Run PROBE against the Codex package only."""
-        case.setdefault("signers", str(self.signers))
-        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-        done = subprocess.run(
-            [sys.executable, "-c", PROBE, str(CODEX), json.dumps(case)], capture_output=True, text=True, env=env,
-            cwd=self.tmp.name, check=False,
-        )  # fmt: skip
-        self.assertEqual(done.returncode, 0, done.stderr)
-        return done.stdout.strip()
-
-    def verify(self, rec: object, prop: dict[str, Any] | None = None) -> list[Any]:
-        """Return the (ok, code) pair that the Codex copy of verify gives."""
-        out: list[Any] = json.loads(self.probe(mode="verify", rec=rec, prop=prop or self.proposed()))
-        return out
-
-    def test_valid_and_self_minted(self) -> None:
-        """(a)+(b) a signed receipt verifies; unsigned, agent-key and edited receipts do not."""
-        self.assertEqual(self.verify(self.receipt()), [True, "ok"])
-        self.assertEqual(self.verify({**self.receipt(), "signature": None}), [False, "signature_missing"])
-        self.assertEqual(self.verify(self.receipt(self.agent_key)), [False, "signer_unknown"])
-        self.assertEqual(self.verify({**self.receipt(), "ref": "refs/heads/release/x"}), [False, "signature_invalid"])
-
-    def test_binding_and_malformed(self) -> None:
-        """(c) stale sha, wrong repository/ref, missing artifact_sha."""
-        for field, value, code in (
-            ("artifact_sha", "b" * 40, "sha_mismatch"), ("repository", "github.com/evil/w", "repository_mismatch"),
-            ("ref", "refs/heads/release/x", "ref_mismatch"),
-        ):  # fmt: skip
-            self.assertEqual(self.verify(self.receipt(**{field: value})), [False, code])
-        self.assertEqual(self.verify(self.receipt(artifact_sha=None)), [False, "malformed"])
-
-    def test_replay_and_concurrent_double_use(self) -> None:
-        """(d)+(e) a second consume is refused; 16 Codex-module processes on one receipt give exactly one winner."""
-        rec = self.receipt()
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            store(base, rec)
-            args = {"mode": "find", "rec": rec, "prop": self.proposed(), "base": tmp}
-            self.assertEqual(self.probe(**args), rec["receipt_id"])
-            self.assertEqual(self.probe(**args), "NONE:consumed")
-            (base / "s1" / "receipts" / f"{rec['receipt_id']}.consumed").unlink()
-            gate = f"import time, pathlib\nwhile not pathlib.Path({str(base / 'go')!r}).exists(): time.sleep(0.005)\n"
-            argv = [sys.executable, "-c", gate + PROBE, str(CODEX), json.dumps({**args, "signers": str(self.signers)})]
-            procs = [subprocess.Popen(argv, stdout=subprocess.PIPE, text=True, cwd=tmp) for _ in range(16)]
-            time.sleep(0.5)
-            (base / "go").write_text("")
-            outs = [p.communicate()[0].strip() for p in procs]
-        self.assertEqual(outs.count(rec["receipt_id"]), 1, outs)
-        self.assertEqual(sum(o.startswith("NONE:") for o in outs), 15, outs)
-
-
-class MatchParityTests(unittest.TestCase):
-    """The vendored command matcher must guard exactly what the Claude one guards."""
-
-    CORPUS = (
-        "git push origin main", "git push", "git -C . push origin main",
-        "git push origin feature && git push origin main",
-        "cd sub && git push", "gh pr merge 5", "gh -R o/r pr merge 5", "gh pr merge 1 && gh pr merge 2",
-        "git push --dry-run origin main", "ls", "git push origin HEAD:main", "git merge main", "bash merge.py 7",
-        "GIT_DIR=x git push origin main", "git -c a=b push origin main", "git --no-pager push origin main",
-        "git commit -m x && git push origin main", "git config a b; gh pr merge 5",
-        'git push origin "main"', "git push origin 'HEAD:main'", "git push origin HEAD:$B", "git push --mirror origin",
-        "/usr/bin/git push origin HEAD:main", 'eval "git push origin HEAD:main"', "/usr/bin/env git push origin main",
-        "git push . evil:feature && git push origin feature:main", "echo x > .git/refs/heads/f; git push origin main",
-        "git status 2>&1 && git push origin main", 'cd "sub" && git push origin main', "cd $X && git push origin main",
-        "(cd sub); git push origin main", "(cd sub && git push origin main)",
-        "cd sub && bash -c 'git push origin main'",
-    )  # fmt: skip
-
-    def test_guarded_segments_identical_on_main_and_feature(self) -> None:
-        """Same corpus, same repo state, same (operation, segment, cwd) answers."""
-        for branch in ("main", "feature/x"):
-            with tempfile.TemporaryDirectory() as tmp:
-                subprocess.run(["git", "init", "-q", "-b", branch, tmp], check=True)
-                (Path(tmp) / "sub").mkdir()
-                for command in self.CORPUS:
-                    with self.subTest(branch=branch, command=command):
-                        for fn in ("guarded_segments", "state_mutated_before_guard"):
-                            args = (command, tmp)[: 2 if fn == "guarded_segments" else 1]
-                            self.assertEqual(getattr(claude_match, fn)(*args), getattr(codex_match, fn)(*args))
 
 
 class HookTests(unittest.TestCase):
@@ -256,7 +123,8 @@ class HookTests(unittest.TestCase):
             {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": MERGE_SHA}
             if kind == "merge" else ab.binding(kind, command, where)
         )  # fmt: skip
-        store(self.loop, signed_receipt(key or self.key, kind, command, where, "main", bind, receipt_id=rid, **over))
+        rec = signed_receipt(key or self.key, kind, command, where, "main", bind, receipt_id=rid, **over)
+        store(self.loop, rec, "s1")  # a foreign-session receipt still lives in s1's directory
 
     def reasons(self) -> list[str]:
         """Reason codes traced for s1."""
@@ -270,11 +138,59 @@ class HookTests(unittest.TestCase):
         self.assertTrue(self.denied(f"{MERGE} && {MERGE}"))
         self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
 
+    def test_unexpected_error_uses_live_authority_error_policy(self) -> None:
+        """Codex denies under enforce or a loaded grant and warns without either."""
+        for mode, live, denied in (("advisory", False, False), ("advisory", True, True), ("enforce", False, True)):
+            with self.subTest(mode=mode, live=live):
+                self.configure(mode)
+                output = io.StringIO()
+                payload = {"session_id": "s1", "cwd": str(self.repo), "tool_input": {"command": MERGE}}
+                with (
+                    mock.patch.dict(os.environ, self.environment),
+                    mock.patch.object(codex_gate, "read_input", return_value=""),
+                    mock.patch.object(codex_gate, "payload_object", return_value=payload),
+                    mock.patch.object(codex_gate, "check_and_consume", side_effect=RuntimeError("unexpected")),
+                    mock.patch.object(codex_gate, "read_authority", return_value={"loop_id": None} if live else None),
+                    contextlib.redirect_stdout(output),
+                ):
+                    self.assertEqual(codex_gate.main(), 0)
+                self.assertEqual(bool(output.getvalue()), denied)
+                self.assertEqual(self.reasons()[-1], "denied_gate_error" if denied else "action_authority_failed_open")
+
+    def test_marker_write_error_denies_in_codex_hook(self) -> None:
+        """A Codex marker write fault must emit a deny envelope, not fail open."""
+        self.configure("enforce")
+        self.mint()
+        original = Path.write_text
+
+        def write(path: Path, data: str, encoding: str | None = None, errors: str | None = None) -> int:
+            if path.suffix == ".consumed":
+                original(path, "", encoding=encoding, errors=errors)
+                raise OSError("marker write failed")
+            return original(path, data, encoding=encoding, errors=errors)
+
+        payload = {"session_id": "s1", "cwd": str(self.repo), "tool_input": {"command": MERGE}}
+        output = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, self.environment),
+            mock.patch.object(codex_gate, "read_input", return_value=json.dumps(payload)),
+            mock.patch.object(Path, "write_text", autospec=True, side_effect=write),
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertEqual(codex_gate.main(), 0)
+        self.assertEqual(json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("denied_marker_write_failed", self.reasons())
+        self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
+
     def test_common_wrappers_are_still_guarded(self) -> None:
         """Env prefix, sudo, subshell, bash -c and gh api merge are guarded like the bare command."""
         self.configure("enforce")
         for command in ("FOO=1 gh pr merge 12", "sudo gh pr merge 12", "(gh pr merge 12)",
-                        "bash -c 'git push origin main'", "gh api repos/o/r/pulls/5/merge -X PUT"):  # fmt: skip
+                        "bash -c 'git push origin main'", "gh api repos/o/r/pulls/5/merge -X PUT",
+                        "gh api -X PUT repos/o/r/pulls/5/merge",
+                        "gh api graphql -f query='mutation { mergePullRequest(input: {}) { id } }'",
+                        "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { id } }'",
+                        ):  # fmt: skip
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
 
@@ -285,12 +201,93 @@ class HookTests(unittest.TestCase):
         self.assertFalse(self.denied(MERGE))
         self.assertEqual(self.reasons(), [])
         self.configure("off")
-        result = self.run_hook(MERGE, session="s2")
+        result = self.run_hook(MERGE)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+        self.assertEqual(self.reasons(), [])
         self.configure("advisory")
         result = self.run_hook(MERGE)
         self.assertEqual((result.stdout, "advisory" in result.stderr), ("", True))
         self.assertEqual(self.reasons()[-1], "advisory_no_receipt")
+
+    def test_unbindable_merge_with_live_cap_is_denied_before_remote_command(self) -> None:
+        """The Codex hook refuses an unknown PR or head while a merge cap is live."""
+        self.configure("advisory")
+        authority = {
+            "authority_id": "a1", "loop_id": None, "session_id": "s1", "scope": ["code"], "denied": [],
+            "max_prs": 1, "expires_at": "2999-01-01T00:00:00+00:00", "revocable": True,
+            "approval_required_for": ["merge"], "granted_by": "command",
+        }  # fmt: skip
+        path = self.loop / "s1" / "authority.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(authority))
+        remote = self.directory / "remote.log"
+        gh = self.directory / "bin" / "gh"
+        gh.write_text(
+            f'#!/bin/sh\nif [ "$1 $2" = "pr view" ]; then '
+            f'echo \'{{"baseRefName":"main","headRefOid":"{MERGE_SHA}"}}\'; '
+            f'else echo "$*" >> "{remote}"; fi\n'
+        )
+        for command in (
+            "gh pr merge 12 --squash",
+            "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { id } }'",
+        ):
+            with self.subTest(command=command):
+                denied = self.denied(command)
+                if not denied:
+                    subprocess.run(command, shell=True, env=self.environment, cwd=self.repo, check=True)
+                self.assertTrue(denied)
+                self.assertFalse(remote.exists())
+                self.assertEqual(list((self.loop / "s1" / "merges").glob("*.json")), [])
+        self.assertEqual(self.reasons(), ["denied_binding_unknown", "denied_binding_unknown"])
+
+    def test_rejected_set(self) -> None:
+        """(c) wrong repository, wrong ref, stale sha, unsigned, agent-signed, expired and foreign-session receipts."""
+        self.configure("enforce")
+        past = datetime.now(timezone.utc) - timedelta(hours=1)
+        cases: tuple[tuple[str, dict[str, Any]], ...] = (
+            ("repository_mismatch", {"repository": "github.com/evil/w"}), ("ref_mismatch", {"ref": "refs/heads/x"}),
+            ("sha_mismatch", {"artifact_sha": "b" * 40}), ("signature_missing", {"signature": None}),
+            ("signer_unknown", {"key": self.agent_key}),
+            ("expired", {"expires_at": (past + timedelta(minutes=1)).isoformat(), "issued_at": past.isoformat()}),
+            ("foreign_session", {"session_id": "other"}),
+        )  # fmt: skip
+        for code, over in cases:
+            with self.subTest(code=code):
+                self.mint(rid=code, **over)
+                self.assertTrue(self.denied(MERGE))
+                self.assertEqual(self.reasons()[-1], f"denied_{code}")
+                (self.loop / "s1" / "receipts" / f"{code}.json").unlink()
+
+    def test_authority_denied_and_max_prs_beat_a_valid_receipt(self) -> None:
+        """(a) authority.denied and a spent max_prs refuse before any receipt is consumed."""
+        self.configure("enforce")
+        obj: dict[str, Any] = {
+            "authority_id": "auth-1", "loop_id": None, "session_id": "s1", "scope": ["code"], "denied": ["merge"],
+            "max_prs": 0, "expires_at": "2999-01-01T00:00:00+00:00", "revocable": True,
+            "approval_required_for": ["merge"], "granted_by": "command",
+        }  # fmt: skip
+        path = self.loop / "s1" / "authority.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(obj))
+        self.mint()
+        self.assertTrue(self.denied(MERGE))
+        path.write_text(json.dumps(obj | {"denied": []}))
+        self.assertTrue(self.denied(MERGE))
+        self.assertEqual(self.reasons(), ["denied_authority_denied", "denied_max_prs_exceeded"])
+        self.assertFalse((self.loop / "s1" / "receipts" / "r1.consumed").exists())
+
+    def test_subagent_payload_is_the_same_session(self) -> None:
+        """(d) Extra agent_id/agent_type fields do not change the session: the parent's receipt is honoured."""
+        self.configure("enforce")
+        self.mint()
+        payload = {"session_id": "s1", "cwd": str(self.repo), "tool_input": {"command": MERGE},
+                   "agent_id": "a-1", "agent_type": "loop-worker"}  # fmt: skip
+        done = subprocess.run(
+            [sys.executable, str(HOOKS / "action_authority_gate.py")], input=json.dumps(payload), capture_output=True,
+            text=True, env=self.environment, check=False,
+        )  # fmt: skip
+        self.assertEqual((done.returncode, done.stdout), (0, ""))
+        self.assertEqual(self.reasons(), ["trust_root_user_tier", "receipt_consumed"])
 
     def test_enforce_deny_allow_consume_once(self) -> None:
         """No receipt denied; matching signed receipt allowed and consumed; replay denied; other args denied."""

@@ -49,6 +49,14 @@ class MatchHardeningTests(unittest.TestCase):
         self.assertTrue(match.targets_main(command, self.repo, "", "git_push"))
         self.assertEqual(self.names(command), ["git_push"])
 
+    def test_async_merge_request_is_guarded_but_result_lookup_is_not(self) -> None:
+        """The stacked-PR PUT endpoint is a merge; polling its UUID is a read."""
+        sha = "f" * 40
+        request = f"gh api --method PUT repos/acme/widgets/pulls/7/merge-async -f sha={sha}"
+        result = "gh api repos/acme/widgets/pulls/7/merge-async/11111111-1111-1111-1111-111111111111"
+        self.assertEqual(self.names(request), ["merge"])
+        self.assertEqual(self.names(result), [])
+
     def test_quoted_variable_and_glob_destinations_are_guarded(self) -> None:
         """Quoting, escaping and expansion must not hide a push to main; non-literal destinations are unbindable."""
         for command in (

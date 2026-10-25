@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -11,6 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, output, read_payload_strict
 from hooks.scripts.lib.destructive_patterns import normalize_ifs, permanent_pattern, source_write, workflow_substitution
 from hooks.scripts.lib.destructive_routes import ROUTES
+from hooks.scripts.lib.trace_row import append_row
+from scripts.lib.authority_permits import permits
+
+LEASE = re.compile(r"\bgit\b.*\bpush\b.*--force-with-lease\b", re.I)  # the one family permanent_pattern can allow
 
 
 def main() -> int:
@@ -36,6 +41,15 @@ def main() -> int:
             permissionDecisionReason=f"Destructive pattern detected: {pattern}\n"
             f"Full command: {command}\n"
             f"This command is permanently blocked. {ROUTES[identifier]}",
+        )
+        return 0
+    session = str(payload.get("session_id") or "")
+    flat = command.replace("\\\n", "").replace("\n", " ")  # the same flattening permanent_pattern decides on
+    if LEASE.search(flat) and not (verdict := permits(session, "destructive_shell"))["allow"]:
+        append_row("action_authority", "denied", "authority_denied_destructive_shell", session)
+        deny(
+            "authority_denied_destructive_shell: this session's authority denies destructive_shell, so the allowlisted "
+            f"git push --force-with-lease is refused too ({verdict['reason']}). Full command: {command}"
         )
         return 0
     if reason := source_write(command, cwd):

@@ -104,9 +104,9 @@ Before responding to the first user message in an authorised loop, do this in a 
 Then respond.
 
 **Envelope examples:**
-- "Ship N PRs without asking" → full-autonomous. Includes merges, deploys, post-deploy cleanup, follow-up tickets within the same theme.
+- "Ship N PRs without asking" → full-autonomous. Includes deploys, post-deploy cleanup, follow-up tickets within the same theme. Merges are included only up to the live authority's `max_prs` and each needs an owner-signed receipt (the envelope class never mints either: `authority.py grant --max-prs N` plus `action_receipt_cli.py approve-action`). With no authority, or `max_prs` 0, the loop prepares the PR and asks the owner to mint a receipt.
 - "Fix this bug" → narrow-fix. Confirm before scope creep into adjacent files.
-- "Crack on / human is dead" → full-autonomous. All routine sub-steps autonomous; only break the loop on verification failure or destructive/irreversible actions.
+- "Crack on / human is dead" → full-autonomous. All routine sub-steps autonomous; only break the loop on verification failure, destructive/irreversible actions, or a merge/push-to-main the authority and receipt gate refuses (`authority_denied`, `max_prs_exceeded`, `no_receipt`).
 - "Help me debug" → diagnostic-only. Do not write code without explicit go-ahead.
 
 Match the confirmation cadence to the envelope class for the rest of the session — every "do you want me to..." inside an authorised envelope is a stall the user has to clear, and stalls cost more than the occasional over-reach you'd avoid by asking.

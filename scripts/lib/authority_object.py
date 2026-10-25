@@ -140,7 +140,7 @@ def read_authority(session_id: str, base: Path | None = None, now: datetime | No
         return None
     try:
         raw: object = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # deeply nested "[[[..." raises RecursionError: still malformed
         return None
     if not isinstance(raw, dict):
         return None

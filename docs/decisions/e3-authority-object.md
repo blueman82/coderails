@@ -91,12 +91,18 @@ a consumer. Those four lines are superseded by the next section; the user direct
   without a tty (`receipt_refused_no_tty`). The user-tier signers file is agent-writable, so this is a
   cooperating-agent safeguard. It does not establish independent human approval.
 - Limits: hash covers only the command text the hook sees (not aliases, functions, eval/xargs; common wrappers are
-  unwrapped); protected branches are main/master only; (guess, unverified) a subagent's `session_id` may differ from
-  its parent's, so a receipt minted by the parent could be refused as `foreign_session` for worker-run actions.
+  unwrapped); protected branches are main/master only. Subagent identity is settled by the `agent_only_gate` evidence (same `session_id`, differing `agent_id`/`agent_type`) and a payload test, so the parent's
+  receipt is honoured by a subagent. `scripts/merge.py` cannot see the shell's command text; when no hook ran it checks the signed hash against the canonical `python3 scripts/merge.py <target> --expected-head <sha>` command, cwd, branch, repository and ref. The target is the PR number, branch name, or `auto` argument supplied to the helper. A hook-consumed receipt must be
+  within 300 s. `action_authority: off` and the user-tier trust root are agent-writable: cooperating-agent safeguard, not a boundary.
+
 - Worker statuses `NEEDS_DECISION | OUTSIDE_SCOPE | IRREVERSIBLE_ACTION` ship as a standalone validator
   (`skills/agentic-loop/scripts/worker_status.py`, Codex copy byte-identical). Wiring into `record-wave` was
   rejected: it changes record-wave evidence demands and `graph_semantics.py` has three synced copies. Wiring point:
   the orchestrator's U4 step and the SKILL.md report-back contract.
+
+### Owner revision, 24 October 2026
+
+The shipped workflow config sets `advisory`. With no config or an unknown value, the gate is off. Routine pushes and merges do not need a key or passphrase. Explicit `enforce` requires a signed receipt. A direct `merge.py` call also needs `--expected-head <sha>` to bind that receipt. PR review, eval, and integrity gates still govern merges.
 
 ## Superseded again: grant moves off prose matching to a typed command
 

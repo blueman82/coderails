@@ -94,7 +94,9 @@ def _push_guarded(segment: str, *, implicit_push: bool = False) -> bool:
 _SEP = re.compile(r"(&&|\|\||[;|&\n])")
 _WRAPPER = re.compile(r"^(?:[A-Za-z_]\w*=\S*|(?:\S*/)?(?:env|sudo|time|command|exec|nohup))\s+")
 _SHELL_C = re.compile(r"\b(?:(?:bash|sh|zsh)\s+-\w*c|eval)\s+([\"'])(.*?)\1")
-_API_MERGE = re.compile(r"^gh\s+api\s+\S*/pulls/\d+/merge(?:\s|$)")
+_API_MERGE = re.compile(  # direct/async merge request or GraphQL mutation; not async result polling
+    r"^gh\s+api\s(?:.*?/pulls/\d+/merge(?:-async)?(?![\w/-])|.*?\b(?:mergePullRequest|enablePullRequestAutoMerge)\b)"
+)
 _PROGRAMS = {"git", "gh", "bash", "sh", "zsh", "python", "python3"}
 UNBINDABLE = "CODERAILS_UNBINDABLE=1 "  # an env-style prefix: action_binding refuses it, so the segment is denied
 
@@ -128,7 +130,8 @@ def guarded_segments(command: str, cwd: str, *, implicit_push: bool = False) -> 
     receipt hash binds the directory the operation really runs in. A cd that cannot be followed (variable, `cd -`, a
     missing directory, a subshell group) makes every later guard unbindable, as does a cd before `bash -c`/`eval`.
     Quoting and absolute program paths are normalised (`canonical`); wrappers are unwrapped (env/sudo/time prefixes,
-    subshell and brace groups, `bash -c '...'`, `eval '...'`, `gh api .../merge`).
+    subshell and brace groups, `bash -c '...'`, `eval '...'`, `gh api .../merge` with flags first, and the GraphQL
+    mergePullRequest/enablePullRequestAutoMerge mutations, which are unbindable for receipts and live merge budgets).
     Still unmatched: xargs, aliases, functions, scripts that push, `gh api` ref/contents writes, other branches.
     ponytail: tokens only, no variable or alias expansion (a non-literal destination is guarded and unbindable).
     """

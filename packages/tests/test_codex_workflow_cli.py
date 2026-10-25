@@ -120,6 +120,28 @@ class WorkflowCliTests(unittest.TestCase):
         ):
             merge.verify_gates("1")
 
+    def test_advisory_config_keeps_integrity_check_in_merge_helper(self) -> None:
+        """The new action_authority key must not make configured integrity settings unreadable."""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "workflow.config.yaml"
+            path.write_text("action_authority: advisory\nintegrity_review:\n  enabled: true\n")
+            values, findings = config.load_config(path)
+            self.assertEqual((values["action_authority"], findings), ("advisory", []))
+            head = "f" * 40
+            with (
+                patch.object(merge, "config_path", return_value=str(path)),
+                patch.object(git_common, "pr_field", return_value=head),
+                patch.object(git_common, "gate_review_summary_for_pr", return_value=(0, "")),
+                patch.object(
+                    git_common, "gate_eval_summary_for_pr", return_value=git_common.EvalSummary(0, embed="{}")
+                ),
+                patch.object(merge, "smoke_verify", return_value=0),
+                patch.object(merge, "has_wiki_ingest_for_merged_prs"),
+                patch.object(merge, "verify_integrity_status") as integrity,
+            ):
+                self.assertEqual(merge.verify_gates("7"), head)
+            integrity.assert_called_once_with(head, "github-actions[bot]")
+
 
 if __name__ == "__main__":
     unittest.main()

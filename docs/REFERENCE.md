@@ -747,6 +747,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `engineering_principles_paths` | array/null | `null` | read_by_prose_only | Glob patterns that trigger the engineering-principles pre-flight in /coderails:push. |
 | `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
 | `sandbox_workers` | boolean/null | `false` | read_by_prose_only | true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md). |
+| `action_authority` | string/null | `"off"` | enforced_by_code | Absent or unknown settings leave this optional gate off. The shipped workflow sets advisory: missing receipts warn while a live session authority still blocks denied actions and merges that cannot be bound to its budget. Enforce requires a signed receipt for merges and pushes to main or master. |
 | `integrity_review` | object/null | `null` | enforced_by_code | Integrity attestation settings. |
 | `integrity_review.enabled` | boolean/null | `false` | enforced_by_code | true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live. |
 | `integrity_review.machine_user` | string/null | `null` | enforced_by_code | Deprecated. A non-empty legacy login remains the required local status author until enabled is true. |
