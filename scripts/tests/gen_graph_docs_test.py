@@ -10,6 +10,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
+import graph_spec  # noqa: E402
+
 SCRIPT = ROOT / "scripts/gen_graph_docs.py"
 FILES = (
     "skills/agentic-loop/execution-graph.md",
@@ -63,6 +66,31 @@ class GenGraphDocsTests(unittest.TestCase):
                 edited = root / relative
                 edited.write_text(edited.read_text(encoding="utf-8").replace(old, new, 1), encoding="utf-8")
                 self.assertEqual(run("--check", "--root", str(root)).returncode, 1)
+
+    def test_worker_status_path_is_rendered_without_changing_spec(self) -> None:
+        """The public table has a usable provider path; its source spec retains its digest."""
+        root = self.copy_tree()
+        spec_path = root / FILES[2]
+        original_bytes = spec_path.read_bytes()
+        original_spec = graph_spec.load_spec(spec_path)
+        document = root / FILES[0]
+        document.write_text(
+            document.read_text(encoding="utf-8").replace(
+                "`skills/agentic-loop/scripts/worker_status.py`", "`missing-worker-status.py`", 1
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(run("--check", "--root", str(root)).returncode, 1)
+        regenerated = run("--root", str(root))
+        self.assertEqual(regenerated.returncode, 0, regenerated.stderr)
+        table = document.read_text(encoding="utf-8")
+        row = next(line for line in table.splitlines() if line.startswith("| `U4[i]` |"))
+        self.assertIn("`skills/agentic-loop/scripts/worker_status.py`", row)
+        self.assertNotIn("`scripts/worker_status.py`", row)
+        self.assertEqual(spec_path.read_bytes(), original_bytes)
+        self.assertEqual(graph_spec.load_spec(spec_path), original_spec)
+        self.assertEqual(graph_spec.spec_sha256(graph_spec.load_spec(spec_path)), graph_spec.spec_sha256(original_spec))
+        self.assertEqual(run("--check", "--root", str(root)).returncode, 0)
 
     def test_missing_marker_is_an_error(self) -> None:
         """A document that lost its region markers refuses instead of silently skipping."""
