@@ -6,7 +6,6 @@ Plain gh merges count as executed; absent or unknown config is off.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from collections.abc import Callable
@@ -41,15 +40,6 @@ def resolve_mode(cwd: str) -> tuple[str, bool]:
     return "off", False
 
 
-def _record(path: Path, name: str, proposed: dict[str, Any]) -> bool:
-    """Write the payload hash and PR number into the .consumed marker; a plain gh merge is marked executed here."""
-    note = {"hash": proposed["exact_payload_hash"], "number": proposed.get("number", ""), "action": name}
-    path.with_suffix(".consumed").write_text(json.dumps(note), encoding="utf-8")
-    if name == "merge" and not proposed.get("script"):
-        return ar.execute(path)
-    return True
-
-
 def _check_and_consume(
     session: str, proposals: list[tuple[str, dict[str, Any]]], now: datetime, loop_id: str | None, signers: Path | None,
     consume: bool = True, stale: bool = False, on_claim: Callable[[str], None] | None = None,
@@ -80,15 +70,9 @@ def _check_and_consume(
     if not consume:
         return None
     actions = [proposed for _, proposed in proposals]
-    claimed, code, index = ar.claim_many(session, actions, now, loop_id, signers=signers)
+    claimed, code, index = ar.claim_many(session, actions, now, loop_id, signers=signers, record=True)
     if claimed is None:
         return proposals[index][0], code
-    for (name, proposed), found in zip(proposals, claimed):
-        path = ar.receipt_path(session, found["receipt_id"])
-        if path is None:
-            return name, "malformed"
-        if not _record(path, name, proposed):
-            return name, "executed_marker_unavailable"
     if on_claim is not None:
         for name, _ in proposals:
             on_claim(name)

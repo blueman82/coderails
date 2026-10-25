@@ -12,6 +12,7 @@ import unittest
 from collections.abc import Generator
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -246,19 +247,21 @@ class SeamSpyTests(unittest.TestCase):
     def test_plain_merge_refuses_when_execution_debit_cannot_be_recorded(self) -> None:
         """A claimed receipt cannot allow the remote merge if its budget marker failed."""
         with tempfile.TemporaryDirectory() as temporary:
-            receipt_path = Path(temporary) / "r1.json"
-            proposal = {"artifact_sha": SHA, "exact_payload_hash": "h", "number": "7"}
+            auth = Path(temporary) / "authority.json"
+            receipt_path = auth.parent / "receipts/r1.json"
+            receipt_path.parent.mkdir()
+            receipt_path.with_suffix(".executed").write_text("")
+            proposal = {"artifact_sha": SHA, "exact_payload_hash": "h", "number": "7", "action": "merge"}
             allowed = {"allow": True, "reason": "ok", "requires_approval": True}
             claims: list[str] = []
+
             with (
                 mock.patch.object(merge_budget, "lock", return_value=contextlib.nullcontext(True)),
                 mock.patch.object(receipt_gate, "read_authority", return_value={"loop_id": None, "max_prs": 1}),
                 mock.patch.object(receipt_gate, "permits", return_value=allowed),
                 mock.patch.object(receipt_gate, "executed_merges", return_value=0),
+                mock.patch.object(receipt, "authority_path", return_value=auth),
                 mock.patch.object(receipt, "find_valid", return_value=({"receipt_id": "r1"}, "ok")),
-                mock.patch.object(receipt, "claim_many", return_value=([{"receipt_id": "r1"}], "ok", 0)),
-                mock.patch.object(receipt, "receipt_path", return_value=receipt_path),
-                mock.patch.object(receipt, "execute", return_value=False),
             ):
                 result = receipt_gate.check_and_consume(
                     "s1",
@@ -270,3 +273,41 @@ class SeamSpyTests(unittest.TestCase):
                 )
             self.assertEqual(result, ("merge", "executed_marker_unavailable"))
             self.assertEqual(claims, [])
+            self.assertFalse(receipt_path.with_suffix(".consumed").exists())
+            self.assertTrue(receipt_path.with_suffix(".executed").exists())
+
+    def test_failed_second_execution_rolls_back_all_claims_in_chain(self) -> None:
+        """A denied two-merge command leaves neither receipt spent nor budget debited."""
+        with tempfile.TemporaryDirectory() as temporary:
+            auth = Path(temporary) / "authority.json"
+            paths = [auth.parent / "receipts" / f"r{number}.json" for number in (1, 2)]
+            paths[0].parent.mkdir()
+            paths[1].with_suffix(".executed").write_text("")
+            proposals = [
+                ("merge", {"artifact_sha": SHA, "exact_payload_hash": str(n), "number": str(n), "action": "merge"})
+                for n in (1, 2)
+            ]
+            allowed = {"allow": True, "reason": "ok", "requires_approval": True}
+            claims: list[str] = []
+
+            def found(
+                _session: str, proposed: dict[str, Any], *_args: object, **_kwargs: object
+            ) -> tuple[dict[str, str], str]:
+                return {"receipt_id": f"r{proposed['number']}"}, "ok"
+
+            with (
+                mock.patch.object(merge_budget, "lock", return_value=contextlib.nullcontext(True)),
+                mock.patch.object(receipt_gate, "read_authority", return_value={"loop_id": None, "max_prs": 2}),
+                mock.patch.object(receipt_gate, "permits", return_value=allowed),
+                mock.patch.object(receipt_gate, "executed_merges", return_value=0),
+                mock.patch.object(receipt, "authority_path", return_value=auth),
+                mock.patch.object(receipt, "find_valid", side_effect=found),
+            ):
+                result = receipt_gate.check_and_consume(
+                    "s1", proposals, datetime.now(timezone.utc), None, None, on_claim=claims.append
+                )
+            self.assertEqual(result, ("merge", "executed_marker_unavailable"))
+            self.assertEqual(claims, [])
+            self.assertFalse(any(path.with_suffix(".consumed").exists() for path in paths))
+            self.assertFalse(paths[0].with_suffix(".executed").exists())
+            self.assertTrue(paths[1].with_suffix(".executed").exists())

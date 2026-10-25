@@ -400,8 +400,11 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - `action_authority_failed_open`: the row carries `inputs.error_class` (sha256 of the exception class name; compare with
   `printf ZeroDivisionError | shasum -a 256`) and `loop_id` when known; the hook's stderr (hook log) prints
   `action_authority failed open: <Class>: <message>`. A session-less failure is traced under `_no_session`.
-- `executed_marker_unavailable`: a plain merge receipt was claimed, but its execution budget marker could not be
-  written. The hook denies the merge. That receipt is spent; fix the marker write fault and mint a new receipt.
+- `marker_write_failed` or `executed_marker_unavailable`: a receipt note or execution marker failed. The hook
+  denies the command and rolls back only this batch's new markers while holding its claim lock.
+  `marker_cleanup_failed` means cleanup failed: consumed markers stay in place if execution state is uncertain.
+  Fix the file fault and mint a new receipt. A killed hook can leave a partial spend; confirm the command did not
+  run before any manual recovery.
 - Remediation for optional enforce mode: one-time `python3 scripts/authority_keys.py init` (passphrase-protected
   key; `show` prints fingerprints), then mint for the exact command:
   `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge|git_push --command '<exact command>' --cwd <directory it runs in>`

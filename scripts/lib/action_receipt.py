@@ -190,11 +190,36 @@ def read_receipt(path: Path) -> dict[str, Any] | None:
 
 def _claim(path: Path, suffix: str) -> bool:
     """Create <id><suffix> with O_CREAT|O_EXCL; True only for the single caller that created it."""
+    return _claim_marker(path, suffix)[0]
+
+
+def _claim_marker(path: Path, suffix: str) -> tuple[bool, bool]:
+    """Return (closed, owned); a close error cannot erase ownership of an exclusive creation."""
     try:
-        os.close(os.open(str(path.with_suffix(suffix)), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+        descriptor = os.open(str(path.with_suffix(suffix)), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
     except OSError:
-        return False
-    return True
+        return False, False
+    try:
+        os.close(descriptor)
+    except OSError:
+        return False, True
+    return True, True
+
+
+def _rollback_claims(consumed: list[Path], executed: list[Path]) -> bool:
+    """Remove only owned markers; retain consumed protection if any execution marker remains."""
+    for path in executed:
+        try:
+            path.with_suffix(".executed").unlink()
+        except OSError:
+            return False
+    clean = True
+    for path in consumed:
+        try:
+            path.with_suffix(".consumed").unlink()
+        except OSError:
+            clean = False
+    return clean
 
 
 def revoke_receipt(path: Path) -> bool:
@@ -278,8 +303,9 @@ def claim_many(
     loop_id: str | None,
     base: Path | None = None,
     signers: Path | None = None,
+    record: bool = False,
 ) -> tuple[list[dict[str, Any]] | None, str, int]:
-    """Claim distinct receipts for one command under a shared session lock; return failure index on denial."""
+    """Claim distinct receipts under one lock; optionally record execution before releasing it."""
     auth = authority_path(session_id, base)
     if auth is None:
         return None, "no_session" if not session_id else "malformed", 0
@@ -299,12 +325,35 @@ def claim_many(
             claimed: list[Path] = []
             for index, found in enumerate(selected):
                 path = receipt_path(session_id, found["receipt_id"], base)
-                if path is None or not consume(path):
-                    for prior in claimed:
-                        with suppress(OSError):
-                            prior.with_suffix(".consumed").unlink()
-                    return None, "consumed", index
-                claimed.append(path)
+                if path is None:
+                    clean = _rollback_claims(claimed, [])
+                    return None, "malformed" if clean else "marker_cleanup_failed", index
+                closed, owned = _claim_marker(path, ".consumed")
+                if owned:
+                    claimed.append(path)
+                if not closed:
+                    clean = _rollback_claims(claimed, [])
+                    return None, "consumed" if clean else "marker_cleanup_failed", index
+            if record:
+                executed: list[Path] = []
+                for index, (path, proposed) in enumerate(zip(claimed, proposals)):
+                    try:
+                        note = {
+                            "hash": proposed["exact_payload_hash"],
+                            "number": proposed.get("number", ""),
+                            "action": proposed["action"],
+                        }
+                        path.with_suffix(".consumed").write_text(json.dumps(note), encoding="utf-8")
+                    except Exception:  # noqa: BLE001 - no recording error may let a guarded action run
+                        clean = _rollback_claims(claimed, executed)
+                        return None, "marker_write_failed" if clean else "marker_cleanup_failed", index
+                    if proposed["action"] == "merge" and not proposed.get("script"):
+                        closed, owned = _claim_marker(path, ".executed")
+                        if owned:
+                            executed.append(path)
+                        if not closed:
+                            clean = _rollback_claims(claimed, executed)
+                            return None, "executed_marker_unavailable" if clean else "marker_cleanup_failed", index
             return selected, "ok", 0
     except OSError:
         return None, "consumed", 0

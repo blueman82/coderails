@@ -73,9 +73,10 @@ Optional receipt minting uses a key with a passphrase:
   receipts directory. `O_EXCL` stops races, not `unlink`: a same-user agent can delete `<id>.consumed` to replay a
   receipt until it expires (owner-chosen, default 1 h) or delete `<id>.revoked` to un-revoke it. Only a consumed
   ledger outside the agent's write reach (root-owned or append-only) would close this; it is not built.
-- A session lock lets one command select and claim distinct receipts for several guarded segments. If a later
-  claim fails, the hook removes markers this call created before it denies. A process killed between marker
-  creates can leave a partial spend. The batch is not crash-atomic.
+- A session lock covers selection, claim, note writes and execution markers for every guarded segment in one
+  command. A synchronous failure denies and removes markers this call created. If an execution marker cannot be
+  removed, consumed markers stay in place so the receipt cannot be reused. A process killed between marker writes
+  can leave a partial spend. The batch is not crash-atomic; confirm the command did not run before recovery.
 - An agent that fills the receipts directory with junk `*.json` sorted ahead of the real one can push the real
   receipt past the 50-receipt cap (`MAX_RECEIPTS`). That denies, never allows (a denial-of-service, not a bypass).
 - The hook fails open on its own exceptions (`action_authority_failed_open`, traced and written to stderr), so an

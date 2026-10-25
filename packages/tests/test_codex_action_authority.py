@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -11,11 +13,14 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 CODEX = ROOT / "packages/codex"
 HOOKS = CODEX / "hooks/scripts"
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(HOOKS))
+import action_authority_gate as codex_gate  # noqa: E402  # isort: skip
 from hooks.scripts.tests.receipt_test_support import (  # noqa: E402  # isort: skip
     REPOSITORY,
     git,
@@ -131,6 +136,31 @@ class HookTests(unittest.TestCase):
         self.configure("enforce")
         self.mint()
         self.assertTrue(self.denied(f"{MERGE} && {MERGE}"))
+        self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
+
+    def test_marker_write_error_denies_in_codex_hook(self) -> None:
+        """A Codex marker write fault must emit a deny envelope, not fail open."""
+        self.configure("enforce")
+        self.mint()
+        original = Path.write_text
+
+        def write(path: Path, data: str, encoding: str | None = None, errors: str | None = None) -> int:
+            if path.suffix == ".consumed":
+                original(path, "", encoding=encoding, errors=errors)
+                raise OSError("marker write failed")
+            return original(path, data, encoding=encoding, errors=errors)
+
+        payload = {"session_id": "s1", "cwd": str(self.repo), "tool_input": {"command": MERGE}}
+        output = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, self.environment),
+            mock.patch.object(codex_gate, "read_input", return_value=json.dumps(payload)),
+            mock.patch.object(Path, "write_text", autospec=True, side_effect=write),
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertEqual(codex_gate.main(), 0)
+        self.assertEqual(json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("denied_marker_write_failed", self.reasons())
         self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
 
     def test_common_wrappers_are_still_guarded(self) -> None:
