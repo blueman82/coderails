@@ -109,6 +109,20 @@ class ResolveTableTests(unittest.TestCase):
         result = containment.resolve(str(self.project), home=self.home, which=which, system="Darwin")
         self.assertEqual(result["reason_code"], "sandbox_unavailable")
 
+    def test_unreadable_schema_and_config_block_default_on(self) -> None:
+        """A missing schema or unreadable config cannot prove that containment is off."""
+        from unittest import mock
+
+        with mock.patch("scripts.lib.config.SCHEMA_PATH", self.root / "missing-schema.json"):
+            result = containment.resolve(str(self.project), home=self.home, which=which, system="Darwin")
+        self.assertEqual(result, {"mode": "fallback", "reason_code": "config_schema_unreadable"})
+        config = self.project / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
+        config.symlink_to(self.root / "missing-config.yaml")
+        with mock.patch("scripts.sandbox.containment.config_path", return_value=str(config)):
+            result = containment.resolve(str(self.project), home=self.home, which=which, system="Darwin")
+        self.assertEqual(result, {"mode": "fallback", "reason_code": "config_unreadable"})
+
     def test_credential_names_are_allowlisted(self) -> None:
         """Only the two documented variables are accepted from the credential file."""
         path = self.home / ".coderails/worker_credential"

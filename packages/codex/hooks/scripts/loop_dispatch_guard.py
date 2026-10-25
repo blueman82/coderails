@@ -59,8 +59,15 @@ def implementation_node(message: str) -> bool:
 
 def refuse_uncontained_worker(message: str, settings: dict[str, object], session: str) -> bool:
     """Stop an in-process implementation spawn when worker containment is enabled."""
-    if not implementation_node(message) or controls_resolved(settings).get("sandbox_workers") is False:
+    if not implementation_node(message):
         return False
+    try:
+        if controls_resolved(settings).get("sandbox_workers") is False:
+            return False
+    except ConfigRejected as error:
+        append_trace_row("worker_containment", "denied", "containment_gate_error", session)
+        deny(f"Graph worker containment needs a readable config schema: {error}")
+        return True
     append_trace_row("worker_containment", "denied", "codex_native_worker_uncontained", session)
     deny(
         "Codex graph implementation workers need separate-process containment. "

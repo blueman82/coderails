@@ -5,8 +5,8 @@ The orchestrator stays outside the worker sandbox.
 
 ## When a worker cannot start
 
-A graph implementation dispatch can stop with `containment_unavailable` or
-`containment_ack_required`. The Claude launcher can stop with
+A graph implementation dispatch can stop with `containment_unavailable`,
+`containment_gate_error`, or `containment_ack_required`. The Claude launcher can stop with
 `branch_import_refused` or `worker_credential_missing`.
 
 Run `python3 scripts/sandbox/containment.py [dir]` to see the mode and reason.
@@ -21,6 +21,8 @@ It also writes a `sandbox_launch/resolved/<code>` trace row. The modes are:
   nonempty line: `ANTHROPIC_API_KEY=...` or `CLAUDE_CODE_OAUTH_TOKEN=...`.
   The owner can get the OAuth token with `claude setup-token`. A looser file
   mode or another variable name does not qualify.
+- `fallback` with a `config_*` code: check that the config and schema can be
+  read and have valid values. Graph implementation dispatch stops.
 - `off` with `sandbox_workers_off`: containment was turned off explicitly.
 
 Restore the sandbox runtime or credential before you dispatch the unit again.
@@ -46,7 +48,8 @@ jq -r 'select(.command=="worker_containment" or .command=="sandbox_launch" or .c
 - `containment_fallback_low_risk`: an in-process worker is allowed because its manifest avoids `HIGH_RISK_PREFIXES`.
 - `containment_ack_required`: a high-risk in-process worker is denied.
 - `containment_ack_receipt`: one owner receipt allowed the fallback.
-- `containment_gate_failed_open`: the hook failed and allowed the call.
+- `containment_gate_error`: the hook could not verify a graph implementation
+  dispatch and denied it. Check the error type in the trace row.
 - `branch_import_refused`: a graph-owned manifest is missing, a commit is outside
   it, a commit contains a secret, another branch moved, or history was
   rewritten. No branch is imported or pushed. The clone stays under
@@ -85,8 +88,9 @@ The output has a `containment` object. It counts `sandboxed`,
 `sandbox_unavailable`, `worker_credential_missing`, and `sandbox_workers_off`
 from launcher decisions. It counts `containment_unavailable`,
 `containment_fallback_low_risk`, `containment_ack_required`,
-`containment_ack_receipt`, `containment_gate_failed_open`, and
+`containment_ack_receipt`, `containment_gate_error`, and
 `codex_native_worker_uncontained` from dispatch gates. It counts
+`containment_gate_failed_open` only for traces from older builds. It counts
 `branch_imported`, `branch_pushed`, and `branch_import_refused` from the Claude
 launcher. It counts `contained_process_start`, `contained_process_complete`,
 `contained_process_failed`, and `contained_process_unavailable` from Codex.

@@ -9,7 +9,8 @@ work_units[unit].manifest / write_scope against HIGH_RISK_PREFIXES (an absent ma
   high risk  denied containment_ack_required unless an owner-signed, single-use `worker_fallback` receipt bound to
              repository + branch + base sha + the unit verifies and is consumed (traced containment_ack_receipt).
 Mode fallback denies graph U3 dispatch. Explicit off, non-graph sessions and non-U3 dispatches are untouched.
-Any own error fails open, traced containment_gate_failed_open. Separate from loop_dispatch_guard. The owner mints with
+An error while checking a U3 dispatch denies it, traced containment_gate_error.
+Separate from loop_dispatch_guard. The owner mints with
 `scripts/action_receipt_cli.py approve-action --kind worker_fallback --command 'worker_fallback <unit>'`.
 Cooperating-agent safeguard: an agent can edit the config key or the manifest it is judged by.
 """
@@ -76,7 +77,7 @@ def acknowledged(session: str, cwd: str, unit: str) -> bool:
 
 
 def main() -> int:
-    """Check one Agent payload; fail open on any own error."""
+    """Check one Agent payload; deny a U3 dispatch if its checks fail."""
     payload = read_payload()
     request = payload.get("tool_input")
     request = request if isinstance(request, dict) else {}
@@ -84,11 +85,14 @@ def main() -> int:
         return 0
     session = str(payload.get("session_id") or "?")
     cwd = str(payload.get("cwd") or os.getcwd())
+    unit = unit_of(request.get("prompt"))
+    if not unit:
+        return 0
     try:
         if not graph_bound(session, cwd):
-            return 0
-        unit = unit_of(request.get("prompt"))
-        if not unit:
+            path = resolve_path(cwd, session)
+            if path.is_file():
+                json.loads(path.read_text(encoding="utf-8"))
             return 0
         decision = containment.resolve(cwd)
         if decision["mode"] == "off":
@@ -117,11 +121,10 @@ def main() -> int:
             f"approve-action --session {session} --kind {containment.ACK_KIND} "
             f"--command '{containment.ack_command(unit or '<unit>')}' --cwd {cwd}"
         )
-    except Exception as error:  # noqa: BLE001 - the gate must never break a session; trace and fail open
-        append_row(
-            COMMAND, "failed_open", "containment_gate_failed_open", session, None, {"error": type(error).__name__}
-        )
-        print(f"worker_containment_gate failed open: {type(error).__name__}: {error}", file=sys.stderr)
+    except Exception as error:  # noqa: BLE001 - a failed verification must not allow a U3 worker
+        append_row(COMMAND, "denied", "containment_gate_error", session, None, {"error": type(error).__name__})
+        log(f"hook=worker_containment_gate session={session} denied=1 reason_code=containment_gate_error")
+        deny(f"Blocked (containment_gate_error): worker containment check failed: {type(error).__name__}.")
     return 0
 
 

@@ -15,7 +15,8 @@ CODES = (
     "containment_fallback_low_risk",
     "containment_ack_required",
     "containment_ack_receipt",
-    "containment_gate_failed_open",
+    "containment_gate_failed_open",  # retained trace code from older B6 heads
+    "containment_gate_error",
     "sandboxed",
     "sandbox_unavailable",
     "worker_credential_missing",

@@ -104,9 +104,13 @@ def resolve(
     which: Callable[[str], str | None] = shutil.which,
     system: str | None = None,
 ) -> dict[str, str]:
-    """The containment decision for a project directory; never raises."""
+    """The containment decision for a project directory."""
     path = config_path(cwd)
-    setting = load_config(path)[0]["sandbox_workers"]
+    values, findings = load_config(path)
+    if findings or "sandbox_workers" not in values:
+        reason = findings[0]["code"] if findings else "config_schema_unreadable"
+        return {"mode": "fallback", "reason_code": reason}
+    setting = values["sandbox_workers"]
     if setting is False:
         return {"mode": "off", "reason_code": "sandbox_workers_off"}
     home = home or Path.home()

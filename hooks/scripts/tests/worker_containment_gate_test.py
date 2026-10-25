@@ -196,11 +196,12 @@ class GateTests(GateCase):
         registered = [item["command"] for group in hooks if group["matcher"] == "Agent" for item in group["hooks"]]
         self.assertTrue(any(f"{HOOK}.py" in command for command in registered), registered)
 
-    def test_own_error_fails_open(self) -> None:
-        """A torn progress.json never blocks a session."""
+    def test_torn_graph_state_denies_implementation_dispatch(self) -> None:
+        """A U3 envelope cannot run when the hook cannot verify graph ownership."""
         path = next(self.loop.glob("*/s1/progress.json"))
         path.write_text("{")
-        self.assertFalse(self.denied(HOOK, self.dispatch()))
+        self.assertTrue(self.denied(HOOK, self.dispatch()))
+        self.assertEqual(self.reasons()[-1], "containment_gate_error")
 
 
 class AckCliTests(GateCase):
