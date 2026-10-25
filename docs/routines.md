@@ -230,7 +230,10 @@ Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
 - After a merge attempt, a failed PR fetch or changed head keeps the run red
   and blocks cleanup. A confirmed merge cannot be aborted or cleaned up.
   If later state is incomplete, the row is `run_incomplete merged_incomplete`
-  and the human log says `incomplete=merged`. Check that PR and its head
+  and the human log says `incomplete=merged`. If that log write failed, the
+  runner reads its own persisted merge attempt and writes
+  `run_incomplete merge_state_unknown` with `incomplete=merge-unknown`.
+  Check that PR and its head
   before recovery. Only `finish ok` after all stages records success.
 - State uses atomic replacement. A state flock covers load/handler/child gate/
   cleanup; the separate JSONL flock is acquired inside it, never in reverse.
@@ -242,7 +245,7 @@ under its log lock. Outcomes are `stage_ok`, `run_ok`, `run_abort`,
 `run_refused`, `run_incomplete`; reason codes are closed per routine. Unknown
 outcomes/codes exit 2 and append nothing. The human marker is `run=ok`,
 `abort=<code>`, `refused=<gate>`, `abort=incomplete-run`,
-`incomplete=merged` or `stage=<name>`. The runner reads JSONL for a merged
+`incomplete=merged`, `incomplete=merge-unknown` or `stage=<name>`. The runner reads JSONL for a merged
 incomplete run and keeps it red. Both files open before either
 append. A failed write returns `log_unwritable` without advancing/ending state.
 The files are **not a transaction**: write/close errors or a crash can leave
