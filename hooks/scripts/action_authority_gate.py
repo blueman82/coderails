@@ -1,64 +1,80 @@
 #!/usr/bin/env python3
-"""Opt-in action-receipt gate: gh pr merge and git push to main/master need a matching receipt.
+"""Action-receipt gate: the shipped advisory mode warns; explicit enforce needs a signed receipt.
 
-Config `action_authority`: enforce | advisory; absent, unreadable or anything else is off (silent exit 0).
-Advisory traces and warns, never denies. Enforce denies only when no receipt verifies.
-Host-resource exhaustion reading the payload (EMFILE etc.) also denies;
-any other own error fails open with reason action_authority_failed_open.
-It does not touch pr_merge_gate, destructive_bash_gate or
-enforce_pr_workflow. Limits: the hash covers only the command text seen here (not aliases, functions, eval/xargs,
-scripts that push; env/sudo/subshell/bash -c/gh api wrappers are unwrapped by guarded_segments). Each enforce use is
-claimed by an atomic O_EXCL marker and the claim, not the verify, decides allow vs deny.
-A receipt does not prove a human minted it.
+Config `action_authority`: advisory | enforce | off; absent or unknown config is off.
+Advisory warns on missing receipts; live authority denials and
+unbindable merges under a live merge cap still block.
+Enforce denies unless
+authority.permits() allows and a receipt verifies (scripts/lib/receipt_gate.py, shared with merge.py, which is
+independently fail-closed). A host-resource error reading the payload denies; unexpected errors deny under enforce
+or live authority and otherwise fail open. It does not touch
+pr_merge_gate, destructive_bash_gate or enforce_pr_workflow. Limits: the hash covers only the command text seen here
+(not aliases, functions, xargs, scripts that push; sudo/subshell/bash -c/eval/gh api wrappers, quoting and absolute
+program paths are normalised by guarded_segments, an env assignment prefix is kept and makes the command unbindable).
+The mode is read from the in-repo config, which the agent can edit: `off` is a same-user switch, not a boundary. Each
+enforce use is claimed by an atomic O_EXCL marker and the claim decides allow vs deny.
+A receipt is signed (ssh-keygen, namespace coderails-receipt) and bound to repository+ref+sha; with the user-tier
+trust root that is a cooperating-agent safeguard, not a boundary (docs/decisions/p3-human-only-minting.md).
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
+import re
 import sys
-from datetime import datetime, timezone
+from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload_strict
 from hooks.scripts.lib.destructive_patterns import git_output
-from hooks.scripts.lib.pr_workflow_match import guarded_segments, pr_number
+from hooks.scripts.lib.pr_workflow_match import MERGE_SCRIPT, guarded_segments, state_mutated_before_guard
 from hooks.scripts.lib.trace_row import append_row
-from scripts.lib.action_receipt import find_valid, proposed_action
+from scripts.lib import advisory_merge, merge_budget
+from scripts.lib.action_binding import binding, merge_number
+from scripts.lib.action_receipt import proposed_action
 from scripts.lib.authority_object import read_authority
-from scripts.lib.config import config_path, config_value
+from scripts.lib.config import config_path
+from scripts.lib.config_strict import ConfigRejected, strict_settings
+from scripts.lib.receipt_gate import check_and_consume, resolve_mode
+from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
 
 def mode(cwd: str) -> str:
-    """Return enforce, advisory or off, never raising."""
-    path = config_path(cwd)
-    value = config_value(path, "action_authority") if path else ""
-    return value if value in {"enforce", "advisory"} else "off"
+    """Return advisory, enforce or off, never raising."""
+    return resolve_mode(cwd)[0]
 
 
-def artifact_sha(name: str, segment: str, cwd: str) -> str | None:
-    """The real artifact at enforcement time: HEAD for a push, the PR head for a merge; None when unknowable.
+def proposal(name: str, segment: str, where: str) -> tuple[str, dict[str, Any]]:
+    """The action as seen here, plus the PR number of a merge.py segment (merge.py matches on it)."""
+    branch = git_output(where, "branch", "--show-current")
+    proposed = proposed_action(name, segment, where, branch, binding(name, segment, where))
+    script = name == "merge" and bool(re.search(MERGE_SCRIPT, segment))
+    return name, proposed | {"script": script, "number": merge_number(segment, where) if name == "merge" else ""}
 
-    A receipt minted with --artifact-sha verifies only when this equals it, so an unknowable sha fails closed.
-    """
-    if name == "git_push":
-        return git_output(cwd, "rev-parse", "HEAD", hook="action_authority_gate") or None
-    number = pr_number(segment)
-    if not number:
-        return None
-    try:
-        out = subprocess.run(
-            ["gh", "pr", "view", number, "--json", "headRefOid", "-q", ".headRefOid"],
-            cwd=cwd, capture_output=True, text=True, timeout=4, check=False,
-        ).stdout.strip()  # fmt: skip
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return out or None
+
+def how_to_proceed(code: str, session: str, name: str) -> str:
+    """The remedy for one refusal code."""
+    if code in {"authority_denied", "max_prs_exceeded"}:
+        return "The session's authority forbids it (authority.py inspect); a receipt cannot override that."
+    if code == "no_session":
+        return "The payload has no session_id, so no receipt can be bound."
+    if code in {"binding_unknown", "state_mutated_before_guard"}:
+        return (
+            "Use the exact forms `git push <remote> <ref>` (no env prefix, -c or --git-dir) and `gh pr merge <n> "
+            "--match-head-commit <head sha>`, with no earlier ref-moving step in the same command."
+        )
+    return (
+        "For optional receipt enforcement, sign one at a terminal with the configured key: "
+        f"python3 scripts/action_receipt_cli.py approve-action --session {session} --kind {name} "
+        "--command '<exact command>' --cwd <directory it runs in>. "
+        "One-time key setup: scripts/authority_keys.py init."
+    )
 
 
 def main() -> int:
-    """Check one Bash payload; every guarded segment needs its own receipt; fail open on any own error."""
+    """Check one Bash payload; deny unreadable input and errors under enforce or live authority."""
     try:
         payload = read_payload_strict()
     except HostResourceError:
@@ -67,56 +83,86 @@ def main() -> int:
     session = str(payload.get("session_id") or "")
     trace_id = session or "_no_session"  # append_row refuses an empty id; keep the denial countable
     loop_id: str | None = None
+    mode_ = "off"
+    authority = None
     try:
         data = payload.get("tool_input")
         command = data.get("command") if isinstance(data, dict) else None
         if not isinstance(command, str) or not command:
             return 0
         cwd = str(payload.get("cwd") or os.getcwd())
-        mode_ = mode(cwd)
-        if mode_ == "off" or not (segments := guarded_segments(command, cwd)):
+        mode_, _ = resolve_mode(cwd)
+        if not (segments := guarded_segments(command, cwd, implicit_push=True)):
+            return 0
+        config = config_path(cwd)
+        if config:
+            try:
+                strict_settings(config, trace_id)
+            except ConfigRejected as error:
+                append_row("action_authority", "denied", "config_rejected", trace_id, None)
+                deny(
+                    f"Blocked: {segments[0][0].replace('_', ' ')} while the workflow config is invalid. {error}. "
+                    "Fix .coderails/workflow.config.yaml (scripts/lib/config.py resolve-config --json lists "
+                    "the findings)."
+                )
+                return 0
+        if mode_ == "off":
             return 0
         authority = read_authority(session)
         loop_id = authority["loop_id"] if authority else None
-        now = datetime.now(timezone.utc)
-        proposals = [
-            (name, proposed_action(name, segment, where, git_output(where, "branch", "--show-current"),
-                                   artifact_sha(name, segment, where)))
-            for name, segment, where in segments
-        ]  # fmt: skip
-        results = [(name, *find_valid(session, proposed, now, loop_id)) for name, proposed in proposals]
-        missing = next(((name, code) for name, found, code in results if found is None), None)
-        if missing is None and mode_ == "enforce":
-            for name, proposed in proposals:  # the O_EXCL claim, not the verify above, decides who is allowed
-                found, code = find_valid(session, proposed, now, loop_id, consume_it=True)
-                if found is None:
+        signers, tier = resolve_trust_root()
+
+        def claimed(_name: str) -> None:
+            if tier == USER_TIER:
+                append_row("action_authority", "allowed", USER_TIER, trace_id, loop_id)
+            append_row("action_authority", "allowed", "receipt_consumed", trace_id, loop_id)
+
+        proposals = [proposal(*segment) for segment in segments]
+        missing = check_and_consume(
+            session, proposals, None, loop_id, signers,
+            consume=mode_ == "enforce", stale=state_mutated_before_guard(command), on_claim=claimed,
+        )  # fmt: skip
+        denied_by_authority = missing is not None and missing[1] in {"authority_denied", "max_prs_exceeded"}
+        reservation_failed = False
+        if mode_ == "advisory" and authority and not denied_by_authority:
+            reserved: list[Path] = []
+            for name, item in proposals:
+                if name != "merge" or item["script"]:
+                    continue
+                bind = {"repository": item["repository"], "ref": item["ref"], "sha": item["artifact_sha"]}
+                code, path = advisory_merge.reserve(session, item["number"], bind)
+                if code != "ok":
+                    for previous in reserved:
+                        try:
+                            merge_budget.settle(previous, False)
+                        except OSError:
+                            code = "budget_release_failed"
                     missing = (name, code)
+                    reservation_failed = True
                     break
+                if path:
+                    reserved.append(path)
         if missing is None:
-            if mode_ == "enforce":
-                append_row("action_authority", "allowed", "receipt_consumed", trace_id, loop_id)
             return 0
         name, code = missing
-        if mode_ == "advisory":
+        if mode_ == "advisory" and not reservation_failed and code not in {"authority_denied", "max_prs_exceeded"}:
             append_row("action_authority", "advisory", f"advisory_{code}", trace_id, loop_id)
             print(f"action_authority (advisory): no valid receipt for {name} ({code}); not blocked.", file=sys.stderr)
             return 0
         append_row("action_authority", "denied", f"denied_{code}", trace_id, loop_id)
-        how = (
-            "The payload has no session_id, so no receipt can be bound."
-            if code == "no_session"
-            else f"Mint one for this exact command: python3 scripts/action_receipt_cli.py approve-action "
-            f"--session {session} --kind {name} --command '<exact command>' --cwd <directory it runs in>."
-        )
-        deny(
-            f"Blocked: {name.replace('_', ' ')} needs an action receipt ({code}). {how} Or set action_authority to off."
-        )
-    except Exception as error:  # noqa: BLE001 - the gate must never break a session; trace and fail open
-        append_row(
-            "action_authority", "failed_open", "action_authority_failed_open", trace_id, loop_id,
-            {"error_class": type(error).__name__},
-        )  # fmt: skip
-        print(f"action_authority failed open: {type(error).__name__}: {error}", file=sys.stderr)
+        need = "needs a bound PR and head under live authority" if reservation_failed else "needs an action receipt"
+        deny(f"Blocked: {name.replace('_', ' ')} {need} ({code}). {how_to_proceed(code, session, name)}")
+    except Exception as error:  # noqa: BLE001 - enforce and live grants must refuse unexpected hook errors
+        if mode_ == "enforce" or authority:
+            deny(f"Blocked: action authority gate error ({type(error).__name__}).")
+            with suppress(Exception):  # trace is not required to deny the command
+                append_row("action_authority", "denied", "denied_gate_error", trace_id, loop_id)
+        else:
+            append_row(
+                "action_authority", "failed_open", "action_authority_failed_open", trace_id, loop_id,
+                {"error_class": type(error).__name__},
+            )  # fmt: skip
+            print(f"action_authority failed open: {type(error).__name__}: {error}", file=sys.stderr)
     return 0
 
 

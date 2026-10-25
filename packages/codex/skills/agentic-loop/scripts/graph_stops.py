@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -13,16 +14,9 @@ from graph_identity import GraphError
 from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import write as _write
+from graph_vocab import STOP_CATEGORIES, STOP_REASON_CODES
 
-STOP_CATEGORIES = ("hard-stop", "approval-gate", "awaiting-input", "complete")
-STOP_REASON_CODES = (
-    "work_complete",
-    "needs_human_input",
-    "needs_approval",
-    "node_hard_stop",
-    "environment_blocked",
-    "other",
-)
+CONSUMABLE = ("hard-stop", "approval-gate", "awaiting-input")  # `complete` goes through verify-completion
 
 
 def record_stop(state: object, session: str, category: str, reason_code: str, reason: str) -> dict[str, Any]:
@@ -54,6 +48,7 @@ def record_stop(state: object, session: str, category: str, reason_code: str, re
         "reason": reason,
         "revision": root["revision"],
         "consumed": False,
+        "at": time.time(),  # lets the Claude Stop guard bind the row to the turn that recorded it
     }
     rows.append(row)
     return {"state": root, "stop": copy.deepcopy(row)}
@@ -71,7 +66,7 @@ def record(path: Path, session: str, category: str, reason_code: str, reason: st
 
 
 def consume(path: Path, session: str) -> dict[str, Any]:
-    """Consume the newest unconsumed same-revision hard-stop row; the Stop guard releases only on a hit."""
+    """Consume the newest unconsumed same-revision pause row; the Stop guard releases only on a hit."""
     with _locked(path):
         state = _load(path)
         if state["session_id"] != session:
@@ -80,7 +75,7 @@ def consume(path: Path, session: str) -> dict[str, Any]:
         for row in reversed(cast(list[object], rows) if isinstance(rows, list) else []):
             stop = cast(dict[str, Any], row) if isinstance(row, dict) else {}
             current = stop.get("consumed") is False and stop.get("revision") == state["revision"]
-            if current and stop.get("category") == "hard-stop":
+            if current and stop.get("category") in CONSUMABLE:
                 stop["consumed"] = True
                 _write(path, state)
                 return {"stop": stop}

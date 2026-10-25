@@ -1,7 +1,9 @@
-"""Codex action-authority hook and its parity with the Claude receipt library (same fixtures, same answers)."""
+"""Codex action-authority hook, its mirrored receipt modules, and parity with the Claude copies."""
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -14,134 +16,67 @@ from typing import Any
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
-HOOKS = ROOT / "packages/codex/hooks/scripts"
+CODEX = ROOT / "packages/codex"
+HOOKS = CODEX / "hooks/scripts"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HOOKS))
-import hook_common as codex  # noqa: E402  # isort: skip
-from lib import action_match as codex_match  # noqa: E402  # isort: skip
-from hooks.scripts.lib import pr_workflow_match as claude_match  # noqa: E402  # isort: skip
-from scripts.lib import action_receipt as claude  # noqa: E402  # isort: skip
+import action_authority_gate as codex_gate  # noqa: E402  # isort: skip
+from hooks.scripts.tests.receipt_test_support import (  # noqa: E402  # isort: skip
+    REPOSITORY,
+    git,
+    make_owner,
+    make_repo,
+    signed_receipt,
+    store,
+)
+from scripts.lib import action_binding as ab  # noqa: E402  # isort: skip
 
-NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
-MERGE = "gh pr merge 12 --squash"
-
-
-def receipt(**over: object) -> dict[str, Any]:
-    """A valid merge receipt for MERGE in /repo on main, with overrides."""
-    obj: dict[str, Any] = {
-        "receipt_id": "r1",
-        "authority_id": None,
-        "session_id": "s1",
-        "loop_id": "L1",
-        "action": "merge",
-        "exact_payload_hash": claude.proposed_action("merge", MERGE, "/repo", "main")["exact_payload_hash"],
-        "artifact_sha": None,
-        "scope": "",
-        "issued_at": NOW.isoformat(),
-        "expires_at": (NOW + timedelta(hours=1)).isoformat(),
-        "single_use": True,
-        "revoked": False,
-    }
-    obj.update(over)
-    return obj
+MERGE_SHA = "f" * 40
+PIN = f"--match-head-commit {MERGE_SHA}"
+MERGE = f"gh pr merge 12 --squash {PIN}"
 
 
-class ParityTests(unittest.TestCase):
-    """The vendored Codex subset must agree with scripts/lib/action_receipt on every fixture."""
-
-    def test_proposed_action_identical(self) -> None:
-        """Same command/cwd/branch hashes identically, including unparseable quoting."""
-        cases = (("merge", MERGE, None), ("git_push", "git push origin main", "abc"), ("merge", "gh 'x", None))
-        for kind, segment, sha in cases:
-            self.assertEqual(
-                claude.proposed_action(kind, segment, "/repo", "main", sha),
-                codex.receipt_proposed(kind, segment, "/repo", "main", sha),
-            )
-
-    def test_verify_identical_on_every_refusal(self) -> None:
-        """One fixture per reason code (plus malformed shapes) gives the same (ok, code) from both."""
-        past = (NOW - timedelta(seconds=1)).isoformat()
-        good = claude.proposed_action("merge", MERGE, "/repo", "main")
-        other = claude.proposed_action("merge", "gh pr merge 13", "/repo", "main")
-        cases: list[tuple[object, dict[str, Any], str, str | None, bool]] = [
-            (receipt(), good, "s1", "L1", False),
-            (receipt(), {**good, "action": "git_push"}, "s1", "L1", False),
-            (receipt(), other, "s1", "L1", False),
-            (receipt(artifact_sha="a"), {**good, "artifact_sha": "b"}, "s1", "L1", False),
-            (receipt(expires_at=past), good, "s1", "L1", False),
-            (receipt(revoked=True), good, "s1", "L1", False),
-            (receipt(), good, "s1", "L1", True),
-            (receipt(), good, "s2", "L1", False),
-            (receipt(), good, "s1", "L2", False),
-            (receipt(loop_id=None), good, "s1", "L9", False),
-            ("x", good, "s1", "L1", False),
-            ({"receipt_id": "r1"}, good, "s1", "L1", False),
-            (receipt(extra=1), good, "s1", "L1", False),
-            (receipt(expires_at="soon"), good, "s1", "L1", False),
-            (receipt(single_use="yes"), good, "s1", "L1", False),
-        ]
-        for index, (rec, proposed, session, loop, consumed) in enumerate(cases):
-            with self.subTest(index):
-                self.assertEqual(
-                    claude.verify(rec, proposed, NOW, session, loop, consumed),
-                    codex.receipt_verify(rec, proposed, NOW, session, loop, consumed),
-                )
-
-    def test_find_valid_and_consume_identical(self) -> None:
-        """Both implementations find, consume once, honour the revoke tombstone and read the same files."""
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"CLAUDE_AGENTIC_LOOP_DIR": tmp}):
-            good = claude.proposed_action("merge", MERGE, "/repo", "main")
-            path = claude.receipt_path("s1", "r1", Path(tmp))
-            assert path is not None
-            claude.write_receipt(path, receipt())
-            self.assertEqual(codex.receipt_find_valid("s1", good, NOW, "L1")[1], "ok")
-            self.assertEqual(codex.receipt_find_valid("s1", good, NOW, "L1", True)[1], "ok")
-            self.assertTrue(claude.is_consumed(path))  # Codex consume is visible to Claude
-            self.assertEqual(codex.receipt_find_valid("s1", good, NOW, "L1", True), (None, "consumed"))
-            self.assertEqual(claude.find_valid("s1", good, NOW, "L1", Path(tmp)), (None, "consumed"))
-            path.with_suffix(".consumed").unlink()
-            claude.revoke_receipt(path)  # Claude tombstone is visible to Codex
-            self.assertEqual(codex.receipt_find_valid("s1", good, NOW, "L1"), (None, "revoked"))
-
-
-class MatchParityTests(unittest.TestCase):
-    """The vendored command matcher must guard exactly what the Claude one guards."""
-
-    CORPUS = (
-        "git push origin main", "git push", "git -C . push origin main",
-        "git push origin feature && git push origin main",
-        "cd sub && git push", "gh pr merge 5", "gh -R o/r pr merge 5", "gh pr merge 1 && gh pr merge 2",
-        "git push --dry-run origin main", "ls", "git push origin HEAD:main", "git merge main", "bash merge.py 7",
-    )  # fmt: skip
-
-    def test_guarded_segments_identical_on_main_and_feature(self) -> None:
-        """Same corpus, same repo state, same (operation, segment, cwd) answers."""
-        for branch in ("main", "feature/x"):
-            with tempfile.TemporaryDirectory() as tmp:
-                subprocess.run(["git", "init", "-q", "-b", branch, tmp], check=True)
-                (Path(tmp) / "sub").mkdir()
-                for command in self.CORPUS:
-                    with self.subTest(branch=branch, command=command):
-                        self.assertEqual(
-                            claude_match.guarded_segments(command, tmp), codex_match.guarded_segments(command, tmp)
-                        )
+PROBE = """
+import json, sys
+from datetime import datetime, timezone
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from scripts.lib import action_receipt as ar, receipt_signing as rs
+assert "packages/codex" in ar.__file__, ar.__file__
+case = json.loads(sys.argv[2])
+rec, prop, signers = case["rec"], case["prop"], Path(case["signers"])
+now = datetime.now(timezone.utc)
+if case["mode"] == "verify":
+    print(json.dumps(ar.verify(rec, prop, now, "s1", None, signers=signers)))
+else:
+    base = Path(case["base"])
+    r, c = ar.find_valid("s1", prop, now, None, base, True, signers)
+    print(r["receipt_id"] if r else "NONE:" + c)
+"""
 
 
 class HookTests(unittest.TestCase):
     """Native Codex PreToolUse payloads (command + session_id) drive the hook as a subprocess."""
 
     def setUp(self) -> None:
-        """Repo on main and isolated loop dir."""
+        """Repo on main with an origin, isolated loop dir and HOME, a fake gh and an owner key (user tier)."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
-        self.repo = self.directory / "repo"
-        self.repo.mkdir()
-        subprocess.run(["git", "init", "-q", "-b", "main", str(self.repo)], check=True)
+        self.repo = make_repo(self.directory / "repo")
         self.loop = self.directory / "loops"
+        keys = self.directory / "home" / ".coderails" / "keys"
+        self.key, signers = make_owner(keys)
+        signers.rename(keys / "receipt_signers")
+        self.agent_key, _ = make_owner(self.directory / "agent")
+        gh = self.directory / "bin" / "gh"
+        gh.parent.mkdir()
+        gh.write_text(f'#!/bin/sh\necho \'{{"baseRefName":"main","headRefOid":"{MERGE_SHA}"}}\'\n')
+        gh.chmod(0o755)
         self.environment = os.environ | {
             "HOME": str(self.directory / "home"),
-            "PLUGIN_ROOT": str(ROOT / "packages/codex"),
+            "PATH": f"{gh.parent}:{os.environ['PATH']}",
+            "PLUGIN_ROOT": str(CODEX),
             "PLUGIN_DATA": str(self.directory / "data"),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
         }
@@ -178,22 +113,18 @@ class HookTests(unittest.TestCase):
             return False
         return bool(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny")
 
-    def mint(self, command: str = MERGE, kind: str = "merge") -> None:
-        """Write a receipt via the Claude library for the hook's view of the command."""
-        now = datetime.now(timezone.utc)
-        proposed = claude.proposed_action(kind, command, str(self.repo), "main")
-        path = claude.receipt_path("s1", "r1", self.loop)
-        assert path is not None
-        claude.write_receipt(
-            path,
-            receipt(
-                loop_id=None,
-                action=kind,
-                exact_payload_hash=proposed["exact_payload_hash"],
-                issued_at=now.isoformat(),
-                expires_at=(now + timedelta(hours=1)).isoformat(),
-            ),
-        )
+    def mint(
+        self, command: str = MERGE, kind: str = "merge", cwd: Path | None = None, rid: str = "r1",
+        key: Path | None = None, **over: object,
+    ) -> None:  # fmt: skip
+        """Store a signed receipt for the hook's view of `command` run in `cwd` on main."""
+        where = str(cwd or self.repo)
+        bind = (
+            {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": MERGE_SHA}
+            if kind == "merge" else ab.binding(kind, command, where)
+        )  # fmt: skip
+        rec = signed_receipt(key or self.key, kind, command, where, "main", bind, receipt_id=rid, **over)
+        store(self.loop, rec, "s1")  # a foreign-session receipt still lives in s1's directory
 
     def reasons(self) -> list[str]:
         """Reason codes traced for s1."""
@@ -201,42 +132,223 @@ class HookTests(unittest.TestCase):
         return [json.loads(line)["reason_code"] for line in path.read_text().splitlines()] if path.exists() else []
 
     def test_one_receipt_cannot_authorise_two_identical_segments(self) -> None:
-        """A single-use receipt is spent once; a repeated guarded segment is denied."""
+        """A denied chain cannot spend the receipt for its first segment."""
         self.configure("enforce")
         self.mint()
         self.assertTrue(self.denied(f"{MERGE} && {MERGE}"))
+        self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
+
+    def test_unexpected_error_uses_live_authority_error_policy(self) -> None:
+        """Codex denies under enforce or a loaded grant and warns without either."""
+        for mode, live, denied in (("advisory", False, False), ("advisory", True, True), ("enforce", False, True)):
+            with self.subTest(mode=mode, live=live):
+                self.configure(mode)
+                output = io.StringIO()
+                payload = {"session_id": "s1", "cwd": str(self.repo), "tool_input": {"command": MERGE}}
+                with (
+                    mock.patch.dict(os.environ, self.environment),
+                    mock.patch.object(codex_gate, "read_input", return_value=""),
+                    mock.patch.object(codex_gate, "payload_object", return_value=payload),
+                    mock.patch.object(codex_gate, "check_and_consume", side_effect=RuntimeError("unexpected")),
+                    mock.patch.object(codex_gate, "read_authority", return_value={"loop_id": None} if live else None),
+                    contextlib.redirect_stdout(output),
+                ):
+                    self.assertEqual(codex_gate.main(), 0)
+                self.assertEqual(bool(output.getvalue()), denied)
+                self.assertEqual(self.reasons()[-1], "denied_gate_error" if denied else "action_authority_failed_open")
+
+    def test_marker_write_error_denies_in_codex_hook(self) -> None:
+        """A Codex marker write fault must emit a deny envelope, not fail open."""
+        self.configure("enforce")
+        self.mint()
+        original = Path.write_text
+
+        def write(path: Path, data: str, encoding: str | None = None, errors: str | None = None) -> int:
+            if path.suffix == ".consumed":
+                original(path, "", encoding=encoding, errors=errors)
+                raise OSError("marker write failed")
+            return original(path, data, encoding=encoding, errors=errors)
+
+        payload = {"session_id": "s1", "cwd": str(self.repo), "tool_input": {"command": MERGE}}
+        output = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, self.environment),
+            mock.patch.object(codex_gate, "read_input", return_value=json.dumps(payload)),
+            mock.patch.object(Path, "write_text", autospec=True, side_effect=write),
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertEqual(codex_gate.main(), 0)
+        self.assertEqual(json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("denied_marker_write_failed", self.reasons())
+        self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
 
     def test_common_wrappers_are_still_guarded(self) -> None:
         """Env prefix, sudo, subshell, bash -c and gh api merge are guarded like the bare command."""
         self.configure("enforce")
         for command in ("FOO=1 gh pr merge 12", "sudo gh pr merge 12", "(gh pr merge 12)",
-                        "bash -c 'git push origin main'", "gh api repos/o/r/pulls/5/merge -X PUT"):  # fmt: skip
+                        "bash -c 'git push origin main'", "gh api repos/o/r/pulls/5/merge -X PUT",
+                        "gh api -X PUT repos/o/r/pulls/5/merge",
+                        "gh api graphql -f query='mutation { mergePullRequest(input: {}) { id } }'",
+                        "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { id } }'",
+                        ):  # fmt: skip
             with self.subTest(command=command):
                 self.assertTrue(self.denied(command))
 
     def test_off_and_advisory(self) -> None:
-        """Off is silent; advisory warns and traces but never denies."""
-        for value in (None, "off", "bogus"):
-            self.configure(value)
-            result = self.run_hook(MERGE)
-            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+        """No config and off are silent; invalid config denies; advisory warns."""
+        self.assertFalse(self.denied(MERGE))  # no config at all
+        self.configure("off")
+        result = self.run_hook(MERGE)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
         self.assertEqual(self.reasons(), [])
+        self.configure("bogus")
+        rejected = self.run_hook(MERGE)
+        self.assertEqual(rejected.returncode, 0, rejected.stderr)
+        self.assertEqual(json.loads(rejected.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("config_rejected", rejected.stdout)
+        self.assertEqual(self.reasons(), ["config_bad_value", "config_rejected"])
         self.configure("advisory")
         result = self.run_hook(MERGE)
         self.assertEqual((result.stdout, "advisory" in result.stderr), ("", True))
-        self.assertEqual(self.reasons(), ["advisory_no_receipt"])
+        self.assertEqual(self.reasons()[-1], "advisory_no_receipt")
+
+    def test_unbindable_merge_with_live_cap_is_denied_before_remote_command(self) -> None:
+        """The Codex hook refuses an unknown PR or head while a merge cap is live."""
+        self.configure("advisory")
+        authority = {
+            "authority_id": "a1", "loop_id": None, "session_id": "s1", "scope": ["code"], "denied": [],
+            "max_prs": 1, "expires_at": "2999-01-01T00:00:00+00:00", "revocable": True,
+            "approval_required_for": ["merge"], "granted_by": "command",
+        }  # fmt: skip
+        path = self.loop / "s1" / "authority.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(authority))
+        remote = self.directory / "remote.log"
+        gh = self.directory / "bin" / "gh"
+        gh.write_text(
+            f'#!/bin/sh\nif [ "$1 $2" = "pr view" ]; then '
+            f'echo \'{{"baseRefName":"main","headRefOid":"{MERGE_SHA}"}}\'; '
+            f'else echo "$*" >> "{remote}"; fi\n'
+        )
+        for command in (
+            "gh pr merge 12 --squash",
+            "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { id } }'",
+        ):
+            with self.subTest(command=command):
+                denied = self.denied(command)
+                if not denied:
+                    subprocess.run(command, shell=True, env=self.environment, cwd=self.repo, check=True)
+                self.assertTrue(denied)
+                self.assertFalse(remote.exists())
+                self.assertEqual(list((self.loop / "s1" / "merges").glob("*.json")), [])
+        self.assertEqual(self.reasons(), ["denied_binding_unknown", "denied_binding_unknown"])
+
+    def test_rejected_set(self) -> None:
+        """(c) wrong repository, wrong ref, stale sha, unsigned, agent-signed, expired and foreign-session receipts."""
+        self.configure("enforce")
+        past = datetime.now(timezone.utc) - timedelta(hours=1)
+        cases: tuple[tuple[str, dict[str, Any]], ...] = (
+            ("repository_mismatch", {"repository": "github.com/evil/w"}), ("ref_mismatch", {"ref": "refs/heads/x"}),
+            ("sha_mismatch", {"artifact_sha": "b" * 40}), ("signature_missing", {"signature": None}),
+            ("signer_unknown", {"key": self.agent_key}),
+            ("expired", {"expires_at": (past + timedelta(minutes=1)).isoformat(), "issued_at": past.isoformat()}),
+            ("foreign_session", {"session_id": "other"}),
+        )  # fmt: skip
+        for code, over in cases:
+            with self.subTest(code=code):
+                self.mint(rid=code, **over)
+                self.assertTrue(self.denied(MERGE))
+                self.assertEqual(self.reasons()[-1], f"denied_{code}")
+                (self.loop / "s1" / "receipts" / f"{code}.json").unlink()
+
+    def test_authority_denied_and_max_prs_beat_a_valid_receipt(self) -> None:
+        """(a) authority.denied and a spent max_prs refuse before any receipt is consumed."""
+        self.configure("enforce")
+        obj: dict[str, Any] = {
+            "authority_id": "auth-1", "loop_id": None, "session_id": "s1", "scope": ["code"], "denied": ["merge"],
+            "max_prs": 0, "expires_at": "2999-01-01T00:00:00+00:00", "revocable": True,
+            "approval_required_for": ["merge"], "granted_by": "command",
+        }  # fmt: skip
+        path = self.loop / "s1" / "authority.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(obj))
+        self.mint()
+        self.assertTrue(self.denied(MERGE))
+        path.write_text(json.dumps(obj | {"denied": []}))
+        self.assertTrue(self.denied(MERGE))
+        self.assertEqual(self.reasons(), ["denied_authority_denied", "denied_max_prs_exceeded"])
+        self.assertFalse((self.loop / "s1" / "receipts" / "r1.consumed").exists())
+
+    def test_subagent_payload_is_the_same_session(self) -> None:
+        """(d) Extra agent_id/agent_type fields do not change the session: the parent's receipt is honoured."""
+        self.configure("enforce")
+        self.mint()
+        payload = {"session_id": "s1", "cwd": str(self.repo), "tool_input": {"command": MERGE},
+                   "agent_id": "a-1", "agent_type": "loop-worker"}  # fmt: skip
+        done = subprocess.run(
+            [sys.executable, str(HOOKS / "action_authority_gate.py")], input=json.dumps(payload), capture_output=True,
+            text=True, env=self.environment, check=False,
+        )  # fmt: skip
+        self.assertEqual((done.returncode, done.stdout), (0, ""))
+        self.assertEqual(self.reasons(), ["trust_root_user_tier", "receipt_consumed"])
 
     def test_enforce_deny_allow_consume_once(self) -> None:
-        """No receipt denied; matching receipt allowed and consumed; second use denied; other args denied."""
+        """No receipt denied; matching signed receipt allowed and consumed; replay denied; other args denied."""
         self.configure("enforce")
         self.assertTrue(self.denied(MERGE))
         self.mint()
-        self.assertTrue(self.denied("gh pr merge 13 --squash"))
+        self.assertTrue(self.denied(f"gh pr merge 13 --squash {PIN}"))
         self.assertFalse(self.denied(MERGE))
         self.assertTrue(self.denied(MERGE))
-        expected = ["denied_no_receipt", "denied_hash_mismatch", "receipt_consumed", "denied_consumed"]
+        expected = ["denied_no_receipt", "denied_hash_mismatch", "trust_root_user_tier", "receipt_consumed"]
+        expected.append("denied_consumed")
         self.assertEqual(self.reasons(), expected)
         self.assertFalse(self.denied("ls -la"))
+
+    def test_self_minted_and_untrusted_are_denied(self) -> None:
+        """Unsigned JSON, an agent-made key and a missing trust root are all denied with their own codes."""
+        self.configure("enforce")
+        self.mint(rid="a", signature=None)
+        self.assertTrue(self.denied(MERGE))
+        (self.loop / "s1" / "receipts" / "a.json").unlink()
+        self.mint(rid="b", key=self.agent_key)
+        self.assertTrue(self.denied(MERGE))
+        (self.loop / "s1" / "receipts" / "b.json").unlink()
+        self.mint(rid="c")
+        (self.directory / "home" / ".coderails" / "keys" / "receipt_signers").unlink()
+        self.assertTrue(self.denied(MERGE))
+        self.assertEqual(
+            self.reasons(), ["denied_signature_missing", "denied_signer_unknown", "denied_trust_root_missing"]
+        )
+
+    def test_binding_unknown_stale_sha_and_refspec_source(self) -> None:
+        """No origin fails closed; a moved HEAD is sha_mismatch; `feature:main` binds feature, not HEAD."""
+        self.configure("enforce")
+        self.mint("git push origin main", "git_push")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "moved")
+        self.assertTrue(self.denied("git push origin main"))
+        (self.loop / "s1" / "receipts" / "r1.json").unlink()
+        git(self.repo, "branch", "feature")
+        command = "git push origin feature:main"
+        git(self.repo, "switch", "-q", "feature")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "feature work")
+        git(self.repo, "switch", "-q", "main")
+        self.mint(command, "git_push", rid="r2", artifact_sha=git(self.repo, "rev-parse", "HEAD"))
+        self.assertTrue(self.denied(command))
+        self.mint(command, "git_push", rid="r3")
+        self.assertFalse(self.denied(command))
+        git(self.repo, "remote", "remove", "origin")
+        self.assertTrue(self.denied("git push origin main"))
+        self.assertEqual(
+            self.reasons(),
+            [
+                "denied_sha_mismatch",
+                "denied_sha_mismatch",
+                "trust_root_user_tier",
+                "receipt_consumed",
+                "denied_binding_unknown",
+            ],
+        )
 
     def test_enforce_guards_push_on_main_only(self) -> None:
         """A push on main is guarded; on a feature branch it is not."""
@@ -245,73 +357,40 @@ class HookTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/feature/x"], check=True)
         self.assertFalse(self.denied("git push origin feature/x"))
 
-    def mint_for(self, command: str, kind: str, cwd: Path, rid: str = "r1", **over: object) -> None:
-        """Write a receipt for `command` run in `cwd` on main."""
-        now = datetime.now(timezone.utc)
-        proposed = claude.proposed_action(kind, command, str(cwd), "main")
-        path = claude.receipt_path("s1", rid, self.loop)
-        assert path is not None
-        claude.write_receipt(
-            path,
-            receipt(
-                loop_id=None, action=kind, exact_payload_hash=proposed["exact_payload_hash"], receipt_id=rid,
-                issued_at=now.isoformat(), expires_at=(now + timedelta(hours=1)).isoformat(), **over,
-            ),
-        )  # fmt: skip
-
     def test_chain_cd_and_dash_c_are_guarded(self) -> None:
         """Chained second op, `cd other && git push` and `git -C . push origin main` all need their own receipt."""
         self.configure("enforce")
-        other = self.directory / "other"
-        other.mkdir()
-        subprocess.run(["git", "init", "-q", "-b", "main", str(other)], check=True)
-        self.mint_for("git push origin feature", "git_push", self.repo)
+        other = make_repo(self.directory / "other")
+        git(self.repo, "branch", "feature")
+        self.mint("git push origin feature", "git_push")
         self.assertTrue(self.denied("git push origin feature && git push origin main"))
-        self.mint_for("git push", "git_push", self.repo, rid="r2")
-        self.assertTrue(self.denied(f"cd {other} && git push"))
+        self.mint("git push origin main", "git_push", rid="r2")
+        self.assertTrue(self.denied(f"cd {other} && git push origin main"))
         self.assertTrue(self.denied("git -C . push origin main"))
 
-    def test_artifact_sha_checked_against_head(self) -> None:
-        """A sha-bound push receipt verifies only against the real HEAD."""
+    def test_env_prefix_global_options_and_moved_refs_are_denied(self) -> None:
+        """Negative controls: env prefix, `-c`, and a ref moved earlier in the chain are denied despite a receipt."""
         self.configure("enforce")
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(self.repo),
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                "commit",
-                "-q",
-                "--allow-empty",
-                "-m",
-                "x",
-            ],
-            check=True,
-        )
-        head = subprocess.run(
-            ["git", "-C", str(self.repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
-        ).stdout.strip()
-        self.mint_for("git push origin main", "git_push", self.repo, artifact_sha="0" * 40)
-        self.assertTrue(self.denied("git push origin main"))
-        self.mint_for("git push origin main", "git_push", self.repo, rid="r2", artifact_sha=head)
+        self.mint("git push origin main", "git_push")
+        for command in ("GIT_DIR=/x git push origin main", "git -c a=b push origin main",
+                        "git branch -f main HEAD~0 && git push origin main"):  # fmt: skip
+            self.assertTrue(self.denied(command), command)
+        self.assertEqual(self.reasons(), ["denied_binding_unknown"] * 2 + ["denied_state_mutated_before_guard"])
         self.assertFalse(self.denied("git push origin main"))
 
-    def test_missing_session_and_cli_honesty(self) -> None:
-        """No session_id: no_session denial that is traced; the hint says the CLI is not in the Codex package."""
+    def test_missing_session_and_owner_hint(self) -> None:
+        """No session_id: a traced no_session denial; the hint gives the optional receipt command."""
         self.configure("enforce")
         result = self.run_hook("git push origin main", session="")
         self.assertIn("no_session", result.stdout)
         self.assertNotIn("--session  ", result.stdout)
         rows = (self.loop / "_no_session" / "trace.jsonl").read_text().splitlines()
         self.assertEqual(json.loads(rows[0])["reason_code"], "denied_no_session")
-        self.assertIn("NOT shipped", self.run_hook("git push origin main").stdout)
+        self.assertIn("sign one at a terminal", self.run_hook("git push origin main").stdout)
 
     def test_registered_with_timeout(self) -> None:
         """Appended last to the ^Bash$ group with a timeout of at least 5."""
-        group = json.loads((ROOT / "packages/codex/hooks/hooks.json").read_text())["hooks"]["PreToolUse"][0]
+        group = json.loads((CODEX / "hooks/hooks.json").read_text())["hooks"]["PreToolUse"][0]
         self.assertEqual(group["matcher"], "^Bash$")
         self.assertIn("action_authority_gate.py", group["hooks"][-1]["command"])
         self.assertGreaterEqual(group["hooks"][-1]["timeout"], 5)

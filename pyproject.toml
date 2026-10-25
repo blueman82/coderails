@@ -28,7 +28,7 @@ executionEnvironments = [
   { root = "skills/agentic-loop/scripts", extraPaths = ["skills/agentic-loop/scripts", "hooks/scripts", "."] },
   { root = "scripts/integrity-gate", extraPaths = ["scripts/integrity-gate", "."] },
   { root = "launchd", extraPaths = ["launchd", "."] },
-  { root = ".", extraPaths = ["."] },
+  { root = ".", extraPaths = [".", "skills/agentic-loop/scripts"] },
 ]
 
 [tool.mypy]

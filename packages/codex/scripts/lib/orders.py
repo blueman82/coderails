@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -18,6 +19,7 @@ from hooks.scripts.lib import dir_lock  # noqa: E402
 from scripts.lib import lessons  # noqa: E402
 from scripts.lib import memory_adapter as ma  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
+from scripts.lib import orders_legacy_import as legacy_import  # noqa: E402
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
 from scripts.lib.memory_reasons import REASONS  # noqa: E402
 
@@ -216,59 +218,63 @@ def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
     if payload.get("degraded"):
         ol.trace("order.tick", "degraded", payload["degraded"], a.session, a.loop)
         return payload, 3
-    ol.trace(
-        "order.tick",
-        "ticked" if payload["ticked"] else "skipped",
-        "ok" if payload["ticked"] else "order_already_ticked",
-        a.session,
-        a.loop,
-    )
+    outcome = "ticked" if payload["ticked"] else "skipped"
+    reason = "ok" if payload["ticked"] else "order_already_ticked"
+    ol.trace("order.tick", outcome, reason, a.session, a.loop)
     return payload, 0
 
 
 def cmd_lessons(a: argparse.Namespace, repo_dir: Path) -> Result:
     """Active orders joined with Muninn's current status."""
-    payload, rc = lessons.serve(ol.open_ledger(repo_dir), a.session)
-    return payload, rc
+    return lessons.serve(ol.open_ledger(repo_dir), a.session)
 
 
 def cmd_render(a: argparse.Namespace, repo_dir: Path) -> Result:
     """Regenerate both views from the ledger, dropping orders Muninn no longer holds as current (when it answers)."""
-    if any((repo_dir / name).is_symlink() for name, _ in VIEWS):
-        return _refuse("order_wrong_session")
-    ledger = ol.open_ledger(repo_dir)
-    got = lessons.joined(ledger, include_decayed=True, session=a.session)
-    if "degraded" in got:  # no ledger-text fallback: with Muninn down the view could resurrect retracted orders
-        ol.trace("order.render", "degraded", got["degraded"], a.session)
-        return {"degraded": got["degraded"]}, 3
-    keep = got["state"] == "memory_backend_off"
-    rows = {r["id"]: r for r in got["lessons"] if keep or r["cited"]}
-    shown: ol.Ledger = {
-        **ledger,
-        "orders": [
-            {**o, "lesson": rows[o["id"]]["text"], "muninn": {**o["muninn"], "id": rows[o["id"]]["muninn_id"]}}
-            for o in ledger["orders"]
-            if o["id"] in rows
-        ],
-    }
-    for name, decayed in VIEWS:
-        bad = ma.write_view(repo_dir / name, ol.view(shown, decayed), a.session)
-        if bad:
-            ol.trace("order.render", "refused", bad.reason, a.session)
-            return {"degraded": bad.reason}, 3
-        os.chmod(repo_dir / name, 0o444)
-    ol.trace("order.render", "rendered", "ok", a.session)
-    return {"rendered": [n for n, _ in VIEWS], "excluded": sorted({g["order"] for g in got.get("excluded", [])})}, 0
+    with locked(repo_dir):
+        if any((repo_dir / name).is_symlink() for name, _ in VIEWS):
+            return _refuse("order_wrong_session")
+        ledger = ol.open_ledger(repo_dir)
+        got = lessons.joined(ledger, include_decayed=True, session=a.session)
+        if "degraded" in got:  # no ledger-text fallback: with Muninn down the view could resurrect retracted orders
+            ol.trace("order.render", "degraded", got["degraded"], a.session)
+            return {"degraded": got["degraded"]}, 3
+        keep = got["state"] == "memory_backend_off"
+        rows = {r["id"]: r for r in got["lessons"] if keep or r["cited"]}
+        shown: ol.Ledger = {
+            **ledger,
+            "orders": [
+                {**o, "lesson": rows[o["id"]]["text"], "muninn": {**o["muninn"], "id": rows[o["id"]]["muninn_id"]}}
+                for o in ledger["orders"]
+                if o["id"] in rows
+            ],
+        }
+        view_hashes = {}
+        for name, decayed in VIEWS:
+            content = ol.view(shown, decayed)
+            bad = ma.write_view(repo_dir / name, content, a.session)
+            if bad:
+                ol.trace("order.render", "refused", bad.reason, a.session)
+                return {"degraded": bad.reason}, 3
+            os.chmod(repo_dir / name, 0o444)
+            view_hashes[name] = hashlib.sha256(content.encode()).hexdigest()
+        ol.trace("order.render", "rendered", "ok", a.session)
+        excluded = sorted({g["order"] for g in got.get("excluded", [])})
+        result: dict[str, Any] = {"rendered": [n for n, _ in VIEWS], "excluded": excluded}
+        result.update(ledger_sha256=lifecycle.sha(ledger), view_sha256=view_hashes)
+        return result, 0
 
 
 def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
-    """Load the hand-written file into the ledger (legacy_uncited), then move it aside."""
+    """Load one hand-written snapshot and archive its bytes without moving the source."""
     src = Path(a.file) if a.file else repo_dir / "standing-orders.md"
     if src.is_symlink() or src.resolve().parent != repo_dir.resolve():
         return _refuse("legacy_parse_error", entry=str(src))
     try:
-        text = src.read_text(encoding="utf-8")
+        raw = src.read_bytes()
+        text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     except OSError:
+        raw = b""
         text = ""
     if not text.strip() or text.split("\n", 1)[0] == ma.MARKER:
         ol.trace("order.import", "refused", "legacy_missing", a.session)
@@ -280,40 +286,14 @@ def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
         return _refuse("legacy_parse_error", entry=error.entry)
 
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger | None, dict[str, Any]]:
-        new = {**ledger, "orders": list(ledger["orders"])}
-        for row in parsed:
-            lifecycle.check_staged_identity(repo_dir, ledger, row)
-        have = {o["id"]: o for o in new["orders"]}
-        shared = [row for row in parsed if row["id"] in have]
-        if shared:
-            timestamps = {have[row["id"]]["created"] for row in shared}
-            expected = ol.parse_legacy(text, have[shared[0]["id"]]["created"])
-            if (
-                len(shared) != len(parsed)
-                or len(timestamps) != 1
-                or any(
-                    {k: v for k, v in have[row["id"]].items() if k not in ("seq", "prev_sha256", "row_sha256")} != row
-                    for row in expected
-                )
-            ):
-                raise ValueError("legacy_parse_error")
-        for n in range(1, 1000):
-            dest = repo_dir / ("standing-orders.legacy.md" if n == 1 else f"standing-orders.legacy.{n}.md")
-            if not dest.exists() and not dest.is_symlink():
-                break
-        else:
+        if src.is_symlink() or src.read_bytes() != raw:
             raise ValueError("legacy_parse_error")
-        if not shared:
-            new["orders"] += parsed
-            ol.save(repo_dir / "orders.json", ol.seal(new))
-        os.replace(src, dest)
-        return None, {"imported": 0 if shared else len(parsed), "skipped": len(shared), "moved_to": str(dest)}
+        return None, legacy_import.apply(repo_dir, raw, text, parsed, ledger)
 
     payload, rc = update(repo_dir, change)
-    if rc:
-        return payload, rc
-    ol.trace("order.import", "imported", "legacy_uncited", a.session)
-    return payload, 0
+    if not rc:
+        ol.trace("order.import", "imported", "legacy_uncited", a.session)
+    return payload, rc
 
 
 def cmd_cite(a: argparse.Namespace, repo_dir: Path) -> Result:
@@ -328,12 +308,9 @@ def cmd_cite(a: argparse.Namespace, repo_dir: Path) -> Result:
 
     payload, rc = update(repo_dir, change)
     field = payload.get("muninn", {})
-    ol.trace(
-        "order.cite",
-        "refused" if rc else field["state"],
-        payload.get("reason_code", field.get("reason_code")),
-        a.session,
-    )
+    outcome = "refused" if rc else field["state"]
+    reason = payload.get("reason_code", field.get("reason_code"))
+    ol.trace("order.cite", outcome, reason, a.session)
     return payload, rc or _exit(field)
 
 
@@ -365,8 +342,9 @@ def build_parser() -> argparse.ArgumentParser:
     prep = sub.add_parser("prepare")
     prep.add_argument("--loop", required=True)
     prep.add_argument("--refresh-from-sha256", default=None, help="CURRENT preparation's evidence_sha256")
-    for name in ("predicate", "lessons", "render"):
+    for name in ("predicate", "lessons"):
         sub.add_parser(name)
+    sub.add_parser("render").add_argument("--loop", default="")
     sub.add_parser("import-legacy").add_argument("--file", default="")
     cite = sub.add_parser("cite")
     cite.add_argument("order_id")

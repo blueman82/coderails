@@ -35,7 +35,7 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | Field | Notes |
 |---|---|
 | `schema_version` | Exactly `3`. Legacy, missing and malformed graph schemas fail closed; no schema-2 reader or alternate writer exists. |
-| `proof_disposition` | Required when no `proof.json` exists: `"none: <reason>"` (nonblank reason), the typed `{"kind":"none","reason_code","reason"}`, or a disposition row recorded by `proof.py disposition`. A bare `"none"`, other or absent values block completion (`proof_disposition_no_reason`). A present proof file must validate independently. |
+| `proof_disposition` | Required when no `proof.json` exists. Use `graph.py record-proof-disposition` to save `"none: <nonblank reason>"` for an owned loop with no executable surface. Other or absent values block completion. A present proof file must validate independently. |
 | `session_id` | This session's id; the guard's ownership check compares it against the file's own path. |
 | `loop_id` | Unique non-blank identity for this loop. Preserve it during mid-loop rewrites; create a new value when re-arming for a new loop. Dispatch evals bind `session_id` + `loop_id`. |
 | `revision` | Positive integer starting at `1`. Graph operations advance it. Dispatch envelopes bind the active revision; frozen dispatch evals bind only session and loop; final neutral grading binds the completion revision. |
@@ -50,13 +50,14 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | `decisions_absorbed` | Chronological (oldest-first) array of typed, hash-chained rows `{seq, phase, decision, flip_condition, unit, revision, ts, prev_sha256, row_sha256, muninn: {state: syncing\|written\|degraded\|unknown\|disabled, id, reason_code}}`, appended ONLY by `graph.py record-decision` through `scripts/lib/decision_record.py` at each phase boundary that absorbs an in-scope decision (Phases -1, 2.5, 2.6, 2.8, 5, 6); never hand-appended. `{phase, decision}` stay exactly as the dashboard reads them. The local row is claimed before Muninn (`kind=decision`, cite quoted from `authorising_prompt_raw`); a safely degraded sync is retried by `graph.py flush-decisions` at teardown. `syncing` or `unknown` requires store reconciliation before retry. Phase -1 records only in a full-autonomous envelope, where it auto-adopts the improve-prompt output instead of asking. In the Phase 2.5/2.6 graph wave the orchestrator records each worker result; workers never write this field (Muninn writers cannot run in subagents). |
 | `completed_marker` | Count of agentic-loop loops completed in this session; bumped at teardown, carried forward by `graph.py start` when it re-arms a completed loop. |
 | `last_updated` | Refreshed at each phase boundary. |
+| `state_minor` | Integer (absent = 0) naming the `progress.json` layout minor within schema 3; current is 1 (v1 adds `graph.wave_history {}`, `stops []`, `updated_at`). `graph.py start` writes it; `graph.py convert <state> --session <id> [--check]` upgrades an older file in place on either provider, refusing with `convert_refused_<code>` when it would have to guess (unknown `schema_version`, `state_minor` from a newer tool, an in-flight wave with no `wave_history` entry, malformed `stops`/`work_units`, non-object `graph`, a foreign session, an existing `progress.json.pre-convert`). It writes `progress.json.pre-convert` once (never overwritten or deleted) before replacing the file, and a second run is a no-op. |
 
 **`work_units` feeds the loop-scope eval gate.** `loop_state_guard` reads `.work_units | length`
 to decide whether the ≥1-work-unit eval threshold applies, and fails open (no block) when the
 field is absent — so keep it populated whenever the loop tracks ≥1 work-unit.
 
-**`work_units` also feeds the `loop_stall_guard` deferral gate.** A `LOOP-STOP: complete`
-declaration is blocked while any unit's `status` is not terminal (`pending`, `in-progress`, or
+**`work_units` also feeds the `loop_stall_guard` deferral gate.** A recorded `complete`
+stop (`graph.py stop --category complete`) is blocked while any unit's `status` is not terminal (`pending`, `in-progress`, or
 `blocked` all block; so does any other value). `done` is terminal outright; `dropped` is terminal
 only with a non-empty **string** `dropped_reason` — an absent, empty, whitespace-only, or
 non-string (number, boolean, array, object) reason all still block. A unit whose value is not an
@@ -78,7 +79,9 @@ A pending node becomes ready only after every incoming dependency is
 `done` or `skipped`. An open wave or hard stop prevents another wave.
 `blocked` and `stale` are not successful prerequisites. `failed` is a wave
 outcome, never a persisted status: recording it increments `retry.attempts` and
-returns the node to pending, or hard-stops at `retry.max` (1 through 5).
+returns ordinary nodes to pending. FULL-profile `U4`, `U4b-review`, and
+`U4b-merge-gate` become blocked until a distinct diagnosed `record-repair`
+transition requeues verification. Every node hard-stops at `retry.max` (1 through 5).
 A stale result requires an artifact check in that same result:
 `{"checked":true,"method":"<check>","result":"<observation>"}`.
 A bare idle event is insufficient. `respawn-stale` records the reason and a new
@@ -99,8 +102,8 @@ done unit does not supply missing native graph evidence. Both gates must pass;
 there is no reconciliation or automatic status copying between them.
 
 **`loop_stop_counts` is written solely by the `loop_stall_guard` hook** on each consumed stop
-(a `stops[]` row written by `graph.py stop`, marked `consumed` in the same atomic write that counts it,
-or else a legacy `LOOP-STOP` text declaration; `stops[]` is intent, `loop_stop_counts` the count). The orchestrator never writes or increments it. `graph.py start` never writes
+(a `stops[]` row written by `graph.py stop`, marked `consumed` in the same atomic write that counts it;
+final text is only a rendering and is never read, so a missing row blocks with `stop_row_missing`; `stops[]` is intent, `loop_stop_counts` the count). The orchestrator never writes or increments it. `graph.py start` never writes
 it and drops it when re-arming a completed loop (the finished loop's counts live in its `retro.json`);
 never rewrite the file wholesale.
 
@@ -152,7 +155,7 @@ is still your job; the guard only catches its absence.
 - **`retro.json`** — session-keyed, beside `progress.json`, written once by the Phase 13 teardown contract.
 - **`orders-prepared-<logical-loop sha256>.json`** and **`teardown.jsonl`** — session-keyed preparations and honest lifecycle observations. Preparations bind the repo directory, state directory, session, separate logical loop, revision and progress hash. They stage claims without recurrence/aging effects; a receipt alone cannot authorize apply.
 - **`evals.json`** — loop-scope and pr-scope, frozen at Phase 2.7c/2.7d via `/coderails:task-evals`; see `skills/agentic-loop/SKILL.md` for the field contract.
-- **`proof.json`** — loop-scope, frozen at Phase 2.7e beside `evals.json`, by a SEPARATE agent given only `authorising_prompt_raw`, `session_id`, and `loop_id` as explicit dispatch inputs (never the plan/spec/conversation, never a `progress.json` read) — generalising `task-evals`' grader-independence to the author. Schema: `{"schema_version":2,"session_id","loop_id","frozen_at","frozen_sha","proofs":[{"id","claim","cmd","expect","status":"pending"}]}`. Voluntary adoption, same posture as `evals.json`: a loop with no executable surface writes none, and records that choice in `decisions_absorbed` **and** in `progress.json`'s own `proof_disposition` field (see the Fields table above) — the latter is what the gate actually reads.
+- **`proof.json`** — loop-scope, frozen at Phase 2.7e beside `evals.json`, by a SEPARATE agent given only `authorising_prompt_raw`, `session_id`, and `loop_id` as explicit dispatch inputs (never the plan/spec/conversation, never a `progress.json` read) — generalising `task-evals`' grader-independence to the author. Schema: `{"schema_version":2,"session_id","loop_id","frozen_at","frozen_sha","proofs":[{"id","claim","cmd","expect","status":"pending"}]}`. A loop with no executable surface writes none and records that choice in `decisions_absorbed` and `progress.json`'s `proof_disposition` field (see the Fields table above).
 
   **`proof.json` feeds the `loop_stall_guard` proof gate** (`loop_proofs.validate_proofs`; Codex: `graph_artifacts.validate_completion_evidence`). The CONTROLLER runs the proofs: `scripts/lib/proof.py freeze <state-dir>` validates the file (schema_version 2: unique ids, nonblank `cmd`, structured `expect` `{exit_code, stdout_contains, stdout_not_contains}`, optional `timeout_s`; at least one non-withdrawn proof; schema 1 is refused because it ignores structured `expect`) and appends a freeze row holding the sha256 of the canonical document. `proof.py run <state-dir> [--id X|--all]` executes each frozen `cmd` VERBATIM through `/bin/bash -c` in the foreground with a timeout (default 600 s), after refusing any cmd the destructive-command classifier matches (`proof_cmd_destructive`, never executed), and appends a run row. `proof.py status` prints each proof's latest verdict.
 

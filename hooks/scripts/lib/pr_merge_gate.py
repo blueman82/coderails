@@ -1,27 +1,37 @@
-"""Fetch and validate exact-head eval evidence and machine integrity attestation."""
+"""Fetch and validate exact-head eval evidence and GitHub Actions attestation."""
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from scripts.lib.config import config_path, integrity_machine_user
+from hooks.scripts.lib.trace_row import append_row
+from scripts.lib.artifact_io import array_value
+from scripts.lib.config import config_path, integrity_enabled, integrity_status_login
+from scripts.lib.config_strict import ConfigRejected, strict_settings
 from scripts.lib.git_common import branch, gate_eval_summary_for_pr, pr_field, pr_num, repo, run
+from scripts.lib.integrity_attestation import parse_attestation
 from scripts.post_evals import smoke_verify
 
 
-def integrity_reason(number: str, sha: str, cwd: str) -> str:
-    """Require the newest exact-SHA success from the configured machine login."""
-    machine = integrity_machine_user(config_path(cwd))
-    if not machine:
+def integrity_reason(number: str, sha: str, cwd: str, session: str = "") -> str:
+    """Require one parsed exact-SHA GitHub Actions status when configured."""
+    path = config_path(cwd)
+    if not path:
         return ""
     prefix = f"Blocked: gh pr merge {number} — "
+    try:
+        strict_settings(path)
+    except ConfigRejected as error:
+        return prefix + str(error)
+    if not integrity_enabled(path):
+        return ""
+    expected_login = integrity_status_login(path)
     try:
         result = run(
             "gh",
@@ -36,42 +46,26 @@ def integrity_reason(number: str, sha: str, cwd: str) -> str:
                 prefix + f"GitHub fetch failed, could not fetch integrity-review status for {sha}. Retry, "
                 f"or check gh auth/network."
             )
-        statuses = json.loads(result.stdout)
-        status = cast(dict[str, Any], statuses[0]) if isinstance(statuses, list) and statuses else {}
-        state = status.get("state", "")
-        creator = status.get("creator", {}).get("login", "")
-        description = status.get("description", "")
+        decoder = json.JSONDecoder()
+        remaining = result.stdout.lstrip()
+        statuses: list[object] = []
+        while remaining:
+            page, end = decoder.raw_decode(remaining)
+            if not isinstance(page, list):
+                raise ValueError("malformed status page")
+            statuses.extend(array_value(cast(object, page)))
+            remaining = remaining[end:].lstrip()
+        status = cast(dict[str, Any], statuses[0]) if statuses else {}
     except (OSError, ValueError, AttributeError, TypeError):
-        return (
-            prefix + f"no integrity-review status found for {sha}. The integrity daemon has not attested this SHA yet."
-        )
-    if not state:
-        return (
-            prefix + f"no integrity-review status found for {sha}. The integrity daemon has not attested this SHA yet."
-        )
-    if state != "success":
-        return (
-            prefix + f"integrity-review status for {sha} is '{state}' (not success). The integrity "
-            f"daemon has not attested this SHA."
-        )
-    if creator != machine:
-        return (
-            prefix + f"integrity-review status for {sha} was posted by '{creator}', not the "
-            f"configured machine user '{machine}'."
-        )
-    if (
-        not isinstance(description, str)
-        or not re.search(r"(^|\s)integrity=pass(\s|$)", description)
-        or not re.search(r"(^|\s)sha=" + re.escape(sha) + r"(\s|$)", description)
-    ):
-        return (
-            prefix + f"integrity-review status for {sha} is not a valid SHA-bound pass attestation. "
-            f"Do not bypass; investigate."
-        )
+        return prefix + f"no integrity-review status found for {sha}. GitHub Actions has not attested this SHA yet."
+    verdict = parse_attestation(status, sha, expected_login)
+    if not verdict.ok:
+        append_row("pr_merge_gate", "denied", verdict.reason_code, session, inputs={"sha": sha})
+        return prefix + f"{verdict.reason_code}: {verdict.detail}. GitHub Actions has not attested this SHA."
     return ""
 
 
-def merge_reason(number: str, cwd: str) -> str:
+def merge_reason(number: str, cwd: str, session: str = "") -> str:
     """Return the fail-closed merge denial, or empty after live evidence re-execution."""
     try:
         os.chdir(cwd)
@@ -133,4 +127,4 @@ def merge_reason(number: str, cwd: str) -> str:
             prefix + "local temporary file allocation failed for the smoke-verify gate. Check /tmp "
             "disk space or permissions, then retry."
         )
-    return integrity_reason(number, sha, cwd)
+    return integrity_reason(number, sha, cwd, session)

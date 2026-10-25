@@ -27,6 +27,10 @@ class Provider:
         self.name = name
         self.home = root / name
         self.home.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.home)], check=True)
+        config = self.home / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
+        config.write_text("memory:\n  backend: off\n")
         self.plugin = ROOT if name == "claude" else ROOT / "packages/codex"
         self.session = "fixture-session" if name == "claude" else "parent"
         self.parent = claude.parent(self.home) if name == "claude" else codex.transcripts(self.home)
@@ -51,6 +55,7 @@ class Provider:
         """Return a current state using stable semantic IDs and native session identity."""
         value = claude.state(0)
         value.update(session_id=self.session, loop_id="fixture-loop")
+        value.update(created="2026-10-24T10:00:00+00:00", authorising_prompt_raw="Run this bounded provider test.")
         value["graph"]["nodes"] = {identifier: node(identifier) for identifier in identifiers}
         return value
 
@@ -89,7 +94,7 @@ class Provider:
     def freeze(self) -> None:
         """Write a stable-identity ungraded suite accepted before implementation."""
         value = claude.frozen_evals()
-        value.update(session_id=self.session, loop_id="fixture-loop", task_ref="fixture-loop")
+        value.update(session_id=self.session, loop_id=self.read()["loop_id"], task_ref=self.read()["loop_id"])
         self.write(value, "evals.json")
 
     def launch(self, outcome: str = "done") -> dict[str, Any]:
@@ -114,7 +119,7 @@ class Provider:
         suite = {
             **identity,
             "scope": "loop",
-            "task_ref": "fixture-loop",
+            "task_ref": state["loop_id"],
             "revision": state["revision"],
             "verification_level": 1,
             "verification_justification": "independent provider parity",

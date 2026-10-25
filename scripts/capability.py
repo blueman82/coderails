@@ -276,6 +276,9 @@ TOOLS: dict[str, Callable[[object], Result]] = {
     "tests.run": tests_run,
     "pr.comment": pr_comment,
 }
+from scripts.lib import capability_extra  # noqa: E402  (worktree arg, more repo.inspect ops, cmd.run)
+
+capability_extra.install(sys.modules[__name__], TOOLS)
 
 
 def trace(tool: str, outcome: str, code: str, raw: str) -> bool:

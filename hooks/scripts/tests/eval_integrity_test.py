@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from hooks.scripts.lib.loop_evals import read_loop_evals_result
+from hooks.scripts.lib.loop_evals import EvalStatus, EvalVerdict, read_loop_evals
 from hooks.scripts.tests.lib.post_evals_fixture import ROOT, ArtifactCase, command, entry
 from scripts.lib import eval_trace
 from scripts.lib.artifact_io import read_object
@@ -173,11 +173,11 @@ class LegacyTests(ArtifactCase):
         self.save()
         with quiet():
             grade_loop(self.path)
-            self.assertEqual(read_loop_evals_result(self.directory), "GO")
+            self.assertEqual(read_loop_evals(self.directory).status, "GO")
             self.data = self.reload()
             self.data["evals"][0]["cmd"] = command("raise SystemExit(0)")
             self.save()
-            self.assertEqual(read_loop_evals_result(self.directory), "TAMPERED:suite_hash_mismatch")
+            self.assertEqual(read_loop_evals(self.directory), EvalVerdict(EvalStatus.TAMPERED, "suite_hash_mismatch"))
 
 
 class HashedReaderTests(Base):
@@ -193,9 +193,9 @@ class HashedReaderTests(Base):
     def test_reader_detects_oracle_edit_after_grade(self) -> None:
         """Test reader detects oracle edit after grade."""
         grade_loop(self.path)
-        self.assertEqual(read_loop_evals_result(self.directory), "GO")
+        self.assertEqual(read_loop_evals(self.directory).status, "GO")
         self.edit_cmd(command("raise SystemExit(0)"))
-        self.assertEqual(read_loop_evals_result(self.directory), "TAMPERED:suite_hash_mismatch")
+        self.assertEqual(read_loop_evals(self.directory), EvalVerdict(EvalStatus.TAMPERED, "suite_hash_mismatch"))
 
 
 class IdentityTests(ArtifactCase):

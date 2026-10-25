@@ -74,7 +74,7 @@ merge) are what the merge gate relies on, not the wording of this comment body.
 Prepend the marker,
 append the full `evals.json` as a fenced JSON code block, so the posted
 comment begins with the marker line and ends with the complete artifact —
-this is the embed the integrity daemon extracts and validates (never
+this is the embed the trusted GitHub Actions workflow extracts and validates (never
 hand-summarised; the raw file, verbatim). Use a `FENCE` variable rather than
 literal triple-backticks inside this script, since a literal fence would
 terminate this instruction's own surrounding code block:

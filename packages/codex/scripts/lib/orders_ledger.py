@@ -15,8 +15,8 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
-from scripts.lib.artifact_io import write_bytes  # noqa: E402
 from scripts.lib.memory_adapter import MARKER, NO_SESSION  # noqa: E402
+from scripts.lib.orders_atomic import write_bytes  # noqa: E402
 
 K = 5  # a loop count, deliberately a code constant and not config: an order decays after K loops without recurrence
 GENESIS = "0" * 64

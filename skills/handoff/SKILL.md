@@ -32,6 +32,8 @@ If a native loop graph exists for this session, first run
 the typed decisions. A missing loop graph (`graph.py` unavailable) only drops the graph commands; Step 1 still supplies
 the rest.
 
+When reporting graph work, use `inspect`/`summarize`'s `node_names` entry to show each node's one-word job name and lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.
+
 ### Step 1: Extract from current session
 
 Scan the conversation for these categories. Be thorough — the new session has ZERO context from this one:

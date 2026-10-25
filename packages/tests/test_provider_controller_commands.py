@@ -126,8 +126,10 @@ class StartTests(ControllerCase):
             self.assertEqual(state["authorising_prompt_raw"], PROMPT)
             self.assertEqual(state["work_units"], {})
             self.assertEqual(
-                state["graph"], {"nodes": {}, "edges": [], "joins": {}, "active_wave": None, "hard_stop": None}
+                state["graph"],
+                {"nodes": {}, "edges": [], "joins": {}, "active_wave": None, "hard_stop": None, "wave_history": {}},
             )
+            self.assertEqual((state["stops"], state["state_minor"]), ([], 1))
             self.assertEqual(("completed_marker" in state), c.name == "claude")
             self.assertEqual(c.codes("start"), ["start_created"])
 

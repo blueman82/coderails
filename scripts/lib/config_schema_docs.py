@@ -12,6 +12,14 @@ START = "<!-- config-schema:start -->"
 END = "<!-- config-schema:end -->"
 
 
+def control(spec: dict[str, Any]) -> str:
+    """The ON value of a safety control, or the owner that blocks it; empty for an ordinary key."""
+    if not spec.get("control"):
+        return "-"
+    blocked = f" (blocked: {spec['blocked_on']})" if spec.get("blocked_on") else ""
+    return f"`{json.dumps(spec['on_value'])}`{blocked}"
+
+
 def rows(properties: dict[str, Any], prefix: str = "") -> list[str]:
     """One markdown row per key, nested keys dotted."""
     lines: list[str] = []
@@ -19,7 +27,7 @@ def rows(properties: dict[str, Any], prefix: str = "") -> list[str]:
         kind = "/".join(spec["type"])
         default = json.dumps(spec["default"])
         text = spec["description"].replace("|", "\\|")
-        lines.append(f"| `{prefix}{key}` | {kind} | `{default}` | {spec['status']} | {text} |")
+        lines.append(f"| `{prefix}{key}` | {kind} | `{default}` | {control(spec)} | {spec['status']} | {text} |")
         lines += rows(spec.get("properties", {}), prefix + key + ".")
     return lines
 
@@ -27,7 +35,7 @@ def rows(properties: dict[str, Any], prefix: str = "") -> list[str]:
 def table(schema_path: Path = ROOT / "config.schema.json") -> str:
     """The full generated block, markers included."""
     schema = cast("dict[str, Any]", json.loads(schema_path.read_text(encoding="utf-8")))
-    head = ["| Key | Type | Default | Status | Description |", "|---|---|---|---|---|"]
+    head = ["| Key | Type | Default | Control ON value | Status | Description |", "|---|---|---|---|---|---|"]
     return "\n".join([START, *head, *rows(schema["properties"]), END])
 
 

@@ -15,6 +15,13 @@ from scripts.installer import codex, files
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def seed_sources(root: Path) -> None:
+    """Create a distinct canonical file for every shared module the installer materializes."""
+    for relative, _ in files.SEMANTIC_TARGETS:
+        (root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (root / relative).write_text(f"canonical {relative}\n")
+
+
 class InstallerTests(unittest.TestCase):
     """Use isolated homes and mocked provider commands for installation controls."""
 
@@ -22,23 +29,22 @@ class InstallerTests(unittest.TestCase):
         """Generate independent identical copies and never write in dry-run mode."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "packages/graph-semantics/graph_semantics.py"
-            source.parent.mkdir(parents=True)
-            source.write_text("fixture canonical\n")
+            seed_sources(root)
             files.materialize(root, dry_run=True)
             self.assertFalse((root / "skills").exists())
             files.materialize(root, dry_run=False)
-            for relative in files.SEMANTIC_TARGETS:
-                self.assertEqual((root / relative).read_bytes(), source.read_bytes())
-                self.assertNotEqual((root / relative).stat().st_ino, source.stat().st_ino)
+            for relative, targets in files.SEMANTIC_TARGETS:
+                source = root / relative
+                self.assertEqual(len(targets), 2)
+                for target in targets:  # every shared module reaches both providers, as its own inode
+                    self.assertEqual((root / target).read_bytes(), source.read_bytes())
+                    self.assertNotEqual((root / target).stat().st_ino, source.stat().st_ino)
 
     def test_test_output_copy_is_preflighted_before_any_materialization(self) -> None:
         """A redirected helper target cannot cause partially updated provider bundles."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "packages/graph-semantics/graph_semantics.py"
-            source.parent.mkdir(parents=True)
-            source.write_text("canonical graph\n")
+            seed_sources(root)
             output = root / "hooks/scripts/test_output.py"
             output.parent.mkdir(parents=True)
             output.write_text("canonical output\n")
@@ -47,7 +53,7 @@ class InstallerTests(unittest.TestCase):
             target.symlink_to(output)
             with self.assertRaises(ValueError):
                 files.materialize(root, dry_run=False)
-            self.assertFalse((root / files.SEMANTIC_TARGETS[0]).exists())
+            self.assertFalse((root / files.SEMANTIC_TARGETS[0][1][0]).exists())
             target.unlink()
             files.materialize(root, dry_run=False)
             self.assertEqual(target.read_bytes(), output.read_bytes())

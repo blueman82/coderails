@@ -12,22 +12,26 @@ REASONS: dict[str, str] = {
     ),
     "memory_backend_invalid": "memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml.",
     "muninn_absent": "muninn is not on PATH; install it (the Markdown path is not a fallback).",
-    "muninn_old_ledger": "muninn lacks the Part A flags (--scope-loop, --confidence, ...); upgrade muninn.",
+    "muninn_old_ledger": (
+        "the D4 adapter expects retired Muninn flags; keep this degraded until a current request-bound adapter "
+        "is designed."
+    ),
     "muninn_timeout": "muninn hung past 10s; run `muninn know list` by hand and check store locks.",
     "muninn_error": (
         "muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and "
         "read stderr."
     ),
     "muninn_bad_output": (
-        "muninn wrote the entry but printed no K-id; run `muninn know list --scope-loop <id>` to find it."
+        "the retired D4 write protocol returned no numeric K-id; inspect current Muninn records without a legacy "
+        "scope flag."
     ),
     "muninn_store_missing": "no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once.",
     "muninn_schema_old": (
-        "the store is schema v1 (PRAGMA user_version != 2); upgrade it with muninn itself, never by hand."
+        "the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2."
     ),
     "muninn_schema_incomplete": (
-        "the store lacks a typed column or table (confidence, valid_until, sensitivity, contradicts, "
-        "tags, fts); run `muninn doctor`."
+        "the D4 adapter expects retired v2 columns or tables; inspect the current store with `muninn doctor`, "
+        "then redesign the adapter."
     ),
     "uncited_write": "give a verbatim --quote (and --cite ref); a record without a quote is never written.",
     "restricted_refused": "restricted records are never written by the adapter; write a normal-sensitivity claim.",
@@ -80,6 +84,8 @@ REASONS: dict[str, str] = {
         "muninn refused with a code not listed here; the reason is `refused_<code>`, read it and the " "muninn docs."
     ),
     "decision_wrong_session": "the loop state belongs to another session; record only from the owning session.",
+    "decision_wrong_loop": "the loop changed after the caller read it; read its current loop ID before recording.",
+    "decision_wrong_revision": "the graph changed after the caller read it; read its revision before recording.",
     "decision_blank_phase": "a decision needs a non-blank phase (for example 2.5).",
     "decision_blank_decision": "a decision needs a non-blank decision text; nothing was written.",
     "decision_invalid_chain": (

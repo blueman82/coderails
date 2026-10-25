@@ -8,10 +8,13 @@ import os
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
+import graph_repair
 import graph_semantics
+import graph_spec
 from graph_identity import GraphError
 
 
@@ -26,14 +29,29 @@ def load(path: Path) -> dict[str, Any]:
                 raise GraphError(f"{name} must be a non-empty string")
         if state.get("status") not in {"initialising", "in-progress", "complete"}:
             raise GraphError("state has invalid status")
+        try:
+            graph_spec.check(state)
+            graph_repair.validate_records(state)
+        except graph_spec.SpecError as error:
+            from graph_recovery import trace  # lazy: graph_recovery is a sibling that never imports this module
+
+            trace(path, state, "refused", error.code, {}, [], "load")
+            raise
         return state
     except (OSError, json.JSONDecodeError, ValueError) as error:
         raise GraphError(f"cannot read valid state: {error}") from error
 
 
-def write(path: Path, state: dict[str, Any], create: bool = False) -> None:
+def write(path: Path, state: dict[str, Any], create: bool = False, preserve_updated_at: bool = False) -> None:
     """Atomically replace state while preserving its file permissions; `create` allows an absent file."""
     mode = 0o644 if create and not path.exists() else path.stat().st_mode & 0o777
+    if path.name == "progress.json":
+        stamp = (
+            state.get("updated_at") if preserve_updated_at else datetime.now(timezone.utc).isoformat(timespec="seconds")
+        )
+        if not isinstance(stamp, str) or not stamp:
+            raise GraphError("state has no valid updated_at")
+        state = {**state, "updated_at": stamp}
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
         temporary = Path(handle.name)
         json.dump(state, handle, indent=2, sort_keys=True)

@@ -16,12 +16,21 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
-import graph
-from graph_artifacts import validate_evals
-from graph_completion import complete, verify_completion
+import graph_dispatch
+from graph_artifacts import validate_completion_evidence, validate_evals
 from graph_identity import GraphError
 
-from packages.tests.codex_fixture import append, frozen_evals, read_json, spawn, state, transcripts, write_json
+from packages.tests.codex_fixture import (
+    append,
+    complete,
+    frozen_evals,
+    read_json,
+    spawn,
+    state,
+    transcripts,
+    verify_completion,
+    write_json,
+)
 from scripts.lib import proof_results as pr
 
 IDENTITY = {"session_id": "parent", "loop_id": "loop"}
@@ -35,6 +44,30 @@ class CompletionTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
+        previous = Path.cwd()
+        subprocess.run(["git", "init", "-q", str(self.directory)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.directory),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
+            check=True,
+        )
+        config = self.directory / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
+        config.write_text("memory:\n  backend: off\n")
+        os.chdir(self.directory)
+        self.addCleanup(os.chdir, previous)
         self.addCleanup(patch.stopall)
         patch("pathlib.Path.home", return_value=self.directory).start()
         self.path = self.directory / "loops/project/parent/progress.json"
@@ -43,9 +76,9 @@ class CompletionTests(unittest.TestCase):
         self.evals = self.path.with_name("evals.json")
         write_json(self.evals, frozen_evals())
         parent = transcripts(self.directory)
-        graph.begin_wave(self.path)
+        graph_dispatch.begin_wave(self.path)
         self.child = spawn(parent, read_json(self.path))
-        graph.record_wave(
+        graph_dispatch.record_wave(
             self.path,
             json.dumps({"wave_id": "wave-2", "results": {"U3[1]": {"outcome": "done", "evidence": "checked"}}}),
         )
@@ -168,8 +201,10 @@ class CompletionTests(unittest.TestCase):
         accepted: tuple[object, ...] = ("none: no executable surface", typed)
         for disposition in accepted:
             write_json(self.path, current | {"proof_disposition": disposition})
-            complete(*self.arguments)
-            write_json(self.path, current)
+            validate_completion_evidence(
+                read_json(self.path), current["revision"], self.evals, self.proof, self.retro, self.transcript
+            )
+        complete(*self.arguments)
 
     def test_empty_proof_file_uses_a_valid_disposition(self) -> None:
         """An owned empty proof document follows the same disposition rule as Claude."""

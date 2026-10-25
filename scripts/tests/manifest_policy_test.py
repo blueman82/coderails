@@ -227,12 +227,17 @@ class GateTests(RepoCase):
             manifest_policy.gate()
         self.assertEqual(str(caught.exception), "diff_manifest:denied_path")
 
-    def test_default_is_advisory(self) -> None:
-        """No mode key means advisory: warning on stdout, trace row, no raise."""
+    def test_default_is_enforced(self) -> None:
+        """No mode key uses the enforce default and refuses the denied change."""
         self.cfg.write_text(f"diff_manifest_policy: {self.policy_path}\n")
-        with mock.patch.object(manifest_policy, "config_path", return_value=str(self.cfg)):
+        with (
+            mock.patch.object(manifest_policy, "config_path", return_value=str(self.cfg)),
+            self.assertRaises(git.WorkflowError) as caught,
+        ):
             manifest_policy.gate()
-        self.assertEqual([r["outcome"] for r in self.rows() if r["outcome"] != "legacy"], ["warned"])
+        self.assertEqual(str(caught.exception), "diff_manifest:denied_path")
+        rows = [r for r in self.rows() if r["outcome"] != "legacy"]
+        self.assertEqual([(r["outcome"], r["reason_code"]) for r in rows], [("refused", "denied_path")])
 
     def test_off_and_no_policy_do_nothing(self) -> None:
         """Off, or no policy file, skips the check and writes nothing."""
@@ -261,6 +266,7 @@ class MergeCallTests(unittest.TestCase):
 
         with (
             mock.patch.object(merge, "verify_gates"),
+            mock.patch.object(merge, "require_merge_receipt"),  # the receipt seam has its own suite
             mock.patch.object(git, "require_repo"),
             mock.patch.object(git, "main", return_value="main"),
             mock.patch.object(git, "pr_field", return_value="OPEN"),

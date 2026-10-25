@@ -165,7 +165,7 @@ def probe() -> Degraded | None:
         flags = any(f not in str(add_help) for f in (*ADD_FLAGS, *KINDS)) or "--scope-loop" not in str(list_help)
         PROBE_CACHE[key] = failed.reason if isinstance(failed, Degraded) else "muninn_old_ledger" if flags else None
     reason = PROBE_CACHE[key] or memory_schema.check()  # the schema is read every time: it can change under us
-    smoke = f"{key}|{os.environ.get('MUNINN_HOME', '')}|smoke"
+    smoke = f"{key}|{memory_schema.store_path()}|smoke"
     if reason is None and smoke not in PROBE_CACHE:
         got = _run(["know", "list", "--scope-loop", PROBE_LOOP, "--status", "all"])
         if isinstance(got, Degraded):
@@ -346,12 +346,8 @@ def main(argv: list[str] | None = None) -> int:
     for flag in ("--confidence", "--valid-until", "--supersedes", "--contradicts", "--query"):
         ap.add_argument(flag)
     ap.add_argument("--tag", action="append", default=[])
-    sid = (
-        os.environ.get("CLAUDE_SESSION_ID")
-        or os.environ.get("CLAUDE_CODE_SESSION_ID")
-        or os.environ.get("CODEX_SESSION_ID")
-        or os.environ.get("CODEX_THREAD_ID", "")
-    )
+    sid = os.environ.get("CLAUDE_SESSION_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    sid = sid or os.environ.get("CODEX_SESSION_ID") or os.environ.get("CODEX_THREAD_ID", "")
     ap.add_argument("--session", default=sid)
     ap.add_argument("--memory-md", action="store_true")
     ap.add_argument("--write", metavar="PATH")

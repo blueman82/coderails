@@ -12,12 +12,18 @@ from typing import Any
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from hooks.scripts.lib.loop_completion import cost_message, validate_completion, validate_work_units
-from hooks.scripts.lib.loop_evals import read_loop_evals_result
+from hooks.scripts.lib.loop_completion import cost_message as cost_report
+from hooks.scripts.lib.loop_completion import validate_completion, validate_work_units
+from hooks.scripts.lib.loop_evals import read_loop_evals
 from hooks.scripts.lib.loop_proofs import validate_proofs
 from hooks.scripts.lib.loop_state_common import LoopState
 from hooks.scripts.tests.lib.hook_test_support import HookTestCase
 from scripts.lib.eval_artifact import grading_checksum
+
+
+def cost_message(retro: dict[str, Any]) -> str:
+    """Message text of the typed cost report."""
+    return cost_report(retro).message
 
 
 class CompletionTests(HookTestCase):
@@ -154,22 +160,22 @@ class CompletionTests(HookTestCase):
         }
         path.write_text(json.dumps(suite))
         with patch.dict(os.environ, self.environment):
-            self.assertEqual(read_loop_evals_result(path.parent), "FROZEN")
+            self.assertEqual(read_loop_evals(path.parent).status, "FROZEN")
             suite["result"] = "GO"
             path.write_text(json.dumps(suite))
-            self.assertEqual(read_loop_evals_result(path.parent), "UNSTAMPED")
+            self.assertEqual(read_loop_evals(path.parent).status, "UNSTAMPED")
             suite["grading"] = {"by": "post_evals.py grade-loop", "checksum": grading_checksum(path, "GO")}
             path.write_text(json.dumps(suite))
-            self.assertEqual(read_loop_evals_result(path.parent), "GO")
+            self.assertEqual(read_loop_evals(path.parent).status, "GO")
             suite["evals"][0]["status"] = "fail"
             path.write_text(json.dumps(suite))
-            self.assertEqual(read_loop_evals_result(path.parent), "UNSTAMPED")
+            self.assertEqual(read_loop_evals(path.parent).status, "UNSTAMPED")
             suite["grading"]["checksum"] = grading_checksum(path, "GO")
             path.write_text(json.dumps(suite))
-            self.assertEqual(read_loop_evals_result(path.parent), "NO-GO")
+            self.assertEqual(read_loop_evals(path.parent).status, "NO-GO")
             suite["verification_justification"] = " "
             path.write_text(json.dumps(suite))
-            self.assertEqual(read_loop_evals_result(path.parent), "UNJUSTIFIED")
+            self.assertEqual(read_loop_evals(path.parent).status, "UNJUSTIFIED")
 
     def test_cost_disclosures_are_frozen_and_single_line(self) -> None:
         """Cost reporting distinguishes missing/incomplete values and sanitizes output."""
