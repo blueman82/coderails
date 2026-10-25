@@ -139,6 +139,10 @@ class ArtifactGateTests(GraphCase):
         artifacts(self, state)
         fixture.append(
             self.parent,
+            {"type": "user", "timestamp": "2000-01-01T00:00:00Z", "message": {"content": "Continue"}},
+        )
+        fixture.append(
+            self.parent,
             {
                 "type": "assistant",
                 "message": {
@@ -146,10 +150,25 @@ class ArtifactGateTests(GraphCase):
                 },
             },
         )
+        command = "python3 graph.py stop --category complete --reason-code work_complete --reason verified"
         fixture.append(
             self.parent,
-            {"type": "assistant", "message": {"content": [{"type": "text", "text": "LOOP-STOP: complete — verified"}]}},
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "tool_use", "name": "Bash", "id": "stop-1", "input": {"command": command}}]
+                },
+            },
         )
+        row = {
+            "seq": 1,
+            "category": "complete",
+            "reason_code": "work_complete",
+            "reason": "verified",
+            "revision": state["revision"],
+            "consumed": False,
+            "at": 1.0e9,
+        }
         payload = {
             "session_id": "fixture-session",
             "cwd": str(self.home),
@@ -165,7 +184,7 @@ class ArtifactGateTests(GraphCase):
             (None, "none: no executable surface", 0, ""),
         )
         for document, disposition, expected, reason in cases:
-            self.save({**state, "proof_disposition": disposition})
+            self.save({**state, "proof_disposition": disposition, "stops": [row]})
             if document is None:
                 proof.unlink(missing_ok=True)
             else:

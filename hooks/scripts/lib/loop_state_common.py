@@ -21,7 +21,8 @@ from hooks.scripts.lib.agentic_loop_path import resolve_path
 from hooks.scripts.lib.dir_lock import acquire_dir_lock, release_dir_lock
 from hooks.scripts.lib.discipline_common import content, records, tool_uses
 
-LOOP_STOP_VOCAB = "hard-stop|approval-gate|awaiting-input|complete"
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loop/scripts"))
+from graph_vocab import STOP_CATEGORIES  # the one shared enum, materialized beside graph_semantics
 
 
 def log(message: str) -> None:
@@ -169,12 +170,6 @@ def loop_active_incomplete(transcript: str, cwd: str, session: str) -> bool:
     return count > 0 and not load_progress(cwd, session, count).complete
 
 
-def stop_category(text: str) -> str:
-    """Legacy text fallback: the last anchored declaration's category; an inline mention is prose (H06)."""
-    matches = re.findall(rf"^\s*LOOP-STOP:\s*({LOOP_STOP_VOCAB})(?:[^a-z0-9]|$)", text, re.I | re.M)
-    return matches[-1] if matches else ""
-
-
 def consume_stop(data: dict[str, Any], seq: object) -> None:
     """Mark exactly one unconsumed stop row consumed; raise so the enclosing atomic write is abandoned otherwise."""
     rows = cast(list[object], data.get("stops") or [])
@@ -198,15 +193,15 @@ def recorded_stop(data: dict[str, Any]) -> dict[str, Any] | None:
         if (
             stop.get("consumed") is False
             and stop.get("revision") == data.get("revision")
-            and stop.get("category") in LOOP_STOP_VOCAB.split("|")
+            and stop.get("category") in STOP_CATEGORIES
         ):
             return stop
     return None
 
 
-def stop_ran_this_turn(transcript: str) -> bool:
-    """Report whether `graph.py stop` ran after the last user prompt, so an old row cannot release a later turn."""
-    ran = False
+def stop_in_this_turn(transcript: str, stop: dict[str, Any]) -> bool:
+    """Report whether the row was recorded after the last user prompt (row `at` vs prompt timestamp)."""
+    prompt_at = 0.0
     for record in records(transcript):
         value = content(record)
         if record.get("type") == "user" and (
@@ -219,13 +214,15 @@ def stop_ran_this_turn(transcript: str) -> bool:
                 )
             )
         ):
-            ran = False
-        for tool in tool_uses(record):
-            data = tool.get("input")
-            command = cast(dict[str, Any], data).get("command") if isinstance(data, dict) else None
-            if tool.get("name") == "Bash" and isinstance(command, str) and re.search(r"graph\.py\s+stop\b", command):
-                ran = True
-    return ran
+            if "timestamp" not in record:
+                prompt_at = float("inf")  # unknown turn boundary cannot authorize an older row
+                continue
+            try:
+                prompt_at = datetime.fromisoformat(str(record["timestamp"]).replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                prompt_at = float("inf")  # an unreadable prompt time fails closed
+    at = stop.get("at")
+    return isinstance(at, (int, float)) and not isinstance(at, bool) and at >= prompt_at
 
 
 def mark_complete(cwd: str, session: str) -> bool:

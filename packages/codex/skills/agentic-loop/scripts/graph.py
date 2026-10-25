@@ -288,6 +288,12 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--depends-on", action="append", default=[])
             controller.add_argument("--join", action="store_true")
             controller.add_argument("--manifest", action="append", default=[])
+    convert = commands.add_parser("convert")
+    convert.add_argument("state", type=Path)
+    convert.add_argument("--session", required=True)
+    mode = convert.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--write", action="store_true")
     recover = commands.add_parser("recover-wave")
     recover.add_argument("state", type=Path)
     recover.add_argument("--session", required=True)
@@ -366,6 +372,8 @@ def main() -> int:
             output = graph_stops.run(args)
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
+        elif args.command == "convert":
+            output = graph_mutations.convert_state(args.state, args.session, args.check)
         elif args.command == "recover-wave":
             output = recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
         elif args.command in {"summarize", "collection"}:

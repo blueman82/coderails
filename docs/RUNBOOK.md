@@ -367,22 +367,17 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   that id through query, predicate, diagnostic lessons and render to underlying degraded adapter traces. Environment
   support in source and private fixtures does not prove a variable is exported in an installed provider session.
 
-## Stop declared in text instead of recorded, or a stop released unexpectedly
+## A stop has no recorded row
 
-- Symptom: the Stop hook releases or blocks a loop and the model says it recorded nothing; or `progress.json`
-  `loop_stop_counts` disagrees with the declared turn category. Stops are model-written intent rows
-  (`progress.stops[]`, written by `graph.py stop`); `loop_stop_counts` stays the hook-owned count of consumed stops.
-- Query: `python3 scripts/graph_alignment_stops.py --json` gives `stops_recorded`, `stops_consumed`,
-  `legacy_text_parse` (the hook fell back to the final-line text, trace `loop_stall_guard/fallback/legacy_text_parse`)
-  and `legacy_log_parse` (absent-state grace fell back to the discipline.log regex because `hook_state.json` was
-  missing or torn). Inspect one loop with `python3 -c "import json;print(json.load(open('<progress.json>')).get('stops'))"`.
-- Remediation: a high `legacy_text_parse` against `stops_consumed` means agents are not running `graph.py stop`: fix
-  the prompt, and if it persists tighten the text parse rather than retiring it. An unconsumed row at the current
-  revision releases the next Stop once, and only when `graph.py stop` ran after the last user prompt (an older row is
-  ignored with trace `stale_stop_row`, so recording a stop early cannot excuse later undeclared turns); a row at an older revision is ignored by design. A refused `graph.py stop`
-  prints the refusal on stderr (foreign session, unknown category or reason code, `complete` while the graph is
-  unresolved); fix the argument, never edit `stops` by hand. Codex records the same row but only a `hard-stop` row on a
-  typed hard-stopped graph releases its guard (`consume-stop`); other categories are recorded and ignored there.
+- Symptom: the Stop hook blocks with `stop_row_missing`. Final text cannot release it. Run `graph.py stop` in the
+  current turn with a valid category, reason code, reason, state path, and session. The command writes `stops[]`.
+- Query: run `python3 scripts/graph_alignment_stops.py --json` for `stops_recorded`, `stops_consumed`, and
+  `stop_row_missing`. Run `python3 scripts/lib/stop_counters.py` for refusal codes. A stale row reports
+  `stale_stop_row`. The hook owns `loop_stop_counts`; never edit it or `stops[]` by hand.
+- Remediation: use the refusal code from `graph.py stop`. A foreign session, unknown category or reason code, or
+  unresolved graph on `complete` needs a source correction. A valid row is consumed once. Codex can release an
+  `awaiting-input` or `approval-gate` row while graph work is pending. `complete` needs a resolved graph and its evidence.
+  See `docs/graph-alignment-measurement.md` for limits and commands.
 
 ## Diff-manifest check warned or refused
 

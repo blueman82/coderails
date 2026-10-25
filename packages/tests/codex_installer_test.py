@@ -9,6 +9,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.installer.files import SHARED_MODULES
+
 ROOT = Path(__file__).resolve().parents[2]
 READ_ONLY = {
     "deploy-safety-reviewer",
@@ -33,7 +36,7 @@ class ProviderInstallerTests(unittest.TestCase):
             shutil.copytree(ROOT / folder, self.root / folder, ignore=shutil.ignore_patterns("*.sh", "__pycache__"))
         shutil.copyfile(ROOT / "install.py", self.root / "install.py")
         for relative, content in {
-            "packages/graph-semantics/graph_semantics.py": '"""Fixture semantics."""\n',
+            **{f"packages/graph-semantics/{name}.py": '"""Fixture semantics."""\n' for name in SHARED_MODULES},
             "instructions/self-checking-discipline.md": "## Self-Checking Discipline\nfixture\n",
             "commands/workflow.md": "fixture",
             "starter-memory/feedback_fixture.md": "fixture",

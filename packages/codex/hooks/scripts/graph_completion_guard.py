@@ -56,16 +56,6 @@ def unresolved(state: Path) -> bool:
     return node_pending or join_pending
 
 
-def hard_stop_declaration(message: str) -> bool:
-    """Return whether the last nonblank line is an accepted hard-stop declaration."""
-    lines = [line for line in message.splitlines() if line.strip()]
-    return bool(lines) and lines[-1] in {
-        "LOOP-STOP: waiting-on-human",
-        "LOOP-STOP: stopped",
-        "LOOP-STOP: stall",
-    }
-
-
 def request_human_approval(state: Path, session_id: str, inspection: dict[str, object]) -> None:
     """Emit the established deduplicated unresolved-graph Stop response."""
     log(f"hook=graph_completion_guard session={session_id} blocked=1")
@@ -98,7 +88,7 @@ def request_human_approval(state: Path, session_id: str, inspection: dict[str, o
 
 
 def main() -> int:
-    """Block Stop unless graph completion or a declared hard stop permits it."""
+    """Block Stop unless graph completion or a recorded stop row permits it."""
     payload = payload_object(read_input())
     if payload.get("stop_hook_active") is True:
         return 0
@@ -121,19 +111,13 @@ def main() -> int:
     if text_field(inspection, "session_id") != session_id:
         continue_turn("The active Codex graph belongs to another session. Repair the state path before stopping.")
         return 0
-    message = text_field(payload, "last_assistant_message")
-    if inspection.get("hard_stop") is not None:
-        try:
-            recorded = graph_output(graph, "consume-stop", str(state), "--session", session_id)
-        except HostResourceError:
-            recorded = None
-        if recorded is not None and recorded.get("stop") is not None:
-            log(f"hook=graph_completion_guard session={session_id} recorded_stop=consumed blocked=0")
-            return 0
-        if hard_stop_declaration(message):
-            log(f"hook=graph_completion_guard session={session_id} legacy_text_parse=1 blocked=0")
-            append_trace_row("graph_completion_guard", "fallback", "legacy_text_parse", session_id)
-            return 0
+    try:
+        recorded = graph_output(graph, "consume-stop", str(state), "--session", session_id)
+    except HostResourceError:
+        recorded = None
+    if recorded is not None and recorded.get("stop") is not None:  # the recorded row decides; final text is unread
+        log(f"hook=graph_completion_guard session={session_id} recorded_stop=consumed blocked=0")
+        return 0
     try:
         verified = (
             graph_output(
@@ -158,6 +142,7 @@ def main() -> int:
         return 0
     if verified:
         return 0
+    append_trace_row("graph_completion_guard", "blocked", "stop_row_missing", session_id)
     if not unresolved(state):
         continue_turn(
             "The native Codex graph passed graph checks but completion evidence is invalid. "
