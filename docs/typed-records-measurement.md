@@ -83,10 +83,10 @@ honestly pending: the latest source and predecessor do not establish that histor
 
 | Measure | Before | After | How measured |
 | --- | ---: | ---: | --- |
-| Who executes a frozen proof cmd | the model, as its own Bash call; the gate string-matched the transcript | the controller: `proof.py run` via `/bin/bash -c`, verbatim | `scripts/tests/proof_run_test.py` (verbatim nested-quote cmd gives exit 3, the same `cmd_sha256`) |
+| Who executes a frozen proof cmd | the model, as its own Bash call; the gate string-matched the transcript | the controller runs the frozen command unchanged in pinned sandbox-runtime 0.0.65 | `proof_sandbox_test.py` (both providers, compound command, blocked host write and loopback connection) |
 | Evidence the gate reads | a transcript tool pair (Claude) or an exec result frame plus `status == pass` (Codex) | hash-chained run rows on both providers | `proof_run_test.py` (a perfectly matching transcript no longer satisfies a proof) |
 | `expect` | prose, never evaluated | `{exit_code, stdout_contains, stdout_not_contains}`, evaluated | `proof_run_test.py` expect tests; skipping the evaluation fails them |
-| Tamper detection | none | edited proof.json, wrong cmd hash and deleted row each block (`proof_stale_cmd`, `proof_chain_broken`) | `proof_run_test.py` mutation controls |
+| Tamper detection | none | edited proof.json, wrong cmd hash and removal of a nonfinal row block (`proof_stale_cmd`, `proof_chain_broken`); removal of a valid-prefix tail is undetected | `proof_run_test.py` mutation controls and current-head review |
 | Codex loop with no executable surface | could not complete | completes with `none: <reason>` or the typed disposition | `packages/tests/test_codex_completion.py` |
 
 Counters: `proof.freeze|run|gate` trace rows are counted by `scripts/lib/memory_counters.py` (prefix `proof.`), embedded under

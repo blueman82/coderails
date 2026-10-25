@@ -1,10 +1,9 @@
 """proof_results.jsonl: the controller-recorded, hash-chained results of frozen proof commands, and their verifier.
 
 Rows sit beside proof.json. kind is freeze (sha256 of the canonical proof.json), run (the controller executed one
-frozen cmd) or disposition (a typed no-proof decision). Each row carries prev_sha256 and row_sha256, so deleting or
-editing any row breaks the chain. Honest limit: a same-user agent can forge rows the way it can forge a transcript;
-this is a cooperating-agent safeguard, not a trust boundary. The latest freeze wins (an agent can re-freeze a
-weakened proof set), and the destructive classifier is literal-pattern, not a sandbox.
+frozen cmd) or disposition (a typed no-proof decision). Each row carries prev_sha256 and row_sha256, so editing a
+retained row or removing a nonfinal row breaks the chain. A valid-prefix tail can be removed undetected. A same-user
+agent can forge rows or re-freeze a weakened proof set. This is a cooperating-agent safeguard, not a trust boundary.
 """
 
 from __future__ import annotations
@@ -26,6 +25,7 @@ REASONS: dict[str, str] = {
     "proof_stale_head": "the proof ran outside this repository or before HEAD changed; run it again at current HEAD.",
     "proof_chain_broken": "proof_results.jsonl is torn, edited or missing rows; never edit it by hand.",
     "proof_cmd_destructive": "the frozen cmd matches the destructive-command classifier and was never run.",
+    "proof_sandbox_unavailable": "the pinned proof sandbox did not start; install its runtime and run the proof again.",
     "proof_no_proofs": "proof.json holds no non-withdrawn proof and no valid disposition; add a proof or record one.",
     "proof_disposition_no_reason": "a bare 'none' or unknown reason code is rejected; record an enum code + reason.",
     "proof_disposition_legacy": "string disposition 'none: <reason>' accepted; prefer `proof.py disposition`.",
@@ -39,6 +39,7 @@ VERDICT_REASON = {
     "timeout": "proof_failed",
     "expect_mismatch": "proof_expect_mismatch",
     "refused": "proof_cmd_destructive",
+    "sandbox_unavailable": "proof_sandbox_unavailable",
 }
 _FIELDS = [
     *("seq", "kind", "proof_id", "cmd_sha256", "proof_json_sha256", "session_id", "loop_id", "head_sha", "cwd"),

@@ -56,12 +56,13 @@ If a `proof.json` was frozen at Phase 2.7e, have the controller run it — befor
 
 ```
 python3 <plugin-root>/scripts/lib/proof.py freeze <state-dir>     # once, records the freeze row
-python3 <plugin-root>/scripts/lib/proof.py run <state-dir> --all  # executes each frozen cmd via /bin/bash -c
+python3 <plugin-root>/scripts/lib/proof.py run <state-dir> --all  # runs each frozen cmd in the pinned proof sandbox
 python3 <plugin-root>/scripts/lib/proof.py status <state-dir>     # per-proof verdict from the latest run row
 ```
 
-`<state-dir>` is the directory holding `progress.json`/`proof.json`. The script runs each `cmd` verbatim,
-in the foreground, with its timeout, and appends hash-chained rows to `proof_results.jsonl`; the gate reads
+`<state-dir>` is the directory holding `progress.json`/`proof.json`. The script runs each `cmd` unchanged,
+in the foreground, with its timeout. The command can read host files, write only below its fresh `TMPDIR`, and use
+no network. The controller appends hash-chained rows to `proof_results.jsonl` after the command ends; the gate reads
 those rows and nothing else (no transcript, no `status` field). A proof run any other way leaves no row and
 cannot satisfy the `loop_stall_guard` proof gate. If a proof fails, fix the underlying issue and re-run
 `proof.py run` (not a modified cmd; editing `proof.json` needs a fresh `freeze`) until it passes, or the
