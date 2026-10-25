@@ -121,7 +121,7 @@ class CostReportTests(HookTestCase):
 
     def test_outcome_logs_are_fixed_tokens_without_retro_injection(self) -> None:
         """Every report class logs a bounded outcome and no untrusted artifact values."""
-        path = self.progress(proof_disposition="none")
+        path = self.progress(proof_disposition="none: no executable surface")
         state = LoopState(path, self.session, 1, json.loads(path.read_text()))
         rows: list[tuple[dict[str, Any], str]] = [
             ({"schema_version": 1}, "skipped_legacy_or_bad_sv"),

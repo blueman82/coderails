@@ -113,7 +113,10 @@ class ProviderAdversarialTests(unittest.TestCase):
             provider.finish_wave()
             provider.artifacts()
             baseline = provider.read()
-            self.assertEqual(provider.complete().returncode, 0)
+            completed = provider.complete()
+            self.assertEqual(completed.returncode, 3)
+            self.assertEqual(json.loads(completed.stdout)["reason_code"], "muninn_old_ledger")
+            self.assertEqual(provider.read()["status"], "complete")
             provider.write(baseline)
             for filename, key, value in (
                 ("evals.json", "grading", {"by": "forged", "checksum": "forged"}),
@@ -129,13 +132,14 @@ class ProviderAdversarialTests(unittest.TestCase):
                 provider.write(document, filename)
             proof = provider.read("proof.json")
             altered = copy.deepcopy(proof)
-            altered["proofs"][0]["evidence"] = "   "
+            altered["proofs"][0]["cmd"] = "false"
             provider.write(altered, "proof.json")
-            self.assertEqual(provider.complete().returncode == 0, provider.name == "claude")
+            self.assertNotEqual(provider.complete().returncode, 0)
             provider.write(baseline)
             provider.write(proof, "proof.json")
-            records = provider.parent.read_text().splitlines()
-            provider.parent.write_text("\n".join(line for line in records if "proof-1" not in line) + "\n")
+            results = provider.path.with_name("proof_results.jsonl")
+            rows = results.read_text().splitlines()
+            results.write_text(rows[0] + "\n")
             self.assertNotEqual(provider.complete().returncode, 0)
 
     def test_clean_cache_codex_lifecycle(self) -> None:
@@ -152,7 +156,13 @@ class ProviderAdversarialTests(unittest.TestCase):
         provider.success("record-wave", json.dumps(provider.launch()))
         provider.artifacts()
         result = provider.complete()
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        response = json.loads(result.stdout)
+        self.assertEqual(
+            (response["status"], response["pending_teardown"], response["reason_code"]),
+            ("complete", True, "muninn_old_ledger"),
+        )
+        self.assertEqual(provider.read()["status"], "complete")
 
 
 if __name__ == "__main__":

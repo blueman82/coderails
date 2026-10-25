@@ -408,6 +408,37 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   different routine; select the correct routine log. Do not finish or replace another routine's state.
 - Limits: see `docs/routines.md` "Routine state machine and event log".
 
+## Proof gate blocked a `complete` declaration
+
+- Symptom: `loop_stall_guard` (Claude) or `graph.py complete` / `verify-completion` (Codex) names frozen proofs as
+  `P1(proof_...)`. The gate reads only `proof_results.jsonl` beside `proof.json`, written by the controller via
+  `scripts/lib/proof.py`; the transcript and the `status` field are never consulted.
+- Query: `python3 scripts/lib/proof.py status <state-dir>` (latest verdict per proof), or
+  `python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['memory'])"`
+  (`by_reason_code` over `proof.freeze|run|gate` rows), or `grep '"command": "proof\.' <agentic-loop dir>/<session_id>/trace.jsonl`.
+- Remediation (reason code: fix, single source `scripts/lib/proof_results.py` `REASONS`):
+  `proof_unexecuted`: run `proof.py run <state-dir> --all`. `proof_failed`: the latest run exited nonzero or timed
+  out; fix the cause, re-run. `proof_expect_mismatch`: exit code or stdout did not match the frozen `expect`.
+  `proof_stale_cmd`: proof.json changed after the freeze row, or the run row hashes a different cmd; run
+  `proof.py freeze` then `run`. `proof_stale_head`: the run belongs to another checkout or an earlier HEAD; run it
+  again from the current repository checkout. `proof_chain_broken`: `proof_results.jsonl` was edited or lost rows; never hand-edit it,
+  re-freeze and re-run (a fresh file). `proof_cmd_destructive`: the cmd matches the destructive classifier and was never
+  executed; reword the proof. `proof_disposition_no_reason`: with no proof.json record `proof.py disposition <state-dir>
+  --none --reason-code <code> --reason <text>`; a bare `none` or a code outside `DISPOSITION_CODES` (`docs_only`,
+  `no_executable_surface`, `research_only`, `superseded`, `other`) is rejected, and a valid disposition is echoed in the
+  gate output. `proof_no_proofs`: proof.json holds no non-withdrawn proof (an empty or withdrawn-only document); freeze a
+  real proof or record a disposition. `proof_disposition_legacy` is a trace note
+  only (string `none: <reason>` accepted). `proof_withdrawn_unobserved`: a withdrawn proof needs a failed/timeout run row
+  and a reason.
+- Limit: a same-user agent can forge rows and recompute the chain, as it could forge a transcript; this is a
+  cooperating-agent safeguard, not a trust boundary. Also not covered: the destructive classifier is literal-pattern,
+  not a sandbox, so obfuscated or interpreter-wrapped deletes (`python3 -c 'shutil.rmtree(...)'`, quote-split `rm`) still
+  run; the latest freeze wins, so an agent can weaken a cmd or move a failing proof
+  to `withdrawn_proofs` and re-freeze (only the frozen set is checked, not the loop's first one); schema 1 is refused at
+  freeze; a disposition's reason is checked for presence and an enum code, not truth.
+- Off-switch: none, by design. The proof gate is intentionally non-disableable on both providers (default ON, no config
+  key or env var); the previous transcript-based check was removed, so there is no earlier behaviour to fall back to.
+
 ## Diff-manifest check warned or refused
 
 - Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)

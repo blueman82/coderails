@@ -79,7 +79,7 @@ degraded Muninn sync, and stop on an invalid decision chain. Then update and reg
 against the graph's exact current revision and write beside the state:
 
 - graded `evals.json` for the current session, loop, and revision;
-- non-empty `proof.json` for the same session and loop, with every proof carrying a nonblank executable `cmd` and `status: "pass"`; or a saved no-proof reason when there is no executable surface;
+- `proof.json` (schema_version 2: unique ids, nonblank `cmd`, structured `expect` `{exit_code, stdout_contains, stdout_not_contains}`, optional `timeout_s`) for the same session and loop, or, for a loop with no executable surface, no proof file and a typed disposition (below);
 - `retro.json` for the same session and loop, schema version 1 or newer, with `status: "complete"`.
 
 For a loop with no executable surface, record the reason in `decisions_absorbed`. Leave `proof.json` absent. Get the current revision from `inspect`. Then run:
@@ -99,6 +99,8 @@ For a legitimate incomplete-source retry, use `$O prepare --loop "$LOOP" --refre
 with the current preparation's returned canonical hash. Immutable ownership must match, revision cannot roll back,
 and that session+loop must have no applied tick or recurrence. Staged records are preserved with no effects. A saved
 replacement whose receipt failed needs ordinary unchanged `prepare` to repair it. Never refresh completed inputs.
+
+The controller runs the proofs. With `P="python3 $SKILL_DIR/../../scripts/lib/proof.py"` and `D` the directory holding `$PROOF`, run `$P freeze "$D"` once, then `$P run "$D" --all` (each frozen `cmd` executes verbatim through `/bin/bash -c` with its timeout; the destructive-command classifier refuses a destructive cmd as `proof_cmd_destructive`), and `$P status "$D"` to read the verdicts. Rows go to `proof_results.jsonl` beside `proof.json`. Editing `proof.json` after the freeze needs a new freeze. With no proof, run `$P disposition "$D" --none --reason-code <code> --reason "<text>"` (a bare `none` is rejected; `proof_disposition: "none: <reason>"` in the state also passes).
 
 Apply `superpowers:verification-before-completion` to the orchestrator's completion claim. Then run:
 
@@ -122,11 +124,4 @@ An old complete loop without D4 receipts needs explicit reviewed legacy admissio
 decision and runbook. Admission checks the exact file hash, then permits completion bookkeeping while binding the
 graph source. It does not age orders; new loops cannot use it.
 
-When `proof.json` exists, run each proof command through `functions.exec` using this canonical nested-result output; replace the placeholder with the proof's exact command so transcript matching remains exact:
-
-```javascript
-const result = await tools.exec_command({cmd: "<exact proof command>"});
-text(JSON.stringify({loop_id: "<current loop id>", exit_code: result.exit_code, output: result.output}));
-```
-
-Completion refuses an active wave, pending/running/hard-stop nodes, a graph hard-stop, unreleased joins, missing or invalid native worker transcript references, wrong-loop evidence, stale eval revision, missing or ungraded evals, missing proof without a saved no-proof disposition, or missing retro. It rechecks every stored worker reference against the owning parent and child transcripts. When `proof.json` exists, it mines this session's Codex JSONL rollout and requires the last exact trimmed execution of every proof command in the current loop to carry a nested integer `exit_code` of zero and, for canonical results, the current `loop_id`; commands explicitly recorded under an earlier loop's turn context cannot replay. The outer `functions.exec` text `Script completed` alone is never proof of the inner command's success. This is local redirect-and-audit evidence, not a privilege boundary. Success atomically marks the loop complete and increments its revision. The provider-local Stop hook recomputes the same observed proof result before allowing a completed loop to end. A hard-stop, approval-gate or awaiting-input pause ends only via a recorded `graph.py stop` row; the final line is a rendering that is never read.
+Completion refuses an active wave, pending/running/hard-stop nodes, a graph hard-stop, unreleased joins, missing or invalid native worker transcript references, wrong-loop evidence, stale eval revision, missing or ungraded evals, missing proof, or missing retro. It rechecks every stored worker reference against the owning parent and child transcripts, then verifies `proof_results.jsonl`: every proof needs a LATEST run row for this session and loop whose `cmd_sha256` equals the current cmd, whose `proof_json_sha256` equals the latest freeze row, whose checkout and HEAD match the current controller checkout, verdict `satisfied`, on an unbroken hash chain. The transcript and any `status` field are never consulted (`--transcript` is accepted and ignored). Reason codes: `proof_unexecuted`, `proof_failed`, `proof_expect_mismatch`, `proof_stale_cmd`, `proof_stale_head`, `proof_chain_broken`, `proof_cmd_destructive`, `proof_disposition_no_reason` (see `docs/RUNBOOK.md`, "Proof gate blocked a `complete` declaration"). This is a cooperating-agent safeguard, not a privilege boundary: a same-user agent can forge rows. Success atomically marks the loop complete and increments its revision. The provider-local Stop hook recomputes the same proof verification before allowing a completed loop to end. A durable graph hard-stop may end only when the final nonblank report line is exactly `LOOP-STOP: waiting-on-human`, `LOOP-STOP: stopped`, or `LOOP-STOP: stall`.
