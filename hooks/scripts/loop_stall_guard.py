@@ -12,13 +12,11 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import read_payload
 from hooks.scripts.lib.agentic_loop_path import sanitise_session_id
-from hooks.scripts.lib.discipline_common import stable_text
 from hooks.scripts.lib.graph_dispatch import validate_graph_completion, validate_graph_shape
 from hooks.scripts.lib.hook_state import unstubbed_grace
 from hooks.scripts.lib.loop_completion import validate_completion
 from hooks.scripts.lib.loop_evals import EvalStatus, EvalVerdict, read_loop_evals
 from hooks.scripts.lib.loop_state_common import (
-    LOOP_STOP_VOCAB,
     LoopState,
     atomic_progress_update,
     consume_stop,
@@ -27,8 +25,7 @@ from hooks.scripts.lib.loop_state_common import (
     read_state,
     recorded_stop,
     stable_invocations,
-    stop_category,
-    stop_ran_this_turn,
+    stop_in_this_turn,
 )
 from hooks.scripts.lib.stall_notice import marker_name, record_notice, seen, status_notice
 from hooks.scripts.lib.trace_row import append_row
@@ -104,6 +101,14 @@ def complete(state: LoopState, transcript: str) -> list[str]:
     return messages
 
 
+def trace_missing_row(state: LoopState, session: str) -> None:
+    """Count a block with no recorded stop; do not create missing loop state."""
+    if state.path.is_file():
+        append_row(
+            "loop_stall_guard", "blocked", "stop_row_missing", session, str(state.data.get("loop_id") or "") or None
+        )
+
+
 def main() -> int:
     """Block undeclared stops and refuse incomplete or unaudited completion."""
     payload = read_payload()
@@ -118,31 +123,19 @@ def main() -> int:
     if unstubbed_grace(state, "loop_stall_guard"):
         return 0
     recorded = recorded_stop(state.data)
-    if recorded and not stop_ran_this_turn(transcript):  # a row from an earlier turn is stale, never a release
+    if recorded and not stop_in_this_turn(transcript, recorded):
         if state.path.is_file():
             append_row(
                 "loop_stall_guard", "fallback", "stale_stop_row", session, str(state.data.get("loop_id") or "") or None
             )
         recorded = None
     category = str(recorded["category"]) if recorded else ""
-    if not recorded:
-        text, _ = stable_text(
-            transcript,
-            int(os.environ.get("CLAUDE_HOOK_TAIL_LINES", "300")),
-            int(os.environ.get("CLAUDE_HOOK_MAX_ATTEMPTS", "5")),
-            float(os.environ.get("CLAUDE_HOOK_SLEEP_S", "0.3")),
-        )
-        category = stop_category(text)
-        if category and state.path.is_file():  # never fabricate loop state for a loop that has none
-            loop_id = str(state.data.get("loop_id") or "") or None
-            append_row("loop_stall_guard", "fallback", "legacy_text_parse", session, loop_id)
     try:
-        if category:
-            if category.lower() == "complete" and graph_unresolved(state):
+        if recorded:
+            if category == "complete" and graph_unresolved(state):
                 raise ValueError(blocked_message(emit_human_request(state)))
-            messages = complete(state, transcript) if category.lower() == "complete" else []
-            if messages:
-                print(json.dumps({"systemMessage": "\n".join(messages)}))
+            messages = complete(state, transcript) if category == "complete" else []
+            seq = recorded["seq"]
 
             def increment(data: dict[str, Any]) -> dict[str, Any]:
                 counters = data.setdefault("loop_stop_counts", {})
@@ -150,12 +143,14 @@ def main() -> int:
                     raise ValueError("loop_stop_counts must be an object")
                 counters = cast(dict[str, Any], counters)
                 counters[category] = counters.get(category, 0) + 1
-                if recorded:  # consume in the same write that counts it, so a repeated Stop cannot double-count
-                    consume_stop(data, recorded["seq"])
+                consume_stop(data, seq)
                 return data
 
             if not atomic_progress_update(state.path, increment):
                 log(f"hook=loop_stall_guard session={session} counter_write=json_failed category={category}")
+                raise ValueError("Recorded stop could not be consumed; stopping remains blocked.")
+            if messages:
+                print(json.dumps({"systemMessage": "\n".join(messages)}))
             log(f"hook=loop_stall_guard session={session} invocations={count} declared=1 blocked=0")
             return 0
         if state.complete:
@@ -163,13 +158,19 @@ def main() -> int:
         if graph_unresolved(state):
             raise ValueError(blocked_message(emit_human_request(state)))
     except ValueError as error:
+        if not recorded:
+            trace_missing_row(state, session)
         print(f"[loop-stall-guard] {error}", file=sys.stderr)
         return 2
     log(f"hook=loop_stall_guard session={session} invocations={count} declared=0 blocked=1")
+    trace_missing_row(state, session)
     print(
-        "[loop-stall-guard] Active agentic loop, no LOOP-STOP declaration in your last message.\n"
-        f"Continue the loop, OR end your message with:\n  LOOP-STOP: <{LOOP_STOP_VOCAB}> — <reason>\n"
-        'Declaring complete means the loop is done: set progress.json status to "complete" and run Phase 13.',
+        "[loop-stall-guard] Active agentic loop, no recorded stop for this turn (reason: stop_row_missing).\n"
+        "Continue the loop, OR record the stop before ending the turn:\n"
+        "  graph.py stop --category <hard-stop|approval-gate|awaiting-input|complete> --reason-code <code> "
+        "--reason <why> <state> --session <session_id>\n"
+        "Final-message text is only a rendering; this hook never reads it. Category complete means the loop is done: "
+        'it needs a resolved graph, then set progress.json status to "complete" and run Phase 13.',
         file=sys.stderr,
     )
     return 2

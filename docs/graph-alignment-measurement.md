@@ -240,14 +240,17 @@ python3 -m unittest scripts.tests.measure_graph_alignment_test
 ## Typed stop intent and hook state (measurement note)
 
 `graph.py stop` records a `progress.stops[]` row; `loop_stall_guard` consumes the newest unconsumed row at the current
-revision in the same atomic write that increments the hook-owned `loop_stop_counts`, and falls back to the final
-anchored `LOOP-STOP:` line (trace `legacy_text_parse`). Absent-state grace reads `hook_state.json`
+revision in the same atomic write that increments the hook-owned `loop_stop_counts`. Final text is never read: with no
+row the Stop blocks with trace `stop_row_missing` (`legacy_text_parse` is no longer emitted). Absent-state grace reads `hook_state.json`
 `ordinals.absent_blocked` only; there is no discipline.log fallback any more (`legacy_log_parse` is no longer emitted, the
 name stays in `FALLBACKS` so history counts). The Claude hook honours a recorded row only if `graph.py stop` ran after the last user prompt (else trace
-`stale_stop_row`). The Codex guard writes the same `legacy_text_parse` trace row (command `graph_completion_guard`), so the
-ratio covers both providers; before this change Codex fallbacks appeared only in discipline.log and were not counted.
-Counters live in `scripts/graph_alignment_stops.py`. Flip condition: if `legacy_text_parse` still dominates `stops_consumed` over the
-first few loops, agents are not recording stops; tighten the parse and block text-only stops instead.
+`stale_stop_row`). The Codex guard writes the same `stop_row_missing` trace row (command `graph_completion_guard`), so the
+ratio covers both providers. Counters live in `scripts/graph_alignment_stops.py` (block codes from `scripts/lib/stop_counters.py`,
+which also counts `convert_ok` / `convert_refused_<code>`). Flip condition: a high `stop_row_missing` against `stops_consumed`
+over the first few loops means agents are not recording stops; fix the prompt, the hook is already strict. Limit: the Stop
+payload has no turn id (unverified), so a recorded row counts only when `graph.py stop` appears in the current turn's
+structured Bash tool_use records; `voice_announce` is async and may run after the guard consumed the row (it then says
+"may have stalled").
 
 **Reproduce.**
 
@@ -323,4 +326,27 @@ readiness are not traced; first-Stop `missing` is expected once per unregistered
 ```
 python3 scripts/lib/state_counters.py
 python3 hooks/scripts/tests/hook_state_test.py && python3 hooks/scripts/tests/graph_readiness_test.py
+```
+
+## Stop text retired, shared vocabulary, versioned conversion (measurement note)
+
+Neither provider reads final text any more: `loop_stall_guard` and the Codex `graph_completion_guard` release only on a
+recorded `stops[]` row, and `voice_announce` takes its category from the same row (async, so it can lose the race to the
+guard that consumes the row and then says "may have stalled"). The enum lives once in
+`packages/graph-semantics/graph_vocab.py`, materialized byte-for-byte into both script dirs next to `graph_semantics.py`
+and `graph_convert.py` by `scripts/installer/files.py` (a list of source/targets pairs, reused by later units).
+`graph.py convert` writes trace `convert_ok` / `convert_refused_<code>` to `recovery-trace.jsonl`; `stop_row_missing` and
+`stale_stop_row` go to `trace.jsonl`; `python3 scripts/lib/stop_counters.py` tallies all of them (own module because
+`scripts/measure_graph_alignment.py` is at its line limit; folding it in is a handoff). Flip condition: any
+`convert_refused_active_wave_ambiguous` means a loop was upgraded mid-wave (finish or recover the wave first); a
+sustained `stop_row_missing` means the prompt is not teaching `graph.py stop`. Limits: the Stop payload has no turn id
+(unverified), so "recorded this turn" is read from structured Bash tool_use records; `convert` refuses rather than
+guesses, so an in-flight wave on a pre-history file needs manual recovery.
+
+**Reproduce.**
+
+```
+python3 scripts/lib/stop_counters.py
+python3 hooks/scripts/tests/graph_convert_test.py && python3 hooks/scripts/tests/loop_stall_guard_test.py
+PYTHONPATH=. python3 -m unittest packages.tests.test_provider_stop_record packages.tests.test_provider_graph_lifecycle
 ```

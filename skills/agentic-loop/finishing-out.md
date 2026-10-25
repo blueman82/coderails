@@ -8,8 +8,8 @@ cleanup (Phase 4b).
 
 The graph's `S13-complete` node and SKILL.md's two existing `superpowers:verification-before-completion` references (Phase 3/3a worker
 construction-discipline lines) discipline the WORKERS' claims. Nothing disciplines the
-ORCHESTRATOR's own final completion claim. Before the Phase 13 `complete` LOOP-STOP
-declaration, the orchestrator applies `superpowers:verification-before-completion` to its
+ORCHESTRATOR's own final completion claim. Before recording the Phase 13 `complete` stop
+(`graph.py stop --category complete`, then the rendering line), the orchestrator applies `superpowers:verification-before-completion` to its
 OWN completion claim — "all authorised work done, all gates passed" is itself a
 completion claim that requires fresh verification evidence, not recall.
 

@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 import copy
+import sys
+import time
+from pathlib import Path
 from typing import Any, cast
 
 from hooks.scripts.lib.graph_executor import graph_semantics
 
-STOP_CATEGORIES = ("hard-stop", "approval-gate", "awaiting-input", "complete")
-STOP_REASON_CODES = (
-    "work_complete",
-    "needs_human_input",
-    "needs_approval",
-    "node_hard_stop",
-    "environment_blocked",
-    "other",
-)
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loop/scripts"))
+from graph_vocab import STOP_CATEGORIES, STOP_REASON_CODES
 
 
 def record_stop(state: object, session: str, category: str, reason_code: str, reason: str) -> dict[str, Any]:
@@ -47,6 +43,7 @@ def record_stop(state: object, session: str, category: str, reason_code: str, re
         "reason": reason,
         "revision": root["revision"],
         "consumed": False,
+        "at": time.time(),  # lets the Claude Stop guard bind the row to the turn that recorded it
     }
     rows.append(row)
     return {"state": root, "stop": copy.deepcopy(row)}

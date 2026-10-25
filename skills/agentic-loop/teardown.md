@@ -40,7 +40,7 @@ than an honest unscored list because it is more likely to be trusted uncriticall
 
 **The two core facts:**
 
-- **`LOOP-STOP` category counts, broken down by type** — the per-category counts of this loop's `LOOP-STOP` declarations (`progress.json` `loop_stop_counts`: `hard-stop`, `approval-gate`, `awaiting-input`, `complete`). HOOK-OWNED — the `loop_stall_guard` hook increments it on every consumed stop (a recorded `progress.json` `stops[]` row, else the legacy text declaration); `stops[]` is the model-written intent, `loop_stop_counts` is the hook-owned count of consumed stops. Read it as-is, do not compute or edit it yourself. Report the raw breakdown with no verdict attached. A high `awaiting-input` count is worth the human's attention, but this section states the count, not a judgement on it.
+- **`LOOP-STOP` category counts, broken down by type** — the per-category counts of this loop's recorded stops (`progress.json` `loop_stop_counts`: `hard-stop`, `approval-gate`, `awaiting-input`, `complete`). HOOK-OWNED — the `loop_stall_guard` hook increments it when it consumes a valid `progress.json` `stops[]` row. Read it as-is; do not compute or edit it. Report the raw breakdown with no verdict attached.
 - **Decisions absorbed** — a flat, unscored list of in-scope decisions the loop made autonomously without asking (e.g. a Phase 2.5 design-fork auto-adopted, a Phase 2.6 disposition defaulted to clean-break, a Phase 2.8 routing assignment set, a Phase 5 disconfirm-skip, a Phase 6 in-scope action taken without a check-in). No self-justification text per entry, no automated "this looks calibrated" stamp — just what was decided and where (phase/work-unit). COPIED VERBATIM from `progress.json`'s `decisions_absorbed` array, chronological (oldest first) — never reconstructed from conversation memory, which is exactly the kind of after-the-fact self-report this phase exists to avoid.
 
 **Also report, unscored:**
@@ -183,7 +183,7 @@ ledger, then retire the hand-written source before generating `standing-orders.m
    the same session. If completion reports pending teardown, repeat `mark-complete` to resume it. Then run
    `graph.py verify-completion <state> --session <session_id>` to check the graph and bound orders evidence. Then run
    `graph.py stop <state> --session <session_id> --category complete --reason-code work_complete --reason "<reason>"`
-   and declare `LOOP-STOP: complete`. First apply
+   and render `LOOP-STOP: complete` for the human. The hook reads the recorded row, not this text. First apply
    `superpowers:verification-before-completion` to the orchestrator's own completion claim
    (SKILL.md's Phase 13 links the `finishing-out.md` detail). The `loop_stall_guard` proof gate
    blocks the declaration itself if Step 1 was skipped or left a proof unexecuted/failed — it does
