@@ -1,11 +1,9 @@
 ---
 name: wiki-query
 description: >-
-  Use for project questions that need the LLM Wiki. Trigger phrases include
-  "search wiki", "search the wiki", "query wiki", "ask the wiki", and
-  "what does the wiki say". Also use it for slides or charts based on wiki
-  knowledge. Do not use it for general coding questions, wiki maintenance,
-  or wiki setup.
+  Use for any Coderails question, lookup, or context. Search the project's
+  LLM Wiki before reading source. Also use it for slides or charts based on
+  wiki knowledge. Use wiki-lint for health checks and wiki-init for setup.
 ---
 
 # Wiki Query

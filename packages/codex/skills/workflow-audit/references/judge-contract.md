@@ -1,6 +1,6 @@
 # Workflow-audit judge contract
 
-The workflow-audit skill gives this prompt template to a fresh sonnet judge.
+The workflow-audit skill gives this prompt template to a fresh Codex judge.
 The judge reads `cluster_ngrams.py` output. It proposes or rejects candidate
 skills.
 

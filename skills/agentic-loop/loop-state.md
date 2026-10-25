@@ -2,9 +2,9 @@
 
 Detail-carrier for the loop's durable state artifact, referenced from the main skill's
 "Context-window persistence" section. The imperatives stay in SKILL.md (start it with `graph.py start` at Phase -2,
-resolve the path via the helper, overwrite at every phase boundary, re-read it to re-orient);
+resolve the path via the helper, update it through graph commands at each phase boundary, re-read it to re-orient);
 this file is the field-by-field spec, the lifecycle, and the concurrency/ownership rules —
-consult it when writing or repairing the file.
+consult it when recording or repairing state through the supported commands.
 
 ## Contents
 
@@ -26,7 +26,7 @@ another session's file in the same directory. Resolve the path by running the he
 never compute it yourself. The helper reads `$CLAUDE_CODE_SESSION_ID` (set in every Bash tool
 call) when no session_id argument is given, so you normally don't need to pass one explicitly.
 
-It is overwritten (not appended) on every phase boundary. A single overwritten JSON object — read
+The graph commands replace it (not append) at each phase boundary. A single JSON object — read
 the whole file in one shot to know current state. Do not use an append-log (`.jsonl`) that has to
 be replayed to derive position, and that can leave a torn tail line after a crash.
 

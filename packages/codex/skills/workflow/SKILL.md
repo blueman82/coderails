@@ -5,7 +5,11 @@ description: Run the full Coderails Codex change workflow from worktree preparat
 
 # Coderails workflow
 
-Use this for a complete code-change workflow. Invoke Coderails Codex skills explicitly. Guarded reviewers run through the package-local `codex_role_session.py`; use `spawn_agent` for other installed Codex custom agents.
+Use this for a complete code-change workflow. Invoke Coderails Codex skills
+explicitly. Set `SKILL_DIR` to the absolute directory that contains this
+`SKILL.md` before running package-local helpers. Guarded reviewers run through
+`codex_role_session.py`; use `spawn_agent` for other installed Codex custom
+agents.
 
 Maintain the phases with `update_plan`. There are two required pauses: wait after preparation for the user to finish coding, then wait again for explicit merge approval.
 

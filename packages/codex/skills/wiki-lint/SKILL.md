@@ -230,16 +230,26 @@ cd "$WORKTREE_PATH"
 git add -A
 git commit -m "wiki(lint): <summary of fixes>"
 git push -u origin "$BRANCH"
-${wiki_git_bypass_flag} gh pr create --title "wiki(lint): <summary>" --body "Findings: <list>"
-${wiki_git_bypass_flag} gh pr merge --squash --delete-branch
-# Note: enforce_pr_workflow gates `gh pr create`/`gh pr merge` only in a repo that has a
-# workflow.config.yaml (a wiki vault usually has none → no-op). When it does apply, the
-# satisfier is `$coderails-codex:push` for creation or a fresh review from the installed
-# `spec-reviewer` custom agent for merge, or an explicit Bash permission. ${wiki_git_bypass_flag} is the wiki's own
-# delivery bypass, separate from that hook.
-git -C "${wiki_git_pull_path}" pull
+wiki_gh() {
+  if [ -n "$wiki_git_bypass_flag" ]; then
+    env "$wiki_git_bypass_flag" gh "$@"
+  else
+    gh "$@"
+  fi
+}
+wiki_gh pr create --title "wiki(lint): <summary>" --body "Findings: <list>"
+wiki_gh pr merge --squash --delete-branch
+if [ -n "$wiki_git_pull_path" ]; then
+  git -C "$wiki_git_pull_path" pull
+fi
 git -C "$vault" worktree remove "$WORKTREE_PATH"
 ```
+
+`wiki_git_bypass_flag` is one `NAME=value` environment assignment. A shell
+does not treat an expanded variable before `gh` as an assignment; pass it
+through `env` as shown. When the vault has a workflow config, resolve any
+`enforce_pr_workflow` review and eval gate before merge. The wiki bypass flag
+does not clear that gate. Skip the post-merge pull when no pull path is set.
 
 **If `wiki_git_worktree` is `false`**:
 ```bash

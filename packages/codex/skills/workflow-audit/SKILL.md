@@ -43,7 +43,10 @@ python3 "$SKILL_DIR/scripts/scan_transcripts.py" <scan args> \
 
 ## 4. Judge stage
 
-Read `$SKILL_DIR/references/judge-contract.md` in full, then call `spawn_agent` exactly once for a fresh Codex judge. Construct the judge's prompt from that file's template verbatim, filling in:
+Read `$SKILL_DIR/references/judge-contract.md` in full. Call `spawn_agent`
+exactly once for a fresh Codex judge, with `fork_turns: "none"`. This prevents
+the judge from inheriting the current conversation. Construct its prompt from
+that file's template verbatim, filling in:
 
 1. The cluster JSON — the full stdout object from `cluster_ngrams.py`.
 2. The existing-skill list — the `name` and `description` frontmatter lines from every `skills/*/SKILL.md` in the repo.
