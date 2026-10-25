@@ -86,11 +86,14 @@ def check_and_consume(
 ) -> tuple[str, str] | None:  # fmt: skip
     """Check receipt and grant together; serialize merge budgets with execution claims."""
     if any(name == "merge" for name, _ in proposals):
-        with merge_budget.lock(session) as acquired:
-            if not acquired:
-                return "merge", "budget_lock_unavailable"
-            effective_now = now or datetime.now(timezone.utc)
-            return _check_and_consume(session, proposals, effective_now, loop_id, signers, consume, stale, on_claim)
+        try:
+            with merge_budget.lock(session) as acquired:
+                if not acquired:
+                    return "merge", "budget_lock_unavailable"
+                effective_now = now or datetime.now(timezone.utc)
+                return _check_and_consume(session, proposals, effective_now, loop_id, signers, consume, stale, on_claim)
+        except OSError:
+            return "merge", "budget_lock_unavailable"
     return _check_and_consume(
         session, proposals, now or datetime.now(timezone.utc), loop_id, signers, consume, stale, on_claim
     )
@@ -135,10 +138,13 @@ def _claim_merge(
 ) -> str:  # fmt: skip
     if not session:
         return "no_session"
-    with merge_budget.lock(session) as acquired:
-        if not acquired:
-            return "budget_lock_unavailable"
-        return _claim_merge_unlocked(session, number, cwd, now or datetime.now(timezone.utc), command)
+    try:
+        with merge_budget.lock(session) as acquired:
+            if not acquired:
+                return "budget_lock_unavailable"
+            return _claim_merge_unlocked(session, number, cwd, now or datetime.now(timezone.utc), command)
+    except OSError:
+        return "budget_lock_unavailable"
 
 
 def _claim_merge_unlocked(

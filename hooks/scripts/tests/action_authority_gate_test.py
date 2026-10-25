@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Pin the opt-in action-authority hook: off/advisory/enforce, signed+bound receipts, consume, fail-open."""
+"""Pin the opt-in action-authority hook: modes, signed receipts, and error policy."""
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import subprocess
 import sys
@@ -155,18 +157,21 @@ class GateTests(ReceiptHookCase):
         self.mint(PUSH, "git_push")
         self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))
 
-    def test_hook_error_fails_open_with_reason(self) -> None:
-        """An injected exception exits 0 without denying and traces action_authority_failed_open."""
+    def test_hook_error_denies_under_enforce(self) -> None:
+        """An unexpected error after enforce scope is known emits a denial."""
         self.configure("enforce")
         payload = self.payload(MERGE)
+        output = io.StringIO()
         with (
             mock.patch.object(gate, "read_payload_strict", return_value=payload),
             mock.patch.object(gate, "check_and_consume", side_effect=RuntimeError("boom")),
             mock.patch.object(gate, "binding", return_value={"repository": "r", "ref": "f", "sha": "s"}),
             mock.patch.dict("os.environ", {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}),
+            contextlib.redirect_stdout(output),
         ):
             self.assertEqual(gate.main(), 0)
-        self.assertEqual(self.reasons(), ["action_authority_failed_open"])
+        self.assertEqual(json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(self.reasons(), ["denied_gate_error"])
 
     def test_a_different_session_id_is_a_different_session(self) -> None:
         """A receipt belongs only to its minted session."""
@@ -232,7 +237,7 @@ class GateTests(ReceiptHookCase):
 
     def test_failed_open_row_carries_error_class_and_loop(self) -> None:
         """The failed-open row records the error class (hashed input) and stderr names the class and message."""
-        self.configure("enforce")
+        self.configure("advisory")
         payload = self.payload(MERGE)
         with (
             mock.patch.object(gate, "read_payload_strict", return_value=payload),

@@ -138,6 +138,25 @@ class HookTests(unittest.TestCase):
         self.assertTrue(self.denied(f"{MERGE} && {MERGE}"))
         self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
 
+    def test_unexpected_error_uses_live_authority_error_policy(self) -> None:
+        """Codex denies under enforce or a loaded grant and warns without either."""
+        for mode, live, denied in (("advisory", False, False), ("advisory", True, True), ("enforce", False, True)):
+            with self.subTest(mode=mode, live=live):
+                self.configure(mode)
+                output = io.StringIO()
+                payload = {"session_id": "s1", "cwd": str(self.repo), "tool_input": {"command": MERGE}}
+                with (
+                    mock.patch.dict(os.environ, self.environment),
+                    mock.patch.object(codex_gate, "read_input", return_value=""),
+                    mock.patch.object(codex_gate, "payload_object", return_value=payload),
+                    mock.patch.object(codex_gate, "check_and_consume", side_effect=RuntimeError("unexpected")),
+                    mock.patch.object(codex_gate, "read_authority", return_value={"loop_id": None} if live else None),
+                    contextlib.redirect_stdout(output),
+                ):
+                    self.assertEqual(codex_gate.main(), 0)
+                self.assertEqual(bool(output.getvalue()), denied)
+                self.assertEqual(self.reasons()[-1], "denied_gate_error" if denied else "action_authority_failed_open")
+
     def test_marker_write_error_denies_in_codex_hook(self) -> None:
         """A Codex marker write fault must emit a deny envelope, not fail open."""
         self.configure("enforce")

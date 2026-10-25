@@ -79,9 +79,11 @@ Optional receipt minting uses a key with a passphrase:
   can leave a partial spend. The batch is not crash-atomic; confirm the command did not run before recovery.
 - An agent that fills the receipts directory with junk `*.json` sorted ahead of the real one can push the real
   receipt past the 50-receipt cap (`MAX_RECEIPTS`). That denies, never allows (a denial-of-service, not a bypass).
-- The hook fails open on its own exceptions (`action_authority_failed_open`, traced and written to stderr), so an
-  input that makes `binding()` or `guarded_segments()` raise would allow. No such input is known; `binding()`
-  returns None rather than raising for malformed commands. Fail-closed for enforce mode is not built.
+- An unexpected hook error denies a guarded command under `enforce` or after live authority loads
+  (`denied_gate_error`). Advisory mode without live authority still fails open and traces
+  `action_authority_failed_open`. A failed budget lock or reservation release denies and keeps an ambiguous
+  reservation spent. `read_authority()` maps a file read error to no authority; in advisory mode, an unreadable
+  authority can therefore take the no-authority path. The user owns that file and can also turn the mode off.
 
 ## Binding rules and mode
 

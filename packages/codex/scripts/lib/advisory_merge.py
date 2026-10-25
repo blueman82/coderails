@@ -14,14 +14,17 @@ def reserve(session: str, number: str, bind: dict[str, str] | None) -> tuple[str
     """Reserve one merge while holding the session lock exactly once."""
     if not bind or not number.isdigit() or not all(bind.get(key) for key in ("repository", "ref", "sha")):
         return "binding_unknown", None
-    with merge_budget.lock(session) as acquired:
-        if not acquired:
-            return "budget_lock_unavailable", None
-        verdict = permits(session, "merge")
-        if not verdict["allow"]:
-            return str(verdict["reason"]), None
-        path = merge_budget.reserve(session, number, bind)
-        return ("ok", path) if path else ("budget_lock_unavailable", None)
+    try:
+        with merge_budget.lock(session) as acquired:
+            if not acquired:
+                return "budget_lock_unavailable", None
+            verdict = permits(session, "merge")
+            if not verdict["allow"]:
+                return str(verdict["reason"]), None
+            path = merge_budget.reserve(session, number, bind)
+            return ("ok", path) if path else ("budget_lock_unavailable", None)
+    except OSError:
+        return "budget_lock_unavailable", None
 
 
 def direct(

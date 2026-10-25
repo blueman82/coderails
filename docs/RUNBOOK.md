@@ -384,7 +384,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
   `repository_mismatch`, `ref_mismatch`, `sha_mismatch`, `signature_missing`, `signature_invalid`, `signer_unknown`, `trust_root_missing`, `binding_unknown` (repository+ref+sha not computable: fail closed), `state_mutated_before_guard` (a ref/HEAD/remote-moving step precedes the guarded one in the same command), `expired`, `revoked`, `consumed`, `foreign_session`, `foreign_loop`, `kind_mismatch`, `no_session` (payload had no session_id; traced under session dir `_no_session`), `malformed`;
-  `receipt_consumed` (allowed); `trust_root_user_tier` (an allow that rested on the agent-writable trust root: cooperating-agent safeguard); `action_authority_failed_open` (the hook itself errored and allowed);
+  `receipt_consumed` (allowed); `trust_root_user_tier` (an allow that rested on the agent-writable trust root: cooperating-agent safeguard); `action_authority_failed_open` (advisory without loaded live authority errored and allowed); `denied_gate_error` (unexpected error under enforce or loaded live authority); `denied_budget_lock_unavailable` / `denied_budget_release_failed` (merge budget lock or cleanup failed; ambiguous reservation remains spent);
   `receipt_approved` / `receipt_revoked` / `receipt_refused_no_tty` (CLI).
   Authority codes (also from `enforce_pr_workflow`, which denies before consuming anything): `denied_authority_denied` (the session's authority lists the category in `denied`; a receipt cannot override it),
   `denied_max_prs_exceeded` (executed merges in the session, counted from `.executed` markers of every merge receipt whatever its `authority_id`, reached `max_prs`; 0 = none; narrow/grant again with `authority.py`), `approval_requirement_missing` (a guarded action's permit verdict omitted its required approval; refused before consuming a receipt), `authority_denied_destructive_shell` (destructive gate, force-with-lease family),
@@ -397,6 +397,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   later merge. Check the exact PR and head on GitHub. If the merge did not happen and the PR is still open, an
   operator can release only that pending entry with `scripts.lib.merge_budget.settle(path, False)` while holding
   `merge_budget.lock(session)`. Keep completed entries; they record used budget.
+- If reservation cleanup or lock teardown fails, the hook denies the command. It keeps any reservation whose
+  release is uncertain. Check the PR and head before releasing a pending entry by the procedure above.
 - `action_authority_failed_open`: the row carries `inputs.error_class` (sha256 of the exception class name; compare with
   `printf ZeroDivisionError | shasum -a 256`) and `loop_id` when known; the hook's stderr (hook log) prints
   `action_authority failed open: <Class>: <message>`. A session-less failure is traced under `_no_session`.
@@ -433,8 +435,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   and `trust` (signature, trust-root, binding and `state_mutated_before_guard` counts). Measurement: one hook run is well under 1 s
   with one receipt (single run, not a benchmark; 50 receipts could approach the 10 s hook timeout).
 - Residuals (docs/decisions/p3-human-only-minting.md): `.consumed`/`.revoked` markers are agent-writable files, so unlinking one
-  replays or un-revokes a receipt until it expires; junk files can crowd the 50-receipt cap (deny, not allow); the hook fails open on
-  its own exceptions. A same-user agent can also write a deeply nested file (`[` x 7000) into `authority.json` or `receipts/`: it is read
+  replays or un-revokes a receipt until it expires; junk files can crowd the 50-receipt cap (deny, not allow);
+  unexpected errors deny under enforce or loaded live authority, and fail open in advisory without live authority.
+  An unreadable authority file appears absent in advisory mode. A same-user agent can also write a deeply nested file (`[` x 7000) into `authority.json` or `receipts/`: it is read
   as malformed (`RecursionError` is caught in `read_receipt`/`read_authority`), so it denies rather than crashing the hook open; it is the
   same same-user class as the markers above.
 - Unmatched merge routes (Limits): `gh api` merge forms are matched with the endpoint anywhere in argv and the GraphQL

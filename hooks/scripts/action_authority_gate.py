@@ -6,8 +6,8 @@ Advisory warns on missing receipts; live authority denials and
 unbindable merges under a live merge cap still block.
 Enforce denies unless
 authority.permits() allows and a receipt verifies (scripts/lib/receipt_gate.py, shared with merge.py, which is
-independently fail-closed). A host-resource error reading the payload denies; other own errors fail open with reason
-action_authority_failed_open. It does not touch
+independently fail-closed). A host-resource error reading the payload denies; unexpected errors deny under enforce
+or live authority and otherwise fail open. It does not touch
 pr_merge_gate, destructive_bash_gate or enforce_pr_workflow. Limits: the hash covers only the command text seen here
 (not aliases, functions, xargs, scripts that push; sudo/subshell/bash -c/eval/gh api wrappers, quoting and absolute
 program paths are normalised by guarded_segments, an env assignment prefix is kept and makes the command unbindable).
@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -71,7 +72,7 @@ def how_to_proceed(code: str, session: str, name: str) -> str:
 
 
 def main() -> int:
-    """Check one Bash payload; deny unreadable input on resource errors and trace other own errors."""
+    """Check one Bash payload; deny unreadable input and errors under enforce or live authority."""
     try:
         payload = read_payload_strict()
     except HostResourceError:
@@ -80,6 +81,8 @@ def main() -> int:
     session = str(payload.get("session_id") or "")
     trace_id = session or "_no_session"  # append_row refuses an empty id; keep the denial countable
     loop_id: str | None = None
+    mode_ = "off"
+    authority = None
     try:
         data = payload.get("tool_input")
         command = data.get("command") if isinstance(data, dict) else None
@@ -114,7 +117,10 @@ def main() -> int:
                 code, path = advisory_merge.reserve(session, item["number"], bind)
                 if code != "ok":
                     for previous in reserved:
-                        merge_budget.settle(previous, False)
+                        try:
+                            merge_budget.settle(previous, False)
+                        except OSError:
+                            code = "budget_release_failed"
                     missing = (name, code)
                     reservation_failed = True
                     break
@@ -130,12 +136,17 @@ def main() -> int:
         append_row("action_authority", "denied", f"denied_{code}", trace_id, loop_id)
         need = "needs a bound PR and head under live authority" if reservation_failed else "needs an action receipt"
         deny(f"Blocked: {name.replace('_', ' ')} {need} ({code}). {how_to_proceed(code, session, name)}")
-    except Exception as error:  # noqa: BLE001 - the gate must never break a session; trace and fail open
-        append_row(
-            "action_authority", "failed_open", "action_authority_failed_open", trace_id, loop_id,
-            {"error_class": type(error).__name__},
-        )  # fmt: skip
-        print(f"action_authority failed open: {type(error).__name__}: {error}", file=sys.stderr)
+    except Exception as error:  # noqa: BLE001 - enforce and live grants must refuse unexpected hook errors
+        if mode_ == "enforce" or authority:
+            deny(f"Blocked: action authority gate error ({type(error).__name__}).")
+            with suppress(Exception):  # trace is not required to deny the command
+                append_row("action_authority", "denied", "denied_gate_error", trace_id, loop_id)
+        else:
+            append_row(
+                "action_authority", "failed_open", "action_authority_failed_open", trace_id, loop_id,
+                {"error_class": type(error).__name__},
+            )  # fmt: skip
+            print(f"action_authority failed open: {type(error).__name__}: {error}", file=sys.stderr)
     return 0
 
 

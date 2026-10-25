@@ -83,6 +83,8 @@ def lock(session: str) -> Generator[bool, None, None]:
                 break
         yield acquired
     finally:
-        if acquired:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
+        try:
+            if acquired:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
