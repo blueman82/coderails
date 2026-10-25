@@ -32,7 +32,11 @@ def main() -> int:
     command = normalize_ifs(raw)
     cwd_value = payload.get("cwd")
     cwd = cwd_value if isinstance(cwd_value, str) and cwd_value else os.getcwd()
-    pattern, identifier = permanent_pattern(command, cwd)
+    try:
+        pattern, identifier = permanent_pattern(command, cwd)
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)
+        return 0
     if pattern:
         output(
             "PreToolUse",
@@ -52,7 +56,12 @@ def main() -> int:
             f"git push --force-with-lease is refused too ({verdict['reason']}). Full command: {command}"
         )
         return 0
-    if reason := source_write(command, cwd):
+    try:
+        reason = source_write(command, cwd)
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)
+        return 0
+    if reason:
         deny(reason)
         return 0
     if workflow_substitution(command):

@@ -56,7 +56,11 @@ def main() -> int:
             )
             mark()
             return 0
-    pattern, identifier = permanent_pattern(command, cwd)
+    try:
+        pattern, identifier = permanent_pattern(command, cwd)
+    except OSError:
+        deny("Host resource exhaustion prevented this hook from checking the command. Retry; the action is blocked.")
+        return 0
     if pattern:
         print(
             json.dumps(
@@ -83,7 +87,12 @@ def main() -> int:
             f"git push --force-with-lease is refused too ({verdict['reason']}). Full command: {command}"
         )
         return 0
-    if reason := source_write(command, cwd):
+    try:
+        reason = source_write(command, cwd)
+    except OSError:
+        deny("Host resource exhaustion prevented this hook from checking the command. Retry; the action is blocked.")
+        return 0
+    if reason:
         deny(reason)
         return 0
     if workflow_substitution(command):

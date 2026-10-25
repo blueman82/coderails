@@ -33,6 +33,10 @@ class HostResourceError(OSError):
     """The host could not start the graph helper; this says nothing about graph validity."""
 
 
+class GraphTimeoutError(TimeoutError):
+    """The graph helper did not finish inside the hook's remaining time."""
+
+
 PATCH_PATH = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.*)$|^\*\*\* Move to: (.*)$")
 
 
@@ -130,11 +134,19 @@ def append_trace_row(
 
 def continue_turn(reason: str) -> None:
     """Emit the established Stop-hook block response."""
+    with suppress(ImportError):  # telemetry must never be able to break a block
+        from lib.hook_telemetry import mark_block
+
+        mark_block()
     print(json.dumps({"decision": "block", "reason": reason}))
 
 
 def deny(reason: str) -> None:
     """Emit the native PreToolUse denial envelope."""
+    with suppress(ImportError):  # telemetry must never be able to break a denial
+        from lib.hook_telemetry import mark_deny
+
+        mark_deny()
     print(
         json.dumps(
             {
@@ -157,11 +169,23 @@ def session_dir(session_id: str) -> Path | None:
     return data_dir / "sessions" / safe_session
 
 
-def loop_state_path(cwd: str, session_id: str) -> Path | None:
+def loop_state_path(cwd: str, session_id: str, *, timeout_seconds: float | None = None) -> Path | None:
     """Return the session-owned graph state path using the established fallback order."""
     safe_session = session_id.replace("/", "_").replace("..", "")
     if not safe_session:
         return None
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        raise GraphTimeoutError("graph deadline reached")
+
+    def present(path: Path) -> bool:
+        try:
+            path.stat()
+        except OSError as error:
+            if error.errno in RESOURCE_ERRNOS:
+                raise HostResourceError(error.errno, str(error)) from error
+            return False
+        return True
+
     root = Path(os.environ.get("CODERAILS_AGENTIC_LOOP_DIR") or Path.home() / ".coderails" / "agentic-loop")
     try:
         result = subprocess.run(
@@ -169,20 +193,27 @@ def loop_state_path(cwd: str, session_id: str) -> Path | None:
             capture_output=True,
             check=False,
             text=True,
+            timeout=timeout_seconds,
         )
-    except OSError:
+    except subprocess.TimeoutExpired as error:
+        raise GraphTimeoutError("graph path lookup timed out") from error
+    except OSError as error:
+        if error.errno in RESOURCE_ERRNOS:
+            raise HostResourceError(error.errno, str(error)) from error
         result = None
     source = result.stdout.strip() if result is not None and result.returncode == 0 else cwd
     canonical = root / source.replace("/", "-") / safe_session / "progress.json"
-    if canonical.exists():
+    if present(canonical):
         return canonical
     try:
         matches = sorted(
             candidate / safe_session / "progress.json"
             for candidate in root.iterdir()
-            if (candidate / safe_session / "progress.json").exists()
+            if present(candidate / safe_session / "progress.json")
         )
-    except OSError:
+    except OSError as error:
+        if error.errno in RESOURCE_ERRNOS:
+            raise HostResourceError(error.errno, str(error)) from error
         matches = []
     return matches[0] if matches else canonical
 
@@ -193,8 +224,10 @@ def graph_path() -> Path:
     return root / "skills" / "agentic-loop" / "scripts" / "graph.py"
 
 
-def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
+def graph_output(graph: Path, *arguments: str, timeout_seconds: float | None = None) -> dict[str, object] | None:
     """Run one graph command and return its object output when valid."""
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        raise GraphTimeoutError("graph deadline reached")
     try:
         result = subprocess.run(
             ["python3", str(graph), *arguments],
@@ -202,11 +235,18 @@ def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
             check=False,
             stderr=subprocess.DEVNULL,
             text=True,
+            timeout=timeout_seconds,
         )
+    except subprocess.TimeoutExpired as error:
+        raise GraphTimeoutError("graph command timed out") from error
     except OSError as error:
         if error.errno in RESOURCE_ERRNOS:
             raise HostResourceError(error.errno, str(error)) from error
         return None
+    with suppress(ImportError):  # telemetry must not change the graph result
+        from lib.hook_telemetry import note_child
+
+        note_child("graph_output", result.returncode)
     if result.returncode != 0:
         return None
     try:

@@ -28,7 +28,7 @@ from scripts.lib.authority_permits import permits
 from scripts.lib.config import config_path
 
 
-def main() -> int:
+def _main() -> int:
     """Redirect missing workflow steps and fail closed on live merge evidence failure."""
     try:
         payload = read_payload_strict()
@@ -112,6 +112,15 @@ def main() -> int:
                 deny(reason)
                 return 0
     return 0
+
+
+def main() -> int:
+    """Deny when a host resource error prevents a required Git lookup."""
+    try:
+        return _main()
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)
+        return 0
 
 
 if __name__ == "__main__":

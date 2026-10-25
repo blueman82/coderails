@@ -5,11 +5,15 @@ from __future__ import annotations
 
 import json
 import sys
+import time
+from contextlib import suppress
 from pathlib import Path
 from typing import cast
 
 from hook_common import (
+    RESOURCE_ERRNOS,
     RESOURCE_MESSAGE,
+    GraphTimeoutError,
     HostResourceError,
     append_trace_row,
     continue_turn,
@@ -22,6 +26,9 @@ from hook_common import (
     text_field,
 )
 from lib.stall_notice import marker_name, record_notice, seen, status_notice
+
+STOP_BUDGET = 9.0  # hooks.json allows 10 seconds; leave time to emit the block response
+TIMEOUT_MESSAGE = "The native graph check timed out. Retry stopping; graph state was not verified."
 
 
 def unresolved(state: Path) -> bool:
@@ -56,8 +63,14 @@ def unresolved(state: Path) -> bool:
     return node_pending or join_pending
 
 
-def request_human_approval(state: Path, session_id: str, inspection: dict[str, object]) -> None:
+def request_human_approval(
+    state: Path, session_id: str, inspection: dict[str, object], *, deadline: float | None = None
+) -> None:
     """Emit the established deduplicated unresolved-graph Stop response."""
+    with suppress(ImportError):  # this hook emits its own Stop envelope
+        from lib.hook_telemetry import mark_block
+
+        mark_block()
     log(f"hook=graph_completion_guard session={session_id} blocked=1")
     # the key comes from the validated inspection, so an unreadable state file cannot drop the notice
     name = marker_name(
@@ -81,14 +94,20 @@ def request_human_approval(state: Path, session_id: str, inspection: dict[str, o
     if seen(state, name):
         continue_turn(blocked)
         return
-    status = status_notice(graph_path(), state, session_id, log)  # never raises
+    status = status_notice(graph_path(), state, session_id, log, deadline=deadline)  # never raises
     print(json.dumps({"decision": "block", "reason": f"{blocked}\n{status}", "systemMessage": f"{base}\n{status}"}))
     sys.stdout.flush()  # the marker must not outlive an undelivered notice
-    record_notice(state, session_id, name, log)
+    if deadline is None or time.monotonic() < deadline:
+        record_notice(state, session_id, name, log)
 
 
 def main() -> int:
     """Block Stop unless graph completion or a recorded stop row permits it."""
+    deadline = time.monotonic() + STOP_BUDGET
+
+    def remaining() -> float:
+        return deadline - time.monotonic()
+
     payload = payload_object(read_input())
     if payload.get("stop_hook_active") is True:
         return 0
@@ -96,14 +115,33 @@ def main() -> int:
     cwd = text_field(payload, "cwd")
     if not session_id or not cwd:
         return 0
-    state = loop_state_path(cwd, session_id)
-    if state is None or not state.is_file():
+    try:
+        state = loop_state_path(cwd, session_id, timeout_seconds=remaining())
+    except HostResourceError:
+        continue_turn(RESOURCE_MESSAGE)
+        return 0
+    except GraphTimeoutError:
+        continue_turn(TIMEOUT_MESSAGE)
+        return 0
+    if state is None:
+        return 0
+    try:
+        state.stat()
+    except FileNotFoundError:
+        return 0
+    except OSError as error:
+        if error.errno in RESOURCE_ERRNOS:
+            continue_turn(RESOURCE_MESSAGE)
+            return 0
         return 0
     graph = graph_path()
     try:
-        inspection = graph_output(graph, "inspect", str(state))
+        inspection = graph_output(graph, "inspect", str(state), timeout_seconds=remaining())
     except HostResourceError:
         continue_turn(RESOURCE_MESSAGE)
+        return 0
+    except GraphTimeoutError:
+        continue_turn(TIMEOUT_MESSAGE)
         return 0
     if inspection is None:
         continue_turn("The active Codex graph state is invalid. Repair progress.json before stopping.")
@@ -112,9 +150,13 @@ def main() -> int:
         continue_turn("The active Codex graph belongs to another session. Repair the state path before stopping.")
         return 0
     try:
-        recorded = graph_output(graph, "consume-stop", str(state), "--session", session_id)
+        recorded = graph_output(graph, "consume-stop", str(state), "--session", session_id, timeout_seconds=remaining())
     except HostResourceError:
-        recorded = None
+        continue_turn(RESOURCE_MESSAGE)
+        return 0
+    except GraphTimeoutError:
+        continue_turn(TIMEOUT_MESSAGE)
+        return 0
     if recorded is not None and recorded.get("stop") is not None:  # the recorded row decides; final text is unread
         log(f"hook=graph_completion_guard session={session_id} recorded_stop=consumed blocked=0")
         return 0
@@ -134,11 +176,15 @@ def main() -> int:
                 str(state.parent / "retro.json"),
                 "--transcript",
                 text_field(payload, "transcript_path"),
+                timeout_seconds=remaining(),
             )
             is not None
         )
     except HostResourceError:
         continue_turn(RESOURCE_MESSAGE)
+        return 0
+    except GraphTimeoutError:
+        continue_turn(TIMEOUT_MESSAGE)
         return 0
     if verified:
         return 0
@@ -150,7 +196,7 @@ def main() -> int:
         )
         return 0
     try:
-        request_human_approval(state, session_id, inspection)
+        request_human_approval(state, session_id, inspection, deadline=deadline)
     except (OSError, ValueError):
         print("Native graph unresolved; required notice could not be emitted. Retry stopping.", file=sys.stderr)
         return 2

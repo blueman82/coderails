@@ -49,7 +49,7 @@ class ResourceExhaustionTests(unittest.TestCase):
     def collaborators(self) -> dict[str, Any]:
         """Patch values pointing the hooks at the fake state and helper."""
 
-        def state_path(*_: object) -> Path:
+        def state_path(*_: object, **_options: object) -> Path:
             return self.state
 
         def graph_path() -> Path:
@@ -65,6 +65,32 @@ class ResourceExhaustionTests(unittest.TestCase):
         with patch("subprocess.run", side_effect=OSError(errno.ENOENT, "missing")):
             self.assertIsNone(hook_common.graph_output(self.graph, "inspect", str(self.state)))
 
+    def test_state_lookup_resource_error_blocks_stop(self) -> None:
+        """EMFILE in the path lookup must not appear to mean no active graph."""
+        payload = {"session_id": "s", "cwd": "/x"}
+        with patch.object(
+            graph_completion_guard,
+            "loop_state_path",
+            side_effect=hook_common.HostResourceError(errno.EMFILE, "x"),
+        ):
+            reason = json.loads(run_hook(graph_completion_guard, payload))["reason"]
+        self.assertIn("Host resource exhaustion", reason)
+        with (
+            patch("hook_common.subprocess.run", side_effect=OSError(errno.EMFILE, "x")),
+            self.assertRaises(hook_common.HostResourceError),
+        ):
+            hook_common.loop_state_path("/x", "s")
+
+    def test_state_scan_resource_error_is_distinct_from_absence(self) -> None:
+        """An exhausted directory scan must not turn into a missing state file."""
+        with (
+            patch.object(hook_common, "loop_root", return_value=self.state.parent),
+            patch("hook_common.subprocess.run", side_effect=OSError(errno.ENOENT, "git absent")),
+            patch.object(Path, "iterdir", side_effect=OSError(errno.EMFILE, "x")),
+            self.assertRaises(hook_common.HostResourceError),
+        ):
+            hook_common.loop_state_path("/x", "s")
+
     def test_stop_hook_reports_resource_exhaustion_not_invalid_state(self) -> None:
         """Both inspect and verify-completion failures yield the resource message."""
         payload = {"session_id": "s", "cwd": "/x", "last_assistant_message": "done"}
@@ -78,7 +104,7 @@ class ResourceExhaustionTests(unittest.TestCase):
         self.assertNotIn("is invalid", reason)
         calls = iter([{"session_id": "s", "hard_stop": None}])
 
-        def second_call(*_: object) -> object:
+        def second_call(*_: object, **_options: object) -> object:
             try:
                 return next(calls)
             except StopIteration:
