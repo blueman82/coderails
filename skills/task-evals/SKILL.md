@@ -139,7 +139,7 @@ claim, stays aligned with `cmd`, or covers other inputs.
 
 ## Verification level rules (self-exemption defence)
 
-Concrete predicates, not vibes — same design rationale as agentic-loop Phase 2.6's "what named thing does this remove?" test for disposition.
+Concrete predicates, not vibes — same design rationale as agentic-loop Phase 2.6's "what named thing does this remove?" test for the compatibility choice.
 
 - **Verification level 0 (exempt, justified):** one work unit, no outward
   or irreversible surface, and an existing test or criterion that covers
@@ -345,7 +345,7 @@ This skill is invoked at four points:
 - **superpowers:systematic-debugging** — pr scope, frozen before the fix is implemented, when a debugging fix will carry a PR.
 - **Directly by the user.**
 
-A plan's or loop's per-work-unit eval refs travel in worker prompts the same way disposition travels under agentic-loop Phase 3's existing pattern: a ref recorded only in `progress.json` and absent from the worker's own prompt does not exist for that worker. Every worker prompt that owns a unit with an eval ref must carry that ref verbatim, not just a pointer to the loop state file.
+A plan's or loop's per-work-unit eval refs travel in worker prompts the same way the compatibility decision travels under agentic-loop Phase 3's existing pattern: a ref recorded only in `progress.json` and absent from the worker's own prompt does not exist for that worker. Every worker prompt that owns a unit with an eval ref must carry that ref verbatim, not just a pointer to the loop state file.
 
 ## Verifier agent contract (agent-run evals)
 
