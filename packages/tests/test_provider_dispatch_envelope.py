@@ -364,7 +364,7 @@ class DispatchEnvelopeTests(unittest.TestCase):
         self.assertIn("dispatch_replayed", failed.stderr)
 
     def test_unconverted_state_cannot_begin_a_wave(self) -> None:
-        """begin-wave needs state_minor >= 2."""
+        """begin-wave needs state_minor >= 3."""
         for name in ("claude", "codex"):
             with self.subTest(provider=name):
                 provider = self.fresh(name)

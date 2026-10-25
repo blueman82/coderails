@@ -69,9 +69,9 @@ transcript parser and independently installed pure graph semantics.
    records exactly the ready nodes as running, captures the native transcript
    cursor, stores one single-use dispatch record per node in `graph.dispatches`
    (its closed contract: role, model_role, base_ref, manifest, publication_command, disposition,
-   lessons, write_scope, skip_phases, scope) and returns each dispatch's
+   lessons, write_scope, skip_phases, scope, required_context) and returns each dispatch's
    `dispatch_id`, `prompt_prefix` and `prompt_sections`. A failure means no
-   dispatch is authorized; a state older than `state_minor` 2 must be converted
+   dispatch is authorized; a state older than `state_minor` 3 must be converted
    first (`graph.py convert`, which refuses while a wave is open).
 3. Paste, verbatim, the returned `prompt_prefix` as the first prompt line, then
    `prompt_sections`, then the instruction body from the resolved source plus

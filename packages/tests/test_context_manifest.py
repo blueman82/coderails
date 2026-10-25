@@ -152,6 +152,11 @@ class ContextManifestTests(unittest.TestCase):
             rows = [json.loads(x) for x in (self.session_dir(provider) / "trace.jsonl").read_text().splitlines()]
             self.assertEqual(rows[-1]["reason_code"], "manifest_state_unreadable")
             self.assertEqual(rows[-1]["command"], "context_manifest")
+            prompt = {"session_id": provider.session, "cwd": str(provider.home), "prompt": "hello"}
+            routed = str(run_hook(provider, "inject_context", prompt)["additionalContext"])
+            prefix = "coderails" if provider.name == "claude" else "coderails-codex"
+            self.assertIn(f"route: {prefix}:agentic-loop", routed)
+            self.assertIn("facts=unavailable", routed)
 
     def test_malformed_payload_fails_open(self) -> None:
         """Garbage stdin still produces a manifest with the fail-safe line."""
@@ -275,6 +280,79 @@ class ContextManifestTests(unittest.TestCase):
             )
             for raw in ("not json", "[]"):
                 self.assertNotIn("route:", str(run_hook(provider, "inject_context", raw)["additionalContext"]))
+
+    def test_active_dispatch_required_route_survives_missing_keyword_and_optional_overflow(self) -> None:
+        """A typed active-wave requirement takes priority over prompt keywords for both hooks."""
+        for provider in self.providers:
+            state = provider.read()
+            state["graph"]["active_wave"] = {
+                "wave_id": "wave-required",
+                "revision": state["revision"],
+                "nodes": ["U3[1]"],
+            }
+            state["graph"]["dispatches"] = {
+                "dispatch-required": {
+                    "wave_id": "wave-required",
+                    "revision": state["revision"],
+                    "node_id": "U3[1]",
+                    "contract": {"required_context": {"skills": ["task-evals"], "checks": ["frozen-evals"]}},
+                }
+            }
+            provider.write(state)
+            prefix = "coderails" if provider.name == "claude" else "coderails-codex"
+            start = context(provider, self.payload(provider))
+            self.assertIn(f"route: {prefix}:agentic-loop, {prefix}:task-evals", start)
+            no_keyword = str(
+                run_hook(
+                    provider,
+                    "inject_context",
+                    {"session_id": provider.session, "cwd": str(provider.home), "prompt": "hello"},
+                )["additionalContext"]
+            )
+            self.assertIn(f"route: {prefix}:agentic-loop, {prefix}:task-evals", no_keyword)
+            self.assertIn("route_meta: required=2 offered=0 recorded=2 dropped=0 budget=4", no_keyword)
+            prompt = "merge git push premortem search the wiki"
+            payload = {"session_id": provider.session, "cwd": str(provider.home), "prompt": prompt}
+            routed = str(run_hook(provider, "inject_context", payload)["additionalContext"])
+            self.assertIn(f"route: {prefix}:agentic-loop, {prefix}:task-evals", routed)
+            self.assertIn("route_meta: required=2 offered=4 recorded=4 dropped=2 budget=4", routed)
+            self.assertLessEqual(len(routed.encode()), PROMPT_CEILING)
+            self.assertLessEqual(len(start.encode()), SESSION_CEILING)
+            foreign = str(
+                run_hook(provider, "inject_context", payload | {"session_id": "foreign"})["additionalContext"]
+            )
+            self.assertNotIn(f"{prefix}:task-evals", foreign)
+
+    def test_required_route_ignores_foreign_or_malformed_optional_facts(self) -> None:
+        """Prompt fields cannot assert required skills or use an old wave's record."""
+        for provider in self.providers:
+            state = provider.read()
+            state["graph"]["active_wave"] = {
+                "wave_id": "current",
+                "revision": state["revision"],
+                "nodes": ["U3[1]"],
+            }
+            state["graph"]["dispatches"] = {
+                "old": {
+                    "wave_id": "old",
+                    "revision": state["revision"],
+                    "node_id": "U3[1]",
+                    "contract": {"required_context": {"skills": ["task-evals"], "checks": []}},
+                }
+            }
+            provider.write(state)
+            prefix = "coderails" if provider.name == "claude" else "coderails-codex"
+            payload = {
+                "session_id": provider.session,
+                "cwd": str(provider.home),
+                "prompt": "hello",
+                "required_context": {"skills": ["merge"]},
+                "routing_policy": {"optional": "broken"},
+            }
+            text = str(run_hook(provider, "inject_context", payload)["additionalContext"])
+            self.assertIn(f"route: {prefix}:agentic-loop", text)
+            self.assertNotIn(f"{prefix}:task-evals", text)
+            self.assertNotIn(f"{prefix}:merge", text)
 
     def test_claude_user_prompt_uses_payload_cwd(self) -> None:
         """The branch reported is the payload cwd's, not the hook process's."""

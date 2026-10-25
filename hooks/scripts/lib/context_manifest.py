@@ -109,10 +109,14 @@ def route_for_payload(raw: str, prefix: str) -> tuple[str, str, str]:
     prompt, sid, cwd = data.get("prompt"), data.get("session_id"), data.get("cwd")
     sid = sid if isinstance(sid, str) else ""
     try:
-        active = safe_id(sid) and find_state(loop_root(prefix), sid, cwd if isinstance(cwd, str) else "") is not None
-    except OSError:
-        active = False
-    text = route(prompt if isinstance(prompt, str) else "", active, prefix)
+        root = loop_root(prefix)
+        active = safe_id(sid) and find_state(root, sid, cwd if isinstance(cwd, str) else "") is not None
+        required = required_skills(root, sid, cwd if isinstance(cwd, str) else "") if active else ()
+    except (OSError, ValueError, TypeError):
+        active, required = False, ()
+    text = route(prompt if isinstance(prompt, str) else "", active, prefix, required)
+    if active and not required:
+        text += " facts=unavailable"
     return text, "route_match" if text else "route_none", sid
 
 
@@ -139,14 +143,69 @@ def phrase_hit(text: str, trigger: str, slash: bool) -> bool:
     return False
 
 
-def route(prompt: str, loop_active: bool, prefix: str) -> str:
-    """Return 'route: p:a, p:b' for matching triggers, or '' when nothing matches."""
+def required_skills(root: Path, session_id: str, cwd: str = "") -> tuple[str, ...]:
+    """Read this session's active dispatch requirements; no other session can supply a route."""
+    if not safe_id(session_id):
+        return ()
+    state = find_state(root, session_id, cwd)
+    raw = parse_object(state.read_text(encoding="utf-8")) if state else None
+    if raw is None or raw.get("session_id") != session_id or not isinstance(raw.get("graph"), dict):
+        return ()
+    graph = cast(dict[str, Any], raw["graph"])
+    names = ["agentic-loop"]
+    active = graph.get("active_wave")
+    dispatches = graph.get("dispatches")
+    if not isinstance(active, dict) or not isinstance(dispatches, dict):
+        return tuple(names)
+    active = cast(dict[str, Any], active)
+    dispatches = cast(dict[str, Any], dispatches)
+    raw_nodes = active.get("nodes")
+    if not isinstance(raw_nodes, list):
+        return tuple(names)
+    nodes = cast(list[object], raw_nodes)
+    if not all(isinstance(node, str) for node in nodes):
+        return tuple(names)
+    for raw_record in dispatches.values():
+        if not isinstance(raw_record, dict):
+            continue
+        record = cast(dict[str, Any], raw_record)
+        if record.get("wave_id") != active.get("wave_id"):
+            continue
+        if record.get("revision") != active.get("revision") or record.get("node_id") not in nodes:
+            continue
+        contract = record.get("contract")
+        if not isinstance(contract, dict):
+            continue
+        context = cast(dict[str, Any], contract).get("required_context")
+        if not isinstance(context, dict):
+            continue
+        skills = cast(dict[str, Any], context).get("skills")
+        if not isinstance(skills, list):
+            continue
+        for skill in cast(list[object], skills):
+            if isinstance(skill, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,40}", skill) and skill not in names:
+                names.append(skill)
+    return tuple(names)
+
+
+def route(prompt: str, loop_active: bool, prefix: str, required: tuple[str, ...] = ()) -> str:
+    """Put required skills before keyword matches and report the offered route counts."""
     text = prompt.lower()
-    names: list[str] = []
+    names = list(dict.fromkeys(("agentic-loop", *required) if loop_active else required))
+    optional: list[str] = []
     for kind, trigger, skills in ROUTES:
         hit = loop_active if kind == "loop" else phrase_hit(text, trigger, kind == "slash")
-        names += [f"{prefix}:{s}" for s in skills if hit and f"{prefix}:{s}" not in names]
-    return f"route: {', '.join(names[:MAX_ROUTE_SKILLS])}" if names else ""
+        optional += [s for s in skills if hit and s not in names and s not in optional]
+    offered = len(optional)
+    chosen = names + optional[: max(0, MAX_ROUTE_SKILLS - len(names))]
+    if not chosen:
+        return ""
+    shown = ", ".join(f"{prefix}:{skill}" for skill in chosen)
+    meta = (
+        f"route_meta: required={len(names)} offered={offered} recorded={len(chosen)} "
+        f"dropped={offered - (len(chosen) - len(names))} budget={MAX_ROUTE_SKILLS}"
+    )
+    return f"route: {shown}\n{meta}"
 
 
 def authority_line(root: Path, session_id: str) -> str:
@@ -235,7 +294,8 @@ def manifest_with_reason(
             except (OSError, ValueError, AttributeError, TypeError):
                 return FALLBACK, "manifest_state_unreadable"
             body = [head, authority_line(root, session_id)] + loop
-            hint = route("", active, prefix)
+            required = required_skills(root, session_id, cwd) if active else ()
+            hint = route("", active, prefix, required)
             body += [hint] if hint else []
         return "\n".join(body + [CONSTRAINTS, FAILSAFE]), reason
     except Exception:  # fail open on anything unforeseen

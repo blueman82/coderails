@@ -12,7 +12,16 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_spec
+from graph_contract_render import BEGIN as BEGIN
+from graph_contract_render import CODES as CODES
+from graph_contract_render import CONTRACT_FIELDS as CONTRACT_FIELDS
+from graph_contract_render import END as END
+from graph_contract_render import render_sections as render_sections
+from graph_contract_render import sections_sha256 as sections_sha256
 from graph_lessons import query as query_lessons
+from graph_required_context import required_context as required_context
+from graph_required_context import validate_context
+from graph_source import base_ref as base_ref
 from graph_source import check_binding
 from graph_source import source_binding as source_binding
 from graph_vocab import decision_pending, decision_sync_pending
@@ -20,26 +29,13 @@ from graph_vocab import decision_pending, decision_sync_pending
 ENVELOPE_VERSION = 2
 ENVELOPE_KEY = "CODERAILS_GRAPH_DISPATCH"
 MODEL_ROLES = ("fast-mechanical", "default", "frontier")
-CONTRACT_FIELDS = tuple(
-    (  # noqa: SIM905 - keep the closed ordered field list compact
-        "role model_role base_ref worktree manifest source_manifest_sha256 source_head_sha "
-        "publication_command disposition lessons lessons_sha256 write_scope skip_phases scope"
-    ).split()
-)
 LIST_FIELDS = ("manifest", "lessons", "write_scope", "skip_phases")
 ENVELOPE_FIELDS = ("envelope_version", "dispatch_id", "session_id", "loop_id", "revision", "wave_id", "node_id")
 LEGACY_FIELDS = ("session_id", "loop_id", "revision", "wave_id", "node_id")
-CODES = (  # noqa: SIM905 - keep the shared counter vocabulary compact
-    "dispatch_missing_envelope dispatch_unknown_id dispatch_foreign dispatch_stale_revision dispatch_replayed "
-    "dispatch_contract_altered dispatch_sections_missing dispatch_state_unconverted role_mismatch "
-    "dispatch_unauthorized dispatch_publication_mismatch dispatch_source_mismatch "
-    "dispatch_lessons_unavailable dispatch_lessons_stale"
-).split()
 OFF_SWITCH = "CODERAILS_GRAPH_DISPATCH"  # off/0/false: bypass policy after v2 ownership (default ON)
-BEGIN, END = "CODERAILS_GRAPH_CONTRACT v2", "END CODERAILS_GRAPH_CONTRACT"
 CAPABILITY_TOOLS = ("repo.inspect", "diff.read", "tests.run", "pr.comment")  # mirrors hooks capability_profiles.TOOLS
 CLAUDE_TYPES = ("general-purpose",)  # unguarded roles may also run as this untyped native agent
-STATE_MINOR_NEEDED = 2
+STATE_MINOR_NEEDED = 3
 
 
 class DispatchDeniedError(ValueError):
@@ -79,13 +75,20 @@ def guarded_roles() -> frozenset[str]:
     )
 
 
-def validate_contract(contract: object) -> dict[str, Any]:
+def validate_contract(contract: object, require_context: bool = False) -> dict[str, Any]:
     """Require exactly the closed field set with typed values; raises ValueError naming the first defect."""
     if not isinstance(contract, dict):
         raise ValueError("contract must be an object")
     value = cast(dict[str, Any], contract)
-    prior_fields = set(CONTRACT_FIELDS) - {"worktree", "source_manifest_sha256", "source_head_sha", "lessons_sha256"}
-    if set(value) not in (prior_fields - {"publication_command"}, prior_fields, set(CONTRACT_FIELDS)):
+    current_fields = set(CONTRACT_FIELDS)
+    v2_fields = current_fields - {"required_context"}
+    prior_fields = v2_fields - {"worktree", "source_manifest_sha256", "source_head_sha", "lessons_sha256"}
+    allowed = (
+        (current_fields,)
+        if require_context
+        else (prior_fields - {"publication_command"}, prior_fields, v2_fields, current_fields)
+    )
+    if set(value) not in allowed:
         raise ValueError(f"contract fields must match the current or historical v2 set: {list(CONTRACT_FIELDS)}")
     if value["role"] not in roles():
         raise ValueError("contract role is not a known agent")
@@ -127,27 +130,9 @@ def validate_contract(contract: object) -> dict[str, Any]:
         head = value["source_head_sha"]
         if head is not None and (not isinstance(head, str) or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head) is None):
             raise ValueError("contract source_head_sha must be a Git SHA or null")
+    if "required_context" in value:
+        validate_context(value["required_context"])
     return value
-
-
-def render_sections(contract: dict[str, Any]) -> str:
-    """The deterministic text block a worker prompt must carry verbatim (one JSON value per line)."""
-    lines = [f"{key}: {json.dumps(contract[key], sort_keys=True)}" for key in CONTRACT_FIELDS if key in contract]
-    return "\n".join([BEGIN, *lines, END])
-
-
-def sections_sha256(contract: dict[str, Any]) -> str:
-    """Digest of the rendered block; stored at begin-wave and recomputed from the stored contract on every check."""
-    return hashlib.sha256(render_sections(contract).encode("utf-8")).hexdigest()
-
-
-def base_ref() -> str:
-    """origin/main when an origin remote exists in the current directory's repository, else main."""
-    try:
-        done = subprocess.run(["git", "remote"], capture_output=True, text=True, timeout=10, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return "main"
-    return "origin/main" if "origin" in done.stdout.split() else "main"
 
 
 def unit_fields(
@@ -263,6 +248,7 @@ def build_contract(
         "write_scope": list(stored.get("write_scope", manifest)),
         "skip_phases": [n["id"] for n in spec["nodes"] if graph_spec.skip_when_met(state, spec, policy, n["id"])],
         "scope": stored.get("scope", ""),
+        "required_context": required_context(state, node_id),
     }
     require_source_binding(state, {"node_id": node_id, "contract": contract})
     return contract
@@ -355,11 +341,18 @@ def check_ownership(state: dict[str, Any], env: dict[str, Any], live: bool) -> d
 
 def check_dispatch(state: dict[str, Any], env: dict[str, Any], prompt: str, live: bool) -> dict[str, Any]:
     """Cross-check an owned prompt against its stored contract and rendered sections."""
+    validate_dispatch_state(state)
     record = check_ownership(state, env, live)
     try:
-        contract = validate_contract(record.get("contract"))
+        cutoff = state["graph"].get("context_from_revision") if state.get("state_minor", 0) >= 3 else None
+        needs_context = type(cutoff) is int and record["revision"] >= cutoff
+        contract = validate_contract(record.get("contract"), require_context=needs_context)
+        if needs_context and contract["required_context"] != required_context(state, record["node_id"]):
+            raise DispatchDeniedError("dispatch_context_mismatch", "required context differs from task facts")
         altered = record.get("envelope_version") != ENVELOPE_VERSION
         altered = altered or sections_sha256(contract) != record.get("prompt_sections_sha256")
+    except DispatchDeniedError:
+        raise
     except (ValueError, TypeError) as error:
         raise DispatchDeniedError("dispatch_contract_altered", f"stored contract is invalid: {error}") from error
     if altered:
@@ -392,9 +385,13 @@ def validate_dispatch_state(state: dict[str, Any]) -> None:
     minor = state.get("state_minor", 0)
     if type(minor) is not int or minor < 0 or minor > STATE_MINOR_NEEDED:
         raise DispatchDeniedError("dispatch_state_unconverted", "state has an invalid dispatch minor")
-    if minor < STATE_MINOR_NEEDED:
+    if minor < 2:
         return
     graph = state["graph"]
     start = graph.get("contract_from_revision")
     if not isinstance(graph.get("dispatches"), dict) or type(start) is not int or not 1 <= start <= state["revision"]:
         raise DispatchDeniedError("dispatch_state_unconverted", "current state lacks a valid contract cutoff")
+    if minor >= 3:
+        context_start = graph.get("context_from_revision")
+        if type(context_start) is not int or not start <= context_start <= state["revision"]:
+            raise DispatchDeniedError("dispatch_state_unconverted", "current state lacks a valid context cutoff")

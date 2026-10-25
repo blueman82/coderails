@@ -38,6 +38,10 @@ def sample() -> dict[str, Any]:
         "write_scope": ["a.py"],
         "skip_phases": ["S2.7a"],
         "scope": "unit one",
+        "required_context": {
+            "skills": ["agentic-loop"],
+            "checks": ["dispatch-contract", "frozen-evals", "publication"],
+        },
     }
 
 
@@ -144,7 +148,7 @@ class ContractTests(unittest.TestCase):
         """Previously frozen dispatch records keep their exact sections digest."""
         old = sample()
         del old["publication_command"]
-        for field in ("worktree", "source_manifest_sha256", "source_head_sha", "lessons_sha256"):
+        for field in ("worktree", "source_manifest_sha256", "source_head_sha", "lessons_sha256", "required_context"):
             del old[field]
         contract_module.validate_contract(old)
         block = contract_module.render_sections(old)
@@ -161,6 +165,18 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(contract_module.guarded_roles(), guarded_agents(profiles))
         self.assertIn("source-auditor", contract_module.guarded_roles())
         self.assertNotIn("loop-worker", contract_module.guarded_roles())
+
+    def test_required_context_comes_from_node_and_unit_facts(self) -> None:
+        """A task skill and checks come from the graph spec and unit, without prompt keywords."""
+        state: dict[str, Any] = {"work_units": {}, "graph": {"edges": []}}
+        freeze = contract_module.build_contract(state, "S2.7c", "main")
+        self.assertEqual(freeze["required_context"]["skills"], ["agentic-loop", "task-evals"])
+        self.assertIn("dispatch-contract", freeze["required_context"]["checks"])
+        unit = {"manifest": ["src/**"], "worktree": "/tmp/unit", "lessons": ["lesson"]}
+        required = contract_module.required_context(state | {"work_units": {"1": unit}}, "U3[1]")
+        self.assertEqual(required["skills"], ["agentic-loop"])
+        for check in ("dispatch-contract", "frozen-evals", "source-binding", "publication", "lessons"):
+            self.assertIn(check, required["checks"])
 
     def test_role_assertion(self) -> None:
         """Guarded roles need their own type; other roles also accept the generic agent; nothing crosses roles."""
@@ -250,6 +266,49 @@ class ContractTests(unittest.TestCase):
             with self.assertRaises(DispatchDeniedError) as caught:
                 contract_module.check_dispatch(stored, env, prompt, True)
             self.assertEqual(caught.exception.code, "dispatch_contract_altered")
+
+    def test_new_dispatch_requires_context_but_old_record_keeps_its_hash(self) -> None:
+        """The conversion cutoff cannot turn a new missing field into an accepted historical contract."""
+        state: dict[str, Any] = {
+            "session_id": "s",
+            "loop_id": "l",
+            "revision": 2,
+            "state_minor": 3,
+            "work_units": {},
+            "graph": {
+                "active_wave": {"wave_id": "wave-2", "nodes": ["U3[1]"]},
+                "dispatches": {},
+                "contract_from_revision": 1,
+                "context_from_revision": 2,
+            },
+        }
+        current = {**sample(), "required_context": contract_module.required_context(state, "U3[1]")}
+        _, record = contract_module.make_record(state, "U3[1]", "wave-2", 1, current, None)
+        state["graph"]["dispatches"]["d1"] = record
+        prompt = envelope() + "\n" + contract_module.render_sections(current)
+        env = contract_module.parse_envelope(prompt)
+        contract_module.check_dispatch(state, env, prompt, True)
+        missing = copy.deepcopy(state)
+        del missing["graph"]["dispatches"]["d1"]["contract"]["required_context"]
+        missing_record = missing["graph"]["dispatches"]["d1"]
+        missing_record["prompt_sections_sha256"] = contract_module.sections_sha256(missing_record["contract"])
+        with self.assertRaises(DispatchDeniedError) as caught:
+            contract_module.check_dispatch(missing, env, prompt, True)
+        self.assertEqual(caught.exception.code, "dispatch_contract_altered")
+        altered = copy.deepcopy(state)
+        altered_record = altered["graph"]["dispatches"]["d1"]
+        altered_record["contract"]["required_context"]["skills"] = ["agentic-loop", "task-evals"]
+        altered_record["prompt_sections_sha256"] = contract_module.sections_sha256(altered_record["contract"])
+        with self.assertRaises(DispatchDeniedError) as caught:
+            contract_module.check_dispatch(altered, env, prompt, True)
+        self.assertEqual(caught.exception.code, "dispatch_context_mismatch")
+        old = copy.deepcopy(state)
+        old_record = old["graph"]["dispatches"]["d1"]
+        old_record["revision"] = 1
+        old_record["contract"] = sample()
+        old_record["prompt_sections_sha256"] = contract_module.sections_sha256(sample())
+        old_prompt = envelope(revision=1) + "\n" + contract_module.render_sections(sample())
+        contract_module.check_dispatch(old, contract_module.parse_envelope(old_prompt), old_prompt, False)
 
     def test_unit_fields_keep_only_given_values_and_reject_bad_model_role(self) -> None:
         """Defaults are applied at contract build time, not stored."""

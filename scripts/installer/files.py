@@ -12,6 +12,8 @@ SHARED_MODULES = (
     "graph_convert.py",
     "graph_spec.py",
     "graph_contract.py",
+    "graph_contract_render.py",
+    "graph_required_context.py",
     "graph_source.py",
     "graph_lessons.py",
     "graph_repair.py",

@@ -133,6 +133,7 @@ class GraphRuntimeTests(RuntimeFixture):
         converted = read_json(self.path)
         converted["revision"] = 3
         converted["graph"]["contract_from_revision"] = 3
+        converted["graph"]["context_from_revision"] = 3
         write_json(self.path, converted)
         graph.begin_wave(self.path)
         spawn(self.parent, read_json(self.path), terminal=False)
@@ -169,6 +170,7 @@ class GraphRuntimeTests(RuntimeFixture):
         old["state_minor"] = 1
         old["graph"].pop("dispatches")
         old["graph"].pop("contract_from_revision")
+        old["graph"].pop("context_from_revision", None)
         lines = self.parent.read_text(encoding="utf-8").splitlines()
         old_call = json.loads(lines[1])
         arguments = json.loads(old_call["payload"]["arguments"])
