@@ -45,6 +45,8 @@ def main() -> int:
         if isinstance(payload.get(key), str) and Path(str(payload[key])).is_file()
     ]
     if not paths:
+        deny("Blocked: protected PR action requires a readable session transcript.")
+        log(f"hook=enforce_pr_workflow decision=deny subcommand={name.replace('_', '-')} required=transcript")
         return 0
     number = pr_number(segment) if name == "merge" else ""
     if not step_found(transcript_entries(paths), name, number):

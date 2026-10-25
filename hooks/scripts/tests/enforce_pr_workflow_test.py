@@ -21,6 +21,23 @@ FIXTURES = Path(__file__).with_name("fixtures")
 class WorkflowGateTests(HookTestCase):
     """Replay original registration, review ordering, branches, and exact-head eval gates."""
 
+    def test_guarded_action_denies_when_transcript_is_unavailable(self) -> None:
+        """A missing review record cannot permit a configured protected action."""
+        repo = self.git_repo("missing_transcript", "main")
+        (repo / ".coderails").mkdir()
+        (repo / ".coderails/workflow.config.yaml").write_text("integrity_review:\n  enabled: true\n")
+        for command in ("gh pr merge 42 --squash", "gh pr create --title x", "git push origin main"):
+            for transcript in (None, str(self.directory / "absent.jsonl")):
+                with self.subTest(command=command, transcript=transcript):
+                    payload = {"session_id": "S1", "cwd": str(repo), "tool_name": "Bash",
+                               "tool_input": {"command": command}}  # fmt: skip
+                    if transcript is not None:
+                        payload["transcript_path"] = transcript
+                    result = self.run_hook("enforce_pr_workflow", payload)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn('"deny"', result.stdout)
+                    self.assertIn("transcript", result.stdout)
+
     def test_invalid_integrity_value_keeps_status_gate_on(self) -> None:
         """A quoted Boolean cannot make the Bash merge hook skip the missing status."""
         repo = self.git_repo("integrity_repo", "main")
