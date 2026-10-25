@@ -7,7 +7,7 @@ Standing orders are typed records split across two stores, with no duplicated au
 | Part | Lives in | Why |
 | --- | --- | --- |
 | The cited claim (the lesson text, its K-id, its cite and quote, its retraction/expiry/supersession status) | Muninn, as a `lesson` record tagged `order` and `ord-<id>`, repository-scoped | Muninn already owns cited, user-anchored, retractable knowledge; a second copy of that would be a second authority |
-| Counters and decay (`loops_since_recurrence`, `last_recurred`, `status`, `decayed_at`, evidence list, `scope`) plus an append-only hash chain | `orders.json` at the repo-key dir (the grandparent of `progress.json`, as before), scripts-owned | Muninn has no update or touch primitive and every write needs a user-substantiated cite, which a per-loop tick cannot have |
+| Counters and decay (`loops_since_recurrence`, `last_recurred`, `status`, `decayed_at`, evidence list, `scope`) plus a hash chain recomputed over current rows after each mutation | `orders.json` at the repo-key dir (the grandparent of `progress.json`, as before), scripts-owned | Muninn has no update or touch primitive and every write needs a user-substantiated cite, which a per-loop tick cannot have |
 
 `scripts/lib/orders.py` is the only writer of `orders.json` (under `dir_lock`); `scripts/lib/lessons.py` is the only reader
 that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md` are generated (marker-stamped, mode

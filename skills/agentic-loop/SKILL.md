@@ -10,11 +10,25 @@ How to run an autonomous multi-agent / multi-PR session so the user doesn't have
 
 ## Why this skill exists
 
-In long agentic sessions the assistant drifts back into bad habits: running skills in main context instead of delegating; asking "want me to spawn an agent for X?" when X is obviously in scope; holding at human gates the session already removed; trusting an "idle" notification as proof-of-failure when the agent often finished silently; spawning fix workers without disproving the symptom premise. Each unnecessary stall is a manual prompt the user has to write — a stalled loop loses the autonomy the session was authorised for.
+In a long agentic session, the assistant can drift from the agreed workflow. It can run skills in the main context
+instead of delegating. It can ask whether to spawn an agent when that work is already in scope. It can stop at a
+human gate that the session has already removed. It can treat an "idle" notice as proof of failure even when the
+agent finished silently. It can assign a fix before it checks whether the reported symptom is real. Each avoidable
+stop makes the user write another prompt and reduces the autonomy the user authorised.
 
 Repo-agnostic lessons promoted from accumulated loop retros live in [learned-failure-modes.md](learned-failure-modes.md) — machine-maintained via the `loop-retro-promotion` pipeline; read it alongside this skill.
 
-**Authoring rule — every instruction in this skill must name an action its reader can actually perform.** Before writing any directive, confirm the reader has a tool call, command, or file write that executes it, and that the condition it tests can actually come out both ways. An instruction the reader cannot carry out is not a weak instruction, it is a no-op: it gets silently skipped or reported as done without happening. Three instances of this defect class were found across this skill and its sibling `superpowers:finishing-a-development-branch` in a single loop on 2026-07-29 — a cwd-equality test whose two sides were assigned from the same source and whose pid was a bash subshell's, never the harness session's, so both branches were dead; a squash-merge safety predicate asserting `git log --oneline origin/main..HEAD` is empty, which a squash's SHA rewrite makes unsatisfiable (both fixed in PR #317); and Phase 0.4's instruction to pin the orchestrator's own model via `/model`, a command the orchestrator cannot invoke.
+**Authoring rule: name an action the reader can perform.** Before you add a directive, check that the reader has
+a tool call, command or file write that can execute it. Check that a condition can return both true and false.
+An impossible instruction is a no-op. The reader can skip it or report it as complete when it did not run.
+
+A loop on 2026-07-29 found three examples in this skill and `superpowers:finishing-a-development-branch`:
+
+- A cwd equality test read both sides from the same source. It also read a Bash subshell PID instead of the harness
+  session PID. Neither branch could run.
+- A squash-merge check required `git log --oneline origin/main..HEAD` to be empty. A squash rewrites the SHA, so
+  this condition could not pass. PR #317 fixed these two checks.
+- Phase 0.4 told the orchestrator to pin its own model with `/model`. The orchestrator cannot invoke that command.
 
 ## The phases
 

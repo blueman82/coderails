@@ -1,6 +1,6 @@
 # AGENTS.md — Coderails
 
-Single source read at conversation start. Covers the repo working guide (below) and the coderails wiki schema (`## Wiki schema` near the end). `CLAUDE.md` is a thin pointer here — edit here, not there.
+Single source read at conversation start. Covers the repo working guide (below) and the coderails wiki schema (`# Wiki schema` near the end). `CLAUDE.md` is a thin pointer here — edit here, not there.
 
 Wiki vault: `../coderails-wiki` relative to the plugin, or wherever `/wiki-init` placed it.
 
@@ -67,7 +67,7 @@ examples/, launchd/             → sample configs and macOS scheduling plists
 
 **This repo** deliberately does not enable general branch protection (2026-07-15, standing decision) — so for ordinary PRs the server-side layer is absent and the redirect-and-audit layer is the whole story, by design.
 
-**One server-side exception: integrity-review.** The planned GitHub ruleset on `main` requires a PR and successful `integrity-review` status from the GitHub Actions app. The workflow validates the head SHA's review/eval evidence and policy as data. Activate and verify the rule after the workflow reaches `main`; local hooks cannot substitute for it.
+**One server-side exception: integrity-review.** This repository has an active GitHub ruleset on `main`. It requires a PR and a successful `integrity-review` status from the GitHub Actions app. The workflow validates the head SHA's review/eval evidence and policy as data. New installations must activate and verify their own rule after the workflow reaches `main`; local hooks cannot substitute for it.
 
 **Worker sandboxing differs by provider.** With `config.sandbox_workers: true`, Claude implementation workers are launched as separate OS processes through pinned `@anthropic-ai/sandbox-runtime` (srt), enforced by Seatbelt/bubblewrap. The orchestrator is never sandboxed. Codex graph workers use native `spawn_agent`; they inherit the parent session's sandbox, permissions, and MCP servers. A custom agent TOML cannot override the parent sandbox, and the Codex dispatch hook receives no effective-sandbox field to verify. `sandbox_workers` does not configure or prove a per-worker Codex sandbox; Codex containment therefore depends on the parent Codex session configuration.
 

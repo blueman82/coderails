@@ -107,7 +107,7 @@ For a new project, this section is in `AGENTS-wiki-schema.md`. For Coderails,
 it is in `AGENTS.md`. List `templates/` and `assets/` as structural
 directories, not page types.
 
-For the Coderails plugin's **own vault**, use the existing `## Wiki schema`
+For the Coderails plugin's **own vault**, use the existing `# Wiki schema`
 section in the plugin's `AGENTS.md`. Do not create a separate
 `AGENTS-wiki-schema.md` for Coderails. Also maintain `wiki.schema.json` at the
 plugin root. Keep its `page_types` and `structural_dirs` lists aligned with

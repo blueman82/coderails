@@ -24,7 +24,14 @@ Before Phase -1 — before anything else — create the loop's durable state wit
 
 > `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"`
 
-If `${CLAUDE_PLUGIN_ROOT}` is not set, do **not** guess the path: proceed without `start`; the `loop_state_guard` hook blocks once and hands you the exact path. Put the authorising prompt, verbatim, in a file, then run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<unique non-blank id>" --prompt-file "$PROMPT_FILE"`. It writes the schema-v3 state atomically (`in-progress`, revision 1, empty graph), treats a repeat of the same loop id as a no-op, re-arms a completed loop (carrying `completed_marker` forward and dropping the finished loop's `loop_stop_counts`), and refuses with a `[reason_code=...]` when an unfinished loop already owns the session: resume it instead.
+If `${CLAUDE_PLUGIN_ROOT}` is not set, do **not** guess the path. Proceed without `start`. The `loop_state_guard`
+hook blocks once and gives you the exact path. Put the authorising prompt, verbatim, in a file. Then run
+`python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<unique non-blank id>" --prompt-file "$PROMPT_FILE"`.
+
+`start` writes schema-v3 state atomically with `in-progress` status, revision 1 and an empty graph. A repeat with
+the same loop id is a no-op. A completed loop is re-armed: the command carries `completed_marker` forward and
+drops the prior loop's `loop_stop_counts`. If an unfinished loop already owns the session, the command refuses with
+a `[reason_code=...]`. Resume that loop instead.
 
 Then register every work unit with `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" add-unit "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<same id>" --unit N [--depends-on M ...] [--join] [--manifest GLOB ...]`. It adds the work unit, its `U3[N]` node, the dependency edges and, with `--join`, the `J12-all-units` input in one locked write. `--manifest` (repeatable) records the globs the unit may touch as `unit.manifest`, which `scripts/diff_manifest.py --progress ... --unit N` compares with the diff. Never edit `progress.json` by hand for either step.
 

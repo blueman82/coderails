@@ -7,7 +7,7 @@ per unit; this file starts with decisions. Counts come from code and trace rows,
 
 | Measure | Before | After | How measured |
 | --- | ---: | ---: | --- |
-| Writers of `decisions_absorbed` in code | 0 (prose told the model to hand-append) | 1 (`scripts/lib/decision_record.py`) | `grep -rln "decisions_absorbed" scripts hooks packages` minus tests, Markdown and the TypeScript dashboard reader lists only `decision_record.py` and its mirror |
+| Writers of `decisions_absorbed` in code | 0 (prose told the model to hand-append) | 1 provider writer (`scripts/lib/decision_record.py`, mirrored for Codex) | Inspect `decision_record.record` and its locked transition. A text search also finds readers, guards and tests; it is not a writer count. |
 | Rows carrying a hash chain | 0 | every row appended by `record` | `decision_record.verify_chain(rows)` returns `[]` |
 | Rows synced to Muninn | 0 | `muninn.state == "written"` rows | `decisions_absorbed[*].muninn` |
 | Silent loss when Muninn is down | n/a | 0: local row kept, `decision.sync/degraded/<code>`, exit 3 | `decision_record_test.py` |
@@ -30,7 +30,7 @@ edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Decision record
 
 | Measure | Before | After | How measured |
 | --- | ---: | ---: | --- |
-| Writers of standing-order counters in code | 0 (prose told the model to hand-edit Markdown) | 1 (`scripts/lib/orders.py` over `orders_ledger.py`) | `grep -rln "loops_since_recurrence" scripts hooks packages` minus tests and Markdown lists only `orders_ledger.py`, `orders.py`, `lessons.py` and their Codex mirrors |
+| Writers of standing-order counters in code | 0 (prose told the model to hand-edit Markdown) | 1 provider command path (`scripts/lib/orders.py` over `orders_ledger.py`, mirrored for Codex) | Inspect the `orders.py` calls to `orders_ledger.record`, `tick` and `save`. `lessons.py` reads the result. Search hits alone do not count writers. |
 | Orders carrying a hash chain | 0 | every order written by `orders.py` | `orders_ledger.verify(ledger)` returns `[]`; a hand edit is refused as `order_chain_broken` naming the order |
 | Decay rule | prose ("K=5") | `orders_ledger.K = 5`, tested at 4 ticks (active) and 5 (decayed, never deleted) | `scripts/tests/orders_test.py` |
 | Graduation predicate | model counted files and read Markdown | >=10 distinct completed source-bound retros, typed recurrence and decay | `orders_test.py`, `lessons_test.py`, `orders_lifecycle_test.py` |
@@ -47,26 +47,36 @@ Counters: `order.record|prepare|tick|render|import|cite` and `lesson.query|predi
 under the `memory` key; no edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Standing order stored without
 a cite, or a lesson missing from dispatch". Decision: `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 
-Limits: Claude and Codex native completion now enforce prepare, validated graph save, tick and render. Both Stop paths
-refuse missing or stale D4 receipts and views. An explicitly reviewed old complete graph can carry a separate
-source-bound admission that never changes progress or ages orders. The exact file hash is checked at admission; later
-completion bookkeeping does not revoke it. `orders_ticked` is a post-save observation, and a
-failed apply/receipt after completion means pending teardown. The one same-user lock covers currentness,
-reconciliation, bounded sync, ledger save and both render writes. The rendered receipt also checks the ledger and
-both view hashes under the lock, with no
-exactly-once network claim. New completed recurrences revive tombstones; replay cannot reset counters. Current live,
-verified owner-cited lesson text is legitimate typed memory; transcript advisory observations remain metadata only.
-Uncited claims are diagnostic and excluded from dispatch, promotion and views. Claims over 500 collapsed characters
-are refused, never truncated. Schema3 history needs the matching `retro_check` validator; absence is unknown/refused.
-The chain and source hashes are cooperating-agent safeguards. Legacy fixture imports preserve all five entries,
-counters, full text and first-seen provenance; a live hand-written-file migration was not verified.
-Each imported row seals the SHA-256 of the full raw source, including its preamble. A retry requires that hash and
-every saved row to match. The archive is a separate copy, so the source stays in place. After a save error, success
-requires the canonical ledger to equal the expected sealed rows. Otherwise import refuses and keeps the archive.
-Archive and ledger publication are not one atomic operation. Current reads
-exclude nonfinite expiries; scope labels remain opaque as supplied by Muninn's cwd-filtered
-repository list. Receipt parsing requires physical LF records and finite JSON numbers; Unicode inside a legitimate
-JSON string remains supported. Linked preparation/receipt/sidecar paths refuse before content read/open/create.
+### Completion and receipts
+
+Claude and Codex native completion enforce prepare, validated graph save, tick and render. Both Stop paths refuse
+missing or stale D4 receipts and views. An explicitly reviewed old complete graph can carry a separate source-bound
+admission. That admission does not change progress or age orders. The file hash is checked at admission; later
+completion bookkeeping does not revoke it. `orders_ticked` is an observation after save. A failed apply or receipt
+after completion leaves teardown pending.
+
+### Lock and memory limits
+
+One same-user lock covers currentness, reconciliation, bounded sync, ledger save and both render writes. The
+rendered receipt checks the ledger and both view hashes under that lock. This does not claim exactly-once network
+delivery. New completed recurrences revive tombstones. Replay cannot reset counters.
+
+Current live lesson text with a verified owner citation is typed memory. Transcript advisory observations remain
+metadata. Uncited claims are diagnostic and cannot enter dispatch, promotion or views. Claims over 500 collapsed
+characters are refused, never truncated. Schema 3 history needs the matching `retro_check` validator. Without it,
+the result is unknown and refused. The chain and source hashes are cooperating-agent safeguards.
+
+### Legacy import and parsing
+
+Legacy fixture imports preserve all five entries, counters, full text and first-seen provenance. A live migration
+of the hand-written file was not verified. Each imported row seals the SHA-256 of the full raw source, including
+its preamble. A retry requires the same source hash and every saved row. The archive is a separate copy, so the
+source stays in place. After a save error, success requires the canonical ledger to equal the expected sealed
+rows. Otherwise import refuses and keeps the archive. Archive and ledger publication are not one atomic operation.
+
+Current reads exclude nonfinite expiries. Scope labels remain opaque as supplied by Muninn's cwd-filtered
+repository list. Receipt parsing requires physical LF records and finite JSON numbers. Unicode inside a valid JSON
+string remains supported. Linked preparation, receipt and sidecar paths refuse before content read, open or create.
 
 For an explicit replacement with existing session/loop evidence, prepared `replaces_source` captures the canonical
 `lesson_source` (including an explicit null when none existed). The canonical token hashes owned binding and authored

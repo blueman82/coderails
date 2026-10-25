@@ -35,9 +35,10 @@ So the Keychain-plus-dialog design is neither confirmed feasible nor ruled out. 
 
 Optional receipt minting uses a key with a passphrase:
 
-1. `python3 scripts/authority_keys.py init` (owner, at a terminal) creates a passphrase-protected ed25519 key
-   `~/.coderails/keys/receipt_ed25519` and a signers file. `ssh-keygen` prompts on `/dev/tty`; the tool refuses
-   (`receipt_refused_no_tty`) when there is no terminal and never overwrites an existing key.
+1. `python3 scripts/authority_keys.py init` (owner, at a terminal) creates an ed25519 key at
+   `~/.coderails/keys/receipt_ed25519` and a signers file. `ssh-keygen` prompts on `/dev/tty`; the owner must enter
+   a non-empty passphrase if they want the key protected by one. The init script does not check that the passphrase
+   is non-empty. It refuses (`receipt_refused_no_tty`) without a terminal and never overwrites an existing key.
 2. `python3 scripts/action_receipt_cli.py approve-action ...` computes the binding itself
    (`scripts/lib/action_binding.py`: repository, destination ref, SHA; the owner never types a SHA), signs the
    canonical receipt body with `ssh-keygen -Y sign` (namespace `coderails-receipt`), and refuses without a

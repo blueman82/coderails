@@ -478,11 +478,14 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Query: `python3 scripts/lib/state_counters.py [--since <ISO ts>]` counts `attest_*` (trace `pr_merge_gate/denied/<code>`,
   written when the hook payload carries a session id), `hook_state_unreadable`, `nudge_first`/`nudge_suppressed` and
   `eval_verdict_<status>`.
-- Remediation: `attest_missing`/`attest_not_success` mean the root-owned daemon has not attested this head yet (wait or
-  push a fresh head); `attest_wrong_creator` means `integrity_review.machine_user` disagrees with the status poster;
-  `attest_not_bound` means the description is not exactly `integrity=pass sha=<head>` as whole tokens. Never bypass.
-- Limit: the daemon (`scripts/integrity-gate`, root-installed separately) does not import the parser; a test asserts the
-  daemon's real success description parses. Codex has no PreToolUse merge hook; only `integrity_status.py` applies there.
+- Remediation: for `attest_missing` or `attest_not_success`, inspect the GitHub Actions integrity run and the latest
+  status for this head. Post missing current-head review or GO eval evidence, then let the workflow check it. A new
+  commit is needed if a head cannot receive a corrected status. `attest_wrong_creator` means the status came from a
+  login other than `github-actions[bot]`. `attest_not_bound` means the description lacks whole-token
+  `integrity=pass` or `sha=<head>`. Never bypass a failed check.
+- Limit: the GitHub Actions validator reads review comments, eval comments and PR data. It does not run PR code.
+  A test checks that its success description passes the shared parser. Codex has no PreToolUse merge hook; only
+  `integrity_status.py` applies there.
 - Eval verdicts: `loop_evals.read_loop_evals()` returns a frozen `EvalVerdict{status, tamper_code}` (`status` is one of
   GO, VERIFICATION_LEVEL0, FROZEN, NO-GO, ABSENT, UNJUSTIFIED, UNSTAMPED, STALE, TAMPERED); callers match on the fields,
   never on `TAMPERED:<code>` text. A blocked completion writes trace `loop_state_guard/blocked/eval_verdict_<status>`.

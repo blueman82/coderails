@@ -48,10 +48,11 @@ stored with `confidence=inferred`; Muninn marks them pull-only, which is correct
   programmatic caller must declare the anchor. Not stopped: text an agent injected that the transcript records as a
   user prompt of the caller's own session (hook or tool output), and an approval that is short and adjacent but about
   something else (the claim is not bound to the reply text).
-- Same-user boundaries: the agent can run `muninn know add|retract` directly, bypassing the adapter (readers only check
-  a non-empty cite and quote, not the anchor), and can set `memory.backend: off` in the workflow config. The off switch
-  is visible (`memory_backend_off` degrade and a trace row) but not gated. No Bash-gate denial for direct muninn writes
-  is built; this is not a security boundary.
+- Same-user boundaries: the agent can run `muninn know add|retract` directly, bypassing the adapter. The reader
+  requires every citation to have `state=live` and `verify=ok`. It selects a `user`/`prompt` citation with a valid ref
+  and a non-empty quote. The reader does not independently recheck that quote against the transcript. An agent can
+  also set `memory.backend: off` in the workflow config. The off switch is visible (`memory_backend_off` degrade and
+  a trace row) but not gated. No Bash-gate denial for direct muninn writes is built; this is not a security boundary.
 - Supersede and contradict: `--supersedes`/`--contradicts` must be `K<n>` (`bad_record` otherwise). Muninn itself
   refuses a supersede across scopes (`refused_bad_supersedes`); inside one scope a user-quoted record can retire a
   standing order, which is intended. `list_records` keeps only entries of the requested scope (global for `user`).

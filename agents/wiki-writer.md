@@ -17,7 +17,7 @@ number, a question, a scope), say so and stop rather than guessing.
 ## Read the schema first
 
 Before writing, read the repo's wiki schema. In Coderails, it is the
-`## Wiki schema` section of `AGENTS.md`. Other projects can link to
+`# Wiki schema` section of `AGENTS.md`. Other projects can link to
 `AGENTS-wiki-schema.md` from `AGENTS.md`. Use the path the task names when
 it gives one. The schema defines frontmatter, naming, and links. Read
 `wiki.schema.json` for the live directory taxonomy when that file exists.
