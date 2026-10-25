@@ -66,9 +66,10 @@ function mergeAttemptState(routine: RoutineDef, ctx: ArtifactCheckContext): "non
   const human = resolveArtifactPath(template, ctx);
   try {
     const state = JSON.parse(readFileSync(`${human.slice(0, -4)}.state.json`, "utf-8"));
-    return state.run_id === ctx.runId && state.routine === routine.name && state.merge_attempt ? "attempt" : "none";
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "ENOENT" ? "none" : "unavailable";
+    if (state.v !== 1 || state.run_id !== ctx.runId || state.routine !== routine.name) return "unavailable";
+    return state.merge_attempt ? "attempt" : "none";
+  } catch {
+    return "unavailable";
   }
 }
 
