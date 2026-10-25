@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 import graph
+import graph_convert
 import graph_semantics
 from graph_completion import validate_work_units
 from graph_evidence import validate_worker_evidence
@@ -146,6 +147,36 @@ class GraphRuntimeTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "dispatch_missing_envelope"):
             validate_worker_evidence(missing_record)
+
+    def test_converted_historical_stale_attempt_survives_without_dispatch_record(self) -> None:
+        """A pre-contract retry stays valid after conversion and a new verified wave."""
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path), terminal=False)
+        self.record("stale", stale_check={"checked": True, "method": "native status", "result": "stalled"})
+        graph.transition(self.path, "parent", "respawn_stale", "U3[1]", "checked stale child")
+        old = read_json(self.path)
+        old["state_minor"] = 1
+        old["graph"].pop("dispatches")
+        old["graph"].pop("contract_from_revision")
+        lines = self.parent.read_text(encoding="utf-8").splitlines()
+        old_call = json.loads(lines[1])
+        arguments = json.loads(old_call["payload"]["arguments"])
+        arguments["message"] = "CODERAILS_GRAPH_TASK=" + task_name("loop", "U3[1]", 1)
+        old_call["payload"]["arguments"] = json.dumps(arguments)
+        lines[1] = json.dumps(old_call)
+        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        converted, report = graph_convert.convert(old, "parent")
+        self.assertEqual(converted["graph"]["contract_from_revision"], old["revision"])
+        self.assertTrue(report["changed"])
+        write_json(self.path, converted)
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path))
+        self.record()
+        validate_worker_evidence(read_json(self.path))
+        post_contract = read_json(self.path)
+        post_contract["graph"]["dispatches"] = {}
+        with self.assertRaisesRegex(ValueError, "dispatch_unknown_id"):
+            validate_worker_evidence(post_contract)
 
     def test_fabricated_generation_rejected(self) -> None:
         """An inflated generation cannot substitute for a real prior native spawn."""

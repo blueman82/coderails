@@ -142,6 +142,7 @@ def _validate_missing_attempts(
     used: set[str],
 ) -> None:
     completed = {reference["attempt"]: reference for reference, _ in references}
+    contract_start = state["graph"].get("contract_from_revision")
     previous_line = 0
     for attempt in range(1, maximum + 1):
         if attempt in completed:
@@ -167,10 +168,39 @@ def _validate_missing_attempts(
             if len(issued) > 1:
                 raise GraphError(f"node {node_id} stale attempt has ambiguous dispatch records")
             if not issued:
-                raise graph_contract.DispatchDeniedError(
-                    "dispatch_missing_envelope", "stale attempt has no stored wave revision"
-                )
-            _verify_dispatch(state, node_id, attempt, issued[0]["wave_id"], call, requests)
+                later_waves = [
+                    (reference["attempt"], reference["wave_id"])
+                    for reference, _ in references
+                    if reference["attempt"] > attempt
+                ]
+                active = state["graph"].get("active_wave")
+                if isinstance(active, dict):
+                    active_wave = cast(dict[str, Any], active)
+                    if node_id in cast(list[str], active_wave.get("nodes", [])):
+                        later_waves.append(
+                            (next_attempt(state["graph"]["nodes"][node_id]), cast(str, active_wave["wave_id"]))
+                        )
+                upper_bounds = [
+                    int(match.group(1)) - 2 * (later_attempt - attempt)
+                    for later_attempt, wave_id in later_waves
+                    if (match := re.fullmatch(r"wave-([1-9][0-9]*)", wave_id))
+                ]
+                if not later_waves:
+                    upper_bounds.append(state["revision"] - (2 if active is not None else 1))
+                native_calls = requests.get(call, [])
+                native_request = native_calls[0] if len(native_calls) == 1 else None
+                if (
+                    type(contract_start) is not int
+                    or not upper_bounds
+                    or min(upper_bounds) >= contract_start
+                    or not isinstance(native_request, dict)
+                    or native_request.get("task_name") != expected
+                ):
+                    raise graph_contract.DispatchDeniedError(
+                        "dispatch_missing_envelope", "stale attempt has no stored wave revision"
+                    )
+            else:
+                _verify_dispatch(state, node_id, attempt, issued[0]["wave_id"], call, requests)
             child_read_records(state["session_id"], child, nickname, path, role)
             used.update({call, child})
         if line <= previous_line:
