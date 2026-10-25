@@ -224,7 +224,7 @@ therefore refuses native implementation work while containment is on. The
 separate OAuth launcher in `packages/codex/scripts/codex_worker.py` runs a
 worker with `workspace-write`; no API key is needed. Its result is not yet
 bound to graph `record-wave` evidence, so the graph cannot mark that work done.
-See [the containment runbook](docs/RUNBOOK.md#worker-containment-sandbox-unavailable-an-in-process-worker-denied-or-a-branch-import-refused).
+See [worker containment](docs/WORKER-CONTAINMENT.md) for recovery steps, counters, and limits.
 
 ## Requirements
 
