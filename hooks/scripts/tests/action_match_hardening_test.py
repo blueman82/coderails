@@ -43,6 +43,12 @@ class MatchHardeningTests(unittest.TestCase):
                 git(Path(self.repo), "config", "--unset", key)
         self.assertEqual(self.names("git push origin feature"), [])
 
+    def test_later_push_to_main_is_not_hidden_by_feature_push(self) -> None:
+        """The legacy review gate checks a whole command, including pushes after a benign first push."""
+        command = "git push origin feature && git push origin HEAD:main"
+        self.assertTrue(match.targets_main(command, self.repo, "", "git_push"))
+        self.assertEqual(self.names(command), ["git_push"])
+
     def test_quoted_variable_and_glob_destinations_are_guarded(self) -> None:
         """Quoting, escaping and expansion must not hide a push to main; non-literal destinations are unbindable."""
         for command in (

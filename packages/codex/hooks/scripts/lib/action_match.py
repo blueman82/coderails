@@ -54,8 +54,8 @@ def targets_main(command: str, cwd: str, target: str, name: str, *, implicit_pus
         return False
     for raw in _SEP.split(command)[::2]:
         segment = canonical(unwrap(raw))
-        if (git := _GIT.match(segment)) and git[2] == "push":
-            return _push_guarded(segment, implicit_push=implicit_push)
+        if (git := _GIT.match(segment)) and git[2] == "push" and _push_guarded(segment, implicit_push=implicit_push):
+            return True
     if re.search(r":(refs/heads/)?(main|master)([\s;&|)]|$)", command):
         return True
     match = re.search(r"\bgit\b[^;&|]*?\bpush\s+(.*)", command)
