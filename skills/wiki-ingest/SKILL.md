@@ -111,18 +111,17 @@ WORKTREE_PATH="$vault"
 setting means. Do not add your own confirmation checkpoint before Step 6's commit either;
 `autonomous` covers the whole ingest, not just this step.
 
-**Otherwise (the default — `discuss` or the field absent):** before
-writing anything, discuss
-with the user:
+**Otherwise (the default — `discuss` or the field absent):** use the user's
+existing instructions and approvals. If they already cover wiki content and
+delivery, proceed. Ask only when a material content choice remains open:
 - What are the key changes / main ideas?
 - What should the wiki emphasise?
 - Are there decisions or patterns worth capturing?
 - Does this relate to existing wiki pages?
 
-Don't auto-ingest silently. The human stays involved. A prior authorization earlier in the same
-turn (e.g. approving the code change, PR, or merge this source documents) does not satisfy this
-step — the wiki content itself has not been discussed yet, regardless of momentum from a chain of
-already-approved actions.
+Report the content and delivery result to the user. Approval of a code PR
+alone does not define what the wiki should say. An explicit wiki instruction
+or standing authorization can supply that decision.
 
 ### Step 4: Check What's Already Known
 

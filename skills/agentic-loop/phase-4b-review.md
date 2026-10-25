@@ -62,9 +62,12 @@ The six review dimensions the Skill covers:
 | 3 | `silent-failure-hunter` | Swallowed exceptions, message-loss, spurious-success error paths | error handling / catch blocks / queue-delete semantics changed |
 | 4 | `type-design-analyzer` | Protocol/type invariants, illegal-states-unrepresentable | new/changed types or protocol surfaces |
 | 5 | `comment-analyzer` | Comment/docstring accuracy, comment rot | comments/docstrings added or behaviour-changing extractions |
-| 6 | `code-simplifier` | Dead code from extractions, duplication, over-engineering (report-only, no edits) | always (polish pass) |
+| 6 | `code-simplifier` | Dead code, duplication, and needless complexity; it can edit code | always (polish pass) |
 
-Collect all reports, aggregate into Critical / Important / Suggestion, and feed any MERGE-BLOCKER back to a fix agent (Phase 5/10) BEFORE merge.
+Collect the six outputs and group findings as Critical, Important, or
+Suggestion. If the simplifier edits code, test and push those edits. Review
+the new head and post fresh SHA-bound evidence before merge. Send any
+remaining MERGE-BLOCKER to a fix agent in Phase 5 or 10.
 
 **Run the native `/security-review` pass when the level rule requires it.**
 Run Claude Code's review in the worktree so it sees the branch diff. It checks
@@ -74,7 +77,16 @@ MERGE-BLOCKER prevents merge until Phase 5 or 10 resolves it.
 
 **Plus `subagent_type: general-purpose` with explicit instructions from `agents/deploy-safety-reviewer.md` when the change has a runtime/production surface.** This is a coderails repo agent, not one of the six `pr-review-toolkit` reviewers above, and does not substitute for the `review-pr` Skill invocation the merge gate requires. Spawn it as a separate `Agent` call, alongside the six and the security pass, for any change with a runtime/production surface — not just schema/migration or flag/infra-config diffs, but any change that ships to production (matching the agent's own wrong-agent tripwire, which returns NOT APPLICABLE for docs-only/comment-only/test-only diffs). It reviews rollback risk, blast radius, deploy-time observability coverage, and migration/rollout safety, none of which the six reviewers or `/security-review` cover. Fold its findings into the same Critical / Important / Suggestion aggregation; a DO NOT SHIP verdict blocks merge exactly like a code finding (Phase 5/10) BEFORE merge.
 
-**Clean-break gate (when the unit's disposition is `clean-break`).** The `code-simplifier` pass — already independent of the worker (separately spawned, read-only) — is additionally instructed to hunt **relabelled compatibility**: a surviving old code path renamed to "fallback", "adapter", "guard", "transitional", or "bridge". It checks whether an **old code path still executes**, not whether the literal word "shim" appears. On a clean-break unit, its findings of surviving compat are **MERGE-BLOCKERS**, not row 6's default report-only suggestions. **The orchestrator cannot downgrade this finding unilaterally.** Its only two moves: (a) fix it — remove the compat path, or (b) declare a hard-stop and hand it to a human, logged with who/when/SHA/reason. If a fully-unattended envelope cannot tolerate ever hard-stopping here, the human must grant auto-demote authority explicitly **at envelope-authorisation time** (Phase 0) — never something the orchestrator grants itself mid-run. The why: letting the orchestrator grade an independent reviewer's finding reintroduces the same self-attestation loophole one level up.
+**Clean-break gate.** When the unit's disposition is `clean-break`, also ask
+the `code-simplifier` pass to find relabelled compatibility. Look for an old
+path that still runs under names such as "fallback", "adapter", "guard",
+"transitional", or "bridge". The check concerns behavior, not the word
+"shim". A finding of surviving compatibility is a MERGE-BLOCKER.
+
+Fix the path and review the new head, or declare a hard-stop with the person,
+time, SHA, and reason. The orchestrator cannot downgrade this finding on its
+own. A fully unattended loop needs explicit auto-demote authority in the
+Phase 0 envelope; the orchestrator cannot grant it during the loop.
 
 **Use `/pr-review-toolkit:review-pr <PR#>` for PR review.** The generic
 `architect-review`, `debugger`, and `ai-engineer` trio tests a design before

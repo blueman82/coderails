@@ -48,6 +48,11 @@ for the config file, as `config_path` does. The first file found wins.
 Set `vault` to `wiki_path`. Resolve a relative path from the project repo
 root. Use an absolute path as given.
 
+If no config or usable `wiki_path` resolves, stop and ask the user to run
+`/wiki-init`. When `wiki_git_worktree` is absent, use `true` (PR flow).
+If it is explicitly `null` or is not a boolean, stop and report the invalid
+setting before any write.
+
 ### Step 2: Search the Wiki
 
 1. Read `$vault/index.md`. Find pages related to the question.
@@ -68,22 +73,33 @@ Answers can take different forms — choose naturally:
 - **Markdown** — explanations, walkthroughs, summaries
 - **Comparison table** — comparing approaches, services, patterns
 - **Slide deck** (Marp format) — write a `.md` file with Marp frontmatter
-  in `$vault/assets/`. The Obsidian Marp Slides plugin renders it.
+  in the selected write root's `assets/`. The Obsidian Marp Slides plugin
+  renders it.
 - **Chart** (matplotlib) — run a Python script and save its `.png` file to
-  `$vault/assets/`.
+  the selected write root's `assets/`.
+
+For a slide deck or chart, select the Step 4 write root before you create
+the file. Include the file in the Step 4 commit or PR.
 
 ### Step 4: File Back
 
 When the answer reveals something non-obvious or reusable:
 
-1. Create an investigation page in `$vault/investigations/` with YAML frontmatter and `[[wiki-links]]`
-2. Update `$vault/index.md`
-3. Append to `$vault/log.md`: `## [YYYY-MM-DD] query-file-back | <question summary>`
+1. Select `WORKTREE_PATH` using the worktree or direct-write flow below.
+2. Create an investigation page in `$WORKTREE_PATH/investigations/` with YAML frontmatter and `[[wiki-links]]`.
+3. Update `$WORKTREE_PATH/index.md`.
+4. Append to `$WORKTREE_PATH/log.md`: `## [YYYY-MM-DD] query-file-back | <question summary>`.
 
-**If `wiki_git_worktree` is `true`**: use a worktree branch and PR — same pattern as wiki-ingest Step 1 and Step 6.
+**If `wiki_git_worktree` is `true`**: use a worktree branch and PR — same
+pattern as wiki-ingest Step 1 and Step 6. Set `WORKTREE_PATH` to that
+worktree. Keep it until the PR merges.
 
-**If `wiki_git_worktree` is `false`**: write directly and commit to the vault.
+**If `wiki_git_worktree` is `false`**: set `WORKTREE_PATH` to `vault`. Write
+directly and commit to the vault.
 
-After writing, reindex if `qmd` is available. Run `qmd update` first to find new or changed files. Then run `qmd embed -c wiki` to refresh embeddings. Run `qmd collection add <vault-path> --name wiki` only during first-time setup if the collection is missing.
+After a direct write, reindex if `qmd` is available. Run `qmd update` to
+find changed files, then `qmd embed -c wiki`. For PR flow, reindex after
+the PR merges into the vault. Run `qmd collection add <vault-path> --name
+wiki` only during first-time setup if the collection is missing.
 
 Good answers compound the knowledge base. File back anything that took real effort to assemble.

@@ -37,8 +37,16 @@ approval. Do not pre-grade that decision.
 
 **The two core facts:**
 
-- **`LOOP-STOP` category counts, broken down by type** — the per-category counts of this loop's recorded stops (`progress.json` `loop_stop_counts`: `hard-stop`, `approval-gate`, `awaiting-input`, `complete`). HOOK-OWNED — the `loop_stall_guard` hook increments it when it consumes a valid `progress.json` `stops[]` row. Read it as-is; do not compute or edit it. Report the raw breakdown with no verdict attached.
-- **Decisions absorbed** — a flat, unscored list of in-scope decisions the loop made autonomously without asking (e.g. a Phase 2.5 design-fork auto-adopted, a Phase 2.6 disposition defaulted to clean-break, a Phase 2.8 routing assignment set, a Phase 5 disconfirm-skip, a Phase 6 in-scope action taken without a check-in). No self-justification text per entry, no automated "this looks calibrated" stamp — just what was decided and where (phase/work-unit). COPIED VERBATIM from `progress.json`'s `decisions_absorbed` array, chronological (oldest first) — never reconstructed from conversation memory, which is exactly the kind of after-the-fact self-report this phase exists to avoid.
+- **`LOOP-STOP` counts.** Report `loop_stop_counts` from `progress.json` by
+  category: `hard-stop`, `approval-gate`, `awaiting-input`, and `complete`.
+  `loop_stall_guard` owns this field and increments it when it consumes a
+  valid `stops[]` row. Read it as stored. Do not compute or edit it. Do not
+  attach a verdict.
+- **Decisions absorbed.** Copy `progress.json.decisions_absorbed` verbatim,
+  oldest first. Include the phase and work unit for each decision. Examples
+  include an adopted design, a disposition, a routing choice, or a skipped
+  disconfirm check. Do not reconstruct the list from memory, justify each
+  choice, or give the list a score.
 
 **Also report, unscored:**
 
@@ -144,9 +152,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/orders.py" --dir "<repo-key dir>" --s
 Run the steps below in order from the orchestrator session.
 Pass the separate logical `loop_id` copied from owned `progress.json`; it is not the session directory name.
 
-1. For each failure mode in this loop's retro, run `record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop <loop_id> --quote "<verbatim words of the owner's own prompt, 12-300 chars>"` with that prefix. Add `--scope agnostic` for a lesson that applies
-   to any repo. Before completion this stages the observation and any cited sync; it changes no lifecycle counters.
-   An id must name the same failure mode and scope. A claim over 500 collapsed characters is refused, never truncated.
+1. For each failure mode in the retro, run the `record` subcommand with the
+   prefix above. Pass `--failure-mode`, `--lesson`, `--loop`, and `--quote`.
+   The quote must contain 12–300 verbatim characters from the owner's prompt.
+   Use `--scope agnostic` for a lesson that applies to any repo. This stages
+   the observation before completion; it does not change lifecycle counts.
+   An ID must identify the same failure mode and scope. The command refuses
+   a claim over 500 collapsed characters.
 2. After final progress updates, the native completion command runs `orders.py prepare --loop <loop_id>`. It validates the
    owned eligible graph and work units, binds the source directory, session, logical loop, revision and progress hash,
    and records `orders_prepared`. This also runs when the retro has no failure mode. Prospective eligibility authorizes
