@@ -22,7 +22,10 @@ from .graph_stops import record_stop
 def add_arguments(name: str, command: argparse.ArgumentParser) -> None:
     """Add the driver-only Claude CLI arguments."""
     command.add_argument("--session", required=True)
-    if name == "assign-unit-scope":
+    if name == "append-unit-scope-note":
+        for field in ("loop-id", "revision", "unit", "expected-scope-sha256", "note", "reason"):
+            command.add_argument(f"--{field}", required=True, type=int if field == "revision" else str)
+    elif name == "assign-unit-scope":
         command.add_argument("--unit", required=True)
         command.add_argument("--scope", required=True)
     elif name == "drive":
@@ -64,6 +67,51 @@ def assign_scope(path: Path, session: str, unit: str, scope: str) -> dict[str, A
     """Save one pending unit assignment through the Claude graph lock."""
     saved = transition(path, lambda state: graph_driver_controller.assign_scope(state, session, unit, scope))
     return {"unit": unit, "scope": saved["work_units"][unit]["scope"], "revision": saved["revision"]}
+
+
+def append_scope_note(
+    path: Path,
+    session: str,
+    loop_id: str,
+    revision: int,
+    unit: str,
+    expected_scope_sha256: str,
+    note: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Save a scoped note under the Claude graph lock."""
+    saved = transition(
+        path,
+        lambda state: graph_driver_control.append_scope_note(
+            state, session, loop_id, revision, unit, expected_scope_sha256, note, reason
+        ),
+    )
+    return {
+        "unit": unit,
+        "revision": saved["revision"],
+        "scope_sha256": saved["work_units"][unit]["scope_notes"][-1]["new_sha256"],
+    }
+
+
+def append_scope_note_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Pass parsed Claude CLI fields to the locked transition."""
+    return append_scope_note(
+        args.state,
+        args.session,
+        args.loop_id,
+        args.revision,
+        args.unit,
+        args.expected_scope_sha256,
+        args.note,
+        args.reason,
+    )
+
+
+def run_scope_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Apply the selected locked unit-scope command."""
+    if args.command == "assign-unit-scope":
+        return assign_scope(args.state, args.session, args.unit, args.scope)
+    return append_scope_note_command(args)
 
 
 def begin_wave(path: Path) -> dict[str, Any]:

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import graph_contract
 import graph_driver_control
@@ -26,12 +27,71 @@ from graph_transcript import transcript_cursor
 from json_types import JsonValue
 
 
+class ScopeParsers(Protocol):
+    """The parser operation used by both scope commands."""
+
+    def add_parser(self, name: str) -> argparse.ArgumentParser:
+        """Add a subcommand parser."""
+        ...
+
+
+def add_scope_arguments(commands: ScopeParsers) -> None:
+    """Add both unit scope commands to the Codex CLI."""
+    assignment = commands.add_parser("assign-unit-scope")
+    assignment.add_argument("state", type=Path)
+    for field in ("session", "unit", "scope"):
+        assignment.add_argument(f"--{field}", required=True)
+    scope_note = commands.add_parser("append-unit-scope-note")
+    scope_note.add_argument("state", type=Path)
+    for field in ("session", "loop-id", "revision", "unit", "expected-scope-sha256", "note", "reason"):
+        scope_note.add_argument(f"--{field}", required=True, type=int if field == "revision" else str)
+
+
+def run_scope_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Apply the selected locked unit-scope command."""
+    if args.command == "assign-unit-scope":
+        return assign_scope(args.state, args.session, args.unit, args.scope)
+    return append_scope_note(
+        args.state,
+        args.session,
+        args.loop_id,
+        args.revision,
+        args.unit,
+        args.expected_scope_sha256,
+        args.note,
+        args.reason,
+    )
+
+
 def assign_scope(path: Path, session: str, unit: str, scope: str) -> dict[str, Any]:
     """Save one pending unit assignment through the Codex graph lock."""
     with _locked(path):
         proposed = graph_driver_controller.assign_scope(_load(path), session, unit, scope)
         _write(path, proposed)
         return {"unit": unit, "scope": proposed["work_units"][unit]["scope"], "revision": proposed["revision"]}
+
+
+def append_scope_note(
+    path: Path,
+    session: str,
+    loop_id: str,
+    revision: int,
+    unit: str,
+    expected_scope_sha256: str,
+    note: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Save a scoped note under the Codex graph lock."""
+    with _locked(path):
+        proposed = graph_driver_control.append_scope_note(
+            _load(path), session, loop_id, revision, unit, expected_scope_sha256, note, reason
+        )
+        _write(path, proposed)
+        return {
+            "unit": unit,
+            "revision": proposed["revision"],
+            "scope_sha256": proposed["work_units"][unit]["scope_notes"][-1]["new_sha256"],
+        }
 
 
 def begin_wave(path: Path) -> dict[str, Any]:

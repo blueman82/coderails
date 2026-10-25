@@ -2,14 +2,74 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+import secrets
 from pathlib import Path
 from typing import Any, cast
 
+import graph_semantics
 import graph_spec
 
 _MAX_RESULT_BYTES = 1_000_000
+
+
+def append_scope_note(
+    state: dict[str, Any],
+    session: str,
+    loop_id: str,
+    revision: int,
+    unit: str,
+    expected_scope_sha256: str,
+    note: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Append a nonfrozen note to a pending unit without changing earlier evidence."""
+    graph = cast(dict[str, Any], state["graph"])
+    units = cast(dict[str, Any], state.get("work_units", {}))
+    raw_record = units.get(unit)
+    raw_node = cast(dict[str, Any], graph["nodes"]).get(f"U3[{unit}]")
+    record = cast(dict[str, Any], raw_record) if isinstance(raw_record, dict) else None
+    node = cast(dict[str, Any], raw_node) if isinstance(raw_node, dict) else None
+    if (state.get("session_id"), state.get("loop_id"), state.get("revision")) != (session, loop_id, revision):
+        raise ValueError("scope note owner or revision changed")
+    if state.get("status") != "in-progress" or graph.get("dispatch_mode") != "driver":
+        raise ValueError("scope note requires an active driver loop")
+    if graph.get("active_wave") is not None or graph.get("hard_stop") is not None:
+        raise ValueError("scope note requires an idle graph")
+    if (
+        not isinstance(record, dict)
+        or record.get("status") != "pending"
+        or not isinstance(node, dict)
+        or node.get("status") != "pending"
+    ):
+        raise ValueError("scope note requires a pending unit and node")
+    old_scope = record.get("scope")
+    if not isinstance(old_scope, str) or not old_scope.strip() or not note.strip() or not reason.strip():
+        raise ValueError("scope note requires a task, note and reason")
+    old_sha = hashlib.sha256(old_scope.encode("utf-8")).hexdigest()
+    if not secrets.compare_digest(old_sha, expected_scope_sha256):
+        raise ValueError("scope note expected scope hash changed")
+    if not isinstance(record.get("scope_notes", []), list):
+        raise ValueError("scope note audit history is invalid")
+    new_scope = f"{old_scope}\n\n[Nonfrozen scope note]\nReason: {reason.strip()}\nNote: {note.strip()}"
+    proposed = copy.deepcopy(state)
+    saved = proposed["work_units"][unit]
+    saved["scope"] = new_scope
+    saved.setdefault("scope_notes", []).append(
+        {
+            "revision": state["revision"] + 1,
+            "old_sha256": old_sha,
+            "new_sha256": hashlib.sha256(new_scope.encode("utf-8")).hexdigest(),
+            "reason": reason.strip(),
+            "note": note.strip(),
+            "nonfrozen": True,
+        }
+    )
+    proposed["revision"] += 1
+    graph_semantics.validate(proposed)
+    return proposed
 
 
 def _artifact(path: Path, wave_id: str, node_id: str) -> Path:

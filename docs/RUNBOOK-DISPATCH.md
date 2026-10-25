@@ -1,5 +1,15 @@
 # Dispatch and worker-status troubleshooting
 
+## Add a note to a pending driver task
+
+Use `append-unit-scope-note` when a pending task needs new context. Read the current session, loop, revision, unit scope and scope SHA-256 from the graph. Then run:
+
+```text
+python3 skills/agentic-loop/scripts/graph.py append-unit-scope-note <progress.json> --session <session> --loop-id <loop> --revision <current revision> --unit <unit> --expected-scope-sha256 <current scope SHA-256> --note <new context> --reason <why it changed>
+```
+
+The Codex plugin has the same command in `packages/codex/skills/agentic-loop/scripts/graph.py`. The command appends a marked, nonfrozen note to the scope and records the reason and old and new hashes. It advances the graph revision once. It keeps prior dispatches, attempts and evidence. A new wave uses the new scope in its worker prompt. The command refuses a foreign owner, stale revision, changed scope, active wave, hard stop or finished task. It does not change frozen plans or tests. Check the new revision before dispatch. Do not use the note to claim that an unmet original test has passed.
+
 ## Dispatch refused: `dispatch_*` or `role_mismatch`
 
 - Symptom: `loop_dispatch_guard` (Claude `Agent`, Codex `spawn_agent`) denies a spawn in a graph-bound session, or

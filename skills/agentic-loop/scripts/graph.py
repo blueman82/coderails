@@ -37,6 +37,7 @@ GRAPH_COMMANDS = (
     "start",
     "add-unit",
     "assign-unit-scope",
+    "append-unit-scope-note",
     "instantiate",
     "inspect",
     "summarize",
@@ -89,7 +90,7 @@ def parser() -> argparse.ArgumentParser:
             for field in ("session", "dispatch-id", "role", "driver-run-id"):
                 command.add_argument(f"--{field}", required=True)
             command.add_argument("--prompt-file", required=True, type=Path)
-        if name in {"record-driver-control", "drive", "assign-unit-scope"}:
+        if name in {"record-driver-control", "drive", "assign-unit-scope", "append-unit-scope-note"}:
             graph_driver_adapter.add_arguments(name, command)
         if name == "instantiate":
             command.add_argument("--profile", choices=graph_spec.PROFILES, help="default: policy graph.profile")
@@ -288,8 +289,8 @@ def main() -> int:
                 args.manifest,
                 {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
             )
-        elif args.command == "assign-unit-scope":
-            output = graph_driver_adapter.assign_scope(args.state, args.session, args.unit, args.scope)
+        elif args.command in {"assign-unit-scope", "append-unit-scope-note"}:
+            output = graph_driver_adapter.run_scope_command(args)
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "inspect":
