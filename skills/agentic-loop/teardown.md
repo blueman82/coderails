@@ -44,7 +44,7 @@ approval. Do not pre-grade that decision.
   attach a verdict.
 - **Decisions absorbed.** Copy `progress.json.decisions_absorbed` verbatim,
   oldest first. Include the phase and work unit for each decision. Examples
-  include an adopted design, a disposition, a routing choice, or a skipped
+  include an adopted design, a compatibility decision, a routing choice, or a skipped
   disconfirm check. Do not reconstruct the list from memory, justify each
   choice, or give the list a score.
 
@@ -58,9 +58,9 @@ approval. Do not pre-grade that decision.
   The price table in `hooks/scripts/lib/model_prices.json` needs manual
   updates. After `ALS_PRICE_STALE_DAYS` (14), the hook asks the user to
   check its rates. It checks the date, not the price values.
-- **Disposition violations.** Compare each `clean-break` decision in
+- **Clean-break violations.** Compare each `clean-break` decision in
   `progress.json` with the merged code. Report any old path that still runs.
-  Say "0 violations" only if a disposition record exists and the check found
+  Say "0 violations" only if a compatibility decision record exists and the check found
   none. If no record exists, report an audit failure. Also report each
   `preserve-compat` unit with an open `removal_ticket` at loop end.
 - **Loop eval result.** Run `post_evals.py grade-loop`. Report the
@@ -93,7 +93,7 @@ Written at `schema_version` 2, beside `progress.json`.
 | `envelope` | Verbatim from `progress.json`'s `authorising_prompt_raw`. |
 | `loop_stop_counts` | Copied **verbatim** from `progress.json` — HOOK-OWNED, never recomputed. |
 | `decisions_absorbed` | Copied **verbatim** from `progress.json`'s array, not reconstructed from conversation memory. |
-| `disposition_record` | Distinguish "0 violations" from "no-record" (an audit failure, not a pass). |
+| `disposition_record` | The saved compatibility decision. Distinguish "0 violations" from "no-record" (an audit failure, not a pass). |
 | `evals` | `result` / `amendments` / unresolved P1s. |
 | `artifacts` | PRs + the verifying check (Phase 12), not the agent's claim. |
 | `hook_blocks` | Via `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/discipline_common.py" "<session_id>"`. |

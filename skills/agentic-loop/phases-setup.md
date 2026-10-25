@@ -2,7 +2,7 @@
 
 This file covers setup before worker routing. Start `progress.json` with
 `graph.py start`. Then clarify the prompt, read the authority envelope, run
-pre-flight checks, resolve design and disposition, and write `spec.md` and
+pre-flight checks, resolve design and compatibility decisions, and write `spec.md` and
 `plan.md` when required.
 
 Read this in full at loop start. Phase 2.8 onward lives in SKILL.md.
@@ -214,16 +214,16 @@ Either way the fork is closed by ONE design artifact before building starts — 
 
 **Where the design artifact is written — never onto local `main`.** Any phase that produces a file — a design investigation page, a recon note, a `progress.json` — writes it *outside the code repo's working tree*: to the wiki vault (`config.wiki_path`) if it is wiki-bound, otherwise a temp dir outside the repo. It is promoted into the PR worktree only at build time (Phase 3); it never lands on local `main`, where an untracked file silently pollutes the base every worker branches from — exactly the contamination the Phase 2 clean-base check then has to catch downstream. The recon/design phase is logically read-only with respect to the code repo; keep it literally so.
 
-### `S2.6` — Phase 2.6: Resolve disposition before replacement work (clean-break vs preserve-compat)
+### `S2.6` — Phase 2.6: Decide whether to keep old code (clean-break vs preserve-compat)
 
-When the Phase 1 plan contains a work-unit that **retires an existing code path** — there is a *named thing being replaced* (a function, module, endpoint, schema, or flag the change removes from use) — resolve its **disposition** once, up front, before the first spawn. This is the migration analogue of Phase 2.5's design fork: asked once, not re-litigated.
+When the Phase 1 plan contains a work-unit that **retires an existing code path** — there is a *named thing being replaced* (a function, module, endpoint, schema, or flag the change removes from use) — decide once, before the first spawn, whether to remove it or keep it for compatibility. This is the migration analogue of Phase 2.5's design fork: asked once, not re-litigated.
 
-When triggered, run the disposition scout as the `S2.6` sibling of `S2.5`,
+When triggered, run the `disposition-scout` role as the `S2.6` sibling of `S2.5`,
 giving it the Phase 1 plan and named retirement paths. It returns one result per
 retirement unit and writes no loop state. If no path is retired, record the
 conditional skip and let `J2` release without this branch.
 
-**Trigger precisely.** The fork fires only when an existing path is being *retired*, not merely when new code calls or wraps old code. If nothing is being removed from use, there is no disposition question. A concrete "what named thing does this remove?" test is deliberately harder to self-exempt from than a vague "is this a migration?".
+**Trigger precisely.** The fork fires only when an existing path is being *retired*, not merely when new code calls or wraps old code. If nothing is being removed from use, there is no decision about keeping old code. A concrete "what named thing does this remove?" test is deliberately harder to self-exempt from than a vague "is this a migration?".
 
 **The fork, asked once:**
 - **clean-break** — the old path is removed in the same unit. No shims, bridges, adapters, or compatibility flags remain.
@@ -233,9 +233,9 @@ conditional skip and let `J2` release without this branch.
 
 **What happens with the answer depends on the envelope class (Phase 0)** — this resolves the fork, it does NOT add a human gate:
 - **Full-autonomous:** adopt clean-break by default, record it, proceed. Surface a preserve-compat choice (with its named blocker) at the next approval-gate; do not stall.
-- **Narrow-fix / diagnostic / ambiguous:** surface the disposition as one decision — "clean-break recommended, here's why" — bounded like Phase 1 (ask once, don't loop).
+- **Narrow-fix / diagnostic / ambiguous:** surface the compatibility choice as one decision — "clean-break recommended, here's why" — bounded like Phase 1 (ask once, don't loop).
 
-**Record** per work-unit in `progress.json`: `disposition`, and when `preserve-compat`, the `named_blocker` and a mandatory `removal_ticket`. Read the current loop ID and revision. Run `graph.py record-decision` with `--loop-id`, `--revision`, phase `2.6`, the disposition as `--decision`, and the work-unit id as `--unit`.
+**Record** per work-unit in `progress.json`: `disposition` (the compatibility decision), and when `preserve-compat`, the `named_blocker` and a mandatory `removal_ticket`. Read the current loop ID and revision. Run `graph.py record-decision` with `--loop-id`, `--revision`, phase `2.6`, the decision as `--decision`, and the work-unit id as `--unit`.
 
 ### `S2.7` — Phase 2.7: Commit the resolved design to durable `spec.md` and `plan.md`
 
@@ -264,7 +264,7 @@ when their own inputs are ready:
 **2.7a — write `spec.md`.** Write a durable `spec.md` to the loop-state dir — the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.py`, run at Phase -2), next to `progress.json`, outside the code repo, **not committed** (loop state, not a PR deliverable). This is a **commit of design the loop has already resolved**, not interactive brainstorming — a loop cannot brainstorm with itself; the forks were closed at 2.5 and 2.6. Record:
 - the authorisation envelope verbatim (Phase 0);
 - the design-fork decision and its flip-condition (Phase 2.5);
-- the disposition decision(s) and any named blocker (Phase 2.6);
+- the compatibility decision(s) and any named blocker (Phase 2.6);
 - the success criteria — what "done" means for the whole loop;
 - the high-level work-unit boundaries (the detailed decomposition is Phase 2.7b's plan).
 
@@ -280,7 +280,7 @@ The `spec.md` is loop state, keyed to this orchestrator's run, exactly like `pro
 
 **2.7d — freeze a PR-scope `evals.json` per work-unit, in the same invocation.** The same `/coderails:task-evals` run ALSO produces one **frozen** PR-scope `evals.json` (scope: `pr`) for every work-unit that will carry a PR. This is a **separate artifact** from 2.7c's loop-scope file, not a view of it, and freezing 2.7c alone does not satisfy it: `scripts/merge.py` hard-gates every merge on a SHA-bound **pr-scope** eval comment with `result=GO` — fail-closed, no config opt-out. A loop that freezes only loop-scope evals passes Phase 3 and Phase 4b unimpeded and then meets an unsatisfiable merge gate, with the implementation already built.
 
-Each unit's PR-scope eval ref then travels into its worker prompt the same way disposition travels under Phase 3's existing "Disposition — ... copied **verbatim** into the task description" bullet: a ref recorded only in `progress.json`/`plan.md` and absent from the worker prompt does not exist for the worker.
+Each unit's PR-scope eval ref then travels into its worker prompt the same way the compatibility decision travels under Phase 3's existing "Compatibility decision — ... copied **verbatim** into the task description" bullet: a ref recorded only in `progress.json`/`plan.md` and absent from the worker prompt does not exist for the worker.
 
 **The timing cannot be recovered later, which is why it is a freeze and not a to-do.** Freeze-before-build is `task-evals`' rule 1; a pr-scope suite authored at merge time cannot honour it, because its author already knows what the implementation does. When it has been missed, the only honest repair is: author them late, stamp `frozen_at` at the **real** authoring time (never backdate — a backdated freeze is the one edit that turns a disclosed gap into a rigged gate), disclose the gap in `verification_justification`, and report it at Phase 13. The GO then rests on evidence the suite genuinely discriminates — an executed negative control, or a run that actually failed against a real defect — never on the timestamp. That repair is a **disclosed gap, not a pass**; its availability is not a licence to skip the freeze.
 
@@ -301,6 +301,6 @@ python3 "$PLUGIN_ROOT/skills/agentic-loop/scripts/graph.py" \
   --disposition none --reason "no executable surface"
 ```
 
-The command saves `none: no executable surface` under the graph lock. It refuses a foreign owner, a stale revision, an active wave, an existing proof file, or a repeated decision. The `loop_stall_guard` proof gate requires the saved disposition when `proof.json` is absent.
+The command saves `none: no executable surface` under the graph lock. It refuses a foreign owner, a stale revision, an active wave, an existing proof file, or a repeated decision. The `loop_stall_guard` proof gate requires the saved no-proof reason when `proof.json` is absent.
 
 The `status` field is written `"pending"` but is present, never consulted — the proof verifier never reads `.status`, so the field cannot grade itself even by accident. The `loop_stall_guard` hook's `loop_proofs.validate_proofs` mines THIS session's own transcript for a matching Bash tool_use/tool_result pair per proof; only an actually-executed, non-erroring command satisfies a proof, never the `status` string. See [loop-state.md](loop-state.md) for the full field contract and honest boundary.

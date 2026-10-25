@@ -35,7 +35,7 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | Field | Notes |
 |---|---|
 | `schema_version` | Exactly `3`. Legacy, missing and malformed graph schemas fail closed; no schema-2 reader or alternate writer exists. |
-| `proof_disposition` | Required when no `proof.json` exists. Use `graph.py record-proof-disposition` to save `"none: <nonblank reason>"` for an owned loop with no executable surface. Other or absent values block completion. A present proof file must validate independently. |
+| `proof_disposition` | The saved reason for having no `proof.json`. Use `graph.py record-proof-disposition` to save `"none: <nonblank reason>"` for an owned loop with no executable surface. Other or absent values block completion. A present proof file must validate independently. |
 | `session_id` | This session's id; the guard's ownership check compares it against the file's own path. |
 | `loop_id` | Unique non-blank identity for this loop. Preserve it during mid-loop rewrites; create a new value when re-arming for a new loop. Dispatch evals bind `session_id` + `loop_id`. |
 | `revision` | Positive integer starting at `1`. Graph operations advance it. Dispatch envelopes bind the active revision; frozen dispatch evals bind only session and loop; final neutral grading binds the completion revision. |
@@ -44,7 +44,7 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | `work_units` | JSON object keyed by unit id; each entry carries at least a `status`. In-flight values are `pending`/`in-progress`/`blocked` (with `blockedBy`); only `done` and `dropped` (with a mandatory sibling `dropped_reason`) are terminal — see below. `merged`/`complete`/other synonyms are retired: do not mint new status values. |
 | `graph` | `{nodes, edges, joins, active_wave, hard_stop}`. Nodes use stable IDs, registry labels, matching status/outcome, retry bounds, evidence arrays and `respawn: {generation, intent}`. Edges reference existing nodes; all-input joins carry `id`, `inputs`, and `released`. The native adapter owns transcript cursors and wave history. |
 | `loop_stop_counts` | **HOOK-OWNED.** Per-category counts `{hard-stop, approval-gate, awaiting-input, complete}`, for Phase 13. |
-| `disposition` | Per work-unit that retires an existing code path: `clean-break` \| `preserve-compat`. |
+| `disposition` | Compatibility decision for each unit that retires a code path: `clean-break` \| `preserve-compat`. |
 | `named_blocker` | When `preserve-compat`: the specific consumer still on the old path that justifies keeping it. |
 | `removal_ticket` | When `preserve-compat`: tracks the deferred removal. |
 | `decisions_absorbed` | Chronological (oldest-first) array of typed, hash-chained rows `{seq, phase, decision, flip_condition, unit, revision, ts, prev_sha256, row_sha256, muninn: {state: syncing\|written\|degraded\|unknown\|disabled, id, reason_code}}`, appended ONLY by `graph.py record-decision` through `scripts/lib/decision_record.py` at each phase boundary that absorbs an in-scope decision (Phases -1, 2.5, 2.6, 2.8, 5, 6); never hand-appended. `{phase, decision}` stay exactly as the dashboard reads them. The local row is claimed before Muninn (`kind=decision`, cite quoted from `authorising_prompt_raw`); a safely degraded sync is retried by `graph.py flush-decisions` at teardown. `syncing` or `unknown` requires store reconciliation before retry. Phase -1 records only in a full-autonomous envelope, where it auto-adopts the improve-prompt output instead of asking. In the Phase 2.5/2.6 graph wave the orchestrator records each worker result; workers never write this field (Muninn writers cannot run in subagents). |
@@ -118,7 +118,7 @@ grace and block every time.
 
 - **Start (Phase -2):** run `graph.py start` (see phases-setup.md). It stamps this `session_id`, your unique non-blank `loop_id`, `revision: 1` and `status: "in-progress"` with an empty graph and no active wave, then `graph.py add-unit` registers each work unit. Never hand-write these; the initial state is validated, not decorative. A different `loop_id` over an unfinished loop is refused: resume it.
 - **Phase 0:** the envelope is already in `authorising_prompt_raw`; update it only when an improved envelope is adopted.
-- **Update at each phase boundary:** `graph` node states, work-unit states, disposition fields, `last_updated` — these fields are written through the graph commands (`add-unit`, `begin-wave`, `record-wave`, `record-unit`, `hard-stop`) and read back with `inspect` or `summarize`; never hand-edit `progress.json` and never touch `loop_stop_counts`.
+- **Update at each phase boundary:** `graph` node states, work-unit states, compatibility decision fields, `last_updated` — these fields are written through the graph commands (`add-unit`, `begin-wave`, `record-wave`, `record-unit`, `hard-stop`) and read back with `inspect` or `summarize`; never hand-edit `progress.json` and never touch `loop_stop_counts`.
 - **Teardown at Phase 13:** record any standing-order candidates with
   `orders.py record` before completion. After final grading, proofs, and
   retro, run `python3 "${PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" verify-completion <state> --session <session>`.
@@ -171,7 +171,7 @@ is still your job; the guard only catches its absence.
   A loop with no executable surface writes no proof file. It records that
   choice in `decisions_absorbed`. Use the supported
   `graph.py record-proof-disposition` command to save the no-proof reason in
-  state. The proof gate reads that disposition.
+  state. The proof gate reads that saved reason.
 
   **The proof gate reads the orchestrator's transcript.** On a recorded
   `complete` stop, `loop_stall_guard` looks for a Bash `tool_use` and
@@ -197,9 +197,9 @@ is still your job; the guard only catches its absence.
   100-entry cap, checked before transcript mining. A valid withdrawal is
   reported in the `complete` system message and does not block.
 
-  **Absence requires a disposition.** Missing `proof.json` requires `proof_disposition` to equal `"none"` or start with `"none:"`. No legacy schema exemption exists. A present proof file must carry this session and loop identity and a numeric schema version >= 1. A malformed file, non-array proof collection or unprovable entry blocks. Empty/absent proof arrays are allowed only after the file-level checks; populated withdrawals are always checked. The combined cap is 100 entries. Proofs execute in the orchestrator's own foreground Bash transcript; a worker's execution cannot satisfy them.
+  **Absence requires a saved reason.** Missing `proof.json` requires `proof_disposition` to equal `"none"` or start with `"none:"`. No legacy schema exemption exists. A present proof file must carry this session and loop identity and a numeric schema version >= 1. A malformed file, non-array proof collection or unprovable entry blocks. Empty/absent proof arrays are allowed only after the file-level checks; populated withdrawals are always checked. The combined cap is 100 entries. Proofs execute in the orchestrator's own foreground Bash transcript; a worker's execution cannot satisfy them.
 
-  **Declaration boundary:** the gate checks that the no-proof disposition exists, not whether its reason is true. It also checks execution, not whether the frozen command is a good proof. These remain auditable declarations, not an external trust boundary.
+  **Declaration boundary:** the gate checks that the saved no-proof reason exists, not whether it is true. It also checks execution, not whether the frozen command is a good proof. These remain auditable declarations, not an external trust boundary.
 
   **Honest boundary:** the gate verifies a command RAN in this session's transcript and did not error — it cannot verify it was the RIGHT command. A weak, poorly-chosen proof set still passes trivially. What it buys is that the proof CHOICE is auditable and time-stamped (frozen before implementation, authored blind to the plan), and that EXECUTION can no longer be self-reported. **Trust boundary:** the gate treats the transcript as harness-written — a session that deliberately appends forged tool_use/tool_result records to its own (ordinary, writable) transcript file can defeat it; no transcript-reading hook can stop that. The gate's actual target is honest self-deception and lazy self-reporting, not adversarial transcript forgery.
 - **`orders.json`** (the typed ledger, written only by `scripts/lib/orders.py`) and its generated views **`standing-orders.md` / `standing-orders-decayed.md`** — repo-keyed, one dir up (the grandparent of the `progress.json` path), shared across every session and loop against that repo. The views are read-only (mode 0444, marker-stamped); read current cited lessons with `scripts/lib/lessons.py --dir <repo-key dir> --session <known native caller id> query --format contract`. Refused or degraded reads remain unknown; a view cannot replace the query.
