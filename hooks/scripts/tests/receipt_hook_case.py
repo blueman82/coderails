@@ -85,6 +85,6 @@ class ReceiptHookCase(HookCase):
             "max_prs": 3, "expires_at": "2999-01-01T00:00:00+00:00", "revocable": True,
             "approval_required_for": ["merge"], "granted_by": "command",
         } | over  # fmt: skip
-        path = self.loop / "s1" / "authority.json"
+        path = self.loop / str(obj["session_id"]) / "authority.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(obj))
