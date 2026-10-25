@@ -5,6 +5,8 @@ import { SessionTracePanel } from "./SessionTracePanel";
 import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readClaudeTracePage, type TraceCollectionDeps } from "@/lib/collect/sessionTrace";
 import type { TraceEvent } from "@/lib/collect/sessionTrace";
 
@@ -32,6 +34,73 @@ function response(value: unknown): Response {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("SessionTracePanel", () => {
+  it("shows the same full-page read count as the source-bound report", async () => {
+    const root = await mkdtemp(join(tmpdir(), "trace-panel-report-"));
+    const source = join(root, "parent.jsonl");
+    const sourceBytes = '{"message":"PRIVATE BODY"}\n';
+    await writeFile(source, sourceBytes);
+    const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+    const observed = event("tool_result", 1, { traceId: sha(`claude:${FIRST}`).slice(0, 32),
+      attributes: { "coderails.actor.kind": "orchestrator",
+        "coderails.start_time.basis": "unavailable", "coderails.end_time.basis": "unavailable",
+        "coderails.native.call_id": "read-1", "coderails.observation.kind": "read",
+        "coderails.observation.target_kind": "context",
+        "coderails.observation.target_sha256": sha("context:AGENTS.md"),
+        "coderails.observation.bytes": 12 } });
+    const eventsText = JSON.stringify(observed) + "\n";
+    const eventFile = `events.${sha(eventsText)}.jsonl`;
+    await writeFile(join(root, eventFile), eventsText);
+    const manifest = { schemaVersion: 1, parserVersion: 5, provider: "claude", nativeSessionId: FIRST,
+      loopId: null, sources: [{ sourceId: "parent.jsonl",
+        fingerprint: `sha256:${sha(sourceBytes)};identity:1:2:3:4`, cursor: "1" }],
+      generatedAt: "2026-10-25T00:00:00Z", complete: true, errors: [], eventCount: 1, eventFile };
+    const manifestText = JSON.stringify(manifest);
+    await writeFile(join(root, "manifest.json"), manifestText);
+    const cohort = { schema_version: 1, cohorts: { baseline: [{
+      provider: "claude", native_session_id: FIRST, parser_version: 5,
+      manifest_path: "manifest.json", manifest_sha256: sha(manifestText),
+      events_path: eventFile, events_sha256: sha(eventsText),
+      source_files: [{ source_id: "parent.jsonl", path: "parent.jsonl", sha256: sha(sourceBytes) }],
+      eligible: true, excluded_reason: null, retry_of: null }], comparison: [] } };
+    await writeFile(join(root, "cohorts.json"), JSON.stringify(cohort));
+    const script = join(process.cwd(), "../../../scripts/observation_report.py");
+    const report = JSON.parse(execFileSync("python3", [script, join(root, "cohorts.json")], { encoding: "utf8" }));
+    const readCount = report.cohorts.baseline.observations.read as number;
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const path = new URL(input, "http://localhost");
+      if (path.pathname === "/api/sessions") return response({ sessions: [{ nativeSessionId: FIRST,
+        provider: "claude", projectLabel: "p", displayLabel: "first",
+        lastActivity: { value: null, basis: "unavailable" } }] });
+      return response({ events: [observed], nextCursor: null, complete: true });
+    }));
+    render(<SessionTracePanel token="secret" />);
+    await screen.findByRole("option", { name: /first/ });
+    fireEvent.change(screen.getByLabelText("Native session"), { target: { value: FIRST } });
+    await screen.findByText(new RegExp(`Observations in loaded events: invocation 0 · read ${readCount} · failed read 0`));
+    expect(screen.queryByText(/PRIVATE BODY/)).toBeNull();
+  });
+
+  it("shows observation counts for loaded events and the safe source fields", async () => {
+    const digest = "a".repeat(64);
+    const observed = event("tool_result", 1, { attributes: {
+      "coderails.actor.kind": "orchestrator", "coderails.observation.kind": "read",
+      "coderails.observation.target_kind": "skill", "coderails.observation.target_sha256": digest,
+      "coderails.observation.bytes": 9, "coderails.usage.semantics": "incremental" } });
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const path = new URL(input, "http://localhost");
+      if (path.pathname === "/api/sessions") return response({ sessions: [{ nativeSessionId: FIRST,
+        provider: "claude", projectLabel: "p", displayLabel: "first",
+        lastActivity: { value: null, basis: "unavailable" } }] });
+      return response({ events: [observed], nextCursor: null, complete: true });
+    }));
+    render(<SessionTracePanel token="secret" />);
+    await screen.findByRole("option", { name: /first/ });
+    fireEvent.change(screen.getByLabelText("Native session"), { target: { value: FIRST } });
+    await screen.findByText(/Observations in loaded events: invocation 0 · read 1 · failed read 0 · mention 0 · uncertain 0/);
+    expect(screen.getByText(/Observation: read; target: skill;/)).toBeTruthy();
+    expect(screen.getByText(new RegExp(digest))).toBeTruthy();
+  });
+
   it("shows the named graph job beside its stable node ID", async () => {
     const traceEvent = event("worker_turn", 1, { attributes: {
       "coderails.actor.kind": "worker", "coderails.node.name": "Builder",

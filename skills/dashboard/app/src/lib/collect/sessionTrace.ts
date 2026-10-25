@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import { TRACE_SCHEMA_VERSION, serializeTraceEvent, nonempty, type SourceRef, type TraceCollectionDeps, type TraceDetail, type TraceEvent, type TraceManifest, type TracePage, type NativeSessionSummary } from "./sessionTraceSchema";
 import { CLAUDE_PARSER_VERSION, safeReadError, type NativeRecord, type Source, obj, safeSession, cacheDir, parentPath, source, artifactSource, auditSource, auditEvents, toolBlocks, dispatch, makeEvent, childValid, graphEvent, pointerPart, completedNotification, terminalChild, saveCache, clearCache, cacheEventPath, teammateChild, explicitBlockedLaunch, claudeSessionSummary, claudeUnavailableSummary } from "./sessionTraceClaudeHelpers";
 import { nodeAttributes } from "./nodeDisplay";
+import { markClaudeReadPairs, markClaudeRequestOrMention, readTarget } from "./claudeObservation";
 export * from "./sessionTraceSchema";
 
 const SESSION_SUMMARY_MAX_BYTES = 64 * 1024 * 1024;
@@ -62,6 +63,8 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
         spanId: string; sourceRef: SourceRef }>();
       const toolRequests = new Map<string, TraceEvent[]>();
       const toolResults = new Map<string, TraceEvent[]>();
+      const readInputs = new Map<string, NativeRecord[]>();
+      const readOutputs = new Map<string, NativeRecord[]>();
       const localResults = new Map<string, NativeRecord[]>();
       const localNativeResults = new Map<string, NativeRecord[]>();
       const localDuplicates = new Set<string>();
@@ -74,6 +77,10 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
         const ordinal = native.ordinals[index];
         const items = toolBlocks(row);
         for (const { block, item } of items) {
+          if (block.type === "tool_use" && typeof block.id === "string" && readTarget(block))
+            readInputs.set(block.id, [...(readInputs.get(block.id) ?? []), block]);
+          if (block.type === "tool_result" && typeof block.tool_use_id === "string")
+            readOutputs.set(block.tool_use_id, [...(readOutputs.get(block.tool_use_id) ?? []), block]);
           const owner = dispatch(block, sessionId);
           if (block.type === "tool_use" && block.name === "Agent") {
             const input = obj(block.input);
@@ -108,15 +115,21 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
         if (items.length) for (const { block, item } of items) {
           const event = makeEvent(sessionId, native, ordinal, row, actor, childId, parentSpanId,
             dispatch(block, sessionId) ?? ownership, block, item, parentSourceRef);
+          markClaudeRequestOrMention(event, row, block);
           events.push(event);
           const callId = event.attributes["coderails.native.call_id"];
           if (typeof callId === "string") {
             const target = block.type === "tool_use" ? toolRequests : toolResults;
             target.set(callId, [...(target.get(callId) ?? []), event]);
           }
-        } else events.push(makeEvent(sessionId, native, ordinal, row, actor, childId,
-          parentSpanId, ownership, null, -1, parentSourceRef));
+        } else {
+          const event = makeEvent(sessionId, native, ordinal, row, actor, childId,
+            parentSpanId, ownership, null, -1, parentSourceRef);
+          markClaudeRequestOrMention(event, row, null);
+          events.push(event);
+        }
       }
+      markClaudeReadPairs(readInputs, readOutputs, toolRequests, toolResults, errors);
       for (const [callId, matching] of toolResults) {
         const requests = toolRequests.get(callId) ?? [];
         if (requests.length !== 1 || matching.length !== 1) continue;
