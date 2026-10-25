@@ -23,8 +23,8 @@ The script handles:
 2. Checking if repository requires PR approval
 3. Verifying approval if required — the script also verifies a SHA-bound eval artifact (`/coderails:post-evals`) exists for the current head, with `result: GO` or a justified verification_level-0 exemption, gating the merge exactly as the review artifact does. This eval-artifact check is additive to, not a replacement for, the review-artifact check that already runs first.
 4. Merging PR with branch deletion
-5. Switching to main branch
-6. Pulling latest changes
+5. Switching the primary checkout to main after a linked-worktree merge
+6. Pulling latest changes in that checkout; the invoking linked worktree stays on its feature branch
 7. Showing recent commit history
 
 Report success and final state when complete.

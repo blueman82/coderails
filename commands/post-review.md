@@ -31,9 +31,9 @@ Write the findings from the just-completed `review-pr` run into a temp file at
 
 **Anti-fabrication rule:** if `review-pr` reported no findings, write `## No findings` and nothing else. Do NOT invent placeholder findings.
 
-**Completeness floor:** include the finding counts from `review-pr`'s output
-(for example, "0 critical, 2 important, 1 suggestion"). The reader can then
-compare the summary with the review.
+**Completeness floor when findings exist:** include the finding counts from
+`review-pr`'s output (for example, "0 critical, 2 important, 1 suggestion").
+For a no-findings result, the sole `## No findings` line is complete.
 
 Example valid body (findings present):
 
@@ -59,7 +59,7 @@ Example valid body (no findings):
 Run the validator before posting. Abort if it fails.
 
 ```bash
-./scripts/post_review.py validate /tmp/coderails-review-summary-$$.md
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/post_review.py" validate /tmp/coderails-review-summary-$$.md
 ```
 
 If exit code is non-zero, print the validation error and **stop** — do not post.

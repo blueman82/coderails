@@ -19,8 +19,10 @@ Config: !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.py" resolve-config`
 **Trigger:** Find the base branch with
 `git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@.*/@@'`.
 Use `main` if the command finds no branch. Then run
-`git diff --name-only $(git merge-base HEAD <base>)..HEAD`. Check the changed
-paths against `config.engineering_principles_paths`.
+`git diff --name-only $(git merge-base HEAD <base>)`. This compares the base
+with the working tree, including tracked changes that `push.py` will stage.
+Also include each new file named by a `--add` flag. Check these paths against
+`config.engineering_principles_paths`.
 
 If **no files match**, skip to push.
 

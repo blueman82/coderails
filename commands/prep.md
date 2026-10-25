@@ -38,9 +38,9 @@ Extract four fields from `$ARGUMENTS`:
    - `feature/*` → `Task`
    - `bug/*` / `bugfix/*` → `Bug`
 
-3. **Summary** (optional). Look for `--summary "..."` flag (handle both double and single quotes; take everything up to the matching close-quote). If a flag-quoted summary isn't present, generate one by humanising the branch name (e.g. `feature/user-auth` → "Implement user auth").
+3. **Summary** (optional). Use `--summary "..."` or the first quoted value after the branch and optional issue type. Handle both quote styles. If neither exists, generate one by humanising the branch name (e.g. `feature/user-auth` → "Implement user auth").
 
-4. **Description** (optional). Look for `--description "..."` or `--desc "..."`. If absent, generate one from the branch name and issue type. Always include `Branch: <branch>` in the final description body.
+4. **Description** (optional). Use `--description "..."`, `--desc "..."`, or the second positional quoted value after the summary. If none exists, generate one from the branch name and issue type. Always include `Branch: <branch>` in the final description body.
 
 ### Accepted input shapes
 

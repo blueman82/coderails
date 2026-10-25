@@ -38,7 +38,7 @@ HEAD_SHA=$(gh pr view "$ARGUMENTS" --json headRefOid -q .headRefOid)
 Run the validator before posting. Abort if it fails — do not post.
 
 ```bash
-./scripts/post_evals.py validate-structure <evals_json_path> "$ARGUMENTS" "$HEAD_SHA"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/post_evals.py" validate-structure <evals_json_path> "$ARGUMENTS" "$HEAD_SHA"
 ```
 
 If exit code is non-zero, print the validation error and **stop** — do not post.
@@ -48,7 +48,7 @@ If exit code is non-zero, print the validation error and **stop** — do not pos
 Run the discriminating-check gate before posting. Abort if it fails — do not post.
 
 ```bash
-./scripts/post_evals.py validate-discriminating <evals_json_path>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/post_evals.py" validate-discriminating <evals_json_path>
 ```
 
 If exit code is non-zero, print the validation error and **stop** — do not post.
@@ -56,7 +56,7 @@ If exit code is non-zero, print the validation error and **stop** — do not pos
 ## Step 4 — Compute result and read verification_level
 
 ```bash
-RESULT=$(./scripts/post_evals.py compute-result <evals_json_path>)
+RESULT=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/post_evals.py" compute-result <evals_json_path>)
 VERIFICATION_LEVEL=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["verification_level"])' <evals_json_path>)
 ```
 
@@ -98,7 +98,7 @@ Before posting, validate the composed body embeds the artifact correctly
 (required at verification_level 0; a no-op exit-0 at verification_level 1/2):
 
 ```bash
-./scripts/post_evals.py validate-embed <evals_json_path> /tmp/coderails-evals-body-$$.md
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/post_evals.py" validate-embed <evals_json_path> /tmp/coderails-evals-body-$$.md
 ```
 
 If exit code is non-zero, print the validation error and **stop** — do not post.

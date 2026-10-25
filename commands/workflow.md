@@ -127,6 +127,12 @@ Pick at least 2 agents and no more than 3. Give each agent the full design page.
 
 ## Phase 2 — Code (interactive pause)
 
+Before implementation starts, invoke `/coderails:task-evals` at PR scope.
+Freeze the suite from the task goal and any completed design page. Record its
+path for Phase 3. If the goal is too unclear to write meaningful evals, resolve
+that gap before coding. Do not create a new suite after implementation and
+present it as a pre-build freeze.
+
 Hand control back to the user. They will:
 
 1. Point his editor at the worktree

@@ -60,8 +60,9 @@ now**.
 - If given several claims, treat each **independently** — evidence for one never
   carries another. Verify every one; don't stop at the first.
 - Break each claim into independently-checkable sub-parts.
-- For each, either **locate** durable evidence (`repo_inspect` read/grep/glob) or
-  **produce** it (`tests_run`, `cmd_run`, `repo_inspect` log/show/wc), then quote it per rule 4.
+- For each, either **locate** durable evidence (`repo_inspect` read/list/grep/status/log
+  or `diff_read`) or **produce** it (`tests_run` or `cmd_run`). Quote the
+  relevant source or result per rule 4.
 - Keep sourced facts separate from any step you could not fully source.
 
 ## Verdict rubric (no partial pass)
