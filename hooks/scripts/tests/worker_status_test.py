@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pin worker statuses: valid/invalid per status, unknown refused, decision request, graph_semantics untouched."""
+"""Pin worker statuses, decision requests, and their graph-semantics boundary."""
 
 from __future__ import annotations
 
@@ -89,16 +89,21 @@ class ValidateTests(unittest.TestCase):
             ws.to_decision_request({"status": "NOPE"})
         self.assertEqual(str(caught.exception), "unknown_status")
 
-    def test_graph_semantics_untouched_and_codex_copy_in_sync(self) -> None:
-        """Negative control: graph_semantics is unchanged vs origin/main, and the Codex copy is byte-identical."""
-        for path in (
-            "skills/agentic-loop/scripts/graph_semantics.py",
-            "packages/codex/skills/agentic-loop/scripts/graph_semantics.py",
-            "packages/graph-semantics/graph_semantics.py",
-        ):
-            source = (ROOT / path).read_text()
-            self.assertNotIn("worker_status", source, path)
-            self.assertNotIn("NEEDS_DECISION", source, path)
+    def test_graph_semantics_and_worker_status_copies_in_sync(self) -> None:
+        """Graph semantics stays free of status storage; provider copies stay equal."""
+        semantics = [
+            (ROOT / path).read_bytes()
+            for path in (
+                "skills/agentic-loop/scripts/graph_semantics.py",
+                "packages/codex/skills/agentic-loop/scripts/graph_semantics.py",
+                "packages/graph-semantics/graph_semantics.py",
+            )
+        ]
+        self.assertEqual(semantics[0], semantics[1])
+        self.assertEqual(semantics[0], semantics[2])
+        source = semantics[0].decode()
+        self.assertNotIn("worker_status", source)
+        self.assertNotIn("NEEDS_DECISION", source)
         digest = [hashlib.sha256((ROOT / p / "worker_status.py").read_bytes()).hexdigest() for p in
                   ("skills/agentic-loop/scripts", "packages/codex/skills/agentic-loop/scripts")]  # fmt: skip
         self.assertEqual(digest[0], digest[1])
