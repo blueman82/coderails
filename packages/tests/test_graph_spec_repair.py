@@ -45,6 +45,28 @@ def failed_review(state: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], proposal["state"])
 
 
+class StampedJoinIntegrityTests(unittest.TestCase):
+    """A stamped graph must not acquire an undeclared completion join."""
+
+    def test_unexpected_join_cannot_complete_a_freeze_node(self) -> None:
+        """Both provider readers refuse a core-valid join on S2.7c."""
+        for name in PROVIDERS:
+            with self.subTest(name), tempfile.TemporaryDirectory() as scratch:
+                controller, _ = instantiate_loop(name, scratch, "full", "1")
+                state = controller.read()
+                state["graph"]["joins"]["S2.7c"] = {
+                    "id": "S2.7c",
+                    "mode": "all",
+                    "inputs": ["S2"],
+                    "released": False,
+                }
+                graph_semantics.validate(state)
+                controller.path.write_text(json.dumps(state))
+                result = controller.run("inspect")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("spec_join_inputs", result.stderr)
+
+
 class ConditionalRepairTests(unittest.TestCase):
     """Run each provider's record-repair command against a real stamped FULL graph."""
 

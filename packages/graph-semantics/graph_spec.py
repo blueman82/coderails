@@ -328,7 +328,7 @@ def check(state: dict[str, Any]) -> None:
             raise SpecError("spec_unknown_node", f"nodes not in the spec: {sorted(nodes - wanted)}")
         if wanted - nodes:
             raise SpecError("spec_node_missing", f"spec nodes absent: {sorted(wanted - nodes)}")
-        have = {j: set(record["inputs"]) for j, record in graph["joins"].items() if j in built["joins"]}
+        have = {j: set(record["inputs"]) for j, record in graph["joins"].items()}
         if have != built["joins"]:
             raise SpecError("spec_join_inputs", "a spec join is missing or does not take every unit it must")
     present = {(edge["from"], edge["to"]) for edge in graph["edges"]}
