@@ -141,8 +141,9 @@ class DecisionCliTests(StoreCase):
                 self.assertEqual((len(rows), dr.verify_chain(rows)), (1, []))
                 rows[0]["decision"] = "tampered"
                 rows[0]["muninn"] = {"state": "pending"}
-                self.put({**self.state(), "decisions_absorbed": rows})
+                self.put({**self.state(), "decisions_absorbed": rows, "updated_at": "2000-01-01T00:00:00+00:00"})
                 before = self.state()
+                before_bytes = self.path.read_bytes()
                 code, out = self.run_graph(
                     script,
                     "record-decision",
@@ -162,6 +163,17 @@ class DecisionCliTests(StoreCase):
                 code, out = self.run_graph(script, "flush-decisions", str(self.path), "--session", SESSION)
                 self.assertEqual((code, out.get("reason_code")), (2, "decision_invalid_chain"))
                 self.assertEqual(self.state(), before)
+                self.assertEqual(self.path.read_bytes(), before_bytes)
+
+    def test_foreign_flush_preserves_state_bytes(self) -> None:
+        """A foreign caller is rejected inside the lock before either provider stamps state."""
+        for script in GRAPH_SCRIPTS:
+            with self.subTest(provider=script):
+                self.put({**fixture.state(), "session_id": SESSION, "updated_at": "2000-01-01T00:00:00+00:00"})
+                before = self.path.read_bytes()
+                code, out = self.run_graph(script, "flush-decisions", str(self.path), "--session", "foreign-session")
+                self.assertEqual((code, out.get("reason_code")), (2, "decision_wrong_session"))
+                self.assertEqual(self.path.read_bytes(), before)
 
     def test_degraded_record_can_flush_with_valid_user_quote(self) -> None:
         """A short approval degrades, then the native flush command syncs the same row."""

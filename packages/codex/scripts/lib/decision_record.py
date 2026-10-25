@@ -343,15 +343,26 @@ def flush_pending(
     cite_quote: str | None = None,
 ) -> dict[str, Any]:
     """Retry every row still pending or degraded (teardown). Returns {synced: [{seq, muninn}], exit_code}."""
-    state = transition(path, lambda s: s)  # identity transition: a read under the provider's lock
-    if state.get("session_id") != session:
-        _trace("decision.flush", "refused", "decision_wrong_session", session, None)
-        return {"synced": [], "reason_code": "decision_wrong_session", "exit_code": 2}
+    refused: dict[str, Any] = {}
+    def checked(state: dict[str, Any]) -> dict[str, Any]:
+        # Provider transitions may stamp even an identity transform. Reject before that write.
+        if state.get("session_id") != session:
+            refused.update(reason="decision_wrong_session", loop_id=None)
+            raise ValueError("wrong_session")
+        try:
+            ensure_chain(state)
+        except ValueError:
+            refused.update(reason="decision_invalid_chain", loop_id=str(state.get("loop_id")))
+            raise
+        return state
     try:
-        ensure_chain(state)
+        state = transition(path, checked)
     except ValueError:
-        _trace("decision.flush", "refused", "decision_invalid_chain", session, str(state.get("loop_id")))
-        return {"synced": [], "reason_code": "decision_invalid_chain", "exit_code": 2}
+        if not refused:
+            raise
+        reason = refused["reason"]
+        _trace("decision.flush", "refused", reason, session, refused["loop_id"])
+        return {"synced": [], "reason_code": reason, "exit_code": 2}
     if any(_as_row(row.get("muninn")).get("state") in {"syncing", "unknown"} for row in map(_as_row, _rows(state))):
         _trace("decision.flush", "degraded", "decision_sync_unknown", session, str(state.get("loop_id")))
         return {"synced": [], "reason_code": "decision_sync_unknown", "exit_code": 3}
