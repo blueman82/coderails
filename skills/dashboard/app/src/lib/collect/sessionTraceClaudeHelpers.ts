@@ -1,5 +1,6 @@
 import { TRACE_SCHEMA_VERSION, serializeTraceEvent, type SourceRef, type TraceAttribute, type TraceCollectionDeps, type TraceEvent, type TraceManifest, type NativeSessionSummary } from "./sessionTraceSchema";
 import { record, nonempty } from "./sessionTraceSchema";
+import { nodeAttributes } from "./nodeDisplay";
 
 // Claude's index is deliberately disposable. Native transcript bytes are read
 // again for detail requests and are never copied into the index.
@@ -257,7 +258,7 @@ export function makeEvent(sessionId: string, src: Source, ordinal: number, row: 
   if (ownership) {
     attributes["coderails.loop.id"] = String(ownership.loop_id);
     attributes["coderails.wave.id"] = String(ownership.wave_id);
-    attributes["coderails.node.id"] = String(ownership.node_id);
+    Object.assign(attributes, nodeAttributes(String(ownership.node_id)));
     attributes["coderails.graph.revision"] = Number(ownership.revision);
   }
   if (childId && ownership) attributes["coderails.child.id"] = childId;

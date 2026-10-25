@@ -85,15 +85,14 @@ class PermitsTests(unittest.TestCase):
         self.assertTrue(self.permits("deploy")["requires_approval"])
         self.assertFalse(self.permits("destructive_shell")["requires_approval"])
 
-    def test_max_prs_counts_only_executed_merges_for_this_authority(self) -> None:
-        """Only executed merge receipts carrying this authority id spend its budget; pushes do not."""
-        self.grant(max_prs=2)
+    def test_max_prs_counts_all_executed_merges_in_the_session(self) -> None:
+        """A renewed grant cannot reset the session budget; pushes do not spend it."""
+        self.grant(max_prs=3)
         self.execute("r3", action="git_push")
         self.execute("r1", authority_id=None)  # type: ignore[arg-type]
         self.execute("r2", authority_id="other")
         self.assertTrue(self.permits("merge")["allow"])
         self.execute("r3", authority_id="auth-1")
-        self.execute("r4", authority_id="auth-1")
         refused = self.permits("merge")
         self.assertEqual((refused["allow"], refused["reason"]), (False, "max_prs_exceeded"))
         self.assertTrue(self.permits("push_main")["allow"])
@@ -157,7 +156,15 @@ class PermitsTests(unittest.TestCase):
 
     def test_mirror_is_byte_identical(self) -> None:
         """The Codex copy is the Claude file."""
-        for name in ("authority_permits.py", "receipt_gate.py", "action_receipt.py", "authority_object.py"):
+        for name in (
+            "authority_permits.py",
+            "receipt_gate.py",
+            "action_receipt.py",
+            "authority_object.py",
+            "advisory_merge.py",
+            "merge_budget.py",
+            "merge_hook_note.py",
+        ):
             self.assertTrue(
                 filecmp.cmp(ROOT / "scripts/lib" / name, ROOT / "packages/codex/scripts/lib" / name, shallow=False)
             )

@@ -71,7 +71,7 @@
       ],
       "default": null,
       "status": "enforced_by_code",
-      "description": "First PR number the wiki-ingest debt merge gate covers; absent or empty disables the gate. A literal null is rejected as a bad type, as before."
+      "description": "First PR number the wiki-ingest debt merge gate covers. An absent key disables the gate; an empty or null value is invalid."
     },
     "worktree_base": {
       "type": [
@@ -148,16 +148,16 @@
         "string",
         "null"
       ],
-      "default": "enforce",
+      "default": "off",
       "enum": [
         "enforce",
         "advisory",
         "off"
       ],
       "status": "enforced_by_code",
-      "description": "enforce (default, also with no config or no key) = gh pr merge, scripts/merge.py and git push to main/master need an owner-signed single-use receipt and honour the session authority; advisory = trace and warn only; off = switch the gate off.",
+      "description": "Absent = off; the shipped workflow uses advisory. Explicit enforce requires a signed receipt for guarded merges and pushes. Invalid values are rejected by strict config consumers.",
       "control": true,
-      "on_value": "enforce"
+      "on_value": "advisory"
     },
     "diff_manifest": {
       "type": [
@@ -193,14 +193,13 @@
       "status": "enforced_by_code",
       "description": "Integrity attestation settings.",
       "properties": {
+        "enabled": {
+          "type": ["boolean", "null"], "default": false, "status": "enforced_by_code",
+          "description": "true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live."
+        },
         "machine_user": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null,
-          "status": "enforced_by_code",
-          "description": "GitHub login that must post the integrity-review status; null or absent = local gate inactive."
+          "type": ["string", "null"], "default": null, "status": "enforced_by_code",
+          "description": "Deprecated. A non-empty legacy login remains the required local status author until enabled is true."
         }
       }
     },
@@ -225,6 +224,16 @@
           "description": "true (default) = eval artifacts must be signed; the local key is created on first use, and signing refuses when ssh-keygen is unavailable. false opts out.",
           "control": true,
           "on_value": true
+        }
+      }
+    },
+    "memory": {
+      "type": ["object", "null"], "default": null, "status": "enforced_by_code",
+      "description": "Typed-memory settings.",
+      "properties": {
+        "backend": {
+          "type": ["string", "null"], "default": "muninn", "status": "enforced_by_code",
+          "description": "muninn (default) = Muninn is the authoritative typed-memory store and a missing or refusing Muninn fails with a reason code; off = no typed memory at all (reason memory_backend_off, traced, Markdown is never read or written). Any other value fails with memory_backend_invalid."
         }
       }
     }

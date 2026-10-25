@@ -15,6 +15,10 @@ GENERATED_SEMANTICS = (
     "skills/agentic-loop/scripts/graph_semantics.py",
     "packages/codex/skills/agentic-loop/scripts/graph_semantics.py",
 )
+GENERATED_NODE_METADATA = (
+    "skills/agentic-loop/scripts/node_metadata.py",
+    "packages/codex/skills/agentic-loop/scripts/node_metadata.py",
+)
 
 
 def run_tool(arguments: list[str], root: Path, environment: dict[str, str] | None = None) -> bool:
@@ -97,6 +101,13 @@ def check_materialization(root: Path) -> bool:
         if not copy.is_file() or copy.read_bytes() != source.read_bytes():
             print(f"quality: generated graph semantics drift: {copy}", file=sys.stderr)
             passed = False
+    metadata_source = root / "packages/graph-semantics/node_metadata.py"
+    if metadata_source.is_file():
+        for relative in GENERATED_NODE_METADATA:
+            copy = root / relative
+            if not copy.is_file() or copy.read_bytes() != metadata_source.read_bytes():
+                print(f"quality: generated node metadata drift: {copy}", file=sys.stderr)
+                passed = False
     output_source = root / "hooks/scripts/test_output.py"
     output_copy = root / "packages/codex/hooks/scripts/test_output.py"
     if output_source.is_file() and (

@@ -123,6 +123,15 @@ class CliTests(unittest.TestCase):
         )
         self.assertFalse(list((self.base / "s1").glob("receipts/*.json")))
 
+    def test_invalid_expiry_is_refused_before_signing(self) -> None:
+        """Nonpositive, nonfinite and overflowing durations never create a receipt."""
+        for hours in ("0", "-1", "nan", "inf", "1e300"):
+            with self.subTest(hours=hours):
+                code, _, err = self.approve("--expires-in-hours", hours)
+                self.assertEqual(code, 2, err)
+                self.assertIn("receipt_refused_expiry_invalid", err)
+        self.assertFalse(list((self.base / "s1").glob("receipts/*.json")))
+
     def test_receipt_cap(self) -> None:
         """The 51st receipt of a session is refused."""
         for _ in range(ar.MAX_RECEIPTS):
@@ -192,7 +201,7 @@ class CliTests(unittest.TestCase):
 
 
 class AuthorityKeysTests(unittest.TestCase):
-    """init/install-root/show: owner-run key setup that never runs sudo and never overwrites."""
+    """Init and show for optional user-tier signing; key setup never overwrites."""
 
     def setUp(self) -> None:
         """Temp key directory."""
@@ -222,18 +231,6 @@ class AuthorityKeysTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()) as err:
             self.assertEqual(keys.init(self.dir, tty_ok=lambda: True, extra=("-q", "-N", "")), 2)
         self.assertIn("key_exists", err.getvalue())
-
-    def test_install_root_only_prints(self) -> None:
-        """The sudo commands are printed for the owner; nothing is installed here."""
-        with contextlib.redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(keys.install_root(self.dir), 0)
-        text = out.getvalue()
-        self.assertIn("sudo install", text)
-        self.assertIn("/Library/Application Support/Coderails/receipt_signers", text)
-        self.assertNotIn(
-            "subprocess",
-            (REPO / "scripts/authority_keys.py").read_text().split("def install_root")[1].split("def _quote")[0],
-        )
 
 
 if __name__ == "__main__":

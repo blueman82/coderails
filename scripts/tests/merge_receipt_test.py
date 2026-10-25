@@ -7,8 +7,6 @@ Only the evidence gates (review/eval/manifest) and GitHub plumbing are stubbed; 
 
 from __future__ import annotations
 
-import contextlib
-import io
 import json
 import os
 import subprocess
@@ -19,22 +17,21 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from hooks.scripts.tests.receipt_test_support import (  # noqa: E402
     REPOSITORY,
+    git,
     make_owner,
     make_repo,
     signed_receipt,
     store,
 )
+from scripts.tests.merge_receipt_driver import DRIVER  # noqa: E402
 
 _loaded = set(sys.modules)
-from scripts import merge  # noqa: E402
-from scripts.lib import git_common as git  # noqa: E402
-from scripts.lib import manifest_policy, receipt_gate  # noqa: E402
+from scripts.lib import receipt_gate  # noqa: E402
 
 for _name in set(sys.modules) - _loaded:  # keep Claude's scripts.* out of the cache: the Codex suites import their own
     if _name.startswith("scripts."):
@@ -44,55 +41,6 @@ for _name in set(sys.modules) - _loaded:  # keep Claude's scripts.* out of the c
             vars(sys.modules[_parent]).pop(_leaf, None)
 
 SHA = "f" * 40
-DENIED = {"allow": False, "reason": "authority_denied"}
-DRIVER = """
-import os, sys, time
-from pathlib import Path
-from unittest import mock
-sys.path.insert(0, os.environ["REPO_ROOT"])
-from scripts import merge
-from scripts.lib import action_receipt as ar
-from scripts.lib import git_common as git
-
-fields = {"state": "OPEN", "headRefOid": os.environ["SHA"], "title": "t", "headRefName": "feature"}
-patches = [
-    mock.patch.object(git, "require_repo"), mock.patch.object(git, "main", return_value="main"),
-    mock.patch.object(git, "protected", return_value=False), mock.patch.object(git, "sync_main_branch"),
-    mock.patch.object(git, "pr_field", side_effect=lambda n, name, fb="": fields.get(name, fb)),
-    mock.patch.object(merge, "verify_gates"), mock.patch.object(merge.manifest_policy, "gate"),
-    mock.patch.object(merge, "cleanup"),
-]
-if os.environ.get("NO_SEAM"):  # negative control: the seam call removed
-    patches.append(mock.patch.object(merge, "require_merge_receipt"))
-def rendezvous(tag):  # both processes arrive before either goes on
-    if not os.environ.get("BARRIER"):
-        return
-    Path(os.environ["BARRIER"], f"{tag}-{os.getpid()}").write_text("")
-    deadline = time.time() + 15
-    while len(list(Path(os.environ["BARRIER"]).glob(f"{tag}-*"))) < 2 and time.time() < deadline:
-        time.sleep(0.01)
-if os.environ.get("NAIVE_CLAIM"):  # negative control: exists()-then-write instead of O_EXCL
-    def naive(path):
-        marker = path.with_suffix(".consumed")
-        seen = marker.exists()
-        rendezvous("chk")
-        if seen:
-            return False
-        marker.write_text("")
-        return True
-    patches += [mock.patch.object(ar, "consume", side_effect=naive),
-                mock.patch.object(ar, "execute", side_effect=lambda p: True)]
-elif os.environ.get("BARRIER"):  # both finish the is-it-consumed check before either claims
-    real = ar.is_consumed
-    def waiting(path):
-        seen = real(path)
-        rendezvous("in")
-        return seen
-    patches.append(mock.patch.object(ar, "is_consumed", side_effect=waiting))
-for patch in patches:
-    patch.start()
-raise SystemExit(merge.main(["7"]))
-"""
 
 
 class MergeReceiptTests(unittest.TestCase):
@@ -101,11 +49,13 @@ class MergeReceiptTests(unittest.TestCase):
     plugin = ROOT  # the Codex test subclasses this with packages/codex
 
     def setUp(self) -> None:
-        """Build the sandbox."""
+        """Build the isolated repository, owner key, and fake GitHub client."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.tmp = Path(temporary.name)
-        self.repo = make_repo(self.tmp / "repo")
+        self.repo = make_repo(self.tmp / "repo").resolve()
+        (self.repo / ".coderails").mkdir()
+        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: enforce\n")
         keys = self.tmp / "home" / ".coderails" / "keys"
         self.key, signers = make_owner(keys)
         signers.rename(keys / "receipt_signers")
@@ -117,7 +67,8 @@ class MergeReceiptTests(unittest.TestCase):
         gh.write_text(
             "#!/bin/sh\n"
             f'case "$1 $2" in\n"pr view") echo \'{{"baseRefName":"main","headRefOid":"{SHA}"}}\';;\n'
-            f'"pr merge") echo "$$" >> "{self.log}";;\nesac\n'
+            f'"pr merge") if [ "$GH_MERGE_FAIL" = 1 ]; then exit 1; fi; echo "$$" >> "{self.log}";;\n'
+            '"pr list") echo \'[{"number":7}]\';;\nesac\n'
         )
         gh.chmod(0o755)
         self.env = {
@@ -130,19 +81,27 @@ class MergeReceiptTests(unittest.TestCase):
         }  # fmt: skip
 
     def mint(
-        self, rid: str = "r1", key: Path | None = None, session: str = "s1", number: int = 7, **over: object
+        self,
+        rid: str = "r1",
+        key: Path | None = None,
+        session: str = "s1",
+        number: int = 7,
+        target: str | None = None,
+        **over: object,
     ) -> str:
         """Store a receipt for the merge as the owner would have signed it (bound to the live PR)."""
         bind = {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": SHA}
+        command = f"python3 {self.plugin / 'scripts/merge.py'} {target or number} --expected-head {SHA}"
         rec = signed_receipt(
-            key or self.key, "merge", f"python3 scripts/merge.py {number}", str(self.repo), "main", bind, session,
+            key or self.key, "merge", command, str(self.repo),
+            git(self.repo, "branch", "--show-current"), bind, session,
             receipt_id=rid, **over,
         )  # fmt: skip
         store(self.loop, rec, session)
         return rid
 
     def grant(self, **over: object) -> None:
-        """A live authority for s1."""
+        """Write a live session authority with optional overrides."""
         obj = {
             "authority_id": "auth-1", "loop_id": None, "session_id": "s1", "scope": ["code"], "denied": [],
             "max_prs": 3, "expires_at": "2999-01-01T00:00:00+00:00", "revocable": True,
@@ -160,7 +119,7 @@ class MergeReceiptTests(unittest.TestCase):
         )  # fmt: skip
 
     def run_merge(self, **env: str) -> tuple[int, str]:
-        """Run one child to completion; return (exit code, stderr)."""
+        """Run one child to completion; return its exit code and stderr."""
         child = self.spawn(**env)
         _, err = child.communicate(timeout=60)
         return child.returncode, err
@@ -174,11 +133,11 @@ class MergeReceiptTests(unittest.TestCase):
                     stream.close()
 
     def merges(self) -> int:
-        """How many times fake gh saw `pr merge`."""
+        """Count fake gh merge calls."""
         return len(self.log.read_text().splitlines()) if self.log.exists() else 0
 
     def refused(self, code: str, **env: str) -> None:
-        """merge.py exits non-zero, names the reason, and never reaches gh pr merge."""
+        """Require refusal before the first remote merge call."""
         rc, err = self.run_merge(**env)
         self.assertNotEqual(rc, 0, err)
         self.assertIn(code, err)
@@ -187,6 +146,32 @@ class MergeReceiptTests(unittest.TestCase):
     def test_no_receipt_is_denied(self) -> None:
         """(a) merge.py with no receipt: no_receipt, and gh is never called."""
         self.refused("no_receipt")
+
+    def test_enforced_merge_needs_a_literal_expected_head(self) -> None:
+        """A bare helper command cannot bind a signed receipt to an unseen future PR head."""
+        self.mint()
+        self.refused("binding_unknown", NO_EXPECTED="1")
+
+    def test_direct_executable_receipt_cannot_authorise_python3_helper(self) -> None:
+        """The supported Python command has a different hash from direct executable invocation."""
+        command = f"{self.plugin / 'scripts/merge.py'} 7 --expected-head {SHA}"
+        bind = {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": SHA}
+        rec = signed_receipt(
+            self.key,
+            "merge",
+            command,
+            str(self.repo),
+            git(self.repo, "branch", "--show-current"),
+            bind,
+        )
+        store(self.loop, rec, "s1")
+        self.refused("hash_mismatch")
+
+    def test_stale_expected_head_is_denied_before_receipt_use(self) -> None:
+        """A moved PR head leaves the matching receipt unconsumed."""
+        self.mint()
+        self.refused("PR head changed", EXPECTED_SHA="a" * 40)
+        self.assertFalse((self.loop / "s1" / "receipts" / "r1.consumed").exists())
 
     def test_direct_invocation_consumes_and_executes_a_signed_receipt(self) -> None:
         """(e) No hook ran: merge.py verifies, consumes and marks executed; the replay is refused."""
@@ -197,8 +182,32 @@ class MergeReceiptTests(unittest.TestCase):
         self.assertTrue((base / "r1.consumed").exists() and (base / "r1.executed").exists())
         self.refused_after_one("consumed")
 
+    def test_direct_merge_rejects_a_receipt_for_another_pr(self) -> None:
+        """Two PRs can share a target and head SHA; the signed PR number must still match."""
+        self.mint(number=8)
+        self.refused("hash_mismatch")
+        base = self.loop / "s1" / "receipts"
+        self.assertFalse((base / "r1.consumed").exists() or (base / "r1.executed").exists())
+
+    def test_direct_merge_refuses_renamed_signed_receipt(self) -> None:
+        """The direct merge path must bind a receipt's filename to its signed ID too."""
+        self.mint()
+        base = self.loop / "s1" / "receipts"
+        (base / "r1.json").rename(base / "r2.json")
+        self.refused("malformed")
+
+    def test_two_receipts_cannot_exceed_one_merge_budget(self) -> None:
+        """Distinct receipts must not let concurrent direct merges pass the same session cap."""
+        self.grant(max_prs=1)
+        self.mint("r1")
+        self.mint("r2")
+        children = [self.spawn(DELAY_PERMITS="1") for _ in range(2)]
+        results = [child.communicate(timeout=60)[1] for child in children]
+        self.assertEqual(self.merges(), 1, results)
+        self.assertEqual(sorted(child.returncode for child in children), [0, 1], results)
+
     def refused_after_one(self, code: str, **env: str) -> None:
-        """A further run is refused with `code` and does not add a second gh pr merge."""
+        """Require refusal after one earlier remote merge call."""
         rc, err = self.run_merge(**env)
         self.assertNotEqual(rc, 0, err)
         self.assertIn(code, err)
@@ -228,14 +237,55 @@ class MergeReceiptTests(unittest.TestCase):
         self.grant(denied=["merge"])
         self.refused("authority_denied")
         self.grant(denied=[], max_prs=1)
+        self.mint("done")
         executed = self.loop / "s1" / "receipts" / "done.json"
-        executed.write_text(json.dumps({"action": "merge", "authority_id": "auth-1"}))
         executed.with_suffix(".executed").write_text("")
         self.refused("max_prs_exceeded")
         self.assertFalse((self.loop / "s1" / "receipts" / "r1.consumed").exists())
 
+    def test_advisory_still_obeys_live_merge_denial_and_cap(self) -> None:
+        """A missing receipt is advisory, but a live authority denial or spent cap stops the remote merge."""
+        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: advisory\n")
+        self.grant(denied=["merge"])
+        self.refused("authority_denied")
+        self.grant(denied=[], max_prs=0)
+        self.refused("max_prs_exceeded")
+
+    def test_advisory_unreceipted_merge_spends_one_live_budget_slot(self) -> None:
+        """One successful advisory merge without a receipt uses the live max_prs budget."""
+        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: advisory\n")
+        self.grant(max_prs=1)
+        first, err = self.run_merge()
+        self.assertEqual(first, 0, err)
+        markers = list((self.loop / "s1" / "merges").glob("*.json"))
+        self.assertEqual(len(markers), 1)
+        self.assertEqual(
+            json.loads(markers[0].read_text()),
+            {"pr": "7", "repository": REPOSITORY, "ref": "refs/heads/main", "head": SHA, "state": "completed"},
+        )
+        self.refused_after_one("max_prs_exceeded")
+
+    def test_confirmed_failed_advisory_merge_releases_budget_slot(self) -> None:
+        """A failed remote merge whose PR remains open does not spend the session cap."""
+        (self.repo / ".coderails/workflow.config.yaml").write_text("action_authority: advisory\n")
+        self.grant(max_prs=1)
+        failed, _ = self.run_merge(GH_MERGE_FAIL="1")
+        self.assertNotEqual(failed, 0)
+        self.assertEqual(list((self.loop / "s1" / "merges").glob("*.json")), [])
+        success, err = self.run_merge()
+        self.assertEqual((success, self.merges()), (0, 1), err)
+
+    def test_auto_and_branch_targets_can_use_exact_command_receipts(self) -> None:
+        """The hook and direct seam accept receipts for supported merge.py targets."""
+        git(self.repo, "switch", "-q", "-c", "feature/x")
+        for target in ("auto", "feature/x"):
+            with self.subTest(target=target):
+                self.mint(rid=target.replace("/", "_"), target=target)
+                rc, err = self.run_merge(MERGE_TARGET=target)
+                self.assertEqual(rc, 0, err)
+
     def test_no_session_is_denied(self) -> None:
-        """No session id in the environment: nothing can be bound."""
+        """An absent session cannot receive a bound receipt."""
         self.mint()
         rc, err = self.run_merge(CLAUDE_SESSION_ID="")
         self.assertNotEqual(rc, 0)
@@ -277,8 +327,9 @@ class MergeReceiptTests(unittest.TestCase):
         rc, err = self.run_merge(NO_SEAM="1")
         self.assertEqual((rc, self.merges()), (0, 1), err)
 
-    def hook_consume(self, command: str = "python3 scripts/merge.py 7") -> None:
+    def hook_consume(self, command: str | None = None) -> None:
         """Run the real PreToolUse hook on `command` so it consumes the receipt (phase 1)."""
+        command = command or f"python3 {self.plugin / 'scripts/merge.py'} 7 --expected-head {SHA}"
         payload = {"session_id": "s1", "cwd": str(self.repo), "tool_name": "Bash", "tool_input": {"command": command}}
         done = subprocess.run(
             [sys.executable, str(self.plugin / "hooks/scripts/action_authority_gate.py")], input=json.dumps(payload),
@@ -298,6 +349,16 @@ class MergeReceiptTests(unittest.TestCase):
         self.assertEqual((rc, self.merges()), (0, 1), err)
         self.refused_after_one("consumed")
 
+    def test_branch_target_hook_note_matches_direct_merge(self) -> None:
+        """A branch command's hook note names the resolved PR, then direct merge accepts that receipt."""
+        git(self.repo, "switch", "-q", "-c", "feature/x")
+        self.mint(target="feature/x")
+        self.hook_consume(f"python3 {self.plugin / 'scripts/merge.py'} feature/x --expected-head {SHA}")
+        marker = self.loop / "s1" / "receipts" / "r1.consumed"
+        self.assertEqual(json.loads(marker.read_text())["number"], "7")
+        rc, err = self.run_merge(MERGE_TARGET="feature/x")
+        self.assertEqual((rc, self.merges()), (0, 1), err)
+
     def test_hook_consumed_receipt_older_than_300_seconds_is_refused(self) -> None:
         """The two phases must be close in time: a stale hook note no longer licenses the merge."""
         self.mint()
@@ -310,7 +371,7 @@ class MergeReceiptTests(unittest.TestCase):
     def test_hook_consumed_for_another_pr_is_refused(self) -> None:
         """A receipt the hook consumed for merge.py 8 does not license merge.py 7."""
         self.mint(number=8)
-        self.hook_consume("python3 scripts/merge.py 8")
+        self.hook_consume(f"python3 {self.plugin / 'scripts/merge.py'} 8 --expected-head {SHA}")
         self.refused("consumed")
 
     def test_two_merge_py_runs_after_one_hook_consume_exactly_one_executes(self) -> None:
@@ -321,79 +382,6 @@ class MergeReceiptTests(unittest.TestCase):
         codes = sorted(child.wait(timeout=60) for child in children)
         self.close(children)
         self.assertEqual((codes[0], codes[1] != 0, self.merges()), (0, True, 1))
-
-
-class SeamSpyTests(unittest.TestCase):
-    """merge.py reaches authority_permits.permits through the shared gate, and calls the gate exactly once."""
-
-    def test_merge_main_calls_the_seam_once_before_gh_pr_merge(self) -> None:
-        """The order is: seam, then gh pr merge; a refusal from the seam stops before gh."""
-        order: list[str] = []
-        fields: dict[str, str] = {"state": "OPEN", "headRefOid": SHA, "title": "t", "headRefName": "feature"}
-
-        def run(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
-            del check
-            order.append("gh" if args[:3] == ("gh", "pr", "merge") else "other")
-            return subprocess.CompletedProcess(args, 0, "", "")
-
-        def field(number: str, name: str, fallback: str = "") -> str:
-            del number
-            return fields.get(name, fallback)
-
-        def seam_call(number: str) -> None:
-            del number
-            order.append("seam")
-
-        with (
-            mock.patch.object(git, "require_repo"), mock.patch.object(git, "main", return_value="main"),
-            mock.patch.object(git, "protected", return_value=False), mock.patch.object(git, "run", side_effect=run),
-            mock.patch.object(git, "pr_field", side_effect=field),
-            mock.patch.object(merge, "verify_gates"), mock.patch.object(manifest_policy, "gate"),
-            mock.patch.object(merge, "cleanup"),
-            mock.patch.object(merge, "require_merge_receipt", side_effect=seam_call) as seam,
-            contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()),
-        ):  # fmt: skip
-            self.assertEqual(merge.main(["7"]), 0)
-            seam.assert_called_once_with("7")
-            self.assertEqual(order, ["seam", "gh"])
-            order.clear()
-            seam.side_effect = receipt_gate.ReceiptRefusedError("no_receipt")
-            self.assertEqual(merge.main(["7"]), 1)
-            self.assertEqual(order, [])
-
-    def test_the_gate_asks_permits_about_merge(self) -> None:
-        """require_merge_receipt consults authority_permits.permits('merge') for the session first."""
-        with (
-            mock.patch.dict(os.environ, {"CLAUDE_SESSION_ID": "spy-session"}),
-            mock.patch.object(receipt_gate, "permits", return_value=DENIED) as spy,
-            mock.patch.object(receipt_gate, "append_row"),
-            mock.patch.object(receipt_gate, "resolve_mode", return_value=("enforce", False)),
-            self.assertRaises(receipt_gate.ReceiptRefusedError) as caught,
-        ):  # fmt: skip
-            receipt_gate.require_merge_receipt("7", "/nowhere")
-        self.assertIn("authority_denied", str(caught.exception))
-        self.assertEqual(spy.call_args.args[:2], ("spy-session", "merge"))
-
-    def test_the_gate_refuses_when_permits_omits_required_approval(self) -> None:
-        """A guarded action cannot proceed if its permit verdict omits the approval requirement."""
-        verdict = {"allow": True, "reason": "ok", "requires_approval": False, "authority_id": "auth-1"}
-        with (
-            mock.patch.dict(os.environ, {"CLAUDE_SESSION_ID": "spy-session"}),
-            mock.patch.object(receipt_gate, "permits", return_value=verdict),
-            mock.patch.object(receipt_gate, "append_row"),
-            mock.patch.object(receipt_gate, "resolve_mode", return_value=("enforce", False)),
-            self.assertRaises(receipt_gate.ReceiptRefusedError) as caught,
-        ):  # fmt: skip
-            refusal = receipt_gate.check_and_consume(
-                "spy-session",
-                [("merge", {})],
-                datetime.now(timezone.utc),
-                None,
-                None,
-            )
-            self.assertEqual(refusal, ("merge", "approval_requirement_missing"))
-            receipt_gate.require_merge_receipt("7", "/nowhere")
-        self.assertIn("approval_requirement_missing", str(caught.exception))
 
 
 if __name__ == "__main__":

@@ -134,8 +134,10 @@ fixing.
    stop, not a warning to log and push anyway.
 5. Invoke `$coderails-codex:push`.
 6. Spawn the installed `spec-reviewer` custom agent to review the current PR
-   head against this run's scope and manifest. Add `deploy-safety-reviewer`
-   only when the change has a production surface. Wait for and close each.
+   head against this run's scope and manifest. For a production surface, run
+   `deploy-safety-reviewer` via `python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role deploy-safety-reviewer --prompt-file <file> --cwd <exact-head-worktree>`
+   per [guarded role sessions](../using-coderails/references/guarded-role-sessions.md).
+   Wait for both results and close the spawned agent.
 7. Invoke `$coderails-codex:post-review <PR#>`.
 8. Invoke `$coderails-codex:post-evals <PR#>`.
 9. Invoke `$coderails-codex:merge`. Once the merge succeeds, append a terminal
@@ -189,7 +191,7 @@ path.
 
 **A non-zero exit that is neither a pass nor a rejection is still a
 refusal.** The worked example is a `pending` `integrity-review` status:
-`$coderails-codex:merge` exits non-zero because the integrity daemon has not
+`$coderails-codex:merge` exits non-zero because GitHub Actions has not
 yet posted its attestation — the gate has not rejected the PR, it has not
 yet attested it. Write `refused=merge` and clean up, exactly as for a
 rejection. **Never wait, poll, or retry for a gate to resolve**, and

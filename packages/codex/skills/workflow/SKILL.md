@@ -5,7 +5,7 @@ description: Run the full Coderails Codex change workflow from worktree preparat
 
 # Coderails workflow
 
-Use this for a complete code-change workflow. Invoke Coderails Codex skills explicitly and use `spawn_agent` only with installed Codex custom agents.
+Use this for a complete code-change workflow. Invoke Coderails Codex skills explicitly. Guarded reviewers run through the package-local `codex_role_session.py`; use `spawn_agent` for other installed Codex custom agents.
 
 Maintain the phases with `update_plan`. There are two required pauses: wait after preparation for the user to finish coding, then wait again for explicit merge approval.
 
@@ -27,12 +27,14 @@ Invoke `$coderails-codex:push`. Capture the pull request number and URL. Stop if
 
 ## 3. Native Codex review and evidence
 
-Review only the final pull-request head. Spawn the applicable installed Codex custom agents in parallel, normally including:
+Review only the final pull-request head. Select the applicable reviewers, normally including:
 
 - `source-auditor` for correctness and changed-code risks.
 - `spec-reviewer` for requirement and contract coverage.
 - `proof-author` for meaningful verification evidence.
 - `deploy-safety-reviewer` when deployment, migration, configuration, or rollback risk exists.
+
+Run `source-auditor` and `deploy-safety-reviewer` with `python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role <role> --prompt-file <file> --cwd <exact-head-worktree>` per [guarded role sessions](../using-coderails/references/guarded-role-sessions.md). Spawn `spec-reviewer` and `proof-author` as native custom agents.
 
 Give each agent the pull-request number, exact head SHA, relevant requirements, and a distinct review focus. Cap a review wave at three concurrent agents.
 

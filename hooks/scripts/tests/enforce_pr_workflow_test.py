@@ -132,7 +132,7 @@ class AuthorityEarlyDenialTests(HookTestCase):
         for command, calls in (("gh pr merge 5", 1), ("gh pr create", 0)):
             payload = {"session_id": "S1", "cwd": str(self.directory), "tool_input": {"command": command}}
             with (
-                mock.patch.object(hook, "read_payload", return_value=payload),
+                mock.patch.object(hook, "read_payload_strict", return_value=payload),
                 mock.patch.object(hook, "permits", return_value=allow) as spy,
             ):
                 hook.main()

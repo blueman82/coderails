@@ -17,7 +17,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts.lib.config import (
     config_value,
-    integrity_machine_user,
+    integrity_enabled,
+    integrity_status_login,
     load_config,
     report_findings,
     require_signatures,
@@ -41,7 +42,7 @@ engineering_principles_skill: coderails-codex:engineering-principles-bash
 sandbox_workers: false
 wiki_debt_epoch_pr: 80
 integrity_review:
-  machine_user: null
+  enabled: false
 evals:
   require_signatures: true
 """
@@ -97,7 +98,7 @@ class LoadConfigTests(ConfigCase):
         self.assertEqual(values["wiki_debt_epoch_pr"], 80)
         self.assertIsNone(values["worktree_script"])
         self.assertEqual(values["engineering_principles_paths"], ["**/*.sh"])
-        self.assertIsNone(values["integrity_review"]["machine_user"])
+        self.assertIs(values["integrity_review"]["enabled"], False)
         self.assertIs(values["evals"]["require_signatures"], True)
 
     def test_defaults_applied_for_absent_keys(self) -> None:
@@ -116,9 +117,16 @@ class LoadConfigTests(ConfigCase):
 
     def test_nested_typo(self) -> None:
         """A typo inside a typed section is flagged with its dotted key."""
-        _, findings = load_config(self.write("integrity_review:\n  machin_user: x\n"))
-        self.assertEqual(findings[0]["key"], "integrity_review.machin_user")
-        self.assertEqual(findings[0]["hint"], "integrity_review.machine_user")
+        _, findings = load_config(self.write("integrity_review:\n  enabld: true\n"))
+        self.assertEqual(findings[0]["key"], "integrity_review.enabld")
+        self.assertEqual(findings[0]["hint"], "integrity_review.enabled")
+
+    def test_legacy_integrity_login_stays_enforced_until_migration(self) -> None:
+        """An installed machine-user setting cannot silently turn off the local gate."""
+        path = self.write("integrity_review:\n  machine_user: attestor\n  enabled: false\n")
+        _, findings = load_config(path)
+        self.assertEqual(findings, [])
+        self.assertTrue(integrity_enabled(path))
 
     def test_enum_violation_is_a_bad_value_with_closest_hint(self) -> None:
         """A string outside the property's enum is config_bad_value naming the closest allowed value."""
@@ -155,16 +163,16 @@ class LoadConfigTests(ConfigCase):
         )
 
     def test_action_authority_enum(self) -> None:
-        """enforce|advisory|off are clean, absent defaults to enforce, anything else is config_bad_type."""
+        """The schema defaults to off; the runtime ignores unknown optional modes."""
         for value in ("enforce", "advisory", "off"):
             values, findings = load_config(self.write(f"action_authority: {value}\n"))
             self.assertEqual((values["action_authority"], findings), (value, []))
         values, findings = load_config(self.write("project: x\n"))
-        self.assertEqual((values["action_authority"], findings), ("enforce", []))
+        self.assertEqual((values["action_authority"], findings), ("off", []))
         values, findings = load_config(self.write("action_authority: bogus\n"))
         self.assertEqual((values["action_authority"], self.codes(findings)), ("bogus", ["config_bad_value"]))
         schema = json.loads((ROOT / "config.schema.json").read_text())["properties"]["action_authority"]
-        self.assertEqual((schema["status"], schema["default"]), ("enforced_by_code", "enforce"))
+        self.assertEqual((schema["status"], schema["default"]), ("enforced_by_code", "off"))
 
     def test_unreadable_never_raises(self) -> None:
         """Missing, torn (non-UTF-8) and directory paths fall back to defaults with one finding."""
@@ -196,16 +204,22 @@ class LoadConfigTests(ConfigCase):
 class ReaderTests(ConfigCase):
     """Re-pointed readers keep their old answers."""
 
-    def test_machine_user_and_signatures(self) -> None:
-        """A named attestor is returned; a literal null is inactive instead of the login 'null'."""
+    def test_integrity_toggle_and_signatures(self) -> None:
+        """Local status checks turn on only for explicit true."""
         with contextlib.redirect_stderr(io.StringIO()):
-            self._machine()
+            self._readers()
 
-    def _machine(self) -> None:
+    def _readers(self) -> None:
         """Body of the reader assertions, stderr muted."""
-        self.assertEqual(integrity_machine_user(self.write("integrity_review:\n  machine_user: bot # x\n")), "bot")
-        self.assertEqual(integrity_machine_user(self.write("integrity_review:\n  machine_user: null\n")), "")
-        self.assertEqual(integrity_machine_user("/nonexistent"), "")
+        self.assertTrue(integrity_enabled(self.write("integrity_review:\n  enabled: true # on\n")))
+        self.assertEqual(integrity_status_login(self.write("integrity_review:\n  machine_user: machine\n")), "machine")
+        self.assertEqual(
+            integrity_status_login(self.write("integrity_review:\n  machine_user: machine\n  enabled: true\n")),
+            "github-actions[bot]",
+        )
+        self.assertFalse(integrity_enabled(self.write("integrity_review:\n  enabled: null\n")))
+        self.assertFalse(integrity_enabled(self.write("integrity_review:\n  machine_user: null\n")))
+        self.assertFalse(integrity_enabled("/nonexistent"))
         self.assertTrue(require_signatures(self.write("evals:\n  require_signatures: true\n")))
         self.assertTrue(require_signatures(self.write("evals:\n  require_signatures: yes\n")))  # bad type: fail closed
         self.assertFalse(require_signatures(""))
@@ -255,6 +269,62 @@ class CliTests(ConfigCase):
         result = self.run_cli("resolve-config", "--json", cwd=self.repo("sandbox_workers: false\n"))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((json.loads(result.stdout)["valid"], json.loads(result.stdout)["findings"]), (True, []))
+
+    def test_json_rejects_wrong_scalar_types_in_both_providers(self) -> None:
+        """Quote marks keep strings typed as strings; bare bool and number cannot fill string keys."""
+        cases = (
+            ("wiki_path: true\n", "wiki_path"),
+            ("diff_manifest_policy: 42\n", "diff_manifest_policy"),
+            ("wiki_path: 3.14\n", "wiki_path"),
+            ("wiki_path: +42\n", "wiki_path"),
+            ("wiki_path: 0x2a\n", "wiki_path"),
+            ("wiki_path: 1e2\n", "wiki_path"),
+            ("sandbox_workers: 'false'\n", "sandbox_workers"),
+            ("evals:\n  require_signatures: 'false'\n", "evals.require_signatures"),
+            ("integrity_review:\n  machine_user: true\n", "integrity_review.machine_user"),
+            ("wiki_path: [vault]\n", "wiki_path"),
+        )
+        for provider in (ROOT, CODEX):
+            for source, key in cases:
+                with self.subTest(provider=provider.name, source=source):
+                    result = subprocess.run(
+                        [sys.executable, str(provider / "scripts/lib/config.py"), "resolve-config", "--json"],
+                        cwd=self.repo(source),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    data = json.loads(result.stdout)
+                    self.assertEqual((data["valid"], data["findings"][0]["key"]), (False, key))
+                    self.assertEqual(data["findings"][0]["code"], "config_bad_type")
+            quoted_null = subprocess.run(
+                [sys.executable, str(provider / "scripts/lib/config.py"), "resolve-config", "--json"],
+                cwd=self.repo("wiki_path: 'null'\n"),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(quoted_null.returncode, 0, quoted_null.stderr)
+            self.assertEqual(json.loads(quoted_null.stdout)["values"]["wiki_path"], "null")
+            quoted_bool = subprocess.run(
+                [sys.executable, str(provider / "scripts/lib/config.py"), "resolve-config", "--json"],
+                cwd=self.repo('wiki_path: "true"\n'),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(quoted_bool.returncode, 0, quoted_bool.stderr)
+            self.assertEqual(json.loads(quoted_bool.stdout)["values"]["wiki_path"], "true")
+            quoted_number = subprocess.run(
+                [sys.executable, str(provider / "scripts/lib/config.py"), "resolve-config", "--json"],
+                cwd=self.repo('wiki_path: "3.14"\n'),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(quoted_number.returncode, 0, quoted_number.stderr)
+            self.assertEqual(json.loads(quoted_number.stdout)["values"]["wiki_path"], "3.14")
 
     def test_json_unreadable_path_never_raises(self) -> None:
         """A discovered path that cannot be read yields JSON with a config_unreadable finding, not a traceback."""

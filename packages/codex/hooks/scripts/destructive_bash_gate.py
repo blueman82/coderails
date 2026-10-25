@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextlib import suppress
 from typing import cast
 
 from hook_common import append_trace_row, deny, payload_object, read_input, text_field
@@ -15,6 +16,14 @@ from lib.destructive_routes import ROUTES
 from scripts.lib.authority_permits import permits
 
 LEASE = re.compile(r"\bgit\b.*\bpush\b.*--force-with-lease\b", re.I)  # the one family permanent_pattern can allow
+
+
+def mark() -> None:
+    """Flag the deny printed by this hook so telemetry records cause deny, not ok."""
+    with suppress(ImportError):  # telemetry must never be able to break the hook
+        from lib.hook_telemetry import mark_deny
+
+        mark_deny()
 
 
 def main() -> int:
@@ -45,6 +54,7 @@ def main() -> int:
                     }
                 )
             )
+            mark()
             return 0
     pattern, identifier = permanent_pattern(command, cwd)
     if pattern:
@@ -62,6 +72,7 @@ def main() -> int:
                 }
             )
         )
+        mark()
         return 0
     session = text_field(payload, "session_id")
     flat = command.replace("\\\n", "").replace("\n", " ")  # the same flattening permanent_pattern decides on
@@ -88,4 +99,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("destructive_bash_gate", main))

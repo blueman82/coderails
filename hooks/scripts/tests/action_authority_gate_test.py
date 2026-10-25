@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Pin the opt-in action-authority hook: off/advisory/enforce, signed+bound receipts, consume, fail-open."""
+"""Pin the opt-in action-authority hook: modes, signed receipts, and error policy."""
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import subprocess
 import sys
@@ -12,7 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts import action_authority_gate as gate
-from hooks.scripts.tests.receipt_hook_case import MERGE, PIN, PUSH, ReceiptHookCase
+from hooks.scripts.tests.receipt_hook_case import MERGE, MERGE_SHA, PIN, PUSH, ReceiptHookCase
 from hooks.scripts.tests.receipt_test_support import git, make_repo
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -21,8 +23,8 @@ ROOT = Path(__file__).resolve().parents[3]
 class GateTests(ReceiptHookCase):
     """Drive the hook as a subprocess against the shared receipt fixture."""
 
-    def test_only_explicit_off_is_silent(self) -> None:
-        """`off` is silent, absence/blank use ON defaults, and invalid config is rejected."""
+    def test_only_explicit_modes_run_the_gate(self) -> None:
+        """Absent config, off, and invalid values do not require a receipt."""
         self.configure("off")
         result = self.invoke("action_authority_gate", self.payload(MERGE))
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
@@ -32,58 +34,14 @@ class GateTests(ReceiptHookCase):
                 self.configure(value if value is not None else "")
                 if value is None:
                     (self.repo / ".coderails/workflow.config.yaml").unlink()
-                self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
-        self.configure("yes")
-        result = self.invoke("action_authority_gate", self.payload(MERGE))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertIn("config_rejected", result.stdout)
-        self.assertEqual(self.reasons()[-2:], ["config_bad_value", "config_rejected"])
+                self.assertFalse(self.denied("action_authority_gate", self.payload(MERGE)))
+        self.assertEqual(self.reasons(), [])
 
-    def test_default_is_enforce_without_any_config_file(self) -> None:
-        """No .coderails directory at all: an unreceipted merge and push to main are denied."""
+    def test_default_is_off_without_any_config_file(self) -> None:
+        """No .coderails directory: ordinary merge and push do not require receipts."""
         self.assertFalse((self.repo / ".coderails").exists())
-        self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
-        self.assertTrue(self.denied("action_authority_gate", self.payload(PUSH)))
-        self.mint(PUSH, "git_push")
         self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))
-
-    def test_default_is_enforce_without_config_or_key(self) -> None:
-        """(b) No config file at all, and a config lacking the key, deny merge, merge.py and push to main."""
-        for value in (None, "other_key: 1\n"):
-            if value:
-                (self.repo / ".coderails").mkdir(exist_ok=True)
-                (self.repo / ".coderails/workflow.config.yaml").write_text(value)
-            for command in (MERGE, PUSH, "python3 scripts/merge.py 12"):
-                with self.subTest(config=value, command=command):
-                    self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
-        self.assertNotIn("action_authority_bad_mode", self.reasons())
-
-    def test_invalid_value_is_rejected(self) -> None:
-        """A guarded action refuses a config value outside the schema enum."""
-        self.configure("yes")
-        self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
-        self.assertEqual(self.reasons(), ["config_bad_value", "config_rejected"])
-
-    def test_authority_denied_and_max_prs_refuse_even_with_a_valid_receipt(self) -> None:
-        """(a) A valid signed receipt does not override authority.denied or a spent max_prs, and is not consumed."""
-        self.grant(denied=["merge", "push_main"])
-        self.mint(MERGE, "merge")
-        self.mint(PUSH, "git_push", rid="r2")
-        for command in (MERGE, PUSH):
-            self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
-        self.assertEqual(self.reasons(), ["denied_authority_denied", "denied_authority_denied"])
-        self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
-        self.grant(denied=[], max_prs=0)
-        self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
-        self.assertEqual(self.reasons()[-1], "denied_max_prs_exceeded")
-
-    def test_subagent_payload_is_the_same_session(self) -> None:
-        """(d) A subagent call (agent_id/agent_type set, same session_id) uses the parent's receipt."""
-        self.mint(MERGE, "merge")
-        sub = self.payload(MERGE) | {"agent_id": "a-1", "agent_type": "loop-worker"}
-        self.assertFalse(self.denied("action_authority_gate", sub))
-        self.assertEqual(self.reasons(), ["trust_root_user_tier", "receipt_consumed"])
+        self.assertFalse(self.denied("action_authority_gate", self.payload(MERGE)))
 
     def test_advisory_warns_and_traces_never_denies(self) -> None:
         """Advisory without a receipt: stderr warning plus a trace row, no denial."""
@@ -94,7 +52,7 @@ class GateTests(ReceiptHookCase):
         self.assertEqual(self.reasons(), ["advisory_no_receipt"])
 
     def test_enforce_denies_without_receipt_and_allows_with_one_once(self) -> None:
-        """(a)+(d) Enforce: denied without; allowed and consumed with a signed receipt; replay denied."""
+        """Enforce denies without, allows and consumes with a receipt, and denies replay."""
         self.configure("enforce")
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
         self.mint(MERGE, "merge")
@@ -102,6 +60,25 @@ class GateTests(ReceiptHookCase):
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
         expected = ["denied_no_receipt", "trust_root_user_tier", "receipt_consumed", "denied_consumed"]
         self.assertEqual(self.reasons(), expected)
+
+    def test_enforce_accepts_auto_and_branch_merge_script_targets(self) -> None:
+        """Both documented merge.py targets can be bound and claimed by the hook."""
+        self.configure("enforce")
+        git(self.repo, "switch", "-q", "-c", "feature/x")
+        for target in ("auto", "feature/x"):
+            with self.subTest(target=target):
+                command = f"python3 scripts/merge.py {target} --expected-head {MERGE_SHA}"
+                self.mint(command, "merge", rid=target.replace("/", "_"))
+                self.assertFalse(self.denied("action_authority_gate", self.payload(command)))
+
+    def test_enforce_async_merge_is_unbindable(self) -> None:
+        """One receipt cannot authorize an async request that may merge a whole stack."""
+        self.configure("enforce")
+        command = (
+            "gh api --method PUT repos/acme/widgets/pulls/12/merge-async " f"-f sha={MERGE_SHA} -f merge_method=merge"
+        )
+        self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+        self.assertIn("denied_binding_unknown", self.reasons())
 
     def test_self_minted_receipts_are_denied(self) -> None:
         """(b) Unsigned hand-written JSON, an agent-made key, and a body edited after signing are all denied."""
@@ -180,21 +157,24 @@ class GateTests(ReceiptHookCase):
         self.mint(PUSH, "git_push")
         self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))
 
-    def test_hook_error_fails_open_with_reason(self) -> None:
-        """An injected exception exits 0 without denying and traces action_authority_failed_open."""
+    def test_hook_error_denies_under_enforce(self) -> None:
+        """An unexpected error after enforce scope is known emits a denial."""
         self.configure("enforce")
         payload = self.payload(MERGE)
+        output = io.StringIO()
         with (
-            mock.patch.object(gate, "read_payload", return_value=payload),
+            mock.patch.object(gate, "read_payload_strict", return_value=payload),
             mock.patch.object(gate, "check_and_consume", side_effect=RuntimeError("boom")),
             mock.patch.object(gate, "binding", return_value={"repository": "r", "ref": "f", "sha": "s"}),
             mock.patch.dict("os.environ", {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}),
+            contextlib.redirect_stdout(output),
         ):
             self.assertEqual(gate.main(), 0)
-        self.assertEqual(self.reasons(), ["action_authority_failed_open"])
+        self.assertEqual(json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(self.reasons(), ["denied_gate_error"])
 
     def test_a_different_session_id_is_a_different_session(self) -> None:
-        """Only a different session_id matters (agent_id/agent_type do not): another session's receipt is refused."""
+        """A receipt belongs only to its minted session."""
         self.configure("enforce")
         self.mint(MERGE, "merge", session="parent")
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE, "worker")))
@@ -218,6 +198,17 @@ class GateTests(ReceiptHookCase):
         self.mint(f"gh pr merge 2 {PIN}", "merge", rid="r3")
         self.assertFalse(self.denied("action_authority_gate", self.payload(chain)))
 
+    def test_two_merge_segments_cannot_spend_one_budget_twice(self) -> None:
+        """A denied shell line cannot consume a receipt or spend the session budget."""
+        self.configure("enforce")
+        self.grant(max_prs=1)
+        first, second = f"gh pr merge 1 {PIN}", f"gh pr merge 2 {PIN}"
+        self.mint(first, "merge", rid="r1")
+        self.mint(second, "merge", rid="r2")
+        self.assertTrue(self.denied("action_authority_gate", self.payload(f"{first} && {second}")))
+        self.assertEqual(self.reasons().count("receipt_consumed"), 0)
+        self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
+
     def test_cd_into_other_repo_binds_the_real_directory(self) -> None:
         """A receipt for `git push` in repoA does not authorise `cd repoB && git push`; one minted for repoB does."""
         self.configure("enforce")
@@ -238,18 +229,18 @@ class GateTests(ReceiptHookCase):
         self.assertEqual(self.reasons("_no_session"), ["denied_no_session"])
 
     def test_deny_hint_names_the_owner_run_mint(self) -> None:
-        """The denial tells the agent the OWNER mints receipts at a terminal."""
+        """The denial gives the optional receipt command."""
         self.configure("enforce")
         out = self.invoke("action_authority_gate", self.payload(PUSH)).stdout
-        self.assertIn("OWNER mints", out)
+        self.assertIn("sign one at a terminal", out)
         self.assertIn("authority_keys.py init", out)
 
     def test_failed_open_row_carries_error_class_and_loop(self) -> None:
         """The failed-open row records the error class (hashed input) and stderr names the class and message."""
-        self.configure("enforce")
+        self.configure("advisory")
         payload = self.payload(MERGE)
         with (
-            mock.patch.object(gate, "read_payload", return_value=payload),
+            mock.patch.object(gate, "read_payload_strict", return_value=payload),
             mock.patch.object(gate, "read_authority", side_effect=ZeroDivisionError("boom")),
             mock.patch.dict("os.environ", {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}),
             mock.patch("sys.stderr") as err,
@@ -261,15 +252,17 @@ class GateTests(ReceiptHookCase):
         self.assertIn("ZeroDivisionError", "".join(c.args[0] for c in err.write.call_args_list))
 
     def test_one_receipt_cannot_authorise_two_identical_segments(self) -> None:
-        """A single-use receipt is spent once: a chain repeating the same guarded command is denied."""
+        """A chain needs distinct receipts; denial leaves the first receipt available."""
         self.configure("enforce")
         self.mint(PUSH, "git_push")
         chained = f"echo x; {PUSH} && {PUSH}"
         self.assertTrue(self.denied("action_authority_gate", self.payload(chained)))
         self.assertNotIn("denied_no_receipt", self.reasons())
+        self.assertEqual(self.reasons().count("receipt_consumed"), 0)
+        self.assertFalse((self.loop / "s1/receipts/r1.consumed").exists())
         self.mint(PUSH, "git_push", rid="r2")
-        self.mint(PUSH, "git_push", rid="r3")
         self.assertFalse(self.denied("action_authority_gate", self.payload(chained)))
+        self.assertEqual(self.reasons().count("receipt_consumed"), 2)
 
     def test_concurrent_hooks_one_receipt_exactly_one_allowed(self) -> None:
         """Four parallel hook processes on one receipt: the O_EXCL claim decides, so one allows and three deny."""
@@ -285,6 +278,25 @@ class GateTests(ReceiptHookCase):
         outs = [p.communicate(json.dumps(self.payload(PUSH)))[0] for p in procs]
         self.assertEqual(sum("deny" not in out for out in outs), 1)
         self.assertEqual(self.reasons().count("receipt_consumed"), 1)
+
+    def test_concurrent_chain_claims_both_receipts_once(self) -> None:
+        """A competing chain either claims both receipts or leaves them to the winner."""
+        self.configure("enforce")
+        self.mint(PUSH, "git_push", rid="r1")
+        self.mint(PUSH, "git_push", rid="r2")
+        command = f"echo x; {PUSH} && {PUSH}"
+        procs = [
+            subprocess.Popen(
+                [sys.executable, str(ROOT / "hooks/scripts/action_authority_gate.py")], stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, text=True, env=self.environment,
+            )
+            for _ in range(4)
+        ]  # fmt: skip
+        outs = [p.communicate(json.dumps(self.payload(command)))[0] for p in procs]
+        self.assertEqual(sum("deny" not in out for out in outs), 1)
+        self.assertEqual(self.reasons().count("receipt_consumed"), 2)
+        self.assertTrue((self.loop / "s1/receipts/r1.consumed").exists())
+        self.assertTrue((self.loop / "s1/receipts/r2.consumed").exists())
 
     def test_common_wrappers_are_still_guarded(self) -> None:
         """Env prefix, env/sudo/time, subshell, brace group, bash -c and gh api merge need the same receipt."""

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.tests.receipt_test_support import REPOSITORY, make_owner, signed_receipt, store
@@ -119,6 +121,10 @@ class VerifyTests(Base):
             with self.subTest(name):
                 self.assertEqual(got, (False, code))
 
+    def test_unscoped_receipt_cannot_authorise_a_loop_action(self) -> None:
+        """A receipt minted outside a loop does not approve an action inside a later loop."""
+        self.assertEqual(self.verify(self.receipt(loop_id=None), loop_id="L1"), (False, "foreign_loop"))
+
     def test_malformed(self) -> None:
         """(c) a missing artifact_sha, v1 shapes, extra fields and bad types are malformed, never downgraded."""
         good = self.receipt()
@@ -146,6 +152,50 @@ class StoreTests(Base):
         again = ar.find_valid("s1", self.proposed(), NOW, None, self.base, True, self.signers)
         self.assertEqual(again, (None, "consumed"))
 
+    def test_batch_claim_rolls_back_a_later_marker_failure(self) -> None:
+        """A failed second O_EXCL claim leaves the earlier receipt available for a later action."""
+        first = self.receipt(receipt_id="r1")
+        second = self.receipt(receipt_id="r2")
+        paths = [store(self.base, item) for item in (first, second)]
+        original = ar._claim_marker  # pyright: ignore[reportPrivateUsage]
+        calls = 0
+
+        def fail_second(path: Path, suffix: str) -> tuple[bool, bool]:
+            nonlocal calls
+            calls += 1
+            return original(path, suffix) if calls == 1 else (False, False)
+
+        with mock.patch.object(ar, "_claim_marker", side_effect=fail_second):
+            self.assertEqual(
+                ar.claim_many("s1", [self.proposed(), self.proposed()], NOW, None, self.base, self.signers),
+                (None, "consumed", 1),
+            )
+        self.assertTrue(all(not ar.is_consumed(path) for path in paths))
+
+    def test_close_failure_after_exclusive_create_rolls_back_owned_marker(self) -> None:
+        """The close error does not hide marker ownership from the batch rollback."""
+        path = store(self.base, self.receipt())
+        original_close = os.close
+
+        def close(descriptor: int) -> None:
+            original_close(descriptor)
+            raise OSError("close failed")
+
+        with (
+            mock.patch.object(ar, "find_valid", return_value=({"receipt_id": path.stem}, "ok")),
+            mock.patch.object(os, "close", side_effect=close),
+        ):
+            result = ar.claim_many("s1", [self.proposed()], NOW, None, self.base, self.signers, record=True)
+        self.assertEqual(result[1], "consumed")
+        self.assertFalse(path.with_suffix(".consumed").exists())
+
+    def test_renamed_receipt_cannot_escape_its_consumed_marker(self) -> None:
+        """Moving signed JSON to another filename cannot give it a fresh claim marker."""
+        path = store(self.base, self.receipt())
+        self.assertEqual(ar.find_valid("s1", self.proposed(), NOW, None, self.base, True, self.signers)[1], "ok")
+        path.rename(path.with_name("renamed.json"))
+        self.assertNotEqual(ar.find_valid("s1", self.proposed(), NOW, None, self.base, True, self.signers)[1], "ok")
+
     def test_peek_does_not_consume_and_revoke_stays_inspectable(self) -> None:
         """Advisory callers peek; a revoked receipt keeps its file but is refused."""
         path = store(self.base, self.receipt())
@@ -160,7 +210,7 @@ class StoreTests(Base):
         for sid, rid in (("../x", "r"), ("s", "../r"), ("", "r"), ("s", ""), ("s", "a/b")):
             self.assertIsNone(ar.receipt_path(sid, rid, self.base))
         rec = self.receipt()
-        copy = ar.receipt_path("s2", "r1", self.base)
+        copy = ar.receipt_path("s2", rec["receipt_id"], self.base)
         assert copy is not None
         ar.write_receipt(copy, rec)
         self.assertEqual(
