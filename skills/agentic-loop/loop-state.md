@@ -35,7 +35,7 @@ be replayed to derive position, and that can leave a torn tail line after a cras
 | Field | Notes |
 |---|---|
 | `schema_version` | Exactly `3`. Legacy, missing and malformed graph schemas fail closed; no schema-2 reader or alternate writer exists. |
-| `proof_disposition` | Required when no `proof.json` exists: `"none"` or `"none: <reason>"`. Other or absent values block completion. A present proof file must validate independently. |
+| `proof_disposition` | Required when no `proof.json` exists. Use `graph.py record-proof-disposition` to save `"none: <nonblank reason>"` for an owned loop with no executable surface. Other or absent values block completion. A present proof file must validate independently. |
 | `session_id` | This session's id; the guard's ownership check compares it against the file's own path. |
 | `loop_id` | Unique non-blank identity for this loop. Preserve it during mid-loop rewrites; create a new value when re-arming for a new loop. Dispatch evals bind `session_id` + `loop_id`. |
 | `revision` | Positive integer starting at `1`. Graph operations advance it. Dispatch envelopes bind the active revision; frozen dispatch evals bind only session and loop; final neutral grading binds the completion revision. |
@@ -169,9 +169,9 @@ is still your job; the guard only catches its absence.
   or `progress.json`. Schema:
   `{"schema_version":1,"session_id","loop_id","frozen_at","frozen_sha","proofs":[{"id","claim","cmd","expect","status":"pending"}]}`.
   A loop with no executable surface writes no proof file. It records that
-  choice in `decisions_absorbed` and `proof_disposition`; the gate reads the
-  latter. The missing supported setter for that field remains an open
-  source-contract issue.
+  choice in `decisions_absorbed`. Use the supported
+  `graph.py record-proof-disposition` command to save the no-proof reason in
+  state. The proof gate reads that disposition.
 
   **The proof gate reads the orchestrator's transcript.** On a recorded
   `complete` stop, `loop_stall_guard` looks for a Bash `tool_use` and

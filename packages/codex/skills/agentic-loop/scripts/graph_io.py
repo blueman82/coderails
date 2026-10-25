@@ -42,11 +42,16 @@ def load(path: Path) -> dict[str, Any]:
         raise GraphError(f"cannot read valid state: {error}") from error
 
 
-def write(path: Path, state: dict[str, Any], create: bool = False) -> None:
+def write(path: Path, state: dict[str, Any], create: bool = False, preserve_updated_at: bool = False) -> None:
     """Atomically replace state while preserving its file permissions; `create` allows an absent file."""
     mode = 0o644 if create and not path.exists() else path.stat().st_mode & 0o777
     if path.name == "progress.json":
-        state = {**state, "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        stamp = (
+            state.get("updated_at") if preserve_updated_at else datetime.now(timezone.utc).isoformat(timespec="seconds")
+        )
+        if not isinstance(stamp, str) or not stamp:
+            raise GraphError("state has no valid updated_at")
+        state = {**state, "updated_at": stamp}
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
         temporary = Path(handle.name)
         json.dump(state, handle, indent=2, sort_keys=True)
