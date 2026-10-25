@@ -351,3 +351,32 @@ python3 scripts/lib/stop_counters.py
 python3 hooks/scripts/tests/graph_convert_test.py && python3 hooks/scripts/tests/loop_stall_guard_test.py
 PYTHONPATH=. python3 -m unittest packages.tests.test_provider_stop_record packages.tests.test_provider_graph_lifecycle
 ```
+
+## Machine-readable graph spec and policy (measurement note)
+
+The node table that only lived in prose is now data: `packages/graph-semantics/graph-spec.yaml` (nodes, requirements,
+phases, instruction sources, machine skip predicates) and `policy.yaml` (thresholds, retry bounds, default graph profile),
+JSON-syntax YAML read with `json.loads`, validated and expanded by the shared `graph_spec.py`, and materialized
+byte-for-byte into both script dirs by `scripts/installer/files.py`. Both providers refuse every load whose graph omits a
+spec edge between two nodes it holds (`spec_edge_missing`); a graph built by `graph.py instantiate` is stamped with
+`graph.spec_sha256` and also refuses unknown nodes, missing spec nodes and a changed spec. `add-unit` and `plan` take
+wiring, instruction sources and skip thresholds from the spec (the old `TARGETS` table and `before_freeze` regex are
+gone), and `scripts/gen_graph_docs.py --check` keeps the execution-graph table, its mermaid diagram and the threshold block
+generated from the same files. Rows go to `recovery-trace.jsonl` (`load/refused/spec_*`, `instantiate/<status>/instantiate_ok|
+instantiate_noop|instantiate_refused_*`, `plan/reported/skip_when_met`); `python3 scripts/lib/spec_counters.py` tallies them
+(own module because `scripts/measure_graph_alignment.py` is at its line limit; folding it in is a handoff). Flip
+condition: a sustained `spec_edge_missing` after the first week means hand-built or foreign graphs are loading; any
+`spec_hash_mismatch` means a spec edit landed while a stamped loop was live. `skip_when_met` against actual skipped nodes
+shows whether the machine predicate matches what orchestrators record. Limits: the default profile is `full`; explicitly choosing
+`units-only` omits the preparation and lifecycle nodes. Join inputs are enforced on stamped graphs only (`spec_join_inputs`)
+and a stamp below the policy profile is `spec_profile_downgrade`; unstamped graphs and a deleted stamp stay the weaker check;
+`CODERAILS_GRAPH_SPEC=off` disables the check;
+judgement skip rules stay prose; the spec files are plain same-user files, so this is drift detection, not tamper evidence.
+
+**Reproduce.**
+
+```
+python3 scripts/lib/spec_counters.py
+python3 scripts/gen_graph_docs.py --check && python3 scripts/tests/gen_graph_docs_test.py
+PYTHONPATH=. python3 -m unittest packages.tests.test_graph_spec
+```
