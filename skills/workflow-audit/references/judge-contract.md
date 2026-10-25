@@ -11,8 +11,9 @@ Exactly two inputs, nothing else:
 1. **The cluster JSON** — the full stdout object from `cluster_ngrams.py`
    (`{"scanned_sessions","clusters":[{"ngram","n","count","sessions"}],"diagnostics"}`).
 2. **A list of existing skill names and descriptions** — the `name` and
-   `description` frontmatter fields of every skill already in the repo (e.g.
-   read from each `skills/*/SKILL.md` frontmatter block).
+   `description` frontmatter fields from both repo skill roots:
+   `skills/*/SKILL.md` and `packages/codex/skills/*/SKILL.md`. Keep both
+   descriptions when providers use the same name with different text.
 
 Use only those two inputs. The cluster JSON supplies tool names,
 privacy-checked `head` strings from `scan_transcripts.py`, counts, session

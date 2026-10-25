@@ -10,7 +10,7 @@ Find repeated tool-use patterns in Claude Code session transcripts. A separate j
 
 ## Overview
 
-The audit has four stages. Scan transcripts into tool-use sequences. Cluster repeated n-grams across sessions. Ask a fresh judge subagent to propose or reject each cluster. Send each proposal to one destination: in-session creation by default, or a dashboard queue in queue-mode (section 5). Never create a rejected candidate.
+The audit has four stages. Scan transcripts into tool-use sequences. Cluster repeated n-grams across sessions. Ask a fresh judge subagent to propose or reject each cluster. Show proposed candidates to the owner for approval, or write them to the dashboard queue in queue-mode (section 5). Never create a rejected candidate.
 
 ## 1. Scope mapping
 
@@ -46,14 +46,17 @@ python3 skills/workflow-audit/scripts/scan_transcripts.py <scan args> \
 Read `references/judge-contract.md` in full, then spawn exactly one fresh sonnet subagent to apply it. Construct the judge's prompt from that file's template verbatim, filling in:
 
 1. The cluster JSON — the full stdout object from `cluster_ngrams.py`.
-2. The existing-skill list — the `name` and `description` frontmatter lines from every `skills/*/SKILL.md` in the repo.
+2. The existing-skill list — the `name` and `description` frontmatter fields
+   from both `skills/*/SKILL.md` and `packages/codex/skills/*/SKILL.md`.
+   These are the repo's Claude and Codex skill roots. Keep both descriptions
+   when providers use the same name with different text.
 
 **The judge receives nothing else.** Do not send transcript content, conversation history, or orchestrator commentary. Its input is limited to tool names, whitelisted heads, counts, session ids, and n-gram lengths. The scanner and clusterer enforce the same boundary. The judge returns one propose/reject verdict per cluster under the contract schema.
 
 ## 5. Queue-mode output (optional) — mutually exclusive with in-session creation
 
-A run uses one creation path. By default, each `propose` verdict goes to
-section 8 for in-session creation. Queue-mode writes each proposal to the
+A run uses one creation path. In an interactive run, an owner-approved
+`propose` verdict goes to section 8. Queue-mode writes each proposal to the
 dashboard instead. Do not create the same proposal in-session in queue-mode.
 Use queue-mode when the owner wants to start builds from the dashboard later.
 
@@ -101,15 +104,25 @@ Present one row per candidate cluster to the owner:
 
 Only rows with `verdict: "propose"` go to creation or the queue. Report rejected clusters and their reasons. Take no further action on them.
 
-**Privacy invariant.** The chart and downstream artifacts contain only tool names, whitelisted heads, counts, and session ids. Do not include transcript prose, file contents, or inferred intent. Keep proposal files in local scratch or loop state. Never commit them.
+**Privacy boundary.** The scan and cluster inputs contain tool names,
+whitelisted command heads, counts, and session IDs. The judge adds inferred
+task summaries and proposed skill names and descriptions to the chart and
+queue. Do not include transcript prose or file contents. Keep proposal files
+in local scratch or loop state. Never commit them.
 
 ## 7. Proceed to creation
 
-If the run is not in queue-mode (section 5), send every `propose` candidate to the create step in section 8. Do not call `AskUserQuestion` or wait for the owner.
+If the run is not in queue-mode (section 5), show the proposal chart and ask
+the owner which candidates to create. A judge's `propose` verdict is not
+owner approval. Create only the candidates the owner explicitly approves
+in this interaction. If the owner already approved named candidates in the
+current request, use that approval; do not ask again. Do not infer approval
+from general loop autonomy. Send approved candidates to section 8.
 
 In queue-mode, write each `propose` verdict as a queue entry (section 5). Do not also create the skill here. The dashboard Approve click is the only way to create it.
 
-The judge's `propose` or `reject` verdict is the only filter. Create nothing that the judge rejected. A run with zero `propose` verdicts succeeds; it does not need escalation.
+Create nothing that the judge rejected or the owner did not approve. A run
+with zero `propose` verdicts succeeds; it does not need escalation.
 
 ## 8. Create step — one skill at a time
 

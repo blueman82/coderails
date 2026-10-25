@@ -30,7 +30,7 @@ path (matching the directory this skill itself is invoked from). Read
 ### Step 2: Read every memory file
 
 Read each file the index points to. Each memory has YAML frontmatter
-(`name`, `description`, `metadata.type`) and a body.
+(`name`, `description`, top-level `type`) and a body.
 
 ### Step 3: Find consolidation candidates
 

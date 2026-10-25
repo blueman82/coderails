@@ -79,7 +79,8 @@ wiki and docs agents. Use the Phase 2.8 role table and terms.
 This section concerns the orchestrator's model. The sections above concern
 worker models. On each turn, the orchestrator reads its growing context again.
 Its cache-read costs add up through the session. Rates differ by model; see
-`hooks/scripts/lib/model_prices.json` for current rates. The loop's
-verification_level can change how much work the session does. In Phase 0.4,
+`hooks/scripts/lib/model_prices.json` for its dated rate record. Check live
+provider prices before you use those numbers for a current cost estimate.
+The loop's verification_level can change how much work the session does. In Phase 0.4,
 the orchestrator tells the user about token use. Only
 the user can type `/model` to change the orchestrator's model.
