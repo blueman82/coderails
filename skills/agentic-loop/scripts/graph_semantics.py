@@ -384,7 +384,9 @@ def can_complete(state: object) -> dict[str, Any]:
     graph = validate(state)["graph"]
     blockers = [key for key in ("active_wave", "hard_stop") if graph[key] is not None]
     unfinished = sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] not in SUCCESS)
-    blockers += ["unfinished:" + ",".join(unfinished)] if unfinished else []
+    if unfinished:
+        blockers.append("unfinished:" + ",".join(unfinished))
     unreleased = sorted(join_id for join_id, join in graph["joins"].items() if not join["released"])
-    blockers += ["unreleased:" + ",".join(unreleased)] if unreleased else []
+    if unreleased:
+        blockers.append("unreleased:" + ",".join(unreleased))
     return {"eligible": not blockers, "blockers": blockers}
