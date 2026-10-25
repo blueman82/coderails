@@ -18,7 +18,7 @@ from typing import Any, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from hooks.scripts.lib.loop_evals import read_loop_evals_result
+from hooks.scripts.lib.loop_evals import EvalStatus, EvalVerdict, read_loop_evals
 from hooks.scripts.tests.lib.post_evals_fixture import ROOT, ArtifactCase, command
 from scripts.lib import eval_signing
 from scripts.lib.eval_execution import record_smoke
@@ -238,7 +238,7 @@ class SuiteTests(ArtifactCase):
         self.assertEqual(code_of(self, lambda: verify_suite(graded, stamped=True)), "signature_missing")
         self.data = graded
         self.save()
-        self.assertEqual(read_loop_evals_result(self.directory), "TAMPERED:signature_missing")
+        self.assertEqual(read_loop_evals(self.directory), EvalVerdict(EvalStatus.TAMPERED, "signature_missing"))
 
     def test_grade_adds_identity_and_stays_verified(self) -> None:
         """grade-loop stamps loop/session onto the suite and re-signs so readers still verify."""
@@ -349,12 +349,12 @@ class SuiteTests(ArtifactCase):
     def test_readers_and_trace(self) -> None:
         """Reader maps new codes to TAMPERED and the counter picks up the rows once per event_id."""
         grade_loop(self.path)
-        self.assertEqual(read_loop_evals_result(self.directory), "GO")
+        self.assertEqual(read_loop_evals(self.directory).status, "GO")
         data = self.reload()
         data["loop_id"] = "other"
         self.data = data
         self.save()
-        self.assertEqual(read_loop_evals_result(self.directory), "TAMPERED:signature_invalid")
+        self.assertEqual(read_loop_evals(self.directory), EvalVerdict(EvalStatus.TAMPERED, "signature_invalid"))
         sys.path.insert(0, str(ROOT / "scripts"))
         mga = importlib.import_module("measure_graph_alignment")
 

@@ -11,16 +11,16 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import read_payload
 from hooks.scripts.lib.agentic_loop_path import sanitise_session_id
-from hooks.scripts.lib.loop_evals import read_loop_evals_result
+from hooks.scripts.lib.hook_state import record_absent_block, unstubbed_grace
+from hooks.scripts.lib.loop_evals import EvalStatus, EvalVerdict, read_loop_evals
 from hooks.scripts.lib.loop_state_common import (
     LoopState,
     load_progress,
     log,
     read_state,
-    record_absent_block,
     stable_invocations,
-    unstubbed_grace,
 )
+from hooks.scripts.lib.trace_row import append_row
 from scripts.lib import orders_completion
 
 
@@ -30,26 +30,28 @@ def completion_evals(state: LoopState) -> str:
     count = len(cast("dict[str, Any] | list[Any] | str", units)) if isinstance(units, (dict, list, str)) else 0
     if not state.complete or count < 1:
         return ""
-    verdict = read_loop_evals_result(state.path.parent)
+    verdict = read_loop_evals(state.path.parent)
     suite = read_state(state.path.parent / "evals.json")
     loop = state.data.get("loop_id")
     if loop and any(suite.get(key) != state.data.get(key) for key in ("session_id", "loop_id", "revision")):
-        verdict = "STALE"
-    if verdict in {"GO", "VERIFICATION_LEVEL0"}:
-        log(f"hook=loop_state_guard session={state.session} work_units={count} evals={verdict} blocked=0")
+        verdict = EvalVerdict(EvalStatus.STALE)
+    status = verdict.status
+    if status in {EvalStatus.GO, EvalStatus.VERIFICATION_LEVEL0}:
+        log(f"hook=loop_state_guard session={state.session} work_units={count} evals={status.value} blocked=0")
         return ""
-    log(f"hook=loop_state_guard session={state.session} work_units={count} evals={verdict} blocked=1")
+    log(f"hook=loop_state_guard session={state.session} work_units={count} evals={verdict.label} blocked=1")
+    append_row("loop_state_guard", "blocked", f"eval_verdict_{status.name.lower()}", state.session)
     reasons = {
-        "UNJUSTIFIED": "missing a non-blank verification_justification",
-        "UNSTAMPED": "missing a valid grading stamp",
-        "FROZEN": "FROZEN but never graded — it authorised dispatch, not completion. Do NOT regenerate it",
-        "STALE": "STALE: does not belong to the current loop revision",
+        EvalStatus.UNJUSTIFIED: "missing a non-blank verification_justification",
+        EvalStatus.UNSTAMPED: "missing a valid grading stamp",
+        EvalStatus.FROZEN: "FROZEN but never graded — it authorised dispatch, not completion. Do NOT regenerate it",
+        EvalStatus.STALE: "STALE: does not belong to the current loop revision",
     }
-    explanation = reasons.get(verdict, f"no passing loop-scope evals.json ({verdict})")
-    if verdict.startswith("TAMPERED:"):
+    explanation = reasons.get(status, f"no passing loop-scope evals.json ({verdict.label})")
+    if status is EvalStatus.TAMPERED:
         return (
             f"[loop-state-guard] Loop complete with {count} work-units, but evals.json at:\n"
-            f"  {state.path.parent / 'evals.json'}\nfailed its tamper check reason={verdict[9:]}. "
+            f"  {state.path.parent / 'evals.json'}\nfailed its tamper check reason={verdict.tamper_code}. "
             f"Re-running grade-loop will refuse with the same code. Revert the oracle edit, or re-apply it with "
             f"post_evals.py amend, then regrade. Trace row: eval_trace.jsonl beside evals.json."
         )

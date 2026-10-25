@@ -242,7 +242,8 @@ python3 -m unittest scripts.tests.measure_graph_alignment_test
 `graph.py stop` records a `progress.stops[]` row; `loop_stall_guard` consumes the newest unconsumed row at the current
 revision in the same atomic write that increments the hook-owned `loop_stop_counts`, and falls back to the final
 anchored `LOOP-STOP:` line (trace `legacy_text_parse`). Absent-state grace reads `hook_state.json`
-`ordinals.absent_blocked`, falling back to the discipline.log regex (trace `legacy_log_parse`). The Claude hook honours a recorded row only if `graph.py stop` ran after the last user prompt (else trace
+`ordinals.absent_blocked` only; there is no discipline.log fallback any more (`legacy_log_parse` is no longer emitted, the
+name stays in `FALLBACKS` so history counts). The Claude hook honours a recorded row only if `graph.py stop` ran after the last user prompt (else trace
 `stale_stop_row`). The Codex guard writes the same `legacy_text_parse` trace row (command `graph_completion_guard`), so the
 ratio covers both providers; before this change Codex fallbacks appeared only in discipline.log and were not counted.
 Counters live in `scripts/graph_alignment_stops.py`. Flip condition: if `legacy_text_parse` still dominates `stops_consumed` over the
@@ -287,4 +288,39 @@ python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receip
 PYTHONPATH=. python3 -m unittest hooks/scripts/tests/authority_permits_test.py
 python3 scripts/lib/config_counters.py
 python3 hooks/scripts/tests/config_strict_test.py && python3 hooks/scripts/tests/wiki_taxonomy_gate_test.py
+```
+
+## One attestation parser (measurement note)
+
+For operator steps and reason codes, see [Typed state and attestation](typed-state-runbook.md).
+
+`scripts/lib/integrity_attestation.py` replaces two hand-written regex copies (merge.py path and the PreToolUse merge
+hook). Each denial under a session writes trace `pr_merge_gate/denied/<attest_code>`; `scripts/lib/state_counters.py`
+tallies them. A nonzero `attest_not_bound` with a passing Actions run can mean the status description changed.
+The parser accepts the whole `integrity=pass` and `sha=<head>` tokens and permits extra fields. The Actions workflow
+does not import the local parser; the description test checks this seam. `merge.py` itself writes no trace row.
+
+**Reproduce.**
+
+```
+python3 scripts/tests/integrity_attestation_test.py
+python3 scripts/lib/state_counters.py
+```
+
+## Typed hook state, verdicts and readiness (measurement note)
+
+`hook_state.json` (hooks/scripts/lib/hook_state.py) replaces `discipline.log` greps for grace and nudge dedupe:
+`hook_state_unreadable` (outcome `missing` | `torn`), `nudge_first` and `nudge_suppressed` are trace rows; `arms[]` records
+each absent-state block. `EvalVerdict` blocked completions write `eval_verdict_<status>`; graph readiness writes
+`predecessor_pending` / `node_unknown` / `node_not_pending` / `graph_blocked` / `join_not_dispatchable`. All tally with `python3 scripts/lib/state_counters.py` (own module because
+`scripts/measure_graph_alignment.py` is at its line limit; integration into that script is a handoff). Flip condition:
+`hook_state_unreadable` with outcome `torn` above zero means a state write is failing (grace can no longer release);
+`nudge_suppressed` far above `nudge_first` is normal (one nudge per session). Limits: GO verdicts and `state_unreadable`
+readiness are not traced; first-Stop `missing` is expected once per unregistered loop session.
+
+**Reproduce.**
+
+```
+python3 scripts/lib/state_counters.py
+python3 hooks/scripts/tests/hook_state_test.py && python3 hooks/scripts/tests/graph_readiness_test.py
 ```

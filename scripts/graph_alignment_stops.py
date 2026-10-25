@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.measure_graph_alignment import as_dict, as_list, loop_state_roots
 
-FALLBACKS = ("legacy_text_parse", "legacy_log_parse")
+FALLBACKS = ("legacy_text_parse", "legacy_log_parse")  # legacy_log_parse is no longer emitted; kept so history counts
 
 
 def count() -> dict[str, int]:

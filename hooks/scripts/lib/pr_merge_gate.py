@@ -4,22 +4,23 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from hooks.scripts.lib.trace_row import append_row
 from scripts.lib.artifact_io import array_value
 from scripts.lib.config import config_path, integrity_enabled, integrity_status_login
 from scripts.lib.config_strict import ConfigRejected, strict_settings
 from scripts.lib.git_common import branch, gate_eval_summary_for_pr, pr_field, pr_num, repo, run
+from scripts.lib.integrity_attestation import parse_attestation
 from scripts.post_evals import smoke_verify
 
 
-def integrity_reason(number: str, sha: str, cwd: str) -> str:
-    """Require the newest exact-SHA GitHub Actions success when configured."""
+def integrity_reason(number: str, sha: str, cwd: str, session: str = "") -> str:
+    """Require one parsed exact-SHA GitHub Actions status when configured."""
     path = config_path(cwd)
     if not path:
         return ""
@@ -55,33 +56,16 @@ def integrity_reason(number: str, sha: str, cwd: str) -> str:
             statuses.extend(array_value(cast(object, page)))
             remaining = remaining[end:].lstrip()
         status = cast(dict[str, Any], statuses[0]) if statuses else {}
-        state = status.get("state", "")
-        creator = status.get("creator", {}).get("login", "")
-        description = status.get("description", "")
     except (OSError, ValueError, AttributeError, TypeError):
         return prefix + f"no integrity-review status found for {sha}. GitHub Actions has not attested this SHA yet."
-    if not state:
-        return prefix + f"no integrity-review status found for {sha}. GitHub Actions has not attested this SHA yet."
-    if state != "success":
-        return (
-            prefix + f"integrity-review status for {sha} is '{state}' (not success). GitHub Actions "
-            f"has not attested this SHA."
-        )
-    if creator != expected_login:
-        return prefix + f"integrity-review status for {sha} was posted by '{creator}', not '{expected_login}'."
-    if (
-        not isinstance(description, str)
-        or not re.search(r"(^|\s)integrity=pass(\s|$)", description)
-        or not re.search(r"(^|\s)sha=" + re.escape(sha) + r"(\s|$)", description)
-    ):
-        return (
-            prefix + f"integrity-review status for {sha} is not a valid SHA-bound pass attestation. "
-            f"Do not bypass; investigate."
-        )
+    verdict = parse_attestation(status, sha, expected_login)
+    if not verdict.ok:
+        append_row("pr_merge_gate", "denied", verdict.reason_code, session, inputs={"sha": sha})
+        return prefix + f"{verdict.reason_code}: {verdict.detail}. GitHub Actions has not attested this SHA."
     return ""
 
 
-def merge_reason(number: str, cwd: str) -> str:
+def merge_reason(number: str, cwd: str, session: str = "") -> str:
     """Return the fail-closed merge denial, or empty after live evidence re-execution."""
     try:
         os.chdir(cwd)
@@ -143,4 +127,4 @@ def merge_reason(number: str, cwd: str) -> str:
             prefix + "local temporary file allocation failed for the smoke-verify gate. Check /tmp "
             "disk space or permissions, then retry."
         )
-    return integrity_reason(number, sha, cwd)
+    return integrity_reason(number, sha, cwd, session)
