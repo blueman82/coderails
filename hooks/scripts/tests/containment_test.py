@@ -179,6 +179,10 @@ class ResolveTableTests(unittest.TestCase):
             (["CLAUDE.md"], True),
             (["packages/codex/scripts/x.py"], True),
             (["packages/codex/agents/loop-worker.toml"], True),
+            (["packages/graph-semantics/**"], True),
+            (["packages/graph-semantics"], True),
+            (["install.py"], True),
+            (["pyproject.toml"], True),
             (["docs/a.md", "src/b.py"], False),
         ):
             with self.subTest(manifest=manifest):

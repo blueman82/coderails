@@ -124,11 +124,13 @@ def run(checkout: Path, prompt: Path, schema: Path, output: Path, final: Path, m
         child = subprocess.run(
             argv, stdin=source, stdout=target, stderr=subprocess.STDOUT, env=environment(), check=False
         )
-    trace(
+    recorded = trace(
         session,
         "allowed" if child.returncode == 0 else "failed",
         "contained_process_complete" if child.returncode == 0 else "contained_process_failed",
     )
+    if not recorded:
+        raise ValueError("Codex worker terminal trace is unavailable")
     return child.returncode
 
 

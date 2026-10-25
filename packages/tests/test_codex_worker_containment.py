@@ -89,6 +89,20 @@ class CodexWorkerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symlinks"):
             codex_worker.command(self.checkout, alias, self.final, executable="/fixture/codex")
 
+    def test_success_without_terminal_trace_refuses(self) -> None:
+        """A child exit cannot report success when its result was not recorded."""
+        prompt = self.scratch / "prompt.txt"
+        prompt.write_text("fixture")
+        with (
+            patch.object(codex_worker, "command", return_value=["fixture"]),
+            patch.object(codex_worker, "trace", side_effect=[True, False]),
+            patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0)),
+            self.assertRaisesRegex(ValueError, "terminal trace"),
+        ):
+            codex_worker.run(
+                self.checkout, prompt, self.schema, self.scratch / "output.jsonl", self.final, "default", "session"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

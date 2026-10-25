@@ -118,6 +118,14 @@ class GateTests(GateCase):
         self.assertTrue(self.denied(HOOK, self.dispatch("general-purpose")))
         self.assertEqual(self.reasons(), ["containment_ack_required"])
 
+    def test_graph_core_installer_and_gate_config_need_acknowledgement(self) -> None:
+        """Implementation work on executable controls cannot take the low-risk fallback."""
+        for manifest in ("packages/graph-semantics/**", "install.py", "pyproject.toml"):
+            with self.subTest(manifest=manifest):
+                self.state([manifest])
+                self.assertTrue(self.denied(HOOK, self.dispatch()))
+                self.assertEqual(self.reasons()[-1], "containment_ack_required")
+
     def test_unknown_manifest_is_high_risk_and_foreign_receipts_do_not_ack(self) -> None:
         """No manifest cannot prove low risk; an agent-signed, unsigned or other-unit receipt does not acknowledge."""
         self.state(None)

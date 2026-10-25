@@ -47,9 +47,12 @@ HIGH_RISK_PREFIXES = (
     ".coderails/",
     ".github/",
     "packages/codex/",
+    "packages/graph-semantics/",
     "workflow.config",
     "config.schema.json",
     "install.sh",
+    "install.py",
+    "pyproject.toml",
     "agents.md",
     "claude.md",
 )

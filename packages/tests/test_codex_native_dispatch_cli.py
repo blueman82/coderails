@@ -71,6 +71,10 @@ class NativeDispatchCliTests(unittest.TestCase):
         plugin = ROOT / "packages/codex"
         with tempfile.TemporaryDirectory() as scratch:
             directory = Path(scratch)
+            subprocess.run(["git", "init", "-q", scratch], check=True)
+            config = directory / ".coderails/workflow.config.yaml"
+            config.parent.mkdir()
+            config.write_text("sandbox_workers: false\n", encoding="utf-8")
             state_path = directory / "loops/project/parent/progress.json"
             state_path.parent.mkdir(parents=True)
             evals = {
