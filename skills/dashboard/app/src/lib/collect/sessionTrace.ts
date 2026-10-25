@@ -2,6 +2,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { readdir } from "node:fs/promises";
 import { TRACE_SCHEMA_VERSION, serializeTraceEvent, nonempty, type SourceRef, type TraceCollectionDeps, type TraceDetail, type TraceEvent, type TraceManifest, type TracePage, type NativeSessionSummary } from "./sessionTraceSchema";
 import { CLAUDE_PARSER_VERSION, safeReadError, type NativeRecord, type Source, obj, safeSession, cacheDir, parentPath, source, artifactSource, auditSource, auditEvents, toolBlocks, dispatch, makeEvent, childValid, graphEvent, pointerPart, completedNotification, terminalChild, saveCache, clearCache, cacheEventPath, teammateChild, explicitBlockedLaunch, claudeSessionSummary, claudeUnavailableSummary } from "./sessionTraceClaudeHelpers";
+import { actorDisplayName } from "./actorDisplay";
 import { nodeAttributes } from "./nodeDisplay";
 import { markClaudeReadPairs, markClaudeRequestOrMention, readTarget } from "./claudeObservation";
 export * from "./sessionTraceSchema";
@@ -43,22 +44,17 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
     if (safeSession(sessionId)) await clearCache(cacheDir(sessionId, deps));
     throw error;
   }
-  const errors: string[] = deps.graphDiscoveryError ? [deps.graphDiscoveryError] : [];
-  const sources: Source[] = [];
-  const events: TraceEvent[] = [];
+  const errors: string[] = deps.graphDiscoveryError ? [deps.graphDiscoveryError] : [], sources: Source[] = [], events: TraceEvent[] = [];
   let loopId: string | null = null;
   try {
     const parent = await source(path, deps);
     sources.push(parent);
     const uses = new Map<string, { row: NativeRecord; block: NativeRecord; ownership: NativeRecord; ordinal: number }>();
-    const duplicateCalls = new Set<string>();
-    const results = new Map<string, NativeRecord[]>();
-    const agents = new Set<string>();
-    const validatedAgents = new Set<string>();
-    const childSources = new Map<string, Source>();
+    const duplicateCalls = new Set<string>(), agents = new Set<string>(), validatedAgents = new Set<string>();
+    const results = new Map<string, NativeRecord[]>(), childSources = new Map<string, Source>();
     const scan = async (native: Source, actor: "orchestrator" | "worker", childId: string | null,
       parentSpanId: string | null, ownership: NativeRecord | null,
-      parentSourceRef: SourceRef | null = null): Promise<void> => {
+      parentSourceRef: SourceRef | null = null, displayName = "Worker"): Promise<void> => {
       const localUses = new Map<string, { prompt: string; role: string; owner: NativeRecord | null;
         spanId: string; sourceRef: SourceRef }>();
       const toolRequests = new Map<string, TraceEvent[]>();
@@ -115,6 +111,7 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
         if (items.length) for (const { block, item } of items) {
           const event = makeEvent(sessionId, native, ordinal, row, actor, childId, parentSpanId,
             dispatch(block, sessionId) ?? ownership, block, item, parentSourceRef);
+          if (actor === "worker") event.attributes["coderails.actor.name"] = displayName;
           markClaudeRequestOrMention(event, row, block);
           events.push(event);
           const callId = event.attributes["coderails.native.call_id"];
@@ -125,6 +122,7 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
         } else {
           const event = makeEvent(sessionId, native, ordinal, row, actor, childId,
             parentSpanId, ownership, null, -1, parentSourceRef);
+          if (actor === "worker") event.attributes["coderails.actor.name"] = displayName;
           markClaudeRequestOrMention(event, row, null);
           events.push(event);
         }
@@ -177,7 +175,8 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
             sources.push(child);
             validatedAgents.add(childId);
             childSources.set(childId, child);
-            await scan(child, "worker", childId, use.spanId, use.owner ?? ownership, use.sourceRef);
+            await scan(child, "worker", childId, use.spanId, use.owner ?? ownership, use.sourceRef,
+              actorDisplayName(result.name, use.owner && nodeAttributes(String(use.owner.node_id))["coderails.node.name"], use.role));
           } catch (error) {
             const reason = error instanceof Error ? error.message : safeReadError(error);
             errors.push(`${reason} for Agent call ${callId}`);
@@ -200,7 +199,8 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
           }
           validatedAgents.add(agentId);
           childSources.set(agentId, child);
-          await scan(child, "worker", agentId, use.spanId, use.owner ?? ownership, use.sourceRef);
+          await scan(child, "worker", agentId, use.spanId, use.owner ?? ownership, use.sourceRef,
+            actorDisplayName(null, use.owner && nodeAttributes(String(use.owner.node_id))["coderails.node.name"], use.role));
         } catch (error) { errors.push(`unreadable or malformed child ${agentId}: ${safeReadError(error)}`); }
       }
     };

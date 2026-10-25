@@ -3,8 +3,9 @@ import { open, readdir } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
 import { TRACE_SCHEMA_VERSION, record, type SourceRef, type TraceAttribute, type TraceCollectionDeps, type TraceEvent } from "./traceSchema";
 import { nodeAttributes } from "./nodeDisplay";
+import { actorDisplayName } from "./actorDisplay";
 
-export const CODEX_PARSER_VERSION = 6;
+export const CODEX_PARSER_VERSION = 7;
 export const MAX_SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
 export function safeReadError(error: unknown): string {
   return error instanceof Error && error.message.startsWith("source exceeds trace scan limit:")
@@ -236,7 +237,13 @@ export function nativeEvent(sessionId: string, src: NativeSource, ordinal: numbe
       attributes["coderails.attempt"] = identity.attempt;
     }
   }
-  if (actor === "worker" && actorId) attributes["coderails.actor.id"] = actorId;
+  if (actor === "worker" && actorId) {
+    attributes["coderails.actor.id"] = actorId;
+    const identity = dispatch?.task ? canonicalTask(dispatch.task) : null;
+    const job = identity ? nodeAttributes(identity.nodeId)["coderails.node.name"] :
+      dispatch?.task && !task(dispatch.task) ? dispatch.task : null;
+    attributes["coderails.actor.name"] = actorDisplayName(dispatch?.nickname, job, dispatch?.role);
+  }
   const model = obj(item.info)?.model ?? item.model;
   if (typeof model === "string") attributes["gen_ai.response.model"] = model;
   const usage = obj(obj(item.info)?.total_token_usage);

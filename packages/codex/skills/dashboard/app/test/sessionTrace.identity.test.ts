@@ -2,6 +2,51 @@ import { expect, it } from "vitest";
 import { collectCodexSessionTrace, readCodexTracePage } from "../src/lib/collect/sessionTrace";
 import { fixture } from "./sessionTraceFixture";
 
+it("names the native worker from its bound graph job and keeps its child identity", async () => {
+  const { deps } = await fixture();
+  const page = await readCodexTracePage("parent", null, 30, deps);
+  const worker = page.events.find((event) => event.attributes["coderails.actor.id"] === "child-one")!;
+  expect(worker.attributes).toMatchObject({ "coderails.actor.id": "child-one", "coderails.actor.name": "Builder",
+    "coderails.node.id": "U3[1]" });
+  expect(worker.parentSpanId).toBe(page.events.find((event) => event.attributes["coderails.native.call_id"] === "call-one")?.spanId);
+});
+
+it("uses a validated native task name when no role or nickname exists", async () => {
+  const { deps, parent, child, rows, children, save } = await fixture();
+  const call = rows[1].payload as Record<string, unknown>;
+  const activity = rows[2].payload as Record<string, unknown>;
+  const meta = children[0].payload as Record<string, unknown>;
+  const subagent = (meta.source as Record<string, unknown>).subagent as Record<string, unknown>;
+  await save(parent, [rows[0], { ...rows[1], payload: { ...call,
+    arguments: JSON.stringify({ task_name: "worker_a", message: "Sensitive prompt" }) } },
+    { ...rows[2], payload: { ...activity, item: { type: "SubAgentActivity", kind: "started",
+      id: "call-one", agent_thread_id: "child-one", agent_path: "/root/worker_a" } } }, rows[3]]);
+  await save(child, [{ ...children[0], payload: { ...meta, agent_path: "/root/worker_a",
+    source: { subagent: { ...subagent, thread_spawn: { ...(subagent.thread_spawn as object), agent_path: "/root/worker_a" } } } } }, ...children.slice(1)]);
+  const page = await readCodexTracePage("parent", null, 30, deps);
+  expect(page.events.find((event) => event.attributes["coderails.actor.id"] === "child-one")?.attributes["coderails.actor.name"]).toBe("Worker A");
+});
+
+it("refuses a hostile native nickname while keeping the validated child", async () => {
+  const { deps, parent, child, rows, children, save } = await fixture();
+  const nickname = "<img src=x onerror=alert(1)>";
+  const taskName = "loop_worker_55335b315d_a2";
+  const legacy = { type: "event_msg", payload: { item: { type: "CollabAgentToolCall", tool: "spawn_agent",
+    status: "completed", id: "legacy", prompt: `CODERAILS_GRAPH_TASK=${taskName}\nSensitive prompt`,
+    receiver_thread_ids: ["child-one"], receiver_agents: [{ thread_id: "child-one",
+      agent_role: "worker", agent_nickname: nickname }] } } };
+  await save(parent, [rows[0], legacy]);
+  const meta = children[0].payload as Record<string, unknown>;
+  const subagent = (meta.source as Record<string, unknown>).subagent as Record<string, unknown>;
+  await save(child, [{ ...children[0], payload: { ...meta, agent_role: "worker", agent_nickname: nickname,
+    agent_path: null, source: { subagent: { ...subagent, thread_spawn: { parent_thread_id: "parent",
+      depth: 1, agent_role: "worker", agent_nickname: nickname, agent_path: null } } } } }, ...children.slice(1)]);
+  const page = await readCodexTracePage("parent", null, 30, deps);
+  const worker = page.events.find((event) => event.attributes["coderails.actor.id"] === "child-one")!;
+  expect(worker.attributes["coderails.actor.name"]).toBe("Worker");
+  expect(JSON.stringify(page)).not.toContain("<img");
+});
+
 it("decodes a canonical retry attempt without creating a graph parent join", async () => {
   const { deps, parent, child, rows, children, save } = await fixture();
   const taskName = "loop_worker_6c6f6f70_55335b315d_a2";
@@ -39,6 +84,7 @@ it("keeps a legacy retry dispatch and its child without claiming a graph identit
   expect(manifest.complete).toBe(true);
   expect(dispatch?.attributes["coderails.child.id"]).toBe("child-one");
   expect(worker?.parentSpanId).toBe(dispatch?.spanId);
+  expect(worker?.attributes["coderails.actor.name"]).toBe("Nick");
   for (const event of [dispatch, worker]) {
     expect(event?.attributes["coderails.loop.id"]).toBeUndefined();
     expect(event?.attributes["coderails.node.id"]).toBeUndefined();

@@ -167,9 +167,9 @@ describe("SessionTracePanel", () => {
 
   it("selects a native session independently of a dashboard run and groups parallel workers", async () => {
     const workerA = event("worker_turn", 3, { eventId: "worker-a", parentSpanId: "span-1",
-      attributes: { "coderails.actor.kind": "worker", "coderails.actor.id": "agent-a", "coderails.node.id": "A" } });
+      attributes: { "coderails.actor.kind": "worker", "coderails.actor.id": "12345678-aaaa-aaaa-aaaa", "coderails.actor.name": "Builder", "coderails.node.id": "A" } });
     const workerB = event("worker_turn", 4, { eventId: "worker-b", parentSpanId: "span-1",
-      attributes: { "coderails.actor.kind": "worker", "coderails.actor.id": "agent-b", "coderails.node.id": "B" } });
+      attributes: { "coderails.actor.kind": "worker", "coderails.actor.id": "12345678-bbbb-bbbb-aaaa", "coderails.actor.name": "Builder", "coderails.node.id": "B" } });
     const fetcher = vi.fn(async (input: string) => {
       const url = new URL(input, "http://localhost");
       if (url.pathname === "/api/sessions") return response({ sessions: [
@@ -187,8 +187,8 @@ describe("SessionTracePanel", () => {
     await screen.findByRole("option", { name: /first/ });
     fireEvent.change(screen.getByLabelText("Native session"), { target: { value: FIRST } });
     await screen.findByText("graph_hard_stop");
-    expect(screen.getByText(/Actor: Worker agent-a/)).toBeTruthy();
-    expect(screen.getByText(/Actor: Worker agent-b/)).toBeTruthy();
+    expect(screen.getByText(/Actor: Builder \(12345678-aaaa-aaaa-aaaa\)/)).toBeTruthy();
+    expect(screen.getByText(/Actor: Builder \(12345678-bbbb-bbbb-aaaa\)/)).toBeTruthy();
     expect(screen.getAllByText(/parent:.*join unavailable; method: unavailable; parent source: unavailable; child source: unavailable/)).toHaveLength(2);
     expect(screen.getByText(/unresolved trace/i)).toBeTruthy();
     expect(screen.getByText(/multiple matching graph roots \(3\)/)).toBeTruthy();
