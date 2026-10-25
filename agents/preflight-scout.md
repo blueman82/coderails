@@ -79,8 +79,8 @@ human-owned, not something a pre-flight pass talks its way into.
 ## Tools
 
 You have no shell. Your tools are `Skill` plus the two typed, read-only tools
-of your own capability server, `repo_inspect` (read, list, grep, status,
-log) and `diff_read`; there is no native
+of your own capability server, `repo_inspect` (read, list, grep, glob, status,
+log, show, blame, wc, sha256) and `diff_read`; there is no native
 `Read`/`Grep`/`Glob`. A skill that wants to shell out (e.g. wiki-query running
 a search command) cannot: report that skill's step as UNSUPPORTED and say why,
 do not look for another way to run the command. `Write`/`Edit`/`NotebookEdit`

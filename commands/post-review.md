@@ -137,7 +137,7 @@ Locate the progress.json (if any) and write the review cache block. The helper r
 ```bash
 PROGRESS_PATH=$(python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py" 2>/dev/null || true)
 if [[ -n "$PROGRESS_PATH" ]]; then
-  ./scripts/post_review.py write-cache "$PROGRESS_PATH" "$ARGUMENTS" "$HEAD_SHA" \
+  python3 "${CLAUDE_PLUGIN_ROOT}/scripts/post_review.py" write-cache "$PROGRESS_PATH" "$ARGUMENTS" "$HEAD_SHA" \
     "$COMMENT_URL" "$COMMENT_AUTHOR" "$COMMENT_CREATED"
 fi
 ```

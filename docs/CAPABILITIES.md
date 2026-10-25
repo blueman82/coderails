@@ -4,7 +4,7 @@
 (run by `scripts/tests/capability_profiles_test.py`) fails when it disagrees with `agents/*.md` frontmatter or
 `packages/codex/agents/*.toml`.
 
-Capabilities: `repo.inspect`, `diff.read`, `tests.run`, `pr.comment` (reached through `scripts/capability.py <tool>`),
+Capabilities: `repo.inspect`, `diff.read`, `tests.run`, `cmd.run`, `pr.comment` (reached through `scripts/capability.py <tool>`),
 plus `worktree.write` (Write/Edit, or a non-read-only Codex sandbox) and `shell.raw` (unrestricted Bash). An agent with
 a capability tool but no `shell.raw` is "guarded": the Bash allowlist hook derives its guarded set from this file.
 

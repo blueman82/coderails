@@ -3,9 +3,11 @@
 Hook: `hooks/scripts/reviewer_bash_allowlist.py` (PreToolUse, `Bash`), registered last in the Bash group, after
 `destructive_bash_gate`, `enforce_pr_workflow`, `test_gate` and `verification_volume_ceiling` (order unchanged).
 
-## Which agents
+## Which agents at the initial E2 decision
 
-Claude agents that keep `Bash` and are read-only by contract: `deploy-safety-reviewer`, `design-scout`,
+The guarded agents later lost `Bash`; see the final addendum below. At the
+initial E2 decision, these Claude agents kept `Bash` and were read-only by
+contract: `deploy-safety-reviewer`, `design-scout`,
 `disposition-scout`, `preflight-scout`, `source-auditor` (`agents/*.md`: `tools: Read, Grep, Glob, Bash` with
 `disallowedTools: Write, Edit, NotebookEdit`). `spec-reviewer` has no Bash. `docs-auditor`, `loop-worker`,
 `wiki-writer` and `proof-author` write by design and are not guarded.

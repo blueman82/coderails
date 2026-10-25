@@ -75,7 +75,8 @@ Write a summary of each eval's pass or fail result, grouped by priority
 `post_evals.py` does not validate this freeform text.
 
 The merge gate relies on the JSON checks, not on the summary's wording.
-`post_evals::validate_structure` runs checks 1-10 when posting.
+`post_evals::validate_structure` runs structural checks 1-11 when posting,
+including the `new_cases[]` ID check.
 `post_evals::smoke_verify` reruns every scripted eval at merge time.
 
 Put the marker first. Put the complete, unchanged `evals.json` last in a

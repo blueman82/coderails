@@ -76,7 +76,7 @@ Call `mcp__<mcp_namespace>__transition_jira_status_by_name` with `{issueIdOrKey:
 A non-default namespace uses the normal permission system. It can prompt once or use a `mcp__<mcp_namespace>__*` rule in `settings.json` `permissions.allow`. See INSTALLATION.md.
 
 Then:
-1. Use comment text: `"Resolved via PR merge. Work implemented via AI-assisted development (Claude Code). Branch: $BRANCH."`
+1. Use comment text: `"PR opened for AI-assisted development (Claude Code). Branch: $BRANCH."`
 2. Report the resolved ticket key alongside the PR URL
 
 If `JIRA_KEY` is empty, skip silently — not all branches have tickets.

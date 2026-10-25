@@ -174,7 +174,7 @@ While waiting, you may: answer review questions, help debug CI failures, iterate
 
 Execute in order:
 
-1. `/coderails:merge` — merges the PR, switches back to `main`, pulls latest. Do not re-ask about merge strategy flags.
+1. `/coderails:merge` — merges the PR and syncs `main` in the primary checkout. A linked worktree stays on its feature branch. Do not re-ask about merge strategy flags.
 2. **If `config.wiki_path` is non-null**: `/wiki-ingest` — creates the source page in `<config.wiki_path>/sources/pr_<N>_*.md`, updates affected wiki pages, refreshes the index, appends to the log. Never write wiki pages directly — always use the skill.
 3. **If `config.wiki_path` is non-null AND `config.wiki_git_worktree` is `false` (direct-write)**: `/wiki-lint` — checks for contradictions, stale pages, orphans, missing cross-references. Fix anything directly related to this PR; defer anything else.
    **If `config.wiki_git_worktree` is `true` or absent, do not run `/wiki-lint` here.** The default is PR flow. The ingest PR is still open, while `/wiki-lint` reads the merged vault at `origin/main`. Run lint after the ingest PR merges. See wiki-ingest Step 8.
@@ -201,6 +201,6 @@ If `git branch -d` refuses because the branch is not fully merged into local `ma
 ## What this command is NOT
 
 - Not enforcement. Slash commands are advisory — Claude has to choose to invoke them. Mechanical enforcement belongs in `PreToolUse` hooks: `enforce_pr_workflow.py` blocks `gh pr create` unless `/coderails:push` ran this session, and blocks `gh pr merge` unless `/pr-review-toolkit:review-pr` ran this session.
-- Not where the eval gate lives. `/coderails:task-evals` and `/coderails:post-evals` are invoked from this command (Phase 3, step 6), but the gate itself is enforced by `scripts/merge.py` inside `/coderails:merge` — a separate enforcement seam from the `PreToolUse` hooks above, not something this command checks.
+- Not where the eval gate lives. This command freezes evals before Code, then grades and posts them in Phase 3. `scripts/merge.py` enforces the PR eval gate during `/coderails:merge`; this command does not enforce it.
 - Not a replacement for reading CLAUDE.md. This command encodes the workflow; the authoritative spec for project-specific standards still lives in `projects/<name>/CLAUDE.md`.
 - Not interactive for the branch name. If the user doesn't provide a branch, ask once — don't invent one.

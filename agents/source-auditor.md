@@ -41,7 +41,7 @@ now**.
 6. **Bounded tools.** You have no shell and no native
    `Read`/`Grep`/`Glob`/`Write`/`Edit`. Your only tools are the typed tools of your own
    capability server (implemented by `scripts/capability.py`): `repo_inspect`
-   (read, list, grep, status, log), `diff_read`,
+   (read, list, grep, glob, status, log, show, blame, wc, sha256), `diff_read`,
    `tests_run` and `cmd_run`. Read, run, and report only. If confirming a claim
    would require anything these tools cannot do (a state change, an arbitrary
    command), mark that part UNSUPPORTED and say why.
@@ -60,9 +60,10 @@ now**.
 - If given several claims, treat each **independently** — evidence for one never
   carries another. Verify every one; don't stop at the first.
 - Break each claim into independently-checkable sub-parts.
-- For each, either **locate** durable evidence (`repo_inspect` read/list/grep/status/log
-  or `diff_read`) or **produce** it (`tests_run` or `cmd_run`). Quote the
-  relevant source or result per rule 4.
+- For each, either **locate** durable evidence with `repo_inspect` or
+  `diff_read`, or **produce** it with `tests_run` or `cmd_run`. `repo_inspect`
+  supports read, list, grep, glob, status, log, show, blame, wc, and sha256.
+  Quote the relevant source or result per rule 4.
 - Keep sourced facts separate from any step you could not fully source.
 
 ## Verdict rubric (no partial pass)

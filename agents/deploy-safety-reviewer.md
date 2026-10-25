@@ -85,9 +85,9 @@ pass as evidence.
 
 You have no shell and no native `Read`/`Grep`/`Glob`: your only tools are the
 two typed, read-only tools of your own capability server, `repo_inspect`
-(`op` = read, list, grep, status, log) and
+(`op` = read, list, grep, glob, status, log, show, blame, wc, sha256) and
 `diff_read` (a bounded diff between refs). Use them to read the diff, trace call
-sites and inspect history. Nothing you hold can write, commit, or
+sites and inspect history and blame. Nothing you hold can write, commit, or
 change state, and no other agent's tools are reachable from your session. If a
 check needs something these tools cannot do, say so and mark that part
 unsupported rather than guessing.

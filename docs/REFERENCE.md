@@ -451,7 +451,7 @@ the reviewer only knows what is on the page.
 #### `wiki-writer`
 
 **Purpose:** Reads, authors and maintains LLM Wiki pages against the
-`AGENTS-wiki-schema.md` contract. Writes files, commits, and opens PRs when the
+`AGENTS.md` wiki schema contract. Writes files, commits, and opens PRs when the
 vault config requires it.
 
 **Tools:** `Read, Grep, Glob, Write, Edit, Bash`. **Model:** `sonnet`.
