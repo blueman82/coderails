@@ -195,7 +195,7 @@ and explicitly defers code-level error-handling correctness to `silent-failure-h
 | `PreToolUse` (AskUserQuestion) | `crack_on_gate.py` | **block** — denies `AskUserQuestion` while the session's crack-on authority is live (revoke: `python3 scripts/authority.py revoke --session <id>`; it also expires after 24h): proceed autonomously instead of asking. Scoped to `AskUserQuestion` only — prose questions are not blocked, and the agentic-loop hard-stops (turn-ending `LOOP-STOP` declarations) are untouched |
 | `PreToolUse` (Bash/Edit/Write/MultiEdit/Read/Grep/Glob/WebFetch/NotebookEdit) | `agent_only_gate.py` | **nudge by default; block opt-in** (`AGENT_ONLY_GATE_ENFORCE=1`) — steers the top-level orchestrator away from inline do-work tool calls; always silent for calls made inside a dispatched subagent or for a whole-command workflow-chain carve-out (`gh`, `git`, `scripts/push\|merge\|post_review\|post_evals.py`) |
 | `PreToolUse` (Agent) | `agent_model_routing_nudge.py` | **advisory nudge only** — when no `model` is set and the dispatch description/prompt matches a mechanical or complex/architectural word list, suggests `haiku` or `opus` respectively; never blocks |
-| `PreToolUse` (Agent) | `loop_dispatch_guard.py` | **block** — validates graph schema 3, session/loop ownership, current revision, active wave, node and `CODERAILS_GRAPH_DISPATCH` envelope against the native request. Available native roles are accepted; custom Coderails roles are optional. With a nonempty work-unit roster, implementation dispatch requires owned frozen or valid graded evals; frozen evals bind session + loop, not the changing graph revision. Preparation nodes remain exempt from that eval check. Missing state blocks marked/custom-worker dispatch; foreign state blocks every Agent request. The Python sandbox launcher invokes the same guard before allocating scratch. |
+| `PreToolUse` (Agent) | `loop_dispatch_guard.py` | **block** — validates graph schema 3, session/loop ownership, current revision, active wave, node and `CODERAILS_GRAPH_DISPATCH` envelope against its `begin-wave` dispatch record (single use; rendered contract sections must appear verbatim). The record's role is asserted against `subagent_type`: guarded scout roles need `coderails:<role>`, other roles also accept `general-purpose`, anything else is `role_mismatch`. With a nonempty work-unit roster, implementation dispatch requires owned frozen or valid graded evals; frozen evals bind session + loop, not the changing graph revision. Preparation nodes remain exempt from that eval check. Missing state blocks marked/custom-worker dispatch; foreign state blocks every Agent request. The Python sandbox launcher invokes the same guard before allocating scratch. |
 | `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.py` | **block** — on main/master, blocks edits to any file EXCEPT an explicit allowlist (`.md`/`.txt`/`.rst`, `.yaml`/`.yml`/`.json`/`.toml`/`.ini`/`.cfg`, `.gitignore`, `LICENSE`); plugin-source markdown (`skills/*/SKILL.md`, `commands/*.md`) is also blocked. Also blocks `.claude/settings.json` / `.claude/settings.local.json` edits on **any** branch (the permission files that can bypass every gate) |
 | `PreToolUse` (Write/Edit/MultiEdit) | `comment_citation_gate.py` | **block** — blocks new comment content that cites a session-artifact label (`E#:`, `F# fix`, `CHANGE B#`/`C#`, `Task A#`, `TA-I#`, "reviewer finding", "per the plan", etc.) instead of stating the constraint the code enforces; `.md` files exempt; fails open |
 | `PreToolUse` (Write/Edit/MultiEdit) | `wiki_taxonomy_gate.py` | **block** — inert until `.coderails/workflow.config.yaml` exists at the plugin root (absent on a fresh clone until `/coderails:init` scaffolds it); once present, in an LLM wiki vault (identified positively: the write's repo root must equal `wiki_path`, resolved relative to `CLAUDE_PLUGIN_ROOT` unless absolute, corroborated by ≥2 of the parsed "## Page types" directories existing on disk as a secondary sanity check), blocks a write into a top-level directory not sanctioned by that section (read from the plugin's `AGENTS.md`); taxonomy is parsed live, never hardcoded; fails open on any ambiguity (schema absent, no config, the vault not being a git repo, `wiki_path` unresolvable, no section, unparseable, write outside the configured vault, or <2 directories present) |
@@ -214,17 +214,17 @@ Compact metrics and expiry records persist separately. Emitted bytes do not esta
 
 ## Sandboxed workers
 
-With `config.sandbox_workers: true` (`.coderails/workflow.config.yaml`), Claude
-implementation workers run through `scripts/sandbox/spawn_sandboxed_worker.py`
-and pinned `@anthropic-ai/sandbox-runtime`, using Seatbelt on macOS or
-bubblewrap on Linux. The launcher applies the provider's filesystem policy;
-the orchestrator is unaffected. It requires `node`/`npx`, macOS or Linux/WSL2.
+With `sandbox_workers: true` (the default), the Claude implementation launcher
+uses pinned `@anthropic-ai/sandbox-runtime` in a scratch clone. It needs the
+OS sandbox, `npx`, and a dedicated Claude worker credential; missing inputs
+stop graph implementation dispatch. The orchestrator remains unsandboxed.
 
-Codex graph workers use native `spawn_agent` and inherit the parent session's
-sandbox, permissions, and MCP servers. A custom agent TOML cannot override the
-parent sandbox. The Codex hook receives no effective-sandbox field, so
-`sandbox_workers` does not configure or prove per-worker Codex containment;
-that depends on the parent Codex session configuration.
+Codex native `spawn_agent` inherits the parent sandbox. The Codex dispatch hook
+therefore refuses native implementation work while containment is on. The
+separate OAuth launcher in `packages/codex/scripts/codex_worker.py` runs a
+worker with `workspace-write`; no API key is needed. Its result is not yet
+bound to graph `record-wave` evidence, so the graph cannot mark that work done.
+See [worker containment](docs/WORKER-CONTAINMENT.md) for recovery steps, counters, and limits.
 
 ## Requirements
 

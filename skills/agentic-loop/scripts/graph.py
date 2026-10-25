@@ -13,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import graph_convert
 import graph_repair
 import graph_spec
-from graph_vocab import STOP_CATEGORIES, STOP_REASON_CODES
+import worker_status
+from graph_cli_unit import add_unit_args
+from graph_vocab import STOP_CATEGORIES, STOP_REASON_CODES, disposition_report
 
 from hooks.scripts.lib import graph_controller, graph_recovery, graph_stops
 from hooks.scripts.lib import graph_dispatch as dispatch
@@ -22,6 +24,16 @@ from hooks.scripts.lib.graph_executor import graph_semantics, load, transition, 
 from hooks.scripts.lib.graph_recovery import trace
 from hooks.scripts.lib.loop_state_common import atomic_progress_update
 from scripts.lib import decision_record
+
+
+def _decision_args(command: argparse.ArgumentParser) -> None:
+    """Add the fields that bind a worker answer to a recorded decision."""
+    command.add_argument("--loop-id", required=True)
+    command.add_argument("--revision", required=True, type=int)
+    command.add_argument("--phase", required=True)
+    command.add_argument("--decision", required=True)
+    command.add_argument("--flip-condition")
+    command.add_argument("--unit")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -51,6 +63,7 @@ def parser() -> argparse.ArgumentParser:
         "complete",
         "verify-completion",
         "convert",
+        "disposition-audit",
     ):
         command = commands.add_parser(name)
         command.add_argument("state", type=Path)
@@ -60,12 +73,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--session", required=True)
             command.add_argument("--cite-quote")
         if name == "record-decision":
-            command.add_argument("--loop-id", required=True)
-            command.add_argument("--revision", required=True, type=int)
-            command.add_argument("--phase", required=True)
-            command.add_argument("--decision", required=True)
-            command.add_argument("--flip-condition")
-            command.add_argument("--unit")
+            _decision_args(command)
         if name == "record-unit":
             command.add_argument("--unit", required=True)
             command.add_argument("--status", required=True, choices=("done", "dropped"))
@@ -89,10 +97,7 @@ def parser() -> argparse.ArgumentParser:
         if name == "start":
             command.add_argument("--prompt-file", required=True, type=Path)
         if name == "add-unit":
-            command.add_argument("--unit", required=True)
-            command.add_argument("--depends-on", action="append", default=[])
-            command.add_argument("--join", action="store_true")
-            command.add_argument("--manifest", action="append", default=[])
+            add_unit_args(command)
         if name == "recover-wave":
             command.add_argument("--lease-seconds", type=int, default=900)
             command.add_argument("--report-only", action="store_true")
@@ -120,9 +125,14 @@ def parser() -> argparse.ArgumentParser:
         if name in {"respawn-stale", "hard-stop"}:
             command.add_argument("--node", required=True)
             command.add_argument("--reason", required=True)
+        if name == "record-decision":
+            command.add_argument("--chosen", help="answer to a recorded worker status")
+            command.add_argument("--worker-status-seq", type=int, help="resolve this worker status with the decision")
+            command.add_argument("--human-answer", action="store_true", help="a human answered an approval-gate status")
         if name == "authorize-dispatch":
             command.add_argument("--prompt", required=True)
             command.add_argument("--subagent-type", required=True)
+            command.add_argument("--tool-use-id", help="PreToolUse tool_use_id; makes a retried hook idempotent")
     return result
 
 
@@ -278,8 +288,17 @@ def main() -> int:
         if args.command == "start":
             output: object = graph_controller.start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
+            fields: dict[str, Any] = {"model_role": args.model_role, "write_scope": args.write_scope}
+            fields.update(lessons=args.lesson, disposition=(args.disposition, args.named_blocker, args.removal_ticket))
             output = graph_controller.add_unit(
-                args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest
+                args.state,
+                args.session,
+                args.loop_id,
+                args.unit,
+                args.depends_on,
+                args.join,
+                args.manifest,
+                {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
             )
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
@@ -294,6 +313,13 @@ def main() -> int:
             output = graph_recovery.summarize(load(args.state))
         elif args.command == "collection":
             output = graph_recovery.collection(args.state)
+        elif args.command == "disposition-audit":
+            report = disposition_report(load(args.state).get("work_units"))
+            output = report
+            if report["offenders"]:
+                print(json.dumps(report, sort_keys=True))
+                print("graph: preserve-compat units must carry a named blocker and removal ticket", file=sys.stderr)
+                return 1
         elif args.command == "recover-wave":
             output = dispatch.recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
         elif args.command == "plan":
@@ -318,6 +344,10 @@ def main() -> int:
                 flip_condition=args.flip_condition,
                 unit=args.unit,
                 cite_quote=args.cite_quote,
+                chosen=args.chosen,
+                worker_status_seq=args.worker_status_seq,
+                human_answer=args.human_answer,
+                status_resolver=worker_status.resolve_pending,
             )
         elif args.command == "flush-decisions":
             output = decision_record.flush_pending(
@@ -341,7 +371,9 @@ def main() -> int:
         elif args.command == "convert":
             output = convert_state(args.state, args.session, args.check)
         elif args.command == "authorize-dispatch":
-            output = dispatch.authorize_dispatch(args.state, args.session, args.prompt, args.subagent_type)
+            output = dispatch.authorize_dispatch(
+                args.state, args.session, args.prompt, args.subagent_type, args.tool_use_id
+            )
         else:
             output = dispatch.complete(args.state, args.session, args.command == "complete")
     except (ValueError, OSError, TypeError, KeyError) as error:

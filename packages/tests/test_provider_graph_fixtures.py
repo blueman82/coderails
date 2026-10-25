@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import importlib.util
 import json
@@ -53,12 +54,20 @@ def run_semantic(module: ModuleType, fixture: dict[str, Any]) -> tuple[object, d
 
 def native_state(provider: Provider, fixture: dict[str, Any]) -> dict[str, Any]:
     """Add only the provider owner fields absent from pure semantic fixtures."""
-    return {
+    state: dict[str, Any] = {
         **copy.deepcopy(fixture["state"]),
         "session_id": provider.session,
         "loop_id": "fixture-loop",
         "status": "in-progress",
+        "state_minor": 1 if fixture["state"]["graph"].get("active_wave") is not None else 2,
     }
+    if isinstance(state.get("graph"), dict):
+        # a hand-built state with a wave already open predates the contract minor
+        opened = state["graph"].get("active_wave") is not None
+        state["graph"]["dispatches"] = {}
+        if not opened:
+            state["graph"]["contract_from_revision"] = 1
+    return state
 
 
 def semantic_graph(state: dict[str, Any]) -> dict[str, Any]:
@@ -66,6 +75,8 @@ def semantic_graph(state: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(state)
     graph = result["graph"]
     graph.pop("wave_history", None)
+    graph.pop("dispatches", None)
+    graph.pop("contract_from_revision", None)
     wave = graph["active_wave"]
     if wave is not None:
         wave.pop("transcript_cursor", None)
@@ -214,6 +225,7 @@ class ProviderGraphFixtureTests(unittest.TestCase):
                         continue
                     with self.subTest(provider=name, fixture=path.name):
                         provider = Provider(fixture_home, name)
+                        provider.environment["CODERAILS_A6_EVIDENCE_WRITE"] = "on"
                         state = native_state(provider, fixture)
                         state["graph"]["active_wave"]["transcript_cursor"] = 0 if name == "claude" else 1
                         provider.write(state)
@@ -228,6 +240,48 @@ class ProviderGraphFixtureTests(unittest.TestCase):
                         self.assertEqual(response["revision"], fixture["expected"]["state"]["revision"])
                         for key in ("released_joins", "ready"):
                             self.assertEqual(response[key], fixture["expected"][key])
+
+    def test_codex_precontract_plaintext_wave_uses_original_reference_with_writes_off(self) -> None:
+        """An open pre-contract wave can still record its original plaintext worker reference."""
+        fixture = json.loads((FIXTURES / "10-record-retry.json").read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as directory:
+            provider = Provider(Path(directory), "codex")
+            provider.environment.pop("CODERAILS_A6_EVIDENCE_WRITE", None)
+            state = native_state(provider, fixture)
+            state["graph"]["active_wave"]["transcript_cursor"] = 1
+            provider.write(state)
+            provider.launch("done")
+            result = provider.call("record-wave", json.dumps(fixture["request"]))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            reference = provider.read()["graph"]["nodes"]["S1"]["evidence"][-1]
+            self.assertEqual(
+                set(reference),
+                {"kind", "attempt", "wave_id", "spawn_call_id", "agent_thread_id", "task_complete_turn_id"},
+            )
+            self.assertEqual(provider.call("inspect").returncode, 0)
+
+    def test_codex_precontract_encrypted_wave_still_requires_writes_on(self) -> None:
+        """The old plaintext exception does not persist an opaque native message."""
+        fixture = json.loads((FIXTURES / "10-record-retry.json").read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as directory:
+            provider = Provider(Path(directory), "codex")
+            provider.environment.pop("CODERAILS_A6_EVIDENCE_WRITE", None)
+            state = native_state(provider, fixture)
+            state["graph"]["active_wave"]["transcript_cursor"] = 1
+            provider.write(state)
+            provider.launch("done")
+            lines = provider.parent.read_text(encoding="utf-8").splitlines()
+            call = json.loads(lines[1])
+            arguments = json.loads(call["payload"]["arguments"])
+            arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x00" * 72).decode("ascii")
+            call["payload"]["arguments"] = json.dumps(arguments)
+            lines[1] = json.dumps(call)
+            provider.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            before = provider.path.read_bytes()
+            result = provider.call("record-wave", json.dumps(fixture["request"]))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("CODERAILS_A6_EVIDENCE_WRITE", result.stderr)
+            self.assertEqual(provider.path.read_bytes(), before)
 
     def test_native_completion_reports_corpus_blockers(self) -> None:
         """The CLI exposes graph blockers before its provider completion gates."""

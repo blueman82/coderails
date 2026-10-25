@@ -20,6 +20,7 @@ import graph_dispatch
 
 from packages.tests.codex_fixture import (
     append,
+    done_result,
     frozen_evals,
     read_json,
     spawn,
@@ -99,11 +100,12 @@ class CompletionFixture(unittest.TestCase):
         self.evals = self.path.with_name("evals.json")
         write_json(self.evals, frozen_evals())
         parent = transcripts(self.directory)
+        self.parent = parent
         graph_dispatch.begin_wave(self.path)
         self.child = spawn(parent, read_json(self.path))
         graph_dispatch.record_wave(
             self.path,
-            json.dumps({"wave_id": "wave-2", "results": {"U3[1]": {"outcome": "done", "evidence": "checked"}}}),
+            json.dumps({"wave_id": "wave-2", "results": {"U3[1]": done_result()}}),
         )
         suite: dict[str, Any] = frozen_evals() | {
             "verification_level": 0,

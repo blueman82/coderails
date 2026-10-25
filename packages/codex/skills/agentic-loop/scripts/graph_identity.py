@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import unicodedata
 from typing import Any, Union, cast
@@ -23,10 +24,18 @@ REFERENCE_KEYS = {
 # A failed attempt whose spawn_agent call was refused has a call but no child thread or completion.
 REFUSED_KEYS = {"kind", "attempt", "wave_id", "spawn_call_id", "outcome"}
 REFUSED_OUTCOME = "launch_refused"
+INVALID_DISPATCH_KEYS = REFERENCE_KEYS | {"outcome"}
+INVALID_DISPATCH_OUTCOME = "invalid_dispatch"
+ENCRYPTED_REFERENCE_KEYS = REFERENCE_KEYS | {"message_sha256"}
 IDENTIFIER_KEYS = {"spawn_call_id", "agent_thread_id", "task_complete_turn_id"}
 RESERVED_TOKENS = REFERENCE_KEYS | {"codex_agent"}
 _MAX_EVIDENCE_INPUT_UNITS = 1 << 20
 _MAX_EVIDENCE_WORK_UNITS = 8 << 20
+
+
+def new_evidence_writes_enabled() -> bool:
+    """Keep new persisted evidence off until the installed reader is verified."""
+    return os.environ.get("CODERAILS_A6_EVIDENCE_WRITE") == "on"
 
 
 def _normalized(value: str) -> str:
@@ -104,6 +113,13 @@ def classify_worker_evidence(
 def next_attempt(node: dict[str, Any]) -> int:
     """Allocate a unique native dispatch attempt across retries and stale respawns."""
     return int(node["retry"]["attempts"]) + int(node["respawn"]["generation"]) + 1
+
+
+def is_contract_wave(state: dict[str, Any], wave_id: str) -> bool:
+    """Whether this wave began at or after the native dispatch contract cutoff."""
+    start = state["graph"].get("contract_from_revision")
+    wave = re.fullmatch(r"wave-([1-9][0-9]*)", wave_id)
+    return type(start) is int and wave is not None and int(wave.group(1)) >= start
 
 
 def _task_suffix(attempt: object) -> str:

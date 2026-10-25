@@ -45,6 +45,9 @@ None
 
 Keep the reviewer names and exact critical, important, and suggestion counts in the posting report. Do not add them to a no-findings body because the validator's no-findings form is intentionally exact.
 
+Record the reviewer's compatibility finding count and the unit's `clean-break` or
+`preserve-compat` choice. Use `0` only when the reviewer found no compatibility code.
+
 ## Package helper
 
 Resolve [post_review.py](../../scripts/post_review.py) relative to this `SKILL.md`, never relative to the repository working directory. It must exist and load. Stop if it is missing or fails; do not substitute another helper or build the marker by hand.
@@ -54,7 +57,7 @@ Resolve [post_review.py](../../scripts/post_review.py) relative to this `SKILL.m
 Write the summary files with the file-writing tool (not a shell heredoc), then run the one command, replacing `<PR>` with the validated number:
 
 ```bash
-python3 <resolved post_review.py> post <PR> --summary <review-summary-file> --pass security-review=<security-summary-file>
+python3 <resolved post_review.py> post <PR> --summary <review-summary-file> --compat-count <COUNT> --disposition <CHOICE> --pass security-review=<security-summary-file>
 ```
 
 Omit `--pass NAME=FILE` for passes the diff does not need. The script validates every file, resolves the head, builds the marker and the passes line, reuses an identical existing artifact, refuses if the head moved before or after posting (`stale`), and posts with `gh api`. A non-zero exit means nothing usable was posted; fix the cause and re-run.

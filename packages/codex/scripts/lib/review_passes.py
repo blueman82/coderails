@@ -182,5 +182,10 @@ def parse(body: str, pr: str, head_sha: str) -> Passes | None:
     if cast(dict[str, Any], data).get("head_sha") != head_sha:
         return []
     passes = cast(Passes, cast(dict[str, Any], data)["passes"])
-    rest = "\n".join(lines[marker + 2 :])
+    start = marker + 2
+    if start < len(lines) and lines[start].startswith(review_artifact.COMPAT_PREFIX):
+        if review_artifact.parse_compat_line(lines[start], pr, head_sha) is None:
+            return None
+        start += 1
+    rest = "\n".join(lines[start:])
     return passes if all(_valid(item) for item in passes) and _bound(rest, passes) else None

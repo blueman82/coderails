@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "skills/agentic-loop/scripts"))
+import graph_contract
 
 
 def write_json(path: Path, value: object) -> None:
@@ -41,7 +45,16 @@ def state(count: int = 1) -> dict[str, Any]:
         "revision": 1,
         "status": "in-progress",
         "work_units": {},
-        "graph": {"nodes": nodes, "edges": [], "joins": {}, "active_wave": None, "hard_stop": None},
+        "state_minor": 2,
+        "graph": {
+            "nodes": nodes,
+            "edges": [],
+            "joins": {},
+            "active_wave": None,
+            "hard_stop": None,
+            "dispatches": {},
+            "contract_from_revision": 1,
+        },
     }
 
 
@@ -74,6 +87,19 @@ def parent(home: Path) -> Path:
     return path
 
 
+def dispatch_prompt(graph: dict[str, Any], node: str, body: str) -> str:
+    """The pasted prompt for a node's begin-wave record: envelope line, rendered sections, body."""
+    wave = graph["graph"]["active_wave"]["wave_id"]
+    records = graph["graph"].get("dispatches", {})
+    for identifier, record in records.items():
+        if record["node_id"] == node and record["wave_id"] == wave:
+            prefix = graph_contract.prompt_prefix(graph, identifier, record)
+            return prefix + "\n" + graph_contract.render_sections(record["contract"]) + "\n" + body
+    ownership = {key: graph[key] for key in ("session_id", "loop_id", "revision")}  # hand-built state: v1 envelope
+    ownership.update({"wave_id": wave, "node_id": node})
+    return "CODERAILS_GRAPH_DISPATCH=" + json.dumps(ownership) + "\n" + body
+
+
 def spawn(
     path: Path,
     graph: dict[str, Any],
@@ -89,11 +115,7 @@ def spawn(
     wave = graph["graph"]["active_wave"]["wave_id"]
     tag = re.sub(r"[^A-Za-z0-9_-]", "_", node.replace("[", "_").replace("]", "")) + "_" + wave + suffix
     tool, agent = "toolu_" + tag, "agent_" + tag
-    ownership = {key: graph[key] for key in ("session_id", "loop_id", "revision")}
-    ownership.update({"wave_id": wave, "node_id": node})
-    prompt = (
-        "CODERAILS_GRAPH_DISPATCH=" + json.dumps(ownership) + "\nRead the worker instructions and execute this unit."
-    )
+    prompt = dispatch_prompt(graph, node, "Read the worker instructions and execute this unit.")
     append(
         path,
         {
@@ -159,6 +181,12 @@ def report(graph: dict[str, Any], outcome: str = "done") -> dict[str, Any]:
     results: dict[str, Any] = {
         node: {"outcome": outcome, "evidence": "Focused behavior checks executed"} for node in wave["nodes"]
     }
+    if outcome == "done":  # dispatch records require a final_report on every done result
+        for result in results.values():
+            result["final_report"] = {
+                "claims": [{"text": "behavior checks ran", "label": "verified", "source": "fixture command: OK"}],
+                "did_not_verify": [],
+            }
     if outcome == "stale":
         for result in results.values():
             result["stale_check"] = {"checked": True, "method": "inspect native child", "result": "no terminal"}

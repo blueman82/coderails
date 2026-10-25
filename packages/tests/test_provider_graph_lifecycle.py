@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.lib.graph_executor import graph_semantics
 from packages.tests.provider_fixture import Provider
+from scripts.lib.decision_record import add_decision
 
 
 def artifacts_with_orders_prepared(provider: Provider) -> None:
@@ -102,7 +104,7 @@ class ProviderLifecycleTests(unittest.TestCase):
                 "start", "--session", provider.session, "--loop-id", "fixture-loop", "--prompt-file", str(prompt)
             )
             state = provider.read()
-            self.assertEqual((state["stops"], state["state_minor"]), ([], 1))
+            self.assertEqual((state["stops"], state["state_minor"]), ([], 2))
             self.assertEqual(state["graph"]["wave_history"], {})
             state["graph"].pop("wave_history")  # a graph written by the old `start`, before the key existed
             provider.write(state)
@@ -111,6 +113,118 @@ class ProviderLifecycleTests(unittest.TestCase):
             result = provider.complete()
             self.assertEqual(result.returncode, 0, (provider.name, result.stderr))
             self.assertEqual(provider.read()["status"], "complete")
+
+    def test_completion_waits_for_hashed_decisions_and_worker_answers(self) -> None:
+        """Both native completion commands preserve state until decisions are resolved."""
+        for provider in self.providers:
+            provider.finish_wave()
+            state = provider.read()
+            state = add_decision(
+                state, provider.session, "2.5", "Use the selected design", state["loop_id"], state["revision"]
+            )["state"]
+            provider.write(state)
+            provider.artifacts()
+            for sync in ("syncing", "unknown"):
+                state["decisions_absorbed"][0]["muninn"] = {"state": sync}
+                provider.write(state)
+                before = provider.path.read_bytes()
+                result = provider.complete()
+                self.assertNotEqual(result.returncode, 0, (provider.name, sync, result.stderr))
+                self.assertIn("decision_sync_pending", result.stdout + result.stderr)
+                self.assertEqual(provider.path.read_bytes(), before)
+            state["decisions_absorbed"][0]["muninn"] = {"state": "written", "id": "K1"}
+            state["worker_statuses"] = [
+                {"seq": 1, "node": "U3[1]", "status": "NEEDS_DECISION", "decision_pending": True}
+            ]
+            provider.write(state)
+            before = provider.path.read_bytes()
+            result = provider.complete()
+            self.assertNotEqual(result.returncode, 0, (provider.name, result.stderr))
+            self.assertIn("decision_pending:U3[1]", result.stdout + result.stderr)
+            self.assertEqual(provider.path.read_bytes(), before)
+            state.pop("worker_statuses")
+            for sync in ("written", "disabled"):
+                state["decisions_absorbed"][0]["muninn"] = (
+                    {"state": "written", "id": "K1"} if sync == "written" else {"state": "disabled"}
+                )
+                self.assertEqual(graph_semantics.can_complete(state), {"eligible": True, "blockers": []})
+
+    def test_empty_graph_rejects_malformed_worker_status_storage(self) -> None:
+        """Stored status shape must block completion even without registered nodes."""
+        for provider in self.providers:
+            provider.path.unlink()
+            prompt = provider.home / "prompt.txt"
+            prompt.write_text("go")
+            provider.success(
+                "start", "--session", provider.session, "--loop-id", "fixture-loop", "--prompt-file", str(prompt)
+            )
+            state = provider.read()
+            state["worker_statuses"] = {"unexpected": "object"}
+            provider.write(state)
+            provider.freeze()
+            provider.artifacts()
+            self.assertFalse(graph_semantics.can_complete(state)["eligible"])
+            before = provider.path.read_bytes()
+            result = provider.complete()
+            self.assertNotEqual(result.returncode, 0, (provider.name, result.stderr))
+            self.assertIn("decision_pending", result.stdout + result.stderr)
+            self.assertEqual(provider.path.read_bytes(), before)
+            state.pop("worker_statuses")
+            provider.write(state)
+            self.assertTrue(graph_semantics.can_complete(state)["eligible"])
+
+    def test_only_final_generic_degraded_decision_releases_graph(self) -> None:
+        """A failed generic memory write is final; a worker answer still needs a successful sync."""
+        for provider in self.providers:
+            provider.finish_wave()
+            state = provider.read()
+            state = add_decision(state, provider.session, "2.5", "Choose design", state["loop_id"], state["revision"])[
+                "state"
+            ]
+            row = state["decisions_absorbed"][0]
+            valid = {"state": "degraded", "id": None, "reason_code": "muninn_absent"}
+            row["muninn"] = valid
+            self.assertTrue(graph_semantics.can_complete(state)["eligible"], provider.name)
+            for bad in (
+                {"state": "degraded"},
+                {"state": "degraded", "id": "K1", "reason_code": "muninn_absent"},
+                {"state": "degraded", "id": None, "reason_code": " "},
+                {"state": "pending"},
+                {"state": "syncing"},
+                {"state": "unknown"},
+            ):
+                row["muninn"] = bad
+                self.assertIn("decision_sync_pending", graph_semantics.can_complete(state)["blockers"])
+            row["muninn"] = valid
+            row["worker_status_seq"] = 7
+            self.assertIn("decision_sync_pending", graph_semantics.can_complete(state)["blockers"])
+
+    def test_empty_graph_rejects_orphan_pending_worker_status(self) -> None:
+        """A pending worker answer must block completion even if its node is absent."""
+        for provider in self.providers:
+            provider.path.unlink()
+            prompt = provider.home / "prompt.txt"
+            prompt.write_text("go")
+            provider.success(
+                "start", "--session", provider.session, "--loop-id", "fixture-loop", "--prompt-file", str(prompt)
+            )
+            state = provider.read()
+            state["worker_statuses"] = [
+                {"seq": 1, "node": "U3[1]", "status": "NEEDS_DECISION", "decision_pending": True}
+            ]
+            provider.write(state)
+            provider.freeze()
+            provider.artifacts()
+            self.assertIn("decision_pending:U3[1]", graph_semantics.can_complete(state)["blockers"])
+            before = provider.path.read_bytes()
+            result = provider.complete()
+            self.assertNotEqual(result.returncode, 0, (provider.name, result.stderr))
+            self.assertIn("decision_pending:U3[1]", result.stdout + result.stderr)
+            self.assertEqual(provider.path.read_bytes(), before)
+            state.pop("worker_statuses")
+            provider.write(state)
+            released = provider.complete()
+            self.assertEqual(provider.read()["status"], "complete", (provider.name, released.stdout, released.stderr))
 
     def test_dispatch_exact_owner_scope_and_retry_name(self) -> None:
         """Foreign ownership and old attempt names cannot authorize a new native worker."""
@@ -151,7 +265,7 @@ class ProviderLifecycleTests(unittest.TestCase):
         self.denied(provider, {**request, "tool_name": "Agent"})
         altered = copy.deepcopy(request)
         altered["tool_input"].update(task_name="ordinary", message="Read documentation.")
-        self.assertEqual(provider.hook("loop_dispatch_guard", altered).stdout, "")
+        self.denied(provider, altered)  # a graph-bound session binds every spawn: no envelope, no dispatch
         provider.write(baseline)
         self.denied(provider, request)
 

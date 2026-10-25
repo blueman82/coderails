@@ -85,6 +85,7 @@ class MergeEvidenceTests(HookTestCase):
             patch(MODULE + ".pr_field", return_value="head"),
             patch(MODULE + ".integrity_reason", return_value=""),
             patch(MODULE + ".publication_gate.evaluate", return_value=[]),
+            patch(MODULE + ".gate_review_summary_for_pr", return_value=(0, "")),
         ):
             for summary in (
                 EvalSummary(2, "", "", "identity"),
@@ -337,6 +338,7 @@ class MergeEvidenceTests(HookTestCase):
             patch(MODULE + ".gate_eval_summary_for_pr", return_value=summary),
             patch(MODULE + ".smoke_verify", return_value=0),
             patch(MODULE + ".integrity_reason", return_value=""),
+            patch(MODULE + ".gate_review_summary_for_pr", return_value=(0, "")),
         ):
             with patch(MODULE + ".publication_gate.evaluate", return_value=violation) as evaluate:
                 reason = merge_reason("1", str(self.directory))
@@ -358,6 +360,7 @@ class MergeEvidenceTests(HookTestCase):
             patch(MODULE + ".smoke_verify", return_value=0),
             patch(MODULE + ".publication_gate.manifest_policy.violations", return_value=[]),
             patch(MODULE + ".publication_gate.git.review_passes_for_pr", return_value=ReviewPasses(0, (), "")),
+            patch(MODULE + ".gate_review_summary_for_pr", return_value=(0, "")),
         ):
             for error, code in (
                 (ValueError("review_policy_unreadable"), "review_policy_unreadable"),

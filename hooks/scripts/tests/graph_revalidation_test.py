@@ -57,6 +57,31 @@ class RevalidationTests(GraphCase):
             self.save(variant)
             self.refuse_completion("wave")
 
+    def test_bound_spawns_revalidate_against_their_dispatch_record(self) -> None:
+        """A wave at or after contract_from_revision needs its stored record and digest; older history does not."""
+        state = self.finish()
+        dispatch.validate_graph_completion(self.path, "fixture-session")
+        identifier = next(iter(state["graph"]["dispatches"]))
+        removed, altered, retyped, early = (copy.deepcopy(state) for _ in range(4))
+        del removed["graph"]["dispatches"][identifier]
+        altered["graph"]["dispatches"][identifier]["contract"]["scope"] = "widened"
+        del retyped["graph"]["dispatches"][identifier]["contract"]["role"]
+        early["state_minor"] = 1
+        early["graph"]["contract_from_revision"] = 99  # only an older minor may predate the contract
+        for variant, reason in ((removed, "begin-wave record"), (altered, "sections hash"), (retyped, "contract")):
+            with self.subTest(reason=reason):
+                self.save(variant)
+                self.refuse_completion(reason)
+        self.save(early)
+        dispatch.validate_graph_completion(self.path, "fixture-session")
+
+    def test_record_wave_refuses_a_spawn_without_its_record(self) -> None:
+        """Binding a spawn needs the begin-wave record: a legacy five-field envelope no longer binds."""
+        state = self.opened()
+        for identifier in state["graph"]["active_wave"]["nodes"]:
+            fixture.spawn(self.parent, {**state, "graph": {**state["graph"], "dispatches": {}}}, identifier)
+        self.refuse_report(fixture.report(state), "v2 dispatch envelope")
+
     def test_never_dispatched_graph_has_empty_history_but_bound_refs_still_need_it(self) -> None:
         """An absent wave_history is {} (nothing was ever dispatched); a node holding refs still fails on it."""
         state = self.finish()

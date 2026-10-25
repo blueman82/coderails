@@ -275,7 +275,11 @@ class PostTests(Repo):
         }
         path = POST if provider == "codex" else ROOT / "scripts/post_review.py"
         result = subprocess.run(
-            [sys.executable, str(path), "post", *arguments], cwd=self.dir, env=env, capture_output=True, text=True
+            [sys.executable, str(path), "post", *arguments, "--compat-count", "0", "--disposition", "clean-break"],
+            cwd=self.dir,
+            env=env,
+            capture_output=True,
+            text=True,
         )
         return result, log, posted
 
@@ -288,6 +292,9 @@ class PostTests(Repo):
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = posted.read_text().splitlines()
         self.assertEqual(lines[0], f"<!-- coderails-review-summary v1 pr=12 head_sha={self.sha} -->")
+        self.assertEqual(
+            lines[2], f"<!-- coderails-compat-findings v1 pr=12 head_sha={self.sha} count=0 disposition=clean-break -->"
+        )
         data = json.loads(lines[1].removeprefix("<!-- coderails-review-passes v1 ").removesuffix(" -->"))
         self.assertEqual(data["head_sha"], self.sha)
         verdicts = {p["name"]: (p["verdict"], p["blocking"]) for p in data["passes"]}

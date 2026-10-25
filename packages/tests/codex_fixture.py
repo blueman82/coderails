@@ -9,7 +9,18 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+import graph_contract
 from graph_identity import GraphError, next_attempt, task_name
+
+FINAL_REPORT: dict[str, Any] = {
+    "claims": [{"text": "unit checks ran", "label": "verified", "source": "fixture command: OK"}],
+    "did_not_verify": [],
+}
+
+
+def done_result(evidence: object = "checked") -> dict[str, Any]:
+    """A `done` wave result carrying the final_report every begin-wave dispatch record requires."""
+    return {"outcome": "done", "evidence": evidence, "final_report": FINAL_REPORT}
 
 
 def node(number: int = 1, status: str = "pending") -> dict[str, Any]:
@@ -34,7 +45,16 @@ def state() -> dict[str, Any]:
         "status": "in-progress",
         "created": "2026-10-24T10:00:00+00:00",
         "authorising_prompt_raw": "Run this bounded Codex graph test.",
-        "graph": {"nodes": {"U3[1]": node()}, "edges": [], "joins": {}, "active_wave": None, "hard_stop": None},
+        "state_minor": 2,
+        "graph": {
+            "nodes": {"U3[1]": node()},
+            "edges": [],
+            "joins": {},
+            "active_wave": None,
+            "hard_stop": None,
+            "dispatches": {},
+            "contract_from_revision": 1,
+        },
     }
 
 
@@ -124,13 +144,59 @@ def transcripts(home: Path) -> Path:
     return parent
 
 
+def dispatch_message(parent: Path, graph: dict[str, Any], node_id: str, task: str) -> str:
+    """Render a fixture v2 message and consume its isolated begin-wave authorization."""
+    records = graph["graph"].get("dispatches", {})
+    issued = next(
+        (
+            (identifier, record)
+            for identifier, record in records.items()
+            if record["node_id"] == node_id and record["wave_id"] == graph["graph"]["active_wave"]["wave_id"]
+        ),
+        None,
+    )
+    message = "CODERAILS_GRAPH_TASK=" + task
+    if issued is not None:
+        identifier, record = issued
+        message = (
+            graph_contract.prompt_prefix(graph, identifier, record)
+            + "\n"
+            + graph_contract.render_sections(record["contract"])
+            + "\nWorker instructions."
+        )
+        home = parent.parents[2]
+        candidates = (
+            home / "progress.json",
+            home / "loops/project/parent/progress.json",
+            home / "state/fixture" / graph["session_id"] / "progress.json",
+        )
+        matches: list[tuple[Path, dict[str, Any]]] = []
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            saved = read_json(candidate)
+            if (
+                saved.get("session_id") == graph["session_id"]
+                and saved.get("loop_id") == graph["loop_id"]
+                and saved["graph"]["active_wave"]["wave_id"] == record["wave_id"]
+            ):
+                matches.append((candidate, saved))
+        if len(matches) != 1:
+            raise AssertionError("fixture spawn requires one owned progress.json")
+        state_path, saved = matches[0]
+        saved["graph"]["dispatches"][identifier]["authorized"] = {"tool_use_id": f"call-{task}"}
+        write_json(state_path, saved)
+    return message
+
+
 def spawn(parent: Path, graph: dict[str, Any], node_id: str = "U3[1]", terminal: bool = True) -> Path:
-    """Append a role-less provider-native spawn and its independently owned child."""
+    """Append a native spawn and simulate the hook's prior consumption in the isolated fixture."""
     attempt = next_attempt(graph["graph"]["nodes"][node_id])
     task = task_name(graph["loop_id"], node_id, attempt)
     child_id = f"child-{task}"
     call_id = f"call-{task}"
     path = f"/root/{task}"
+    message = dispatch_message(parent, graph, node_id, task)
     append(
         parent,
         {
@@ -140,7 +206,7 @@ def spawn(parent: Path, graph: dict[str, Any], node_id: str = "U3[1]", terminal:
                 "name": "spawn_agent",
                 "namespace": "collaboration",
                 "call_id": call_id,
-                "arguments": json.dumps({"task_name": task}),
+                "arguments": json.dumps({"task_name": task, "message": message}),
             },
         },
     )

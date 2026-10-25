@@ -205,7 +205,11 @@ class NativeEvidenceTests(unittest.TestCase):
                 },
             }
         ]
-        self._bind()
+        reference = self._bind()
+        stored = copy.deepcopy(self.state)
+        stored["graph"]["nodes"]["U3[1]"].update(status="done", evidence=[reference])
+        stored["graph"]["active_wave"] = None
+        validate_worker_evidence(stored)
         self.spawn["agent_role"] = "explorer"
         self._reject()
 

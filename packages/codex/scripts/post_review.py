@@ -58,14 +58,14 @@ def comment_for(repo: str, number: int, login: str, head: str, top: list[str]) -
             newest = comment
     if (
         newest is not None
-        and newest["body"].splitlines()[:2] == top
+        and newest["body"].splitlines()[:3] == top
         and review_passes.parse(newest["body"], str(number), head) is not None
     ):
         return newest
     return None
 
 
-def post(number: int, summary: Path, extra: list[str]) -> int:
+def post(number: int, summary: Path, extra: list[str], compat_count: int, disposition: str) -> int:
     """Post (or reuse) the artifact for the PR's current head; a head that moves mid-post is refused as stale."""
     texts = sections(summary, extra)
     head = git.pr_field(str(number), "headRefOid")
@@ -76,7 +76,11 @@ def post(number: int, summary: Path, extra: list[str]) -> int:
          "summary_sha256": review_passes.summary_sha256(t)}
         for n, t in texts
     ]  # fmt: skip
-    top = [review_artifact.marker(str(number), head), review_passes.render(head, passes)]
+    top = [
+        review_artifact.marker(str(number), head),
+        review_passes.render(head, passes),
+        review_artifact.compat_line(str(number), head, compat_count, disposition),
+    ]
     repo = git.repo()
     login = git.output("gh", "api", "user", "-q", ".login", check=True)
     comment = comment_for(repo, number, login, head, top)
@@ -107,12 +111,14 @@ def post_main(arguments: list[str]) -> int:
     parser.add_argument("pr", type=pr_number)
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--pass", dest="passes", action="append", default=[], metavar="NAME=FILE")
+    parser.add_argument("--compat-count", type=int, required=True)
+    parser.add_argument("--disposition", choices=review_artifact.COMPAT_DISPOSITIONS, required=True)
     try:
         args = parser.parse_args(arguments)
     except SystemExit as error:
         return int(bool(error.code))
     try:
-        return post(args.pr, args.summary, args.passes)
+        return post(args.pr, args.summary, args.passes, args.compat_count, args.disposition)
     except (OSError, ValueError, KeyError, git.WorkflowError) as error:
         print(f"post: {error}", file=sys.stderr)
         return 1
@@ -124,14 +130,22 @@ def main(arguments: list[str] | None = None) -> int:
     if arguments[:1] == ["post"]:
         return post_main(arguments[1:])
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("validate",))
-    parser.add_argument("path", type=Path)
+    parser.add_argument("operation", choices=("validate", "compat-line"))
+    parser.add_argument("path", help="summary path; the PR number for compat-line")
+    parser.add_argument("arguments", nargs="*")
+    parser.add_argument("--count", type=int, help="compat-line: compat findings the reviewer reported")
+    parser.add_argument("--disposition", help="compat-line: clean-break | preserve-compat")
     try:
         args = parser.parse_args(arguments)
     except SystemExit as error:
         return int(bool(error.code))
     try:
-        validate_summary(args.path)
+        if args.operation == "compat-line":
+            if len(args.arguments) != 1 or args.count is None or args.disposition is None:
+                raise ValueError("compat-line requires <pr> <sha> --count K --disposition D")
+            print(review_artifact.compat_line(args.path, args.arguments[0], args.count, args.disposition))
+            return 0
+        validate_summary(Path(args.path))
     except (OSError, ValueError) as error:
         print(f"validate_summary: {error}", file=sys.stderr)
         return 1

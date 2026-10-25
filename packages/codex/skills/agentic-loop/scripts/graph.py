@@ -3,28 +3,35 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 import time
 from pathlib import Path
 from typing import Any, cast
 
+import graph_cli_parser
+import graph_invalid_dispatch
+import graph_ledger
 import graph_mutations
 import graph_repair
 import graph_semantics
-import graph_spec
 import graph_stops
 from graph_completion import complete, verify_completion
 from graph_controller import add_unit, instantiate, start
 from graph_dispatch import apply_record as _apply_record
-from graph_dispatch import authorize_dispatch, begin_wave, record_wave
+from graph_dispatch import authorize_dispatch as authorize_dispatch
+from graph_dispatch import begin_wave as begin_wave
+from graph_dispatch import record_wave as record_wave
 from graph_identity import GraphError, next_attempt, task_name
 from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import write as _write
 from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace, traced_refusal
 from graph_recovery import collection as collect
+from graph_summary import budget_spent as _budget_spent
+from graph_summary import summarize as summarize
+
+reject_invalid_dispatch = graph_invalid_dispatch.reject_invalid_dispatch
 
 __all__ = ["authorize_dispatch", "begin_wave", "record_wave"]
 
@@ -184,146 +191,24 @@ def recover_wave(
     return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
 
 
-def _budget_spent(node: dict[str, Any]) -> bool:
-    """True when the node's respawn generation has reached its retry max."""
-    return bool(node["respawn"]["generation"] >= node["retry"]["max"])
-
-
-def summarize(path: Path) -> dict[str, Any]:
-    """Plain-language status from graph state alone: done, active, ready, blocked and the human dependency."""
-    state = _load(path)
-    graph = state["graph"]
-    statuses = {node_id: node["status"] for node_id, node in graph["nodes"].items()}
-    pending = sorted(n for n, s in statuses.items() if s not in {"done", "skipped"})
-    ready = [] if graph["active_wave"] or graph["hard_stop"] else graph_semantics.ready(state)
-    if graph["hard_stop"] is not None:
-        stopped = graph_semantics.describe_node(graph["hard_stop"]["node"])["display"]
-        phase, detail = (
-            "waiting for human",
-            f"hard stop on {stopped}: {graph['hard_stop']['reason']}",
-        )
-    elif graph["active_wave"] is not None:
-        phase, detail = "waiting for worker", f"wave {graph['active_wave']['wave_id']} dispatched"
-        spent = [n for n in graph["active_wave"]["nodes"] if _budget_spent(graph["nodes"][n])]
-        if spent:
-            detail += f"; recovery budget exhausted for {', '.join(spent)}: recover-wave will refuse, a human decides"
-    elif ready:
-        phase, detail = "ready to dispatch", "begin-wave then spawn the ready nodes"
-    elif not pending:
-        phase, detail = "ready to complete", "run verify-completion"
-    else:
-        phase, detail = "waiting for evidence", "no node is ready; check pending dependencies"
-    return {
-        "phase": phase,
-        "detail": detail,
-        "node_names": graph_semantics.node_names(graph["nodes"]),
-        "done": sorted(n for n in statuses if n not in pending),
-        "active": list(graph["active_wave"]["nodes"]) if graph["active_wave"] else [],
-        "ready": ready,
-        "pending": pending,
-    }
-
-
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Operate one native Codex agentic-loop graph.")
-    commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("begin-wave", "inspect", "summarize", "collection"):
-        command = commands.add_parser(name)
-        command.add_argument("root" if name == "collection" else "state", type=Path)
-    for name in ("start", "add-unit"):
-        controller = commands.add_parser(name)
-        controller.add_argument("state", type=Path)
-        controller.add_argument("--session", required=True)
-        controller.add_argument("--loop-id", required=True)
-        if name == "start":
-            controller.add_argument("--prompt-file", required=True, type=Path)
-        else:
-            controller.add_argument("--unit", required=True)
-            controller.add_argument("--depends-on", action="append", default=[])
-            controller.add_argument("--join", action="store_true")
-            controller.add_argument("--manifest", action="append", default=[])
-    spec = commands.add_parser("instantiate")
-    spec.add_argument("state", type=Path)
-    spec.add_argument("--session", required=True)
-    spec.add_argument("--loop-id", required=True)
-    spec.add_argument("--profile", choices=graph_spec.PROFILES, help="default: policy graph.profile")
-    spec.add_argument("--unit", action="append", default=[], help="work unit id to register (repeatable)")
-    convert = commands.add_parser("convert")
-    convert.add_argument("state", type=Path)
-    convert.add_argument("--session", required=True)
-    mode = convert.add_mutually_exclusive_group()
-    mode.add_argument("--check", action="store_true")
-    mode.add_argument("--write", action="store_true")
-    recover = commands.add_parser("recover-wave")
-    recover.add_argument("state", type=Path)
-    recover.add_argument("--session", required=True)
-    recover.add_argument("--lease-seconds", type=int, default=900)
-    recover.add_argument("--report-only", action="store_true")
-    record = commands.add_parser("record-wave")
-    record.add_argument("state", type=Path)
-    record.add_argument("results_json")
-    for name in ("record-decision", "flush-decisions"):
-        decision = commands.add_parser(name)
-        decision.add_argument("state", type=Path)
-        decision.add_argument("--session", required=True)
-        decision.add_argument("--cite-quote")
-        if name == "record-decision":
-            decision.add_argument("--loop-id", required=True)
-            decision.add_argument("--revision", required=True, type=int)
-            decision.add_argument("--phase", required=True)
-            decision.add_argument("--decision", required=True)
-            decision.add_argument("--flip-condition")
-            decision.add_argument("--unit")
-    unit = commands.add_parser("record-unit")
-    unit.add_argument("state", type=Path)
-    unit.add_argument("--session", required=True)
-    unit.add_argument("--unit", required=True)
-    unit.add_argument("--status", required=True, choices=("done", "dropped"))
-    detail = unit.add_mutually_exclusive_group(required=True)
-    detail.add_argument("--evidence")
-    detail.add_argument("--reason")
-    repair = commands.add_parser("record-repair")
-    repair.add_argument("state", type=Path)
-    for field in ("session", "unit", "failed-node", "kind", "identity", "diagnosis"):
-        repair.add_argument(f"--{field}", required=True)
-    disposition = commands.add_parser("record-proof-disposition")
-    disposition.add_argument("state", type=Path)
-    disposition.add_argument("--session", required=True)
-    disposition.add_argument("--loop-id", required=True)
-    disposition.add_argument("--revision", required=True, type=int)
-    disposition.add_argument("--disposition", required=True)
-    disposition.add_argument("--reason", required=True)
-    for name in ("respawn_stale", "hard_stop"):
-        transition = commands.add_parser(name.replace("_", "-"))
-        transition.add_argument("state", type=Path)
-        transition.add_argument("--session", required=True)
-        transition.add_argument("--node", required=True)
-        transition.add_argument("--reason", required=True)
-    graph_stops.add_parsers(commands.add_parser)
-    dispatch = commands.add_parser("authorize-dispatch")
-    dispatch.add_argument("state", type=Path)
-    for option in ("session", "task"):
-        dispatch.add_argument(f"--{option}", required=True)
-    dispatch.add_argument("--evals", required=True, type=Path)
-    for name in ("complete", "verify-completion"):
-        complete = commands.add_parser(name)
-        complete.add_argument("state", type=Path)
-        complete.add_argument("--session", required=True)
-        for option in ("evals", "proof", "retro"):
-            complete.add_argument(f"--{option}", required=True, type=Path)
-        complete.add_argument("--transcript", type=Path)
-    return parser
-
-
 def main() -> int:
     """Run the requested graph command and print its JSON response."""
-    args = _parser().parse_args()
+    args = graph_cli_parser.parser().parse_args()
     try:
         if args.command == "start":
             output = start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
+            fields: dict[str, Any] = {"model_role": args.model_role, "write_scope": args.write_scope}
+            fields.update(lessons=args.lesson, disposition=(args.disposition, args.named_blocker, args.removal_ticket))
             output = add_unit(
-                args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest
+                args.state,
+                args.session,
+                args.loop_id,
+                args.unit,
+                args.depends_on,
+                args.join,
+                args.manifest,
+                {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
             )
         elif args.command == "instantiate":
             output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
@@ -351,18 +236,38 @@ def main() -> int:
             )
         elif args.command in {"stop", "consume-stop"}:
             output = graph_stops.run(args)
+        elif args.command in graph_ledger.COMMANDS:
+            output, code = graph_ledger.run(args)
+            if code:
+                print(json.dumps(output, sort_keys=True))
+                return code
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "convert":
             output = graph_mutations.convert_state(args.state, args.session, args.check)
         elif args.command == "recover-wave":
             output = recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
-        elif args.command in {"summarize", "collection"}:
-            output = summarize(args.state) if args.command == "summarize" else collect(args.root)
+        elif args.command == "reject-invalid-dispatch":
+            output = reject_invalid_dispatch(
+                args.state, args.session, args.node, args.wave_id, apply=not args.report_only
+            )
+        elif args.command == "summarize":
+            output = summarize(args.state)
+        elif args.command == "collection":
+            output = collect(args.root)
         elif args.command == "inspect":
             output = inspect(args.state)
         elif args.command == "authorize-dispatch":
-            output = authorize_dispatch(args.state, args.session, args.task, args.evals)
+            output = authorize_dispatch(
+                args.state,
+                args.session,
+                args.dispatch_id,
+                args.message_file,
+                args.agent_type,
+                args.task_name,
+                args.evals or args.state.with_name("evals.json"),
+                args.tool_use_id,
+            )
         elif args.command == "complete":
             output = complete(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)
         else:

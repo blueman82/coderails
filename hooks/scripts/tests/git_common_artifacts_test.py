@@ -16,7 +16,7 @@ from scripts.lib import eval_artifact, git_common, review_artifact
 
 RUN = Callable[..., subprocess.CompletedProcess[str]]
 SHA = "deadbeef"
-REVIEW = review_artifact.marker("42", SHA)
+REVIEW = review_artifact.marker("42", SHA) + "\n" + review_artifact.compat_line("42", SHA, 0, "clean-break")
 GO = eval_artifact.marker("42", SHA, "GO", "1")
 NO_GO = eval_artifact.marker("42", SHA, "NO-GO", "2")
 
