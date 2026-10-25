@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Action-receipt gate: warn by default; explicit enforce needs a signed receipt.
+"""Action-receipt gate: the shipped advisory mode warns; explicit enforce needs a signed receipt.
 
-Config `action_authority`: advisory (default, also with no config or no key) | enforce | off; any other value is
-enforce, traced action_authority_bad_mode. Advisory warns on missing receipts; live authority denials and
+Config `action_authority`: advisory | enforce | off; absent or unknown config is off.
+Advisory warns on missing receipts; live authority denials and
 unbindable merges under a live merge cap still block.
 Enforce denies unless
 authority.permits() allows and a receipt verifies (scripts/lib/receipt_gate.py, shared with merge.py, which is
-independently fail-closed). Any own error fails open with reason action_authority_failed_open. It does not touch
+independently fail-closed). A host-resource error reading the payload denies; other own errors fail open with reason
+action_authority_failed_open. It does not touch
 pr_merge_gate, destructive_bash_gate or enforce_pr_workflow. Limits: the hash covers only the command text seen here
 (not aliases, functions, xargs, scripts that push; sudo/subshell/bash -c/eval/gh api wrappers, quoting and absolute
 program paths are normalised by guarded_segments, an env assignment prefix is kept and makes the command unbindable).
@@ -25,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import deny, read_payload
+from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload_strict
 from hooks.scripts.lib.destructive_patterns import git_output
 from hooks.scripts.lib.pr_workflow_match import MERGE_SCRIPT, guarded_segments, state_mutated_before_guard
 from hooks.scripts.lib.trace_row import append_row
@@ -38,7 +39,7 @@ from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
 
 def mode(cwd: str) -> str:
-    """Return advisory (the default), enforce or off, never raising."""
+    """Return advisory, enforce or off, never raising."""
     return resolve_mode(cwd)[0]
 
 
@@ -62,7 +63,7 @@ def how_to_proceed(code: str, session: str, name: str) -> str:
             "--match-head-commit <head sha>`, with no earlier ref-moving step in the same command."
         )
     return (
-        "The OWNER mints one at a terminal (it is signed with their passphrase key; an agent cannot): "
+        "For optional receipt enforcement, sign one at a terminal with the configured key: "
         f"python3 scripts/action_receipt_cli.py approve-action --session {session} --kind {name} "
         "--command '<exact command>' --cwd <directory it runs in>. "
         "One-time key setup: scripts/authority_keys.py init."
@@ -70,8 +71,12 @@ def how_to_proceed(code: str, session: str, name: str) -> str:
 
 
 def main() -> int:
-    """Check one Bash payload; every guarded segment needs its own receipt; fail open on any own error."""
-    payload = read_payload()
+    """Check one Bash payload; deny unreadable input on resource errors and trace other own errors."""
+    try:
+        payload = read_payload_strict()
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)  # fail closed: a gate that cannot read its input must not allow the action
+        return 0
     session = str(payload.get("session_id") or "")
     trace_id = session or "_no_session"  # append_row refuses an empty id; keep the denial countable
     loop_id: str | None = None
@@ -81,13 +86,11 @@ def main() -> int:
         if not isinstance(command, str) or not command:
             return 0
         cwd = str(payload.get("cwd") or os.getcwd())
-        mode_, bad = resolve_mode(cwd)
-        if mode_ == "off" or not (segments := guarded_segments(command, cwd)):
+        mode_, _ = resolve_mode(cwd)
+        if mode_ == "off" or not (segments := guarded_segments(command, cwd, implicit_push=True)):
             return 0
         authority = read_authority(session)
         loop_id = authority["loop_id"] if authority else None
-        if bad:
-            append_row("action_authority", "advisory", "action_authority_bad_mode", trace_id, loop_id)
         signers, tier = resolve_trust_root()
 
         def claimed(_name: str) -> None:
@@ -137,4 +140,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("action_authority_gate", main))

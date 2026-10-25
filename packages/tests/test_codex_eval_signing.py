@@ -76,6 +76,17 @@ class CodexSigningTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphError, "signature_missing"):
             validate_evals(self.state, 2, self.path)
 
+    def test_corrupted_signature_without_allowed_signers_is_refused(self) -> None:
+        """The Codex reader must reject bad signature bytes without a local trust list."""
+        document = json.loads(self.path.read_text())
+        lines = document["signature"]["sig"].splitlines()
+        lines[2] = lines[2][:-4] + ("AAAA" if not lines[2].endswith("AAAA") else "BBBB")
+        document["signature"]["sig"] = "\n".join(lines) + "\n"
+        self.path.write_text(json.dumps(document))
+        (Path(os.environ["CODERAILS_KEYS_DIR"]) / "allowed_signers").unlink()
+        with self.assertRaisesRegex(GraphError, "signature_invalid"):
+            validate_evals(self.state, 2, self.path)
+
 
 if __name__ == "__main__":
     unittest.main()

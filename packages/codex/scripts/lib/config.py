@@ -123,7 +123,7 @@ def _coerce(entry: dict[str, Any], spec: dict[str, Any]) -> tuple[Any, bool]:
         return int(raw), True
     if "array" in types and raw.startswith("[") and raw.endswith("]"):
         return [item.strip().strip("\"'") for item in raw[1:-1].split(",") if item.strip()], True
-    return raw, "string" in types and raw in spec.get("enum", [raw])
+    return raw, "string" in types
 
 
 def _hint(key: str, known: dict[str, Any]) -> str:
@@ -254,9 +254,20 @@ def _section(path: str | Path, key: str) -> dict[str, Any]:
     return cast("dict[str, Any]", value) if isinstance(value, dict) else {}
 
 
-def integrity_machine_user(path: str | Path) -> str:
-    """Read the configured root-owned attestor login; null or absent means inactive."""
-    return str(_section(path, "integrity_review").get("machine_user") or "")
+def integrity_enabled(path: str | Path) -> bool:
+    """Keep legacy machine-user gates active until explicit config migration."""
+    settings = _section(path, "integrity_review")
+    legacy = settings.get("machine_user")
+    return settings.get("enabled") is True or (isinstance(legacy, str) and bool(legacy))
+
+
+def integrity_status_login(path: str | Path) -> str:
+    """Trust the old login until enabled=true selects the Actions bot."""
+    settings = _section(path, "integrity_review")
+    legacy = settings.get("machine_user")
+    if settings.get("enabled") is not True and isinstance(legacy, str) and legacy:
+        return legacy
+    return "github-actions[bot]"
 
 
 def require_signatures(path: str | Path) -> bool:

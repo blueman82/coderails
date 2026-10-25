@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import cast
 
@@ -85,6 +86,10 @@ def deny(reason: str) -> None:
             }
         )
     )
+    with suppress(ImportError):  # telemetry must never be able to break the hook
+        from lib.hook_telemetry import mark_deny
+
+        mark_deny()
 
 
 def count_for(count_path: Path) -> int:
@@ -141,4 +146,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("verification_volume_ceiling", main))

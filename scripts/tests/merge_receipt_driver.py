@@ -58,5 +58,10 @@ elif os.environ.get("BARRIER"):  # both finish the is-it-consumed check before e
     patches.append(mock.patch.object(ar, "is_consumed", side_effect=waiting))
 for patch in patches:
     patch.start()
-raise SystemExit(merge.main([os.environ.get("MERGE_TARGET", "7")]))
+target = os.environ.get("MERGE_TARGET", "7")
+sys.argv[0] = str(Path(os.environ["PLUGIN_ROOT"]) / "scripts/merge.py")
+args = [target]
+if not os.environ.get("NO_EXPECTED"):
+    args.extend(["--expected-head", os.environ.get("EXPECTED_SHA", os.environ["SHA"])])
+raise SystemExit(merge.main(args))
 """

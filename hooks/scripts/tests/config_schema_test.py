@@ -17,7 +17,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts.lib.config import (
     config_value,
-    integrity_machine_user,
+    integrity_enabled,
+    integrity_status_login,
     load_config,
     report_findings,
     require_signatures,
@@ -41,7 +42,7 @@ engineering_principles_skill: coderails-codex:engineering-principles-bash
 sandbox_workers: false
 wiki_debt_epoch_pr: 80
 integrity_review:
-  machine_user: null
+  enabled: false
 evals:
   require_signatures: true
 """
@@ -97,7 +98,7 @@ class LoadConfigTests(ConfigCase):
         self.assertEqual(values["wiki_debt_epoch_pr"], 80)
         self.assertIsNone(values["worktree_script"])
         self.assertEqual(values["engineering_principles_paths"], ["**/*.sh"])
-        self.assertIsNone(values["integrity_review"]["machine_user"])
+        self.assertIs(values["integrity_review"]["enabled"], False)
         self.assertIs(values["evals"]["require_signatures"], True)
 
     def test_defaults_applied_for_absent_keys(self) -> None:
@@ -116,9 +117,16 @@ class LoadConfigTests(ConfigCase):
 
     def test_nested_typo(self) -> None:
         """A typo inside a typed section is flagged with its dotted key."""
-        _, findings = load_config(self.write("integrity_review:\n  machin_user: x\n"))
-        self.assertEqual(findings[0]["key"], "integrity_review.machin_user")
-        self.assertEqual(findings[0]["hint"], "integrity_review.machine_user")
+        _, findings = load_config(self.write("integrity_review:\n  enabld: true\n"))
+        self.assertEqual(findings[0]["key"], "integrity_review.enabld")
+        self.assertEqual(findings[0]["hint"], "integrity_review.enabled")
+
+    def test_legacy_integrity_login_stays_enforced_until_migration(self) -> None:
+        """An installed machine-user setting cannot silently turn off the local gate."""
+        path = self.write("integrity_review:\n  machine_user: attestor\n  enabled: false\n")
+        _, findings = load_config(path)
+        self.assertEqual(findings, [])
+        self.assertTrue(integrity_enabled(path))
 
     def test_bad_type_keeps_raw_value(self) -> None:
         """A value of the wrong type is reported and left as written."""
@@ -128,16 +136,16 @@ class LoadConfigTests(ConfigCase):
         self.assertEqual(values["wiki_debt_epoch_pr"], "null")
 
     def test_action_authority_enum(self) -> None:
-        """enforce|advisory|off are clean, absent defaults to advisory, anything else is config_bad_type."""
+        """The schema defaults to off; the runtime ignores unknown optional modes."""
         for value in ("enforce", "advisory", "off"):
             values, findings = load_config(self.write(f"action_authority: {value}\n"))
             self.assertEqual((values["action_authority"], findings), (value, []))
         values, findings = load_config(self.write("project: x\n"))
-        self.assertEqual((values["action_authority"], findings), ("advisory", []))
+        self.assertEqual((values["action_authority"], findings), ("off", []))
         values, findings = load_config(self.write("action_authority: bogus\n"))
-        self.assertEqual((values["action_authority"], self.codes(findings)), ("bogus", ["config_bad_type"]))
+        self.assertEqual((values["action_authority"], self.codes(findings)), ("bogus", []))
         schema = json.loads((ROOT / "config.schema.json").read_text())["properties"]["action_authority"]
-        self.assertEqual((schema["status"], schema["default"]), ("enforced_by_code", "advisory"))
+        self.assertEqual((schema["status"], schema["default"]), ("enforced_by_code", "off"))
 
     def test_unreadable_never_raises(self) -> None:
         """Missing, torn (non-UTF-8) and directory paths fall back to defaults with one finding."""
@@ -169,16 +177,22 @@ class LoadConfigTests(ConfigCase):
 class ReaderTests(ConfigCase):
     """Re-pointed readers keep their old answers."""
 
-    def test_machine_user_and_signatures(self) -> None:
-        """A named attestor is returned; a literal null is inactive instead of the login 'null'."""
+    def test_integrity_toggle_and_signatures(self) -> None:
+        """Local status checks turn on only for explicit true."""
         with contextlib.redirect_stderr(io.StringIO()):
-            self._machine()
+            self._readers()
 
-    def _machine(self) -> None:
+    def _readers(self) -> None:
         """Body of the reader assertions, stderr muted."""
-        self.assertEqual(integrity_machine_user(self.write("integrity_review:\n  machine_user: bot # x\n")), "bot")
-        self.assertEqual(integrity_machine_user(self.write("integrity_review:\n  machine_user: null\n")), "")
-        self.assertEqual(integrity_machine_user("/nonexistent"), "")
+        self.assertTrue(integrity_enabled(self.write("integrity_review:\n  enabled: true # on\n")))
+        self.assertEqual(integrity_status_login(self.write("integrity_review:\n  machine_user: machine\n")), "machine")
+        self.assertEqual(
+            integrity_status_login(self.write("integrity_review:\n  machine_user: machine\n  enabled: true\n")),
+            "github-actions[bot]",
+        )
+        self.assertFalse(integrity_enabled(self.write("integrity_review:\n  enabled: null\n")))
+        self.assertFalse(integrity_enabled(self.write("integrity_review:\n  machine_user: null\n")))
+        self.assertFalse(integrity_enabled("/nonexistent"))
         self.assertTrue(require_signatures(self.write("evals:\n  require_signatures: true\n")))
         self.assertFalse(require_signatures(self.write("evals:\n  require_signatures: yes\n")))
         self.assertFalse(require_signatures(""))

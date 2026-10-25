@@ -40,7 +40,7 @@ def operation(command: str) -> tuple[str, str, str]:
     return "", "", ""
 
 
-def targets_main(command: str, cwd: str, target: str, name: str) -> bool:
+def targets_main(command: str, cwd: str, target: str, name: str, *, implicit_push: bool = False) -> bool:
     """Check both current branch and explicitly named protected push destinations."""
     if name not in {"git_merge", "git_push"}:
         return True
@@ -54,8 +54,8 @@ def targets_main(command: str, cwd: str, target: str, name: str) -> bool:
         return False
     for raw in _SEP.split(command)[::2]:
         segment = canonical(unwrap(raw))
-        if (git := _GIT.match(segment)) and git[2] == "push":
-            return _push_guarded(segment)
+        if (git := _GIT.match(segment)) and git[2] == "push" and _push_guarded(segment, implicit_push=implicit_push):
+            return True
     if re.search(r":(refs/heads/)?(main|master)([\s;&|)]|$)", command):
         return True
     match = re.search(r"\bgit\b[^;&|]*?\bpush\s+(.*)", command)
@@ -65,7 +65,7 @@ def targets_main(command: str, cwd: str, target: str, name: str) -> bool:
 _PUSH_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
 
 
-def _push_guarded(segment: str) -> bool:
+def _push_guarded(segment: str, *, implicit_push: bool = False) -> bool:
     """True when the parsed push can reach main/master, or its destination is not a literal (unbindable: denied)."""
     try:
         tokens = shlex.split(segment)
@@ -82,6 +82,8 @@ def _push_guarded(segment: str) -> bool:
             skip = True
         elif not token.startswith("-"):
             refs.append(token)
+    if len(refs) < 2:
+        return implicit_push  # Config can select main; the receipt binding refuses an implicit refspec.
     for spec in refs[1:]:  # refs[0] is the remote
         dest = spec.lstrip("+").rpartition(":")[2]
         if re.search(r"[$`*?\[\]{}()\\]", dest) or dest.removeprefix("refs/heads/") in {"main", "master"}:
@@ -92,8 +94,8 @@ def _push_guarded(segment: str) -> bool:
 _SEP = re.compile(r"(&&|\|\||[;|&\n])")
 _WRAPPER = re.compile(r"^(?:[A-Za-z_]\w*=\S*|(?:\S*/)?(?:env|sudo|time|command|exec|nohup))\s+")
 _SHELL_C = re.compile(r"\b(?:(?:bash|sh|zsh)\s+-\w*c|eval)\s+([\"'])(.*?)\1")
-_API_MERGE = re.compile(  # the merge endpoint or a GraphQL merge mutation anywhere in argv (flags may come first)
-    r"^gh\s+api\s(?:.*?/pulls/\d+/merge(?![\w-])|.*?\b(?:mergePullRequest|enablePullRequestAutoMerge)\b)"
+_API_MERGE = re.compile(  # direct/async merge request or GraphQL mutation; not async result polling
+    r"^gh\s+api\s(?:.*?/pulls/\d+/merge(?:-async)?(?![\w/-])|.*?\b(?:mergePullRequest|enablePullRequestAutoMerge)\b)"
 )
 _PROGRAMS = {"git", "gh", "bash", "sh", "zsh", "python", "python3"}
 UNBINDABLE = "CODERAILS_UNBINDABLE=1 "  # an env-style prefix: action_binding refuses it, so the segment is denied
@@ -121,7 +123,7 @@ def canonical(segment: str) -> str:
     return shlex.join(tokens) if tokens else segment
 
 
-def guarded_segments(command: str, cwd: str) -> list[tuple[str, str, str]]:
+def guarded_segments(command: str, cwd: str, *, implicit_push: bool = False) -> list[tuple[str, str, str]]:
     """Every guarded (merge | git_push to main) segment as (operation, segment, effective cwd).
 
     A plain `cd <dir>` (shell-parsed, an existing directory) moves the effective cwd for the segments after it, so the
@@ -165,14 +167,17 @@ def guarded_segments(command: str, cwd: str) -> list[tuple[str, str, str]]:
             found.append(("merge", UNBINDABLE * unknown + (stripped.rstrip(")} ") if tainted else segment), cwd))
         else:
             name, matched, target_dir = operation(segment)
-            if name in {"merge", "git_push"} and targets_main(segment, cwd, target_dir, name):
+            if name in {"merge", "git_push"} and targets_main(
+                segment, cwd, target_dir, name, implicit_push=implicit_push
+            ):
                 found.append((name, UNBINDABLE * unknown + (stripped.rstrip(")} ") if tainted else matched), cwd))
         if raw.rstrip().endswith(")"):
             group_blind = False
     after_cd = bool(re.search(r"\bcd\b", _SHELL_C.sub(" ", command)))
     for inner in _SHELL_C.finditer(command):
         found.extend(  # a cd outside the string: its effect on the inner command's cwd is not followed
-            (name, UNBINDABLE * after_cd + seg, where) for name, seg, where in guarded_segments(inner[2], cwd)
+            (name, UNBINDABLE * after_cd + seg, where)
+            for name, seg, where in guarded_segments(inner[2], cwd, implicit_push=implicit_push)
         )
     return found
 

@@ -20,7 +20,7 @@ Do not merge when GitHub state cannot be fetched, approval is missing when requi
 
 ## Merge and synchronize
 
-Resolve [merge.py](../../scripts/merge.py) relative to this `SKILL.md`, then run it with exactly one target: the pull request number, branch name, or `auto` for the current branch. Do not reconstruct the helper's checks manually or bypass a failure.
+Resolve [merge.py](../../scripts/merge.py) relative to this `SKILL.md`. Run `python3 <absolute package-local merge.py> <PR number, branch, or auto>`. When `action_authority: enforce` applies, fetch the current head SHA and add `--expected-head <40-hex SHA>`. Mint any required receipt for this exact `python3` command, including the absolute helper path and SHA. Direct executable invocation has a different command hash and is unsupported in enforce mode. Do not reconstruct the helper's checks manually or bypass a failure. The `action_authority_gate` hook can consume a receipt before the helper; the helper checks it again when run directly.
 
 The package-local helper must:
 

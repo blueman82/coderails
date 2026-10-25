@@ -201,7 +201,7 @@ class CliTests(unittest.TestCase):
 
 
 class AuthorityKeysTests(unittest.TestCase):
-    """init/install-root/show: owner-run key setup that never runs sudo and never overwrites."""
+    """Init and show for optional user-tier signing; key setup never overwrites."""
 
     def setUp(self) -> None:
         """Temp key directory."""
@@ -231,18 +231,6 @@ class AuthorityKeysTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()) as err:
             self.assertEqual(keys.init(self.dir, tty_ok=lambda: True, extra=("-q", "-N", "")), 2)
         self.assertIn("key_exists", err.getvalue())
-
-    def test_install_root_only_prints(self) -> None:
-        """The sudo commands are printed for the owner; nothing is installed here."""
-        with contextlib.redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(keys.install_root(self.dir), 0)
-        text = out.getvalue()
-        self.assertIn("sudo install", text)
-        self.assertIn("/Library/Application Support/Coderails/receipt_signers", text)
-        self.assertNotIn(
-            "subprocess",
-            (REPO / "scripts/authority_keys.py").read_text().split("def install_root")[1].split("def _quote")[0],
-        )
 
 
 if __name__ == "__main__":

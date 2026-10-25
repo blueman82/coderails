@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-"""Shared hook/merge.py receipt gate, with a session-wide merge-budget lock.
+"""Receipt gate for the hook and merge.py, with session-wide merge-budget locking.
 
-The hook checks permits and bindings before O_EXCL consumption; plain gh merges count as executed.
-merge.py checks a recent hook claim or consumes directly, then claims execution before gh pr merge.
-Absent action_authority config is advisory; an invalid value enforces.
+Plain gh merges count as executed; absent or unknown config is off.
 """
 
 from __future__ import annotations
@@ -35,36 +33,28 @@ class ReceiptRefusedError(ValueError):
 
 
 def resolve_mode(cwd: str) -> tuple[str, bool]:
-    """(mode, bad): warn by default; fail closed for an unrecognised value."""
+    """(mode, bad): only explicit supported values enable the gate."""
     path = config_path(cwd)
     value = config_value(path, "action_authority") if path else ""
     if value in MODES:
         return value, False
-    return ("enforce", True) if value else ("advisory", False)
+    return "off", False
 
 
-def _record(path: Path, name: str, proposed: dict[str, Any]) -> None:
+def _record(path: Path, name: str, proposed: dict[str, Any]) -> bool:
     """Write the payload hash and PR number into the .consumed marker; a plain gh merge is marked executed here."""
     note = {"hash": proposed["exact_payload_hash"], "number": proposed.get("number", ""), "action": name}
     path.with_suffix(".consumed").write_text(json.dumps(note), encoding="utf-8")
     if name == "merge" and not proposed.get("script"):
-        ar.execute(path)
+        return ar.execute(path)
+    return True
 
 
 def _check_and_consume(
-    session: str,
-    proposals: list[tuple[str, dict[str, Any]]],
-    now: datetime,
-    loop_id: str | None,
-    signers: Path | None,
-    consume: bool = True,
-    stale: bool = False,
-    on_claim: Callable[[str], None] | None = None,
-) -> tuple[str, str] | None:
-    """None when every (name, proposed) segment is allowed, else (name, reason code). consume=False only verifies.
-
-    stale: a ref/HEAD/remote-moving step precedes the guarded one, so the bound sha/ref would be out of date.
-    """
+    session: str, proposals: list[tuple[str, dict[str, Any]]], now: datetime, loop_id: str | None, signers: Path | None,
+    consume: bool = True, stale: bool = False, on_claim: Callable[[str], None] | None = None,
+) -> tuple[str, str] | None:  # fmt: skip
+    """Return a refusal or None; consume=False verifies only; stale means a prior ref mutation."""
     live = read_authority(session, now=now)
     for name, _ in proposals:
         verdict = permits(session, name, now, snapshot=live)
@@ -81,23 +71,26 @@ def _check_and_consume(
         return unbound, "binding_unknown"  # unknowable repository+ref+sha fails closed
     if stale:
         return proposals[0][0], "state_mutated_before_guard"
+    seen: set[str] = set()
     for name, proposed in proposals:
-        found, code = ar.find_valid(session, proposed, now, loop_id, signers=signers)
+        found, code = ar.find_valid(session, proposed, now, loop_id, signers=signers, excluded=seen)
         if found is None:
             return name, code
+        seen.add(found["receipt_id"])
     if not consume:
         return None
-    for name, proposed in proposals:
-        if name == "merge":
-            verdict = permits(session, name, now, snapshot=live)
-            if not verdict["allow"]:
-                return name, str(verdict["reason"])
-        found, code = ar.find_valid(session, proposed, now, loop_id, consume_it=True, signers=signers)
-        path = ar.receipt_path(session, found["receipt_id"]) if found else None
+    actions = [proposed for _, proposed in proposals]
+    claimed, code, index = ar.claim_many(session, actions, now, loop_id, signers=signers)
+    if claimed is None:
+        return proposals[index][0], code
+    for (name, proposed), found in zip(proposals, claimed):
+        path = ar.receipt_path(session, found["receipt_id"])
         if path is None:
-            return name, code
-        _record(path, name, proposed)
-        if on_claim is not None:
+            return name, "malformed"
+        if not _record(path, name, proposed):
+            return name, "executed_marker_unavailable"
+    if on_claim is not None:
+        for name, _ in proposals:
             on_claim(name)
     return None
 
@@ -121,20 +114,24 @@ def check_and_consume(
 
 def require_merge_receipt(
     number: str, cwd: str | None = None, now: datetime | None = None, target: str | None = None,
-    verified_sha: str | None = None,
+    verified_sha: str | None = None, expected_sha: str | None = None, command: str | None = None,
 ) -> Path | None:  # fmt: skip
     """Called once by merge.py before `gh pr merge`; returns only when a receipt was claimed (or mode allows)."""
     cwd = cwd or os.getcwd()
+    if expected_sha is not None and expected_sha != verified_sha:
+        raise ReceiptRefusedError("expected_head_mismatch")
     mode, _ = resolve_mode(cwd)
     if mode == "off":
         return None
     session = next((os.environ[name] for name in SESSION_ENV if os.environ.get(name)), "")
-    code = _claim_merge(session, number, cwd, now, target)
+    code = _claim_merge(session, number, cwd, now, command)
     if code == "ok":
         return None
     reservation_required = False
     if mode == "advisory" and code not in {"authority_denied", "max_prs_exceeded"}:
-        reservation_required, reserved, path = advisory_merge.direct(session, number, cwd, target, verified_sha)
+        reservation_required, reserved, path = advisory_merge.direct(
+            session, number, cwd, target, verified_sha, command
+        )
         if path:
             append_row("action_authority", "advisory", f"merge_py_{code}", session)
             return path
@@ -149,16 +146,20 @@ def require_merge_receipt(
     return None
 
 
-def _claim_merge(session: str, number: str, cwd: str, now: datetime | None, target: str | None = None) -> str:
+def _claim_merge(
+    session: str, number: str, cwd: str, now: datetime | None, command: str | None = None,
+) -> str:  # fmt: skip
     if not session:
         return "no_session"
     with merge_budget.lock(session) as acquired:
         if not acquired:
             return "budget_lock_unavailable"
-        return _claim_merge_unlocked(session, number, cwd, now or datetime.now(timezone.utc), target)
+        return _claim_merge_unlocked(session, number, cwd, now or datetime.now(timezone.utc), command)
 
 
-def _claim_merge_unlocked(session: str, number: str, cwd: str, now: datetime, target: str | None = None) -> str:
+def _claim_merge_unlocked(
+    session: str, number: str, cwd: str, now: datetime, command: str | None = None,
+) -> str:  # fmt: skip
     """Return ok after claiming .executed for one matching receipt, else the refusal code."""
     auth = authority_path(session)
     if not session or auth is None:
@@ -169,8 +170,9 @@ def _claim_merge_unlocked(session: str, number: str, cwd: str, now: datetime, ta
         return str(verdict["reason"])
     if not verdict.get("requires_approval", False):
         return "approval_requirement_missing"
-    command = f"python3 scripts/merge.py {target or number}"
-    bind = binding("merge", command, cwd)  # merge.py pins the head sha it verified
+    if command is None:
+        return "binding_unknown"
+    bind = binding("merge", command, cwd)
     if bind is None:
         return "binding_unknown"
     direct = ar.proposed_action("merge", command, cwd, git_out(cwd, "branch", "--show-current"), bind)

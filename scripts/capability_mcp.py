@@ -3,7 +3,7 @@
 
 Newline-delimited JSON-RPC (initialize, notifications/initialized, ping, tools/list, tools/call). The role is fixed at
 launch and is never a tool argument. Tool calls dispatch in-process to capability.TOOLS; MCP names replace the dot with
-an underscore (repo.inspect -> repo_inspect). Every call and refusal appends a fail-open trace row.
+an underscore (repo.inspect -> repo_inspect). Every call and refusal tries to append a fail-open trace row.
 """
 
 from __future__ import annotations
@@ -116,7 +116,12 @@ def handle(role: str, allowed: dict[str, str], method: object, params: object) -
         return {}, None
     if method == "tools/list":
         tools = [
-            {"name": n, "description": (cap.TOOLS[t].__doc__ or t).strip().splitlines()[0], "inputSchema": SCHEMAS[t]}
+            {
+                "name": n,
+                "description": (cap.TOOLS[t].__doc__ or t).strip().splitlines()[0],
+                "inputSchema": SCHEMAS[t],
+                "annotations": {"readOnlyHint": t in {"repo.inspect", "diff.read"}},
+            }
             for n, t in sorted(allowed.items())
         ]
         return {"tools": tools}, None

@@ -191,7 +191,7 @@ path.
 
 **A non-zero exit that is neither a pass nor a rejection is still a
 refusal.** The worked example is a `pending` `integrity-review` status:
-`$coderails-codex:merge` exits non-zero because the integrity daemon has not
+`$coderails-codex:merge` exits non-zero because GitHub Actions has not
 yet posted its attestation — the gate has not rejected the PR, it has not
 yet attested it. Write `refused=merge` and clean up, exactly as for a
 rejection. **Never wait, poll, or retry for a gate to resolve**, and

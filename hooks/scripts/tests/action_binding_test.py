@@ -156,7 +156,7 @@ class MergeTests(unittest.TestCase):
             for target in ("auto", "feature/x"):
                 with self.subTest(target=target):
                     self.assertEqual(
-                        ab.binding("merge", f"python3 scripts/merge.py {target}", str(self.repo)),
+                        ab.binding("merge", f"python3 scripts/merge.py {target} --expected-head {sha}", str(self.repo)),
                         {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": sha},
                     )
         self.assertEqual([call.args[0] for call in number.call_args_list], ["feature/x", "feature/x"])
@@ -178,7 +178,27 @@ class MergeTests(unittest.TestCase):
             self.assertIsNotNone(
                 ab.binding("merge", f"gh api repos/acme/widgets/pulls/9/merge -f sha={a}", str(self.repo))
             )
-            self.assertIsNotNone(ab.binding("merge", "python3 scripts/merge.py 12", str(self.repo)))  # pins itself
+            self.assertIsNone(ab.binding("merge", "python3 scripts/merge.py 12", str(self.repo)))
+
+    def test_merge_script_requires_the_current_expected_head(self) -> None:
+        """Only a literal head that matches the live PR can bind a helper receipt."""
+        approved = "a" * 40
+        later = "b" * 40
+        with mock.patch.object(ab, "pr_view", return_value=("main", approved)) as view:
+            self.assertIsNone(ab.binding("merge", "python3 scripts/merge.py 12", str(self.repo)))
+            view.assert_not_called()
+            view.return_value = ("main", later)
+            self.assertIsNone(
+                ab.binding("merge", f"python3 scripts/merge.py 12 --expected-head {approved}", str(self.repo))
+            )
+            self.assertEqual(
+                ab.binding("merge", f"python3 scripts/merge.py 12 --expected-head {later}", str(self.repo)),
+                {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": later},
+            )
+            self.assertEqual(
+                ab.binding("merge", f"gh pr merge 12 --match-head-commit {later}", str(self.repo)),
+                {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": later},
+            )
 
     def test_forms(self) -> None:
         """PR URL, gh api path and -R pick the repository; option values are never mistaken for the PR."""
@@ -190,6 +210,13 @@ class MergeTests(unittest.TestCase):
             self.assertEqual(by_url and by_url["repository"], "github.com/other/repo")
             api = ab.binding("merge", f"gh api repos/acme/gadgets/pulls/9/merge -f sha={b}", str(self.repo))
             self.assertEqual(api and api["repository"], "github.com/acme/gadgets")
+            async_api = ab.binding(
+                "merge", f"gh api --method PUT repos/acme/gadgets/pulls/9/merge-async -f sha={b}", str(self.repo)
+            )
+            self.assertIsNone(async_api)  # async merge may also merge open downstack PRs
+            self.assertIsNone(
+                ab.binding("merge", "gh api repos/acme/gadgets/pulls/9/merge-async/some-uuid", str(self.repo))
+            )
             got = ab.binding("merge", f"gh pr merge 3 -R other/repo {pin}", str(self.repo))
             body = ab.binding("merge", f"gh pr merge --body 7 5 {pin}", str(self.repo))
         self.assertEqual(got and got["repository"], "github.com/other/repo")

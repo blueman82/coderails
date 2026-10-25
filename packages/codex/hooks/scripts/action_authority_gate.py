@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Action-receipt gate: warn by default (Codex copy of hooks/scripts/action_authority_gate.py).
+"""Action-receipt gate: shipped advisory mode warns (Codex copy of hooks/scripts/action_authority_gate.py).
 
-Config `action_authority`: advisory (default, also with no config or no key) | enforce | off; any other value is
-enforce, traced action_authority_bad_mode. Advisory warns on missing receipts; live authority denials and
+Config `action_authority`: advisory | enforce | off; absent or unknown config is off.
+Advisory warns on missing receipts; live authority denials and
 unbindable merges under a live merge cap still block.
 Enforce denies unless
 authority.permits() allows and a receipt verifies (mirrored scripts/lib/receipt_gate.py, shared with merge.py, which is
@@ -32,7 +32,7 @@ from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
 
 def mode(cwd: str) -> str:
-    """Return advisory (the default), enforce or off, never raising."""
+    """Return advisory, enforce or off, never raising."""
     return resolve_mode(cwd)[0]
 
 
@@ -56,7 +56,7 @@ def how_to_proceed(code: str, session: str, name: str) -> str:
             "--match-head-commit <head sha>`, with no earlier ref-moving step in the same command."
         )
     return (
-        "The OWNER mints one at a terminal (signed with their passphrase key; an agent cannot): run "
+        "For optional receipt enforcement, sign one at a terminal with the configured key: run "
         f"scripts/action_receipt_cli.py approve-action --session {session} --kind {name} "
         "--command '<exact command>' --cwd <directory it runs in>. "
         "One-time key setup: scripts/authority_keys.py init."
@@ -75,14 +75,12 @@ def main() -> int:
         cwd = text_field(payload, "cwd") or os.getcwd()
         if not isinstance(command, str) or not command:
             return 0
-        mode_, bad = resolve_mode(cwd)
-        if mode_ == "off" or not (segments := guarded_segments(command, cwd)):
+        mode_, _ = resolve_mode(cwd)
+        if mode_ == "off" or not (segments := guarded_segments(command, cwd, implicit_push=True)):
             return 0
         authority = read_authority(session) or {}
         loop_id = authority.get("loop_id")
         loop = loop_id if isinstance(loop_id, str) else None
-        if bad:
-            append_trace_row("action_authority", "advisory", "action_authority_bad_mode", trace_id, {"loop_id": loop})
         signers, tier = resolve_trust_root()
 
         def claimed(_name: str) -> None:
@@ -132,4 +130,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("action_authority_gate", main))

@@ -17,12 +17,20 @@ anything else:
 
 1. Resolve the repo-key dir: `dirname` of `dirname` of the path printed by
    `hooks/scripts/lib/agentic_loop_path.py`.
-2. Count `<repo-key-dir>/*/retro.json` — must be **>= 10**.
-3. Confirm `standing-orders.md` has **>= 1** entry whose `last_recurred` !=
-   `created` — one full lifecycle (created, then recurred at least once).
-4. Confirm `standing-orders-decayed.md` has **>= 1** entry — one clean decay.
+2. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/lessons.py" --dir <repo-key-dir> --session <native caller session id> predicate`
+   and read `graduation` from its JSON; do not count files or read Markdown by hand.
+   It checks **>= 10 distinct completed retros** with owned validated progress and matching source hashes,
+3. `recurred` **>= 1** — an order in `orders.json` whose typed `last_recurred` !=
+   `created` (one full lifecycle: created, then recurred at least once), and
+4. `decayed` **>= 1** — an order with `status: decayed` (one clean decay).
+   `met` is true only when all three hold.
 
-Append one line to `<repo-key-dir>/promotion-runs.log`:
+An exit 2 refusal or exit 3 degraded read is an unknown result, never an unmet predicate or a successful dormant run.
+Report its reason and leave a failure marker; do not use a generated view or ledger claim as authoritative fallback.
+Schema3 history requires the matching `retro_check` validator; unavailable validation is an explicit refusal.
+Pass the actual caller's native session id so degraded reads remain attributable; do not infer environment presence.
+
+After a successful evaluation, append one line to `<repo-key-dir>/promotion-runs.log`:
 
 ```
 <ISO8601> predicate=<met|unmet> retros=<n> lifecycle=<0|1> decay=<0|1>
@@ -46,7 +54,11 @@ delivery completes.
 ## 2. Mining
 
 If the predicate is met, read all `retro.json` files under
-`<repo-key-dir>/*/retro.json` plus `standing-orders.md` (the overlay).
+`<repo-key-dir>/*/retro.json` plus the `candidates` list from the
+`lessons.py ... predicate` output of §1 (the typed standing orders; the
+generated `standing-orders.md` is only a view of them).
+Candidates carry current, live, verified owner-cited lesson text from Muninn. Retros lacking complete owned sources
+cannot inflate the graduation count; free-text notes cannot substitute for typed recurrence fields.
 Select ONLY failure modes that:
 
 - recurred **>= 2** times, and
@@ -55,7 +67,9 @@ Select ONLY failure modes that:
   agentic-loop skill, not just this one.
 
 Reject repo-specific lessons even if they meet the recurrence bar — they
-stay in the overlay (`standing-orders.md`), they do not get promoted.
+stay in the typed standing orders (`scope: repo`), they do not get promoted.
+`lessons.py predicate` already applies the recurrence, distinct-session and
+`scope: agnostic` bars; the repo-agnostic judgement is confirmed here.
 
 ## 3. Drafting
 

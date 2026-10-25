@@ -91,8 +91,9 @@ class MergeReceiptTests(unittest.TestCase):
     ) -> str:
         """Store a receipt for the merge as the owner would have signed it (bound to the live PR)."""
         bind = {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": SHA}
+        command = f"python3 {self.plugin / 'scripts/merge.py'} {target or number} --expected-head {SHA}"
         rec = signed_receipt(
-            key or self.key, "merge", f"python3 scripts/merge.py {target or number}", str(self.repo),
+            key or self.key, "merge", command, str(self.repo),
             git(self.repo, "branch", "--show-current"), bind, session,
             receipt_id=rid, **over,
         )  # fmt: skip
@@ -145,6 +146,32 @@ class MergeReceiptTests(unittest.TestCase):
     def test_no_receipt_is_denied(self) -> None:
         """(a) merge.py with no receipt: no_receipt, and gh is never called."""
         self.refused("no_receipt")
+
+    def test_enforced_merge_needs_a_literal_expected_head(self) -> None:
+        """A bare helper command cannot bind a signed receipt to an unseen future PR head."""
+        self.mint()
+        self.refused("binding_unknown", NO_EXPECTED="1")
+
+    def test_direct_executable_receipt_cannot_authorise_python3_helper(self) -> None:
+        """The supported Python command has a different hash from direct executable invocation."""
+        command = f"{self.plugin / 'scripts/merge.py'} 7 --expected-head {SHA}"
+        bind = {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": SHA}
+        rec = signed_receipt(
+            self.key,
+            "merge",
+            command,
+            str(self.repo),
+            git(self.repo, "branch", "--show-current"),
+            bind,
+        )
+        store(self.loop, rec, "s1")
+        self.refused("hash_mismatch")
+
+    def test_stale_expected_head_is_denied_before_receipt_use(self) -> None:
+        """A moved PR head leaves the matching receipt unconsumed."""
+        self.mint()
+        self.refused("PR head changed", EXPECTED_SHA="a" * 40)
+        self.assertFalse((self.loop / "s1" / "receipts" / "r1.consumed").exists())
 
     def test_direct_invocation_consumes_and_executes_a_signed_receipt(self) -> None:
         """(e) No hook ran: merge.py verifies, consumes and marks executed; the replay is refused."""
@@ -300,8 +327,9 @@ class MergeReceiptTests(unittest.TestCase):
         rc, err = self.run_merge(NO_SEAM="1")
         self.assertEqual((rc, self.merges()), (0, 1), err)
 
-    def hook_consume(self, command: str = "python3 scripts/merge.py 7") -> None:
+    def hook_consume(self, command: str | None = None) -> None:
         """Run the real PreToolUse hook on `command` so it consumes the receipt (phase 1)."""
+        command = command or f"python3 {self.plugin / 'scripts/merge.py'} 7 --expected-head {SHA}"
         payload = {"session_id": "s1", "cwd": str(self.repo), "tool_name": "Bash", "tool_input": {"command": command}}
         done = subprocess.run(
             [sys.executable, str(self.plugin / "hooks/scripts/action_authority_gate.py")], input=json.dumps(payload),
@@ -325,7 +353,7 @@ class MergeReceiptTests(unittest.TestCase):
         """A branch command's hook note names the resolved PR, then direct merge accepts that receipt."""
         git(self.repo, "switch", "-q", "-c", "feature/x")
         self.mint(target="feature/x")
-        self.hook_consume("python3 scripts/merge.py feature/x")
+        self.hook_consume(f"python3 {self.plugin / 'scripts/merge.py'} feature/x --expected-head {SHA}")
         marker = self.loop / "s1" / "receipts" / "r1.consumed"
         self.assertEqual(json.loads(marker.read_text())["number"], "7")
         rc, err = self.run_merge(MERGE_TARGET="feature/x")
@@ -343,7 +371,7 @@ class MergeReceiptTests(unittest.TestCase):
     def test_hook_consumed_for_another_pr_is_refused(self) -> None:
         """A receipt the hook consumed for merge.py 8 does not license merge.py 7."""
         self.mint(number=8)
-        self.hook_consume("python3 scripts/merge.py 8")
+        self.hook_consume(f"python3 {self.plugin / 'scripts/merge.py'} 8 --expected-head {SHA}")
         self.refused("consumed")
 
     def test_two_merge_py_runs_after_one_hook_consume_exactly_one_executes(self) -> None:

@@ -30,6 +30,7 @@ def direct(
     cwd: str,
     target: str | None,
     verified_sha: str | None,
+    command: str | None,
 ) -> tuple[bool, str, Path | None]:
     """Reserve a direct merge when live authority exists; bind its requested PR and verified head."""
     if not read_authority(session):
@@ -37,7 +38,7 @@ def direct(
     branch = git_out(cwd, "branch", "--show-current") if target == "auto" else target
     if branch and not branch.isdigit() and pr_number_for_branch(branch, cwd) != number:
         return True, "binding_unknown", None
-    bind = binding("merge", f"python3 scripts/merge.py {target or number}", cwd)
+    bind = binding("merge", command, cwd) if command else None
     if bind and verified_sha and bind["sha"] != verified_sha:
         return True, "sha_mismatch", None
     code, path = reserve(session, number, bind)

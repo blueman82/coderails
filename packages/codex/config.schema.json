@@ -56,16 +56,20 @@
       "description": "true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md)."
     },
     "action_authority": {
-      "type": ["string", "null"], "default": "advisory", "enum": ["enforce", "advisory", "off"], "status": "enforced_by_code",
-      "description": "Advisory is the default when the setting or config file is absent. Missing receipts warn without blocking. A live session authority still blocks denied actions and merges that cannot be bound to its budget. Enforce requires a signed owner receipt for merges and pushes to main or master. Off is silent. An unknown value enforces and logs action_authority_bad_mode."
+      "type": ["string", "null"], "default": "off", "enum": ["enforce", "advisory", "off"], "status": "enforced_by_code",
+      "description": "Absent or unknown settings leave this optional gate off. The shipped workflow sets advisory: missing receipts warn while a live session authority still blocks denied actions and merges that cannot be bound to its budget. Enforce requires a signed receipt for merges and pushes to main or master."
     },
     "integrity_review": {
       "type": ["object", "null"], "default": null, "status": "enforced_by_code",
       "description": "Integrity attestation settings.",
       "properties": {
+        "enabled": {
+          "type": ["boolean", "null"], "default": false, "status": "enforced_by_code",
+          "description": "true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live."
+        },
         "machine_user": {
           "type": ["string", "null"], "default": null, "status": "enforced_by_code",
-          "description": "GitHub login that must post the integrity-review status; null or absent = local gate inactive."
+          "description": "Deprecated. A non-empty legacy login remains the required local status author until enabled is true."
         }
       }
     },
@@ -76,6 +80,16 @@
         "require_signatures": {
           "type": ["boolean", "null"], "default": false, "status": "enforced_by_code",
           "description": "true = eval artifacts must be signed; refuse when signing is impossible."
+        }
+      }
+    },
+    "memory": {
+      "type": ["object", "null"], "default": null, "status": "enforced_by_code",
+      "description": "Typed-memory settings.",
+      "properties": {
+        "backend": {
+          "type": ["string", "null"], "default": "muninn", "status": "enforced_by_code",
+          "description": "muninn (default) = Muninn is the authoritative typed-memory store and a missing or refusing Muninn fails with a reason code; off = no typed memory at all (reason memory_backend_off, traced, Markdown is never read or written). Any other value fails with memory_backend_invalid."
         }
       }
     }

@@ -262,9 +262,9 @@ PYTHONPATH=. python3 -m unittest packages/tests/test_provider_stop_record.py scr
 to `receipts` and `trust`: `authority_denied`, `approval_requirement_missing`, `max_prs_exceeded`, `action_authority_bad_mode`,
 `authority_denied_destructive_shell`, `no_receipt` and `merge_py_receipt_executed`. The hook, `enforce_pr_workflow` and
 `scripts/merge.py` all land in the same counters (`denied_`, `advisory_` and `merge_py_` prefixes are stripped).
-Baseline: none yet on a real loop. The receipt gate is advisory by default. Explicit `action_authority: enforce` blocks actions without a valid receipt.
+Baseline: none yet on a real loop. The shipped workflow sets the receipt gate to advisory. An absent setting leaves it off. Explicit `action_authority: enforce` blocks actions without a valid receipt.
 What to read: `approval_requirement_missing` above 0 means a guarded action's permit verdict omitted its approval requirement and was refused before consuming a receipt. `authority_denied` / `max_prs_exceeded` above 0 mean the authority is refusing actions it should (inspect it
-  with `authority.py inspect`); `no_receipt` can be expected in advisory mode. In enforce mode, a high `no_receipt` count means merges lack valid receipts. `action_authority_bad_mode` above 0 means a config typo (treated as enforce).
+  with `authority.py inspect`); `no_receipt` can be expected in advisory mode. In enforce mode, a high `no_receipt` count means merges lack valid receipts. An unknown config value leaves the optional gate off.
 Wiring `gate_summary` into `measure_graph_alignment.py` itself is a handoff to the lane that owns that file; until then
 the stdin CLI above is the supported route.
 

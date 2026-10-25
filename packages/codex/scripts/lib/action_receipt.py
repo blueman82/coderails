@@ -10,6 +10,7 @@ cooperating-agent safeguard, not a boundary (see docs/decisions/p3-human-only-mi
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -149,7 +150,7 @@ def verify(
         return False, "expired"
     if data["session_id"] != session_id:
         return False, "foreign_session"
-    if data["loop_id"] is not None and data["loop_id"] != loop_id:
+    if data["loop_id"] != loop_id:
         return False, "foreign_loop"
     if consumed:
         return False, "consumed"
@@ -240,11 +241,15 @@ def find_valid(
     base: Path | None = None,
     consume_it: bool = False,
     signers: Path | None = None,
+    excluded: set[str] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     """Return (receipt, "ok") for the first receipt in this session that verifies, else (None, refusal code).
 
     With consume_it a match is claimed atomically; losing the claim race reports "consumed".
     """
+    if consume_it:
+        claimed, code, _ = claim_many(session_id, [proposed], now, loop_id, base, signers)
+        return (claimed[0], "ok") if claimed else (None, code)
     auth = authority_path(session_id, base)
     if auth is None:
         return None, "no_session" if not session_id else "malformed"
@@ -259,8 +264,47 @@ def find_valid(
         ok, code = verify(data, proposed, now, session_id, loop_id, is_consumed(path), signers)
         if not ok:
             refusals.append(code)
-        elif consume_it and not consume(path):
+        elif data["receipt_id"] in (excluded or set()):
             refusals.append("consumed")
         else:
             return data, "ok"
     return None, next((c for c in refusals if c != "malformed"), refusals[0] if refusals else "no_receipt")
+
+
+def claim_many(
+    session_id: str,
+    proposals: list[dict[str, Any]],
+    now: datetime,
+    loop_id: str | None,
+    base: Path | None = None,
+    signers: Path | None = None,
+) -> tuple[list[dict[str, Any]] | None, str, int]:
+    """Claim distinct receipts for one command under a shared session lock; return failure index on denial."""
+    auth = authority_path(session_id, base)
+    if auth is None:
+        return None, "no_session" if not session_id else "malformed", 0
+    directory = auth.parent / "receipts"
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        with (directory / ".claims.lock").open("a+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            selected: list[dict[str, Any]] = []
+            ids: set[str] = set()
+            for index, proposed in enumerate(proposals):
+                found, code = find_valid(session_id, proposed, now, loop_id, base, signers=signers, excluded=ids)
+                if found is None:
+                    return None, code, index
+                selected.append(found)
+                ids.add(found["receipt_id"])
+            claimed: list[Path] = []
+            for index, found in enumerate(selected):
+                path = receipt_path(session_id, found["receipt_id"], base)
+                if path is None or not consume(path):
+                    for prior in claimed:
+                        with suppress(OSError):
+                            prior.with_suffix(".consumed").unlink()
+                    return None, "consumed", index
+                claimed.append(path)
+            return selected, "ok", 0
+    except OSError:
+        return None, "consumed", 0

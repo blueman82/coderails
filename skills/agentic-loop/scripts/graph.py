@@ -14,6 +14,7 @@ from hooks.scripts.lib import graph_controller, graph_recovery, graph_stops
 from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.graph_evidence import object_value
 from hooks.scripts.lib.graph_executor import graph_semantics, load, transition
+from scripts.lib import decision_record
 
 
 def parser() -> argparse.ArgumentParser:
@@ -25,11 +26,14 @@ def parser() -> argparse.ArgumentParser:
         "add-unit",
         "inspect",
         "summarize",
+        "collection",
         "recover-wave",
         "plan",
         "begin-wave",
         "record-wave",
         "record-unit",
+        "record-decision",
+        "flush-decisions",
         "respawn-stale",
         "hard-stop",
         "stop",
@@ -41,6 +45,16 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("state", type=Path)
         if name == "record-wave":
             command.add_argument("results_json")
+        if name in {"record-decision", "flush-decisions"}:
+            command.add_argument("--session", required=True)
+            command.add_argument("--cite-quote")
+        if name == "record-decision":
+            command.add_argument("--loop-id", required=True)
+            command.add_argument("--revision", required=True, type=int)
+            command.add_argument("--phase", required=True)
+            command.add_argument("--decision", required=True)
+            command.add_argument("--flip-condition")
+            command.add_argument("--unit")
         if name == "record-unit":
             command.add_argument("--unit", required=True)
             command.add_argument("--status", required=True, choices=("done", "dropped"))
@@ -161,6 +175,8 @@ def main() -> int:
             }
         elif args.command == "summarize":
             output = graph_recovery.summarize(load(args.state))
+        elif args.command == "collection":
+            output = graph_recovery.collection(args.state)
         elif args.command == "recover-wave":
             output = dispatch.recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
         elif args.command == "plan":
@@ -173,6 +189,26 @@ def main() -> int:
             if (args.status == "done") != (args.evidence is not None):
                 raise ValueError("done requires --evidence; dropped requires --reason")
             output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
+        elif args.command == "record-decision":
+            output = decision_record.record(
+                args.state,
+                args.session,
+                args.phase,
+                args.decision,
+                expected_loop_id=args.loop_id,
+                expected_revision=args.revision,
+                transition=transition,
+                flip_condition=args.flip_condition,
+                unit=args.unit,
+                cite_quote=args.cite_quote,
+            )
+        elif args.command == "flush-decisions":
+            output = decision_record.flush_pending(
+                args.state,
+                args.session,
+                transition=transition,
+                cite_quote=args.cite_quote,
+            )
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = native_transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "stop":
@@ -185,7 +221,7 @@ def main() -> int:
         print(f"graph: {error}", file=sys.stderr)
         return 1
     print(json.dumps(output, sort_keys=True))
-    return 0
+    return int(output.get("exit_code", 0)) if isinstance(output, dict) else 0
 
 
 if __name__ == "__main__":

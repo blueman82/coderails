@@ -1,4 +1,4 @@
-"""authority.py grant must fail loudly when the session id is an unsubstituted placeholder or empty."""
+"""authority.py grant must reject empty, unsubstituted and shell-unsafe session IDs."""
 
 from __future__ import annotations
 
@@ -25,9 +25,18 @@ def grant(loops: Path, *session_args: str, session_env: str | None = None) -> su
 class SessionGuardTests(unittest.TestCase):
     """A failed ${CLAUDE_SESSION_ID} substitution must never produce a grant no hook can see."""
 
-    def test_literal_placeholder_session_is_refused_and_writes_nothing(self) -> None:
-        """A literal ${...} or {...} id exits 2 under the unsafe-session code and creates no directory."""
-        for placeholder in ("${CLAUDE_SESSION_ID}", "$CLAUDE_SESSION_ID", "{session}"):
+    def test_unsafe_session_is_refused_and_writes_nothing(self) -> None:
+        """A placeholder or shell-unsafe ID exits 2 and creates no directory."""
+        for placeholder in (
+            "${CLAUDE_SESSION_ID}",
+            "$CLAUDE_SESSION_ID",
+            "{session}",
+            "s;echo INJECTED;#",
+            "s evil",
+            "`id`",
+            "?",
+            "s?",
+        ):
             with self.subTest(placeholder=placeholder), tempfile.TemporaryDirectory() as raw:
                 run = grant(Path(raw), "--session", placeholder)
                 self.assertEqual(run.returncode, 2, run.stderr)

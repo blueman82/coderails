@@ -7,6 +7,7 @@ import io
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from collections.abc import Generator
 from datetime import datetime, timezone
@@ -32,17 +33,21 @@ SHA = "f" * 40
 DENIED = {"allow": False, "reason": "authority_denied"}
 
 
+def _field(_number: str, key: str, fallback: str = "") -> str:
+    return {"state": "OPEN", "title": "t", "headRefOid": SHA}.get(key, fallback)
+
+
 class SeamSpyTests(unittest.TestCase):
     """merge.py reaches authority_permits.permits through the shared gate, and calls the gate exactly once."""
 
     def test_default_mode_does_not_require_a_merge_passphrase(self) -> None:
-        """With no config, the direct merge path reports a missing receipt but proceeds."""
+        """With no config, the direct merge path is off and needs no receipt."""
         with (
             mock.patch.object(receipt_gate, "_claim_merge", return_value="no_receipt"),
             mock.patch.object(receipt_gate, "append_row") as trace,
         ):
             receipt_gate.require_merge_receipt("7", "/nowhere")
-        self.assertEqual(trace.call_args.args[1:3], ("advisory", "merge_py_no_receipt"))
+        trace.assert_not_called()
 
     def test_merge_main_calls_the_seam_once_before_gh_pr_merge(self) -> None:
         """The order is: seam, then gh pr merge; a refusal from the seam stops before gh."""
@@ -58,9 +63,10 @@ class SeamSpyTests(unittest.TestCase):
             del number
             return fields.get(name, fallback)
 
-        def seam_call(number: str, *, target: str, verified_sha: str) -> None:
+        def seam_call(number: str, *, target: str, verified_sha: str, expected_sha: str | None, command: str) -> None:
             del number
-            self.assertEqual((target, verified_sha), ("7", SHA))
+            self.assertEqual((target, verified_sha, expected_sha), ("7", SHA, None))
+            self.assertTrue(command.endswith(" 7"))
             order.append("seam")
 
         with (
@@ -73,12 +79,49 @@ class SeamSpyTests(unittest.TestCase):
             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()),
         ):  # fmt: skip
             self.assertEqual(merge.main(["7"]), 0)
-            seam.assert_called_once_with("7", target="7", verified_sha=SHA)
+            self.assertEqual(seam.call_args.args, ("7",))
             self.assertEqual(order, ["seam", "gh"])
             order.clear()
             seam.side_effect = receipt_gate.ReceiptRefusedError("no_receipt")
             self.assertEqual(merge.main(["7"]), 1)
             self.assertEqual(order, [])
+
+    def test_expected_head_must_match_verified_head_before_receipt_or_merge(self) -> None:
+        """A stale literal head cannot reuse a signed receipt after the PR moves."""
+        other = "a" * 40
+        with (
+            mock.patch.object(git, "require_repo"),
+            mock.patch.object(git, "main", return_value="main"),
+            mock.patch.object(git, "protected", return_value=False),
+            mock.patch.object(git, "pr_field", side_effect=_field),
+            mock.patch.object(merge, "verify_gates", return_value=SHA),
+            mock.patch.object(merge, "require_merge_receipt", return_value=None) as receipt_check,
+            mock.patch.object(git, "run") as remote_merge,
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(merge.main(["7", "--expected-head", other]), 1)
+        receipt_check.assert_not_called()
+        remote_merge.assert_not_called()
+
+    def test_matching_expected_head_reaches_receipt_and_remote_pin(self) -> None:
+        """The same literal SHA flows through the receipt gate and remote merge."""
+        with (
+            mock.patch.object(git, "require_repo"),
+            mock.patch.object(git, "main", return_value="main"),
+            mock.patch.object(git, "protected", return_value=False),
+            mock.patch.object(git, "pr_field", side_effect=_field),
+            mock.patch.object(merge, "verify_gates", return_value=SHA),
+            mock.patch.object(manifest_policy, "gate"),
+            mock.patch.object(merge, "cleanup"),
+            mock.patch.object(merge, "require_merge_receipt", return_value=None) as receipt_check,
+            mock.patch.object(git, "run") as remote_merge,
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(merge.main(["7", "--expected-head", SHA]), 0)
+        self.assertEqual(receipt_check.call_args.kwargs["command"].split()[-2:], ["--expected-head", SHA])
+        self.assertEqual(remote_merge.call_args.args[-2:], ("--match-head-commit", SHA))
 
     def test_the_gate_asks_permits_about_merge(self) -> None:
         """require_merge_receipt consults authority_permits.permits('merge') for the session first."""
@@ -199,3 +242,31 @@ class SeamSpyTests(unittest.TestCase):
         ):
             receipt_gate.require_merge_receipt("7", "/repo", datetime.now(timezone.utc))
         direct_read.assert_called_once()
+
+    def test_plain_merge_refuses_when_execution_debit_cannot_be_recorded(self) -> None:
+        """A claimed receipt cannot allow the remote merge if its budget marker failed."""
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt_path = Path(temporary) / "r1.json"
+            proposal = {"artifact_sha": SHA, "exact_payload_hash": "h", "number": "7"}
+            allowed = {"allow": True, "reason": "ok", "requires_approval": True}
+            claims: list[str] = []
+            with (
+                mock.patch.object(merge_budget, "lock", return_value=contextlib.nullcontext(True)),
+                mock.patch.object(receipt_gate, "read_authority", return_value={"loop_id": None, "max_prs": 1}),
+                mock.patch.object(receipt_gate, "permits", return_value=allowed),
+                mock.patch.object(receipt_gate, "executed_merges", return_value=0),
+                mock.patch.object(receipt, "find_valid", return_value=({"receipt_id": "r1"}, "ok")),
+                mock.patch.object(receipt, "claim_many", return_value=([{"receipt_id": "r1"}], "ok", 0)),
+                mock.patch.object(receipt, "receipt_path", return_value=receipt_path),
+                mock.patch.object(receipt, "execute", return_value=False),
+            ):
+                result = receipt_gate.check_and_consume(
+                    "s1",
+                    [("merge", proposal)],
+                    datetime.now(timezone.utc),
+                    None,
+                    None,
+                    on_claim=claims.append,
+                )
+            self.assertEqual(result, ("merge", "executed_marker_unavailable"))
+            self.assertEqual(claims, [])

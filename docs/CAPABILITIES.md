@@ -39,12 +39,13 @@ byte-identical copies of `capability.py`, `capability_mcp.py`, `lib/capability_e
 - **Tool names.** MCP tool names cannot contain dots, so `repo.inspect`, `diff.read`, `tests.run`, `pr.comment`, `cmd.run`
   are served as `repo_inspect`, `diff_read`, `tests_run`, `pr_comment`, `cmd_run`. Guarded read-only roles
   (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`) get `repo_inspect`, `diff_read`;
-  `source-auditor` additionally gets `tests_run` and `cmd_run`.
+  `source-auditor` additionally gets `tests_run` and `cmd_run`. The two read tools advertise `readOnlyHint: true`.
+  The execution tools advertise `readOnlyHint: false`; they can run repo code.
 - **Per-role instance; role is not an argument.** The role is fixed at launch. No `inputSchema` has a `role` property and
-  `capability.check` rejects unknown keys, so a smuggled `role` is `capability_args_invalid`. Startup exits 2 (stderr
-  reason, trace `capability_mcp_refused`) when the role is absent from `profiles.json`, holds no capability tool, or an
-  unknown flag is given. A `tools/call` for a name outside the role's list is a JSON-RPC error, a
-  `capability_wrong_role` trace row, and nothing is dispatched.
+  `capability.check` rejects unknown keys, so a smuggled `role` is `capability_args_invalid`. Startup exits 2 with a
+  stderr reason when the role is absent from `profiles.json`, holds no capability tool, or an unknown flag is given.
+  It tries to write a `capability_mcp_refused` trace row. A `tools/call` for a name outside the role's list returns a
+  JSON-RPC error and tries to write a `capability_wrong_role` row. It dispatches nothing.
 - **cwd and `worktree`.** A plugin MCP server's cwd is the session's cwd, not a subagent's worktree. Every repo tool
   therefore accepts an optional `worktree` argument, honoured only if it is a path listed by `git worktree list` in the
   server's own repo (else `capability_path_denied`).
@@ -55,8 +56,10 @@ byte-identical copies of `capability.py`, `capability_mcp.py`, `lib/capability_e
   substitution (no shell), executed through `capability.sandboxed()` like `tests.run` (no network, confined writes,
   scrubbed env). Granted to `source-auditor` only. Refusals: `capability_args_invalid` (unknown name, missing/extra key),
   `capability_path_denied` (`..`, absolute), `capability_bad_ref`.
-- **Trace.** Every call and refusal appends a `capability` row with inputs `{tool, role, via: mcp}` (stored as hashes).
-  Counters: `python3 scripts/lib/capability_counters.py [--since <ISO ts>]` (reads `CLAUDE_AGENTIC_LOOP_DIR`).
+- **Trace.** Each call and refusal tries to append a `capability` row with inputs `{tool, role, via: mcp}` (stored as
+  hashes). A missing trace library or failed write leaves no row. A recognized tool's response sets `traced: false` in
+  that case; startup and wrong-role errors have no `traced` field. Counters include only stored rows:
+  `python3 scripts/lib/capability_counters.py [--since <ISO ts>]` (reads `CLAUDE_AGENTIC_LOOP_DIR`).
 - **Cost.** Plugin MCP servers all launch at session start: one python process per role, five per session.
 
 Limits (stated, not hidden): `cmd.run` and `pr.comment` offer no network command: `gh pr view` is
@@ -113,10 +116,16 @@ before `developer_instructions` would swallow it) and keeps `sandbox_mode = "rea
 `sandbox_mode` alone is not sufficient: a native child preserves the parent's permissions and MCP configuration.
 `scripts/codex_role_session.py --role <agent> --prompt-file <file> [--cwd <dir>]` (byte-identical copy in the Codex
 package) launches `codex exec --ignore-user-config -s read-only -c features.shell_tool=false -c
-mcp_servers.cap-<role>=... -` with only that role's server, the prompt on stdin from the file and an allowlisted
-environment (PATH, HOME, CODEX_HOME, LANG, LC_ALL, TERM, TMPDIR; no tokens). It also loads the tracked role TOML's
+features.multi_agent=false -c mcp_servers.cap-<role>=... -`. It registers only that role's server. It reads the prompt
+from the file on stdin and passes an allowlisted environment (PATH, HOME, CODEX_HOME, LANG, LC_ALL, TERM, TMPDIR; no
+tokens). It also loads the tracked role TOML's
 `developer_instructions` into the contained session. The Codex cite-check, merge, workflow, post-review,
 workflow-audit, and docs-sync skills route guarded review roles through this launcher with an exact-head worktree.
+For `source-auditor` only, the launcher sets `approval_mode="approve"` on that server's `cmd_run` and `tests_run` tools.
+This allows the two granted, sandboxed execution tools to run under Codex's `approval=never` policy. It adds no approval
+for other tool names or roles. The [Codex config reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+defines the per-server, per-tool setting. The MCP server still checks the role, arguments, named command or test, and
+execution sandbox. These same-user files can be changed by repo code; this route is not a tamper-proof boundary.
 Use it for `source-auditor`, because
 `tests_run`/`cmd_run` must not be reachable by inherited children. It refuses roles that are not guarded profile entries.
 The Codex plugin manifest declares no `mcpServers`: a manifest server would be inherited by every native child, and
@@ -149,9 +158,13 @@ tools after a Skill call). If it did, the remaining controls are `reviewer_bash_
 **Codex observation.** `scripts/tests/codex_role_session_live_test.py` runs the real `codex exec` with the launcher's
 argv against a loopback Responses fixture that answers with an `exec_command` call. With the launcher's argv the request's
 `tools` array holds no `exec_command`/`write_stdin`, the call returns `unsupported call: exec_command`, and only the
-requested role's server tools are present; the same argv minus `features.shell_tool=false` offers the shell and the
-command runs (negative control). Observed: the launcher's argv. Config asserted, not observed: the `[features]` block
-inside the role TOML files themselves (a native sub-agent spawn was not driven offline).
+requested role's server tools are present. All five guarded roles offer no `spawn_agent` tool. Without
+`features.multi_agent=false`, the control run offers `spawn_agent`. Without `features.shell_tool=false`, the control
+run offers the shell and executes the command. The tests observe the launcher's argv. They do not test the `[features]`
+block in the role TOML files by spawning a native child.
+An OAuth spot check also ran the launcher with `approval=never` and a read-only Codex sandbox. `design-scout` completed
+`repo_inspect`; `source-auditor` completed `cmd_run(file-lines)` and `tests_run(reviewer-allowlist)`. Before the read
+annotation and the two per-tool approval settings, Codex offered the tools but refused calls that required approval.
 
 Measurement note: the success signal is the `capability_wrong_role`, `capability_args_invalid`, `capability_path_denied`
 and `capability_bad_ref` counts staying near zero for well-behaved roles, with `ok` rising once agents are bound to the

@@ -158,7 +158,7 @@ class AuthorityDeniedLeaseTests(unittest.TestCase):
         for command, calls in ((self.LEASE, 1), ("ls -la", 0)):
             payload = {"session_id": "s1", "cwd": str(self.repo), "tool_input": {"command": command}}
             with (
-                mock.patch.object(hook, "read_payload", return_value=payload),
+                mock.patch.object(hook, "read_payload_strict", return_value=payload),
                 mock.patch.object(hook, "permits", return_value=allow) as spy,
             ):
                 hook.main()

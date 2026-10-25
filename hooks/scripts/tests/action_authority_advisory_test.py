@@ -30,8 +30,20 @@ class AdvisoryGateTests(ReceiptHookCase):
         self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
         self.assertIn("denied_max_prs_exceeded", self.reasons())
 
+    def test_advisory_async_merge_with_live_budget_is_unbindable(self) -> None:
+        """A live max_prs cannot count the downstack PRs an async request may merge."""
+        self.configure("advisory")
+        self.grant(max_prs=1)
+        command = (
+            "gh api --method PUT repos/acme/widgets/pulls/12/merge-async " f"-f sha={MERGE_SHA} -f merge_method=merge"
+        )
+        self.assertTrue(self.denied("action_authority_gate", self.payload(command)))
+        self.assertEqual(list((self.loop / "s1" / "merges").glob("*.json")), [])
+        self.assertIn("denied_binding_unknown", self.reasons())
+
     def test_unbindable_merge_with_live_cap_is_denied_before_remote_command(self) -> None:
         """An unknown PR or head cannot merge without using the live max_prs budget."""
+        self.configure("advisory")
         self.grant(max_prs=1)
         remote = self.directory / "remote.log"
         gh = self.directory / "bin" / "gh"
@@ -55,7 +67,8 @@ class AdvisoryGateTests(ReceiptHookCase):
         self.assertEqual(self.reasons(), ["denied_binding_unknown", "denied_binding_unknown"])
 
     def test_unbindable_merge_without_live_cap_remains_advisory(self) -> None:
-        """Default advisory mode still warns and allows when no session authority is active."""
+        """Explicit advisory mode warns and allows when no session authority is active."""
+        self.configure("advisory")
         self.assertFalse(self.denied("action_authority_gate", self.payload("gh pr merge 12 --squash")))
         self.configure("enforce")
         self.assertTrue(self.denied("action_authority_gate", self.payload("gh pr merge 12 --squash")))

@@ -25,7 +25,11 @@ class MergeEvidenceTests(HookTestCase):
     def test_integrity_newest_exact_head_creator_state_and_description(self) -> None:
         """Only the newest successful configured-machine attestation can authorize this head."""
         sha = "a" * 40
-        valid = {"state": "success", "creator": {"login": "machine"}, "description": f"integrity=pass sha={sha}"}
+        valid = {
+            "state": "success",
+            "creator": {"login": "github-actions[bot]"},
+            "description": f"integrity=pass sha={sha}",
+        }
         rows: list[object] = [
             [],
             [{**valid, "state": "pending"}],
@@ -40,7 +44,7 @@ class MergeEvidenceTests(HookTestCase):
         ]
         with (
             patch(MODULE + ".config_path", return_value="config"),
-            patch(MODULE + ".integrity_machine_user", return_value="machine"),
+            patch(MODULE + ".integrity_enabled", return_value=True),
             patch(MODULE + ".repo", return_value="owner/repo"),
         ):
             for row in rows:
@@ -53,6 +57,22 @@ class MergeEvidenceTests(HookTestCase):
                 self.assertEqual(integrity_reason("1", sha, str(self.directory)), "")
             with patch(MODULE + ".run", return_value=subprocess.CompletedProcess([], 1, "")):
                 self.assertIn("GitHub fetch failed", integrity_reason("1", sha, str(self.directory)))
+
+    def test_legacy_integrity_hook_accepts_only_configured_login(self) -> None:
+        """An old config keeps the same status author rule until enabled becomes true."""
+        config = self.directory / "workflow.config.yaml"
+        config.write_text("integrity_review:\n  machine_user: machine\n  enabled: false\n")
+        sha = "a" * 40
+        old = {"state": "success", "creator": {"login": "machine"}, "description": f"integrity=pass sha={sha}"}
+        bot = {**old, "creator": {"login": "github-actions[bot]"}}
+        with patch(MODULE + ".config_path", return_value=config), patch(MODULE + ".repo", return_value="owner/repo"):
+            with patch(MODULE + ".run", return_value=subprocess.CompletedProcess([], 0, json.dumps([old]))):
+                self.assertEqual(integrity_reason("1", sha, str(self.directory)), "")
+            with patch(MODULE + ".run", return_value=subprocess.CompletedProcess([], 0, json.dumps([bot]))):
+                self.assertTrue(integrity_reason("1", sha, str(self.directory)))
+            config.write_text("integrity_review:\n  machine_user: machine\n  enabled: true\n")
+            with patch(MODULE + ".run", return_value=subprocess.CompletedProcess([], 0, json.dumps([bot]))):
+                self.assertEqual(integrity_reason("1", sha, str(self.directory)), "")
 
     def test_eval_failures_and_actual_smoke_gate_result_propagation(self) -> None:
         """Missing head, fetch failure, NO-GO, missing embeds and failed verification all deny."""

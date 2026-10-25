@@ -1,7 +1,7 @@
-# P3: human-only minting of action receipts
+# P3: optional signed action receipts
 
-Status: built (unit U4, branch `feature/p3-signed-receipts`). Scope: how an action receipt for `gh pr merge` /
-`git push` to main is minted so that an agent cannot mint its own, and what that does and does not guarantee.
+Status: built in draft PR #513. Scope: how an optional action receipt for `gh pr merge` or `git push` to main is
+signed and bound to the action. Same-user minting remains possible.
 
 ## Question
 
@@ -33,7 +33,7 @@ So the Keychain-plus-dialog design is neither confirmed feasible nor ruled out. 
 
 ## Chosen design
 
-The minting step is a separate OWNER-RUN command, signed with a passphrase-protected key:
+Optional receipt minting uses a key with a passphrase:
 
 1. `python3 scripts/authority_keys.py init` (owner, at a terminal) creates a passphrase-protected ed25519 key
    `~/.coderails/keys/receipt_ed25519` and a signers file. `ssh-keygen` prompts on `/dev/tty`; the tool refuses
@@ -41,23 +41,18 @@ The minting step is a separate OWNER-RUN command, signed with a passphrase-prote
 2. `python3 scripts/action_receipt_cli.py approve-action ...` computes the binding itself
    (`scripts/lib/action_binding.py`: repository, destination ref, SHA; the owner never types a SHA), signs the
    canonical receipt body with `ssh-keygen -Y sign` (namespace `coderails-receipt`), and refuses without a
-   controlling terminal (`receipt_refused_no_tty`). An agent without the passphrase cannot mint.
+   controlling terminal (`receipt_refused_no_tty`). An agent without the passphrase cannot sign with that key,
+   but a same-user agent can replace the user-tier signers file and use another key.
 3. The hook verifies the signature against a trust root, then the binding, then consumes the receipt atomically
    (`O_CREAT|O_EXCL`). Unsigned, wrongly signed, edited, stale, replayed, v1 and unbound receipts are all refused.
-4. Trust root, in two tiers, with no environment-variable override (an env knob would be a bypass):
-   - ROOT tier `/Library/Application Support/Coderails/receipt_signers`, honoured only when the file and its
-     directory are owned by uid 0 and not group/other writable. The owner installs it with sudo
-     (`authority_keys.py install-root` only prints the commands). This is the real boundary. It is NOT installed
-     on this machine by this work.
-   - USER tier `~/.coderails/keys/receipt_signers`. The agent runs as the same user and can write this file, so
-     this tier is a cooperating-agent safeguard (traced `trust_root_user_tier`), not a boundary.
-   - Neither present: `trust_root_missing`, deny.
+4. The trust root is `~/.coderails/keys/receipt_signers`. The agent runs as the same user and can write this file, so
+   it is a cooperating-agent safeguard (traced `trust_root_user_tier`). If absent, verification reports
+   `trust_root_missing`.
 
 ## Residuals (what this does not stop)
 
 - The user-tier trust root and the key directory are agent-writable. A hostile same-user agent can replace the
-  signers file with its own key and sign its own receipts. Only the root tier prevents that. Until the owner runs
-  the sudo install, treat the whole mechanism as a cooperating-agent safeguard.
+  signers file with its own key and sign its own receipts. Treat this as a cooperating-agent safeguard.
 - An agent with Accessibility permission or control of the owner's terminal (pty injection, a tty it shares) can
   answer the passphrase prompt or type the command. The tty rule excludes headless agents, not a hostile process
   in the owner's session. A key loaded in `ssh-agent` could also sign without a prompt.
@@ -78,33 +73,30 @@ The minting step is a separate OWNER-RUN command, signed with a passphrase-prote
   receipts directory. `O_EXCL` stops races, not `unlink`: a same-user agent can delete `<id>.consumed` to replay a
   receipt until it expires (owner-chosen, default 1 h) or delete `<id>.revoked` to un-revoke it. Only a consumed
   ledger outside the agent's write reach (root-owned or append-only) would close this; it is not built.
+- A session lock lets one command select and claim distinct receipts for several guarded segments. If a later
+  claim fails, the hook removes markers this call created before it denies. A process killed between marker
+  creates can leave a partial spend. The batch is not crash-atomic.
 - An agent that fills the receipts directory with junk `*.json` sorted ahead of the real one can push the real
   receipt past the 50-receipt cap (`MAX_RECEIPTS`). That denies, never allows (a denial-of-service, not a bypass).
 - The hook fails open on its own exceptions (`action_authority_failed_open`, traced and written to stderr), so an
   input that makes `binding()` or `guarded_segments()` raise would allow. No such input is known; `binding()`
   returns None rather than raising for malformed commands. Fail-closed for enforce mode is not built.
-- The root tier now checks the file and every ancestor directory (uid 0, not group/other writable), but it is not
-  installed here, so the real boundary is not active until the owner runs the sudo install.
 
-## Binding rules and default
+## Binding rules and mode
 
-Owner revision, 24 October 2026: `advisory` is now the default, including when the config or key is absent. Routine
-pushes and merges do not need a passphrase. A live session denial or spent merge cap still blocks. Explicit `enforce`
-requires a signed receipt; an unknown mode also enforces. The original design enforced receipts when the config was
-absent or unreadable. That earlier default no longer applies.
-
-In enforce mode, a command with unknown repository, ref or SHA is denied as `binding_unknown`. With a live session
-authority, advisory merge reservations also need a known PR and head. An unbindable merge is blocked while that
-authority is live. This replaces the original `default ON` decision. Binding fails when the command:
+The gate is off unless config sets `action_authority: enforce` or `action_authority: advisory`. Thus a normal PR
+workflow does not require a key or passphrase. To keep the repository+ref+SHA binding honest, a guarded command is
+unbindable (`binding_unknown`, denied) when it:
 
 - carries an env assignment prefix (`GIT_DIR=`, `GIT_CONFIG_*=`, `GH_REPO=`, any `NAME=value`), `git -c`, `--git-dir` or
   `--work-tree` (they retarget the action; the prefix is kept in the hashed segment so it is never silently stripped);
 - is a bare or remote-only `git push` (push.default, `branch.*.remote` and `remote.*.push` decide the destination);
 - is `gh pr merge` without `--match-head-commit <live head sha>` (or `gh api .../merge` without `sha=`). GitHub then
-  refuses a merge whose head moved after the hook ran. `scripts/merge.py` pins the sha its own gates verified;
-- names a raw `gh pr merge` PR ambiguously (a branch name, two PRs, a `-R` that disagrees with the PR URL, or a
-  combined short flag hiding a value option). `scripts/merge.py` also accepts a branch or `auto` and resolves its PR
-  before binding. The repository comes from `-R`, the PR URL or the api path, else `origin`.
+  refuses a merge whose head moved after the hook ran. Bare `scripts/merge.py <n>` is unbindable in enforce mode.
+  Use `scripts/merge.py <n> --expected-head <live head sha>` to bind a helper receipt;
+- names the PR ambiguously in `gh pr merge` (a branch name, two PRs, a `-R` that disagrees with the PR URL, a
+  combined short flag hiding a value option). The helper resolves its `auto` or branch target before it binds.
+  The repository comes from `-R`, the PR URL or the api path, else `origin`.
 
 `git push origin HEAD` binds the current branch. A detached HEAD is unbindable. The repository is the push URL from
 `git remote get-url --push --all`, including `remote.<n>.pushurl` and `pushInsteadOf`. More than one push URL is
