@@ -26,7 +26,11 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
   switch and serves ledger text, exit 0). The ledger never silently stands in for Muninn.
 - An order recorded without a user quote is kept active with `muninn.state=degraded`, reason `no_user_cite`, and
   `orders.py cite <id> --quote` attaches the cite later. Legacy entries are imported as `legacy_uncited` and served
-  diagnostically with `cited: false` until cited. Dispatch, promotion and generated views exclude uncited claims.
+  diagnostically with `cited: false` until cited. With Muninn enabled, dispatch
+  and generated views exclude uncited claims. With explicit
+  `memory.backend: off`, contract queries and generated views serve ledger
+  text, including uncited rows. Promotion candidates still require cited
+  claims.
 
 ## Consequences and limits
 
@@ -52,8 +56,12 @@ that joins it with Muninn. `standing-orders.md` and `standing-orders-decayed.md`
   leave canonical evidence untouched; an ambiguous post-publication error permits ordinary dedupe retry. Existing
   corrupt or newline-less evidence refuses untouched. Concurrent preservation requires every publisher to share this
   protocol; D6 adoption is pending and retains its separate latest-step dedupe semantics.
-- Uncited orders are diagnostic only: `lessons` lists them `cited: false`, `query --format contract` and the promotion
-  `predicate` exclude them, and candidate text is Muninn's claim. `render` exits 3 with Muninn down (no ledger text).
+- With Muninn enabled, uncited orders are diagnostic only: `lessons` lists
+  them `cited: false`, and contract queries and generated views exclude them.
+  Explicit `memory.backend: off` serves ledger text, including uncited rows,
+  in contract queries and generated views. The promotion `predicate` still
+  excludes uncited candidates; cited candidate text comes from Muninn.
+  `render` exits 3 when Muninn is unavailable and the backend remains enabled.
 - `orders.json` carries a `head` anchor (count, last hash, ticks hash) so a dropped tail or edited ticks are named, and a
   missing ledger beside a generated view is an error; a same-user agent can still rewrite the file, chain and head.
   `retro_count` requires distinct completed logical loops, valid owned progress and complete source-bound retros.

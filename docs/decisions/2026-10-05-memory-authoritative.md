@@ -1,5 +1,11 @@
 # Muninn is the authoritative typed-memory store (default on)
 
+> **Decision recorded 2026-10-05.** The schema-v2 requirement below describes
+> this adapter's contract, not proof of live activation. A later runbook check
+> found the installed Muninn on this Mac using schema v1 and a newer
+> request-bound API. This adapter reports degradation there. See
+> [the memory runbook](../RUNBOOK.md#memory-degraded-muninn-authoritative).
+
 ## Decision
 
 `scripts/lib/memory_adapter.py` (the #496 adapter) is no longer an optional helper. Muninn schema v2 is the only typed

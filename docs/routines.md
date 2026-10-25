@@ -276,9 +276,10 @@ whole surface.
 (`bypass`). Its mitigation is the same shape as that routine's: no hook
 protects a `claude -p` run, so the entire merge rail is the manifest
 lock (docs-only, three-dot-scoped) plus `scripts/merge.py`'s own
-artifact gates and `/pr-review-toolkit:review-pr`. The active GitHub
-`integrity-review` rule also checks the PR head before merge. Local hooks
-do not protect this headless run.
+artifact gates and `/pr-review-toolkit:review-pr`. If the GitHub
+`integrity-review` rule is active, it also checks the PR head before merge.
+Verify the live rule before relying on it. Source files alone do not activate
+the rule. Local hooks do not protect this headless run.
 
 ## `loop-retro-promotion-weekly`: a dormant-by-default routine
 
@@ -341,11 +342,11 @@ not protect this run either. Its merge rail is entirely
 `scripts/merge.py`'s own script-internal artifact gates, plus
 `/pr-review-toolkit:review-pr` and the manifest assertion the skill
 itself runs before pushing (abort-with-cleanup if the diff isn't exactly
-`skills/agentic-loop/learned-failure-modes.md`) — no hook and no
-server-side check backs any of this up. This repo deliberately does not
-enable GitHub branch protection (2026-07-15) — that's a standing
-decision, not a TODO — so this routine's merge rail rests entirely, by
-design, on the script-internal gates named above.
+`skills/agentic-loop/learned-failure-modes.md`) — no local hook backs this
+headless run. The `integrity-review` GitHub rule applies to this PR too when
+the rule is active. Verify the live rule before relying on it. The 2026-07-15
+decision not to enable general branch protection does not remove this
+specific status rule.
 
 ## Install / uninstall
 

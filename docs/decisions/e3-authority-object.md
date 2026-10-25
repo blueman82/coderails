@@ -103,7 +103,12 @@ a consumer. Those four lines are superseded by the next section; the user direct
 
 ### Owner revision, 24 October 2026
 
-The shipped workflow config sets `advisory`. With no config or an unknown value, the gate is off. Routine pushes and merges do not need a key or passphrase. Explicit `enforce` requires a signed receipt. A direct `merge.py` call also needs `--expected-head <sha>` to bind that receipt. PR review, eval, and integrity gates still govern merges.
+The shipped workflow config sets `advisory`. With no config or an explicit
+`off`, receipt checks are off. An invalid configured value makes strict config
+validation deny a guarded command. Routine pushes and merges under `advisory`
+do not need a key or passphrase. Explicit `enforce` requires a signed receipt.
+A direct `merge.py` call also needs `--expected-head <sha>` to bind that
+receipt. PR review, eval, and integrity gates still govern merges.
 
 ## Superseded again: grant moves off prose matching to a typed command
 

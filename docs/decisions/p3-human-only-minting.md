@@ -89,8 +89,12 @@ Optional receipt minting can use a passphrase-protected key:
 
 ## Binding rules and mode
 
-The gate is off unless config sets `action_authority: enforce` or `action_authority: advisory`. Thus a normal PR
-workflow does not require a key or passphrase. To keep the repository+ref+SHA binding honest, a guarded command is
+Receipt checks are off unless config sets `action_authority` to `advisory` or
+`enforce`. No config and explicit `off` keep the checks off. An invalid
+configured value instead denies guarded commands during strict config
+validation. The shipped `advisory` mode does not require a key or passphrase
+for routine PR work; `enforce` requires a receipt. To keep the
+repository+ref+SHA binding honest, a guarded command is
 unbindable (`binding_unknown`, denied) when it:
 
 - carries an env assignment prefix (`GIT_DIR=`, `GIT_CONFIG_*=`, `GH_REPO=`, any `NAME=value`), `git -c`, `--git-dir` or

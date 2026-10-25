@@ -196,12 +196,15 @@ Before this change a SIGKILLed hook left `progress.json.lock` (or `verification-
 forever: every later `atomic_progress_update` returned `False` and the verification ceiling denied every command.
 Both sites now take the lock through `hooks/scripts/lib/dir_lock.py`.
 
-**Policy.** The lock dir holds `owner` = `{pid, host, start, ts}` (`start` is `ps -o lstart=`). A lock is stolen only when
-the owner is provably dead: `os.kill(pid, 0)` raises `ProcessLookupError`, or the pid is alive with a different
-start time (pid reuse). `PermissionError` means alive and never steals. An absent, empty or torn owner file is not
-dead on its own (it is the mkdir-then-write window); it is stolen only when the lock dir's mtime is older than
-`CLAUDE_LOCK_STALE_S` (default 60). An old lock with a live owner is never stolen. A future mtime (clock skew)
-counts as young. The steal is `os.rename(lock, lock.stale.<pid>.<uuid>)`: one racing stealer wins, losers retry
+**Policy.** The lock dir holds `owner` = `{pid, host, start, ts}` (`start` is
+`ps -o lstart=`). A local owner's lock is stolen when `os.kill(pid, 0)` shows
+the pid is gone, or the pid's start time shows reuse. `PermissionError`
+leaves a local owner treated as alive; age alone never steals its lock.
+An absent, empty or torn owner file can be the mkdir-then-write window. A
+readable foreign-host owner also cannot be judged by the local pid. These
+ambiguous or foreign-host locks are stolen only when the lock dir's mtime is
+older than `CLAUDE_LOCK_STALE_S` (default 60). A future mtime counts as young.
+The steal is `os.rename(lock, lock.stale.<pid>.<uuid>)`: one racing stealer wins, losers retry
 `mkdir`; the renamed owner is rechecked against the one judged, and a mismatch is given back as `lock_busy`.
 Release removes the lock only if `owner.pid` is the caller's.
 
@@ -212,7 +215,7 @@ lock result):
 | Code | Meaning |
 | --- | --- |
 | `lock_stolen_dead_owner` | Owner pid gone or reused; lock stolen. |
-| `lock_stolen_age` | Owner unreadable and lock older than the bound; stolen. |
+| `lock_stolen_age` | Owner unreadable or on another host, and lock older than the bound; stolen. |
 | `lock_busy` | Retry budget exhausted against a live, young or ambiguous lock. |
 
 `python3 scripts/measure_graph_alignment.py --root . --json` reports `lock_events` counts per code, deduped by
