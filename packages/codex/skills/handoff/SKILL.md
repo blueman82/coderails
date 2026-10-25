@@ -22,11 +22,12 @@ Generate two artefacts that allow a fresh Codex session to continue the current 
 ### Step 0: Read recorded state (Muninn authoritative)
 
 If a native loop graph exists for this session, take `$STATE` (the `<session>/progress.json` path) and `$SESSION` from
-the SessionStart bootstrap text (it reports the active state path), then run
+the SessionStart bootstrap text (it reports the active state path). Set
+`SKILL_DIR` to the absolute directory that contains this `SKILL.md`. Then run
 `python3 "$SKILL_DIR/../agentic-loop/scripts/graph.py" summarize "$STATE"` (JSON: `phase`, `detail`, `done`, `active`,
 `ready`, `pending`), `... graph.py collection <state-root>` (JSON graph list with each node's stable ID, readable name and status), `... graph.py inspect "$STATE"` (JSON: `revision`, `active_wave`, `running`, `ready`, `hard_stop`),
 and `python3 "$SKILL_DIR/../../scripts/lib/memory_adapter.py" list --type decision --scope loop --loop "<loop id from inspect>" --session "$SESSION"`
-(JSON records with `cite`). `$SKILL_DIR` is the absolute directory containing this `SKILL.md`.
+(JSON records with `cite`).
 Use successful results for Goal, Decisions, Done, and Next steps. If a graph command fails, omit only its result.
 Keep current-graph results when collection fails on another graph. A missing loop graph drops only the graph commands.
 If the adapter exits nonzero, it prints `{"degraded": "<reason_code>"}`. Put that code under a "Memory degraded" line

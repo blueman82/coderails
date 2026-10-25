@@ -20,8 +20,9 @@ anything else:
    `CODERAILS_AGENTIC_LOOP_DIR`; default to
    `$HOME/.coderails/agentic-loop`. The caller must scope this directory to
    the current repo. Do not call a root plugin hook or graph helper.
-2. Run `python3 "$SKILL_DIR/../../scripts/lib/lessons.py" --dir <repo-key-dir> --session <native caller session id> predicate`
-   (resolve the path from this `SKILL.md`) and read `graduation` from its JSON;
+2. Set `SKILL_DIR` to the absolute directory that contains this `SKILL.md`.
+   Run `python3 "$SKILL_DIR/../../scripts/lib/lessons.py" --dir <repo-key-dir> --session <native caller session id> predicate`
+   and read `graduation` from its JSON;
    do not count files or read Markdown by hand. It checks **>= 10 distinct completed retros**
    with owned validated progress and matching source hashes,
 3. `recurred` **>= 1** — an order in `orders.json` whose typed `last_recurred` !=

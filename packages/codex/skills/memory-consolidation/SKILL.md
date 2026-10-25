@@ -26,8 +26,9 @@ skill runs. Read `MEMORY.md` first. It indexes the memory files.
 
 ### Step 2: Read every memory file
 
-Read each file the index points to. Each memory has YAML frontmatter
-(`name`, `description`, `metadata.type`) and a body.
+Read each file the index points to. A project memory created by the
+Codex handoff skill has YAML frontmatter (`name`, `description`, `type`)
+and a body. Preserve other frontmatter fields when a record uses them.
 
 ### Step 3: Find consolidation candidates
 

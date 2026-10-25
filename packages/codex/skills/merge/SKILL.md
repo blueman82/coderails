@@ -9,7 +9,10 @@ Use this skill when the user asks to merge a pull request by number, branch name
 
 ## Before merging
 
-1. Resolve the target from the user's request. If no target was supplied, use the current branch when it has an open pull request; otherwise use `request_user_input` to ask for the pull request number or branch.
+1. Set `SKILL_DIR` to the absolute directory that contains this `SKILL.md`.
+   Resolve the target from the user's request. If no target was supplied,
+   use the current branch when it has an open pull request. Otherwise,
+   use `request_user_input` to ask for the pull request number or branch.
 2. Fetch the pull request's current head SHA and state. Stop if it is closed without being merged.
 3. If the repository requires approval, confirm the pull request is approved.
 4. Confirm an independent Codex review covers the current head. When fresh review is needed, run `source-auditor` through `python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role source-auditor --prompt-file <file> --cwd <exact-head-worktree>` per [guarded role sessions](../using-coderails/references/guarded-role-sessions.md); use native `spawn_agent` for `spec-reviewer`. Resolve all blocking findings, push any fixes, and repeat the review against the new head.
