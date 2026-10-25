@@ -11,6 +11,7 @@ from typing import cast
 from hook_common import (
     RESOURCE_MESSAGE,
     HostResourceError,
+    append_trace_row,
     deny,
     graph_output,
     graph_path,
@@ -22,7 +23,7 @@ from hook_common import (
 )
 
 from scripts.lib.config import config_path
-from scripts.lib.config_strict import ConfigRejected, strict_settings
+from scripts.lib.config_strict import ConfigRejected, controls_resolved, strict_settings
 
 ENVELOPE_KEY = "CODERAILS_GRAPH_DISPATCH"
 
@@ -43,6 +44,30 @@ def dispatch_id(message: str) -> str:
     except (ValueError, AttributeError):
         return ""
     return found if isinstance(found, str) else ""
+
+
+def implementation_node(message: str) -> bool:
+    """Identify a graph implementation dispatch before native process launch."""
+    if not message.startswith(ENVELOPE_KEY + "="):
+        return False
+    try:
+        node = json.loads(message.split("\n", 1)[0].split("=", 1)[1]).get("node_id")
+    except (ValueError, AttributeError):
+        return False
+    return isinstance(node, str) and node.startswith("U3[") and node.endswith("]")
+
+
+def refuse_uncontained_worker(message: str, settings: dict[str, object], session: str) -> bool:
+    """Stop an in-process implementation spawn when worker containment is enabled."""
+    if not implementation_node(message) or controls_resolved(settings).get("sandbox_workers") is False:
+        return False
+    append_trace_row("worker_containment", "denied", "codex_native_worker_uncontained", session)
+    deny(
+        "Codex graph implementation workers need separate-process containment. "
+        "Native spawn_agent inherits the parent sandbox and cannot prove worker containment. "
+        "Use the contained Codex worker launcher and bind its evidence through the graph driver."
+    )
+    return True
 
 
 def main() -> int:
@@ -69,9 +94,10 @@ def main() -> int:
             deny("Graph worker dispatch requires a session id and working directory.")
         return 0
     config = config_path(cwd)
+    settings: dict[str, object] = {}
     if config:
         try:
-            strict_settings(config, session_id)
+            settings = strict_settings(config, session_id)
         except ConfigRejected as error:
             deny(f"Graph worker dispatch requires valid workflow configuration: {error}")
             return 0
@@ -80,6 +106,8 @@ def main() -> int:
         if enveloped:
             deny("Graph worker dispatch requires this session's progress.json. Start the native graph first.")
         return 0  # no loop owns this session: nothing to bind the spawn to
+    if refuse_uncontained_worker(message, settings, session_id):
+        return 0
     tool_use_id = text_field(payload, "tool_use_id")
     if not tool_use_id:
         deny("Graph worker dispatch requires a native tool-call id.")

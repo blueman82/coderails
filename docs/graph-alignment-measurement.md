@@ -422,3 +422,24 @@ python3 scripts/lib/worker_counters.py
 python3 hooks/scripts/tests/worker_status_test.py
 PYTHONPATH=. python3 -m unittest packages.tests.test_provider_disposition packages.tests.test_provider_worker_status packages.tests.test_provider_record_decision scripts.tests.compat_findings_test
 ```
+
+## Worker containment counters (measurement note)
+
+`python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/containment_counters.py` prints a `containment` object with
+`sandboxed`, `sandbox_unavailable`, `worker_credential_missing`, `sandbox_workers_off` (the `sandbox_launch/resolved` decisions traced by
+`scripts/sandbox/containment.py`), `containment_unavailable`, `containment_fallback_low_risk`, `containment_ack_required`, `containment_ack_receipt`,
+`containment_gate_failed_open` and `codex_native_worker_uncontained` (provider dispatch gates), `branch_imported`, `branch_pushed`, `branch_import_refused` (the Claude launcher), and `contained_process_start`, `contained_process_complete`, `contained_process_failed`, `contained_process_unavailable` (the Codex process caller).
+Baseline: none yet on a real loop, so every counter starts at 0. One measurement taken on the development machine (single run, not a
+benchmark): `containment.py` resolved in 0.15 s wall; the pinned srt 0.0.65 was in the npx cache and no worker credential was provisioned, so the
+decision was `fallback / worker_credential_missing`; the live probe (real srt) showed writes to `~/.claude.json`, the primary
+`.git/refs/heads/main` and the real HOME all refused while the in-scratch write succeeded.
+What to read: `sandboxed` high but `branch_import_refused` above 0 means workers are touching branches they do not own; `containment_ack_required`
+dominating `containment_ack_receipt` means high-risk units are being dispatched in process and owners are not acknowledging them (or
+manifests are undeclared); `worker_credential_missing` dominating means the owner has not provisioned the credential, so graph implementation dispatch stops. Wiring `containment_summary` into `measure_graph_alignment.py` itself is a handoff to the lane that owns that file.
+
+**Reproduce.**
+
+```
+python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/containment_counters.py
+PYTHONPATH=. python3 -m unittest hooks/scripts/tests/containment_test.py hooks/scripts/tests/worker_containment_gate_test.py
+```

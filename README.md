@@ -214,17 +214,17 @@ Compact metrics and expiry records persist separately. Emitted bytes do not esta
 
 ## Sandboxed workers
 
-With `config.sandbox_workers: true` (`.coderails/workflow.config.yaml`), Claude
-implementation workers run through `scripts/sandbox/spawn_sandboxed_worker.py`
-and pinned `@anthropic-ai/sandbox-runtime`, using Seatbelt on macOS or
-bubblewrap on Linux. The launcher applies the provider's filesystem policy;
-the orchestrator is unaffected. It requires `node`/`npx`, macOS or Linux/WSL2.
+With `sandbox_workers: true` (the default), the Claude implementation launcher
+uses pinned `@anthropic-ai/sandbox-runtime` in a scratch clone. It needs the
+OS sandbox, `npx`, and a dedicated Claude worker credential; missing inputs
+stop graph implementation dispatch. The orchestrator remains unsandboxed.
 
-Codex graph workers use native `spawn_agent` and inherit the parent session's
-sandbox, permissions, and MCP servers. A custom agent TOML cannot override the
-parent sandbox. The Codex hook receives no effective-sandbox field, so
-`sandbox_workers` does not configure or prove per-worker Codex containment;
-that depends on the parent Codex session configuration.
+Codex native `spawn_agent` inherits the parent sandbox. The Codex dispatch hook
+therefore refuses native implementation work while containment is on. The
+separate OAuth launcher in `packages/codex/scripts/codex_worker.py` runs a
+worker with `workspace-write`; no API key is needed. Its result is not yet
+bound to graph `record-wave` evidence, so the graph cannot mark that work done.
+See [the containment runbook](docs/RUNBOOK.md#worker-containment-sandbox-unavailable-an-in-process-worker-denied-or-a-branch-import-refused).
 
 ## Requirements
 

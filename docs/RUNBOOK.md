@@ -630,3 +630,26 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
 - Limits: shape is checked, truth is not (a worker can write any claim); only results of dispatches with a begin-wave
   record require the report, so a pre-conversion state behaves as before; `check_confidence_labels` and
   `check_verify_loop` stay advisory lints on the orchestrator's own text.
+
+## Worker containment: sandbox unavailable, an in-process worker denied, or a branch import refused
+
+- Symptom: a graph U3 `Agent` dispatch is denied with `containment_unavailable` or
+  `containment_ack_required`; or `spawn_sandboxed_worker.py` exits 1 with `branch_import_refused` / `worker_credential_missing`.
+  ON by default (`sandbox_workers` true or absent); `false` is `off`.
+- Decision: `python3 scripts/sandbox/containment.py [dir]` prints `{mode, reason_code}` and traces `sandbox_launch/resolved/<code>`.
+  `sandboxed`; `fallback` with `sandbox_unavailable` (needs `sandbox-exec` + `rg` on macOS or `bwrap` on Linux, `npx`, and the pinned srt
+  in the npx cache: prime it once with `npx --yes @anthropic-ai/sandbox-runtime@0.0.65 --version`) or `worker_credential_missing`
+  (OWNER creates `~/.coderails/worker_credential`, mode 0600, one line `ANTHROPIC_API_KEY=...` or `CLAUDE_CODE_OAUTH_TOKEN=...` from
+  `claude setup-token`; a looser mode, another variable name or an empty value counts as missing); `off` with `sandbox_workers_off`.
+- Query: `jq -r 'select(.command=="worker_containment" or .command=="sandbox_launch" or .command=="codex_worker") | [.command,.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`.
+  Codes: `containment_unavailable` (sandbox prerequisite missing; graph implementation dispatch denied),
+  `containment_fallback_low_risk` (allowed in process, manifest avoids `HIGH_RISK_PREFIXES`), `containment_ack_required` (denied),
+  `containment_ack_receipt` (allowed once on an owner receipt), `containment_gate_failed_open` (the hook errored and allowed),
+  `branch_import_refused` (missing graph-owned manifest, out-of-manifest commit, committed secret, moved branch other than its own, or rewritten history: nothing imported or pushed, the clone
+  stays under `$TMPDIR/sw.*/clone` for inspection), `branch_imported`, `branch_pushed`.
+- Remediation: restore the sandbox runtime or credential when `containment_unavailable` appears, then dispatch the unit with `python3 scripts/sandbox/spawn_sandboxed_worker.py <worktree> <prompt_file> <model>`. When the sandbox is ready, the OWNER may acknowledge
+  the in-process fallback once: `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind worker_fallback --command 'worker_fallback <unit>' --cwd <worktree>`
+  (signed, single-use, bound to repository + branch + HEAD). Declare the unit's `manifest` so a low-risk unit needs no acknowledgement.
+- Counters: `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/containment_counters.py` (see "Worker containment counters" in docs/graph-alignment-measurement.md).
+- Codex: `loop_dispatch_guard.py` refuses native U3 dispatch with `codex_native_worker_uncontained` while `sandbox_workers` is on. The OAuth contained caller is `python3 packages/codex/scripts/codex_worker.py --session <id> --checkout <feature-checkout> --prompt <file> --schema <checkout>/.coderails-worker/schema.json --output <checkout>/.coderails-worker/run.jsonl --final <checkout>/.coderails-worker/final.json`. It records `codex_worker/starting/contained_process_start` before launch, then emits `codex_worker/allowed/contained_process_complete`, `codex_worker/failed/contained_process_failed`, or `codex_worker/refused/contained_process_unavailable`. The parent graph cannot yet bind this process to a U3 record-wave result; keep U3 pending until a graph driver supplies sealed process evidence. `sandbox_workers: false` explicitly permits native dispatch with the inherited parent `sandbox_mode`.
+- Limits: a cooperating-agent safeguard, not absolute isolation. Claude reads under the real HOME, api.anthropic.com egress, the trusted launcher and the unsandboxed orchestrator remain; GitHub egress is blocked in the Claude worker. Codex OAuth access needs no API key or separate account, but its `workspace-write` sandbox is a write boundary only and shares the user token. An agent can edit `sandbox_workers`, a unit's manifest and the user-tier receipt trust root. The synthetic OS probes do not establish a live Claude model session or accepted Codex graph dispatch.

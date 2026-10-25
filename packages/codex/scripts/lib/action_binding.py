@@ -9,8 +9,9 @@ are None (push.default, branch.*.remote, pushurl and GIT_* could redirect them).
 gh pr merge / gh api .../merge: ref = the PR base, sha = the live PR headRefOid, repository = origin, -R, the PR URL or
 the api path. The command must pin that sha (`--match-head-commit <sha>` / `sha=<sha>`). The merge.py helper must
 name the same literal sha with `--expected-head <sha>` before a receipt can bind. Option values are skipped when
-finding the PR argument. merge-async is guarded but unbindable because it may merge a stack. Used by the hook,
-the receipt CLI and merge.py's direct receipt check.
+finding the PR argument. merge-async is guarded but unbindable because it may merge a stack.
+worker_fallback (the containment gate's owner acknowledgement): origin + current branch + HEAD of the
+orchestrator's directory. Used by the containment hook and receipt CLI.
 Refuses (None) --all/--mirror/--tags/--delete, several refspecs, deletes, and remotes that are not host/owner/name.
 """
 
@@ -193,6 +194,13 @@ def _merge(tokens: list[str], segment: str, cwd: str) -> dict[str, str] | None:
     return {"repository": repository, "ref": _full_ref(view[0]), "sha": view[1]} if repository else None
 
 
+def _worker_fallback(cwd: str) -> dict[str, str] | None:
+    """worker_fallback: repository = origin, ref = the current branch, sha = HEAD (the worker's base)."""
+    repository = normalise_repository(git_out(cwd, "remote", "get-url", "origin"))
+    branch, sha = git_out(cwd, "branch", "--show-current"), git_out(cwd, "rev-parse", "--verify", "--quiet", "HEAD")
+    return {"repository": repository, "ref": _full_ref(branch), "sha": sha} if repository and branch and sha else None
+
+
 def merge_number(segment: str, cwd: str) -> str:
     """Resolve the PR number named by a merge command, including merge.py branch and auto targets."""
     try:
@@ -203,13 +211,15 @@ def merge_number(segment: str, cwd: str) -> str:
 
 
 def binding(kind: str, segment: str, cwd: str) -> dict[str, str] | None:
-    """{repository, ref, sha} for one guarded segment (kind merge | git_push), or None when unknowable."""
+    """{repository, ref, sha} for one guarded segment (kind merge | git_push | worker_fallback), None if unknowable."""
     try:
         tokens = shlex.split(segment)
     except ValueError:
         return None
     if tokens and re.match(r"^[A-Za-z_]\w*=", tokens[0]):
         return None  # an env assignment prefix (also the matcher's UNBINDABLE marker) can retarget the action
+    if kind == "worker_fallback":
+        return _worker_fallback(cwd)
     if kind == "git_push" and "push" in tokens:
         return _push(tokens, cwd)
     if kind == "merge":

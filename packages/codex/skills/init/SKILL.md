@@ -30,7 +30,7 @@ Collect:
 - Worktree base path. Default to the parent of the repository root and show the resolved path before accepting it.
 - Worktree script path relative to the repository root, or `none`.
 - Engineering-principles path globs and skill. Detect a default from repository files: Go for `go.mod`; TypeScript for a `package.json` project containing TypeScript; Bash for a shell-only project; otherwise Python. Use the installed native Coderails Codex skill name, such as `coderails-codex:engineering-principles-python`, without command syntax. Accept `none` to disable it.
-- Sandbox workers. Default to `false`. Preserve this field exactly during migration.
+- Sandbox workers. Default to `true` (Claude workers only: Codex workers rely on Codex's own `sandbox_mode`); `false` switches it off. Preserve this field exactly during migration.
 - Integrity review. Default to `false`; set `true` after the GitHub Actions ruleset is live.
 
 ## Write the file
@@ -61,7 +61,7 @@ jira:
 engineering_principles_paths:
   - "**/container.py"
 engineering_principles_skill: coderails-codex:engineering-principles-python
-sandbox_workers: false
+sandbox_workers: true
 action_authority: advisory
 integrity_review:
   enabled: false
