@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from hook_common import append_trace_row, deny, payload_object, read_input, text_field
-from lib.action_match import MERGE_SCRIPT, guarded_segments, state_mutated_before_guard
+from lib.action_match import MERGE_SCRIPT, Operation, guarded_operations, repository, state_mutated_before_guard
 from lib.destructive_patterns import git_output
 
 from scripts.lib import advisory_merge, merge_budget
@@ -39,12 +39,15 @@ def mode(cwd: str) -> str:
     return resolve_mode(cwd)[0]
 
 
-def proposal(name: str, segment: str, where: str) -> tuple[str, dict[str, Any]]:
+def proposal(call: Operation) -> tuple[str, dict[str, Any]]:
     """The action as seen here, plus the PR number of a merge.py segment (merge.py matches on it)."""
-    branch = git_output(where, "branch", "--show-current")
-    proposed = proposed_action(name, segment, where, branch, binding(name, segment, where))
-    script = name == "merge" and bool(re.search(MERGE_SCRIPT, segment))
-    return name, proposed | {"script": script, "number": merge_number(segment, where) if name == "merge" else ""}
+    branch = git_output(call.git_cwd, *call.prefix, "branch", "--show-current")
+    proposed = proposed_action(call.name, call.segment, call.cwd, branch, binding(call.name, call.segment, call.cwd))
+    script = call.name == "merge" and bool(re.search(MERGE_SCRIPT, call.segment))
+    return call.name, proposed | {
+        "script": script,
+        "number": merge_number(call.segment, call.cwd) if call.name == "merge" else "",
+    }
 
 
 def how_to_proceed(code: str, session: str, name: str) -> str:
@@ -80,23 +83,33 @@ def main() -> int:
         cwd = text_field(payload, "cwd") or os.getcwd()
         if not isinstance(command, str) or not command:
             return 0
-        mode_, _ = resolve_mode(cwd)
-        if not (segments := guarded_segments(command, cwd, implicit_push=True)):
+        if not (calls := guarded_operations(command, cwd, implicit_push=True)):
             return 0
-        config = config_path(cwd)
-        if config:
+        source_mode, _ = resolve_mode(cwd)
+        priority = {"off": 0, "advisory": 1, "enforce": 2}
+        configured: list[tuple[Operation, str]] = []
+        for call in calls:
+            selected = repository(call)
+            config = config_path(selected)
+            selected_mode, _ = resolve_mode(selected)
+            selected_mode = max((source_mode, selected_mode), key=priority.__getitem__)
+            configured.append((call, selected_mode))
+            if not config:
+                continue
             try:
                 strict_settings(config, session)
             except ConfigRejected as error:
                 append_trace_row("action_authority", "denied", "config_rejected", trace_id, {})
                 deny(
-                    f"Blocked: {segments[0][0].replace('_', ' ')} while the workflow config is invalid. {error}. "
+                    f"Blocked: {call.name.replace('_', ' ')} while the workflow config is invalid. {error}. "
                     "Fix .coderails/workflow.config.yaml (scripts/lib/config.py resolve-config --json lists "
                     "the findings)."
                 )
                 return 0
-        if mode_ == "off":
+        active = [(call, selected_mode) for call, selected_mode in configured if selected_mode != "off"]
+        if not active:
             return 0
+        mode_ = "enforce" if any(selected_mode == "enforce" for _, selected_mode in active) else "advisory"
         authority = read_authority(session) or {}
         loop_id = authority.get("loop_id")
         loop = loop_id if isinstance(loop_id, str) else None
@@ -107,7 +120,7 @@ def main() -> int:
                 append_trace_row("action_authority", "allowed", USER_TIER, trace_id, {"loop_id": loop})
             append_trace_row("action_authority", "allowed", "receipt_consumed", trace_id, {"loop_id": loop})
 
-        proposals = [proposal(*segment) for segment in segments]
+        proposals = [proposal(call) for call, _ in active]
         missing = check_and_consume(
             session, proposals, None, loop, signers,
             consume=mode_ == "enforce", stale=state_mutated_before_guard(command), on_claim=claimed,

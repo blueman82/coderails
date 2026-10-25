@@ -21,7 +21,7 @@ MERGE_SHA = "f" * 40
 
 MIRRORS = (
     "scripts/lib/action_receipt.py", "scripts/lib/receipt_signing.py", "scripts/lib/action_binding.py",
-    "scripts/action_receipt_cli.py", "scripts/authority_keys.py", "scripts/lib/authority_permits.py",
+    "scripts/authority_keys.py", "scripts/lib/authority_permits.py",
     "scripts/lib/receipt_gate.py", "scripts/lib/merge_budget.py",
 )  # fmt: skip
 
@@ -34,6 +34,21 @@ class MirrorTests(unittest.TestCase):
         for name in MIRRORS:
             with self.subTest(name):
                 self.assertTrue(filecmp.cmp(ROOT / name, CODEX / name, shallow=False), name)
+
+    def test_receipt_cli_diff_is_provider_import(self) -> None:
+        """Receipt commands differ only in the provider-local command classifier import."""
+        claude = (ROOT / "scripts/action_receipt_cli.py").read_text()
+        codex = (CODEX / "scripts/action_receipt_cli.py").read_text()
+        self.assertEqual(
+            claude.replace(
+                "from hooks.scripts.lib.pr_workflow_match import operations",
+                "from hooks.scripts.lib.action_match import operations",
+            ).replace(
+                "from hooks.scripts.lib.action_match import operations\nfrom hooks.scripts.lib.trace_row",
+                "from hooks.scripts.lib.action_match import operations\n\nfrom hooks.scripts.lib.trace_row",
+            ),
+            codex,
+        )
 
     def test_hook_common_has_no_vendored_receipt_code(self) -> None:
         """The vendored receipt_* functions are gone and the file is under its 400-line ceiling."""

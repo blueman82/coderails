@@ -151,7 +151,12 @@ def invocations(command: str, cwd: str = "", depth: int = 0) -> list[tuple[str, 
     """Yield exact source, unwrapped argv and effective cwd, with local shell/subshell scope."""
     found: list[tuple[str, list[str], str]] = []
     directories: list[str] = []
+    cursor = 0
     for segment, tokens in split_all(command):
+        at = command.find(segment, cursor)
+        if at < 0:
+            at = cursor
+        cursor = at + len(segment)
         if segment == "(":
             directories.append(cwd)
             continue
@@ -164,12 +169,19 @@ def invocations(command: str, cwd: str = "", depth: int = 0) -> list[tuple[str, 
             continue
         if argv[0] == "cd":
             args = argv[2:] if len(argv) > 1 and argv[1] == "--" else argv[1:]
-            if len(args) == 1:
+            before = command[:at].rstrip()
+            after = command[cursor:].lstrip()
+            child_shell = (before.endswith(("|", "&")) and not before.endswith(("||", "&&"))) or (
+                after.startswith(("|", "&")) and not after.startswith(("||", "&&"))
+            )
+            if len(args) == 1 and not child_shell:
                 cwd = move(where, args[0])
             continue
         found.append((segment, argv, where))
         if (body := shell_body(argv)) is not None and depth < 5:
             found.extend(invocations(body, where, depth + 1))
+        elif argv[0] == "eval" and len(argv) > 1 and depth < 5:
+            found.extend(invocations(" ".join(argv[1:]), where, depth + 1))
     return found
 
 

@@ -553,7 +553,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Query: `trace.by_reason` for `argv/denied/ceiling_exceeded` and `argv/denied/protected_paths_unreadable`
   (`python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`).
   See `docs/workflow-gates-measurement.md`.
-- Limits: still no shell parser. `eval`, aliases, shell functions, ANSI-C quoted or run-time-built command names,
+- Limits: still no full shell parser. Literal `eval` bodies are checked. Aliases, shell functions, ANSI-C quoted or run-time-built command names,
   backticks inside double quotes and scripts that themselves run `git commit` or `run_all.py` are not seen. Wrapper
   options are only partly modelled; variable expansion and command-local `GIT_DIR`/`GIT_WORK_TREE` assignments are not
   evaluated. Merge-script matching retains its existing anchored source policy, including its interpreter-option

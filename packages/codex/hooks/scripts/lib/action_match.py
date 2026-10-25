@@ -10,13 +10,132 @@ import re
 import shlex
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
-from lib import argv_match
-from lib.destructive_patterns import git_output
+from . import argv_match
+from .destructive_patterns import git_output
+from .shell_context import invocations
 
 MERGE_SCRIPT = r"""(?:(?:bash|sh|python3?)\s+)?["']?(?:[^\s"']*/)?merge\.(?:py|sh)["']?(?:\s|$)"""
 _GIT_OPT = r"(?:-C\s+\S+|-c\s+\S+|--[\w-]+=\S+|--(?:git-dir|work-tree|namespace|exec-path)\s+\S+|--[\w-]+|-[pP])"
 _GIT = re.compile(r"^git((?:\s+" + _GIT_OPT + r")*)\s+(merge|push)(?:\s|$)")
+UNBINDABLE = "CODERAILS_UNBINDABLE=1 "
+
+
+class Operation(NamedTuple):
+    """One command with its exact source and Git selection context."""
+
+    name: str
+    segment: str
+    cwd: str
+    git_cwd: str
+    prefix: list[str]
+    git_args: list[str]
+    selected_cwd: str
+
+
+def _gh_args(argv: list[str]) -> list[str]:
+    """Skip GitHub CLI global repository options before the command."""
+    if argv[:1] != ["gh"]:
+        return []
+    index = 1
+    while index < len(argv):
+        token = argv[index]
+        if token in {"-R", "--repo", "--hostname"}:
+            index += 2
+        elif token.startswith(("--repo=", "--hostname=")):
+            index += 1
+        else:
+            break
+    return argv[index:]
+
+
+def operations(command: str, cwd: str = "") -> list[Operation]:
+    """Classify each invoked action; keep unknown bindings visibly unbindable."""
+    cwd = cwd or os.getcwd()
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from scripts.lib.merge_target import has_noop_option
+
+    found: list[Operation] = []
+    for source, argv, where in invocations(command, cwd):
+        name, prefix, git_args, selected = "", [], [], where
+        gh_args = _gh_args(argv)
+        call = argv_match.git_invocation(argv, where)
+        if call is not None:
+            subcommand, selected, rest = call
+            options = argv_match.flags(rest, "mFsX" if subcommand == "merge" else "")
+            if options & {"--dry-run", "--help"}:
+                continue
+            if subcommand == "merge" and not options & {"--abort", "--continue", "--quit", "--skip"}:
+                name = "git_merge"
+            elif subcommand == "push":
+                name = "git_push"
+            prefix = argv_match.git_prefix(argv, rest)
+            git_args = rest
+        elif gh_args[:2] in (["pr", "create"], ["pr", "merge"]):
+            if has_noop_option(source):
+                continue
+            name = "create" if gh_args[1] == "create" else "merge"
+        elif gh_args[:1] == ["api"] and api_merge(shlex.join(["gh", *gh_args])):
+            if "--help" not in argv_match.flags(gh_args[1:]):
+                name = "merge"
+        elif argv and (
+            Path(argv[0]).name in {"merge.py", "merge.sh"}
+            or (
+                len(argv) > 1
+                and argv[0] in {"bash", "sh", "python", "python3"}
+                and Path(argv[1]).name in {"merge.py", "merge.sh"}
+            )
+        ):
+            name = "merge"
+        if not name:
+            continue
+        raw = source.strip()
+        leading = raw.split("git", 1)[0] if name.startswith("git_") and "git" in raw else raw.split("gh", 1)[0]
+        if name == "merge" and "merge.py" in raw:
+            leading = raw.split("merge.py", 1)[0]
+        outer_assignment = bool(
+            re.search(
+                r"(?:^|[;&|])\s*(?:env\s+)?[A-Za-z_]\w*=\S+\s+(?:bash|sh|zsh)\s+-\w*c",
+                command,
+            )
+        )
+        unsafe = bool(re.search(r"(?:^|\s)[A-Za-z_]\w*=", leading)) or not os.path.isdir(where) or outer_assignment
+        if unsafe:
+            raw = UNBINDABLE + raw
+            where = cwd
+            selected = cwd
+        elif raw.startswith("time git "):
+            raw = raw.removeprefix("time ")
+        found.append(Operation(name, raw, where, where, prefix, git_args, selected))
+    return found
+
+
+def repository(call: Operation) -> str:
+    """Resolve the selected worktree for its policy and config."""
+    return git_output(call.git_cwd, *call.prefix, "rev-parse", "--show-toplevel") or call.cwd
+
+
+def targets_main_call(call: Operation, *, implicit_push: bool = False) -> bool:
+    """Guard a protected branch or a push whose target may be protected."""
+    if call.name not in {"git_merge", "git_push"}:
+        return True
+    if call.segment.startswith(UNBINDABLE):
+        return True
+    if git_output(call.git_cwd, *call.prefix, "branch", "--show-current") in {"main", "master"}:
+        return True
+    if call.name == "git_push":
+        return _push_guarded(call.segment, implicit_push=implicit_push)
+    return False
+
+
+def guarded_operations(command: str, cwd: str, *, implicit_push: bool = False) -> list[Operation]:
+    """Keep each guarded action's source, repo and receipt context."""
+    return [
+        call
+        for call in operations(command, cwd)
+        if call.name in {"merge", "git_push"} and targets_main_call(call, implicit_push=implicit_push)
+    ]
 
 
 def pr_number(segment: str) -> str:
@@ -28,27 +147,9 @@ def pr_number(segment: str) -> str:
 
 
 def operation(command: str) -> tuple[str, str, str]:
-    """Return guarded operation, matched segment, and optional Git target directory."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    from scripts.lib.merge_target import has_noop_option
-
-    for segment in re.split(r"&&|\|\||[;|&\n]", command):
-        segment = segment.lstrip()
-        if re.match(r"^git +merge +(--abort|--continue|--quit|--skip)(?:\s|$)", segment):
-            continue
-        if has_noop_option(segment) and not re.search("^" + MERGE_SCRIPT, segment):
-            continue
-        for pattern, name in (
-            (r"^gh\s+pr\s+create(?:\s|$)", "create"),
-            (r"^gh\s+pr\s+merge(?:\s|$)", "merge"),
-            ("^" + MERGE_SCRIPT, "merge"),
-        ):
-            if re.search(pattern, segment):
-                return name, segment, ""
-        call = argv_match.git_invocation((argv_match.argvs(segment) or [[]])[0])  # git -C/-c/--no-pager, /usr/bin/git
-        if call and call[0] in {"merge", "push"}:
-            return f"git_{call[0]}", segment, call[1]
-    return "", "", ""
+    """Project the first typed operation for existing callers."""
+    found = operations(command)
+    return (found[0].name, found[0].segment, found[0].selected_cwd) if found else ("", "", "")
 
 
 def targets_main(command: str, cwd: str, target: str, name: str, *, implicit_push: bool = False) -> bool:
@@ -123,7 +224,6 @@ def api_merge(segment: str) -> bool:
 
 
 _PROGRAMS = {"git", "gh", "bash", "sh", "zsh", "python", "python3"}
-UNBINDABLE = "CODERAILS_UNBINDABLE=1 "  # an env-style prefix: action_binding refuses it, so the segment is denied
 
 
 def unwrap(segment: str) -> str:
@@ -151,60 +251,10 @@ def canonical(segment: str) -> str:
 def guarded_segments(
     command: str, cwd: str, *, implicit_push: bool = False, _blind: bool = False
 ) -> list[tuple[str, str, str]]:
-    """Every guarded (merge | git_push to main) segment as (operation, segment, effective cwd).
-
-    Track literal cwd changes through groups and shell -c strings. Unknown destinations remain unbindable.
-    """
-    found: list[tuple[str, str, str]] = []
-    blind = _blind
-    stack: list[tuple[str, bool]] = []
-    masked = _SHELL_C.sub(lambda match: " " * len(match[0]), command)
-    parts = _SEP.split(masked)
-    cursor = 0
-    for index in range(0, len(parts), 2):
-        raw = command[cursor : cursor + len(parts[index])]
-        cursor += len(parts[index]) + (len(parts[index + 1]) if index + 1 < len(parts) else 0)
-        before, after = parts[index - 1] if index else "", parts[index + 1 : index + 2]
-        opened = raw.lstrip()
-        while opened.startswith("("):
-            stack.append((cwd, blind))
-            opened = opened[1:].lstrip()
-        closes = len(raw.rstrip()) - len(raw.rstrip().rstrip(")"))
-        plain = unwrap(raw)
-        for inner in _SHELL_C.finditer(plain):
-            found.extend(guarded_segments(inner[2], cwd, implicit_push=implicit_push, _blind=blind))
-        plain = _SHELL_C.sub("", plain).strip()
-        segment = canonical(plain)
-        # An env assignment (GIT_DIR=, GH_REPO=, GIT_CONFIG_*=) can retarget the action: keep the prefix in the
-        # segment so action_binding refuses it (binding None -> denied) instead of binding the approved repo.
-        stripped = raw.strip().lstrip("({ ")
-        tainted = bool(re.search(r"(?:^|\s)[A-Za-z_]\w*=", stripped[: max(stripped.find(plain), 0)]))
-        unknown = blind
-        if segment.split(None, 1)[:1] == ["cd"]:
-            try:
-                move = shlex.split(segment)
-            except ValueError:
-                move = []
-            target = os.path.normpath(os.path.join(cwd, os.path.expanduser(move[1]))) if len(move) == 2 else ""
-            if before in {"|", "&"} or after[:1] in (["|"], ["&"]):
-                continue  # pipeline/background commands run in children; the parent cwd does not move
-            if len(move) == 2 and not re.search(r"[$`*?\[]", move[1]) and os.path.isdir(target):
-                cwd = target
-            else:
-                blind = True
-        elif api_merge(segment):
-            found.append(("merge", UNBINDABLE * unknown + (stripped.rstrip(")} ") if tainted else segment), cwd))
-        else:
-            name, matched, target_dir = operation(segment)
-            if name in {"merge", "git_push"} and targets_main(
-                segment, cwd, target_dir, name, implicit_push=implicit_push
-            ):
-                literal = plain if name == "merge" and plain.startswith("gh pr merge ") else matched
-                found.append((name, UNBINDABLE * unknown + (stripped.rstrip(")} ") if tainted else literal), cwd))
-        for _ in range(closes):
-            if stack:
-                cwd, blind = stack.pop()
-    return found
+    """Project typed guarded operations for existing receipt callers."""
+    return [
+        (call.name, call.segment, call.cwd) for call in guarded_operations(command, cwd, implicit_push=implicit_push)
+    ]
 
 
 _READ_ONLY = {
