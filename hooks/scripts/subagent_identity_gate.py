@@ -60,4 +60,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:
+        raise SystemExit(main()) from None
+    raise SystemExit(run("subagent_identity_gate", main))

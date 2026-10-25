@@ -1,0 +1,223 @@
+{
+  "schema_version": 1,
+  "hooks": {
+    "action_authority_gate": {
+      "remediation": "Use the configured authority path for the exact action and session.",
+      "category": "action authority gate"
+    },
+    "agent_model_routing_nudge": {
+      "remediation": "Select a model role that fits the task when the suggestion is useful.",
+      "category": "agent model routing nudge"
+    },
+    "agent_only_gate": {
+      "remediation": "Dispatch source work to an agent or use the allowed workflow command.",
+      "category": "agent only gate"
+    },
+    "check_confidence_labels": {
+      "remediation": "Add the correct confidence label to each claim that needs one.",
+      "category": "check confidence labels"
+    },
+    "check_verify_loop": {
+      "remediation": "Complete the verification section and mark each unresolved check.",
+      "category": "check verify loop"
+    },
+    "comment_citation_gate": {
+      "remediation": "State the durable rule in the comment without a session label.",
+      "category": "comment citation gate"
+    },
+    "crack_on_gate": {
+      "remediation": "Use the typed authority command, or continue after the authority expires.",
+      "category": "crack on gate"
+    },
+    "destructive_bash_gate": {
+      "remediation": "Use a safe command that avoids the blocked operation.",
+      "category": "destructive bash gate"
+    },
+    "enforce_pr_workflow": {
+      "remediation": "Run the required PR review and post current-head evidence.",
+      "category": "enforce pr workflow"
+    },
+    "graph_completion_guard": {
+      "remediation": "Resolve the graph state and record a valid stop result.",
+      "category": "graph completion guard"
+    },
+    "inject_bootstrap": {
+      "remediation": "Check the plugin root and hook registration when context is absent.",
+      "category": "inject bootstrap"
+    },
+    "inject_context": {
+      "remediation": "Check the prompt hook registration when context is absent.",
+      "category": "inject context"
+    },
+    "loop_dispatch_guard": {
+      "remediation": "Use the current owned graph dispatch envelope and role.",
+      "category": "loop dispatch guard"
+    },
+    "loop_stall_guard": {
+      "remediation": "Record the required stop and complete unresolved graph work.",
+      "category": "loop stall guard"
+    },
+    "loop_state_guard": {
+      "remediation": "Restore owned graph and graded loop eval evidence.",
+      "category": "loop state guard"
+    },
+    "no_edit_on_main": {
+      "remediation": "Move the source edit to a feature branch.",
+      "category": "no edit on main"
+    },
+    "offload_push_guard": {
+      "remediation": "Keep the push in the authorised workflow.",
+      "category": "offload push guard"
+    },
+    "pr_publication_gate": {
+      "remediation": "Complete the required review and eval steps for this PR head.",
+      "category": "pr publication gate"
+    },
+    "quality_feedback": {
+      "remediation": "Read the quality result and correct reported source findings.",
+      "category": "quality feedback"
+    },
+    "remember_inject_cap_guard": {
+      "remediation": "Set the memory injection cap or use the documented opt-in patch.",
+      "category": "remember inject cap guard"
+    },
+    "reviewer_bash_allowlist": {
+      "remediation": "Use an allowed read-only command or a granted capability tool.",
+      "category": "reviewer bash allowlist"
+    },
+    "subagent_identity_gate": {
+      "remediation": "Dispatch with a native agent type that the graph can identify.",
+      "category": "subagent identity gate"
+    },
+    "test_gate": {
+      "remediation": "Fix the failed tests before the commit.",
+      "category": "test gate"
+    },
+    "unregistered_loop_guard": {
+      "remediation": "Register the active agentic loop graph before more dispatches.",
+      "category": "unregistered loop guard"
+    },
+    "verification_volume_ceiling": {
+      "remediation": "Use focused tests after the allowed full-suite runs.",
+      "category": "verification volume ceiling"
+    },
+    "voice_announce": {
+      "remediation": "Read the loop state when a spoken notice is absent.",
+      "category": "voice announce"
+    },
+    "wiki_taxonomy_gate": {
+      "remediation": "Write the page under a directory allowed by the wiki schema.",
+      "category": "wiki taxonomy gate"
+    },
+    "worker_containment_gate": {
+      "remediation": "Use the required containment acknowledgement or a low-risk path.",
+      "category": "worker containment gate"
+    }
+  },
+  "fallback": {
+    "remediation": "Read the hook reason and retry after you correct its cause."
+  },
+  "memory_source": "scripts/lib/memory_reasons.py",
+  "aliases": {
+    "action_authority": "action_authority_gate",
+    "crack_on": "crack_on_gate"
+  },
+  "reasons": {
+    "authority_phrase_ignored": {
+      "source": "hooks/scripts/crack_on_gate.py",
+      "remediation": "Use the typed authority command, or continue after the authority expires."
+    },
+    "authority_corrupt_ignored": {
+      "source": "hooks/scripts/crack_on_gate.py",
+      "remediation": "Use the typed authority command, or continue after the authority expires."
+    },
+    "authority_deny": {
+      "source": "hooks/scripts/crack_on_gate.py",
+      "remediation": "Use the typed authority command, or continue after the authority expires."
+    },
+    "authority_expired_allow": {
+      "source": "hooks/scripts/crack_on_gate.py",
+      "remediation": "Use the typed authority command, or continue after the authority expires."
+    },
+    "crack_on_legacy_flag": {
+      "source": "hooks/scripts/crack_on_gate.py",
+      "remediation": "Use the typed authority command, or continue after the authority expires."
+    },
+    "confidence_label_missing": {
+      "source": "hooks/scripts/check_confidence_labels.py",
+      "remediation": "Add the correct confidence label to each claim that needs one."
+    },
+    "verify_loop_missing": {
+      "source": "hooks/scripts/check_verify_loop.py",
+      "remediation": "Complete the verification section and mark each unresolved check."
+    },
+    "bash_agent_type_absent": {
+      "source": "hooks/scripts/subagent_identity_gate.py",
+      "remediation": "Dispatch with a native agent type that the graph can identify."
+    },
+    "config_rejected": {
+      "source": "hooks/scripts/subagent_identity_gate.py",
+      "remediation": "Fix .coderails/workflow.config.yaml and retry."
+    },
+    "containment_unavailable": {
+      "source": "hooks/scripts/worker_containment_gate.py",
+      "remediation": "Use the required containment acknowledgement or a low-risk path."
+    },
+    "containment_fallback_low_risk": {
+      "source": "hooks/scripts/worker_containment_gate.py",
+      "remediation": "Use the required containment acknowledgement or a low-risk path."
+    },
+    "containment_ack_receipt": {
+      "source": "hooks/scripts/worker_containment_gate.py",
+      "remediation": "Use the required containment acknowledgement or a low-risk path."
+    },
+    "containment_ack_required": {
+      "source": "hooks/scripts/worker_containment_gate.py",
+      "remediation": "Use the required containment acknowledgement or a low-risk path."
+    },
+    "containment_gate_error": {
+      "source": "hooks/scripts/worker_containment_gate.py",
+      "remediation": "Use the required containment acknowledgement or a low-risk path."
+    },
+    "ceiling_exceeded": {
+      "source": "hooks/scripts/verification_volume_ceiling.py",
+      "remediation": "Use focused tests after the allowed full-suite runs."
+    },
+    "hook_state_unreadable": {
+      "source": "hooks/scripts/lib/hook_state.py",
+      "remediation": "Restore the owned hook state file and retry."
+    },
+    "nudge_first": {
+      "source": "hooks/scripts/lib/hook_state.py",
+      "remediation": "The first nudge was recorded; continue the required workflow."
+    },
+    "nudge_suppressed": {
+      "source": "hooks/scripts/lib/hook_state.py",
+      "remediation": "The earlier nudge still applies; check the loop state."
+    },
+    "action_authority_failed_open": {
+      "source": "hooks/scripts/action_authority_gate.py",
+      "remediation": "Use the configured authority path for the exact action and session."
+    },
+    "denied_gate_error": {
+      "source": "hooks/scripts/action_authority_gate.py",
+      "remediation": "Use the configured authority path for the exact action and session."
+    },
+    "receipt_consumed": {
+      "source": "hooks/scripts/action_authority_gate.py",
+      "remediation": "Use the configured authority path for the exact action and session."
+    },
+    "authority_denied_destructive_shell": {
+      "source": "hooks/scripts/destructive_bash_gate.py",
+      "remediation": "Use a safe command that avoids the blocked operation."
+    },
+    "stop_row_missing": {
+      "source": "packages/codex/hooks/scripts/graph_completion_guard.py",
+      "remediation": "Record the current Stop result before the loop completes."
+    },
+    "codex_native_worker_uncontained": {
+      "source": "packages/codex/hooks/scripts/loop_dispatch_guard.py",
+      "remediation": "Use a parent Codex sandbox that contains the worker."
+    }
+  }
+}

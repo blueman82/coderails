@@ -12,6 +12,143 @@ Query every entry below with:
 python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['trace'])"
 ```
 
+## Generated hook and memory reasons
+
+The first table gives an action for each control category. The second table lists literal reason codes found in the named source files and the maintained memory reason catalog. Dynamic reason codes can also occur. A trace record keeps the detailed emitted code. A hook telemetry record keeps the coarser observed result, such as `deny` or `block`. Read the record's action text. This table is not an exhaustive list of dynamic codes.
+
+<!-- hook-reasons:start -->
+| Control | Category | Action |
+|---|---|---|
+| `action_authority_gate` | action authority gate | Use the configured authority path for the exact action and session. |
+| `agent_model_routing_nudge` | agent model routing nudge | Select a model role that fits the task when the suggestion is useful. |
+| `agent_only_gate` | agent only gate | Dispatch source work to an agent or use the allowed workflow command. |
+| `check_confidence_labels` | check confidence labels | Add the correct confidence label to each claim that needs one. |
+| `check_verify_loop` | check verify loop | Complete the verification section and mark each unresolved check. |
+| `comment_citation_gate` | comment citation gate | State the durable rule in the comment without a session label. |
+| `crack_on_gate` | crack on gate | Use the typed authority command, or continue after the authority expires. |
+| `destructive_bash_gate` | destructive bash gate | Use a safe command that avoids the blocked operation. |
+| `enforce_pr_workflow` | enforce pr workflow | Run the required PR review and post current-head evidence. |
+| `graph_completion_guard` | graph completion guard | Resolve the graph state and record a valid stop result. |
+| `inject_bootstrap` | inject bootstrap | Check the plugin root and hook registration when context is absent. |
+| `inject_context` | inject context | Check the prompt hook registration when context is absent. |
+| `loop_dispatch_guard` | loop dispatch guard | Use the current owned graph dispatch envelope and role. |
+| `loop_stall_guard` | loop stall guard | Record the required stop and complete unresolved graph work. |
+| `loop_state_guard` | loop state guard | Restore owned graph and graded loop eval evidence. |
+| `no_edit_on_main` | no edit on main | Move the source edit to a feature branch. |
+| `offload_push_guard` | offload push guard | Keep the push in the authorised workflow. |
+| `pr_publication_gate` | pr publication gate | Complete the required review and eval steps for this PR head. |
+| `quality_feedback` | quality feedback | Read the quality result and correct reported source findings. |
+| `remember_inject_cap_guard` | remember inject cap guard | Set the memory injection cap or use the documented opt-in patch. |
+| `reviewer_bash_allowlist` | reviewer bash allowlist | Use an allowed read-only command or a granted capability tool. |
+| `subagent_identity_gate` | subagent identity gate | Dispatch with a native agent type that the graph can identify. |
+| `test_gate` | test gate | Fix the failed tests before the commit. |
+| `unregistered_loop_guard` | unregistered loop guard | Register the active agentic loop graph before more dispatches. |
+| `verification_volume_ceiling` | verification volume ceiling | Use focused tests after the allowed full-suite runs. |
+| `voice_announce` | voice announce | Read the loop state when a spoken notice is absent. |
+| `wiki_taxonomy_gate` | wiki taxonomy gate | Write the page under a directory allowed by the wiki schema. |
+| `worker_containment_gate` | worker containment gate | Use the required containment acknowledgement or a low-risk path. |
+
+| Source | Emitted reason | Action |
+|---|---|---|
+| `hooks/scripts/action_authority_gate.py` | `action_authority_failed_open` | Use the configured authority path for the exact action and session. |
+| `hooks/scripts/crack_on_gate.py` | `authority_corrupt_ignored` | Use the typed authority command, or continue after the authority expires. |
+| `hooks/scripts/destructive_bash_gate.py` | `authority_denied_destructive_shell` | Use a safe command that avoids the blocked operation. |
+| `hooks/scripts/crack_on_gate.py` | `authority_deny` | Use the typed authority command, or continue after the authority expires. |
+| `hooks/scripts/crack_on_gate.py` | `authority_expired_allow` | Use the typed authority command, or continue after the authority expires. |
+| `hooks/scripts/crack_on_gate.py` | `authority_phrase_ignored` | Use the typed authority command, or continue after the authority expires. |
+| `hooks/scripts/subagent_identity_gate.py` | `bash_agent_type_absent` | Dispatch with a native agent type that the graph can identify. |
+| `hooks/scripts/verification_volume_ceiling.py` | `ceiling_exceeded` | Use focused tests after the allowed full-suite runs. |
+| `packages/codex/hooks/scripts/loop_dispatch_guard.py` | `codex_native_worker_uncontained` | Use a parent Codex sandbox that contains the worker. |
+| `hooks/scripts/check_confidence_labels.py` | `confidence_label_missing` | Add the correct confidence label to each claim that needs one. |
+| `hooks/scripts/subagent_identity_gate.py` | `config_rejected` | Fix .coderails/workflow.config.yaml and retry. |
+| `hooks/scripts/worker_containment_gate.py` | `containment_ack_receipt` | Use the required containment acknowledgement or a low-risk path. |
+| `hooks/scripts/worker_containment_gate.py` | `containment_ack_required` | Use the required containment acknowledgement or a low-risk path. |
+| `hooks/scripts/worker_containment_gate.py` | `containment_fallback_low_risk` | Use the required containment acknowledgement or a low-risk path. |
+| `hooks/scripts/worker_containment_gate.py` | `containment_gate_error` | Use the required containment acknowledgement or a low-risk path. |
+| `hooks/scripts/worker_containment_gate.py` | `containment_unavailable` | Use the required containment acknowledgement or a low-risk path. |
+| `hooks/scripts/crack_on_gate.py` | `crack_on_legacy_flag` | Use the typed authority command, or continue after the authority expires. |
+| `hooks/scripts/action_authority_gate.py` | `denied_gate_error` | Use the configured authority path for the exact action and session. |
+| `hooks/scripts/lib/hook_state.py` | `hook_state_unreadable` | Restore the owned hook state file and retry. |
+| `hooks/scripts/lib/hook_state.py` | `nudge_first` | The first nudge was recorded; continue the required workflow. |
+| `hooks/scripts/lib/hook_state.py` | `nudge_suppressed` | The earlier nudge still applies; check the loop state. |
+| `hooks/scripts/action_authority_gate.py` | `receipt_consumed` | Use the configured authority path for the exact action and session. |
+| `packages/codex/hooks/scripts/graph_completion_guard.py` | `stop_row_missing` | Record the current Stop result before the loop completes. |
+| `hooks/scripts/check_verify_loop.py` | `verify_loop_missing` | Complete the verification section and mark each unresolved check. |
+| memory | `bad_record` | the record failed validation (type, scope, tag, date, empty claim, or loop scope without a loop id). |
+| memory | `cite_bad_approval` | the approval must be a short user prompt (80 chars or fewer) that directly follows the reply it answers. |
+| memory | `cite_not_own_session` | the cite ref belongs to another session; only a prompt of the caller's own session (--session) can anchor a write. |
+| memory | `cite_not_user` | the cite must anchor in a user prompt; cite the owner's own words or use the approved-reply form. |
+| memory | `cite_too_short` | a quote-only cite needs 12 to 300 characters; quote more of the user's prompt or cite an approval with its reply. |
+| memory | `cite_unresolved` | the cite ref was not found in `muninn session <root>`, or the approval has no reply before it; check the ref. |
+| memory | `decision_blank_decision` | a decision needs a non-blank decision text; nothing was written. |
+| memory | `decision_blank_phase` | a decision needs a non-blank phase (for example 2.5). |
+| memory | `decision_invalid_chain` | the decision chain is damaged; inspect and preserve the loop state before any further sync. |
+| memory | `decision_state_error` | the loop state could not be read, validated or locked; nothing was written. |
+| memory | `decision_sync_unknown` | a decision sync may have reached Muninn; inspect the store before any manual retry. |
+| memory | `decision_wrong_loop` | the loop changed after the caller read it; read its current loop ID before recording. |
+| memory | `decision_wrong_revision` | the graph changed after the caller read it; read its revision before recording. |
+| memory | `decision_wrong_session` | the loop state belongs to another session; record only from the owning session. |
+| memory | `graph_unavailable` | graph.py summarize or inspect failed for this state, so the done and next-step lists are empty; run the command by hand and read stderr. |
+| memory | `handoff_state_unreadable` | handoff_derive could not read the loop's progress.json; pass the real state path. |
+| memory | `handwritten_protected` | the render target is hand-written (no generator marker); render to a new path. |
+| memory | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
+| memory | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix the named entry and rerun import-legacy, preserving the original. |
+| memory | `legacy_uncited` | an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`. |
+| memory | `lesson_not_current` | the order has no unambiguous current cited Muninn claim (retracted, expired, superseded or conflicting current claims); inspect the current evidence and explicitly record the intended lesson with a fresh quote. |
+| memory | `memory_backend_invalid` | memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml. |
+| memory | `memory_backend_off` | memory.backend is off in the workflow config; set it to muninn (or remove the key) to write typed memory. |
+| memory | `muninn_absent` | muninn is not on PATH; install it (the Markdown path is not a fallback). |
+| memory | `muninn_bad_output` | the retired D4 write protocol returned no numeric K-id; inspect current Muninn records without a legacy scope flag. |
+| memory | `muninn_error` | muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and read stderr. |
+| memory | `muninn_old_ledger` | the D4 adapter expects retired Muninn flags; keep this degraded until a current request-bound adapter is designed. |
+| memory | `muninn_schema_incomplete` | the D4 adapter expects retired v2 columns or tables; inspect the current store with `muninn doctor`, then redesign the adapter. |
+| memory | `muninn_schema_old` | the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2. |
+| memory | `muninn_store_missing` | no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once. |
+| memory | `muninn_timeout` | muninn hung past 10s; run `muninn know list` by hand and check store locks. |
+| memory | `no_user_cite` | the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner prompt text>`. |
+| memory | `order_already_ticked` | this session and logical loop were already counted; the tick was skipped (informational). |
+| memory | `order_bad_id` | an explicit order id must match [a-z0-9][a-z0-9_-]{0,119}; use a canonical id. |
+| memory | `order_blank_field` | an order needs a non-blank failure mode and lesson; nothing was written. |
+| memory | `order_chain_broken` | orders.json was edited by hand (the hash chain names the order); restore it from backup or review the named order, then re-seal by recording through orders.py. |
+| memory | `order_id_collision` | that order id already names another failure mode or scope; use its real identity or a distinct id. |
+| memory | `order_lesson_too_long` | the collapsed lesson exceeds 500 characters; provide a shorter complete claim, never truncate it. |
+| memory | `order_loop_ineligible` | the owned graph or work units are incomplete or stopped; finish the existing completion requirements. |
+| memory | `order_loop_unknown` | no source at <repo-key dir>/<session>/progress.json; pass the owning --session and its separate logical --loop. |
+| memory | `order_not_complete` | preparation is prospective; durably save owned progress as complete before applying recurrence or aging. |
+| memory | `order_not_found` | no order with that id in orders.json; check the id with `orders.py lessons`. |
+| memory | `order_pending_teardown` | completion saved but local apply or its observation failed; retry tick with the same bound source. |
+| memory | `order_retro_validator_unavailable` | schema3 retros require the matching retro_check validator; install the matching validator before graduation. |
+| memory | `order_source_invalid` | progress, preparation or observations are malformed; restore genuine validated source artifacts. |
+| memory | `order_source_mismatch` | the prepared source/hash is stale; before completion use prepare --refresh-from-sha256 with its CURRENT evidence_sha256. |
+| memory | `order_state_error` | orders, preparation or receipt could not be read, locked or written; check the repo-key dir, orders.lock and persistent teardown.jsonl.lock. |
+| memory | `order_wrong_session` | the source directory, session or logical loop is foreign; use the owning directory and identifiers. |
+| memory | `refused_approval_needs_reply` | a short approval needs the reply it answers cited too; use the approved-reply form (--approval REF). |
+| memory | `refused_bad_contradicts` | the contradicted K-id does not exist. |
+| memory | `refused_bad_kind` | the record kind is not one muninn accepts. |
+| memory | `refused_bad_loop_scope` | the loop id is invalid, or --global was combined with a loop scope. |
+| memory | `refused_bad_supersedes` | the superseded K-id is missing, not current, or in another scope. |
+| memory | `refused_bad_tags` | tags must match [a-z0-9_-]{1,32}. |
+| memory | `refused_bad_valid_until` | valid_until must be a future ISO date. |
+| memory | `refused_no_caller_session` | quote-only writes need CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID in the environment. |
+| memory | `refused_not_citable` | the cited event is a subagent thread; only the orchestrator session can write typed records. |
+| memory | `refused_not_found` | the cite ref does not resolve; run `muninn ingest` and check the ref. |
+| memory | `refused_other` | muninn refused with a code not listed here; the reason is `refused_<code>`, read it and the muninn docs. |
+| memory | `refused_preference_needs_user` | a preference must cite a user prompt. |
+| memory | `refused_quote_length` | the quote must be 12 to 300 characters (a shorter one is valid only as a whole approval prompt). |
+| memory | `refused_quote_not_found` | the quote is not verbatim in the cited event; copy it exactly. |
+| memory | `refused_text_length` | the claim must be 1 to 500 characters. |
+| memory | `refused_uncited` | muninn got no citation; pass --cite/--quote. |
+| memory | `restricted_refused` | restricted records are never written by the adapter; write a normal-sensitivity claim. |
+| memory | `retro_decisions_chain_broken` | decisions_absorbed fails verify_chain (the failing seq is named); restore the rows, record decisions only through `graph.py record-decision`, then re-assemble. |
+| memory | `retro_free_invalid` | --free-file must hold one JSON object; nothing was assembled. |
+| memory | `retro_not_assembled` | retro.json is below schema_version 3 or has no source_hashes; run `python3 scripts/lib/retro.py assemble <state-dir> --session <session_id>` instead of writing it by hand. |
+| memory | `retro_source_mismatch` | a hashed source (named in the message) changed after the retro was assembled; re-run retro.py assemble once the sources are final. |
+| memory | `retro_state_error` | progress.json is unreadable, so nothing was assembled. |
+| memory | `retro_steps_missing` | a teardown step is missing or out of order in teardown.jsonl; run proof.py run --all (or proof.py disposition), flush decisions, orders.py prepare and retro.py assemble, in that order. |
+| memory | `retro_wrong_session` | the loop state belongs to another session; assemble only from the owning session. |
+| memory | `uncited_write` | give a verbatim --quote (and --cite ref); a record without a quote is never written. |
+<!-- hook-reasons:end -->
+
 ## No trace rows appear
 
 - Symptom: `trace.rows` is 0 although gates fired (`gate_blocks` counts are nonzero).

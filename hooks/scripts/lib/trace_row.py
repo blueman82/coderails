@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import uuid
@@ -39,7 +40,10 @@ def append_row(
     path = trace_path(session_id, base)
     if path is None:
         return False
-    row = {
+    hashed = {
+        k: hashlib.sha256(str(v).encode("utf-8", "backslashreplace")).hexdigest() for k, v in (inputs or {}).items()
+    }
+    row: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "event_id": str(uuid.uuid4()),
         "session_id": session_id,
@@ -48,10 +52,19 @@ def append_row(
         "command": command,
         "outcome": outcome,
         "reason_code": reason_code,
-        "inputs": {
-            k: hashlib.sha256(str(v).encode("utf-8", "backslashreplace")).hexdigest() for k, v in (inputs or {}).items()
-        },
+        "inputs": hashed,
     }
+    try:
+        hook_decision = importlib.import_module("hooks.scripts.lib.hook_decision")
+        row["decision_record"] = hook_decision.make_record(command, outcome, reason_code, hashed)
+    except Exception:  # noqa: BLE001 - missing helper must not change hook or trace behavior
+        row["decision_record"] = {
+            "hook": command,
+            "decision": outcome,
+            "reason_code": reason_code,
+            "params": hashed,
+            "remediation": "Read the hook reason and retry after you correct its cause.",
+        }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
