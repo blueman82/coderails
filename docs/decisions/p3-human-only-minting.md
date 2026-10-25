@@ -33,7 +33,7 @@ So the Keychain-plus-dialog design is neither confirmed feasible nor ruled out. 
 
 ## Chosen design
 
-Optional receipt minting uses a key with a passphrase:
+Optional receipt minting can use a passphrase-protected key:
 
 1. `python3 scripts/authority_keys.py init` (owner, at a terminal) creates an ed25519 key at
    `~/.coderails/keys/receipt_ed25519` and a signers file. `ssh-keygen` prompts on `/dev/tty`; the owner must enter
@@ -42,8 +42,9 @@ Optional receipt minting uses a key with a passphrase:
 2. `python3 scripts/action_receipt_cli.py approve-action ...` computes the binding itself
    (`scripts/lib/action_binding.py`: repository, destination ref, SHA; the owner never types a SHA), signs the
    canonical receipt body with `ssh-keygen -Y sign` (namespace `coderails-receipt`), and refuses without a
-   controlling terminal (`receipt_refused_no_tty`). An agent without the passphrase cannot sign with that key,
-   but a same-user agent can replace the user-tier signers file and use another key.
+   controlling terminal (`receipt_refused_no_tty`). When the owner chose a non-empty passphrase, an agent without
+   it cannot sign with that key. An empty-passphrase key has no such barrier. A same-user agent can also replace
+   the user-tier signers file and use another key.
 3. The hook verifies the signature against a trust root, then the binding, then consumes the receipt atomically
    (`O_CREAT|O_EXCL`). Unsigned, wrongly signed, edited, stale, replayed, v1 and unbound receipts are all refused.
 4. The trust root is `~/.coderails/keys/receipt_signers`. The agent runs as the same user and can write this file, so
