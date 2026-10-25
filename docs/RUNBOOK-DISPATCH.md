@@ -2,7 +2,7 @@
 
 ## Add a note to a pending driver task
 
-Use `append-unit-scope-note` when a pending task needs new context. Read the current session, loop, revision, unit scope and scope SHA-256 from the graph. Then run:
+Use `append-unit-scope-note` when a pending task needs new context. Read the current session, loop, revision and unit scope from the graph. Compute the SHA-256 of the exact UTF-8 scope text. The graph stores a scope hash only after a note. Then run:
 
 ```text
 python3 skills/agentic-loop/scripts/graph.py append-unit-scope-note <progress.json> --session <session> --loop-id <loop> --revision <current revision> --unit <unit> --expected-scope-sha256 <current scope SHA-256> --note <new context> --reason <why it changed>

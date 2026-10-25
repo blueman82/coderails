@@ -115,8 +115,8 @@ class DriverEvidenceTests(unittest.TestCase):
             check=True,
         )
 
-    def test_publication_requires_clean_checkout_and_open_exact_head_pr(self) -> None:
-        """A source worker cannot finish before the root publishes its HEAD."""
+    def test_publication_requires_clean_checkout_and_published_exact_head_pr(self) -> None:
+        """A source worker can use an open or already merged PR at its HEAD."""
         with tempfile.TemporaryDirectory() as directory:
             checkout = Path(directory) / "checkout"
             subprocess.run(["git", "init", "-q", str(checkout)], check=True)
@@ -130,6 +130,12 @@ class DriverEvidenceTests(unittest.TestCase):
             gh.chmod(0o755)
             with patch.dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}"):
                 self.assertEqual(graph_driver_evidence.publication(checkout), {"number": 42, "head": head})
+                gh.write_text("#!/bin/sh\nprintf '%s\\n' '" + response.replace("OPEN", "MERGED") + "'\n")
+                self.assertEqual(graph_driver_evidence.publication(checkout), {"number": 42, "head": head})
+                graph_driver_evidence.validate_publication(checkout, 42, head)
+                gh.write_text("#!/bin/sh\nprintf '%s\\n' '" + response.replace("OPEN", "CLOSED") + "'\n")
+                with self.assertRaisesRegex(ValueError, "PR"):
+                    graph_driver_evidence.publication(checkout)
                 gh.write_text("#!/bin/sh\nprintf '%s\\n' '" + response.replace(head, "0" * len(head)) + "'\n")
                 with self.assertRaisesRegex(ValueError, "HEAD"):
                     graph_driver_evidence.publication(checkout)
@@ -264,7 +270,7 @@ class DriverEvidenceTests(unittest.TestCase):
             output.write_text('{"type":"turn.completed"}\n')
             final = artifact / "final.json"
             final.write_text('{"outcome":"done"}')
-            with self.assertRaisesRegex(ValueError, "open PR"):
+            with self.assertRaisesRegex(ValueError, "open or merged PR"):
                 graph_driver_evidence.seal(
                     state_path, state, "U3[1]", dispatch_id, checkout, "codex", 0, {"outcome": "done"}
                 )

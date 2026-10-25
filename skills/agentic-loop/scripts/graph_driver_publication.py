@@ -80,7 +80,9 @@ def publication(checkout: Path, *, require_merged: bool = False) -> dict[str, An
     except (OSError, subprocess.TimeoutExpired) as error:
         raise ValueError("publication lookup failed") from error
     if viewed.returncode:
-        raise ValueError("publication requires a merged PR" if require_merged else "publication requires an open PR")
+        raise ValueError(
+            "publication requires a merged PR" if require_merged else "publication requires an open or merged PR"
+        )
     try:
         raw: object = json.loads(viewed.stdout)
     except ValueError as error:
@@ -88,16 +90,17 @@ def publication(checkout: Path, *, require_merged: bool = False) -> dict[str, An
     if not isinstance(raw, dict):
         raise ValueError("publication lookup returned invalid PR")
     pr = cast(dict[str, Any], raw)
+    states = {"MERGED"} if require_merged else {"OPEN", "MERGED"}
     if (
         type(pr.get("number")) is not int
         or pr["number"] < 1
-        or pr.get("state") != ("MERGED" if require_merged else "OPEN")
+        or pr.get("state") not in states
         or pr.get("headRefOid") != current_head
     ):
         raise ValueError(
             "publication requires a merged PR at checkout HEAD"
             if require_merged
-            else "publication requires an open PR at checkout HEAD"
+            else "publication requires an open or merged PR at checkout HEAD"
         )
     if require_merged:
         _merged_on_main(checkout, current_head)
