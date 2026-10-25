@@ -50,9 +50,10 @@ The rules below apply when working on shell code in another project or integrati
 
 ### Avoid Footguns
 - **Never `eval` untrusted input.** If you find yourself reaching for `eval` to build a command dynamically, there is almost always a safer construct: an array of arguments (`cmd=(git commit -m "$msg")`; `"${cmd[@]}"`), a `case` dispatch, or a function-name lookup (`"$fn_name" "$@"` — calling a function by variable name doesn't need `eval`).
-- **Avoid unquoted glob expansion in loops.** `for f in *.txt` fails on zero matches unless `nullglob` is set.
-  It can also fail on names with spaces when `IFS` is not handled.
-  Prefer `find ... -print0 | while IFS= read -r -d '' f` for anything touching a real filesystem, or `shopt -s nullglob` when a plain glob loop is genuinely simpler and the empty-match case is handled.
+- **Handle unmatched globs.** Without `nullglob`, `for f in *.txt` uses the
+  literal `*.txt` when no file matches. Matched names with spaces stay intact.
+  Use `shopt -s nullglob` when an empty match set is valid. Use
+  `find ... -print0 | while IFS= read -r -d '' f` for recursive traversal.
 - **Do not use word splitting as your loop mechanism.** `for word in $(some_command)` splits on all whitespace, including whitespace inside values.
   Prefer `while IFS= read -r line; do ... done < <(some_command)` when lines (not words) are the unit, or an array (`mapfile -t lines < <(some_command)`) when you need random access afterward.
 - **Use a subshell for a temporary `cd`.** Use `(cd "$dir" && cmd)` instead of `cd "$dir"; cmd; cd -`.

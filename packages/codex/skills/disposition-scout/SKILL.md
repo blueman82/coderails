@@ -30,7 +30,7 @@ The heading in the required output format names the compatibility choice.
 Output:
 
 ```text
-## Disposition recommendation: <unit>
+## Compatibility decision: <unit>
 
 **Recommendation:** clean-break | preserve-compat
 **Evidence:** <file:line-backed reason>

@@ -201,14 +201,20 @@ command exits 3, report its `reason_code`. Do not write a Markdown fallback.
 uses a newer API, so live lesson activation remains pending; see
 `docs/RUNBOOK.md`, "Standing order stored without a cite".
 
-Flush and reload pending progress-source updates before final preparation. Changed sources are refused by default.
-For a legitimate incomplete-source retry, run `prepare` with the `--loop`
-and `--refresh-from-sha256` arguments. Set them to the logical loop ID and
-the current evidence SHA-256. Use the
-full Python command prefix shown above. Use
-with the current preparation's returned canonical hash. Immutable ownership must match, revision cannot roll back,
-and that session+loop must have no applied tick or recurrence. Staged records are preserved with no effects. A saved
-replacement whose receipt failed needs ordinary unchanged `prepare` to repair it. Never refresh completed inputs.
+Flush and reload pending progress-source updates before final preparation.
+Changed sources are refused by default. For a legitimate retry before
+completion, use the `evidence_sha256` returned by the current preparation:
+
+```bash
+python3 "$SKILL_DIR/../../scripts/lib/orders.py" --dir "$D" --session "$SESSION" \
+  prepare --loop "$LOOP" --refresh-from-sha256 "$CURRENT_EVIDENCE_SHA256"
+```
+
+Set `CURRENT_EVIDENCE_SHA256` to that returned hash. Immutable ownership must
+match. The revision cannot roll back. That session and loop must have no
+applied tick or recurrence. Staged records remain without effects. If the
+replacement receipt failed, run ordinary `prepare` with unchanged sources.
+Never refresh completed inputs.
 
 Apply `superpowers:verification-before-completion` to the orchestrator's completion claim. Then run:
 
