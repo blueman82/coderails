@@ -52,45 +52,41 @@ Unit nodes (`U3[N]`) and the `J12-all-units` join come from `add-unit`; any othe
 
 It surfaces ambiguities, fills gaps with grounded assumptions, and produces a rewritten prompt that passes its 7-foundation diagnosis. Let it run to completion before Step 2.
 
-**Step 2 — Adopt the improved prompt. Ask only outside a full-autonomous envelope.**
+**Step 2 — Use the improved prompt as a work description.**
 
-Step 2 has two paths. Which one applies is decided by the authorising prompt's envelope class (the same classification Phase 0 makes): "crack on", "human is dead", "ship N PRs without asking", "no human gates", or equivalent means full-autonomous. These words still select the envelope class for your reasoning, but they no longer create authority: the `AskUserQuestion` denial exists only after the user types `/coderails:authorize` (or `authority.py grant` runs); on the phrase alone the hook just prints that command.
+`graph.py start` saved the owner's original words in
+`progress.json.authorising_prompt_raw`. Keep that field unchanged. It is the
+owner quote used by decisions, evals, and proofs. Do not edit `progress.json`
+by hand or replace the owner quote with model-written text.
 
-**Full-autonomous envelope → auto-adopt, do not ask.** An `AskUserQuestion` here is a human gate, and a full-autonomous envelope has already withdrawn consent for gates. Do not resolve that contradiction by skipping Phase -1 — the improve-prompt output is worth more in autonomous operation, not less, because there is no human downstream to catch a vague envelope. Instead: run Step 1, auto-adopt outcome **A** without asking, and emit the improved prompt so it stays on the record. Concretely:
+Compare the rewrite with the original prompt. A compatible rewrite can make
+steps and success checks clearer, but it cannot add authority or change the
+requested goal. If it changes scope, the original loop has no supported
+post-start operation to replace its authorisation oracle. Stop this loop with
+a recorded reason and start a new authorised loop from the owner's exact new
+request in a new session. Record the stop with `graph.py stop` and preserve
+the old state and evidence.
 
-**Do the writes first, then emit the prompt last — the order matters.** Delivery mechanism (a) below means *ending the turn* with the improved prompt as final text and no trailing tool call. Any `progress.json` write issued after that text is a trailing tool call, which by the Delivery constraint below makes the prompt invisible. Emitting first and writing second therefore defeats the visibility this path exists to preserve. So:
+**Full-autonomous envelope:** if the rewrite only clarifies the original,
+use it as the work description without asking. Record that choice with
+`graph.py record-decision`, citing the owner's original prompt. Show the
+clarification to the user, then continue. The phrase "crack on" can select
+this workflow but does not mint authority; the authority command still
+controls guarded actions.
 
-1. Write the improved prompt to `progress.json.authorising_prompt_raw` as the canonical envelope.
-2. Read the current `loop_id` and `revision` from `progress.json`. Run `graph.py record-decision <progress.json> --session <id> --loop-id <loop-id> --revision <revision> --phase -1 --decision "auto-adopted improved prompt as envelope" --flip-condition "user names a divergence between the improved and original prompt"`.
-3. Emit the improved prompt as the turn's final text (delivery mechanism (a) below), with no tool call after it, so it stays visible. Auto-adoption must not make it invisible — the user has waived the gate, not the record.
-4. Begin Phase 0 on the next turn, and note the auto-adoption at the next approval gate. Do not stall waiting for a reply — adopting a sharpened envelope is neither a verification failure nor a destructive action, so Phase 0's rule says the loop proceeds. The turn break here is a rendering requirement, not an approval gate: continue without any input.
+**Other envelopes:** show the rewrite and ask whether to use it as the work
+description, revise it, or keep the original wording. Ask only about a
+material choice that existing context does not resolve. Bound revision to
+two passes. A choice to use the rewrite does not alter
+`authorising_prompt_raw` or expand the envelope.
 
-This follows Phase 2.5's handling of the design fork in full-autonomous mode — auto-adopt, record, surface later, never stall — with one difference: Phase 2.5 writes only to a file and carries no render-as-final-text constraint, so it can finish inside one turn. Phase -1 must also show the prompt to the user, which costs the turn break in step 4.
+Deliver the rewrite in a way the user can see. End the turn with the text,
+or include it in the question itself. Do not assume text followed by a tool
+call appeared in the Claude Code terminal.
 
-The auto-adoption is bounded by the flip-condition: if the user later says the improved prompt drifted from what they meant, revert `authorising_prompt_raw` to the original and continue from there.
-
-**Any other envelope class → ask, as below.**
-
-**Delivery constraint — the improved prompt must be visible, not just asked-about.** Text emitted before a tool call is not rendered in the Claude Code terminal UI — only text with no trailing tool call, or content inside the tool call itself, reaches the user. This means "present the improved prompt as text, then call `AskUserQuestion`" silently drops the prompt: the user sees only the question, never the content it's asking about. Use one of two delivery mechanisms instead:
-- (a) End the turn with the improved prompt as the final text — no trailing tool call — and issue the `AskUserQuestion` call in the *next* turn; or
-- (b) Embed the improved prompt directly inside the `AskUserQuestion` call itself: its question text, option descriptions, or option preview fields. This renders regardless of turn-splitting.
-
-After improve-prompt produces its output, deliver it via (a) or (b) above, then present three options through `AskUserQuestion`:
-
-> "Here's the improved prompt. How do you want to proceed?
-> A) Proceed with the improved prompt as the authorising envelope
-> B) Tweak it — tell me what to adjust and I'll revise
-> C) Use the original prompt as-is"
-
-On **A**: the improved prompt becomes the authorisation envelope. Phase 0 reads it verbatim.
-On **B**: apply the user's tweak, re-present the revised prompt via (a) or (b) again, and ask again (bounded to two revision passes — if a third is needed, something is wrong with the envelope itself; surface that).
-On **C**: proceed with the original prompt unchanged; Phase 0 reads it verbatim.
-
-On adopting an improved envelope (outcome **A** or **B**), update `progress.json.authorising_prompt_raw` to the adopted text so the field stays the canonical post-Phase-0 envelope. Outcome **C** needs no update — `graph.py start` at Phase -2 already wrote the original prompt verbatim.
-
-The improved and approved prompt is the Phase 0 authorisation envelope. Use
-the original if the user selected C, or the auto-adopted prompt in a fully
-autonomous envelope. Quote the selected prompt in the Phase 0 summary.
+Phase 0 reads the original owner prompt as the authorisation envelope. It
+can also use the compatible work description. State which text is the owner
+quote and which text is the clarification.
 
 ### `S0` — Phase 0: Read the authorisation envelope
 
@@ -139,7 +135,7 @@ Main context must, in its own output (not just in spawned-agent prompts):
 - Tag each `## Did Not Verify` bullet that cannot be checked in the same
   turn. The advisory hook flags an untagged bullet.
 - Never narrate a claim about an artifact (PR merged, deploy live) without having run the check this turn (Phase 12).
-- Before ending any stopping turn inside an active loop, run `graph.py stop --category <hard-stop|approval-gate|awaiting-input|complete> --reason-code <code> --reason "<why>" <state> --session <id>` in the SAME turn — the hook releases only on that recorded row and blocks with `stop_row_missing` otherwise. Then end the turn with the rendering line `LOOP-STOP: <category> — <reason>` as the FINAL line, emitted together with the confidence-label and Did-Not-Verify requirements above: the final line is a rendering that hooks never read. Bundling all three matters more, not less, in the warn era: the confidence-label and verify-loop hooks no longer block the orchestrator's in-loop Stop turns, so nothing else forces those labels and DNV tags into the transcript — the bundle is what keeps them present for post-hoc audit, and one composed ending beats clearing one stop hook only to trip another (`loop_stall_guard` still blocks). Declaring `complete` means the loop is done: also set `progress.json` `status: "complete"` and run the Phase 13 teardown. The recorded row is all that's required — `loop_stop_counts` is HOOK-OWNED: the `loop_stall_guard` hook itself increments the matching category when it consumes the row; never write or compute this field yourself.
+- Before ending a stopping turn in an active loop, record the stop in the same turn: `graph.py stop <state> --session <id> --category <hard-stop|approval-gate|awaiting-input|complete> --reason-code <code> --reason "<why>"`. Without the row, `loop_stall_guard` blocks Stop with `stop_row_missing`. End with `LOOP-STOP: <category> — <reason>` as the final line, after the confidence label and Did-Not-Verify section. The hook reads the row, not the final line. For `complete`, run Phase 13 and `loop_state_common.py mark-complete` before recording the stop; `mark-complete` sets the durable completion state. The hook owns `loop_stop_counts`; do not write it.
 
 ### `S1` — Phase 1: State the plan in bullets, ask once
 
