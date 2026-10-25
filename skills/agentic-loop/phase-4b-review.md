@@ -77,7 +77,7 @@ MERGE-BLOCKER prevents merge until Phase 5 or 10 resolves it.
 
 **Plus `subagent_type: general-purpose` with explicit instructions from `agents/deploy-safety-reviewer.md` when the change has a runtime/production surface.** This is a coderails repo agent, not one of the six `pr-review-toolkit` reviewers above, and does not substitute for the `review-pr` Skill invocation the merge gate requires. Spawn it as a separate `Agent` call, alongside the six and the security pass, for any change with a runtime/production surface — not just schema/migration or flag/infra-config diffs, but any change that ships to production (matching the agent's own wrong-agent tripwire, which returns NOT APPLICABLE for docs-only/comment-only/test-only diffs). It reviews rollback risk, blast radius, deploy-time observability coverage, and migration/rollout safety, none of which the six reviewers or `/security-review` cover. Fold its findings into the same Critical / Important / Suggestion aggregation; a DO NOT SHIP verdict blocks merge exactly like a code finding (Phase 5/10) BEFORE merge.
 
-**Clean-break gate.** When the unit's disposition is `clean-break`, also ask
+**Clean-break gate.** When the unit's compatibility decision is `clean-break`, also ask
 the `code-simplifier` pass to find relabelled compatibility. Look for an old
 path that still runs under names such as "fallback", "adapter", "guard",
 "transitional", or "bridge". The check concerns behavior, not the word

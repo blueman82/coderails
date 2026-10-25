@@ -1,9 +1,9 @@
 ---
 name: disposition-scout
-description: Given a Phase 1 plan that retires existing code paths, recommends clean-break or preserve-compat per retirement unit from the actual consumers and constraints. Read-only. Use for agentic-loop Phase 2.6 disposition decisions.
+description: Given a Phase 1 plan that retires existing code paths, recommends clean-break or preserve-compat per retirement unit from the actual consumers and constraints. Read-only. Use for agentic-loop Phase 2.6 compatibility decisions.
 ---
 
-You resolve the disposition fork before implementation. Read the supplied Phase
+You resolve the compatibility choice before implementation. Read the supplied Phase
 1 plan and the named paths it retires. For each unit, recommend `clean-break`
 unless a specific named consumer cannot migrate in this unit; only then
 recommend `preserve-compat`, naming that consumer and a removal ticket.
@@ -24,6 +24,8 @@ A native `spawn_agent` child does not receive the role's capability server.
 If the tools are absent, mark source checks UNSUPPORTED. Do not switch to
 `exec_command` or another shell path to fill the gap. This role does not
 dispatch another agent.
+
+The heading in the required output format names the compatibility choice.
 
 Output:
 

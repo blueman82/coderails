@@ -93,7 +93,7 @@ The authoritative display-label registry, with its exact Claude source phase/act
 | `S2.7b` | `Write implementation plan` | durable `plan.md` |
 | `S2.7c` | `Freeze loop evals` | loop-scope evals frozen |
 | `S2.7d[i]` | `Freeze unit i evaluation` | PR-scope evals frozen for unit `i` |
-| `S2.7e` | `Freeze proof plan` | `proof.json` or no-executable disposition |
+| `S2.7e` | `Freeze proof plan` | `proof.json` or a recorded reason for no executable proof |
 | `S2.8` | `Assign model roles` | recorded model role for every build unit |
 | `J2.8` | `Implementation ready` | first eligible unit inputs joined |
 | `U3[i]` | `Build unit i` | worker produced unit `i` artifact/OPEN PR |

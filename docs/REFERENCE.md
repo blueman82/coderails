@@ -498,7 +498,7 @@ removal ticket.
 
 **Tools:** typed `repo_inspect` and `diff_read`; no shell. **Model:** `inherit` — pass an explicit model at dispatch; `agentic-loop` Phase 2.6 assigns its role inline per Phase 2.8's table (see `model-routing.md`'s "Inline sites elsewhere").
 
-**Used by:** `agentic-loop` Phase 2.6 disposition decisions.
+**Used by:** `agentic-loop` Phase 2.6 compatibility decisions.
 
 #### `docs-auditor`
 

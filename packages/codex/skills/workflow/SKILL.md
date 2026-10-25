@@ -62,7 +62,7 @@ Apply blocking and worthwhile findings, add or update tests where the public con
 Skip only cosmetic or subjective findings and record why.
 If the head changes, re-run the affected review and verification against the new exact head.
 
-Post a pull-request ledger listing every finding and its disposition. Invoke `$coderails-codex:post-review` with the pull-request number only after fixes are pushed so the review artifact is bound to the final head SHA.
+Post a pull-request ledger listing every finding and how it was handled. Invoke `$coderails-codex:post-review` with the pull-request number only after fixes are pushed so the review artifact is bound to the final head SHA.
 
 Confirm that the eval suite was frozen before implementation.
 Run its checks and negative controls, then grade it with `$coderails-codex:task-evals`.

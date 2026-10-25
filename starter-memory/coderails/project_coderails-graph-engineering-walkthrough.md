@@ -73,7 +73,7 @@ The walkthrough must re-derive the exact current shapes and consumers for at lea
 
 - `progress.json`: loop identity, status, revision, work roster, graph nodes, edges, readiness, active wave, wave history, node outcomes, retry state, and worker evidence.
 - `evals.json`: frozen success checks, scope, SHA binding, commands, negative controls, grading, result, and verification level.
-- `proof.json`: frozen proofs, execution status, transcript observations, withdrawals, and completion disposition.
+- `proof.json`: frozen proofs, execution status, transcript observations, withdrawals, and proof results used at completion.
 - `retro.json`: schema, lessons, model use, cost data, and teardown result.
 - Native provider transcript records and dispatch/completion envelopes used as evidence. These are evidence sources, not interchangeable with loop-owned JSON.
 - `standing-orders.md` and learned failure modes. They are durable learning inputs but are not graph-control JSON.

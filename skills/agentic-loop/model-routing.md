@@ -71,7 +71,7 @@ show a quality defect.
 
 Phase 2.8 routes only Phase 3 and 3a build tasks. Assign roles for agents in
 other phases when you spawn them. This includes the Phase 2 pre-flight agent,
-the Phase 2.5 design agent, the Phase 2.6 disposition agent, and the Phase 9
+the Phase 2.5 design agent, the Phase 2.6 compatibility reviewer, and the Phase 9
 wiki and docs agents. Use the Phase 2.8 role table and terms.
 
 ## The orchestrator's own model (Phase 0.4)
