@@ -35,7 +35,7 @@ class InstallBoundaryTests(unittest.TestCase):
         ) -> ModuleType:
             if name in {"integrity_install", "integrity_http"}:
                 raise AssertionError(f"legacy installer imported: {name}")
-            return original_import(name, globals, locals, fromlist, level)
+            return original_import(name, globals, locals, fromlist or (), level)
 
         output = io.StringIO()
         with (
