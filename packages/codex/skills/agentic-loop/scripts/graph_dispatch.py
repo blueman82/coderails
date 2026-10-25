@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
+import graph_repair
 import graph_semantics
 from graph_evidence import bind_worker_evidence, transcript_cursor, validate_evals
 from graph_identity import GraphError, classify_worker_evidence, next_attempt, task_name, task_node
@@ -35,6 +36,7 @@ def begin_wave(path: Path) -> dict[str, Any]:
         return {
             "wave_id": wave["wave_id"],
             "nodes": wave["nodes"],
+            "node_names": graph_semantics.node_names(proposed["graph"]["nodes"]),
             "task_names": task_names,
             "revision": proposed["revision"],
         }
@@ -55,6 +57,7 @@ def apply_record(state: dict[str, Any], raw_results: str) -> tuple[dict[str, Any
         raise GraphError("results must contain exactly wave_id and results")
     results = _object(envelope.get("results"), "results.results")
     transition = graph_semantics.record_wave(state, envelope.get("wave_id"), results)
+    graph_repair.apply_failed_gates(transition, results)
     stale_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "stale")
     failed_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "failed")
     references, identifiers = bind_worker_evidence(state, active, stale_nodes, failed_nodes)

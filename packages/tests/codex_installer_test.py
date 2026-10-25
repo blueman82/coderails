@@ -36,7 +36,7 @@ class ProviderInstallerTests(unittest.TestCase):
             shutil.copytree(ROOT / folder, self.root / folder, ignore=shutil.ignore_patterns("*.sh", "__pycache__"))
         shutil.copyfile(ROOT / "install.py", self.root / "install.py")
         for relative, content in {
-            **{f"packages/graph-semantics/{name}.py": '"""Fixture semantics."""\n' for name in SHARED_MODULES},
+            **{f"packages/graph-semantics/{name}": '"""Fixture semantics."""\n' for name in SHARED_MODULES},
             "instructions/self-checking-discipline.md": "## Self-Checking Discipline\nfixture\n",
             "commands/workflow.md": "fixture",
             "starter-memory/feedback_fixture.md": "fixture",

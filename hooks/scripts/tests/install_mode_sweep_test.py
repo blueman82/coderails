@@ -62,7 +62,7 @@ class InstallModeSweepTests(unittest.TestCase):
                 shutil.copytree(ROOT / folder, root / folder, ignore=shutil.ignore_patterns("*.sh", "__pycache__"))
             shutil.copyfile(ROOT / "install.py", root / "install.py")
             for relative, content in {
-                **{f"packages/graph-semantics/{name}.py": '"""Fixture module."""\n' for name in files.SHARED_MODULES},
+                **{f"packages/graph-semantics/{name}": '"""Fixture module."""\n' for name in files.SHARED_MODULES},
                 "instructions/self-checking-discipline.md": "preamble\n## Self-Checking Discipline\nfixture rules\n",
                 "commands/workflow.md": "replacement",
                 "starter-memory/feedback_fixture.md": "memory fixture",
