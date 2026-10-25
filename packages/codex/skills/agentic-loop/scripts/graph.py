@@ -59,6 +59,37 @@ def record_repair(
         return report
 
 
+def record_proof_disposition(
+    path: Path, session: str, loop_id: str, revision: int, disposition: str, reason: str
+) -> dict[str, Any]:
+    """Save an owner's no-proof decision under the sole Codex state lock."""
+    inputs = {"session": session, "loop_id": loop_id, "revision": revision, "disposition": disposition}
+    with _locked(path):
+        state: dict[str, Any] = {}
+        try:
+            state = _load(path)
+            if state["session_id"] != session or state["loop_id"] != loop_id:
+                raise GraphError("wrong owner or loop")
+            if state["revision"] != revision:
+                raise GraphError("stale revision")
+            if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
+                raise GraphError("no-proof decision requires an idle in-progress loop")
+            if disposition != "none" or not reason.strip() or reason.strip().lower().startswith("none:"):
+                raise GraphError("disposition must be none with a nonblank reason and no prefix")
+            if path.with_name("proof.json").exists():
+                raise GraphError("proof.json exists; no-proof decision is invalid")
+            if state.get("proof_disposition") is not None:
+                raise GraphError("proof disposition is already recorded")
+            state["proof_disposition"] = f"none: {reason.strip()}"
+            graph_semantics.validate(state)
+            _write(path, state)
+        except (GraphError, graph_semantics.GraphSemanticError):
+            trace(path, state, "refused", "proof_disposition_refused", inputs, [], "record-proof-disposition")
+            raise
+        trace(path, state, "ok", "proof_disposition_recorded", inputs, [], "record-proof-disposition")
+        return {"proof_disposition": state["proof_disposition"], "revision": revision}
+
+
 def inspect(path: Path) -> dict[str, Any]:
     """Read core readiness and native task identities without mutating state."""
     state = _load(path)
@@ -253,6 +284,13 @@ def _parser() -> argparse.ArgumentParser:
     repair.add_argument("state", type=Path)
     for field in ("session", "unit", "failed-node", "kind", "identity", "diagnosis"):
         repair.add_argument(f"--{field}", required=True)
+    disposition = commands.add_parser("record-proof-disposition")
+    disposition.add_argument("state", type=Path)
+    disposition.add_argument("--session", required=True)
+    disposition.add_argument("--loop-id", required=True)
+    disposition.add_argument("--revision", required=True, type=int)
+    disposition.add_argument("--disposition", required=True)
+    disposition.add_argument("--reason", required=True)
     for name in ("respawn_stale", "hard_stop"):
         transition = commands.add_parser(name.replace("_", "-"))
         transition.add_argument("state", type=Path)
@@ -304,6 +342,10 @@ def main() -> int:
         elif args.command == "record-repair":
             output = record_repair(
                 args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis
+            )
+        elif args.command == "record-proof-disposition":
+            output = record_proof_disposition(
+                args.state, args.session, args.loop_id, args.revision, args.disposition, args.reason
             )
         elif args.command in {"stop", "consume-stop"}:
             output = graph_stops.run(args)
