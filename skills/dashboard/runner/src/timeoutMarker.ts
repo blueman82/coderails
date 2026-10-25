@@ -12,7 +12,7 @@ export function localDateIso(date: Date): string {
 
 export function recordTimeoutMarker(routine: RoutineDef, ctx: ArtifactCheckContext): void {
   const predicate = routine.expectedArtifact.predicate;
-  if (predicate.kind !== "last-marker") return;
+  if (predicate.kind !== "last-marker" || mergeAttemptState(routine, ctx) !== "none") return;
   const path = resolveArtifactPath(routine.expectedArtifact.artifactPath, ctx);
   const marker = resolveArtifactPath(predicate.failures[0], ctx);
   try {
