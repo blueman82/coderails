@@ -12,9 +12,9 @@ described in `~/.claude/CLAUDE.md`.
 
 ## When to Use
 
-- Run as a scheduled routine (weekly, via the `routines` section of
-  `~/.claude/coderails-dashboard.json`). The skill needs no routines setup
-  to work — it runs standalone on demand too.
+- Run weekly through the `routines` section of
+  `~/.claude/coderails-dashboard.json`, if configured. You can also run it
+  on demand without a routine.
 - Run on demand when memory files have visibly accumulated overlapping or
   contradictory content.
 
@@ -53,10 +53,9 @@ For each merge or deletion from Step 3, update the memory files and their
 If a merge changes a surviving file's scope, update its frontmatter
 `description:` first. Then derive the index line from that description.
 
-**Apply this rule whenever you edit `MEMORY.md`, even if Step 3 found no
-merge.** Never cut an index line mid-clause. A size-pressure hook asks
-you to compress the text, not truncate bytes. Truncation can erase a
-fact without leaving a record of it.
+**Use this rule on every `MEMORY.md` edit.** Keep each index line as a
+complete clause. If a size hook asks for shorter text, remove supporting
+detail. Do not cut off bytes or leave a sentence unfinished.
 
 The memory file's frontmatter `description:` is the source for its index
 summary. Normal sessions do not change it. When shortening an index line,
@@ -70,16 +69,9 @@ number, or failure mode. A complete sentence with no concrete fact is
 still damaged. Rebuild existing damaged lines from their file's
 `description:`, even if Step 3 found no other consolidation candidate.
 
-Worked example — given a file whose `description:` reads "a failed git
-checkout leaves a plausible-looking tree at the OLD commit; nearly
-reported a merged, working fix as broken because foreign WIP blocked the
-checkout and my test ran against pre-merge code", a correct shortened
-index line keeps the load-bearing fact (failed checkout → stale tree →
-false-broken report) while trimming connective wording: "a failed `git
-checkout` leaves a plausible-looking tree at the OLD commit; nearly
-reported a merged fix as broken". An incorrect shortening — the failure
-mode this rule exists to prevent — stops mid-clause: "a failed `git
-checkout` leaves a".
+For example, keep "failed checkout left a stale tree and caused a false
+failure report." Do not shorten it to "failed checkout left a". The first
+line retains the cause and consequence. The second loses the finding.
 
 ### Step 5: Write the durable report artifact
 
@@ -104,6 +96,5 @@ artifact-gate checks. Its content:
 Updated: yes|no
 ```
 
-This report is this skill's own durable artifact, written natively by the
-skill itself — the property that lets a scheduled routine gate on the
-report's existence.
+The report is the skill's durable artifact. A scheduled routine checks that
+it exists.

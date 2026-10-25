@@ -88,7 +88,9 @@ On **C**: proceed with the original prompt unchanged; Phase 0 reads it verbatim.
 
 On adopting an improved envelope (outcome **A** or **B**), update `progress.json.authorising_prompt_raw` to the adopted text so the field stays the canonical post-Phase-0 envelope. Outcome **C** needs no update — `graph.py start` at Phase -2 already wrote the original prompt verbatim.
 
-The improved-and-approved prompt (or the original, if C was chosen; or the auto-adopted improved prompt, in a full-autonomous envelope) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
+The improved and approved prompt is the Phase 0 authorisation envelope. Use
+the original if the user selected C, or the auto-adopted prompt in a fully
+autonomous envelope. Quote the selected prompt in the Phase 0 summary.
 
 ### `S0` — Phase 0: Read the authorisation envelope
 

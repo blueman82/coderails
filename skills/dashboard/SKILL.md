@@ -50,7 +50,7 @@ Seven panels:
 ## Starting
 
 ```
-scripts/start_dashboard.py
+python3 skills/dashboard/scripts/start_dashboard.py
 ```
 
 The first run installs dependencies with `npm ci` and builds the app with
@@ -62,7 +62,7 @@ The first run installs dependencies with `npm ci` and builds the app with
 Override the port with `DASHBOARD_PORT`:
 
 ```
-DASHBOARD_PORT=4200 scripts/start_dashboard.py
+DASHBOARD_PORT=4200 python3 skills/dashboard/scripts/start_dashboard.py
 ```
 
 ## LAN access (opt-in)
@@ -72,7 +72,7 @@ Origin values that resolve to loopback. Set `DASHBOARD_HOST` to your machine's
 LAN IP to allow access from other devices on that network:
 
 ```
-DASHBOARD_HOST=192.168.50.140 scripts/start_dashboard.py
+DASHBOARD_HOST=192.168.50.140 python3 skills/dashboard/scripts/start_dashboard.py
 ```
 
 The server then binds to that exact address. Its request guard accepts that
@@ -84,11 +84,11 @@ For the persistent launchd agent, set `DASHBOARD_HOST` in the `plist`'s
 fill in your LAN IP), then reinstall the agent
 (`launchd/install_dashboard_agent.py`) so launchd picks it up.
 
-Leaving `DASHBOARD_HOST` unset (or empty) is unchanged from before this
-option existed: bind and guard are loopback-only, identical to today.
-Wildcard binds (`0.0.0.0`, `::`, `*`) and `host:port` forms are rejected at
-startup with a non-zero exit — the guard exact-matches one host, so a
-wildcard bind would silently 403 real LAN requests.
+If `DASHBOARD_HOST` is unset or empty, the server binds to loopback.
+The validator rejects wildcard binds (`0.0.0.0`, `::`, `*`) and dotted
+IPv4 addresses with a port. Supply only the host address. The validator
+also accepts some other colon-containing strings, which can fail when the
+server tries to bind. The request guard matches the configured host.
 
 **Security:** The dashboard does not require a login. COMMAND DECK's
 `POST /run` and workflow-audit Approve/Deny execute declared commands.
@@ -101,7 +101,7 @@ fails to bind.
 ## Stopping
 
 ```
-scripts/stop_dashboard.py
+python3 skills/dashboard/scripts/stop_dashboard.py
 ```
 
 Kills the process recorded in the pidfile and removes it. The dashboard keeps

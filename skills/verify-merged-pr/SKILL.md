@@ -34,8 +34,8 @@ session. An open or draft PR has no merge to verify.
 ## The Three Checks
 
 Run all three checks. Confirm the claim only when each check passes.
-Use the real PR number and author. Select a search string that is unique
-to the change.
+Use the real PR number and author. Select a file and a content condition
+that identifies the change. For a deletion, the condition is absence.
 
 ### 1. Re-derive the merge STATE from gh
 
@@ -50,19 +50,23 @@ Use the JSON fields to distinguish these cases.
 
 ### 2. Confirm the CONTENT is actually on origin/main
 
-Fetch the base branch first. Its local copy can be stale.
-Check that the merge commit and the change are on that branch.
+Fetch the base branch first. Its local copy can be stale. Check that the
+merge commit is an ancestor and that the expected content is in the current
+tree. For a deletion, check that the old content is absent.
 
 ```bash
 git fetch origin <base> --quiet
 git merge-base --is-ancestor <mergeCommit.oid> origin/<base> && echo "on origin/<base>" || echo "NOT on origin/<base>"
-git grep -n '<string unique to the change>' origin/<base> -- <expected path>
+git grep -n '<string unique to an addition>' origin/<base> -- <expected path>
 ```
 
 Ancestry shows that the base branch contains the merge commit.
-`git grep` checks for the selected change in the tree. If it finds no
-match, leave the content claim unconfirmed even when the PR state is
-`MERGED`.
+For an addition, `git grep` checks the selected text in the tree. For a
+deletion, inspect `git show origin/<base>:<expected path>` or the current
+file list and confirm the removed content is absent. For a rename, check
+the expected new path and old path. Record the condition you checked. If
+the condition fails, leave the content claim unconfirmed even if the PR
+state is `MERGED`.
 
 ### 3. Enumerate SIBLING PRs by author and time window
 
@@ -84,7 +88,7 @@ only when you have a reason.
 | Check | Command | Confirms |
 |---|---|---|
 | State | `gh pr view <N> --json state,mergedAt,mergeCommit,author,baseRefName` | The PR is MERGED, into the base you expect |
-| Content | `git fetch origin <base>` → `git merge-base --is-ancestor <oid> origin/<base>` + `git grep '<change>' origin/<base>` | The actual change is on the branch, not just a marker |
+| Content | Fetch, check ancestry, then inspect the expected path and content | The actual change is on the branch, not just a marker |
 | Siblings | `gh pr list --state merged --search "author:<login> sort:updated-desc"` | No unreported PRs landed in the same window |
 
 ## Reporting the Verdict
@@ -102,7 +106,7 @@ State CONFIRMED or NOT CONFIRMED. Then report:
 | Mistake | Fix |
 |---|---|
 | Verifying only the named PR | Always run check 3 — the sibling enumeration is the point. |
-| Trusting `state: MERGED` alone | A merge marker isn't the content. Run the `git grep` on `origin/<base>`. |
+| Trusting `state: MERGED` alone | Check the expected content or absence on `origin/<base>`. |
 | Skipping `git fetch` | The local snapshot can be stale. Fetch before checking ancestry. |
 | Assuming the base branch | Read `baseRefName` from the JSON; the PR may not target `main`. |
 | Reporting "merged, works" | You verified presence, not behaviour. Separate the two in the verdict. |

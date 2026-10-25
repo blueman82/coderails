@@ -28,8 +28,9 @@ The toolkit sets its reviewer set from the change. The eval artifact's
 verification_level is a separate check.
 
 At verification_level 0, you can skip the separate `/security-review` pass
-only after you inspect the actual file list. Use `gh pr diff <PR#>
---name-only` or `git diff origin/main...HEAD --name-only`. Run the security
+only after you inspect the actual file list. Use
+`gh pr diff <PR#> --name-only` or
+`git diff origin/main...HEAD --name-only`. Run the security
 pass if the diff touches `hooks/`, `scripts/`, or authentication, command
 execution, or network fetch code. The diff takes precedence over a declared
 level. At levels 1 and 2, run the full security pass.
@@ -74,4 +75,7 @@ MERGE-BLOCKER prevents merge until Phase 5 or 10 resolves it.
 
 **Clean-break gate (when the unit's disposition is `clean-break`).** The `code-simplifier` pass — already independent of the worker (separately spawned, read-only) — is additionally instructed to hunt **relabelled compatibility**: a surviving old code path renamed to "fallback", "adapter", "guard", "transitional", or "bridge". It checks whether an **old code path still executes**, not whether the literal word "shim" appears. On a clean-break unit, its findings of surviving compat are **MERGE-BLOCKERS**, not row 6's default report-only suggestions. **The orchestrator cannot downgrade this finding unilaterally.** Its only two moves: (a) fix it — remove the compat path, or (b) declare a hard-stop and hand it to a human, logged with who/when/SHA/reason. If a fully-unattended envelope cannot tolerate ever hard-stopping here, the human must grant auto-demote authority explicitly **at envelope-authorisation time** (Phase 0) — never something the orchestrator grants itself mid-run. The why: letting the orchestrator grade an independent reviewer's finding reintroduces the same self-attestation loophole one level up.
 
-**Do not substitute the generic `architect-review` + `debugger` + `ai-engineer` trio here.** That trio is a separate general-purpose adversarial pattern for design stress-tests before a thing is built — it is NOT the PR-review step. The canonical review step is `/pr-review-toolkit:review-pr all` = the six agents above. PR review is a specialised gate requiring knowledge of the codebase's review culture and the PR's own change shape; a generic agent cannot carry that context.
+**Use `/pr-review-toolkit:review-pr <PR#>` for PR review.** The generic
+`architect-review`, `debugger`, and `ai-engineer` trio tests a design before
+build. It does not satisfy the PR review gate. Give the actual PR number to
+the toolkit so the merge gate can find its review evidence.

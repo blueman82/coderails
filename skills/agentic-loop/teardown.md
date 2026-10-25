@@ -1,21 +1,20 @@
 # Teardown write contract — `retro.json` and standing-orders
 
-Detail-carrier for Phase 13's teardown. The main skill keeps the imperative (run the five steps in
-order, before the `complete` declaration); this file is the field spec and the mechanics you
-consult **while writing the retro**.
+This file gives the Phase 13 teardown steps and `retro.json` fields. Run all
+five steps in order before you declare `complete`.
 
-`loop_stall_guard` blocks a `complete` declaration when `retro.json` is absent, malformed, or
-below `schema_version` 1 (the hook accepts `schema_version >= 1`, forward-compatible with the cost
-fields added at 2) — so the retro must be written before the declaration. It separately blocks
-when a sibling `proof.json` exists but any of its frozen proofs is unexecuted-in-transcript or
-last-failed — so every proof cmd must be run, in the foreground, in the orchestrator's own
-session, before the declaration too (Step 1 below).
+`loop_stall_guard` blocks `complete` if `retro.json` is absent, malformed, or
+has `schema_version` below 1. Version 2 adds cost fields. The guard also
+blocks if a sibling `proof.json` has a proof that did not run in this session
+or whose last run failed. Run each proof command in the foreground before you
+declare `complete`.
 
-Before assembling the retro, run `graph.py flush-decisions <progress.json> --session <id>` through the
-current provider's graph CLI. If it returns 3, record the named Muninn degradation or uncertain
-sync and preserve the local decision rows; reconcile `decision_sync_unknown` against the store
-before any manual retry. If it returns 2, stop and inspect the chain. Copy the resulting
-`decisions_absorbed` rows verbatim into the retro.
+Before you assemble the retro, run `graph.py flush-decisions <progress.json>
+--session <id>` through the current provider's graph CLI. On exit 3, record
+the Muninn degradation or uncertain sync. Preserve local decision rows.
+Check `decision_sync_unknown` against the store before a manual retry. On exit
+2, stop and inspect the chain. Copy the resulting `decisions_absorbed` rows
+verbatim into the retro.
 
 **Graph dispatch boundary.** `S13-proof`, `S13-retro`, and `S13-complete` deliberately have no
 entry in the Claude role map, so the native graph CLI `plan` command reports them as `unresolved:true`. These are orchestrator actions. Keep them in the phase/artifact record; do not create fake worker-completed graph nodes for them. An actual graph dispatch requires a resolved instruction source and native worker evidence.
@@ -32,11 +31,9 @@ entry in the Claude role map, so the native graph CLI `plan` command reports the
 
 ## The Phase 13 self-audit report
 
-The orchestrator audits its own autonomy from the `progress.json` counters and reports raw,
-unscored facts — no numeric pass/fail scorecard, no "target: approaching zero" framing. The human
-is the only party positioned to judge "should I have been asked about that?"; hand them the raw
-list rather than have the process pre-grade itself. A clean-looking scorecard is more dangerous
-than an honest unscored list because it is more likely to be trusted uncritically.
+Read the autonomy counters in `progress.json`. Report the facts without a
+score or target. The user judges whether the loop should have asked for
+approval. Do not pre-grade that decision.
 
 **The two core facts:**
 
@@ -86,12 +83,13 @@ retro records what happened, it does not grade it.
 
 ## Cost-mining sub-step
 
-Same step 1, after assembling the fields above. Run `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_cost.py" <session_id>`. It enumerates this loop's transcripts (the orchestrator's own
-`~/.claude/projects/<slug>/<sid>.jsonl` plus every worker transcript under
-`<proj>/<sid>/subagents/`, recursively), dedupes by `message.id` so a transcript read twice isn't
-double-counted, sums per-model token usage, prices it from a dated price table, and returns a
-single object carrying `prices_as_of`, `per_model`, `total_tokens`, `total_usd_estimate`, and
-`models_used` all as siblings.
+After you assemble the fields above, run `python3
+"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_cost.py" <session_id>`. It reads
+the orchestrator transcript at `~/.claude/projects/<slug>/<sid>.jsonl` and
+worker transcripts under `<proj>/<sid>/subagents/`. It removes duplicate
+`message.id` entries, sums tokens by model, and uses a dated price table.
+The result has `prices_as_of`, `per_model`, `total_tokens`,
+`total_usd_estimate`, and `models_used` fields.
 
 **Fold-in is a split, not a copy.** Write the miner's returned object as `retro.cost` (its own
 nested `schema_version` 1, independent of the retro's), then lift its `models_used` array OUT to
@@ -99,17 +97,14 @@ nested `schema_version` 1, independent of the retro's), then lift its `models_us
 inside `cost`. This split is what bumps the retro's own `schema_version` to 2; the
 `cost`/`models_used` fields don't exist under `schema_version` 1.
 
-**Fail-open.** The miner never blocks teardown — on any environmental error (missing/invalid
-price file) it returns `{}`, so both `retro.cost` and `retro.models_used` end up empty and a
-`complete` declaration proceeds exactly as it would with populated values. `loop_stall_guard`
-checks the retro's presence and `schema_version`, never the cost field's correctness, so a miner
-failure cannot stall a loop. There are two CALLER-error paths — invoking the miner with no session
-id, or with a session id that resolves to no transcript anywhere under the projects dir — each
-returning a self-describing `{"error":...,"hint":...}` object on stdout instead of `{}` (see the
-lib's own header comment). Both can happen even when this sub-step believes it has `<session_id>`
-in hand — a stale or wrong id is easier to pass than no id at all. Read the miner's output and, if
-`.error` is present, record the error text in the retro rather than treating it as a normal empty
-cost.
+**A cost-miner failure does not block teardown.** An environmental error, such
+as a missing or invalid price file, returns `{}`. Leave `retro.cost` and
+`retro.models_used` empty. `loop_stall_guard` checks the retro's presence and
+schema version, not its cost fields.
+
+A missing session ID or an ID with no transcript returns an object with
+`error` and `hint` fields. Read the output. If `.error` is present, record the
+error text in the retro. Do not treat it as a normal empty cost.
 
 ## Pricing is computed once and frozen
 

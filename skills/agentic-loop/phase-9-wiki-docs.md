@@ -4,8 +4,9 @@ This file gives the steps for [SKILL.md](SKILL.md)'s Phase 9. Ingest the wiki
 once at the end of the loop. Then run `/sync-docs` once. Use the instructions
 below to set worker prompts, verify wiki delivery, and resolve docs drift.
 
-**Graph dispatch boundary.** The Claude role map in `graph_dispatch.py`
+**Graph dispatch boundary.** `packages/graph-semantics/graph-spec.yaml`
 assigns `S9-wiki` to `wiki-writer` and `S9-docs` to `docs-auditor`.
+`graph_dispatch.py` reads that spec when it plans the wave.
 `J12-all-units` must release before `S9-wiki -> S9-docs` runs. See the
 `S9-wiki -> S9-docs` and `J12-all-units` section of
 [execution-graph.md](execution-graph.md). The acceptance test is
