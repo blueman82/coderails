@@ -182,10 +182,30 @@ python3 "$SKILL_DIR/scripts/graph.py" record-proof-disposition "$STATE" \
 
 The command saves `none: no executable surface`. It refuses a foreign owner, a stale revision, an active wave, an existing proof file, or a repeated decision.
 
-Prepare standing orders from the retro with code, never by editing Markdown. With `D` the repo-key dir (the grandparent of `$STATE`), `LOOP` the separate logical `loop_id` from owned progress, and `O="python3 $SKILL_DIR/../../scripts/lib/orders.py --dir $D --session $SESSION"`: run `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop "$LOOP" --quote "<verbatim words of the owner's own prompt, 12-300 chars>"` for each failure mode (add `--scope agnostic` for a lesson that applies to any repo). The native `complete` command runs `prepare` after final progress updates, including when none were recorded. Preparation binds the eligible owned source and records `orders_prepared`, with no recurrence or aging effect. Exit 3 prints a `reason_code`: report it and never write a Markdown fallback. `memory.backend: off` is the explicit opt-out. The current Muninn installation uses a newer API, so live lesson activation remains pending (see `docs/RUNBOOK.md`, "Standing order stored without a cite").
+Prepare standing orders from the retro with code. Do not edit their generated
+Markdown views. Set `D` to the repo-key dir (the grandparent of `$STATE`),
+and `LOOP` to the separate logical loop ID from owned progress. For each
+failure mode, run the full command:
+
+```bash
+python3 "$SKILL_DIR/../../scripts/lib/orders.py" --dir "$D" --session "$SESSION" \
+  record --failure-mode "<mode>" --lesson "<imperative lesson>" \
+  --loop "$LOOP" --quote "<owner prompt quote, 12-300 verbatim chars>"
+```
+
+Add `--scope agnostic` when a lesson applies to any repo. Native `complete`
+then runs `prepare`, even when no lesson was recorded. Preparation binds the
+owned source and records `orders_prepared`; it does not age orders. If the
+command exits 3, report its `reason_code`. Do not write a Markdown fallback.
+`memory.backend: off` is the explicit opt-out. The current Muninn installation
+uses a newer API, so live lesson activation remains pending; see
+`docs/RUNBOOK.md`, "Standing order stored without a cite".
 
 Flush and reload pending progress-source updates before final preparation. Changed sources are refused by default.
-For a legitimate incomplete-source retry, use `$O prepare --loop "$LOOP" --refresh-from-sha256 <CURRENT evidence_sha256>`
+For a legitimate incomplete-source retry, run `prepare` with the `--loop`
+and `--refresh-from-sha256` arguments. Set them to the logical loop ID and
+the current evidence SHA-256. Use the
+full Python command prefix shown above. Use
 with the current preparation's returned canonical hash. Immutable ownership must match, revision cannot roll back,
 and that session+loop must have no applied tick or recurrence. Staged records are preserved with no effects. A saved
 replacement whose receipt failed needs ordinary unchanged `prepare` to repair it. Never refresh completed inputs.
@@ -202,7 +222,8 @@ python3 "$SKILL_DIR/scripts/graph.py" complete "$STATE" \
 Keep this sibling `proof.json` path when the saved no-proof disposition leaves the file absent.
 
 That command runs `prepare` before the graph lock, checks the prepared source under the graph lock, saves completion,
-then runs `$O tick --loop "$LOOP"` and `$O render --loop "$LOOP"` after it releases the lock. Apply validates the
+then runs `orders.py tick` and `orders.py render` for the same loop after it
+releases the lock. Apply validates the
 separately bound directory/session/logical-loop/source and the actual provider completion revision. New completed
 recurrences reset counters; unmatched orders age once and become tombstones at K=5, never deletions. A failed native
 completion save ages nothing. `orders_ticked` follows the ledger save; a failed postcompletion apply or observation
