@@ -8,6 +8,7 @@ import os
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -34,6 +35,8 @@ def load(path: Path) -> dict[str, Any]:
 def write(path: Path, state: dict[str, Any], create: bool = False) -> None:
     """Atomically replace state while preserving its file permissions; `create` allows an absent file."""
     mode = 0o644 if create and not path.exists() else path.stat().st_mode & 0o777
+    if path.name == "progress.json":
+        state = {**state, "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
         temporary = Path(handle.name)
         json.dump(state, handle, indent=2, sort_keys=True)

@@ -12,7 +12,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,7 +20,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.agentic_loop_path import resolve_path
 from hooks.scripts.lib.dir_lock import acquire_dir_lock, release_dir_lock
 from hooks.scripts.lib.discipline_common import content, records, tool_uses
-from hooks.scripts.lib.trace_row import append_row
 
 LOOP_STOP_VOCAB = "hard-stop|approval-gate|awaiting-input|complete"
 
@@ -65,6 +64,8 @@ def atomic_progress_update(
         if not isinstance(state, dict):
             return False
         proposed = update(cast(dict[str, Any], state))
+        if path.name == "progress.json":  # stamped only on a write that happens; a refused update raises above
+            proposed = {**proposed, "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         with tempfile.NamedTemporaryFile(
             mode="w", dir=path.parent, prefix=f"{path.name}.tmp.", delete=False, encoding="utf-8"
         ) as stream:
@@ -166,46 +167,6 @@ def loop_active_incomplete(transcript: str, cwd: str, session: str) -> bool:
     """Return whether a native loop invocation remains active for this session."""
     count = stable_invocations(transcript)
     return count > 0 and not load_progress(cwd, session, count).complete
-
-
-def record_absent_block(state: LoopState) -> None:
-    """Persist the invocation ordinal of an absent-state block in hook_state.json; fail open, never raise."""
-
-    def update(data: dict[str, Any]) -> dict[str, Any]:
-        ordinals = data.setdefault("ordinals", {})
-        if not isinstance(ordinals, dict):
-            raise ValueError("ordinals must be an object")
-        cast(dict[str, Any], ordinals)["absent_blocked"] = state.invocations
-        return data
-
-    atomic_progress_update(state.path.with_name("hook_state.json"), update, create=True)
-
-
-def unstubbed_grace(state: LoopState, hook: str) -> bool:
-    """Release only an absent-file block already recorded at this invocation ordinal.
-
-    Typed hook_state.json decides when it holds an integer ordinal; the discipline.log regex is the legacy
-    fallback (traced as legacy_log_parse) for a missing or torn state file.
-    """
-    if state.path.is_file():
-        return False
-    ordinals = read_state(state.path.with_name("hook_state.json")).get("ordinals")
-    recorded = cast(dict[str, Any], ordinals).get("absent_blocked") if isinstance(ordinals, dict) else None
-    if isinstance(recorded, int) and not isinstance(recorded, bool):
-        released = recorded == state.invocations
-    else:
-        path = Path(os.environ.get("CLAUDE_DISCIPLINE_LOG", str(Path.home() / ".claude/discipline.log")))
-        try:
-            lines = path.read_text()
-        except OSError:
-            return False
-        prefix = f"hook=loop_state_guard session={state.session} invocations={state.invocations} "
-        released = bool(re.search(re.escape(prefix) + r".*reason=absent blocked=1", lines))
-        if released:
-            append_row(hook, "fallback", "legacy_log_parse", state.session)
-    if released:
-        log(f"hook={hook} session={state.session} invocations={state.invocations} unstubbed_grace=released blocked=0")
-    return released
 
 
 def stop_category(text: str) -> str:

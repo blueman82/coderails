@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import cast
 
 from . import git_common as git
 from .artifact_io import array_value, object_value
+from .integrity_attestation import parse_attestation
 
 
 def verify_integrity_status(sha: str, expected_login: str = "github-actions[bot]") -> None:
@@ -31,16 +31,7 @@ def verify_integrity_status(sha: str, expected_login: str = "github-actions[bot]
         statuses.extend(array_value(cast(object, page)))
         text = text[end:].lstrip()
     status = statuses[0] if statuses else None
-    if not isinstance(status, dict):
-        raise git.WorkflowError(f"No integrity-review status found for {sha}")
-    status = object_value(cast(object, status))
-    if status.get("state") != "success":
-        raise git.WorkflowError(f"integrity-review status for {sha} is not success")
-    creator = status.get("creator")
-    if not isinstance(creator, dict) or object_value(cast(object, creator)).get("login") != expected_login:
-        raise git.WorkflowError(f"integrity-review status for {sha} was not posted by {expected_login}")
-    description = str(status.get("description") or "")
-    if not re.search(r"(^|\s)integrity=pass(\s|$)", description) or not re.search(
-        r"(^|\s)sha=" + re.escape(sha) + r"(\s|$)", description
-    ):
-        raise git.WorkflowError(f"integrity-review status for {sha} is not a valid SHA-bound pass attestation")
+    fields = object_value(cast(object, status)) if isinstance(status, dict) else None
+    verdict = parse_attestation(fields, sha, expected_login)
+    if not verdict.ok:
+        raise git.WorkflowError(f"integrity-review {verdict.reason_code}: {verdict.detail}")

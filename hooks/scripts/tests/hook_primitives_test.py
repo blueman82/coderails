@@ -62,7 +62,9 @@ class HookPrimitivesTests(unittest.TestCase):
             self.assertEqual(path.read_text(), '{"revision":1}')
             self.assertFalse(lock.exists())
             self.assertTrue(atomic_progress_update(path, lambda state: {**state, "revision": 2}))
-            self.assertEqual(json.loads(path.read_text()), {"revision": 2})
+            written = json.loads(path.read_text())
+            self.assertRegex(written.pop("updated_at"), r"^\d{4}-\d\d-\d\dT")  # stamped on progress.json writes
+            self.assertEqual(written, {"revision": 2})
 
     def test_completion_cli_refuses_incomplete_native_graph(self) -> None:
         """The direct teardown CLI cannot mark a thin state complete without native evidence."""
@@ -95,8 +97,9 @@ class HookPrimitivesTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 1, result.stderr)
+            written = json.loads(path.read_text())
             self.assertEqual(
-                json.loads(path.read_text()),
+                written,
                 {
                     "schema_version": 3,
                     "session_id": "S1",

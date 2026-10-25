@@ -19,7 +19,7 @@ from .graph_evidence_revalidate import revalidate_all
 from .graph_executor import ROOT, graph_semantics, load, transition, validate_state
 from .graph_recovery import recover_wave as recover_wave
 from .loop_completion import validate_completion
-from .loop_evals import read_loop_evals_result
+from .loop_evals import EvalStatus, read_loop_evals
 from .loop_state_common import LoopState, read_state
 
 sys.path.insert(0, str(ROOT))
@@ -59,9 +59,9 @@ def validate_dispatch_evals(path: Path, state: dict[str, Any], node_id: str, wor
     suite = read_state(path.with_name("evals.json"))
     if any(suite.get(key) != state[key] for key in ("session_id", "loop_id")):
         raise ValueError("frozen eval suite belongs to another session or loop")
-    verdict = read_loop_evals_result(path.parent)
-    if verdict not in {"GO", "VERIFICATION_LEVEL0", "FROZEN"}:
-        raise ValueError(f"dispatch requires frozen loop evals before build; current verdict: {verdict}")
+    verdict = read_loop_evals(path.parent)
+    if verdict.status not in {EvalStatus.GO, EvalStatus.VERIFICATION_LEVEL0, EvalStatus.FROZEN}:
+        raise ValueError(f"dispatch requires frozen loop evals before build; current verdict: {verdict.label}")
 
 
 def ownership(state: dict[str, Any], node_id: str) -> dict[str, Any]:
@@ -203,7 +203,7 @@ def validate_artifacts(path: Path, state: dict[str, Any]) -> None:
         suite.get("revision") != state["revision"]
         or grading.get("by") != "post_evals.py grade-loop"
         or grading.get("amendments_at_grade") != len(suite.get("amendments", []))
-        or read_loop_evals_result(path.parent) != "GO"
+        or read_loop_evals(path.parent).status is not EvalStatus.GO
     ):
         raise ValueError("loop evals lack current neutral GO grading")
     retro = read_state(path.with_name("retro.json"))
