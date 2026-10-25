@@ -1,6 +1,14 @@
 # Provider graph-alignment design
 
-> Implementation supersession note (2026-09-21): the approved design below is retained as the pre-cutover specification. Its shell filenames and proposed `cmp` delivery wording are superseded by the two-provider Python clean-break amendment in [the implementation plan](../plans/2026-09-03-provider-graph-alignment-implementation.md). Current delivery is `install.py` using `scripts/installer/files.py`; current provider parity tests are `packages/tests/test_provider_graph_parity.py`. The semantic source remains `packages/graph-semantics/graph_semantics.py`, independently materialized byte-for-byte into both provider bundles. This note does not change the frozen semantic contract.
+> **Implementation supersession note (2026-09-21).** The approved design below
+> remains the pre-cutover specification. The two-provider Python clean-break
+> amendment in [the implementation plan](../plans/2026-09-03-provider-graph-alignment-implementation.md)
+> supersedes its shell filenames and proposed `cmp` delivery wording.
+> `install.py` now delivers through `scripts/installer/files.py`. Provider
+> parity tests are in `packages/tests/test_provider_graph_parity.py`.
+> `packages/graph-semantics/graph_semantics.py` remains the semantic source.
+> It is copied byte-for-byte into both provider bundles. This note does not
+> change the frozen semantic contract.
 
 ## Problem and decision
 

@@ -79,10 +79,13 @@ host and loopback in Host and Origin headers. On another LAN device, open
 `http://<LAN-IP>:<port>`. For example, use
 `http://192.168.50.140:4173` for the command above.
 
-With no `DASHBOARD_HOST`, bind and guard stay on loopback. The script
-rejects wildcard addresses (`0.0.0.0`, `::`, `*`) and `host:port` values at
-startup. It exits nonzero. The guard requires one exact host; a wildcard
-bind would cause LAN requests to fail with 403.
+With no `DASHBOARD_HOST`, bind and guard stay on loopback. The startup check
+rejects wildcard addresses (`0.0.0.0`, `::`, `*`) and dotted IPv4
+`address:port` values. Its current parser can accept other colon-bearing
+strings, including `localhost:4173`; binding such a value may fail later.
+Set `DASHBOARD_HOST` to a concrete host address without a port. The request
+guard requires one exact host. A wildcard bind would make LAN requests fail
+with 403.
 
 **Security:** The dashboard has no login. COMMAND DECK `POST /run` and
 workflow-audit Approve/Deny can run declared commands. The Host and Origin

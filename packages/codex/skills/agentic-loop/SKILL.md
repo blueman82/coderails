@@ -47,15 +47,101 @@ python3 "$SKILL_DIR/scripts/graph.py" record-wave "$STATE" \
   '{"wave_id":"wave-N","results":{"U3[1]":{"outcome":"done","evidence":"check passed"}}}'
 ```
 
-The graph marker correlates a node and attempt; it does not attest a custom agent role. Native task paths, child/thread IDs, and any actual requested role are bound to provider transcript evidence. A supplied native role must match both child role fields; role-less dispatch is accepted only for the recognized `collaboration` function-call/activity shape with an explicit null nested spawn role; the top-level role may be absent or null, and any populated top-level path must agree. Parent/session, depth, unique dispatch, terminal completion for completed attempts, cursor, and reuse checks remain mandatory. A checked stale result verifies its unique native spawn and child ownership without inventing a successful terminal; subsequent completion rechecks every abandoned attempt from native transcripts. `loop_dispatch_guard.py` routes graph tasks through state, session, active-wave, and eval authorization before dispatch; an ambiguous marker is denied.
+### Native dispatch evidence
 
-If every worker in the active wave has been silent past a lease, run `graph.py recover-wave "$STATE" --session "$SESSION" [--lease-seconds N] [--report-only]`. It reports each node as `dispatch` (never spawned: spawn it now, nothing is recorded), `record` (finished or launch refused: record it), `waiting` or `stalled`, plus one stable `reason_code`. Only when all nodes are `stalled` does it, in one locked save, record them `stale` and request the respawn, so no attempt is counted without a stored worker reference. It refuses (`recovery_budget_exhausted`) once a node's respawns reach `retry.max`; a human then decides. Each outcome appends a non-authoritative row to `recovery-trace.jsonl` beside the state (see `docs/recover-wave-runbook.md`). For plain-language status run `graph.py summarize "$STATE"`; to list graph states and readable names for every node run `graph.py collection <state-root>`. An optional `collection.json` explicitly links graphs: `{"schema_version":1,"graphs":[{"key":"build","path":"build/progress.json","loop_id":"build-loop","links":["verify"]},{"key":"verify","path":"verify/progress.json","loop_id":"verify-loop","links":[]}]}`. Paths and loop IDs must match discovered schema-v3 states; links name keys, and unknown or ambiguous targets fail closed. Without the index, graphs are listed as disconnected. The command only reads graph states and returns graph links plus `unresolved_targets` (empty for a valid index). Malformed states fail the collection command. The Stop hook runs this recovery itself (at most once per 900s lease per graph state, within a 4s budget) when a blocked Stop finds a silent wave; it can respawn a worker that is alive but silent, so a duplicate is possible (bounded by `retry.max`). A timed-out attempt reports its outcome as unknown.
+The graph marker correlates a node and attempt. It does not attest a custom
+agent role. Provider transcript evidence binds the native task path, child or
+thread ID, and any requested role. A supplied role must match both child role
+fields.
 
-The collection command adds `key` and `links` to each graph record; an unlinked record has `"links": []`. Each node keeps its stable `id` and reports its one-word `name`, optional `lane_code`, and current `status` (for example: `{"id":"U3[15]","name":"Builder","lane_code":"C-3","status":"pending"}`). A missing or malformed target makes the command fail with a `graph:` error.
+A dispatch without a role is accepted only for the recognized `collaboration`
+function-call/activity shape. Its nested spawn role must be explicit null. The
+top-level role can be absent or null; any populated top-level path must agree.
+Parent/session, depth, unique dispatch, cursor, reuse, and terminal completion
+checks still apply. A completed attempt needs a successful terminal result.
 
-Partial, extra, malformed, wrong-wave, stale, failed, duplicate, foreign-session, or reused worker evidence is rejected without changing state. `record-wave` atomically adds compact transcript references to the existing node evidence array; workers never write graph state. A failed node increments its attempts and preserves a separate reference for that attempt. If a `spawn_agent` call was refused (for example "agent thread limit reached"), re-issue it with the same printed `task_name` until it succeeds; if it keeps being refused, report that node as `failed`, and `record-wave` binds the latest refused call (a call with an error output and no `SubAgentActivity`) as that attempt's reference. A refused call never satisfies `done`, `skipped`, or `stale`. A later `followup_task` turn on a recorded child does not invalidate its earlier recorded completion, but the child's latest turn must have completed successfully. It returns to pending while attempts remain; exhaustion becomes a durable hard-stop. Successful all-input joins release deterministically after every input succeeds. Repeat from `inspect`, then `begin-wave`.
+A checked stale result proves its unique native spawn and child ownership. It
+does not invent a successful terminal result. Completion later rechecks every
+abandoned attempt against native transcripts. Before dispatch,
+`loop_dispatch_guard.py` checks graph state, session, active wave, and eval
+authority. It denies an ambiguous marker.
 
-**Scout spawn refusal fails closed.** If the design scout (or any independent reviewer) cannot be spawned (`agent thread limit reached` or any other capacity refusal), do not silently downgrade to the orchestrator's or a worker's own read. Retry the spawn with the same `task_name`; if it keeps being refused, record the node `failed` through `graph.py record-wave`, which binds the refused call as that attempt's reference (a refused call never satisfies `done`, and `record-wave` rejects it as success on Codex), then halt. A `not_found` on a `task_name` carried over from a previous session or resumed loop is not a capacity refusal: retry with a FRESH `task_name`, never the same one. Without an independent scout the loop HALTS for the human: do not continue past the refusal. A `non_independent` fallback requires explicit human approval. Only after the human approves, record `S2.5` as `skipped` with evidence beginning `non_independent: human approved` and run `graph.py record-decision` with that phase and decision text. That `skipped` record is the only exit that lets `J2` release without an independent scout; a `non_independent` read never counts as an independent review or as `done`. Hooks cannot spawn agents and no gate reads `non_independent`, so this is an orchestrator rule, not a hook-enforced one.
+### Silent-wave recovery and collection
+
+If every worker in the active wave is silent past a lease, run
+`graph.py recover-wave "$STATE" --session "$SESSION" [--lease-seconds N] [--report-only]`.
+It reports each node with one stable `reason_code` and one action:
+
+- `dispatch`: the node was never spawned. Spawn it now; nothing was recorded.
+- `record`: the worker finished or launch was refused. Record the result.
+- `waiting` or `stalled`: keep the reported status.
+
+Only when all nodes are `stalled` does one locked save record them as `stale`
+and request a respawn. No attempt is counted without a stored worker
+reference. Recovery refuses with `recovery_budget_exhausted` once a node's
+respawns reach `retry.max`; a human then decides. Each outcome appends a
+non-authoritative row to `recovery-trace.jsonl` beside the state. See
+`docs/recover-wave-runbook.md`. A timed-out attempt has an unknown outcome.
+
+Use `graph.py summarize "$STATE"` for plain-language status. Use
+`graph.py collection <state-root>` to list graph states and readable node
+names. An optional `collection.json` links graphs explicitly:
+`{"schema_version":1,"graphs":[{"key":"build","path":"build/progress.json","loop_id":"build-loop","links":["verify"]},{"key":"verify","path":"verify/progress.json","loop_id":"verify-loop","links":[]}]}`.
+Paths and loop IDs must match discovered schema-v3 states. Links name keys;
+unknown or ambiguous targets fail closed. Without an index, graphs appear
+disconnected. The command reads graph states and returns graph links plus
+`unresolved_targets` (empty for a valid index). Malformed states fail the
+collection command.
+
+On a blocked Stop with a silent wave, the Stop hook tries this recovery at most
+once per 900-second lease per graph state, within a four-second budget. It can
+respawn a worker that is alive but silent. `retry.max` bounds that duplicate.
+
+
+The collection command adds `key` and `links` to each graph record. An
+unlinked record has `"links": []`. Each node keeps its stable `id`. It reports a
+one-word `name`, optional `lane_code`, and current `status`; for example:
+`{"id":"U3[15]","name":"Builder","lane_code":"C-3","status":"pending"}`.
+A missing or malformed target makes the command fail with a `graph:` error.
+
+### Record the wave
+
+Reject partial, extra, malformed, wrong-wave, stale, failed, duplicate,
+foreign-session, or reused worker evidence without changing state.
+`record-wave` atomically adds compact transcript references to existing node
+evidence. Workers never write graph state. A failed node increments its
+attempts and keeps a separate reference for that attempt.
+
+If `spawn_agent` is refused, for example by the thread limit, retry with the
+same printed `task_name`. If refusal persists, report that node as `failed`.
+`record-wave` binds the latest refused call (an error output without
+`SubAgentActivity`) as that attempt's reference. A refused call cannot satisfy
+`done`, `skipped`, or `stale`. A later `followup_task` turn does not invalidate
+an earlier recorded completion, but the child's latest turn must complete
+successfully.
+
+A failed node returns to pending while attempts remain. Exhaustion becomes a
+durable hard stop. An all-input join releases only after every input succeeds.
+Repeat from `inspect`, then `begin-wave`.
+
+### Scout spawn refusal
+
+If a design scout or independent reviewer cannot be spawned, retry with the
+same `task_name`. A continuing refusal must be recorded as `failed` through
+`graph.py record-wave`, which binds the refused call. That call never satisfies
+`done`; `record-wave` rejects it as success on Codex. Then halt. Do not
+substitute the orchestrator's or worker's own read without approval.
+
+A `not_found` for a `task_name` from an earlier session or resumed loop is not
+a capacity refusal. Retry with a fresh `task_name`, never the old one. Without
+an independent scout, halt for the human. A `non_independent` fallback needs
+explicit human approval. Only then record `S2.5` as `skipped` with evidence
+beginning `non_independent: human approved`, and run `graph.py record-decision`
+with that phase and decision text. Only this `skipped` record lets `J2` release
+without an independent scout. A `non_independent` read never counts as an
+independent review or as `done`. Hooks cannot spawn agents, and no gate reads
+`non_independent`; this is an orchestrator rule.
+
 
 Before each `graph.py record-decision` call, read the current `loop_id` and `revision` from `progress.json`.
 Pass them as `--loop-id` and `--revision`. The CLI refuses a stale caller.

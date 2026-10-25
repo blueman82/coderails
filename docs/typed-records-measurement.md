@@ -78,13 +78,24 @@ Current reads exclude nonfinite expiries. Scope labels remain opaque as supplied
 repository list. Receipt parsing requires physical LF records and finite JSON numbers. Unicode inside a valid JSON
 string remains supported. Linked preparation, receipt and sidecar paths refuse before content read, open or create.
 
-For an explicit replacement with existing session/loop evidence, prepared `replaces_source` captures the canonical
-`lesson_source` (including an explicit null when none existed). The canonical token hashes owned binding and authored
-row fields, excluding mutable Muninn observations, and is saved with its lesson under the existing chain. Tick applies
-only a missing observation or a replacement whose predecessor still matches; equal published source is already applied.
-A different later authored source is preserved, with exit 3/pending unless exact validated success evidence already
-acknowledges this preparation. An unbound pure `record` update clears the old token. Older absent predecessor data is
-not retroactively invented. Captured null cannot authorize a delayed replacement without its own published source or
-exact validated acknowledgement; even an unchanged null-source predecessor cannot prove authorship. Direct completed
-explicit record remains available. Publication followed by a lost receipt and then another authored replacement can remain
-honestly pending: the latest source and predecessor do not establish that historical application.
+For an explicit replacement with existing session and loop evidence:
+
+- Prepared `replaces_source` captures the canonical `lesson_source`. It records
+  an explicit null when no source existed.
+- The canonical token hashes owned binding and authored row fields. It excludes
+  mutable Muninn observations. The token is saved with its lesson under the
+  existing chain.
+- Tick applies a missing observation or a replacement whose predecessor still
+  matches. An equal published source is already applied.
+- A different later authored source is preserved. The result stays pending
+  with exit 3 unless exact validated success evidence acknowledges this
+  preparation.
+- An unbound pure `record` update clears the old token. Older absent
+  predecessor data is not invented later.
+- A captured null cannot authorize a delayed replacement without its own
+  published source or exact validated acknowledgement. Even an unchanged
+  null-source predecessor does not prove authorship.
+- Direct completed explicit record remains available. If publication is
+  followed by a lost receipt and another authored replacement, the result
+  can stay pending. The latest source and predecessor do not prove that the
+  historical application occurred.
