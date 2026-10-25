@@ -14,6 +14,7 @@ from hooks.scripts.hook_common import deny, log, read_payload
 from hooks.scripts.lib.agentic_loop_path import resolve_path, sanitise_session_id
 from hooks.scripts.lib.graph_dispatch import authorize_dispatch, validate_dispatch_evals
 from hooks.scripts.lib.graph_evidence import ENVELOPE_KEY
+from hooks.scripts.lib.graph_executor import graph_contract
 from hooks.scripts.lib.loop_state_common import read_state
 
 
@@ -47,13 +48,14 @@ def check(payload: dict[str, Any]) -> None:
     path = resolve_path(str(payload.get("cwd") or os.getcwd()), session)
     state = read_state(path)
     if not state:
-        if worker or marked:
+        if (worker or marked) and not (agent and graph_contract.dispatch_off()):
             raise ValueError("no owned progress.json was found before native dispatch")
         return
     if state.get("session_id") != session:
         raise ValueError("progress.json belongs to another session")
     if agent and ("graph" in state or marked):
-        authorize_dispatch(path, session, prompt, role)
+        use = payload.get("tool_use_id")  # unverified: a PreToolUse payload may omit it, then single use is by flag
+        authorize_dispatch(path, session, prompt, role, use if isinstance(use, str) and use else None)
     elif worker:
         if state.get("schema_version") != 3 or not state.get("loop_id"):
             raise ValueError("implementation workers require current loop identity")
@@ -64,7 +66,7 @@ def main() -> int:
     """Emit a native PreToolUse denial while retaining the hook's zero exit code."""
     try:
         check(cast(dict[str, Any], read_payload()))
-    except (ValueError, OSError, KeyError, TypeError) as error:
+    except Exception as error:  # noqa: BLE001  a crashing guard must deny, not fail open on an uncaught exception
         log(f"hook=loop_dispatch_guard blocked=1 reason={error}")
         deny(f"[loop-dispatch-guard] Blocked: {error}")
     return 0

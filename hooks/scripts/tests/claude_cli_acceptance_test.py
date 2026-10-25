@@ -75,12 +75,11 @@ class ClaudeCLIAcceptanceTest(unittest.TestCase):
         graph = load(self.path)
         blocks: list[dict[str, Any]] = []
         for index, node in enumerate(opened["nodes"]):
-            ownership = dispatch.ownership(graph, node)
+            body = (ROOT / "agents/loop-worker.md").read_text()
+            body += "\nTask: return NATIVE_CHILD_COMPLETED. No files, commits, network calls or further agents."
+            prompt = fixture.dispatch_prompt(graph, node, body)
             if self.bad_envelope:
-                ownership["wave_id"] = "wave-foreign"
-            prompt = "CODERAILS_GRAPH_DISPATCH=" + json.dumps(ownership) + "\n"
-            prompt += (ROOT / "agents/loop-worker.md").read_text()
-            prompt += "\nTask: return NATIVE_CHILD_COMPLETED. No files, commits, network calls or further agents."
+                prompt = prompt.replace(graph["graph"]["active_wave"]["wave_id"], "wave-foreign", 1)
             blocks.append(
                 {
                     "type": "tool_use",

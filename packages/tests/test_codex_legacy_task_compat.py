@@ -196,8 +196,10 @@ class LegacyTaskRefusalTests(unittest.TestCase):
         value["graph"]["active_wave"] = {"wave_id": "wave-1", "revision": 2, "nodes": ["U3[1]"]}
         state_path = self.home / "progress.json"
         state_path.write_text(json.dumps(value), encoding="utf-8")
+        message = self.home / "message.txt"
+        message.write_text("CODERAILS_GRAPH_TASK=" + LEGACY + "\nImplement.", encoding="utf-8")
         with self.assertRaises(GraphError):
-            graph.authorize_dispatch(state_path, "parent", LEGACY, self.home / "evals.json")
+            graph.authorize_dispatch(state_path, "parent", "", message, "", LEGACY, self.home / "evals.json")
 
 
 class LegacyRefusalTraceTests(unittest.TestCase):

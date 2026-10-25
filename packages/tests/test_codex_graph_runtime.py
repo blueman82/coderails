@@ -116,6 +116,37 @@ class GraphRuntimeTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             validate_worker_evidence(read_json(self.path))
 
+    def test_converted_stale_attempt_requires_its_native_v2_message(self) -> None:
+        """A missing stale-attempt message after conversion cannot survive completion validation."""
+        converted = read_json(self.path)
+        converted["revision"] = 3
+        converted["graph"]["contract_from_revision"] = 3
+        write_json(self.path, converted)
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path), terminal=False)
+        self.record("stale", stale_check={"checked": True, "method": "native status", "result": "stalled"})
+        graph.transition(self.path, "parent", "respawn_stale", "U3[1]", "checked stale child")
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path))
+        self.record()
+        validate_worker_evidence(read_json(self.path))
+        lines = self.parent.read_text().splitlines()
+        native = json.loads(lines[1])
+        arguments = json.loads(native["payload"]["arguments"])
+        arguments["message"] = "No v2 envelope"
+        native["payload"]["arguments"] = json.dumps(arguments)
+        lines[1] = json.dumps(native)
+        self.parent.write_text("\n".join(lines) + "\n")
+        with self.assertRaisesRegex(ValueError, "dispatch_missing_envelope"):
+            validate_worker_evidence(read_json(self.path))
+        missing_record = read_json(self.path)
+        first = min(missing_record["graph"]["dispatches"].values(), key=lambda row: row["attempt"])
+        missing_record["graph"]["dispatches"] = {
+            key: row for key, row in missing_record["graph"]["dispatches"].items() if row is not first
+        }
+        with self.assertRaisesRegex(ValueError, "dispatch_missing_envelope"):
+            validate_worker_evidence(missing_record)
+
     def test_fabricated_generation_rejected(self) -> None:
         """An inflated generation cannot substitute for a real prior native spawn."""
         current = state()
@@ -159,10 +190,14 @@ class GraphRuntimeTests(unittest.TestCase):
 
     def test_dispatch_rejects_foreign_loop_task_identity(self) -> None:
         """A valid task identity from another loop cannot authorize this graph's dispatch."""
-        graph.begin_wave(self.path)
+        opened = graph.begin_wave(self.path)["dispatches"][0]
+        message = self.path.with_name("message.txt")
+        message.write_text(opened["prompt_prefix"] + "\n" + opened["prompt_sections"] + "\nwork", encoding="utf-8")
+        evals, identifier = self.path.with_name("evals.json"), opened["dispatch_id"]
         foreign_task = task_name("foreign-loop", "U3[1]")
         with self.assertRaises(GraphError):
-            graph.authorize_dispatch(self.path, "parent", foreign_task, self.path.with_name("evals.json"))
+            graph.authorize_dispatch(self.path, "parent", identifier, message, "", foreign_task, evals)
+        graph.authorize_dispatch(self.path, "parent", identifier, message, "", opened["task_name"], evals)
 
     def test_exact_result_envelope(self) -> None:
         """Reject wrong wave, partial results, and malformed stale evidence atomically."""
