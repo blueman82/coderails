@@ -139,6 +139,8 @@ def _check_node(node: object) -> Node:
     profiles = item["profiles"]
     if not isinstance(profiles, list) or not profiles or any(p not in PROFILES for p in cast("list[str]", profiles)):
         raise SpecError("spec_profile", f"node {item['id']} profiles must be a non-empty subset of {PROFILES}")
+    if "full" not in profiles:
+        raise SpecError("spec_profile", f"node {item['id']} must belong to the full profile")
     per_unit = item["id"].endswith("[i]")
     if item["per_unit"] is not per_unit or ("{i}" in item["label"]) is not per_unit:
         raise SpecError("spec_shape", f"node {item['id']}: per_unit, [i] id and {{i}} label must agree")

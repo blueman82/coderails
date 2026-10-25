@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import sys
 import tempfile
@@ -43,6 +44,19 @@ def failed_review(state: dict[str, Any]) -> dict[str, Any]:
     )
     graph_repair.apply_failed_gates(proposal, {"U4b-review[1]": {"outcome": "failed"}})
     return cast(dict[str, Any], proposal["state"])
+
+
+class FullProfileIntegrityTests(unittest.TestCase):
+    """FULL must include every declared node before instantiate can build a graph."""
+
+    def test_full_profile_cannot_omit_loop_eval_freeze(self) -> None:
+        """A profile edit cannot remove a required freeze node from FULL."""
+        spec = copy.deepcopy(graph_spec.load_spec())
+        freeze = next(node for node in spec["nodes"] if node["id"] == "S2.7c")
+        freeze["profiles"] = ["units-only"]
+        self.assertEqual(graph_spec.load_policy()["graph"]["profile"], "full")
+        with self.assertRaisesRegex(graph_spec.SpecError, "spec_profile"):
+            graph_spec.validate_spec(spec)
 
 
 class StampedJoinIntegrityTests(unittest.TestCase):

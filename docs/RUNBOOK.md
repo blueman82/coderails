@@ -530,8 +530,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   (default ON; unset to re-enable). Use it only to rescue a loop whose graph a spec change has stranded, then rebuild it.
   `spec_join_inputs` (a stamped graph's join is missing or lacks a unit's input) and `spec_profile_downgrade` (the stamp is
   below `policy.yaml` `graph.profile`) are the other refusal codes.
-- Limits: `policy.yaml` default `graph.profile` is `full`. `instantiate --profile units-only` requires the
-  owner to lower that policy floor to `units-only` first; the explicit flag alone is refused. Spec edges are
+- Limits: `policy.yaml` default `graph.profile` is `full`. Every spec node must belong to FULL; a spec
+  that removes one from FULL is refused with `spec_profile` before instantiate. `instantiate --profile units-only`
+  requires the owner to lower the policy floor to `units-only` first; the flag alone is refused. Spec edges are
   enforced only between nodes that exist, so an unstamped (hand-built or `start`-built) graph that never creates `J2.8` or
   the prep nodes is not refused: making `start` stamp via `instantiate`, or having `plan`/`begin-wave` refuse an unstamped
   graph once `full` is chosen, is an open owner decision. Join inputs are enforced on stamped graphs only. Downgrade path:
