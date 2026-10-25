@@ -55,6 +55,8 @@ def table(spec: dict[str, Any], policy: dict[str, Any]) -> str:
     ]
     for node in spec["nodes"]:
         cells = [_text(node[key], policy) for key in ("prereq_text", "ready_when", "skip_text")]
+        if node["id"] == "U4[i]":
+            cells[1] = cells[1].replace("`scripts/worker_status.py`", "`skills/agentic-loop/scripts/worker_status.py`")
         rows.append(f"| `{node['id']}` | `{node['kind']}` | " + " | ".join(cells) + " |")
     return "\n".join(rows)
 
