@@ -28,7 +28,10 @@ Corpus root is `WORKFLOW_AUDIT_ROOT` (default `~/.codex/sessions`) — override 
 
 ## 2. Size sanity
 
-`scan_transcripts.py` prints a `scanning file_count=<N> total_mb=<M>` line to stderr before it scans anything. Surface this line to the user so they know the scale of what's being read before results come back.
+`scan_transcripts.py` prints `scanning file_count=<N> total_mb=<M>` to
+stderr after it parses and filters candidate files, before it emits the
+event sequences. Surface this line so the user knows the size of the
+selected corpus before the cluster result arrives.
 
 ## 3. Mechanical pipeline
 
@@ -37,7 +40,15 @@ python3 "$SKILL_DIR/scripts/scan_transcripts.py" <scan args> \
   | python3 "$SKILL_DIR/scripts/cluster_ngrams.py" --min-sessions 3
 ```
 
-`scan_transcripts.py` (full contract: `--help`) emits one JSON line per root session from native `event_msg.payload.item` records. It allows only completed `CommandExecution`, `FileChange`, `Extension`, and `CollabAgentToolCall` items. The optional `head` is limited to the first two command tokens or an explicit allowlist of native extension and collaboration tool names; unknown names lose their head. Message, prompt, result, reasoning, remaining command arguments, and file-change content is never copied. `cluster_ngrams.py` (full contract: `--help`) consumes that stream and emits one JSON object: n-grams (n=2..5) that recur across `--min-sessions` (default 3) distinct sessions, capped at `--top` (default 50) clusters.
+`scan_transcripts.py` (full contract: `--help`) emits one JSON line per root
+session from completed native tool events. It keeps `CommandExecution`,
+`FileChange`, `Extension`, and `CollabAgentToolCall` items. For a command,
+`head` is the first two tokens of its command text. These tokens are not
+allowlisted and can contain a literal argument. Extension and collaboration
+heads use a small allowlist. The scanner omits the rest of each command,
+message, prompt, result, reasoning, and file-change content.
+`cluster_ngrams.py` emits recurring n-grams (n=2..5), capped at `--top`
+(default 50) across `--min-sessions` (default 3) distinct sessions.
 
 **Diagnostics are not noise.** `jq_parse_error:<file>` or `jq_parse_error:<line-no>` lines on stderr are real parse failures — surface them, don't swallow them. An empty `clusters` array is a legitimate result ("no repeated patterns found at this threshold") — report it plainly and stop; don't lower the threshold or invent candidates to fill the gap.
 
@@ -49,9 +60,17 @@ the judge from inheriting the current conversation. Construct its prompt from
 that file's template verbatim, filling in:
 
 1. The cluster JSON — the full stdout object from `cluster_ngrams.py`.
-2. The existing-skill list — the `name` and `description` frontmatter lines from every `skills/*/SKILL.md` in the repo.
+2. The existing-skill list — the `name` and `description` frontmatter from
+   both `skills/*/SKILL.md` and `packages/codex/skills/*/SKILL.md` in the
+   repo. Deduplicate equal names; use the native Codex description when
+   both roots define the same name.
 
-**The judge receives nothing else.** No transcript content, no conversation history, no orchestrator commentary. This is a deliberate privacy boundary: the judge's entire vocabulary is tool names, whitelisted heads, counts, session ids, and n-gram lengths — the same boundary `scan_transcripts.py` and `cluster_ngrams.py` already enforce on their own output. The judge returns one propose/reject verdict per cluster per the contract's schema.
+Give the judge only those two inputs, with no conversation history or
+orchestrator commentary. Before dispatch, inspect command heads for literal
+secrets or private text. If one appears, stop this run; do not send the JSON
+to the judge or write a queue entry. The two-token limit reduces content but
+does not guarantee privacy. The judge returns one propose/reject verdict per
+cluster per the contract's schema.
 
 ## 5. Queue-mode output (optional) — mutually exclusive with in-session creation
 
@@ -94,10 +113,11 @@ reviews and merges it by hand.
 that writes queue entries nobody has approved yet ends cleanly; there is
 no retry, no nag, no follow-up ask.
 
-The queue file itself carries only the D2-whitelisted fields already
-vetted by the judge contract (`cluster_ngram`, `count`, `sessions`,
-`task_summary`, `proposed_name`, `proposed_description`) — never verbatim
-transcript content — and is never committed to any repo
+The queue file carries `cluster_ngram`, `count`, `sessions`,
+`task_summary`, `proposed_name`, and `proposed_description`. Command heads
+inside these fields can contain literal command text. Apply the head check
+in section 4 before writing a queue entry. The queue file is never committed
+to any repo
 (`~/.codex/coderails-dashboard/approvals/` lives outside every repo).
 
 ## 6. Proposal chart
@@ -114,7 +134,11 @@ Present one row per candidate cluster to the owner:
 
 Only rows with `verdict: "propose"` go forward (to creation or a queue entry, per section 7); rejected clusters are reported (with their reason) but nothing further is done with them.
 
-**Privacy invariant.** The chart and every downstream artifact (proposal file, wrap-up report) contain only tool names, whitelisted heads, counts, and session ids — never verbatim transcript prose, file contents, or reconstructed intent beyond what those fields literally say. Any proposal artifact written to disk stays local (scratch or loop-state dir) and is never committed to the repo.
+**Privacy limit.** The chart and downstream artifacts contain tool names,
+command heads, counts, and session IDs. A command head can itself contain
+private text. Stop before creating these artifacts if the section-4 check
+finds such text. Keep any local proposal file in scratch or loop state;
+never commit it to the repo.
 
 ## 7. Proceed to creation
 
@@ -124,9 +148,22 @@ Unless the run is in queue-mode (section 5), every candidate the judge marked `p
 
 For each proposed candidate, in sequence, never batched:
 
-1. Author the skill via `$skill-creator`, fully specified from the candidate's own judge-contract fields. Run a fresh-subagent baseline scenario without the new skill, write the smallest `SKILL.md` that addresses the observed failure, then repeat the scenario.
-2. Land the new skill in the coderails repo as a plugin skill, via its own branch and PR. Run the test gate, spawn the installed `spec-reviewer` custom agent against the current PR head; for a production surface run `deploy-safety-reviewer` via `python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role deploy-safety-reviewer --prompt-file <file> --cwd <exact-head-worktree>` per [guarded role sessions](../using-coderails/references/guarded-role-sessions.md). Then invoke `$coderails-codex:post-review`, PR-scope `$coderails-codex:task-evals`, `$coderails-codex:post-evals`, and `$coderails-codex:merge`. Never commit straight to `main`, and never write into a user's personal `~/.codex/skills` directory — this is a repo skill, not a local one.
-3. **Stop after this skill is merged before starting the next proposed candidate.** Test and ship each candidate separately.
+1. Prepare a branch and worktree for this candidate. Freeze PR-scope
+   `$coderails-codex:task-evals` before writing the skill.
+2. Author the skill via `$skill-creator` from the candidate's judge-contract
+   fields. Run a fresh-subagent baseline scenario without the skill, write
+   the smallest `SKILL.md` that addresses the observed failure, then repeat
+   the scenario.
+3. Land the skill in the coderails repo through its own PR. Run the test
+   gate. Review the current PR head with
+   `source-auditor` through `python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role source-auditor --prompt-file <file> --cwd <exact-head-worktree>`.
+   For a production surface, also run `deploy-safety-reviewer` through that
+   helper. See [guarded role sessions](../using-coderails/references/guarded-role-sessions.md).
+   Run and grade the frozen checks. Then invoke `$coderails-codex:post-review`,
+   `$coderails-codex:post-evals`, and `$coderails-codex:merge`. Never commit
+   straight to `main` or write into `~/.codex/skills`.
+4. **Stop after this skill is merged before starting the next proposed
+   candidate.** Test and ship each candidate separately.
 
 ## 9. Wrap-up
 

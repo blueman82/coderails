@@ -33,9 +33,10 @@ interface Intent {
 runs `test/schema-compat.test.ts`. That test checks this type against the
 Obsidian plugin's `IntentFile` type so the two types stay compatible.
 
-`IntentFile.source` is presently the single literal `"obsidian"` on the
-wire (the only merged producer); `Intent.source`'s wider union exists to
-admit future producers (`"web"`, `"cli"`), not because they exist today.
+The Obsidian button writes `source: "obsidian"`. The runner's routine seed
+writes `source: "scheduler"` (see `runner/src/seed.ts`). The wider
+`Intent.source` type also permits future web and CLI producers; it does
+not establish that either exists now.
 
 **Current producer behavior:** After writing an intent file, the Obsidian
 plugin also runs `claude` directly. See `pressButton` in
@@ -56,8 +57,8 @@ interim behaviour (above) does not yet honor it.
 A queued intent file moves through exactly these directories, atomically
 claimed by rename (never copied, never edited in place):
 
-1. `queue/<runId>.json` — written by a producer (web click, Obsidian
-   command, routine scheduler). Not yet claimed. Directory is created
+1. `queue/<runId>.json` — written by a current producer (Obsidian command
+   or routine scheduler). Not yet claimed. Directory is created
    with mode `0o700` by producers (see `obsidian/src/main.ts`).
 2. `processing/<runId>.json` — claimed by the runner via `fs.renameSync`.
    The atomicity of a same-filesystem rename is what prevents two runner

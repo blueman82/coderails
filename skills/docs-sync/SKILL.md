@@ -64,8 +64,11 @@ fixing.
 1. Fetch `origin/main`; branch off the freshly-fetched tip.
 2. Run `/coderails:task-evals` (scope: `pr`) and FREEZE it — BEFORE
    making the edit.
-3. Make the doc edits identified in step 1 (git-tracked `.md` files
-   only).
+3. Make the doc edits identified in step 1 (git-tracked `.md` files only).
+   Stage only those named paths and commit them before step 4. The diff in
+   step 4 compares commits. If the edits are uncommitted, its output is
+   empty and the assertion cannot check the changed paths. Do not use
+   `git add -A`; it can sweep in unrelated files.
 4. **Assert `git diff origin/main...HEAD --name-status` (THREE-dot, not
    two; `--name-status`, never `--name-only`) satisfies ALL FOUR of the
    conditions below. Any violation is an ABORT WITH CLEANUP.**
@@ -115,7 +118,8 @@ fixing.
 5. `/coderails:push`
 6. `/pr-review-toolkit:review-pr <PR#>`
 7. `/coderails:post-review <PR#>`
-8. `/coderails:post-evals <PR#>`
+8. Run the frozen checks and negative controls, grade their results, then
+   invoke `/coderails:post-evals <PR#>`.
 9. `/coderails:merge`. Once the merge succeeds, append a terminal
    `run=ok` line to the run log as the last line — the canonical
    success marker the `last-marker` gate keys on.

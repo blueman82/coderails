@@ -22,7 +22,11 @@ Coderails-owned hooks, workflow helpers, launchers, and tests are Python. The ru
 ### Safety Header
 - **Use `set -euo pipefail`** at the top of each executed standalone script. Do not impose it on a sourced file. `-e` stops on the first unhandled error. `-u` rejects an unset variable. `pipefail` reports a failed pipeline command even if the last command succeeds.
 - **Sourced library files are an exception.** A sourced file must not impose `set -e` or `set -u` on its caller. The top-level script owns that choice. If you add `set -e` to a library, explain the choice in a comment and check every caller.
-- **PreToolUse and hook scripts are another exception.** A hook in a shell-based Claude Code integration must usually return `exit 0` after an internal error. An abrupt exit can break the calling harness. These scripts skip `set -e` and protect risky reads with `|| true` or an explicit fallback. Check this failure contract before adding `set -euo pipefail` to a hook.
+- **Hooks follow their declared failure policy.** An advisory hook may
+  return `exit 0` after an internal error. A blocking security hook must
+  deny when its contract says to fail closed. Do not add `|| true` to a
+  guarded read without checking that contract. Choose `set -e` behavior
+  only after checking how the calling harness handles an abrupt exit.
 
 ### Quoting & Expansion
 - **Quote every variable expansion** unless you specifically want word-splitting or globbing (`"$var"`, not `$var`). Unquoted expansions are the single most common source of bugs when a value contains spaces, globs, or is empty.

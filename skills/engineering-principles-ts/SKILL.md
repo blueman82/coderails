@@ -22,7 +22,8 @@ paths: "**/*.ts,**/*.tsx"
 
 ### Null Handling
 - **Optional chaining** (`?.`) instead of nested null checks
-- **Nullish coalescing** (`??`) instead of `|| defaultValue`
+- **Nullish coalescing** (`??`) when `0`, `false`, or an empty string is a
+  valid value. Use `||` when those values must select the fallback.
 - **Non-null assertion (!)** only when you've verified safety
 
 ### Switch Statements
@@ -43,7 +44,7 @@ paths: "**/*.ts,**/*.tsx"
 | Pattern | Before | After |
 |---------|--------|-------|
 | Optional chaining | `user && user.profile && user.profile.name` | `user?.profile?.name` |
-| Nullish coalescing | `value \|\| 'default'` | `value ?? 'default'` |
+| Nullish coalescing when false-like values are valid | `value \|\| 'default'` | `value ?? 'default'` preserves `0`, `false`, and `''`; confirm that behavior is intended. |
 | Object shorthand | `{ name: name, age: age }` | `{ name, age }` |
 | Template literal | `'Hello ' + name + '!'` | `` `Hello ${name}!` `` |
 | Arrow callback | `items.map(function(x) { return x * 2; })` | `items.map(x => x * 2)` |
@@ -96,7 +97,7 @@ Find these patterns and replace them with the matching TypeScript idiom.
 
 | Anti-Pattern | Replacement |
 |-------------|-------------|
-| Sequential `await` in loop | `Promise.all()` for independent operations |
+| Sequential `await` in loop | `Promise.all()` when operations are independent and safe to run together; bound concurrency when needed |
 | `.then()` chains | `async/await` |
 | Manual error collection | `Promise.allSettled()` |
 | Callback nesting (callback hell) | `async/await` |
@@ -166,7 +167,8 @@ function summarize(groups: string[][]): string {
     const flat = groups.flatMap(g => g);
     const foundSpecial = flat.some(item => item.startsWith("!"));
     const label = foundSpecial ? "Found special" : "No special";
-    return `${label} in ${flat.length} items: ${flat.join(", ")}`;
+    const output = flat.join(", ") + (flat.length > 0 ? ", " : "");
+    return `${label} in ${flat.length} items: ${output}`;
 }
 ```
 
@@ -256,7 +258,7 @@ Before completing TypeScript code changes:
 - [ ] No `any` type — use `unknown` or proper types
 - [ ] Explicit return types on exported functions
 - [ ] Optional chaining (`?.`) for null checks
-- [ ] Nullish coalescing (`??`) not `||` for defaults
+- [ ] Choose `??` or `||` from the required handling of `0`, `false`, and empty strings
 - [ ] Discriminated unions for variant types
 - [ ] Exhaustive switch with `assertNever`
 - [ ] `as const` for literal types
@@ -267,7 +269,7 @@ Before completing TypeScript code changes:
 - [ ] `.find`/`.some`/`.every` over `for` with `break`
 - [ ] `.flatMap` over nested `for` loops
 - [ ] `Object.fromEntries` over loop building objects
-- [ ] `Promise.all` over sequential `await` in loops
+- [ ] Use `Promise.all` only for independent work with safe concurrency
 - [ ] Object/Map dispatch over `if/else if` chains (5+)
 - [ ] Guard clauses over nested conditionals 3+ deep
 - [ ] `[...new Set()]` over manual dedup

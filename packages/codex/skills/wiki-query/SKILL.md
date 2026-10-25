@@ -36,6 +36,7 @@ A fork does not need to run from inside the vault.
 
 Read `wiki_path` and `wiki_git_worktree` from the project's
 `.coderails/workflow.config.yaml`. These flat keys are not in `AGENTS.md`.
+If `wiki_git_worktree` is absent, use `true` and the worktree/PR flow.
 Start at the project location. Search each directory up to its git root
 for the config file. The first file found wins. Set `vault` to `wiki_path`.
 Resolve a relative path from the project repo root. Use an absolute path

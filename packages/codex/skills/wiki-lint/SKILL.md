@@ -211,7 +211,10 @@ After reporting findings:
 
 ### Step 5: Update Log
 
-Append to `$vault/log.md`: `## [YYYY-MM-DD] lint | <summary of findings>`
+Append to `$WORKTREE_PATH/log.md`:
+`## [YYYY-MM-DD] lint | <summary of findings>`.
+In direct-write mode, `WORKTREE_PATH` is the vault. In PR mode, it is the
+wiki worktree, so the log update enters the same commit as the other edits.
 
 Immediately after that line, append a structured findings-count record on its
 own line: `<!-- lint-findings: N -->`, where `N` is the total number of

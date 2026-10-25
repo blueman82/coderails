@@ -11,16 +11,18 @@ Exactly two inputs, nothing else:
 1. **The cluster JSON** — the full stdout object from `cluster_ngrams.py`
    (`{"scanned_sessions","clusters":[{"ngram","n","count","sessions"}],"diagnostics"}`).
 2. **A list of existing skill names and descriptions** — the `name` and
-   `description` frontmatter fields of every skill already in the repo (e.g.
-   read from each `skills/*/SKILL.md` frontmatter block).
+   `description` frontmatter fields from `skills/*/SKILL.md` and
+   `packages/codex/skills/*/SKILL.md`. Deduplicate equal names and use
+   the native Codex description when both roots define the same name.
 
 The judge must use only these two inputs. It must not request or reconstruct
 other content. It can use tool names, `head` strings, counts, session IDs,
-and n-gram lengths from the cluster JSON. `scan_transcripts.py` has already
-put the `head` strings on a privacy allowlist. The judge cannot read
-transcripts, file contents, or other prose. If a verdict needs the meaning
-of command arguments beyond the allowed `head`, the judge must reject the
-cluster or state the limit. It must not guess.
+and n-gram lengths from the cluster JSON. For command events, `head` is the
+first two tokens of command text. Those tokens are not allowlisted and can
+contain a literal argument. The workflow checks them before dispatch and
+stops if they contain private text. The judge cannot read other transcript
+content or file bodies. If a verdict needs more of a command, the judge
+must reject the cluster or state the limit. It must not guess.
 
 ## Per-cluster output
 
@@ -43,7 +45,7 @@ For every cluster in the input, the judge returns one object:
 - Build `task_summary` and `proposed_description` only from the tool names,
   heads, and counts in the cluster. Do not invent details or user intent.
   "Sessions repeatedly do X then Y" is allowed. "The user was debugging a
-  flaky CI job" needs a whitelisted head that says so.
+  flaky CI job" needs evidence in the supplied head that says so.
 - `proposed_name` is required only when `verdict` is `"propose"`; kebab-case.
 
 ## Mandatory rejection criteria

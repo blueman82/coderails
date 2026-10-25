@@ -19,6 +19,10 @@ Obtain a branch name matching `feature/*`, `bug/*`, or `bugfix/*` and an optiona
 
 Invoke `$coderails-codex:prep` with the branch and summary. Work only in the worktree it returns. Report the worktree path and any issue key it creates.
 
+Invoke `$coderails-codex:task-evals` with PR scope and freeze the suite
+before implementation starts. Keep its frozen assertions unchanged while
+the work is built.
+
 If a project wiki is configured, invoke `$coderails-codex:wiki-query`.
 Ask about known constraints, open gaps, adjacent behavior, and assumptions that code does not enforce.
 Report material findings before coding.
@@ -38,14 +42,19 @@ Invoke `$coderails-codex:push`. Capture the pull request number and URL. Stop if
 
 ## 3. Native Codex review and evidence
 
-Review only the final pull-request head. Select the applicable reviewers, normally including:
+Review only the final pull-request head. Select reviewers whose roles cover
+the changed work:
 
-- `source-auditor` for correctness and changed-code risks.
-- `spec-reviewer` for requirement and contract coverage.
-- `proof-author` for meaningful verification evidence.
+- `source-auditor` for source-backed claims and current-head facts.
 - `deploy-safety-reviewer` when deployment, migration, configuration, or rollback risk exists.
 
-Run `source-auditor` and `deploy-safety-reviewer` with `python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role <role> --prompt-file <file> --cwd <exact-head-worktree>` per [guarded role sessions](../using-coderails/references/guarded-role-sessions.md). Spawn `spec-reviewer` and `proof-author` as native custom agents.
+`spec-reviewer` reviews a design before implementation planning. `proof-author`
+freezes pending loop proofs before implementation. Neither is a current-head
+code reviewer.
+
+Run `source-auditor` and any needed `deploy-safety-reviewer` with
+`python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role <role> --prompt-file <file> --cwd <exact-head-worktree>`
+per [guarded role sessions](../using-coderails/references/guarded-role-sessions.md).
 
 Give each agent the pull-request number, exact head SHA, relevant requirements, and a distinct review focus. Cap a review wave at three concurrent agents.
 
