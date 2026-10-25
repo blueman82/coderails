@@ -11,10 +11,11 @@ import tempfile
 import time
 import unittest
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+from hooks.scripts.lib import graph_dispatch
 from scripts.post_evals import grade_loop
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,61 +27,6 @@ GRAPHS = (
 
 class ProofDispositionCliTests(unittest.TestCase):
     """Exercise the two independently installed graph adapters."""
-
-    def test_orders_source_ignores_completion_timestamp_only(self) -> None:
-        """New receipts survive a new second; old same-second receipts stay valid."""
-        self.assertEqual(
-            (ROOT / "scripts/lib/orders_lifecycle.py").read_bytes(),
-            (ROOT / "packages/codex/scripts/lib/orders_lifecycle.py").read_bytes(),
-        )
-        for source in (
-            ROOT / "scripts/lib/orders_lifecycle.py",
-            ROOT / "packages/codex/scripts/lib/orders_lifecycle.py",
-        ):
-            with self.subTest(provider=str(source)), tempfile.TemporaryDirectory() as temporary:
-                lifecycle = runpy.run_path(str(source))
-                initial = datetime(2026, 10, 25, tzinfo=timezone.utc)
-                state: dict[str, Any] = {
-                    "session_id": "session",
-                    "loop_id": "loop",
-                    "status": "in-progress",
-                    "revision": 1,
-                    "updated_at": initial.isoformat(timespec="seconds"),
-                    "proof_disposition": "none: no executable surface",
-                    "graph": {"nodes": {}},
-                }
-                state_dir = Path(temporary) / "session"
-                state_dir.mkdir()
-                progress = state_dir / "progress.json"
-                progress.write_text(json.dumps(state), encoding="utf-8")
-                normalized = lifecycle["source_state"](state)
-                binding = {
-                    "repo_dir": str(Path(temporary).resolve()),
-                    "state_dir": str(state_dir.resolve()),
-                    "session_id": "session",
-                    "loop_id": "loop",
-                    "revision": 1,
-                    "progress_sha256": lifecycle["sha"](normalized),
-                }
-                legacy = binding | {
-                    "progress_sha256": lifecycle["sha"](normalized | {"updated_at": state["updated_at"]})
-                }
-                receipt = lifecycle["preparation_path"](state_dir, "loop")
-                receipt.write_text(json.dumps({"schema": 1, "binding": legacy, "records": []}), encoding="utf-8")
-                lifecycle["prepared"](state_dir, binding, required=True)
-                with self.assertRaisesRegex(ValueError, "order_source_mismatch"):
-                    lifecycle["prepared"](state_dir, binding | {"revision": 2}, required=True)
-                later = state | {"updated_at": (initial + timedelta(seconds=1)).isoformat(timespec="seconds")}
-                progress.write_text(json.dumps(later), encoding="utf-8")
-                with self.assertRaisesRegex(ValueError, "order_source_mismatch"):
-                    lifecycle["prepared"](state_dir, binding, required=True)
-                receipt.write_text(json.dumps({"schema": 1, "binding": binding, "records": []}), encoding="utf-8")
-                lifecycle["prepared"](state_dir, binding, required=True)
-                changed = later | {"proof_disposition": "none: different decision"}
-                progress.write_text(json.dumps(changed), encoding="utf-8")
-                changed_binding = binding | {"progress_sha256": lifecycle["sha"](lifecycle["source_state"](changed))}
-                with self.assertRaisesRegex(ValueError, "order_source_mismatch"):
-                    lifecycle["prepared"](state_dir, changed_binding, required=True)
 
     def test_owner_write_and_refusals(self) -> None:
         """Save one owned decision and reject invalid calls without a state write."""
@@ -271,11 +217,50 @@ class ProofDispositionCliTests(unittest.TestCase):
                     self.assertNotEqual(bypass.returncode, 0)
                     self.assertEqual(state.read_bytes(), before)
                 proof.unlink()
+                stamp_before = json.loads(state.read_text())["updated_at"]
                 time.sleep(1.1)  # Cross the updated_at second before the real completion write.
                 completed = run(*complete_args)
                 self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-                self.assertEqual(json.loads(state.read_text())["status"], "complete")
+                saved = json.loads(state.read_text())
+                self.assertEqual(saved["status"], "complete")
+                self.assertEqual(saved["updated_at"], stamp_before)
                 self.assertFalse(proof.exists())
+                self.assertEqual(run("verify-completion", *complete_args[1:]).returncode, 0)
+                lifecycle_path = (
+                    ROOT / "scripts/lib/orders_lifecycle.py"
+                    if graph == GRAPHS[0]
+                    else ROOT / "packages/codex/scripts/lib/orders_lifecycle.py"
+                )
+                lifecycle = runpy.run_path(str(lifecycle_path))
+                state_dir, _, binding = lifecycle["owned"](state.parent.parent, "session", "loop", complete=True)
+                receipt = lifecycle["prepared"](state_dir, binding, required=True)
+                self.assertEqual(receipt["binding"], binding)
+                self.assertEqual(binding["progress_sha256"], lifecycle["sha"](lifecycle["source_state"](saved)))
+                changed_source = lifecycle["source_state"](saved) | {"proof_disposition": "none: changed"}
+                changed_binding = binding | {"progress_sha256": lifecycle["sha"](changed_source)}
+                with self.assertRaisesRegex(ValueError, "order_source_mismatch"):
+                    lifecycle["prepared"](state_dir, changed_binding, required=True)
+                ledger = state.parent.parent / "orders.json"
+                ledger_before = ledger.read_bytes()
+                if graph == GRAPHS[0]:
+                    prior_cwd = Path.cwd()
+                    try:
+                        os.chdir(root)
+                        with patch.dict(
+                            os.environ,
+                            {"HOME": str(root), "CLAUDE_PROJECTS_DIR": str(root / ".claude/projects")},
+                        ):
+                            marker_result = graph_dispatch.complete(state, "session", completed_marker=2)
+                    finally:
+                        os.chdir(prior_cwd)
+                    self.assertFalse(marker_result["pending_teardown"], marker_result)
+                    self.assertEqual(json.loads(state.read_text())["completed_marker"], 2)
+                    self.assertEqual(json.loads(state.read_text())["updated_at"], stamp_before)
+                    self.assertEqual(ledger.read_bytes(), ledger_before)
+                retried = run(*complete_args)
+                self.assertEqual(retried.returncode, 0, retried.stdout + retried.stderr)
+                self.assertEqual(ledger.read_bytes(), ledger_before)
+                self.assertEqual(json.loads(state.read_text())["updated_at"], stamp_before)
 
 
 if __name__ == "__main__":

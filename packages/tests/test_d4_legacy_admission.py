@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import runpy
 import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta
 from pathlib import Path
 
 from hooks.scripts.tests.lib import claude_transcript_fixture as claude
@@ -62,26 +60,6 @@ class LegacyAdmission(unittest.TestCase):
             state["completion"] = {"revision": state["revision"]}
             state["revision"] += 1
         provider.write(state)
-
-    def test_old_timestamp_bound_admission_remains_readable(self) -> None:
-        """Keep a valid old admission while refusing a later timestamp."""
-        for provider in self.providers:
-            with self.subTest(provider=provider.name):
-                self.old_complete(provider)
-                command = self.command(provider, "Reviewed this completed historical graph and its evidence.")
-                accepted = subprocess.run(command, cwd=provider.home, env=provider.environment, capture_output=True)
-                self.assertEqual(accepted.returncode, 0, accepted.stderr)
-                lifecycle = runpy.run_path(str(provider.plugin / "scripts/lib/orders_lifecycle.py"))
-                receipt = next(provider.path.parent.glob("orders-legacy-*.json"))
-                saved = json.loads(receipt.read_text())
-                saved["source_sha256"] = lifecycle["legacy_source_sha"](provider.read())
-                receipt.write_text(json.dumps(saved), encoding="utf-8")
-                self.assertEqual(self.verify(provider).returncode, 0)
-                state = provider.read()
-                stamp = datetime.fromisoformat(state["updated_at"])
-                state["updated_at"] = (stamp + timedelta(seconds=1)).isoformat(timespec="seconds")
-                provider.write(state)
-                self.assertNotEqual(self.verify(provider).returncode, 0)
 
     def test_old_complete_requires_exact_reviewed_admission(self) -> None:
         """Both native guards accept a reviewed old graph without ticking it."""

@@ -131,7 +131,6 @@
   "scripts/lib/orders_ledger.py": "100644",
   "scripts/lib/orders_legacy_import.py": "100644",
   "scripts/lib/orders_lifecycle.py": "100644",
-  "scripts/lib/orders_source.py": "100644",
   "scripts/lib/receipt_counters.py": "100644",
   "scripts/lib/receipt_gate.py": "100644",
   "scripts/lib/receipt_signing.py": "100644",

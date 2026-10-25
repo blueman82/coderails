@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import datetime
 import hashlib
 import importlib
@@ -17,8 +18,6 @@ from typing import Any, cast
 
 from hooks.scripts.test_output import file_lock
 from scripts.lib.orders_atomic import write_bytes
-from scripts.lib.orders_source import legacy_source_state
-from scripts.lib.orders_source import source_state as normalize_source
 
 ROOT = Path(__file__).resolve().parents[2]
 CODEX = (ROOT / ".codex-plugin/plugin.json").is_file()
@@ -70,13 +69,27 @@ def semantics() -> dict[str, Any]:
 
 
 def source_state(state: dict[str, Any]) -> dict[str, Any]:
-    """Return the provider's source binding before completion-only changes."""
-    return normalize_source(state, CODEX)
-
-
-def legacy_source_sha(state: dict[str, Any]) -> str | None:
-    """Reproduce an old receipt hash only from the current state's original timestamp."""
-    return sha(source) if (source := legacy_source_state(state, CODEX)) is not None else None
+    """Normalize only fields the actual provider completion operation changes."""
+    source = copy.deepcopy(state)
+    if CODEX and state["status"] == "complete":
+        completion = state.get("completion")
+        if not isinstance(completion, dict):
+            raise ValueError("order_source_invalid")
+        completion = cast("dict[str, Any]", completion)
+        if type(completion.get("revision")) is not int:
+            raise ValueError("order_source_invalid")
+        if completion["revision"] != state["revision"] - 1:
+            raise ValueError("order_source_mismatch")
+        source["revision"] = completion["revision"]
+    elif "completion" in state:
+        raise ValueError("order_source_invalid")
+    for key in ("status", "completion", "completed_marker"):
+        source.pop(key, None)
+    if isinstance(counts := source.get("loop_stop_counts"), dict):
+        remaining = {k: v for k, v in cast("dict[str, Any]", counts).items() if k != "complete"}
+        source.pop("loop_stop_counts")
+        source.update({"loop_stop_counts": remaining} if remaining else {})
+    return source
 
 
 def owned(
@@ -166,22 +179,8 @@ def prepared(state_dir: Path, binding: dict[str, Any], required: bool = False) -
     if not path.exists() and not required:
         return {"schema": 1, "binding": binding, "records": []}
     value = object_file(path)
-    if type(value.get("schema")) is not int or value["schema"] != 1:
+    if type(value.get("schema")) is not int or value["schema"] != 1 or value.get("binding") != binding:
         raise ValueError("order_source_mismatch")
-    recorded_raw = value.get("binding")
-    if not isinstance(recorded_raw, dict):
-        raise ValueError("order_source_mismatch")
-    recorded = cast("dict[str, Any]", recorded_raw)
-    if recorded != binding:
-        if {k: v for k, v in recorded.items() if k != "progress_sha256"} != {
-            k: v for k, v in binding.items() if k != "progress_sha256"
-        }:
-            raise ValueError("order_source_mismatch")
-        state = object_file(state_dir / "progress.json")
-        if binding.get("progress_sha256") != sha(source_state(state)):
-            raise ValueError("order_source_mismatch")
-        if recorded.get("progress_sha256") != legacy_source_sha(state):
-            raise ValueError("order_source_mismatch")
     raw_rows = value.get("records")
     rows = cast("list[Any]", raw_rows)
     if not isinstance(raw_rows, list):

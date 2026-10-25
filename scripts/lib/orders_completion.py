@@ -179,12 +179,7 @@ def _legacy_admitted(path: Path, session: str, loop: str, ledger: ol.Ledger) -> 
         "loop_id": loop,
         "source_sha256": lifecycle.sha(lifecycle.source_state(state)),
     }
-    if any(receipt.get(key) != value for key, value in expected.items() if key != "source_sha256"):
-        raise ValueError("order_legacy_admission_stale")
-    if not isinstance(receipt.get("source_sha256"), str) or receipt["source_sha256"] not in {
-        expected["source_sha256"],
-        lifecycle.legacy_source_sha(state),
-    }:
+    if any(receipt.get(key) != value for key, value in expected.items()):
         raise ValueError("order_legacy_admission_stale")
     if not isinstance(receipt.get("progress_sha256"), str) or not re.fullmatch(
         r"[0-9a-f]{64}", receipt["progress_sha256"]
@@ -242,20 +237,15 @@ def status(path: Path, session: str) -> None:
             raise ValueError("order_legacy_admission_required")
         staged = lifecycle.prepared(state_dir, binding, required=True)
         digest = lifecycle.sha(staged)
-        receipt_bindings = (binding, staged["binding"]) if staged["binding"] != binding else (binding,)
         if lifecycle.loop_key(session, state["loop_id"]) not in ledger["ticked_loops"]:
             raise ValueError("order_pending_teardown")
-        if not any(
-            lifecycle.observe(state_dir, "orders_ticked", bound, digest, emit=False) for bound in receipt_bindings
-        ):
+        if not lifecycle.observe(state_dir, "orders_ticked", binding, digest, emit=False):
             raise ValueError("order_pending_teardown")
         try:
             rendered = _view_digest(repo_dir, ledger)
         except (OSError, ValueError) as error:
             raise ValueError(_pending_reason(state_dir, binding, ledger) or "order_pending_teardown") from error
-        if not any(
-            lifecycle.observe(state_dir, "orders_rendered", bound, rendered, emit=False) for bound in receipt_bindings
-        ):
+        if not lifecycle.observe(state_dir, "orders_rendered", binding, rendered, emit=False):
             raise ValueError(_pending_reason(state_dir, binding, ledger) or "order_pending_teardown")
 
 
