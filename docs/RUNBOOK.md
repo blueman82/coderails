@@ -375,8 +375,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `stop_row_missing`. Run `python3 scripts/lib/stop_counters.py` for refusal codes. A stale row reports
   `stale_stop_row`. The hook owns `loop_stop_counts`; never edit it or `stops[]` by hand.
 - Remediation: use the refusal code from `graph.py stop`. A foreign session, unknown category or reason code, or
-  unresolved graph on `complete` needs a source correction. A valid row is consumed once. Codex releases only a
-  `hard-stop` row on a typed hard-stopped graph. See `docs/graph-alignment-measurement.md` for limits and commands.
+  unresolved graph on `complete` needs a source correction. A valid row is consumed once. Codex can release an
+  `awaiting-input` or `approval-gate` row while graph work is pending. `complete` needs a resolved graph and its evidence.
+  See `docs/graph-alignment-measurement.md` for limits and commands.
 
 ## Diff-manifest check warned or refused
 

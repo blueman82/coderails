@@ -132,19 +132,23 @@ def main() -> int:
     category = str(recorded["category"]) if recorded else ""
     try:
         if recorded:
+            if not state.owned:
+                raise ValueError("Recorded stop belongs to another session; stopping remains blocked.")
             if category == "complete" and graph_unresolved(state):
                 raise ValueError(blocked_message(emit_human_request(state)))
             messages = complete(state, transcript) if category == "complete" else []
             seq = recorded["seq"]
 
             def increment(data: dict[str, Any]) -> dict[str, Any]:
+                current = LoopState(state.path, session, count, data)
+                if not current.owned:
+                    raise ValueError("Recorded stop belongs to another session; stopping remains blocked.")
                 identity = ("schema_version", "session_id", "loop_id", "revision")
                 if any(data.get(key) != state.data.get(key) for key in identity):
                     raise ValueError("Recorded stop belongs to an earlier graph state; stopping remains blocked.")
                 if recorded_stop(data) != recorded:
                     raise ValueError("Recorded stop changed before consumption; stopping remains blocked.")
                 if category == "complete":
-                    current = LoopState(state.path, session, count, data)
                     if graph_unresolved(current):
                         raise ValueError("Native graph unresolved; stopping remains blocked.")
                     complete(current, transcript)

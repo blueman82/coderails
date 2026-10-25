@@ -115,6 +115,14 @@ class StallGuardRaceTests(HookTestCase):
         self.assertEqual(result, 2)
         self.assertEqual(path.read_bytes(), interleaved[0])
 
+    def test_foreign_owner_row_cannot_release_stop(self) -> None:
+        """A row in a foreign session's state cannot release or change the invoking session's Stop."""
+        path = self.progress(session_id="foreign", stops=[self.stop(1, "awaiting-input")])
+        before = path.read_bytes()
+        result = self.run_hook("loop_stall_guard", self.payload(self.stopped()))
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(path.read_bytes(), before)
+
     def test_complete_rechecks_evals_before_locked_consume(self) -> None:
         """A grade withdrawn after the first read makes completion block and leaves the row unconsumed."""
         path = self.complete_fixture()
