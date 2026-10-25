@@ -392,21 +392,38 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   out; fix the cause, re-run. `proof_expect_mismatch`: exit code or stdout did not match the frozen `expect`.
   `proof_stale_cmd`: proof.json changed after the freeze row, or the run row hashes a different cmd; run
   `proof.py freeze` then `run`. `proof_stale_head`: the run belongs to another checkout or an earlier HEAD; run it
-  again from the current repository checkout. `proof_chain_broken`: `proof_results.jsonl` was edited or lost rows; never hand-edit it,
-  re-freeze and re-run (a fresh file). `proof_cmd_destructive`: the cmd matches the destructive classifier and was never
-  executed; reword the proof. `proof_disposition_no_reason`: with no proof.json record `proof.py disposition <state-dir>
+  again from the current repository checkout. `proof_chain_broken`: a retained row was edited or a nonfinal row was
+  lost. Preserve `proof_results.jsonl` and start a new session and loop. `proof_cmd_destructive`: the cmd matches the
+  destructive classifier and was never executed; reword the proof. `proof_sandbox_unavailable`: the pinned sandbox did
+  not start. Prepare and check the pinned runtime, then run the proof again:
+
+  ```bash
+  npx --yes @anthropic-ai/sandbox-runtime@0.0.65 --help
+  npx --offline --yes @anthropic-ai/sandbox-runtime@0.0.65 --help
+  ```
+
+  The first command can download the runtime. The second confirms that the offline command used by `proof.py` works.
+  `proof_disposition_no_reason`: with no proof.json record `proof.py disposition <state-dir>
   --none --reason-code <code> --reason <text>`; a bare `none` or a code outside `DISPOSITION_CODES` (`docs_only`,
   `no_executable_surface`, `research_only`, `superseded`, `other`) is rejected, and a valid disposition is echoed in the
   gate output. `proof_no_proofs`: proof.json holds no non-withdrawn proof (an empty or withdrawn-only document); freeze a
   real proof or record a disposition. `proof_disposition_legacy` is a trace note
   only (string `none: <reason>` accepted). `proof_withdrawn_unobserved`: a withdrawn proof needs a failed/timeout run row
   and a reason.
-- Limit: a same-user agent can forge rows and recompute the chain, as it could forge a transcript; this is a
-  cooperating-agent safeguard, not a trust boundary. Also not covered: the destructive classifier is literal-pattern,
-  not a sandbox, so obfuscated or interpreter-wrapped deletes (`python3 -c 'shutil.rmtree(...)'`, quote-split `rm`) still
-  run; the latest freeze wins, so an agent can weaken a cmd or move a failing proof
-  to `withdrawn_proofs` and re-freeze (only the frozen set is checked, not the loop's first one); schema 1 is refused at
-  freeze; a disposition's reason is checked for presence and an enum code, not truth.
+- The proof command runs inside a separate pinned OS sandbox. It can read host files. It can write only to a fresh
+  temporary directory, named by `TMPDIR`, and cannot use the network. The repository and loop state stay read-only to
+  the proof command. The controller writes the result row after the command ends. A proof that needs temporary files
+  must write them under `TMPDIR`. If the runtime is absent or the sandbox does not start, the run fails closed.
+  This proof runner uses `/tmp` for its private scratch on macOS and Linux. Windows proof runs fail closed until a
+  Windows scratch policy is implemented and checked. The live containment probe for this release ran on macOS.
+- Limit: a same-user agent can forge rows and recompute the chain, as it could forge a transcript. The chain detects
+  changes to retained rows and removal of a nonfinal row. It cannot detect removal of a final row when the remaining
+  rows form a valid prefix. The latest freeze wins, so an agent can weaken a command or withdraw a failing proof and
+  re-freeze. If the controller is killed before it appends a refusal, an earlier pass can remain the latest row.
+  A disposition's reason is checked for presence and an enum code, not truth.
+- Retained schema 1 proof files are historical evidence. Do not edit or convert them. For new work, start a new
+  session and loop with a schema 2 proof. The current runner cannot recheck completion or retry teardown for an old
+  schema 1 loop. Use the prior plugin version in an isolated checkout for that historical recovery operation.
 - Off-switch: none, by design. The proof gate is intentionally non-disableable on both providers (default ON, no config
   key or env var); the previous transcript-based check was removed, so there is no earlier behaviour to fall back to.
 

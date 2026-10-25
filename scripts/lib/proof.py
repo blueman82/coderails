@@ -7,19 +7,22 @@ Usage:
   proof.py status <state-dir>
   proof.py disposition <state-dir> --none --reason-code CODE --reason TEXT
 
-<state-dir> holds proof.json (and progress.json); rows go to proof_results.jsonl beside it. The cmd is passed to
-`/bin/bash -c` exactly as frozen; only its hash uses .strip(). Exit 0 ok, 1 a proof was not satisfied, 2 refused.
+<state-dir> holds proof.json (and progress.json); rows go to proof_results.jsonl beside it. The frozen cmd runs
+through pinned sandbox-runtime with read-only host paths and no network. Exit 0 ok, 1 unsatisfied, 2 refused.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import json
 import os
+import secrets
 import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, cast
 
@@ -29,6 +32,7 @@ from scripts.lib import proof_results as pr  # noqa: E402
 
 DEFAULT_TIMEOUT_S = 600
 EXCERPT_CAP = 2000
+SRT_VERSION = "0.0.65"
 
 
 def _now() -> str:
@@ -100,22 +104,87 @@ def _destructive(cmd: str, cwd: str) -> bool:
     return bool(permanent_pattern(cmd, cwd)[0]) or secret_path(cmd)
 
 
-def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool]:
-    process = subprocess.Popen(
-        ["/bin/bash", "-c", cmd],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        errors="replace",
-        start_new_session=True,
-    )
-    try:
-        out, err = process.communicate(timeout=timeout)
-        return process.returncode, out, err, False
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        out, err = process.communicate()
-        return None, out or "", err or "", True
+def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool, bool]:
+    """Return exit, stdout, stderr, timeout, and proof that the sandbox started."""
+    with tempfile.TemporaryDirectory(prefix="coderails-proof.", dir="/tmp") as temporary:
+        scratch = Path(temporary)
+        settings = scratch / "settings.json"
+        home = Path.home()
+        settings.write_text(
+            json.dumps(
+                {
+                    "filesystem": {
+                        "denyRead": [],
+                        "allowWrite": [temporary],
+                        "denyWrite": [
+                            str(settings),
+                            "/tmp/claude",
+                            "/private/tmp/claude",
+                            str(home / ".npm/_logs"),
+                            str(home / ".claude/debug"),
+                        ],
+                    },
+                    "network": {"allowedDomains": [], "deniedDomains": ["*"], "strictAllowlist": True},
+                }
+            )
+        )
+        marker = f"CODERAILS_PROOF_SANDBOX_{secrets.token_hex(16)}"
+        wrapped = f"printf '%s\\n' '{marker}'\n{cmd}"
+        environment = os.environ.copy()
+        environment.update(
+            TMPDIR=temporary,
+            CLAUDE_CODE_TMPDIR=temporary,
+            XDG_CACHE_HOME=temporary,
+            PYTHONDONTWRITEBYTECODE="1",
+        )
+        environment.pop("CLAUDE_TMPDIR", None)
+        try:
+            process = subprocess.Popen(
+                [
+                    "npx",
+                    "--offline",
+                    "--yes",
+                    f"@anthropic-ai/sandbox-runtime@{SRT_VERSION}",
+                    "--settings",
+                    str(settings),
+                    "-c",
+                    wrapped,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                errors="replace",
+                start_new_session=True,
+                env=environment,
+            )
+        except OSError as error:
+            return None, "", str(error), False, False
+        try:
+            out, err = process.communicate(timeout=timeout)
+            prefix = marker + "\n"
+            return (
+                process.returncode,
+                out[len(prefix) :] if out.startswith(prefix) else out,
+                err,
+                False,
+                out.startswith(prefix),
+            )
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            try:
+                out, err = process.communicate(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                if process.stdout:
+                    process.stdout.close()
+                if process.stderr:
+                    process.stderr.close()
+                try:
+                    process.wait(timeout=0.5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                out, err = "", ""
+            return None, out or "", err or "", True, False
 
 
 def _judge(entry: dict[str, Any], code: int | None, out: str, timed_out: bool) -> tuple[str, bool]:
@@ -152,8 +221,14 @@ def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path:
         pr.append(path, **base, ended=_now(), verdict="refused", expect_matched=False)
         pr.trace("proof.run", "refused", "proof_cmd_destructive", who[0], who[1])
         return "refused"
-    code, out, err, timed_out = _execute(cmd, float(entry.get("timeout_s") or DEFAULT_TIMEOUT_S))
-    verdict, matched = _judge(entry, code, out, timed_out)
+    try:
+        code, out, err, timed_out, started = _execute(cmd, float(entry.get("timeout_s") or DEFAULT_TIMEOUT_S))
+    except OSError as error:
+        code, out, err, timed_out, started = None, "", str(error), False, False
+    if timed_out:
+        verdict, matched = "timeout", False
+    else:
+        verdict, matched = _judge(entry, code, out, False) if started else ("sandbox_unavailable", False)
     pr.append(
         path,
         **base,
