@@ -38,6 +38,8 @@ For a no-findings result, the sole `## No findings` line is complete.
 Example valid body (findings present):
 
 ```
+0 critical, 1 important, 1 suggestion
+
 ## Critical
 None
 
