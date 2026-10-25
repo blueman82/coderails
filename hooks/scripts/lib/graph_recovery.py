@@ -19,6 +19,8 @@ from typing import Any, TypedDict, cast
 from .graph_evidence import child_identity, notifications, records, spawns, transcript, validate_child_terminal
 from .graph_evidence_bind import bind_wave
 from .graph_executor import graph_semantics, load, transition
+from .graph_summary import budget_spent
+from .graph_summary import summarize as summarize
 
 TRACE_NAME = "recovery-trace.jsonl"
 NODE_CODES = {"dispatch": "no_spawn_dispatch", "record": "worker_finished_record", "waiting": "worker_waiting"}
@@ -96,11 +98,6 @@ def _refuse(
     rows: Rows = [(n, _attempt(state, n), None) for n in error.nodes if n in state["graph"]["nodes"]]
     trace(path, state, "refused", error.reason_code, inputs, rows)
     return error
-
-
-def _spent(node: dict[str, Any]) -> bool:
-    """True when the node's respawn generation has reached its retry max."""
-    return bool(node["respawn"]["generation"] >= node["retry"]["max"])
 
 
 def _row_state(session: str, row: dict[str, Any], path: Path, notices: dict[str, Any], now: float, lease: int) -> str:
@@ -227,7 +224,7 @@ def recover_wave(
             moved = tuple(n for n, action in current.items() if action != "stalled")
             if moved:
                 raise RecoveryRefusedError("mixed_wave", "wave changed before recovery could be recorded", moved)
-            spent = tuple(n for n in current if _spent(locked["graph"]["nodes"][n]))
+            spent = tuple(n for n in current if budget_spent(locked["graph"]["nodes"][n]))
             if spent:
                 message = "recovery budget exhausted: waiting for human"
                 raise RecoveryRefusedError("recovery_budget_exhausted", message, spent)
@@ -245,40 +242,6 @@ def recover_wave(
     report.update(recovered=True, reason_code="recovered")
     trace(path, state, "recovered", "recovered", inputs, rows)
     return report
-
-
-def summarize(state: dict[str, Any]) -> dict[str, Any]:
-    """Plain-language status from graph state alone: done, active, ready, blocked and the human dependency."""
-    graph = state["graph"]
-    statuses = {node_id: node["status"] for node_id, node in graph["nodes"].items()}
-    pending = sorted(n for n, s in statuses.items() if s not in {"done", "skipped"})
-    ready = [] if graph["active_wave"] or graph["hard_stop"] else graph_semantics.ready(state)
-    if graph["hard_stop"] is not None:
-        stopped = graph_semantics.describe_node(graph["hard_stop"]["node"])["display"]
-        phase, detail = (
-            "waiting for human",
-            f"hard stop on {stopped}: {graph['hard_stop']['reason']}",
-        )
-    elif graph["active_wave"] is not None:
-        phase, detail = "waiting for worker", f"wave {graph['active_wave']['wave_id']} dispatched"
-        spent = [n for n in graph["active_wave"]["nodes"] if _spent(graph["nodes"][n])]
-        if spent:
-            detail += f"; recovery budget exhausted for {', '.join(spent)}: recover-wave will refuse, a human decides"
-    elif ready:
-        phase, detail = "ready to dispatch", "begin-wave then spawn the ready nodes"
-    elif not pending:
-        phase, detail = "ready to complete", "run verify-completion"
-    else:
-        phase, detail = "waiting for evidence", "no node is ready; check pending dependencies"
-    return {
-        "phase": phase,
-        "detail": detail,
-        "node_names": graph_semantics.node_names(graph["nodes"]),
-        "done": sorted(n for n in statuses if n not in pending),
-        "active": list(graph["active_wave"]["nodes"]) if graph["active_wave"] else [],
-        "ready": ready,
-        "pending": pending,
-    }
 
 
 def _unique_collection_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

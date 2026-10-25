@@ -233,7 +233,11 @@ class Provider:
             request.update(tool_name="Agent", tool_input={"subagent_type": "general-purpose", "prompt": prompt})
         else:
             task = self.success("inspect")["task_names"][identifier]
-            request.update(tool_name="spawn_agent", tool_input={"task_name": task, "message": prompt})
+            request.update(
+                tool_name="spawn_agent",
+                tool_use_id=f"call-{task}",
+                tool_input={"task_name": task, "message": prompt},
+            )
         return request
 
     def hook(self, name: str, payload: dict[str, Any]) -> subprocess.CompletedProcess[str]:

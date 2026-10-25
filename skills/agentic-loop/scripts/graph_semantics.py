@@ -8,6 +8,7 @@ import re
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, NoReturn, cast
 
+from graph_vocab import decision_pending
 from node_metadata import LABELS
 from node_metadata import describe_node as _describe_node
 from node_metadata import node_names as _node_names
@@ -242,6 +243,7 @@ def ready(state: object) -> list[str]:
         for node_id, node in graph["nodes"].items()
         if node_id not in graph["joins"]
         and node["status"] == "pending"
+        and not decision_pending(root, node_id)
         and all(graph["nodes"][source]["status"] in SUCCESS for source in dependencies[node_id])
     )
 
@@ -252,10 +254,8 @@ def _decision_sync_pending(state: dict[str, Any]) -> bool:
         if not isinstance(value, dict):
             continue  # historic prose rows have no sync contract
         row = cast(dict[str, Any], value)
-        if row.get("row_sha256") and _object(row.get("muninn"), "decision.muninn").get("state") not in {
-            "written",
-            "disabled",
-        }:
+        sync = _object(row.get("muninn"), "decision.muninn") if row.get("row_sha256") else {}
+        if row.get("row_sha256") and sync.get("state") not in ("written", "disabled"):
             return True
     return False
 
@@ -343,6 +343,8 @@ def respawn_stale(state: object, node_id: object, reason: object) -> dict[str, A
     reason_text = _text(reason, "reason")
     if node_key not in graph["nodes"] or graph["nodes"][node_key]["status"] != "stale":
         _error("respawn", "respawn requires a stale node")
+    if decision_pending(root, node_key):
+        _error("decision_pending", "cannot retry a node with a pending worker decision")
     node = graph["nodes"][node_key]
     _stale_check(node.get("stale_check"), f"node {node_key}")
     node["respawn"]["generation"] += 1
@@ -392,9 +394,7 @@ def can_complete(state: object) -> dict[str, Any]:
     graph = validate(state)["graph"]
     blockers = [key for key in ("active_wave", "hard_stop") if graph[key] is not None]
     unfinished = sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] not in SUCCESS)
-    if unfinished:
-        blockers.append("unfinished:" + ",".join(unfinished))
+    blockers += ["unfinished:" + ",".join(unfinished)] if unfinished else []
     unreleased = sorted(join_id for join_id, join in graph["joins"].items() if not join["released"])
-    if unreleased:
-        blockers.append("unreleased:" + ",".join(unreleased))
+    blockers += ["unreleased:" + ",".join(unreleased)] if unreleased else []
     return {"eligible": not blockers, "blockers": blockers}

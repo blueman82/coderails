@@ -552,6 +552,15 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   graph is unaffected. Each allowed spawn leaves an
   `authorize-dispatch/reported/dispatch_check_off` trace row. Default ON; unset to re-enable. Use it only to rescue a
   loop wedged by a bad contract or an uninstalled plugin agent.
+- Codex evidence rollout: `CODERAILS_A6_EVIDENCE_WRITE` defaults OFF. While OFF, the new reader can validate old and new
+  references, `reject-invalid-dispatch --report-only` works, and attempts to persist invalid-dispatch or encrypted-message
+  evidence fail without changing `progress.json`; the dispatch off-switch also keeps its old no-receipt behavior. After
+  installing and trusting this reader, check active old graphs with
+  `inspect` and completed ones with `verify-completion` before setting the variable to `on` for new writes. Once either
+  new reference shape is stored, turn writing OFF to stop further new records, but keep this reader installed for later
+  completion and verification. The prior plugin reader cannot verify those histories, even after a loop is complete;
+  reinstalling it is not a rollback path. Enabling writes also changes how plaintext authorization binds native call IDs,
+  before either new reference shape is stored. The owner must accept the resulting reader pin before enabling writes.
 - Bad `add-unit --model-role` is `add_unit_refused_bad_field` (allowed: `fast-mechanical`, `default`, `frontier`).
 - Limits: a plugin agent that is not installed in the session cannot run a guarded scout (refused, never downgraded); the
   sandboxed Bash launcher carries no agent type, so the role is asserted on the `Agent` and `spawn_agent` routes only
@@ -568,8 +577,56 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent` and `spawn_agent` only, so `SendMessage` on
   Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
   (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
-  `spawn_agent` function-call message with its v2 record, role and consumed authorization; a task-name-only legacy event
+  `spawn_agent` function-call message with its v2 record, role and consumed authorization; encrypted messages also require
+  the PreToolUse `tool_use_id` to equal the native function-call id, so off-mode receipts cannot bind them. A task-name-only legacy event
   cannot bind a contract-era wave. Claude matches a non-null hook `tool_use_id` to the native Agent call; when the hook
   supplies no id, it retains the consumed flag and one-spawn-per-id check without claiming call-id proof. Historical
   pre-contract attempts retain their original evidence rules. Claude hooks can still fail open if the hook times out
   (10 s in `hooks.json`) before it denies.
+
+## Disposition refused, compat findings blocked a merge, or a worker status stopped the loop
+
+- `add-unit` says `add_unit_refused_disposition`: `--disposition preserve-compat` needs both a non-blank `--named-blocker`
+  and `--removal-ticket`; `--disposition clean-break` takes neither; either flag without `--disposition` is refused. The
+  unit is stored as `work_units[u].disposition = {kind, named_blocker?, removal_ticket?}` and is what the dispatch
+  contract carries. `graph.py disposition-audit <state>` prints every unit's kind and exits 1 on a hand-edited unit that
+  broke the rule; `complete` / `verify-completion` refuse the same unit on both providers (default ON, no switch).
+- `/coderails:merge` says `compat_findings_nonzero`: the posted review artifact carries a second line
+  `<!-- coderails-compat-findings v1 pr=N head_sha=S count=K disposition=D -->` (built by
+  `post_review.py compat-line <pr> <sha> --count K --disposition D`) with `disposition=clean-break` and `K > 0`. Remove the
+  retained compatibility code, creating a new head SHA, and post a fresh review; or register the unit `preserve-compat`
+  with a blocker and ticket. Posting a passing review on the same SHA cannot override an earlier refusing compat line.
+  `compat_findings_malformed` means a line with that prefix is not exactly the typed form. `compat_findings_missing`
+  means no line matches this PR and head; post a fresh artifact including the line, even for a zero count.
+  The v1 review marker the root-owned integrity daemon matches is unchanged. Any refusing line for the
+  head wins; the merge refusal is a stderr reason code, not a trace row (merge.py has no loop session).
+- Limits: `K` and `D` are the reviewer's own judgement, not a measurement, and a same-user agent can write any line, so
+  this is drift detection for a cooperating reviewer, not tamper evidence. The gate reads the PR's artifact only; it does
+  not cross-check `D` against `work_units[u].disposition`.
+- `record-wave` says `worker_status_<code>` (`not_an_object`, `unknown_status`, `missing_field`, `unknown_field`,
+  `bad_field`): a result carrying a `status` key is not a valid typed worker status, so the WHOLE report was rejected and
+  `progress.json` is byte-identical; fix the worker's result (the schema is in `scripts/worker_status.py`) and record
+  again. `final_report_invalid`: a `done` result for a dispatch with `final_report_required` lacks a valid
+  `final_report {claims: [{text, label, source?}], did_not_verify: [{item, tag, reason}]}` (non-empty claims, a `verified`
+  claim cites a source, tags `resolved|unverifiable`). Both leave a `record-wave/refused/<code>` trace row.
+- A valid typed status is recorded, not refused: `worker_statuses[]` gets a `decision_pending` row, the node is recorded
+  as a failed attempt; at the retry limit the terminal slot stays available behind that pending decision, so an answer
+  can resume the node. ONE typed
+  stop row is written in the same save (`awaiting-input/needs_human_input` for `NEEDS_DECISION`, `approval-gate/needs_approval`
+  for `OUTSIDE_SCOPE` and `IRREVERSIBLE_ACTION`; approval outranks input when a wave returns both). The Stop guard releases
+  that row once. Ask the human with `to_decision_request()`, then log the answer with `graph.py record-decision <state>
+  --session S --phase P --decision D --chosen C [--flip-condition F] --worker-status-seq <seq>`: it appends one typed row
+  to `decisions_absorbed` and marks that status resolved. `python3 scripts/lib/worker_counters.py` reports
+  `pending_statuses` (rows still `decision_pending`) and `decision_recorded`.
+- `record-decision` says `record_decision_refused_<foreign|field|state|status|chosen|human>`: the session does not own the
+  graph, a flag is blank, `decisions_absorbed` is not an array of objects, `--worker-status-seq` names no pending status
+  (unknown, already resolved, duplicated, or malformed), `--chosen` is not one of a `NEEDS_DECISION` status's options,
+  or the status is an approval gate (`OUTSIDE_SCOPE`, `IRREVERSIBLE_ACTION`) and `--human-answer` was not passed. Nothing is written. It does
+  not bump the revision. Limits: `phase`, `decision` and `chosen` are free text outside a status-linked answer (no enum,
+  no check against the graph); hand-appended `{phase, decision}` rows stay valid and unnumbered. There is no caller
+  authentication: `--session` and `--human-answer` are self-asserted, so a same-user agent can still forge a human
+  answer (or write any row); the flag makes that a deliberate act, not tamper evidence. Only the orchestrator should
+  pass `--human-answer`, and only after the human replied.
+- Limits: shape is checked, truth is not (a worker can write any claim); only results of dispatches with a begin-wave
+  record require the report, so a pre-conversion state behaves as before; `check_confidence_labels` and
+  `check_verify_loop` stay advisory lints on the orchestrator's own text.

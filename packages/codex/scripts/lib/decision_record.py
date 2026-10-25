@@ -39,7 +39,7 @@ import sys
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
 from scripts.lib import memory_adapter as ma  # noqa: E402
@@ -49,6 +49,7 @@ HASH_EXCLUDED = ("row_sha256", "muninn")
 QUOTE_MIN, QUOTE_MAX, CLAIM_MAX = 12, 300, 500  # muninn's quote and claim length rules
 REFUSALS = ("wrong_session", "wrong_loop", "wrong_revision", "blank_phase", "blank_decision", "invalid_chain")
 Transition = Callable[[Path, Callable[[dict[str, Any]], dict[str, Any]]], dict[str, Any]]
+StatusResolver = Callable[[dict[str, Any], Optional[int], Optional[str], bool, int], None]
 
 
 def _collapse(text: str) -> str:
@@ -82,6 +83,10 @@ def add_decision(
     flip_condition: str | None = None,
     unit: str | None = None,
     now: datetime.datetime | str | None = None,
+    chosen: str | None = None,
+    worker_status_seq: int | None = None,
+    human_answer: bool = False,
+    status_resolver: StatusResolver | None = None,
 ) -> dict[str, Any]:
     """Append one hashed row; return {"state", "decision"}. Raises ValueError(<REFUSALS code>) and mutates nothing."""
     if state.get("session_id") != session:
@@ -94,6 +99,10 @@ def add_decision(
         raise ValueError("blank_phase")
     if not str(decision or "").strip():
         raise ValueError("blank_decision")
+    if chosen is not None and not chosen.strip():
+        raise ValueError("record_decision_refused_field")
+    if worker_status_seq is not None and (chosen is None or status_resolver is None):
+        raise ValueError("record_decision_refused_field")
     stamp = now.isoformat(timespec="seconds") if isinstance(now, datetime.datetime) else now
     rows = _rows(state)
     ensure_chain(state)
@@ -108,9 +117,15 @@ def add_decision(
         "ts": stamp or datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "prev_sha256": last.get("row_sha256") or GENESIS,
     }
+    if chosen is not None:
+        row["chosen"] = chosen.strip()
+    if worker_status_seq is not None:
+        row["worker_status_seq"] = worker_status_seq
     row["row_sha256"] = row_digest(row)
     row["muninn"] = {"state": "syncing"}
     new = copy.deepcopy(state)
+    if status_resolver is not None:
+        status_resolver(new, worker_status_seq, chosen, human_answer, row["seq"])
     new["decisions_absorbed"] = [*rows, row]
     new.setdefault("chain_started_seq", row["seq"])  # first hashed row of this loop; see verify_chain
     return {"state": new, "decision": row}
@@ -261,13 +276,29 @@ def record(
     prompt_raw: str | None = None,
     cite_quote: str | None = None,
     now: datetime.datetime | str | None = None,
+    chosen: str | None = None,
+    worker_status_seq: int | None = None,
+    human_answer: bool = False,
+    status_resolver: StatusResolver | None = None,
 ) -> dict[str, Any]:
     """Append locally, sync to Muninn outside the lock, patch the row. Returns {recorded, seq, muninn, exit_code}."""
     held: dict[str, Any] = {}
 
     def append(state: dict[str, Any]) -> dict[str, Any]:
         out = add_decision(
-            state, session, phase, decision, expected_loop_id, expected_revision, flip_condition, unit, now
+            state,
+            session,
+            phase,
+            decision,
+            expected_loop_id,
+            expected_revision,
+            flip_condition,
+            unit,
+            now,
+            chosen,
+            worker_status_seq,
+            human_answer,
+            status_resolver,
         )
         held.update(out["decision"])
         new: dict[str, Any] = out["state"]
@@ -276,9 +307,13 @@ def record(
     try:
         state = transition(path, append)
     except ValueError as error:
-        code = str(error) if str(error) in REFUSALS else "state_error"
-        _trace("decision.record", "refused", f"decision_{code}", session, None)
-        return {"recorded": False, "reason_code": f"decision_{code}", "exit_code": 2}
+        message = str(error)
+        marked = re.search(r"\[reason_code=(record_decision_refused_[a-z_]+)\]", message)
+        raw = str(getattr(error, "code", marked.group(1) if marked else message))
+        code = raw if raw in REFUSALS or raw.startswith("record_decision_refused_") else "state_error"
+        reason = code if code.startswith("record_decision_refused_") else f"decision_{code}"
+        _trace("decision.record", "refused", reason, session, None)
+        return {"recorded": False, "reason_code": reason, "exit_code": 2}
     _trace("decision.record", "recorded", "ok", session, str(state.get("loop_id")))
     field = _sync_safely(held, state, session, prompt_raw, cite_quote)
     seq = held["seq"]

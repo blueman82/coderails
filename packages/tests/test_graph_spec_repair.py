@@ -14,9 +14,11 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
+sys.path.insert(0, str(ROOT / "skills/agentic-loop/scripts"))
 import graph_repair  # noqa: E402
 import graph_semantics  # noqa: E402
 import graph_spec  # noqa: E402
+import worker_status  # noqa: E402
 
 from packages.tests.test_graph_spec import PROVIDERS, instantiate_loop  # noqa: E402
 
@@ -215,6 +217,37 @@ class ConditionalRepairTests(unittest.TestCase):
                 graph_repair.apply_failed_gates(proposal, {"U4b-review[1]": {"outcome": "failed"}})
                 result = proposal["state"]
             self.assertEqual(result["graph"]["nodes"]["U4b-review[1]"]["status"], "hard-stop")
+
+    def test_terminal_human_status_does_not_override_repair_limit(self) -> None:
+        """The schema retry cap and independent repair bound both remain enforced."""
+        with tempfile.TemporaryDirectory() as scratch:
+            controller, _ = instantiate_loop("claude", scratch, "full", "1")
+            state = failed_review(controller.read())
+            state, _ = graph_repair.record_repair(
+                state, "sess-1", "1", "U4b-review[1]", "artifact", "comment-101", "review fixed"
+            )
+            node = state["graph"]["nodes"]["U4b-review[1]"]
+            node["retry"]["attempts"] = node["retry"]["max"] - 1
+            node.update(status="running", outcome="running")
+            state["graph"]["active_wave"] = {
+                "wave_id": f"wave-{state['revision']}",
+                "revision": state["revision"],
+                "nodes": ["U4b-review[1]"],
+            }
+            result = {"U4b-review[1]": {"outcome": "failed", "evidence": "needs answer"}}
+            policy = {**graph_spec.load_policy(), "repair_attempts_max": 1}
+            with patch.object(graph_spec, "load_policy", return_value=policy):
+                proposal = graph_semantics.record_wave(state, state["graph"]["active_wave"]["wave_id"], result)
+                reversed_order = copy.deepcopy(proposal)
+                graph_repair.apply_failed_gates(reversed_order, result)
+                worker_status.retain_decision_slot(reversed_order["state"], [{"node": "U4b-review[1]"}])
+                worker_status.retain_decision_slot(proposal["state"], [{"node": "U4b-review[1]"}])
+                graph_repair.apply_failed_gates(proposal, result)
+            self.assertEqual(reversed_order["state"]["graph"]["hard_stop"]["reason"], "retry exhaustion")
+            self.assertEqual(reversed_order["state"]["graph"]["nodes"]["U4b-review[1]"]["retry"]["attempts"], 5)
+            graph = proposal["state"]["graph"]
+            self.assertEqual(graph["hard_stop"]["reason"], "retry exhaustion")
+            self.assertEqual(graph["nodes"]["U4b-review[1]"]["status"], "hard-stop")
 
     def test_malformed_repair_record_is_a_coded_refusal(self) -> None:
         """A JSON list in a typed field never escapes the provider loader as a traceback."""

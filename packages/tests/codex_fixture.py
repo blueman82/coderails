@@ -12,6 +12,16 @@ from typing import Any, cast
 import graph_contract
 from graph_identity import GraphError, next_attempt, task_name
 
+FINAL_REPORT: dict[str, Any] = {
+    "claims": [{"text": "unit checks ran", "label": "verified", "source": "fixture command: OK"}],
+    "did_not_verify": [],
+}
+
+
+def done_result(evidence: object = "checked") -> dict[str, Any]:
+    """A `done` wave result carrying the final_report every begin-wave dispatch record requires."""
+    return {"outcome": "done", "evidence": evidence, "final_report": FINAL_REPORT}
+
 
 def node(number: int = 1, status: str = "pending") -> dict[str, Any]:
     """Return a canonical build-unit node."""
@@ -174,7 +184,7 @@ def dispatch_message(parent: Path, graph: dict[str, Any], node_id: str, task: st
         if len(matches) != 1:
             raise AssertionError("fixture spawn requires one owned progress.json")
         state_path, saved = matches[0]
-        saved["graph"]["dispatches"][identifier]["authorized"] = {"tool_use_id": None}
+        saved["graph"]["dispatches"][identifier]["authorized"] = {"tool_use_id": f"call-{task}"}
         write_json(state_path, saved)
     return message
 

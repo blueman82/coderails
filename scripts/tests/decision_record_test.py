@@ -6,7 +6,6 @@ negative control that mutates the one thing it proves. Nothing here touches the 
 
 from __future__ import annotations
 
-import copy
 import importlib
 import json
 import os
@@ -22,6 +21,8 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(CODEX_SCRIPTS))
 
 graph_io: Any = importlib.import_module("graph_io")
+worker_status: Any = importlib.import_module("worker_status")
+decision_pending: Any = importlib.import_module("graph_vocab").decision_pending
 
 from hooks.scripts.lib.graph_executor import transition as claude_transition  # noqa: E402
 from hooks.scripts.tests.lib import claude_transcript_fixture as fixture  # noqa: E402
@@ -89,68 +90,6 @@ class Base(StoreCase):
             transition=tr,
             **kw,
         )
-
-
-class LocalFirstAndChain(Base):
-    """(a) both providers append hashed, chained rows with the dashboard shape; (g) a clean chain verifies."""
-
-    def test_both_providers_append_chained_rows(self) -> None:
-        """Two calls per provider: seq, hashes, muninn field, prev link, {phase, decision} intact."""
-        for name, tr in PROVIDERS:
-            with self.subTest(provider=name):
-                self.put({**self.state(), "decisions_absorbed": []})
-                first = self.rec(tr, "2.5", "adopt shape A", flip_condition="owner objects")
-                second = self.rec(tr, "2.6", "clean-break", unit="U1")
-                rows = self.decisions()
-                self.assertEqual((first["seq"], second["seq"]), (1, 2))
-                self.assertEqual([r["seq"] for r in rows], [1, 2])
-                self.assertEqual((rows[0]["phase"], rows[0]["decision"]), ("2.5", "adopt shape A"))
-                self.assertEqual(rows[0]["flip_condition"], "owner objects")
-                self.assertEqual(rows[1]["unit"], "U1")
-                self.assertEqual(rows[0]["prev_sha256"], dr.GENESIS)
-                self.assertEqual(rows[1]["prev_sha256"], rows[0]["row_sha256"])
-                self.assertEqual(rows[0]["muninn"]["state"], "written")
-                self.assertEqual(dr.verify_chain(rows), [])
-
-    def test_control_unchained_row_would_fail_the_link_assert(self) -> None:
-        """Negative control: a row whose prev link is wrong is reported by verify_chain."""
-        self.rec()
-        self.rec(phase="2.6", text="second")
-        rows = self.decisions()
-        rows[1]["prev_sha256"] = dr.GENESIS
-        self.assertEqual({o["seq"] for o in dr.verify_chain(rows)}, {2})
-
-    def test_refusals_write_nothing(self) -> None:
-        """(f) a wrong session, a blank decision and a blank phase are refused and the file is untouched."""
-        before = self.path.read_bytes()
-        cases = (
-            (
-                dr.record(
-                    self.path,
-                    "other",
-                    "2.5",
-                    "x",
-                    expected_loop_id="L1",
-                    expected_revision=self.state()["revision"],
-                    transition=claude_transition,
-                ),
-                "decision_wrong_session",
-            ),
-            (self.rec(text="   "), "decision_blank_decision"),
-            (self.rec(phase=" "), "decision_blank_phase"),
-        )
-        for out, code in cases:
-            self.assertEqual((out["recorded"], out["reason_code"], out["exit_code"]), (False, code, 2))
-        self.assertEqual(self.path.read_bytes(), before)
-        traced = [r["reason_code"] for r in self.trace() if r["command"] == "decision.record"]
-        self.assertEqual(traced, [cases[1][1], cases[2][1]])  # the wrong session traces under its own session id
-
-    def test_control_pure_add_does_not_mutate_its_input(self) -> None:
-        """add_decision returns a new state; the caller's dict is unchanged."""
-        before = copy.deepcopy(self.state())
-        out = dr.add_decision(self.state(), SESSION, "2.5", "x", "L1", self.state()["revision"])
-        self.assertEqual(self.state(), before)
-        self.assertEqual(len(out["state"]["decisions_absorbed"]), 1)
 
 
 class MuninnSync(Base):

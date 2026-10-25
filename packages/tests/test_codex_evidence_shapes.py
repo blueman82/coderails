@@ -18,7 +18,16 @@ import graph
 from graph_evidence import validate_worker_evidence
 from graph_identity import GraphError, classify_worker_evidence
 
-from packages.tests.codex_fixture import frozen_evals, node, read_json, spawn, state, transcripts, write_json
+from packages.tests.codex_fixture import (
+    done_result,
+    frozen_evals,
+    node,
+    read_json,
+    spawn,
+    state,
+    transcripts,
+    write_json,
+)
 
 
 def encoded(value: object, depth: int = 4) -> str:
@@ -79,7 +88,7 @@ class EvidenceShapeTests(unittest.TestCase):
         """Record one caller-authored ordinary evidence value."""
         graph.record_wave(
             self.path,
-            json.dumps({"wave_id": "wave-2", "results": {"U3[1]": {"outcome": "done", "evidence": evidence}}}),
+            json.dumps({"wave_id": "wave-2", "results": {"U3[1]": done_result(evidence)}}),
         )
 
     def test_classifier_unicode_and_bounds(self) -> None:

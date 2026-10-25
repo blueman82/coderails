@@ -27,6 +27,8 @@ def verify_gates(number: str) -> str:
     review, reason = git.gate_review_summary_for_pr(number, sha)
     if review == 2:
         raise git.WorkflowError(git.trust_failure_message(reason))
+    if review == 3:
+        raise git.WorkflowError(git.compat_failure_message(reason))
     if review:
         raise git.WorkflowError(f"No coderails review artifact for current head {sha} — run /coderails:post-review")
     summary = git.gate_eval_summary_for_pr(number, sha)

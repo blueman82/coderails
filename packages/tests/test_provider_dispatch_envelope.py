@@ -107,6 +107,7 @@ class DispatchEnvelopeTests(unittest.TestCase):
         """A faithful dispatch is allowed once and the record notes its authorization."""
 
         def case(provider: Provider) -> None:
+            provider.environment["CODERAILS_A6_EVIDENCE_WRITE"] = "off"
             self.assertFalse(self.verdict(provider, provider.request()))
             state = provider.read()
             record = next(iter(state["graph"]["dispatches"].values()))
@@ -116,6 +117,15 @@ class DispatchEnvelopeTests(unittest.TestCase):
             self.assertEqual(self.reason(provider), "dispatch_authorized")
 
         self.each(case)
+
+    def test_codex_authorization_binds_call_id_after_rollout(self) -> None:
+        """The enabled reader records the exact native call ID."""
+        provider = self.opened("codex")
+        request = provider.request()
+        provider.environment["CODERAILS_A6_EVIDENCE_WRITE"] = "on"
+        self.assertFalse(self.verdict(provider, request))
+        record = next(iter(provider.read()["graph"]["dispatches"].values()))
+        self.assertEqual(record["authorized"], {"tool_use_id": request["tool_use_id"]})
 
     def test_missing_contract_field_in_the_stored_record(self) -> None:
         """A record whose contract lost a field no longer authorizes anything."""
