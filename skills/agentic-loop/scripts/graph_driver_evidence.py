@@ -127,7 +127,9 @@ def seal(
     return reference
 
 
-def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: dict[str, Any]) -> dict[str, Any]:
+def validate(
+    state_path: Path, state: dict[str, Any], node_id: str, reference: dict[str, Any], *, historical: bool = False
+) -> dict[str, Any]:
     """Reject changed, missing, replayed or foreign worker evidence."""
     if (
         set(reference) != {"kind", "dispatch_id", "wave_id", "attempt", "manifest_sha256"}
@@ -191,7 +193,9 @@ def validate(state_path: Path, state: dict[str, Any], node_id: str, reference: d
             or published.get("head") != manifest["head"]
         ):
             raise ValueError("driver publication evidence is invalid")
-        validate_publication(Path(checkout), number, manifest["head"], require_merged=node_id == "S9-wiki")
+        validate_publication(
+            Path(checkout), number, manifest["head"], require_merged=node_id == "S9-wiki", historical=historical
+        )
     return cast(dict[str, Any], manifest)
 
 
@@ -269,7 +273,7 @@ def validate_history(state_path: Path, state: dict[str, Any]) -> None:
             if not isinstance(dispatch_id, str) or dispatch_id in seen:
                 raise ValueError("duplicate or invalid driver evidence")
             seen.add(dispatch_id)
-            validate(state_path, state, node_id, reference)
+            validate(state_path, state, node_id, reference, historical=True)
     active = cast(Optional[dict[str, Any]], graph.get("active_wave"))
     for dispatch_id, value in dispatches.items():
         record = cast(dict[str, Any], value)

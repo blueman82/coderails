@@ -107,7 +107,9 @@ def publication(checkout: Path, *, require_merged: bool = False) -> dict[str, An
     return {"number": pr["number"], "head": current_head}
 
 
-def validate_publication(checkout: Path, number: int, head: str, *, require_merged: bool = False) -> None:
+def validate_publication(
+    checkout: Path, number: int, head: str, *, require_merged: bool = False, historical: bool = False
+) -> None:
     """Keep sealed publication bound to a live open or merged PR at its head."""
     _clean(checkout)
     try:
@@ -131,7 +133,44 @@ def validate_publication(checkout: Path, number: int, head: str, *, require_merg
         raise ValueError("driver publication response is invalid")
     pr = cast(dict[str, Any], raw)
     states = {"MERGED"} if require_merged else {"OPEN", "MERGED"}
-    if pr.get("number") != number or pr.get("headRefOid") != head or pr.get("state") not in states:
+    live_head = pr.get("headRefOid")
+    if pr.get("number") != number or pr.get("state") not in states or not isinstance(live_head, str):
+        raise ValueError("driver publication no longer matches its PR")
+    if historical and not require_merged and live_head != head:
+        if not re.fullmatch(r"[0-9a-f]{40,64}", live_head):
+            raise ValueError("driver publication has an invalid PR head")
+        try:
+            fetched = subprocess.run(
+                ["git", "-C", str(checkout), "fetch", "--no-tags", "origin", f"refs/pull/{number}/head"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            fetched_head = subprocess.run(
+                ["git", "-C", str(checkout), "rev-parse", "--verify", "FETCH_HEAD"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+            ancestor = subprocess.run(
+                ["git", "-C", str(checkout), "merge-base", "--is-ancestor", head, live_head],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ValueError("driver publication cannot verify PR history") from error
+        if (
+            fetched.returncode
+            or fetched_head.returncode
+            or fetched_head.stdout.strip() != live_head
+            or ancestor.returncode
+        ):
+            raise ValueError("driver publication no longer contains its sealed commit")
+    elif live_head != head:
         raise ValueError("driver publication no longer matches its PR")
     if require_merged:
         _merged_on_main(checkout, head)
