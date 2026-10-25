@@ -33,6 +33,9 @@ def main() -> int:
     command = cast(dict[str, object], data).get("command") if isinstance(data, dict) else None
     if not isinstance(command, str) or "merge" not in command:
         return 0
+    session = payload.get("session_id")
+    if isinstance(session, str) and session:
+        os.environ["CODERAILS_PUBLICATION_SESSION_ID"] = session
     cwd = text_field(payload, "cwd") or os.getcwd()
     try:
         for name, segment, where in guarded_segments(command, cwd):

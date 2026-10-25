@@ -2,6 +2,7 @@ import { basename, join, resolve, sep } from "node:path";
 import { TRACE_SCHEMA_VERSION, serializeTraceEvent, type NativeSessionSummary, type SourceRef, type TraceCollectionDeps, type TraceDetail, type TraceEvent, type TraceManifest, type TracePage } from "./traceSchema";
 import { CODEX_PARSER_VERSION, MAX_SOURCE_SCAN_BYTES, TranscriptResolutionError, addElapsedGaps, cacheDir, dispatches, isSubagentTranscript, nativeEvent, obj, orderEvents, paths, payload, safeId, safeReadError, source, terminalTurn, transcript, validChild, type Dispatch, type NativeSource } from "./codexTraceNative";
 import { auditEvents, auditSource, cacheEventPath, graphEvent, graphSource, pointer, saveCache } from "./codexTraceSupport";
+import { nodeAttributes } from "./nodeDisplay";
 
 function unavailableSummary(nativeSessionId: string, projectLabel = "unavailable"): NativeSessionSummary {
   const shortId = nativeSessionId.length > 12 ? nativeSessionId.slice(0, 8) : nativeSessionId;
@@ -130,10 +131,10 @@ export async function collectCodexSessionTrace(sessionId: string, deps: TraceCol
         for (const [nodeId, raw] of Object.entries(nodes)) {
           const node = obj(raw); if (!node) { errors.push(`malformed graph node ${nodeId}`); continue; }
           const path = `/graph/nodes/${pointer(nodeId)}`;
-          events.push(graphEvent(sessionId, src, ++ordinal, "graph_node", path, { "coderails.node.id": nodeId }));
+          events.push(graphEvent(sessionId, src, ++ordinal, "graph_node", path, nodeAttributes(nodeId)));
           const retry = obj(node.retry);
           if (typeof retry?.attempts === "number" && retry.attempts > 0)
-            events.push(graphEvent(sessionId, src, ++ordinal, "graph_retry", `${path}/retry`, { "coderails.node.id": nodeId, "coderails.attempt": retry.attempts }));
+            events.push(graphEvent(sessionId, src, ++ordinal, "graph_retry", `${path}/retry`, { ...nodeAttributes(nodeId), "coderails.attempt": retry.attempts }));
           const refs = Array.isArray(node.evidence) ? node.evidence : [];
           refs.forEach((rawRef, index) => {
             const ref = obj(rawRef);
@@ -151,12 +152,16 @@ export async function collectCodexSessionTrace(sessionId: string, deps: TraceCol
             });
             if (matches.length !== 1) errors.push(`graph evidence has no validated native linkage: ${nodeId} item ${index}`);
             events.push(graphEvent(sessionId, src, ++ordinal, "graph_evidence", `${path}/evidence/${index}`,
-              { "coderails.node.id": nodeId, "coderails.evidence.kind": "codex_agent",
+              { ...nodeAttributes(nodeId), "coderails.evidence.kind": "codex_agent",
                 "coderails.native.call_id": typeof ref.spawn_call_id === "string" ? ref.spawn_call_id : null,
                 "coderails.attempt": typeof ref.attempt === "number" ? ref.attempt : null }));
           });
         }
-        if (obj(graph?.hard_stop)) events.push(graphEvent(sessionId, src, ++ordinal, "graph_hard_stop", "/graph/hard_stop", {}));
+        if (obj(graph?.hard_stop)) {
+          const stopped = obj(graph?.hard_stop)?.node;
+          events.push(graphEvent(sessionId, src, ++ordinal, "graph_hard_stop", "/graph/hard_stop",
+            typeof stopped === "string" ? nodeAttributes(stopped) : {}));
+        }
       } catch (error) { errors.push(`unreadable graph progress: ${safeReadError(error)}`); }
       for (const name of ["evals", "proof", "retro"] as const) {
         try {

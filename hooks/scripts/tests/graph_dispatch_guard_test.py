@@ -10,9 +10,11 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.agentic_loop_path import resolve_path
+from hooks.scripts.lib.loop_evals import EvalStatus, EvalVerdict
 from hooks.scripts.loop_dispatch_guard import check
 from hooks.scripts.tests.claude_graph_test_support import ROOT, GraphCase, dispatch, fixture, load, node
 from scripts.post_evals import grade_loop
@@ -229,6 +231,22 @@ class DispatchGuardTests(GraphCase):
         self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertEqual(before, self.path.read_bytes())
         self.assertIn("hook=loop_dispatch_guard blocked=1", (self.home / "discipline.log").read_text())
+
+    def test_dispatch_eval_gate_reads_verdict_fields(self) -> None:
+        """validate_dispatch_evals matches on EvalVerdict.status and names tamper_code from its field."""
+        self.setup_request()
+        state = load(self.path)
+        self.path.with_name("evals.json").write_text(
+            json.dumps({"session_id": state["session_id"], "loop_id": state["loop_id"]})
+        )
+        target = "hooks.scripts.lib.graph_dispatch.read_loop_evals"
+        with (
+            patch(target, return_value=EvalVerdict(EvalStatus.TAMPERED, "x")),
+            self.assertRaisesRegex(ValueError, "current verdict: TAMPERED:x"),
+        ):
+            dispatch.validate_dispatch_evals(self.path, state, "U3[1]")
+        with patch(target, return_value=EvalVerdict(EvalStatus.FROZEN)):
+            dispatch.validate_dispatch_evals(self.path, state, "U3[1]")
 
 
 if __name__ == "__main__":

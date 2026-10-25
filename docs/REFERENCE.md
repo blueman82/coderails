@@ -256,7 +256,7 @@ server still accepts TCP but serves nothing.
 
 **When it triggers:** Only as the scheduled `loop-retro-promotion-weekly` routine (see `docs/routines.md`) — never for a single loop's retro and never from inside an active agentic-loop session.
 
-**Graduation predicate (evaluated on every run, dormant until met):** at least 10 `retro.json` files under the repo-key dir; at least one `standing-orders.md` entry whose `last_recurred` differs from its `created` date (one full lifecycle); at least one `standing-orders-decayed.md` entry (one clean decay). Every run — met or unmet — appends a line to `promotion-runs.log`; an unmet predicate then appends a `run=ok` terminal marker and stops, with no branch, no PR, no gate chain. The routine's artifact gate is a `last-marker` predicate keyed on that log's final terminal marker (`run=ok` passes; `abort=` or a stranded `delivery=started` fails).
+**Graduation predicate (evaluated on every run, dormant until met):** at least 10 `retro.json` files under the repo-key dir; at least one order in the typed ledger `orders.json` whose `last_recurred` differs from its `created` date (one full lifecycle); at least one order with `status: decayed` (one clean decay), all computed by `scripts/lib/lessons.py predicate`. Every run — met or unmet — appends a line to `promotion-runs.log`; an unmet predicate then appends a `run=ok` terminal marker and stops, with no branch, no PR, no gate chain. The routine's artifact gate is a `last-marker` predicate keyed on that log's final terminal marker (`run=ok` passes; `abort=` or a stranded `delivery=started` fails).
 
 **Delivery (once graduated):** full gate chain, manifest-locked to exactly `skills/agentic-loop/learned-failure-modes.md` — `task-evals` (pr scope) frozen before the edit, `/coderails:push`, `/pr-review-toolkit:review-pr`, `/coderails:post-review`, `/coderails:post-evals`, `/coderails:merge`. Any other file in the diff aborts with cleanup (closes the PR, deletes the branch, logs the abort).
 
@@ -581,8 +581,8 @@ retained in full; failure notices provide measurements and a reader command
 instead of a fixed excerpt (see below).
 
 Local hooks redirect and audit a cooperating agent. Their files and transcripts
-remain inside the local trust domain. The root-owned integrity attestor and
-GitHub required status provide the separate server-side boundary described in
+remain inside the local trust domain. The trusted GitHub Actions workflow and
+GitHub required status provide the server-side boundary described in
 [INTEGRITY-GATE.md](INTEGRITY-GATE.md).
 
 ### Retained test-gate output
@@ -702,6 +702,7 @@ Commands are slash commands invoked by Claude (or the user via `/coderails:<name
 | `/coderails:push` | Stage, commit, push changes, and create a PR. Runs an engineering-principles pre-flight if `config.engineering_principles_paths` is set. | Shells out to `scripts/push.py`; requires a GitHub remote; reads `workflow.config.yaml` |
 | `/coderails:post-review` | Post the SHA-bound review artifact as a GitHub PR comment. Validates the review summary structure, then posts a machine-marked comment. The `/merge` gate requires this artifact for the current head SHA — fail-closed. | Shells out to `scripts/post_review.py`; runs the Python review marker CLI; uses `gh api` (not `gh pr comment`) to capture the returned comment URL; best-effort cache write to `progress.json` if it exists |
 | `/coderails:post-evals` | Validate and post the SHA-bound eval-artifact summary as a GitHub PR comment. Consumes the `evals.json` produced by `/coderails:task-evals` for this PR, computes `GO`/`NO-GO` (never hand-written), and posts a machine-marked comment. The `/merge` gate requires this artifact for the current head SHA — fail-closed, additive to the review-artifact gate. | Shells out to `scripts/post_evals.py`; runs the Python eval marker CLI |
+| `/coderails:authorize` | User-typed only (`disable-model-invocation: true`): pre-executes `scripts/authority.py grant --session ${CLAUDE_SESSION_ID} ...`, writing an expiring, revocable authority object with `granted_by: command`. The phrase "crack on" no longer grants anything; it only prints this command. Cooperating-agent safeguard: an agent with shell access can also run `authority.py grant`. | Shells out to `scripts/authority.py`; merge approval stays mandatory |
 | `/coderails:merge` | Merge an approved PR, switch to main, and pull latest. Requires a coderails review artifact AND a coderails eval artifact on the PR for the current head SHA before merging, and — where the repo config activates it (`wiki_debt_epoch_pr` + `wiki_path`) — a wiki-ingest debt check (`has_wiki_ingest_for_merged_prs`) that greps the wiki vault's `origin/main` for coverage of every PR merged after the epoch. | Shells out to `scripts/merge.py`; requires GitHub remote; checks PR approval if branch protection is on; fetches live PR comments for both the review-artifact gate and the eval-artifact gate |
 | `/coderails:init` | Scaffold or migrate a `workflow.config.yaml` for the current project. Writes to `$(pwd)/.coderails/` (resolved by walk-up — see Config resolution). | `git rev-parse`, Write tool; confirms before overwriting |
 | `/coderails:test-gate-setup` | Configure the test gate for the current project. Detects the test runner (npm, cargo, pytest, go test, etc.) and writes `.claude/test_command`. | Write tool; opt-in gate for `test_gate.py` hook |
@@ -724,43 +725,44 @@ Trash; it never silently overwrites user values.
 `config.schema.json` (repo root, mirrored at `packages/codex/config.schema.json`) is the source of truth for
 `.coderails/workflow.config.yaml`. `load_config(path)` in `scripts/lib/config.py` applies the defaults, coerces
 types and returns reason-coded findings (`config_unknown_key` with a did-you-mean hint, `config_bad_type`,
-`config_unreadable`); findings are non-authoritative trace rows plus one stderr line and never change a gate's
-decision. `python3 scripts/lib/config.py resolve-config --json` prints
+`config_unreadable`). Guarded actions reject an invalid config; other readers report findings. The parser supports
+the documented one-level mapping, nested fields, and scalar forms. It is a bounded grammar, not full YAML 1.2.
+Quote a number or Boolean word when a string value is required. `python3 scripts/lib/config.py resolve-config --json` prints
 `{path, values, defaults_applied, unknown_keys, findings}`; plain `resolve-config` is unchanged. Status says who
 reads a key: `enforced_by_code`, `read_by_prose_only` (skills and commands read it from the resolve-config text,
 no script does) or `unused`. Regenerate the table with `python3 scripts/lib/config_schema_docs.py --write`.
 
 <!-- config-schema:start -->
-| Key | Type | Default | Status | Description |
-|---|---|---|---|---|
-| `project` | string/null | `null` | read_by_prose_only | Project name written by /coderails:init; read by command prose only. |
-| `wiki_path` | string/null | `null` | enforced_by_code | LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate. |
-| `wiki_supervision` | string/null | `"discuss"` | read_by_prose_only | wiki-ingest mode: discuss (pause before writing) or autonomous. |
-| `wiki_git_worktree` | boolean/null | `true` | read_by_prose_only | true = PR flow for wiki commits; false = commit directly to the vault. |
-| `wiki_git_bypass_flag` | string/null | `null` | read_by_prose_only | Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1. |
-| `wiki_git_pull_path` | string/null | `null` | read_by_prose_only | Source repo pulled after a wiki PR merges. |
-| `wiki_debt_epoch_pr` | integer | `null` | enforced_by_code | First PR number the wiki-ingest debt merge gate covers; absent or empty disables the gate. A literal null is rejected as a bad type, as before. |
-| `worktree_base` | string/null | `null` | read_by_prose_only | Parent directory for sibling worktrees. |
-| `worktree_script` | string/null | `null` | read_by_prose_only | Project script that creates a worktree. |
-| `jira` | object/null | `null` | read_by_prose_only | Jira settings (project, epic, component_name, component_id, epic_field, points_field, fix_version, mcp_namespace, transitions). Nested keys are not type-checked. |
-| `engineering_principles_paths` | array/null | `null` | read_by_prose_only | Glob patterns that trigger the engineering-principles pre-flight in /coderails:push. |
-| `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
-| `sandbox_workers` | boolean/null | `false` | read_by_prose_only | true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md). |
-| `integrity_review` | object/null | `null` | enforced_by_code | Integrity attestation settings. |
-| `integrity_review.machine_user` | string/null | `null` | enforced_by_code | GitHub login that must post the integrity-review status; null or absent = local gate inactive. |
-| `diff_manifest` | string | `"enforce"` | enforced_by_code | Diff-manifest publication gate run by push.py, merge.py and the direct-merge hooks: off, advisory or enforce (default). Any other value is treated as enforce and reported as diff_manifest_mode_invalid. |
-| `review_passes` | string | `"enforce"` | enforced_by_code | Required-reviewer check in the publication gate (policy/review_policy.json): off skips it; enforce (default) and any other value apply it. |
-| `eval_level` | string | `"enforce"` | enforced_by_code | Derived-eval-level and suite-integrity check in the publication gate (policy/surface_policy.json): off skips it; enforce (default) and any other value apply it. |
-| `diff_manifest_policy` | string/null | `null` | enforced_by_code | Path to a diff policy JSON file; null = the shipped policy/diff-policy.default.json. |
-| `evals` | object/null | `null` | enforced_by_code | Eval settings. |
-| `evals.require_signatures` | boolean/null | `false` | enforced_by_code | true = eval artifacts must be signed; refuse when signing is impossible. |
+| Key | Type | Default | Control ON value | Status | Description |
+|---|---|---|---|---|---|
+| `project` | string/null | `null` | - | read_by_prose_only | Project name written by /coderails:init; read by command prose only. |
+| `wiki_path` | string/null | `null` | - | enforced_by_code | LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate. |
+| `wiki_stale_days` | integer | `30` | - | read_by_prose_only | Page age in days before wiki-lint considers staleness; age alone does not mark a page stale. |
+| `wiki_supervision` | string/null | `"discuss"` | - | read_by_prose_only | wiki-ingest mode: discuss (pause before writing) or autonomous. |
+| `wiki_git_worktree` | boolean/null | `true` | - | read_by_prose_only | true = PR flow for wiki commits; false = commit directly to the vault. |
+| `wiki_git_bypass_flag` | string/null | `null` | - | read_by_prose_only | Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1. |
+| `wiki_git_pull_path` | string/null | `null` | - | read_by_prose_only | Source repo pulled after a wiki PR merges. |
+| `wiki_debt_epoch_pr` | integer | `null` | - | enforced_by_code | First PR number the wiki-ingest debt merge gate covers. An absent key disables the gate; an empty or null value is invalid. |
+| `worktree_base` | string/null | `null` | - | read_by_prose_only | Parent directory for sibling worktrees. |
+| `worktree_script` | string/null | `null` | - | read_by_prose_only | Project script that creates a worktree. |
+| `jira` | object/null | `null` | - | read_by_prose_only | Jira settings (project, epic, component_name, component_id, epic_field, points_field, fix_version, mcp_namespace, transitions). Nested keys are not type-checked. |
+| `engineering_principles_paths` | array/null | `null` | - | read_by_prose_only | Glob patterns that trigger the engineering-principles pre-flight in /coderails:push. |
+| `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | - | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
+| `sandbox_workers` | boolean/null | `true` | `true` | enforced_by_code | Default ON. Claude graph_dispatch.plan() reports sandboxed or in-process-fallback:<reason> for U3 nodes, and the Claude worker launcher consumes that mode. Codex native workers inherit the parent session sandbox; this setting does not configure or prove per-worker Codex containment. |
+| `subagent_identity_gate` | string | `"on"` | `"on"` | enforced_by_code | on (default) denies an untyped Bash subagent in a graph-bound Claude session; off disables that hook. |
+| `action_authority` | string/null | `"off"` | `"advisory"` | enforced_by_code | Absent = off; the shipped workflow uses advisory. Explicit enforce requires a signed receipt for guarded merges and pushes. Invalid values are rejected by strict config consumers. |
+| `diff_manifest` | string/null | `"enforce"` | `"enforce"` | enforced_by_code | Diff-manifest publication gate for push.py, merge.py and direct-merge hooks. Default enforce uses the shipped policy; invalid values are rejected by strict config consumers. |
+| `review_passes` | string | `"enforce"` | - | enforced_by_code | Required-reviewer check in the publication gate (policy/review_policy.json): off skips it; enforce (default) and any other value apply it. |
+| `eval_level` | string | `"enforce"` | - | enforced_by_code | Derived-eval-level and suite-integrity check in the publication gate (policy/surface_policy.json): off skips it; enforce (default) and any other value apply it. |
+| `diff_manifest_policy` | string/null | `null` | - | enforced_by_code | Path to the diff-manifest policy JSON; null or absent uses policy/diff-policy.default.json. |
+| `integrity_review` | object/null | `null` | - | enforced_by_code | Integrity attestation settings. |
+| `integrity_review.enabled` | boolean/null | `false` | - | enforced_by_code | true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live. |
+| `integrity_review.machine_user` | string/null | `null` | - | enforced_by_code | Deprecated. A non-empty legacy login remains the required local status author until enabled is true. |
+| `evals` | object/null | `{"require_signatures": true}` | - | enforced_by_code | Eval settings. |
+| `evals.require_signatures` | boolean/null | `true` | `true` | enforced_by_code | true (default) = eval artifacts must be signed; the local key is created on first use, and signing refuses when ssh-keygen is unavailable. false opts out. |
+| `memory` | object/null | `null` | - | enforced_by_code | Typed-memory settings. |
+| `memory.backend` | string/null | `"muninn"` | - | enforced_by_code | muninn (default) = Muninn is the authoritative typed-memory store and a missing or refusing Muninn fails with a reason code; off = no typed memory at all (reason memory_backend_off, traced, Markdown is never read or written). Any other value fails with memory_backend_invalid. |
 <!-- config-schema:end -->
-
-Publication unit scope is opt-in through paired `--unit N --progress PATH` flags, including equals syntax. The requested
-unit needs a string-list manifest and an absolute worktree matching the real repository root; progress needs nonblank
-string session and loop ids. Missing or mismatched metadata refuses `manifest_unreadable`; `manifest: []` permits no
-changed paths. This validates shape and worktree, not publisher identity: same-worktree forged owner fields remain a
-known limit. See the [RUNBOOK](RUNBOOK.md#diff-manifest-check-warned-or-refused) for reason codes and consumer boundaries.
 
 ## Scripts and Libraries
 
@@ -770,12 +772,13 @@ known limit. See the [RUNBOOK](RUNBOOK.md#diff-manifest-check-warned-or-refused)
 | `scripts/post_review.py`, `post_evals.py` | Review grammar/cache, structural eval validation, neutral grading and observed smoke execution. |
 | `scripts/lib/git_common.py` | GitHub repository/PR operations and newest trusted exact-head artifact selection. Requires a `github.com` remote. |
 | `scripts/lib/{config,review_artifact,eval_artifact,artifact_io}.py` | Shared root-provider config and structured artifact operations. |
-| `scripts/lib/memory_adapter.py` (+ byte-identical `packages/codex/scripts/lib/` mirror), `memory_counters.py` | Optional typed-memory adapter over the `muninn` CLI (subprocess only; never imported, muninn needs py3.12). `add\|list\|render\|probe`; probes `know add --help` for the Part A flags (`--scope-loop --confidence --valid-until --sensitivity --contradicts --tag`, kinds `lesson`/`constraint`) and returns a reason-coded `Degraded` (exit 3) instead of failing, so callers keep the Markdown memory path. Writes need `--cite` and a verbatim `--quote`; reads drop restricted/expired rows; `render --memory-md\|--standing-orders` prints to stdout and `--write PATH` only replaces an absent or marker-stamped file. The ledger upgrade (schema v2) is one-way, done by muninn, not Coderails. The Codex copy cannot trace (no `trace_row.py` ships there) and has no teardown doc; both fail open. `remember_inject_cap_guard` is untouched (third-party plugin patch, unrelated). |
+| `scripts/lib/memory_adapter.py` (+ byte-identical `packages/codex/scripts/lib/` mirrors of it, `memory_cite.py`, `memory_reasons.py`, `memory_schema.py`), `memory_counters.py` | Authoritative typed-memory adapter over the `muninn` CLI (subprocess only; never imported, muninn needs py3.12). `add\|list\|render\|probe`. Config `memory.backend: muninn\|off` (default `muninn`): `off` is the only no-Muninn mode (`memory_backend_off`, traced); an invalid value is `memory_backend_invalid`. `probe()` checks the backend, muninn on PATH, the Part A help flags, the store schema (`memory_schema.check`, never `--version`) and one read smoke. `add()` returns `Written(id='K<n>')` or a reason-coded `Degraded` (exit 3); a muninn refusal (rc 2) is `refused_<code>`. Cites must anchor in a user prompt (`memory_cite`: `quote_only` 12-300 chars, or `approved_reply` via `--approval REF`), else `cite_not_user`. `list` with `--query` uses `muninn search --all-projects` filtered to `loop:<id>`. Reason codes and fixes: `memory_reasons.REASONS`, mirrored in `docs/RUNBOOK.md`. There is no Markdown fallback; `render --write PATH` only replaces an absent or marker-stamped file. `memory_counters.memory_counts` counts `memory./decision./order./lesson./proof./retro./teardown./handoff.` trace rows (`rows`, `by_reason_code`, `by_command`). Limits (orchestrator-only writes, user-anchored cites, cooperating-agent boundary): `docs/decisions/2026-10-05-memory-authoritative.md`. The Codex copy cannot trace (no `trace_row.py` ships there); it fails open. |
+| `scripts/lib/decision_record.py` (+ byte-identical `packages/codex/scripts/lib/` mirror) | Typed, hash-chained loop decisions; the only writer of `decisions_absorbed`. `add_decision` (pure), `verify_chain`, `sync_row` (Muninn `kind=decision`, `scope=loop`, tag `run-<loop_id[:28]>`, `confidence=inferred`, cite = a quote of `authorising_prompt_raw` or a caller `cite_quote`), `mark_synced`, `record` and `flush_pending`. Entry point section below. Limits: cooperating-agent safeguard, last-row deletion undetectable, a short prompt like "yes" degrades visibly. Reasons: `decision_*` in `memory_reasons.REASONS`. |
 | `scripts/lib/{eval_validation,eval_execution}.py` | Eval criteria and command/control verification. Gate smoke runs in a detached worktree at the trusted SHA. |
 | `scripts/sandbox/spawn_sandboxed_worker.py` | Guard dispatch before scratch allocation; run a separate Claude process through pinned srt and retain its exit status. |
 | `scripts/sandbox/{render_settings,sandbox_probe}.py` | Render explicit write containment and discriminate allowed versus forbidden filesystem writes. |
-| `scripts/integrity-gate/integrity_gate_runner.py` | Root-owned mechanical review/eval/diff attestation; no LLM classifier. Deployed with its root-owned HTTP and policy modules. |
-| `scripts/integrity-gate/{install,setup}.py` | Reviewable owner-run promotion, credential handling and GitHub ruleset setup. |
+| `.github/workflows/integrity-review.yml`, `scripts/integrity-gate/integrity_actions.py` | Trusted GitHub Actions review/eval/diff check. It uses the built-in token and runs no PR code. |
+| `scripts/integrity-gate/setup.py` | Preview and activate the GitHub Actions source-bound ruleset after a live candidate status. |
 | `install.py`, `uninstall.py` | Independent provider installation/removal with preserved user data, preflight checks and read-only dry-run. |
 | `launchd/*_routines.py`, `*_dashboard_agent.py` | Literal-path launch agent installation and verified unload/removal. |
 | `scripts/quality/check.py` | Strict source, format, typing, size and generated-materialization checks. |
@@ -802,3 +805,25 @@ known limit. See the [RUNBOOK](RUNBOOK.md#diff-manifest-check-warned-or-refused)
 ### The ephemeral vs committed boundary
 
 The loop's `spec.md`, `plan.md`, and `progress.json` live in `~/.coderails/agentic-loop/` — **outside** the code repo and Claude's configuration tree. They are loop state keyed to this orchestrator run, not shareable design records. If work needs handing to a human, `coderails:handoff` is the right tool. Durable records belong in the wiki or an explicitly authorized repository document, not these session-local scratch files.
+
+### Record-decision entry point
+
+Both provider graph CLIs call `decision_record.record` through their native state locks:
+
+```text
+graph.py record-decision <progress.json> --session <id> --loop-id <loop-id> --revision <revision> --phase <phase> --decision <text> [--flip-condition <text>] [--unit <id>] [--cite-quote <verbatim user quote>]
+graph.py flush-decisions <progress.json> --session <id> [--cite-quote <verbatim user quote>]
+```
+
+Read the current `loop_id` and `revision` from `progress.json` before each call. Use these commands for decisions;
+never append rows to `progress.json` by hand. `record-decision` checks the caller's loop ID and revision under the
+graph lock. It verifies the existing hash chain before appending. `flush-decisions` verifies it before retrying
+pending or degraded rows.
+
+Order: (1) under the lock the local row is appended (`seq`, `prev_sha256`, `row_sha256`, `muninn: {state: syncing}`);
+(2) outside the lock Muninn is written; (3) under the lock again the row's `muninn` field is patched. Return
+`{recorded, seq, muninn: {state, id, reason_code}, exit_code}`; exit 0 written or disabled, 3 degraded or unknown (loud reason
+code, trace `decision.sync/degraded/<code>`, local row kept), 2 refused (wrong session, loop, or revision, or blank phase or decision: nothing
+written). Teardown runs `flush-decisions` to retry pending and safely degraded rows. An in-flight or uncertain sync
+returns `decision_sync_unknown` and must be reconciled against Muninn before any manual retry. Trace commands: `decision.record`,
+`decision.sync` (counted by `memory_counters.memory_counts`).

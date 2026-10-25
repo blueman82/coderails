@@ -114,19 +114,20 @@ class UnitMismatchTests(base.DefaultGateTests):
     def test_config_load_error_is_internal_error(self) -> None:
         """A config that cannot be loaded refuses with manifest_internal_error instead of a raw exception."""
         self.commit("docs/guide.md")
-        with mock.patch.object(manifest_policy, "load_config", side_effect=RuntimeError("boom")):
-            self.assertEqual(self.refusal(), "diff_manifest:manifest_internal_error")
-            self.assertEqual(
-                [v["code"] for v in manifest_policy.violations()], ["diff_manifest:manifest_internal_error"]
-            )
+        with mock.patch.object(manifest_policy, "strict_settings", side_effect=RuntimeError("boom")):
+            self.assertEqual(self.refusal("diff_manifest: enforce\n"), "diff_manifest:manifest_internal_error")
+            with mock.patch.object(manifest_policy, "config_path", return_value=str(self.cfg)):
+                self.assertEqual(
+                    [v["code"] for v in manifest_policy.violations()], ["diff_manifest:manifest_internal_error"]
+                )
         rows = [json.loads(x) for f in self.loop.rglob("trace.jsonl") for x in f.read_text().splitlines()]
         self.assertIn(("refused", "manifest_internal_error"), [(r["outcome"], r["reason_code"]) for r in rows])
 
     def test_real_unreadable_config_is_refused(self) -> None:
-        """The loader reports unreadability as a finding rather than raising."""
+        """Strict config rejects an unreadable file."""
         self.commit("docs/guide.md")
         with mock.patch.object(manifest_policy, "config_path", return_value=str(self.dir / "missing.yaml")):
-            self.assertEqual(manifest_policy.violations()[0]["code"], "diff_manifest:manifest_internal_error")
+            self.assertEqual(manifest_policy.violations()[0]["code"], "config_rejected")
 
     def test_explicit_empty_mode_reports_invalid_enforcement(self) -> None:
         """An explicitly empty mode is invalid, even though enforcement remains the default."""
@@ -135,10 +136,10 @@ class UnitMismatchTests(base.DefaultGateTests):
         rows = [json.loads(x) for f in self.loop.rglob("trace.jsonl") for x in f.read_text().splitlines()]
         self.assertIn("diff_manifest_mode_invalid", [r["reason_code"] for r in rows])
 
-    def test_typed_null_policy_uses_the_shipped_default(self) -> None:
-        """The existing config grammar coerces an empty nullable scalar to null."""
+    def test_explicit_empty_policy_is_unreadable(self) -> None:
+        """An empty policy path cannot silently disable the default policy."""
         self.commit("docs/guide.md")
-        self.gate("diff_manifest_policy: ''\n")
+        self.assertEqual(self.refusal("diff_manifest_policy: ''\n"), "diff_manifest:manifest_unreadable")
 
     def test_unit_cannot_widen_policy_manifest(self) -> None:
         """Both declared bounds apply, and unknown or malformed requested units refuse."""

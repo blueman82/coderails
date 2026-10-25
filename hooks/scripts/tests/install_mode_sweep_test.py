@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.tests.run_all import isolated_environment
+from scripts.installer import files
 from scripts.installer.modes import arm_scripts
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -61,7 +62,7 @@ class InstallModeSweepTests(unittest.TestCase):
                 shutil.copytree(ROOT / folder, root / folder, ignore=shutil.ignore_patterns("*.sh", "__pycache__"))
             shutil.copyfile(ROOT / "install.py", root / "install.py")
             for relative, content in {
-                "packages/graph-semantics/graph_semantics.py": '"""Fixture semantics."""\n',
+                **{f"packages/graph-semantics/{name}": '"""Fixture module."""\n' for name in files.SHARED_MODULES},
                 "instructions/self-checking-discipline.md": "preamble\n## Self-Checking Discipline\nfixture rules\n",
                 "commands/workflow.md": "replacement",
                 "starter-memory/feedback_fixture.md": "memory fixture",

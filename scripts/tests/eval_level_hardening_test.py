@@ -299,6 +299,7 @@ class SelectedSuiteTests(PostCase):
         with (
             mock.patch.dict(os.environ, {"_PR_TRUSTED_LOGIN": "", "_PR_TRUSTED_PERMISSION": ""}),
             mock.patch.object(git, "run", side_effect=transport),
+            mock.patch.object(git, "pr_field", return_value=self.base),
         ):
             return [row["code"] for row in publication_gate.eval_level_check("42", head, "", "")]
 

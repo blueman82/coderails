@@ -28,7 +28,7 @@
     },
     "env": {},
     "returncode": 0,
-    "denied": false,
+    "denied": true,
     "fixture_index": 102
   }
 ]

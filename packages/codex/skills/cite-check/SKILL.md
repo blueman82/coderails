@@ -5,10 +5,10 @@ description: Re-derive a specific claim from sources only - no recall, no infere
 
 # Cite-check
 
-Spawn the installed `source-auditor` custom agent with `spawn_agent`, passing
-the claim text and the evidence rules below. Collect its result with
-`wait_agent`, use `send_input` only to request missing evidence, then
-`close_agent`.
+Write the claim text and evidence rules below to a self-contained prompt file,
+then run `python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role source-auditor --prompt-file <file> --cwd <review-worktree>`.
+Read its actual result and exit status. Follow [guarded role sessions](../using-coderails/references/guarded-role-sessions.md);
+a native `spawn_agent` child has no source-auditor capability server.
 
 Re-derive the claim(s) below using only durable sources you can read or produce
 right now — file contents, git output, and fresh command output. You have no

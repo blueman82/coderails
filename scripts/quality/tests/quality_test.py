@@ -86,7 +86,7 @@ class QualityTests(unittest.TestCase):
             self.assertFalse(quality_tools.check_materialization(root))
             for relative in quality_tools.GENERATED_SEMANTICS:
                 target = root / relative
-                target.parent.mkdir(parents=True)
+                target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(source.read_bytes())
             self.assertTrue(quality_tools.check_materialization(root))
             (root / quality_tools.GENERATED_SEMANTICS[0]).write_text("different\n")

@@ -22,6 +22,7 @@ HOOK = ROOT / "packages/codex/hooks/scripts/pr_publication_gate.py"
 SECRET = ".en" + "v"  # two parts so no source line spells the secret-file name
 GH_SHIM = """#!/bin/sh
 case "$1 $2" in
+  "pr list") if [ "$4" = feat-b ]; then echo 7; fi ;;
   "pr view")
     case "$5" in
       headRefOid) if [ "$3" = 1 ]; then echo "$CLEAN_SHA"; else echo "$FAKE_SHA"; fi ;;
@@ -125,7 +126,12 @@ class CodexPublicationGateTests(unittest.TestCase):
 
     def test_denies_every_merge_form(self) -> None:
         """Plain, bash -c wrapped and merge.py invocations are denied with the reason code first."""
-        for command in ("gh pr merge 7 --merge", "bash -c 'gh pr merge 7'", "python3 scripts/merge.py 7"):
+        for command in (
+            "gh pr merge 7 --merge",
+            "bash -c 'gh pr merge 7'",
+            "python3 scripts/merge.py 7",
+            "gh api -X PUT repos/o/r/pulls/7/merge",
+        ):
             with self.subTest(command=command):
                 self.assertTrue(self.reason(command).startswith("diff_manifest:denied_path"), command)
 
@@ -156,7 +162,7 @@ class CodexPublicationGateTests(unittest.TestCase):
 
     def test_off_passes(self) -> None:
         """Negative control: diff_manifest off lets the same merge through."""
-        self.config("diff_manifest: off\n")
+        self.config("diff_manifest: off\nevals:\n  require_signatures: false\n")
         self.assertEqual(self.reason("gh pr merge 7"), "")
 
     def test_clean_diff_passes(self) -> None:
@@ -169,6 +175,27 @@ class CodexPublicationGateTests(unittest.TestCase):
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
         self.env["FAKE_EVAL_FILE"] = str(write_comment(self.dir.parent, self.env["FAKE_SHA"], 0))
         self.assertEqual(self.reason("gh pr merge 7"), "")
+
+    def test_owned_graph_unit_needs_manifest_binding(self) -> None:
+        """The direct hook uses its session ID to refuse an unbound graph publication."""
+        common = git_cmd(self.dir, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        progress = self.loop / common.replace("/", "-") / "s1" / "progress.json"
+        progress.parent.mkdir(parents=True)
+        progress.write_text(
+            json.dumps(
+                {
+                    "schema_version": 3,
+                    "session_id": "s1",
+                    "loop_id": "test-loop",
+                    "work_units": {"C1": {"worktree": str(self.dir), "manifest": ["docs/**"]}},
+                }
+            )
+        )
+        self.env["CLAUDE_AGENTIC_LOOP_DIR"] = str(self.loop / "other-root")
+        self.assertTrue(self.reason("gh pr merge 1").startswith("diff_manifest:manifest_unreadable"))
+        self.env["CLAUDE_AGENTIC_LOOP_DIR"] = str(self.loop)
+        self.env["CODERAILS_AGENTIC_LOOP_DIR"] = str(self.loop / "other-root")
+        self.assertEqual(self.reason("gh pr merge 1"), "")
 
     def test_gh_repo_retarget_refuses_even_clean_diff(self) -> None:
         """A same-number PR in another repository cannot borrow this repository's clean result."""

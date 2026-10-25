@@ -128,6 +128,21 @@ class DefaultGateTests(RepoCase):
         self.commit(SECRET, "k=v\n")
         self.assertEqual(self.refusal(), "diff_manifest:denied_path")
 
+    def test_protected_policy_deletion_refused_by_default(self) -> None:
+        """Deleting a policy file from the real diff is still denied."""
+        git_cmd(self.dir, "checkout", "-q", "main")
+        policy = self.dir / "policy/diff-policy.default.json"
+        policy.parent.mkdir()
+        policy.write_text("{}\n")
+        git_cmd(self.dir, "add", "-A")
+        git_cmd(self.dir, "commit", "-qm", "base policy")
+        git_cmd(self.dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git_cmd(self.dir, "checkout", "-qB", "feature/x", "origin/main")
+        policy.unlink()
+        git_cmd(self.dir, "add", "-u")
+        git_cmd(self.dir, "commit", "-qm", "remove policy")
+        self.assertEqual(self.refusal(), "diff_manifest:denied_path")
+
     def test_pr_diff_uses_target_base_not_main(self) -> None:
         """A release-targeted PR includes a denied path already present on newer main."""
         release = git_cmd(self.dir, "rev-parse", "origin/main").strip()
@@ -158,6 +173,37 @@ class DefaultGateTests(RepoCase):
         self.commit("docs/guide.md", "hello\n")
         self.gate()
 
+    def test_graph_publication_without_unit_refuses(self) -> None:
+        """A session-owned graph unit cannot publish without its manifest binding."""
+        self.commit("docs/guide.md", "hello\n")
+        session = "manifest-test-session"
+        common = git_cmd(self.dir, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        progress = self.loop / common.replace("/", "-") / session / "progress.json"
+        progress.parent.mkdir(parents=True)
+        progress.write_text(
+            json.dumps(
+                {
+                    "schema_version": 3,
+                    "session_id": session,
+                    "loop_id": "manifest-test-loop",
+                    "work_units": {"C1": {"worktree": str(self.dir), "manifest": ["docs/**"]}},
+                }
+            )
+        )
+        with mock.patch.dict(
+            os.environ, {"CLAUDE_CODE_SESSION_ID": session, "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}
+        ):
+            self.assertEqual(self.refusal(), "diff_manifest:manifest_unreadable")
+        with mock.patch.dict(
+            os.environ,
+            {
+                "CLAUDE_CODE_SESSION_ID": session,
+                "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop / "other-root"),
+                "CODERAILS_AGENTIC_LOOP_DIR": str(self.loop),
+            },
+        ):
+            self.gate()
+
     def test_off_passes_the_violating_diff(self) -> None:
         """Negative control: diff_manifest off proves the refusal comes from the gate."""
         self.commit(SECRET, "k=v\n")
@@ -170,12 +216,12 @@ class DefaultGateTests(RepoCase):
         rows = [json.loads(x) for f in self.loop.rglob("trace.jsonl") for x in f.read_text().splitlines()]
         self.assertIn(("warned", "denied_path"), [(r["outcome"], r["reason_code"]) for r in rows])
 
-    def test_invalid_mode_is_enforce_and_reported(self) -> None:
-        """An unknown mode is treated as enforce and reported as diff_manifest_mode_invalid."""
+    def test_invalid_mode_is_rejected(self) -> None:
+        """An unknown mode is refused by the strict config reader."""
         self.commit(SECRET, "k=v\n")
-        self.assertEqual(self.refusal("diff_manifest: sometimes\n"), "diff_manifest:denied_path")
+        self.assertEqual(self.refusal("diff_manifest: sometimes\n"), "config_rejected")
         rows = [json.loads(x) for f in self.loop.rglob("trace.jsonl") for x in f.read_text().splitlines()]
-        self.assertIn("diff_manifest_mode_invalid", [r["reason_code"] for r in rows])
+        self.assertIn("config_rejected", [r["reason_code"] for r in rows])
 
     def test_missing_policy_file_refuses(self) -> None:
         """Negative control: a policy file that cannot be read refuses, never silently passes."""

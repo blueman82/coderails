@@ -77,19 +77,69 @@ a consumer. Those four lines are superseded by the next section; the user direct
   never rewritten). Consume and revoke are `<id>.consumed` / `<id>.revoked` marker files created with
   `O_CREAT|O_EXCL`, so single-use state is file existence: no read-modify-write race, and a torn write cannot
   half-consume (a truncated receipt reads as `malformed` and is never accepted).
-- `verify(receipt, proposed, now, session_id, loop_id)` is pure and returns `(ok, reason_code)`; check order is fixed:
-  `malformed`, `revoked`, `expired`, `foreign_session`, `foreign_loop`, `consumed`, `kind_mismatch`, `hash_mismatch`,
-  `sha_mismatch`, else `ok`. The hash is sha256 of canonical JSON of the shlex-split command, cwd and branch.
-- Hook `action_authority_gate.py` (Claude, appended to the Bash group; Codex vendored subset in `hook_common.py`,
-  parity-tested): opt-in via config `action_authority` (enforce | advisory | off, default off); it does not touch
+- `verify(receipt, proposed, now, session_id, loop_id, consumed, signers)` is pure and returns `(ok, reason_code)`; check order is fixed:
+  `malformed`, signature (`signature_missing`, `signature_invalid`, `signer_unknown`, `trust_root_missing`), `revoked`, `expired`,
+  `foreign_session`, `foreign_loop`, `consumed`, `kind_mismatch`, `hash_mismatch`, `repository_mismatch`, `ref_mismatch`,
+  `sha_mismatch`, else `ok`. The hash is sha256 of canonical JSON of the shlex-split command, cwd, branch, repository and ref.
+  Receipts are v2: signed, bound to repository+ref+SHA (`artifact_sha` is mandatory), always single-use; v1/unsigned receipts
+  are rejected with no downgrade path. See [p3-human-only-minting.md](p3-human-only-minting.md).
+- Hook `action_authority_gate.py` (Claude, appended to the Bash group; Codex imports the byte-identical mirrored
+  `scripts/lib/{action_receipt,receipt_signing,action_binding}.py`): opt-in via config `action_authority` (enforce | advisory | off, default off); it does not touch
   `pr_merge_gate`, the destructive gate or `enforce_pr_workflow`.
-- What a receipt proves: some same-user principal minted an approval for exactly this command text, cwd and branch,
-  for this session and loop, once, before it expired. What it does NOT prove: that a human approved it. A same-user
-  agent can run `approve-action`, so this is a speed bump and an audit trail, not a human-in-the-loop guarantee.
+- What a receipt proves: a key listed in the user-tier signers file signed this command text, cwd, branch,
+  repository, ref and SHA for this session and loop. It expires and can be used once. `approve-action` refuses
+  without a tty (`receipt_refused_no_tty`). The user-tier signers file is agent-writable, so this is a
+  cooperating-agent safeguard. It does not establish independent human approval.
 - Limits: hash covers only the command text the hook sees (not aliases, functions, eval/xargs; common wrappers are
-  unwrapped); protected branches are main/master only; (guess, unverified) a subagent's `session_id` may differ from
-  its parent's, so a receipt minted by the parent could be refused as `foreign_session` for worker-run actions.
+  unwrapped); protected branches are main/master only. Subagent identity is settled by the `agent_only_gate` evidence (same `session_id`, differing `agent_id`/`agent_type`) and a payload test, so the parent's
+  receipt is honoured by a subagent. `scripts/merge.py` cannot see the shell's command text; when no hook ran it checks the signed hash against the canonical `python3 scripts/merge.py <target> --expected-head <sha>` command, cwd, branch, repository and ref. The target is the PR number, branch name, or `auto` argument supplied to the helper. A hook-consumed receipt must be
+  within 300 s. `action_authority: off` and the user-tier trust root are agent-writable: cooperating-agent safeguard, not a boundary.
+
 - Worker statuses `NEEDS_DECISION | OUTSIDE_SCOPE | IRREVERSIBLE_ACTION` ship as a standalone validator
   (`skills/agentic-loop/scripts/worker_status.py`, Codex copy byte-identical). Wiring into `record-wave` was
   rejected: it changes record-wave evidence demands and `graph_semantics.py` has three synced copies. Wiring point:
   the orchestrator's U4 step and the SKILL.md report-back contract.
+
+### Owner revision, 24 October 2026
+
+The shipped workflow config sets `advisory`. With no config or an unknown value, the gate is off. Routine pushes and merges do not need a key or passphrase. Explicit `enforce` requires a signed receipt. A direct `merge.py` call also needs `--expected-head <sha>` to bind that receipt. PR review, eval, and integrity gates still govern merges.
+
+## Superseded again: grant moves off prose matching to a typed command
+
+The phrase heuristics (`invoked()`, negation, question and quote handling, about 45 lines) are deleted. Verified defect:
+`invoked("do not, under any circumstances, crack on")` returned True, so negated and pasted text could mint authority.
+
+- Mint: `scripts/authority.py grant --session <id> --max-prs N [--loop --scope --denied --expires-in-hours --approval-for]`
+  writes `granted_by: command` and traces `authority/granted/authority_granted_command`. `create` is a thin alias on the same
+  code path for one release. Merge approval stays mandatory; a live object is never replaced (`authority_refused_exists`),
+  an expired or torn file is.
+- `scripts/lib/authority_object.py`: optional field `granted_by` in `{command, legacy_phrase}`; any other value fails `validate`.
+  Objects without it (written by the old hook) read as `legacy_phrase` and are honoured until expiry. `FIELDS` otherwise stays closed.
+- `commands/authorize.md` (`/coderails:authorize`, `disable-model-invocation: true`) pre-executes the grant with
+  `--session "${CLAUDE_SESSION_ID}"` and fixed defaults (scope `autonomous_decisions`, denied `destructive_shell`, `max_prs` 0); user text is never
+  spliced into the `!` command (an existing test forbids `$ARGUMENTS` there), so other limits mean running the CLI directly. The script falls back to `$CLAUDE_CODE_SESSION_ID` when the expansion is empty.
+  Codex: `packages/codex/skills/authorize/SKILL.md` instructs the same command (no pre-execution).
+- `crack_on_gate.py` (Claude and Codex) on `UserPromptSubmit` never writes. On "crack on" / "crack-on" with no live authority it emits
+  `additionalContext` with the grant command and traces `crack_on/ignored/authority_phrase_ignored`. The AskUserQuestion /
+  request_user_input denial, expiry, revoked, foreign and legacy-flag paths are unchanged. A later B3 correction
+  makes each hook check for `autonomous_decisions` in the current grant scope. The printed grant command now includes
+  that scope and `--denied destructive_shell`. A narrowed grant with an empty scope allows user input.
+- Codex mirror: `packages/codex/scripts/authority.py` and `packages/codex/scripts/lib/authority_object.py` are byte-identical to
+  the Claude files (parity test); `hook_common.py` no longer vendors `authority_state`/`write_authority`/`parse_expiry` and imports the
+  mirrored lib. Both trace and authority paths now honour `CODERAILS_AGENTIC_LOOP_DIR` as a fallback, as the old Codex vendored code did.
+- A session ID must start with an ASCII letter or digit. It can then contain ASCII letters, digits, `.`, `_`, or `-`,
+  but not `..`. Both grant CLIs and both hooks use this check. Other characters cannot enter a printed shell command.
+- Limit (cooperating-agent safeguard): an agent with shell access can also run `authority.py grant` (for Codex the skill is itself an
+  instruction to do so). The change stops accidental, negated and pasted-text grants and removes the false precision of a prose
+  matcher; it does not stop a hostile same-user agent. Optional signed receipts are a separate unit.
+- Same-user boundary: `granted_by` is an unsigned, self-asserted label. Besides running `grant`, an agent can write `authority.json` directly (Write or a shell redirect, with any `granted_by` or none) or touch the legacy `crack_on_active` flag (no expiry, still honoured), and nothing guards those paths; the crack-on hint tells agents not to grant.
+- Not verified: that `${CLAUDE_SESSION_ID}` is substituted before the `!` pre-execution runs in Claude Code 2.1.289 (strings in the binary show
+  substitution in the skill body, ordering vs shell execution not observed); the env fallback covers an empty expansion. The
+  UserPromptSubmit prefix-match fallback named in the plan was not built.
+- Live-probe record (2026-10-05): a live `/coderails:authorize` run could not be made from the non-interactive build session, so the
+  substitution and `!` ordering stay unverified. What is verified: the tool environment of a Claude session exports
+  `CLAUDE_CODE_SESSION_ID` (the fallback source), and `grant` now refuses any session id containing `$` or `{` (a literal
+  `${CLAUDE_SESSION_ID}` from a failed substitution) or an empty id with the env var unset, each with
+  `authority_refused_unsafe_session` and nothing written (`scripts/tests/authority_session_guard_test.py`). A failed substitution
+  therefore fails loudly instead of reporting a grant no hook can see. Human action to close: run `/coderails:authorize` once in a
+  live session and confirm the printed result names the real session id.

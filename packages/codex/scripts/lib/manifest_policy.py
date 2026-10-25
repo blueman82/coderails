@@ -11,16 +11,24 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import re
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
 from . import git_common as git
-from .config import config_path, load_config
+from .config import config_path
+from .config_strict import ConfigRejected, strict_settings
 
 DEFAULT_POLICY = Path(__file__).resolve().parents[2] / "policy" / "diff-policy.default.json"
 MODES = ("off", "advisory", "enforce")
+PROTECTED_POLICY_PATHS = [
+    ".coderails/workflow.config.yaml",
+    "policy/diff-policy*.json",
+    "packages/codex/policy/diff-policy*.json",
+]
 Changes = list[tuple[str, list[str]]]
 
 
@@ -104,7 +112,7 @@ def check(
         if statuses and status[0] not in statuses:
             add("status_not_allowed", paths[-1])
         for path in paths:
-            if matches(path, deny) and not status.startswith("D"):  # removing a secret is the safe direction
+            if matches(path, deny) and (not status.startswith("D") or matches(path, PROTECTED_POLICY_PATHS)):
                 add("denied_path", path)
             if (manifest is not None and not matches(path, manifest)) or (allow and not matches(path, allow)):
                 add("out_of_manifest", path)
@@ -188,6 +196,48 @@ def unit_manifest(progress: str, unit: str) -> list[str]:
     return strings(cast(list[object], manifest))
 
 
+def active_graph_unit() -> bool:
+    """True when this session owns a graph unit in the current worktree."""
+    session = (
+        os.environ.get("CODERAILS_PUBLICATION_SESSION_ID")
+        or os.environ.get("CLAUDE_CODE_SESSION_ID")
+        or os.environ.get("CODEX_SESSION_ID")
+        or os.environ.get("CODEX_THREAD_ID")
+        or ""
+    )
+    if not session:
+        return False
+    session = session.replace("/", "_").replace("..", "")
+    plugin = Path(__file__).resolve().parents[2]
+    root_key = "CLAUDE_AGENTIC_LOOP_DIR"
+    if (plugin / ".codex-plugin/plugin.json").is_file():
+        root_key = "CODERAILS_AGENTIC_LOOP_DIR"
+    root = Path(os.environ.get(root_key) or Path.home() / ".coderails/agentic-loop")
+    common = git.output("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
+    current = git.output("git", "rev-parse", "--show-toplevel")
+    if not common or not current:
+        return False
+    paths = [root / common.replace("/", "-") / session / "progress.json"]
+    with suppress(OSError):
+        paths += [directory / session / "progress.json" for directory in root.iterdir() if directory.is_dir()]
+    for path in paths:
+        if not path.is_file():
+            continue
+        state = load_json(path)
+        if state is None:
+            return True
+        if state.get("session_id") != session or not isinstance(state.get("work_units"), dict):
+            continue
+        units = cast(dict[str, Any], state["work_units"])
+        for entry in units.values():
+            if not isinstance(entry, dict):
+                continue
+            worktree = cast(dict[str, Any], entry).get("worktree")
+            if isinstance(worktree, str) and Path(worktree).resolve() == Path(current).resolve():
+                return True
+    return False
+
+
 def unit_flags(arguments: list[str]) -> tuple[list[str], str, str]:
     """Split `--unit N --progress PATH` out of an argument list: (remaining arguments, unit, progress)."""
     rest: list[str] = []
@@ -209,9 +259,8 @@ def unit_flags(arguments: list[str]) -> tuple[list[str], str, str]:
 
 def settings() -> tuple[str, str, bool]:
     """(mode, policy file, mode_invalid) from the typed config; no config file means the defaults."""
-    values, findings = load_config(config_path() or "")
-    if any(finding["code"] == "config_unreadable" for finding in findings):
-        raise ValueError("config unreadable")
+    path = config_path()
+    values = strict_settings(path) if path else {}
     mode = str(values.get("diff_manifest", "enforce"))
     configured_policy = values.get("diff_manifest_policy")
     policy = str(DEFAULT_POLICY if configured_policy is None else configured_policy)
@@ -246,6 +295,8 @@ def _evaluate(pr: str, head: str, policy_file: str, unit: str, progress: str, la
     found = cast(list[dict[str, str]], check(changes, policy, manifest, linked)["violations"])
     if scoped is not None:
         found += [v for v in check(changes, {}, scoped)["violations"] if v not in found]
+    if not unit and not progress and active_graph_unit():
+        found.append({"code": "manifest_unreadable", "path": "graph unit requires --unit and --progress"})
     return found
 
 
@@ -257,6 +308,10 @@ def violations(pr: str = "", unit: str = "", progress: str = "", head: str = "")
     """
     try:
         mode, policy_file, invalid = settings()
+    except ConfigRejected as error:
+        trace(f"pr-{pr}" if pr else "config", "refused", "config_rejected")
+        print(f"! {error}", file=sys.stderr)
+        return [{"code": "config_rejected", "detail": str(error)}]
     except Exception:  # noqa: BLE001 - unreadable config must not turn the default-ON gate off or raise raw
         trace(f"pr-{pr}" if pr else "config", "refused", "manifest_internal_error")
         print("! diff_manifest manifest_internal_error: config unreadable", file=sys.stderr)

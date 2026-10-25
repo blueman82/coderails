@@ -43,7 +43,7 @@ def keys_dir() -> Path:
 
 
 def required() -> bool:
-    """True when workflow.config.yaml sets evals.require_signatures: true (default false)."""
+    """True for a configured project unless evals.require_signatures is explicitly false."""
     return require_signatures(config_path())
 
 
@@ -93,8 +93,6 @@ def check(block: object, text: str) -> str:
         raise SigningError(SIGNATURE_INVALID, "signature block is malformed or signs a different payload")
     _check_perms(keys_dir() / "evals_ed25519")
     allowed = keys_dir() / "allowed_signers"
-    if not allowed.is_file():
-        return KEY_MISSING
     with tempfile.TemporaryDirectory() as scratch:
         sig = Path(scratch) / "payload.sig"
         sig.write_text(armored)
@@ -104,6 +102,8 @@ def check(block: object, text: str) -> str:
             return KEY_MISSING
         if plain.returncode:
             raise SigningError(SIGNATURE_INVALID, "signature does not verify")
+        if not allowed.is_file():
+            return KEY_MISSING
         trusted = _run(
             ["ssh-keygen", "-Y", "verify", "-f", str(allowed), "-I", PRINCIPAL, "-n", NAMESPACE, "-s", str(sig)], text
         )

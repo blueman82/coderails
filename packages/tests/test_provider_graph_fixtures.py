@@ -14,6 +14,9 @@ from types import ModuleType
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages/graph-semantics"))
+import graph_spec
+
 from packages.tests.provider_fixture import Provider
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -74,6 +77,21 @@ def semantic_graph(state: dict[str, Any]) -> dict[str, Any]:
 class ProviderGraphFixtureTests(unittest.TestCase):
     """Compare exact pure outcomes and persisted native transitions."""
 
+    def spec_refused(self, provider: Provider, state: dict[str, Any]) -> bool:
+        """True once the real CLI is shown to refuse a pure-core fixture that breaks a spec edge.
+
+        The corpus pins the unmodified core, whose graphs may omit edges the spec layer requires (S1 before S2);
+        the native adapters sit above that layer, so for those states they must refuse with the spec's code.
+        """
+        try:
+            graph_spec.check(state)
+        except graph_spec.SpecError as error:
+            result = provider.call("inspect")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(error.code, result.stderr)
+            return True
+        return False
+
     def test_every_fixture_against_each_independent_semantic_copy(self) -> None:
         """All 52 corpus cases retain exact results, errors, and refusal atomicity."""
         paths = sorted(FIXTURES.glob("*.json"))
@@ -106,6 +124,8 @@ class ProviderGraphFixtureTests(unittest.TestCase):
                         provider = Provider(fixture_home, name)
                         provider.write(native_state(provider, fixture))
                         before = provider.path.read_bytes()
+                        if valid and self.spec_refused(provider, native_state(provider, fixture)):
+                            continue
                         result = provider.call("inspect")
                         self.assertEqual(result.returncode == 0, valid, result.stderr)
                         self.assertEqual(provider.path.read_bytes(), before)
@@ -197,6 +217,8 @@ class ProviderGraphFixtureTests(unittest.TestCase):
                         state = native_state(provider, fixture)
                         state["graph"]["active_wave"]["transcript_cursor"] = 0 if name == "claude" else 1
                         provider.write(state)
+                        if self.spec_refused(provider, state):
+                            continue
                         outcomes = {entry["outcome"] for entry in fixture["request"]["results"].values()}
                         provider.launch("stale" if outcomes == {"stale"} else "done")
                         result = provider.call("record-wave", json.dumps(fixture["request"]))
@@ -224,6 +246,8 @@ class ProviderGraphFixtureTests(unittest.TestCase):
                         if name == "claude":
                             state["graph"]["wave_history"] = {}
                         provider.write(state)
+                        if self.spec_refused(provider, state):
+                            continue
                         before = provider.path.read_bytes()
                         result = provider.complete()
                         self.assertNotEqual(result.returncode, 0)
