@@ -138,6 +138,16 @@ def main() -> int:
             seq = recorded["seq"]
 
             def increment(data: dict[str, Any]) -> dict[str, Any]:
+                identity = ("schema_version", "session_id", "loop_id", "revision")
+                if any(data.get(key) != state.data.get(key) for key in identity):
+                    raise ValueError("Recorded stop belongs to an earlier graph state; stopping remains blocked.")
+                if recorded_stop(data) != recorded:
+                    raise ValueError("Recorded stop changed before consumption; stopping remains blocked.")
+                if category == "complete":
+                    current = LoopState(state.path, session, count, data)
+                    if graph_unresolved(current):
+                        raise ValueError("Native graph unresolved; stopping remains blocked.")
+                    complete(current, transcript)
                 counters = data.setdefault("loop_stop_counts", {})
                 if not isinstance(counters, dict):
                     raise ValueError("loop_stop_counts must be an object")

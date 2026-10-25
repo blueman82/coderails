@@ -215,7 +215,8 @@ def stop_in_this_turn(transcript: str, stop: dict[str, Any]) -> bool:
             )
         ):
             if "timestamp" not in record:
-                continue  # synthetic records without a clock cannot move the bound
+                prompt_at = float("inf")  # unknown turn boundary cannot authorize an older row
+                continue
             try:
                 prompt_at = datetime.fromisoformat(str(record["timestamp"]).replace("Z", "+00:00")).timestamp()
             except ValueError:

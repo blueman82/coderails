@@ -50,9 +50,8 @@ def _check_active_wave(graph: dict[str, Any]) -> None:
     active = graph.get("active_wave")
     if not isinstance(history, dict):
         raise ConvertRefusedError("active_wave_ambiguous", "wave_history must be an object")
-    if active is not None and (
-        not isinstance(active, dict) or cast(dict[str, Any], active).get("wave_id") not in history
-    ):
+    wave_id = cast(dict[str, Any], active).get("wave_id") if isinstance(active, dict) else None
+    if active is not None and (not isinstance(wave_id, str) or wave_id not in history):
         raise ConvertRefusedError(
             "active_wave_ambiguous", "a wave is in flight with no wave_history entry: record or recover it first"
         )

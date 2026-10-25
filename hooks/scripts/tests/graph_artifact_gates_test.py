@@ -139,6 +139,10 @@ class ArtifactGateTests(GraphCase):
         artifacts(self, state)
         fixture.append(
             self.parent,
+            {"type": "user", "timestamp": "2000-01-01T00:00:00Z", "message": {"content": "Continue"}},
+        )
+        fixture.append(
+            self.parent,
             {
                 "type": "assistant",
                 "message": {

@@ -248,8 +248,8 @@ name stays in `FALLBACKS` so history counts). The Claude hook honours a recorded
 ratio covers both providers. Counters live in `scripts/graph_alignment_stops.py` (block codes from `scripts/lib/stop_counters.py`,
 which also counts `convert_ok` / `convert_refused_<code>`). Flip condition: a high `stop_row_missing` against `stops_consumed`
 over the first few loops means agents are not recording stops; fix the prompt, the hook is already strict. Limit: the Stop
-payload has no turn id (unverified), so a recorded row counts only when `graph.py stop` appears in the current turn's
-structured Bash tool_use records; `voice_announce` is async and may run after the guard consumed the row (it then says
+payload has no turn id (unverified), so a recorded row counts only when its `at` time is at or after the latest user
+prompt timestamp; a prompt without a readable timestamp blocks it. `voice_announce` is async and may run after the guard consumed the row (it then says
 "may have stalled").
 
 **Reproduce.**
@@ -340,7 +340,8 @@ and `graph_convert.py` by `scripts/installer/files.py` (a list of source/targets
 `scripts/measure_graph_alignment.py` is at its line limit; folding it in is a handoff). Flip condition: any
 `convert_refused_active_wave_ambiguous` means a loop was upgraded mid-wave (finish or recover the wave first); a
 sustained `stop_row_missing` means the prompt is not teaching `graph.py stop`. Limits: the Stop payload has no turn id
-(unverified), so "recorded this turn" is read from structured Bash tool_use records; `convert` refuses rather than
+(unverified), so the hook compares the row timestamp with the latest user prompt timestamp; a missing prompt clock
+blocks the row. `convert` refuses rather than
 guesses, so an in-flight wave on a pre-history file needs manual recovery.
 
 **Reproduce.**

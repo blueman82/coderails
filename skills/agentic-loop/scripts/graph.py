@@ -169,7 +169,7 @@ def convert_state(path: Path, session: str, check: bool) -> dict[str, Any]:
     if refusal:
         trace(path, {"session_id": session}, "refused", f"convert_refused_{refusal[0].code}", inputs, [], "convert")
         raise refusal[0]
-    if not saved and not report:
+    if not saved and (not report or (report["changed"] and not check)):
         raise ValueError("progress.json is locked, unreadable or not an object")
     if saved:
         load(path)
