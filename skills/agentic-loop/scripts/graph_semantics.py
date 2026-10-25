@@ -381,8 +381,14 @@ def inspect(state: object) -> dict[str, Any]:
 
 def can_complete(state: object) -> dict[str, Any]:
     """Return canonical completion eligibility, excluding provider work-unit gates."""
-    graph = validate(state)["graph"]
+    root = validate(state)
+    graph = root["graph"]
     blockers = [key for key in ("active_wave", "hard_stop") if graph[key] is not None]
+    if decision_sync_pending(root):
+        blockers.append("decision_sync_pending")
+    pending = sorted(node_id for node_id in graph["nodes"] if decision_pending(root, node_id))
+    if pending:
+        blockers.append("decision_pending:" + ",".join(pending))
     unfinished = sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] not in SUCCESS)
     if unfinished:
         blockers.append("unfinished:" + ",".join(unfinished))

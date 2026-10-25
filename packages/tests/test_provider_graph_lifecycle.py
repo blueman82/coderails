@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.lib.graph_executor import graph_semantics
 from packages.tests.provider_fixture import Provider
+from scripts.lib.decision_record import add_decision
 
 
 class ProviderLifecycleTests(unittest.TestCase):
@@ -67,6 +69,41 @@ class ProviderLifecycleTests(unittest.TestCase):
             result = provider.complete()
             self.assertEqual(result.returncode, 0, (provider.name, result.stderr))
             self.assertEqual(provider.read()["status"], "complete")
+
+    def test_completion_waits_for_hashed_decisions_and_worker_answers(self) -> None:
+        """Both native completion commands preserve state until decisions are resolved."""
+        for provider in self.providers:
+            provider.finish_wave()
+            state = provider.read()
+            state = add_decision(
+                state, provider.session, "2.5", "Use the selected design", state["loop_id"], state["revision"]
+            )["state"]
+            provider.write(state)
+            provider.artifacts()
+            for sync in ("syncing", "unknown"):
+                state["decisions_absorbed"][0]["muninn"] = {"state": sync}
+                provider.write(state)
+                before = provider.path.read_bytes()
+                result = provider.complete()
+                self.assertNotEqual(result.returncode, 0, (provider.name, sync, result.stderr))
+                self.assertIn("decision_sync_pending", result.stdout + result.stderr)
+                self.assertEqual(provider.path.read_bytes(), before)
+            state["decisions_absorbed"][0]["muninn"] = {"state": "written", "id": "K1"}
+            state["worker_statuses"] = [
+                {"seq": 1, "node": "U3[1]", "status": "NEEDS_DECISION", "decision_pending": True}
+            ]
+            provider.write(state)
+            before = provider.path.read_bytes()
+            result = provider.complete()
+            self.assertNotEqual(result.returncode, 0, (provider.name, result.stderr))
+            self.assertIn("decision_pending:U3[1]", result.stdout + result.stderr)
+            self.assertEqual(provider.path.read_bytes(), before)
+            state.pop("worker_statuses")
+            for sync in ("written", "disabled"):
+                state["decisions_absorbed"][0]["muninn"] = (
+                    {"state": "written", "id": "K1"} if sync == "written" else {"state": "disabled"}
+                )
+                self.assertEqual(graph_semantics.can_complete(state), {"eligible": True, "blockers": []})
 
     def test_dispatch_exact_owner_scope_and_retry_name(self) -> None:
         """Foreign ownership and old attempt names cannot authorize a new native worker."""
