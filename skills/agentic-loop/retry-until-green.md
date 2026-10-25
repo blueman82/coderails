@@ -1,42 +1,30 @@
 # Retry-until-green
 
-Not a stop condition — applies to the `U5 -> U5-repair -> U4` edge in the
-execution graph, BEFORE hard-stop #1 in the main skill's stop-conditions section.
+This rule applies to the `U5 -> U5-repair -> U4` graph edge. Use it before
+hard-stop #1 in the main skill.
 
-A single failing test, lint error, or verification check is not, by itself, a reason to stop and
-ask. Diagnose the failure, fix it, re-verify — in a tight cycle — the same way a human engineer
-would iterate on their own failing test, up to a bounded number of attempts (default: 5 distinct
-fix attempts per failure; re-trying the identical fix without a new diagnosis does not count as a
-new attempt). Only escalate to hard-stop #1 once that bound is exhausted and the failure still
-reproduces — at that point it has stopped being "a bug to fix" and become "a wall to report." The
-bound exists so retry-until-green cannot become an infinite loop against a fundamentally broken or
-mis-specified test; hitting it is itself useful information for the human, not a failure of the
-loop. Log each attempt's diagnosis in `progress.json` so the eventual hard-stop report (if reached)
-shows the exhausted attempts, not just the final failure. An identical retry
-does not advance the edge.
+A failed test, lint check, or verification check alone is not a reason to stop.
+Find the cause, fix it, and check again. Make at most five distinct fix attempts
+per failure by default. A repeat of the same fix without a new diagnosis does
+not count as a new attempt or advance the edge.
 
-**Multiple independent failures — use `superpowers:dispatching-parallel-agents`.** When a
-verification failure turns out to be multiple independent broken things, don't fix them one at a
-time. A single test run failing across 2+ unrelated files/subsystems with different root causes
-(not "fixing one might fix the others") is exactly that skill's trigger condition. Dispatch one
-focused agent per independent failure domain, `subagent_type: general-purpose` with explicit instructions from `agents/loop-worker.md`, in parallel, each scoped to its own file/subsystem
-with an explicit "don't touch other code" constraint; integrate and re-run the full suite once
-they all report back. This is a parallelisation tactic inside one retry-until-green cycle, not a
-substitute for it — the bound is per failure (as stated above), so each independent failure domain
-gets its own 5-attempt budget, not a pool shared or split across the dispatched agents. A
-genuinely single, related failure (fixing one thing likely fixes the rest) should NOT be split
-into parallel agents. This skill excludes that case. **Use failure-domain
-fixers for separate failures.** Each fixer must write the failing test first
-and verify its result before reporting. The named loop-worker type gives
-each worker these rules at dispatch.
+Use hard-stop #1 only if the failure remains after the attempt limit. The
+limit prevents an endless cycle on a broken or incorrect test. Record each
+attempt's diagnosis through the supported graph command so the hard-stop
+report shows all attempts. Do not edit `progress.json` by hand.
 
-**Cause not obvious — use `superpowers:systematic-debugging`.** "Diagnose" above is not "try
-something plausible." If the first fix attempt doesn't make the cause clear, the second attempt
-should be preceded by an actual `superpowers:systematic-debugging` invocation rather than another ad
-hoc guess. This is distinct from Phase 5's premise-disproven check: Phase 5 asks "does this bug
-exist at all, verified against source-of-truth" *before* any fix work starts;
-`superpowers:systematic-debugging` is *how* to investigate a confirmed, reproducing failure once inside the
-retry cycle. A guessed fix that happens to pass does not excuse skipping this — it just means the
-next unrelated failure gets the same undisciplined treatment. Each `superpowers:systematic-debugging`
-invocation still counts toward the 5-attempt bound; it makes the attempts count for more, not more
-of them.
+**For independent failures, use `superpowers:dispatching-parallel-agents`.**
+If one test run finds unrelated failures in two or more files or subsystems,
+give each failure to one focused `general-purpose` agent. Give each agent the
+instructions in `agents/loop-worker.md`. Assign separate files and tell each
+agent not to change other code. Each agent must write the failing test first
+and verify its fix. Integrate the fixes and run the full suite again.
+
+Each independent failure has its own five-attempt limit. Keep related
+failures together when one fix could resolve the others.
+
+**If the cause is unclear, use `superpowers:systematic-debugging`.** If the
+first attempt does not identify the cause, invoke this skill before the second
+attempt. Phase 5 first checks that the bug exists. Systematic debugging then
+investigates the confirmed failure. Count each debugging invocation toward
+the five-attempt limit.
