@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from packages.tests.test_provider_add_unit_contract import assigned_checkout
 from packages.tests.test_provider_controller_commands import ControllerCase
 
 
@@ -18,12 +19,12 @@ class AddUnitManifestTests(ControllerCase):
         for c in self.each():
             c.start()
             self.assertEqual(c.add("1").returncode, 0)
-            result = c.add("2", "--manifest", "src/**", "--manifest", "docs/*.md")
+            worktree = assigned_checkout(c.root)
+            result = c.add("2", "--manifest", "src/**", "--manifest", "docs/*.md", "--worktree", worktree)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                c.read()["work_units"],
-                {"1": {"status": "pending"}, "2": {"status": "pending", "manifest": ["src/**", "docs/*.md"]}},
-            )
+            self.assertEqual(c.read()["work_units"]["1"], {"status": "pending"})
+            self.assertEqual(c.read()["work_units"]["2"]["manifest"], ["src/**", "docs/*.md"])
+            self.assertEqual(c.read()["work_units"]["2"]["worktree"], worktree)
 
 
 if __name__ == "__main__":

@@ -69,14 +69,18 @@ def wave_record(state: dict[str, Any], node_id: str) -> tuple[str, dict[str, Any
     )
 
 
-def add_records(proposed: dict[str, Any], base: str, mode: str, path: Path) -> None:
+def add_records(
+    proposed: dict[str, Any], base: str, mode: str, path: Path, lesson_snapshot: dict[str, Any] | None
+) -> None:
     """Store one dispatch record (contract, sections digest, single-use slot) per node of the just-opened wave."""
     graph = proposed["graph"]
     wave = graph["active_wave"]
     for node_id in wave["nodes"]:
         node = graph["nodes"][node_id]
         attempt = node["retry"]["attempts"] + node["respawn"]["generation"] + 1
-        contract = graph_contract.build_contract(proposed, node_id, base, path, ROOT / "scripts/push.py")
+        contract = graph_contract.build_contract(
+            proposed, node_id, base, path, ROOT / "scripts/push.py", lesson_snapshot
+        )
         identifier, record = graph_contract.make_record(
             proposed, node_id, wave["wave_id"], attempt, contract, mode if contract["role"] == "loop-worker" else None
         )
@@ -124,8 +128,18 @@ def plan(path: Path) -> list[dict[str, Any]]:
 def begin_wave(path: Path) -> dict[str, Any]:
     """Open exactly the core-ready wave and capture its native transcript boundary."""
     base, mode = graph_contract.base_ref(), sandbox_mode(load_config(config_path())[0])
+    preview = load(path)
+    lesson_snapshot = None
+    if any(
+        unit.get(key) for unit in preview.get("work_units", {}).values() for key in ("manifest", "worktree", "lessons")
+    ):
+        lesson_snapshot = graph_contract.current_lessons(path, ROOT / "scripts/push.py", preview["session_id"])
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
+        if lesson_snapshot is not None and any(
+            state[key] != preview[key] for key in ("session_id", "loop_id", "revision")
+        ):
+            raise graph_contract.DispatchDeniedError("dispatch_lessons_stale", "graph changed during lessons query")
         graph_contract.require_converted(state)
         for node in graph_semantics.ready(state):
             validate_dispatch_evals(path, state, node)
@@ -139,7 +153,7 @@ def begin_wave(path: Path) -> dict[str, Any]:
             "nodes": list(active["nodes"]),
             "revision": active["revision"],
         }
-        add_records(proposed, base, mode, path)
+        add_records(proposed, base, mode, path, lesson_snapshot)
         return proposed
 
     state = transition(path, update)
@@ -209,14 +223,18 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
 def authorize_dispatch(
     path: Path, session: str, prompt: str, role: str, tool_use_id: str | None = None
 ) -> dict[str, Any]:
-    """Validate the actual native Agent request against its begin-wave record, assert the role, consume the id.
-
-    Every check runs under the state lock before anything is written; a refusal leaves progress.json untouched and
-    leaves one coded trace row. `tool_use_id` (from the PreToolUse payload, unverified) makes a hook retry idempotent.
-    """
+    """Check a native Agent request under lock, consume its dispatch ID, and trace a coded refusal."""
     state = load(path)
     if state["session_id"] != session or state["status"] == "complete":
         raise ValueError("this session does not own an active loop")
+    lesson_snapshot = (
+        graph_contract.current_lessons(path, ROOT / "scripts/push.py", session)
+        if any(
+            record.get("contract", {}).get("lessons_sha256") is not None
+            for record in state["graph"].get("dispatches", {}).values()
+        )
+        else None
+    )
     role = role.strip()
     inputs = {"session": session, "role": role}
     if not role:
@@ -229,6 +247,9 @@ def authorize_dispatch(
             request = graph_contract.parse_envelope(prompt)
             record = graph_contract.check_ownership(state, request, live=True)
             graph_contract.require_publication(record, path, ROOT / "scripts/push.py")
+            graph_contract.require_source_binding(state, record)
+            if lesson_snapshot is not None:
+                graph_contract.require_current_lessons(record, lesson_snapshot)
             validate_dispatch_evals(path, state, request["node_id"], role == "coderails:loop-worker")
         except graph_contract.DispatchDeniedError as error:
             trace(path, state, "refused", error.code, inputs, [(None, None, None)], "authorize-dispatch")
@@ -254,6 +275,9 @@ def authorize_dispatch(
             named[0] = request["node_id"]
             record = graph_contract.check_dispatch(current, request, prompt, live=True)
             graph_contract.require_publication(record, path, ROOT / "scripts/push.py")
+            graph_contract.require_source_binding(current, record)
+            if lesson_snapshot is not None:
+                graph_contract.require_current_lessons(record, lesson_snapshot)
             graph_contract.assert_role(record["contract"], role, "coderails:", graph_contract.CLAUDE_TYPES)
             validate_dispatch_evals(path, current, request["node_id"], role == "coderails:loop-worker")
             used = record["authorized"]

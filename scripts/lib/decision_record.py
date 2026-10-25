@@ -11,9 +11,8 @@ Both graph CLIs call `record` with a provider transition function. The function 
 writes a `syncing` row under the graph lock. It calls Muninn outside that lock, then
 writes the result under the lock. Exit code 0 means written or disabled; 3 means
 degraded or unknown; 2 means refused. `flush_pending` retries pending and safe
-degraded rows. An ambiguous result stays `syncing` or `unknown` until a person
-reconciles the Muninn record. A citation uses the authorising prompt or an explicit
-user quote. A short or approval-only quote can cause a visible degraded result.
+degraded rows. An ambiguous result stays `syncing` or `unknown` until it is resolved.
+A citation needs a user prompt or quote. Short approval text can degrade the sync.
 """
 
 from __future__ import annotations
@@ -54,8 +53,9 @@ def row_digest(row: dict[str, Any]) -> str:
 
 def _rows(state: dict[str, Any]) -> list[Any]:
     value: Any = state.get("decisions_absorbed")
-    rows: list[Any] = list(value) if isinstance(value, list) else []  # pyright: ignore[reportUnknownArgumentType]
-    return rows
+    if "decisions_absorbed" in state and not isinstance(value, list):
+        raise ValueError("invalid_chain")
+    return list(value) if isinstance(value, list) else []  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _as_row(value: Any) -> dict[str, Any]:  # noqa: ANN401

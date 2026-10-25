@@ -189,6 +189,12 @@ def add_unit(
             given.get("base_branch"),
             given.get("worktree"),
         )
+        if manifest and not fields.get("worktree"):
+            raise ValueError("--worktree is required when a unit has a source manifest")
+        if worktree := fields.get("worktree"):
+            fields["source_manifest_sha256"] = graph_contract.source_binding(worktree, manifest or [])[
+                "source_manifest_sha256"
+            ]
     except ValueError as error:
         coded = RecoveryRefusedError("add_unit_refused_bad_field", str(error))
         raise _refused("add-unit", path, ident, coded, inputs) from error

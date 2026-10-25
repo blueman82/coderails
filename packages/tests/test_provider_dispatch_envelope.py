@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages/graph-semantics"))
 from hooks.scripts.tests.lib import claude_transcript_fixture as claude
 from packages.tests.provider_fixture import Provider
 
