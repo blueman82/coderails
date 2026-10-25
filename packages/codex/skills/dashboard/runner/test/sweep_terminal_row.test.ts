@@ -207,4 +207,29 @@ describe("runner terminal-row check after a routine child exits", () => {
     expect(rowsOf().at(-1)).toMatchObject({ run_id: ownId, outcome: "run_incomplete", reason_code: "merge_state_unknown" });
     expect(readFileSync(human(), "utf-8")).not.toContain("abort=");
   });
+
+  it.each(["unreadable", "changed"] as const)("does not mark a timeout abort when a merge attempt has a %s event log", async (logFailure) => {
+    if (logFailure === "changed") writeFileSync(jsonl(), row("previous", "run_ok"));
+    const { result } = await sweepWith((id) => {
+      writeFileSync(join(root, "run-active.state.json"), JSON.stringify({
+        run_id: id, routine: "docs-sync", merge_attempt: { number: 7 },
+      }));
+      if (logFailure === "unreadable") mkdirSync(jsonl());
+      else writeFileSync(jsonl(), row("replacement", "run_ok"));
+    }, 1, "timeout");
+    expect(result).toMatchObject({ succeeded: 0, failed: 1 });
+    expect(existsSync(human()) ? readFileSync(human(), "utf-8") : "").not.toContain("abort=");
+  });
+
+  it("does not mark a timeout abort when merge state is unreadable", async () => {
+    const { result } = await sweepWith(() => mkdirSync(join(root, "run-active.state.json")), 1, "timeout");
+    expect(result).toMatchObject({ succeeded: 0, failed: 1 });
+    expect(existsSync(human()) ? readFileSync(human(), "utf-8") : "").not.toContain("abort=");
+  });
+
+  it("keeps the timeout abort marker when there is no merge attempt", async () => {
+    const { result } = await sweepWith(() => mkdirSync(jsonl()), 1, "timeout");
+    expect(result).toMatchObject({ succeeded: 0, failed: 1 });
+    expect(readFileSync(human(), "utf-8")).toContain("abort=runner-timeout-kill");
+  });
 });
