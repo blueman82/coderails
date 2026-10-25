@@ -382,7 +382,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 ## A routine run ended incomplete, aborted or refused
 
 - Symptom: the dashboard gate for `docs-sync` or `loop-retro-promotion` reads red; the run log's last marker is
-  `abort=incomplete-run`, `abort=<code>` or `refused=<gate>`.
+  `abort=incomplete-run`, `abort=<code>`, `refused=<gate>` or `incomplete=merged`.
 - Query: the JSONL beside the run log (`run-{date}.jsonl`, `promotion-runs.jsonl`): the last row for the newest
   `run_id` gives `stage`, `outcome` (`stage_ok`, `run_ok`, `run_abort`, `run_refused`, `run_incomplete`) and
   `reason_code`. Counters: `trace.by_reason` keys `routine/<outcome>/<reason_code>`, tallied by
@@ -396,9 +396,13 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   output under the runner's runs dir and fix the cause. `begin` refuses an open run even across midnight, or a same-day
   abort/refusal. Use `begin --new` explicitly to replace it; an open previous run first gets `run_abort incomplete-run`.
   A refusal names the gate that exited non-zero or could not start (`gate_spawn_failed` on stderr). Cleanup prints
-  `cleanup_failed: <step>` when a PR, remote branch or local branch could not be removed; delete it with `gh pr close`
-  and `git push origin --delete` / `git branch -D`. `routine_unknown`/`reason_code_invalid`/`outcome_invalid` (exit 2)
+  `cleanup_failed: <step>` when a PR or local branch could not be closed; inspect the exact PR before any manual
+  cleanup. The remote branch is retained. `routine_unknown`/`reason_code_invalid`/`outcome_invalid` (exit 2)
   mean a caller used a value outside the closed lists.
+- `merged_incomplete` means GitHub confirms the pinned PR merged but the local
+  run did not finish. Do not abort it or close its PR. `merge_state_unknown`
+  means GitHub could not confirm the pinned PR and head; restore that read
+  before you retry or clean up. A changed head also remains unknown.
 - `log_unwritable` refuses advancement or terminal state: inspect both event logs and the persisted state for partial
   output from an interrupted/failed write, then repair the destination. `routine_mismatch` means the log belongs to a
   different routine; select the correct routine log. Do not finish or replace another routine's state.

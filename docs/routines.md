@@ -210,7 +210,9 @@ Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
   `scripts/` directory, directly or through the active Python interpreter.
   Same-basename files elsewhere are refused with `gate_argv_not_allowed`.
 - A nonzero gate exit becomes `run_refused` for that gate, including a command
-  that cannot spawn (`gate_spawn_failed` on stderr).
+  that cannot spawn (`gate_spawn_failed` on stderr). At the merge stage, the
+  exact PR and head are saved first. A live `MERGED` result takes precedence
+  over the merge command's exit code.
 - `abort`, `refuse` and failed checks clean up once using Git/gh: close the PR
   and delete the current local branch, never a remote or default branch. No
   `rm`. Cleanup proceeds only while still on the branch recorded at
@@ -222,6 +224,14 @@ Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
   State includes the routine name; another routine is refused with
   `routine_mismatch`. State is keyed by the log template, with paths pinned
   at begin so a run crossing midnight keeps its log.
+- The runner passes its 16-character run ID to the child as
+  `CODERAILS_ROUTINE_RUN_ID`. `begin` validates it; a manual run without it
+  generates an ID. The runner accepts terminal rows for its own ID only.
+- After a merge attempt, a failed PR fetch or changed head keeps the run red
+  and blocks cleanup. A confirmed merge cannot be aborted or cleaned up.
+  If later state is incomplete, the row is `run_incomplete merged_incomplete`
+  and the human log says `incomplete=merged`. Check that PR and its head
+  before recovery. Only `finish ok` after all stages records success.
 - State uses atomic replacement. A state flock covers load/handler/child gate/
   cleanup; the separate JSONL flock is acquired inside it, never in reverse.
 
@@ -231,8 +241,9 @@ Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
 under its log lock. Outcomes are `stage_ok`, `run_ok`, `run_abort`,
 `run_refused`, `run_incomplete`; reason codes are closed per routine. Unknown
 outcomes/codes exit 2 and append nothing. The human marker is `run=ok`,
-`abort=<code>`, `refused=<gate>`, `abort=incomplete-run` or `stage=<name>`,
-so the existing last-marker predicate is unchanged. Both files open before either
+`abort=<code>`, `refused=<gate>`, `abort=incomplete-run`,
+`incomplete=merged` or `stage=<name>`. The runner reads JSONL for a merged
+incomplete run and keeps it red. Both files open before either
 append. A failed write returns `log_unwritable` without advancing/ending state.
 The files are **not a transaction**: write/close errors or a crash can leave
 partial output. Inspect both logs and persisted state after a write error.
@@ -247,8 +258,9 @@ The runner captures the existing JSONL bytes before child launch and accepts
 only appended rows with that prefix intact. A changed prefix, read/write error,
 missing terminal, abort or refusal returns failed evidence and cannot pass via
 an old human `run=ok`. It pins the artifact date/context for that invocation.
-Among new rows it chooses the latest run id, falling back to its own id; it does
-not hand an id to the child. Fallback appends do not take the Python log lock or
+It checks only its own run ID; another child cannot make this invocation green.
+A `merged_incomplete` row stays red without a fallback abort. Fallback
+appends do not take the Python log lock or
 perform branch/PR cleanup. Concurrent producers remain an integration limit.
 An editable state/log, redirected `--log`, or manual `routine_log.py emit` can
 forge success under the same user. This is a cooperating-agent safeguard.

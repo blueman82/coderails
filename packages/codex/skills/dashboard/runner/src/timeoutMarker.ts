@@ -30,6 +30,7 @@ interface RoutineRow {
   run_id: string;
   routine: string;
   outcome: string;
+  reason_code?: string;
 }
 
 function readLog(path: string): Buffer {
@@ -78,16 +79,18 @@ export function ensureTerminalRow(
       return { passed: false, reason: "routine_log_changed: existing event log changed during invocation" };
     }
     const mine = readRows(contents.subarray(boundary.length));
-    const last = mine[mine.length - 1];
-    const runId = last ? last.run_id : ctx.runId;
-    const terminal = mine.filter((row) => row.run_id === runId && TERMINAL_OUTCOMES.has(row.outcome)).pop();
+    const own = mine.filter((row) => row.run_id === ctx.runId && row.routine === routine.name);
+    const terminal = own.filter((row) => TERMINAL_OUTCOMES.has(row.outcome)).pop();
     if (terminal) return { passed: terminal.outcome === "run_ok", reason: `routine_terminal:${terminal.outcome}` };
+    if (own.some((row) => row.outcome === "run_incomplete" && row.reason_code === "merged_incomplete")) {
+      return { passed: false, reason: "routine_merged_incomplete" };
+    }
     const ts = new Date().toISOString();
     const row = {
       v: 1,
       ts,
-      run_id: runId,
-      routine: last ? last.routine : routine.name,
+      run_id: ctx.runId,
+      routine: routine.name,
       stage: "runner",
       outcome: "run_abort",
       reason_code: "runner_exit_no_terminal",
