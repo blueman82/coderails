@@ -36,9 +36,12 @@ class DispatchGuardTests(unittest.TestCase):
             "tool_input": self.tool_input,
         }
 
-    def _run(self, authorized: bool = True, denied: bool = False, ordinary: bool = False) -> None:
+    def _run(
+        self, authorized: bool = True, denied: bool = False, ordinary: bool = False, config: Path | None = None
+    ) -> None:
         with (
             patch.object(guard, "read_input", return_value=json.dumps(self.payload)),
+            patch.object(guard, "config_path", return_value=str(config) if config else "", create=True),
             patch.object(guard, "loop_state_path", return_value=self.state),
             patch.object(guard, "graph_path", return_value=Path(guard.__file__)),
             patch.object(
@@ -72,6 +75,18 @@ class DispatchGuardTests(unittest.TestCase):
                 )
             elif not denied:
                 self.assertEqual(authority.call_count, 0)
+
+    def test_invalid_typed_config_blocks_native_worker_dispatch(self) -> None:
+        """A misspelled sandbox control cannot reach Codex's actual spawn gate."""
+        config = Path(self.scratch.name) / "workflow.config.yaml"
+        config.write_text("sandbox_workerz: true\n", encoding="utf-8")
+        self._run(denied=True, config=config)
+
+    def test_valid_default_sandbox_setting_does_not_claim_a_codex_override(self) -> None:
+        """The existing Codex API continues dispatch; its sandbox is inherited from the parent session."""
+        config = Path(self.scratch.name) / "workflow.config.yaml"
+        config.write_text("sandbox_workers: true\n", encoding="utf-8")
+        self._run(config=config)
 
     def test_roleless_dispatch_reaches_authority(self) -> None:
         """Require the existing active-wave and frozen-eval authority for role-less workers."""

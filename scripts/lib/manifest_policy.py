@@ -1,8 +1,9 @@
 """Check a diff against a declared manifest and an allow/deny policy; shared by diff_manifest.py, push.py, merge.py.
 
-`check` is pure. `gate` is the one guarded call push.py and merge.py make: it reads the opt-in config keys
-`diff_manifest` (off|advisory|enforce, default advisory) and `diff_manifest_policy` (a JSON file), then warns or
-refuses. Trace rows are non-authoritative and fail open (Codex ships no trace_row, so the import is optional).
+`check` is pure. `gate` is the one guarded call push.py and merge.py make: it reads the typed config keys
+`diff_manifest` (off|advisory|enforce, default enforce) and `diff_manifest_policy` (a JSON file), then warns or
+refuses; a config with findings refuses with config_rejected (no config file at all stays inert).
+Trace rows are non-authoritative and fail open (Codex ships no trace_row, so the import is optional).
 """
 
 from __future__ import annotations
@@ -14,7 +15,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from . import git_common as git
-from .config import config_path, config_value
+from .config import config_path
+from .config_strict import ConfigRejected, strict_settings
 
 Changes = list[tuple[str, list[str]]]
 
@@ -143,13 +145,20 @@ def diff_changes(head: str, fetch: str = "") -> Changes | None:
 
 
 def gate(pr: str = "") -> None:
-    """Opt-in additional check: no policy file or mode off does nothing; advisory warns; enforce raises.
+    """Additional check: no config, no policy file or mode off does nothing; advisory warns; enforce raises.
 
     With a PR number the diff is the PR's own head (fetched if absent); otherwise it is the local HEAD.
     """
     config = config_path()
-    mode = (config_value(config, "diff_manifest") if config else "") or "advisory"
-    policy_file = config_value(config, "diff_manifest_policy") if config else ""
+    if not config:
+        return
+    try:
+        values = strict_settings(config)
+    except ConfigRejected as error:
+        trace("config", "refused", "config_rejected")
+        print(f"! {error}")
+        raise git.WorkflowError("config_rejected") from error
+    mode, policy_file = values["diff_manifest"] or "enforce", values["diff_manifest_policy"] or ""
     if mode == "off" or not policy_file:
         return
     head = git.pr_field(pr, "headRefOid") if pr else "HEAD"

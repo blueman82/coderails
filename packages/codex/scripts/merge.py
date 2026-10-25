@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import git_common as git
 from scripts.lib import manifest_policy, merge_budget
 from scripts.lib.config import config_path, integrity_enabled, integrity_status_login
+from scripts.lib.config_strict import ConfigRejected, strict_settings
 from scripts.lib.integrity_status import verify_integrity_status
 from scripts.lib.receipt_gate import require_merge_receipt
 from scripts.lib.wiki_debt import has_wiki_ingest_for_merged_prs
@@ -52,8 +53,13 @@ def verify_gates(number: str) -> str:
     except OSError as error:
         raise git.WorkflowError("Local temporary file allocation/write failed for the smoke-verify gate") from error
     config = config_path()
-    if config and integrity_enabled(config):
-        verify_integrity_status(sha, integrity_status_login(config))
+    if config:
+        try:
+            strict_settings(config)
+        except ConfigRejected as error:
+            raise git.WorkflowError(str(error)) from error
+        if integrity_enabled(config):
+            verify_integrity_status(sha, integrity_status_login(config))
     has_wiki_ingest_for_merged_prs(number)
     return sha
 

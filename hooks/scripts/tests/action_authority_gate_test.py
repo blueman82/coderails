@@ -29,7 +29,7 @@ class GateTests(ReceiptHookCase):
         result = self.invoke("action_authority_gate", self.payload(MERGE))
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
         self.assertEqual(self.reasons(), [])
-        for value in (None, "yes", ""):
+        for value in (None, ""):
             with self.subTest(value=value):
                 self.configure(value if value is not None else "")
                 if value is None:

@@ -166,7 +166,7 @@ Query: `jq -r 'select(.outcome!="ok")|[.command,.outcome,.reason_code]|@tsv' <lo
 | `pass_exit_nonzero` | gate: eval recorded `pass` but `cmd` exits non-zero | the PASS is wrong or the build regressed; re-grade |
 | `fixture_formula_not_in_cmd` | `fixtures.formula` is not the literal tail of `cmd` | make the fixtures run the real checker text |
 
-**Signing trust boundary.** Signing detects edits made without the key. It binds the suite hash, the chain head and loop_id/session_id to the signer. It lets a different party who holds only the public key (an `allowed_signers` entry) verify. It does NOT stop a same-user agent, which can read the 0600 key and re-sign. It does NOT detect a rollback to an earlier validly-signed state (the `grading.chain_len` check is the only partial guard). Keys: `$CODERAILS_KEYS_DIR` or `~/.coderails/keys` (`evals_ed25519`, `.pub`, `allowed_signers`, all 0600, created on first sign). Config: `evals:` section, `require_signatures: true` in `.coderails/workflow.config.yaml` (default false) makes unsigned and key-less verification block. Sign rows: `command=sign` (`ok|signed`, `degraded|key_missing`); verify rows: `command=verify` (`ok|verified`, `legacy|legacy_unsigned`, `degraded|key_missing`); refusals keep the existing command names. Counters need no change: `eval_trace_counts` keys on `command|outcome|reason_code` and dedupes by `event_id`.
+**Signing trust boundary.** Signing detects edits made without the key. It binds the suite hash, the chain head and loop_id/session_id to the signer. It lets a different party who holds only the public key (an `allowed_signers` entry) verify. It does NOT stop a same-user agent, which can read the 0600 key and re-sign. It does NOT detect a rollback to an earlier validly-signed state (the `grading.chain_len` check is the only partial guard). Keys: `$CODERAILS_KEYS_DIR` or `~/.coderails/keys` (`evals_ed25519`, `.pub`, `allowed_signers`, all 0600, created on first sign). Config: `evals.require_signatures` defaults to `true` when a workflow config exists, so unsigned and key-less verification blocks. Only an explicit `false` turns it off. Sign rows: `command=sign` (`ok|signed`, `degraded|key_missing`); verify rows: `command=verify` (`ok|verified`, `legacy|legacy_unsigned`, `degraded|key_missing`); refusals keep the existing command names. Counters need no change: `eval_trace_counts` keys on `command|outcome|reason_code` and dedupes by `event_id`.
 
 Rows are deduped at write time per (evals.json sha256, command, outcome, reason_code) and the sink stops growing at 1 MiB, so hook polling does not inflate counters; `smoke-run|ok|frozen` records each freeze.
 
@@ -264,13 +264,27 @@ to `receipts` and `trust`: `authority_denied`, `approval_requirement_missing`, `
 `scripts/merge.py` all land in the same counters (`denied_`, `advisory_` and `merge_py_` prefixes are stripped).
 Baseline: none yet on a real loop. The shipped workflow sets the receipt gate to advisory. An absent setting leaves it off. Explicit `action_authority: enforce` blocks actions without a valid receipt.
 What to read: `approval_requirement_missing` above 0 means a guarded action's permit verdict omitted its approval requirement and was refused before consuming a receipt. `authority_denied` / `max_prs_exceeded` above 0 mean the authority is refusing actions it should (inspect it
-  with `authority.py inspect`); `no_receipt` can be expected in advisory mode. In enforce mode, a high `no_receipt` count means merges lack valid receipts. An unknown config value leaves the optional gate off.
+  with `authority.py inspect`); `no_receipt` can be expected in advisory mode. In enforce mode, a high `no_receipt` count means merges lack valid receipts. An invalid config value blocks a guarded action with `config_rejected`.
 Wiring `gate_summary` into `measure_graph_alignment.py` itself is a handoff to the lane that owns that file; until then
 the stdin CLI above is the supported route.
+
+## Strict typed config and wiki fail-closed (measurement note)
+
+Guarded actions read `.coderails/workflow.config.yaml` through `strict_settings` and deny with `config_rejected`
+(trace `action_authority/denied/config_rejected`, `diff-manifest/refused/config_rejected`,
+`wiki_taxonomy_gate/failed_closed/config_rejected`). Once the vault is positively identified, a missing or invalid
+`wiki.schema.json` also denies (`wiki_taxonomy_gate/failed_closed/wiki_schema_missing|wiki_schema_invalid`). Safety
+controls default ON in `config.schema.json`: `sandbox_workers`, `evals.require_signatures`, and
+`diff_manifest` (the latter remains inactive until a policy path is configured). `action_authority` defaults to `off`;
+the shipped config sets it to `advisory`, so routine PR work needs no signing passphrase. The receipt CLI is shipped for both
+providers in this stack. Limits: no config file keeps non-action config consumers inert; `dispatch_mode` is computed in
+`plan()` and consumed in Phase 3c; the srt probe checks `npx` and `gh` on PATH, not whether runtime sandbox startup works.
 
 **Reproduce.**
 
 ```
 python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py
 PYTHONPATH=. python3 -m unittest hooks/scripts/tests/authority_permits_test.py
+python3 scripts/lib/config_counters.py
+python3 hooks/scripts/tests/config_strict_test.py && python3 hooks/scripts/tests/wiki_taxonomy_gate_test.py
 ```

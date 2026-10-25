@@ -195,15 +195,18 @@ class HookTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
 
     def test_off_and_advisory(self) -> None:
-        """No config, off, and invalid values are silent; advisory warns but does not deny."""
+        """No config and off are silent; invalid config denies; advisory warns."""
         self.assertFalse(self.denied(MERGE))  # no config at all
-        self.configure("bogus")
-        self.assertFalse(self.denied(MERGE))
-        self.assertEqual(self.reasons(), [])
         self.configure("off")
         result = self.run_hook(MERGE)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
         self.assertEqual(self.reasons(), [])
+        self.configure("bogus")
+        rejected = self.run_hook(MERGE)
+        self.assertEqual(rejected.returncode, 0, rejected.stderr)
+        self.assertEqual(json.loads(rejected.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("config_rejected", rejected.stdout)
+        self.assertEqual(self.reasons(), ["config_bad_value", "config_rejected"])
         self.configure("advisory")
         result = self.run_hook(MERGE)
         self.assertEqual((result.stdout, "advisory" in result.stderr), ("", True))

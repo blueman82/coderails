@@ -725,36 +725,41 @@ Trash; it never silently overwrites user values.
 `config.schema.json` (repo root, mirrored at `packages/codex/config.schema.json`) is the source of truth for
 `.coderails/workflow.config.yaml`. `load_config(path)` in `scripts/lib/config.py` applies the defaults, coerces
 types and returns reason-coded findings (`config_unknown_key` with a did-you-mean hint, `config_bad_type`,
-`config_unreadable`); findings are non-authoritative trace rows plus one stderr line and never change a gate's
-decision. `python3 scripts/lib/config.py resolve-config --json` prints
+`config_unreadable`). Guarded actions reject an invalid config; other readers report findings. The parser supports
+the documented one-level mapping, nested fields, and scalar forms. It is a bounded grammar, not full YAML 1.2.
+Quote a number or Boolean word when a string value is required. `python3 scripts/lib/config.py resolve-config --json` prints
 `{path, values, defaults_applied, unknown_keys, findings}`; plain `resolve-config` is unchanged. Status says who
 reads a key: `enforced_by_code`, `read_by_prose_only` (skills and commands read it from the resolve-config text,
 no script does) or `unused`. Regenerate the table with `python3 scripts/lib/config_schema_docs.py --write`.
 
 <!-- config-schema:start -->
-| Key | Type | Default | Status | Description |
-|---|---|---|---|---|
-| `project` | string/null | `null` | read_by_prose_only | Project name written by /coderails:init; read by command prose only. |
-| `wiki_path` | string/null | `null` | enforced_by_code | LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate. |
-| `wiki_supervision` | string/null | `"discuss"` | read_by_prose_only | wiki-ingest mode: discuss (pause before writing) or autonomous. |
-| `wiki_git_worktree` | boolean/null | `true` | read_by_prose_only | true = PR flow for wiki commits; false = commit directly to the vault. |
-| `wiki_git_bypass_flag` | string/null | `null` | read_by_prose_only | Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1. |
-| `wiki_git_pull_path` | string/null | `null` | read_by_prose_only | Source repo pulled after a wiki PR merges. |
-| `wiki_debt_epoch_pr` | integer | `null` | enforced_by_code | First PR number the wiki-ingest debt merge gate covers; absent or empty disables the gate. A literal null is rejected as a bad type, as before. |
-| `worktree_base` | string/null | `null` | read_by_prose_only | Parent directory for sibling worktrees. |
-| `worktree_script` | string/null | `null` | read_by_prose_only | Project script that creates a worktree. |
-| `jira` | object/null | `null` | read_by_prose_only | Jira settings (project, epic, component_name, component_id, epic_field, points_field, fix_version, mcp_namespace, transitions). Nested keys are not type-checked. |
-| `engineering_principles_paths` | array/null | `null` | read_by_prose_only | Glob patterns that trigger the engineering-principles pre-flight in /coderails:push. |
-| `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
-| `sandbox_workers` | boolean/null | `false` | read_by_prose_only | true = agentic-loop dispatches implementation workers as OS-sandboxed processes. No script reads it; the orchestrator reads it from the resolve-config text (skills/agentic-loop/SKILL.md). |
-| `action_authority` | string/null | `"off"` | enforced_by_code | Absent or unknown settings leave this optional gate off. The shipped workflow sets advisory: missing receipts warn while a live session authority still blocks denied actions and merges that cannot be bound to its budget. Enforce requires a signed receipt for merges and pushes to main or master. |
-| `integrity_review` | object/null | `null` | enforced_by_code | Integrity attestation settings. |
-| `integrity_review.enabled` | boolean/null | `false` | enforced_by_code | true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live. |
-| `integrity_review.machine_user` | string/null | `null` | enforced_by_code | Deprecated. A non-empty legacy login remains the required local status author until enabled is true. |
-| `evals` | object/null | `null` | enforced_by_code | Eval settings. |
-| `evals.require_signatures` | boolean/null | `false` | enforced_by_code | true = eval artifacts must be signed; refuse when signing is impossible. |
-| `memory` | object/null | `null` | enforced_by_code | Typed-memory settings. |
-| `memory.backend` | string/null | `"muninn"` | enforced_by_code | muninn (default) = Muninn is the authoritative typed-memory store and a missing or refusing Muninn fails with a reason code; off = no typed memory at all (reason memory_backend_off, traced, Markdown is never read or written). Any other value fails with memory_backend_invalid. |
+| Key | Type | Default | Control ON value | Status | Description |
+|---|---|---|---|---|---|
+| `project` | string/null | `null` | - | read_by_prose_only | Project name written by /coderails:init; read by command prose only. |
+| `wiki_path` | string/null | `null` | - | enforced_by_code | LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate. |
+| `wiki_stale_days` | integer | `30` | - | read_by_prose_only | Page age in days before wiki-lint considers staleness; age alone does not mark a page stale. |
+| `wiki_supervision` | string/null | `"discuss"` | - | read_by_prose_only | wiki-ingest mode: discuss (pause before writing) or autonomous. |
+| `wiki_git_worktree` | boolean/null | `true` | - | read_by_prose_only | true = PR flow for wiki commits; false = commit directly to the vault. |
+| `wiki_git_bypass_flag` | string/null | `null` | - | read_by_prose_only | Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1. |
+| `wiki_git_pull_path` | string/null | `null` | - | read_by_prose_only | Source repo pulled after a wiki PR merges. |
+| `wiki_debt_epoch_pr` | integer | `null` | - | enforced_by_code | First PR number the wiki-ingest debt merge gate covers. An absent key disables the gate; an empty or null value is invalid. |
+| `worktree_base` | string/null | `null` | - | read_by_prose_only | Parent directory for sibling worktrees. |
+| `worktree_script` | string/null | `null` | - | read_by_prose_only | Project script that creates a worktree. |
+| `jira` | object/null | `null` | - | read_by_prose_only | Jira settings (project, epic, component_name, component_id, epic_field, points_field, fix_version, mcp_namespace, transitions). Nested keys are not type-checked. |
+| `engineering_principles_paths` | array/null | `null` | - | read_by_prose_only | Glob patterns that trigger the engineering-principles pre-flight in /coderails:push. |
+| `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | - | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
+| `sandbox_workers` | boolean/null | `true` | `true` | enforced_by_code | Default ON. Claude graph_dispatch.plan() reports sandboxed or in-process-fallback:<reason> for U3 nodes, and the Claude worker launcher consumes that mode. Codex native workers inherit the parent session sandbox; this setting does not configure or prove per-worker Codex containment. |
+| `subagent_identity_gate` | string | `"on"` | `"on"` | enforced_by_code | on (default) denies an untyped Bash subagent in a graph-bound Claude session; off disables that hook. |
+| `action_authority` | string/null | `"off"` | `"advisory"` | enforced_by_code | Absent = off; the shipped workflow uses advisory. Explicit enforce requires a signed receipt for guarded merges and pushes. Invalid values are rejected by strict config consumers. |
+| `diff_manifest` | string/null | `"enforce"` | `"enforce"` | enforced_by_code | off \| advisory \| enforce, read by scripts/push.py and scripts/merge.py. Default enforce but inert until diff_manifest_policy names a policy file (the default policy is a Phase 4 deliverable). |
+| `diff_manifest_policy` | string/null | `null` | - | enforced_by_code | Path to the diff-manifest policy JSON; null or absent = the diff check is inactive. |
+| `integrity_review` | object/null | `null` | - | enforced_by_code | Integrity attestation settings. |
+| `integrity_review.enabled` | boolean/null | `false` | - | enforced_by_code | true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live. |
+| `integrity_review.machine_user` | string/null | `null` | - | enforced_by_code | Deprecated. A non-empty legacy login remains the required local status author until enabled is true. |
+| `evals` | object/null | `{"require_signatures": true}` | - | enforced_by_code | Eval settings. |
+| `evals.require_signatures` | boolean/null | `true` | `true` | enforced_by_code | true (default) = eval artifacts must be signed; the local key is created on first use, and signing refuses when ssh-keygen is unavailable. false opts out. |
+| `memory` | object/null | `null` | - | enforced_by_code | Typed-memory settings. |
+| `memory.backend` | string/null | `"muninn"` | - | enforced_by_code | muninn (default) = Muninn is the authoritative typed-memory store and a missing or refusing Muninn fails with a reason code; off = no typed memory at all (reason memory_backend_off, traced, Markdown is never read or written). Any other value fails with memory_backend_invalid. |
 <!-- config-schema:end -->
 
 ## Scripts and Libraries

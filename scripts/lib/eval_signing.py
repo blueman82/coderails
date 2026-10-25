@@ -43,7 +43,7 @@ def keys_dir() -> Path:
 
 
 def required() -> bool:
-    """True when workflow.config.yaml sets evals.require_signatures: true (default false)."""
+    """True for a configured project unless evals.require_signatures is explicitly false."""
     return require_signatures(config_path())
 
 

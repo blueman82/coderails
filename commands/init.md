@@ -72,7 +72,7 @@ engineering_principles_paths:
   - "**/container.py"
 # or: engineering_principles_paths: null
 engineering_principles_skill: "/engineering-principles-python"   # nil = skip engineering-principles entirely; /engineering-principles-go, /engineering-principles-ts, /engineering-principles-bash also supported
-sandbox_workers: false   # true = agentic-loop dispatches implementation-unit workers via @anthropic-ai/sandbox-runtime (OS write containment); requires node/npx, macOS or Linux/WSL2
+sandbox_workers: true    # default ON; requires npx and a supported OS for contained worker dispatch
 action_authority: advisory  # shipped setting: warn without a receipt; omitted means off; enforce requires a signed receipt
 integrity_review:
   enabled: false   # Turn on local status checks after the GitHub Actions ruleset is live

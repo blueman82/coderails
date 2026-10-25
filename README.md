@@ -214,16 +214,17 @@ Compact metrics and expiry records persist separately. Emitted bytes do not esta
 
 ## Sandboxed workers
 
-With `config.sandbox_workers: true` (`.coderails/workflow.config.yaml`; status `read_by_prose_only`: the agentic-loop skill reads it from the resolve-config text and no script does), the
-agentic-loop dispatches implementation-unit workers via
-`@anthropic-ai/sandbox-runtime` (`scripts/sandbox/spawn_sandboxed_worker.py`),
-an OS-enforced filesystem containment layer (Seatbelt on macOS, bubblewrap on
-Linux) that restricts writes to an explicit per-worker allowlist — the
-worktree, per-worker scratch, the primary repo's `.git` (with its `hooks` and
-`config` subpaths denied), the per-user `$TMPDIR`, and a narrowed slice of
-Claude Code's own `~/.claude` config state (a named residual — worker
-containment excludes claude-home) — never the orchestrator, which is
-unaffected. Requires `node`/`npx`, macOS or Linux/WSL2.
+With `config.sandbox_workers: true` (`.coderails/workflow.config.yaml`), Claude
+implementation workers run through `scripts/sandbox/spawn_sandboxed_worker.py`
+and pinned `@anthropic-ai/sandbox-runtime`, using Seatbelt on macOS or
+bubblewrap on Linux. The launcher applies the provider's filesystem policy;
+the orchestrator is unaffected. It requires `node`/`npx`, macOS or Linux/WSL2.
+
+Codex graph workers use native `spawn_agent` and inherit the parent session's
+sandbox, permissions, and MCP servers. A custom agent TOML cannot override the
+parent sandbox. The Codex hook receives no effective-sandbox field, so
+`sandbox_workers` does not configure or prove per-worker Codex containment;
+that depends on the parent Codex session configuration.
 
 ## Requirements
 
@@ -233,7 +234,7 @@ unaffected. Requires `node`/`npx`, macOS or Linux/WSL2.
 - For `/push` / `/merge`: a **GitHub**-hosted repo with an authenticated `gh` CLI (`gh auth login`) — the workflow uses `gh`, so non-GitHub remotes (GitLab/Bitbucket/Gitea) are not supported.
 - `pr-review-toolkit@claude-plugins-official` for the review stage of `/workflow`
 - `superpowers@claude-plugins-official` for dev-workflow skills (planning, TDD, debugging, code review, worktrees)
-- For sandboxed workers (opt-in): `node`/`npx`, macOS or Linux/WSL2
+- For Claude sandboxed workers: `node`/`npx`, macOS or Linux/WSL2
 
 ## Uninstall Claude
 

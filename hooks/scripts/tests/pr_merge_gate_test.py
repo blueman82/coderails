@@ -42,8 +42,10 @@ class MergeEvidenceTests(HookTestCase):
             [{**valid, "state": "failure"}, valid],
             "malformed",
         ]
+        config = self.directory / "workflow.config.yaml"
+        config.write_text("integrity_review:\n  enabled: true\n")
         with (
-            patch(MODULE + ".config_path", return_value="config"),
+            patch(MODULE + ".config_path", return_value=config),
             patch(MODULE + ".integrity_enabled", return_value=True),
             patch(MODULE + ".repo", return_value="owner/repo"),
         ):

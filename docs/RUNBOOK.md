@@ -23,13 +23,36 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 - Symptom: a configured gate (wiki taxonomy, wiki-debt, integrity, eval signing) does nothing, or a config key seems ignored.
 - Query: `python3 scripts/lib/config.py resolve-config --json | jq .unknown_keys` (also `.findings`); counts via
-  `python3 scripts/lib/config_counters.py` for `config_unknown_key`, `config_bad_type`, `config_unreadable`,
+  `python3 scripts/lib/config_counters.py` for `config_unknown_key`, `config_bad_type`, `config_bad_value`, `config_unreadable`,
   `wiki_schema_missing`, `wiki_schema_invalid`, `wiki_schema_legacy` (scope with `--since 2026-10-05T00:00:00`; the same rows
-  also appear in `measure_graph_alignment.py --json` under `trace.by_reason`; trace rows: `config/warned/<code>`, `wiki_taxonomy_gate/failed_open/<code>`).
-- Remediation: fix the key (the finding carries a did-you-mean hint) or the value type; for `wiki_schema_*` restore or
-  repair `wiki.schema.json` (`page_types` non-empty list of directory names). Both are fail-open by design: findings never
-  change a gate's decision, and a stale AGENTS.md Page types table fails the build (`config_docs_drift_test.py`), not the hook. `wiki_schema_legacy` means a vault still has only
-  `AGENTS-wiki-schema.md`: policing continues from its Page types table; add `wiki.schema.json` to retire the fallback.
+  also appear in `measure_graph_alignment.py --json` under `trace.by_reason`; trace rows: `config/warned/<code>`, `wiki_taxonomy_gate/failed_closed/<code>`).
+- Remediation: fix the key (the finding carries a did-you-mean hint) or the value; `resolve-config --json` prints
+  `valid:false` and exits 1 while any finding remains. Reading is non-authoritative for ordinary gates (they warn and
+  trace), but the guarded actions below fail closed. `wiki_schema_legacy` identifies an older vault record. The wiki
+  gate requires `wiki.schema.json`; restore that file to allow writes in an identified vault.
+
+## Guarded action denied: config_rejected or wiki schema fail-closed
+
+- Symptom: `gh pr merge` or `git push` to main (action-authority hook), `push.py`/`merge.py` (diff-manifest check) or a
+  write inside the wiki vault is denied with `config_rejected` ("did you mean ..."), `wiki_schema_missing` or
+  `wiki_schema_invalid`.
+- Query: trace rows `action_authority/denied/config_rejected`, `diff-manifest/refused/config_rejected`,
+  `wiki_taxonomy_gate/failed_closed/<config_rejected|wiki_schema_missing|wiki_schema_invalid>`; counts via
+  `python3 scripts/lib/config_counters.py` (`config_rejected`, `config_bad_value`, `wiki_schema_fail_closed`).
+- Remediation: run `python3 scripts/lib/config.py resolve-config --json`, fix each finding (typo'd key, wrong type, value
+  outside the enum), or restore `wiki.schema.json` (`page_types` non-empty list of directory names). Only the guarded
+  action is denied; every other command and tool passes. With NO config file nothing is read and every gate stays inert
+  (repos not using coderails), and an ambiguous wiki identity (no `wiki_path`, other repository, vault not a directory)
+  still allows.
+- Limit: the controls are only as strong as the config file. A same-user agent can `mv` it away (every gate goes inert)
+  or edit a control to `off` in place; no hook guards `.coderails/workflow.config.yaml`. Review config diffs like code
+  (the diff-manifest policy can list it as a protected path). `evals.require_signatures` fails closed: only an
+  explicit `false` turns it off. Malformed lines and duplicate keys are `config_unparseable_line` /
+  `config_duplicate_key` findings.
+- Defaults: an existing config with no other keys enables `sandbox_workers: true`,
+  `evals.require_signatures: true`, and `diff_manifest: enforce` (inert until `diff_manifest_policy` names a file).
+  `action_authority` defaults to `off`. The shipped config sets it to `advisory`, which warns about missing receipts
+  without a passphrase. Set `enforce` only when signed receipts are required.
 
 ## Discipline lint advisories climbing
 

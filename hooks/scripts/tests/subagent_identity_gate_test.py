@@ -108,6 +108,27 @@ class SubagentIdentityGateTests(HookCase):
                 config.write_text(line)
                 self.assertEqual(self.denied(HOOK, body), expect)
 
+    def test_invalid_config_cannot_turn_off_graph_identity_gate(self) -> None:
+        """An unknown key beside off is rejected before an untyped graph Bash can run."""
+        import subprocess
+
+        repo = self.directory / "invalid-repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+        (repo / ".coderails").mkdir()
+        config = repo / ".coderails/workflow.config.yaml"
+        body = request(agent_id="a1") | {"cwd": str(repo)}
+        with patch.dict(os.environ, {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}):
+            path = resolve_path(str(repo), SESSION)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"session_id": SESSION, "graph": {"nodes": {}}}))
+        for source in ("subagent_identity_gate: off\nunknown_key: true\n", "subagent_identity_gate: off\n$$$\n"):
+            with self.subTest(source=source):
+                config.write_text(source)
+                out = self.output(HOOK, body)
+                self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+                self.assertIn("config_rejected", out["hookSpecificOutput"]["permissionDecisionReason"])
+
     def test_malformed_payload_does_not_crash(self) -> None:
         """A non-object or garbage payload exits 0 with no decision (the harness treats a crash as allow anyway)."""
         for raw in ("", "not json", "[]"):

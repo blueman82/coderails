@@ -62,46 +62,115 @@ def config_value(path: str | Path, key: str, section: str = "") -> str:
         prefix = r"\s+" if section else ""
         match = re.match(prefix + re.escape(key) + r":\s*(.*)$", line)
         if active and match:
-            return match[1].split("#", 1)[0].strip().strip("\"'")
+            return _without_comment(match[1]).strip().strip("\"'")
     return ""
 
 
 SCHEMA_PATH = Path(__file__).resolve().parents[2] / "config.schema.json"
 KEY_LINE = re.compile(r"(\s*)([A-Za-z_][\w-]*):[ \t]*(.*)")
 NULLS = frozenset({"null", "~"})
+NUMERIC_SCALAR = re.compile(
+    r"[-+]?(?:0[xX][0-9a-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|(?:[0-9][0-9_]*(?:\.[0-9_]*)?|\.[0-9_]+)(?:[eE][-+]?[0-9_]+)?)"
+)
+
+
+def _without_comment(value: str) -> str:
+    """Remove a YAML comment while keeping hashes in quoted or attached scalars."""
+    quote = ""
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if quote == '"' and char == "\\":
+            index += 2
+            continue
+        if quote == "'" and char == "'" and value[index : index + 2] == "''":
+            index += 2
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "\"'" and not value[:index].strip():
+            quote = char
+        elif char == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index].rstrip()
+        index += 1
+    return value
+
+
+def _scalar(value: str) -> dict[str, Any]:
+    """Keep quote marks as type evidence while removing the enclosing pair."""
+    raw = _without_comment(value).strip()
+    quoted = len(raw) >= 2 and raw[0] in "\"'" and raw[-1] == raw[0]
+    return {"raw": raw[1:-1] if quoted else raw, "quoted": quoted}
 
 
 def _schema() -> dict[str, Any]:
-    """Return the schema; on any failure an empty one, so every key stays a raw (still readable) unknown."""
+    """Read the typed-config schema or report that typed resolution is unavailable."""
     try:
-        data = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-        return cast("dict[str, Any]", data) if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+        data: Any = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError("config_schema_unreadable") from error
+    if not isinstance(data, dict):
+        raise ValueError("config_schema_unreadable")
+    schema = cast("dict[str, Any]", data)
+    if not isinstance(schema.get("properties"), dict):
+        raise ValueError("config_schema_unreadable")
+    return schema
 
 
-def _entries(text: str) -> dict[str, dict[str, Any]]:
-    """Parse the single-level grammar plus one nested level: {key: {raw, items, children}}."""
+def _entries(text: str, findings: list[dict[str, str]] | None = None) -> dict[str, dict[str, Any]]:
+    """Parse the single-level grammar plus one nested level: {key: {raw, items, children}}.
+
+    A line that fits no branch or repeats a key at its level is reported (config_unparseable_line,
+    config_duplicate_key; key "line N") so malformed syntax cannot silently drop a setting.
+    """
+    found = findings if findings is not None else []
     top: dict[str, dict[str, Any]] = {}
     current: dict[str, Any] | None = None
+    current_top = ""
     indent = None
-    for line in text.splitlines():
+
+    def flag(code: str, key: str) -> None:
+        found.append({"code": code, "key": key, "hint": ""})
+
+    for number, line in enumerate(text.splitlines(), 1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
+        where = f"line {number}"
+        match = KEY_LINE.fullmatch(line)
         if not line[0].isspace():
-            match = KEY_LINE.fullmatch(line)
             current = {"raw": "", "items": [], "children": {}} if match else None
+            current_top = match[2] if match else ""
             indent = None
             if match and current is not None:
-                current["raw"] = match[3].split("#", 1)[0].strip().strip("\"'")
+                current.update(_scalar(match[3]))
+                if match[2] in top:
+                    flag("config_duplicate_key", match[2])
                 top[match[2]] = current
+            else:
+                flag("config_unparseable_line", where)
         elif current is not None and stripped.startswith("- "):
-            current["items"].append(stripped[2:].split("#", 1)[0].strip().strip("\"'"))
-        elif current is not None and (match := KEY_LINE.fullmatch(line)):
+            if current["raw"] or current.get("quoted") or current["children"]:
+                flag("config_unparseable_line", where)
+                continue
+            current["items"].append(_without_comment(stripped[2:]).strip().strip("\"'"))
+        elif current is not None and match:
+            if current["raw"] or current.get("quoted") or current["items"]:
+                flag("config_unparseable_line", where)
+                continue
             indent = len(match[1]) if indent is None else indent
-            if len(match[1]) == indent:
-                current["children"][match[2]] = {"raw": match[3].split("#", 1)[0].strip().strip("\"'")}
+            kids = cast("list[dict[str, Any]]", list(current["children"].values()))
+            if len(match[1]) > indent and current_top == "jira" and kids and kids[-1]["raw"] == "":
+                continue  # Jira's nested mapping is deliberately untyped.
+            if len(match[1]) != indent:
+                flag("config_unparseable_line", where)
+            else:
+                if match[2] in current["children"]:
+                    flag("config_duplicate_key", f"{match[2]} ({where})")
+                current["children"][match[2]] = _scalar(match[3])
+        else:
+            flag("config_unparseable_line", where)
     return top
 
 
@@ -113,16 +182,19 @@ def _coerce(entry: dict[str, Any], spec: dict[str, Any]) -> tuple[Any, bool]:
         return {key: child["raw"] for key, child in entry["children"].items()}, True
     if entry.get("items") and "array" in types:
         return list(entry["items"]), True
+    if entry.get("quoted"):
+        return raw, "string" in types
     if raw == "":
-        return None, not (entry.get("items") or entry.get("children"))
+        return None, "null" in types and not (entry.get("items") or entry.get("children"))
     if raw in NULLS:
         return (None, True) if "null" in types else (raw, False)
-    if "boolean" in types and raw.lower() in ("true", "false"):
-        return raw.lower() == "true", True
-    if "integer" in types and re.fullmatch(r"[0-9]+", raw):
-        return int(raw), True
-    if "array" in types and raw.startswith("[") and raw.endswith("]"):
-        return [item.strip().strip("\"'") for item in raw[1:-1].split(",") if item.strip()], True
+    if raw.lower() in ("true", "false"):
+        return (raw.lower() == "true", True) if "boolean" in types else (raw, False)
+    if NUMERIC_SCALAR.fullmatch(raw):
+        return (int(raw), True) if "integer" in types and re.fullmatch(r"-?[0-9]+", raw) else (raw, False)
+    if raw.startswith("[") and raw.endswith("]"):
+        items = [item.strip().strip("\"'") for item in raw[1:-1].split(",") if item.strip()]
+        return (items, True) if "array" in types else (raw, False)
     return raw, "string" in types
 
 
@@ -145,11 +217,12 @@ def _typed(
             values[key] = entry["raw"]
             continue
         value, ok = _coerce(entry, spec)
-        if not ok:
-            findings.append({"code": "config_bad_type", "key": prefix + key, "hint": "/".join(spec["type"])})
+        if not ok or (isinstance(value, str) and value not in spec.get("enum", [value])):
+            code = "config_bad_value" if ok else "config_bad_type"
+            hint = _hint(value, dict.fromkeys(spec["enum"])) if ok else "/".join(spec["type"])
+            findings.append({"code": code, "key": prefix + key, "hint": hint})
         elif isinstance(value, dict) and spec.get("properties"):
-            nested = cast("dict[str, Any]", value)
-            value = _typed({k: {"raw": v} for k, v in nested.items()}, spec["properties"], prefix + key + ".", findings)
+            value = _typed(entry["children"], spec["properties"], prefix + key + ".", findings)
         values[key] = value
     for key, spec in properties.items():
         if key not in values:
@@ -159,15 +232,21 @@ def _typed(
 
 def load_config(path: str | Path) -> tuple[dict[str, Any], list[dict[str, str]]]:
     """Parse path against config.schema.json: (typed values with defaults, reason-coded findings). Never raises."""
-    properties: dict[str, Any] = _schema().get("properties", {})
     findings: list[dict[str, str]] = []
+    properties: dict[str, Any]
+    try:
+        properties = cast("dict[str, Any]", _schema()["properties"])
+    except (OSError, ValueError, KeyError, TypeError):
+        properties = {}
+        findings.append({"code": "config_schema_unreadable", "key": "", "hint": ""})
     text = ""
     if path:
         try:
             text = Path(path).read_text(encoding="utf-8")
         except (OSError, ValueError):
             findings.append({"code": "config_unreadable", "key": "", "hint": ""})
-    return _typed(_entries(text), properties, "", findings), findings
+    entries = _entries(text, findings)
+    return _typed(entries, properties, "", findings), findings
 
 
 def _append_row(code: str, key: str, session: str) -> None:
@@ -238,16 +317,6 @@ def wiki_page_types(path: str | Path) -> tuple[list[str], str]:
     return [str(n) for n in names], ""
 
 
-def legacy_page_types(path: str | Path) -> list[str]:
-    """Top-level dirs from the '## Page types' section of a pre-wiki.schema.json AGENTS-wiki-schema.md, else []."""
-    try:
-        sections = re.split(r"(?m)^## ", Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    section = next((part for part in sections if part.startswith("Page types\n")), "")
-    return [name[:-1] for name in re.findall(r"`([A-Za-z0-9_-]+/)`", section)]
-
-
 def _section(path: str | Path, key: str) -> dict[str, Any]:
     """One typed nested section of the config at path, or {}."""
     value = settings(path).get(key)
@@ -255,10 +324,13 @@ def _section(path: str | Path, key: str) -> dict[str, Any]:
 
 
 def integrity_enabled(path: str | Path) -> bool:
-    """Keep legacy machine-user gates active until explicit config migration."""
-    settings = _section(path, "integrity_review")
+    """Keep integrity checks on for invalid config and legacy machine-user settings."""
+    values, findings = load_config(path)
+    report_findings(findings)
+    section = values.get("integrity_review")
+    settings = cast("dict[str, Any]", section) if isinstance(section, dict) else {}
     legacy = settings.get("machine_user")
-    return settings.get("enabled") is True or (isinstance(legacy, str) and bool(legacy))
+    return bool(findings) or settings.get("enabled") is True or (isinstance(legacy, str) and bool(legacy))
 
 
 def integrity_status_login(path: str | Path) -> str:
@@ -271,8 +343,14 @@ def integrity_status_login(path: str | Path) -> str:
 
 
 def require_signatures(path: str | Path) -> bool:
-    """True when evals.require_signatures is true."""
-    return str(_section(path, "evals").get("require_signatures")).lower() == "true"
+    """True unless evals.require_signatures is explicitly false (a config with findings stays ON; no path = inert)."""
+    if not path:
+        return False
+    values, findings = load_config(path)
+    report_findings(findings)
+    # An explicit false is the only OFF; null, a bad type or a rejected config keep signing ON (fail closed).
+    evals = cast("dict[str, Any]", values.get("evals") or {})
+    return bool(findings) or evals.get("require_signatures") is not False
 
 
 def resolve_config_json(start_dir: str | Path | None = None) -> dict[str, Any]:
@@ -282,13 +360,18 @@ def resolve_config_json(start_dir: str | Path | None = None) -> dict[str, Any]:
     present: set[str] = set()
     with contextlib.suppress(OSError):
         present = set(_entries(Path(path).read_text(encoding="utf-8", errors="replace"))) if path else present
-    properties = _schema().get("properties", {})
+    properties: dict[str, Any]
+    try:
+        properties = cast("dict[str, Any]", _schema()["properties"])
+    except (OSError, ValueError, KeyError, TypeError):
+        properties = {}
     return {
         "path": path,
         "values": values,
         "defaults_applied": sorted(set(properties) - present),
         "unknown_keys": [f["key"] for f in findings if f["code"] == "config_unknown_key"],
         "findings": findings,
+        "valid": not findings,
     }
 
 
@@ -300,8 +383,9 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="resolve-config: print the typed view as JSON")
     args = parser.parse_args()
     if args.json and args.operation == "resolve-config":
-        print(json.dumps(resolve_config_json(args.start_dir), indent=2, sort_keys=True))
-        return 0
+        data = resolve_config_json(args.start_dir)
+        print(json.dumps(data, indent=2, sort_keys=True))
+        return 0 if data["valid"] else 1
     result = config_path(args.start_dir) if args.operation == "config-path" else resolve_config(args.start_dir)
     print(result, end="" if result.endswith("\n") else "\n")
     return 0

@@ -35,6 +35,8 @@ from scripts.lib import advisory_merge, merge_budget
 from scripts.lib.action_binding import binding, merge_number
 from scripts.lib.action_receipt import proposed_action
 from scripts.lib.authority_object import read_authority
+from scripts.lib.config import config_path
+from scripts.lib.config_strict import ConfigRejected, strict_settings
 from scripts.lib.receipt_gate import check_and_consume, resolve_mode
 from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
@@ -90,7 +92,21 @@ def main() -> int:
             return 0
         cwd = str(payload.get("cwd") or os.getcwd())
         mode_, _ = resolve_mode(cwd)
-        if mode_ == "off" or not (segments := guarded_segments(command, cwd, implicit_push=True)):
+        if not (segments := guarded_segments(command, cwd, implicit_push=True)):
+            return 0
+        config = config_path(cwd)
+        if config:
+            try:
+                strict_settings(config, trace_id)
+            except ConfigRejected as error:
+                append_row("action_authority", "denied", "config_rejected", trace_id, None)
+                deny(
+                    f"Blocked: {segments[0][0].replace('_', ' ')} while the workflow config is invalid. {error}. "
+                    "Fix .coderails/workflow.config.yaml (scripts/lib/config.py resolve-config --json lists "
+                    "the findings)."
+                )
+                return 0
+        if mode_ == "off":
             return 0
         authority = read_authority(session)
         loop_id = authority["loop_id"] if authority else None

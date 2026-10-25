@@ -19,6 +19,9 @@ from hook_common import (
     text_field,
 )
 
+from scripts.lib.config import config_path
+from scripts.lib.config_strict import ConfigRejected, strict_settings
+
 TASK_NAME = re.compile(r"loop_worker_[0-9a-f]+_[0-9a-f]+(?:_a(?:[2-9]|[1-9][0-9]+))?$")
 
 
@@ -62,6 +65,13 @@ def main() -> int:
     if not session_id or not cwd:
         deny("Graph worker dispatch requires a session id and working directory.")
         return 0
+    config = config_path(cwd)
+    if config:
+        try:
+            strict_settings(config, session_id)
+        except ConfigRejected as error:
+            deny(f"Graph worker dispatch requires valid workflow configuration: {error}")
+            return 0
     state = loop_state_path(cwd, session_id)
     if state is None:
         deny("Graph worker dispatch could not resolve this session's progress.json.")
