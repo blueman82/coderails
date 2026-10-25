@@ -86,17 +86,16 @@ def python_checks(files: list[Path], root: Path, config: Path) -> bool:
 
 
 def check_materialization(root: Path) -> bool:
-    """Require generated provider copies of every shared graph module to equal their maintained source."""
+    """Require generated provider semantic copies to equal their maintained source."""
     passed = True
     for source_relative, targets in SEMANTIC_TARGETS:
         source = root / source_relative
-        if not source.is_file():
-            continue
-        for relative in targets:
-            copy = root / relative
-            if not copy.is_file() or copy.read_bytes() != source.read_bytes():
-                print(f"quality: generated graph semantics drift: {copy}", file=sys.stderr)
-                passed = False
+        if source.is_file():
+            for relative in targets:
+                copy = root / relative
+                if not copy.is_file() or copy.read_bytes() != source.read_bytes():
+                    print(f"quality: generated graph module drift: {copy}", file=sys.stderr)
+                    passed = False
     output_source = root / "hooks/scripts/test_output.py"
     output_copy = root / "packages/codex/hooks/scripts/test_output.py"
     if output_source.is_file() and (

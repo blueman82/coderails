@@ -8,19 +8,31 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 from .graph_evidence import child_identity, notifications, records, spawns, transcript, validate_child_terminal
 from .graph_evidence_bind import bind_wave
 from .graph_executor import graph_semantics, load, transition
+from .graph_summary import budget_spent
+from .graph_summary import summarize as summarize
 
 TRACE_NAME = "recovery-trace.jsonl"
 NODE_CODES = {"dispatch": "no_spawn_dispatch", "record": "worker_finished_record", "waiting": "worker_waiting"}
+
+
+class CollectionRecord(TypedDict):
+    """Validated index entry describing one graph and its outgoing graph links."""
+
+    key: str
+    path: str
+    loop_id: str
+    links: list[str]
 
 
 class RecoveryRefusedError(ValueError):
@@ -86,11 +98,6 @@ def _refuse(
     rows: Rows = [(n, _attempt(state, n), None) for n in error.nodes if n in state["graph"]["nodes"]]
     trace(path, state, "refused", error.reason_code, inputs, rows)
     return error
-
-
-def _spent(node: dict[str, Any]) -> bool:
-    """True when the node's respawn generation has reached its retry max."""
-    return bool(node["respawn"]["generation"] >= node["retry"]["max"])
 
 
 def _row_state(session: str, row: dict[str, Any], path: Path, notices: dict[str, Any], now: float, lease: int) -> str:
@@ -217,7 +224,7 @@ def recover_wave(
             moved = tuple(n for n, action in current.items() if action != "stalled")
             if moved:
                 raise RecoveryRefusedError("mixed_wave", "wave changed before recovery could be recorded", moved)
-            spent = tuple(n for n in current if _spent(locked["graph"]["nodes"][n]))
+            spent = tuple(n for n in current if budget_spent(locked["graph"]["nodes"][n]))
             if spent:
                 message = "recovery budget exhausted: waiting for human"
                 raise RecoveryRefusedError("recovery_budget_exhausted", message, spent)
@@ -237,40 +244,120 @@ def recover_wave(
     return report
 
 
-def summarize(state: dict[str, Any]) -> dict[str, Any]:
-    """Plain-language status from graph state alone: done, active, ready, blocked and the human dependency."""
-    graph = state["graph"]
-    statuses = {node_id: node["status"] for node_id, node in graph["nodes"].items()}
-    pending = sorted(n for n, s in statuses.items() if s not in {"done", "skipped"})
-    ready = [] if graph["active_wave"] or graph["hard_stop"] else graph_semantics.ready(state)
-    decisions = cast(list[dict[str, Any]], state.get("worker_statuses") or [])
-    awaiting = [row for row in decisions if row.get("decision_pending") is True]
-    if graph["hard_stop"] is not None:
-        phase, detail = (
-            "waiting for human",
-            f"hard stop on {graph['hard_stop']['node']}: {graph['hard_stop']['reason']}",
-        )
-    elif graph["active_wave"] is not None:
-        phase, detail = "waiting for worker", f"wave {graph['active_wave']['wave_id']} dispatched"
-        spent = [n for n in graph["active_wave"]["nodes"] if _spent(graph["nodes"][n])]
-        if spent:
-            detail += f"; recovery budget exhausted for {', '.join(spent)}: recover-wave will refuse, a human decides"
-    elif ready:
-        phase, detail = "ready to dispatch", "begin-wave then spawn the ready nodes"
-    elif awaiting:
-        phase = "waiting for human"
-        detail = "; ".join(
-            f"{row['node']} {row['status']}: run record-decision --worker-status-seq {row['seq']}" for row in awaiting
-        )
-    elif not pending:
-        phase, detail = "ready to complete", "run verify-completion"
-    else:
-        phase, detail = "waiting for evidence", "no node is ready; check pending dependencies"
-    return {
-        "phase": phase,
-        "detail": detail,
-        "done": sorted(n for n in statuses if n not in pending),
-        "active": list(graph["active_wave"]["nodes"]) if graph["active_wave"] else [],
-        "ready": ready,
-        "pending": pending,
-    }
+def _unique_collection_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous JSON object fields in a collection index."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate collection field {key!r}")
+        result[key] = value
+    return result
+
+
+def _collection_paths(root: Path) -> Iterator[Path]:
+    """Find graph files, refusing directory links and incomplete traversal."""
+
+    def walk_error(error: OSError) -> None:
+        raise ValueError(f"cannot inspect collection directory: {error}") from error
+
+    for directory, dirs, files in os.walk(root, onerror=walk_error):
+        if any((Path(directory) / name).is_symlink() for name in dirs):
+            raise ValueError(f"symlinked collection directory: {directory}")
+        if "progress.json" in files:
+            yield Path(directory) / "progress.json"
+
+
+def collection(root: Path) -> dict[str, Any]:
+    """List validated graph states beneath a directory without changing them."""
+    root = root.resolve()
+    if not root.is_dir():
+        raise ValueError("graph collection root must be a directory")
+    graphs_by_path: dict[str, dict[str, Any]] = {}
+    for path in sorted(_collection_paths(root)):
+        if path.is_symlink() or not path.resolve().is_relative_to(root):
+            raise ValueError(f"graph state escapes collection root: {path}")
+        state = load(path)
+        graph = state["graph"]
+        node_names = graph_semantics.node_names(graph["nodes"])
+        relative = path.relative_to(root).as_posix()
+        if state["loop_id"] in {item["loop_id"] for item in graphs_by_path.values()}:
+            raise ValueError(f"duplicate graph loop_id {state['loop_id']!r}; collection keys must be unambiguous")
+        graphs_by_path[relative] = {
+            "key": state["loop_id"],
+            "path": relative,
+            "loop_id": state["loop_id"],
+            "session_id": state["session_id"],
+            "revision": state["revision"],
+            "status": state["status"],
+            "nodes": [
+                {
+                    "id": node_id,
+                    "name": node_names[node_id]["job_name"],
+                    "lane_code": node_names[node_id]["lane_code"],
+                    "status": node["status"],
+                }
+                for node_id, node in sorted(graph["nodes"].items())
+            ],
+            "links": [],
+        }
+    index_path = root / "collection.json"
+    if index_path.is_symlink() or not index_path.resolve().is_relative_to(root):
+        raise ValueError("collection index escapes collection root")
+    if index_path.exists():
+        try:
+            raw_index: object = json.loads(
+                index_path.read_text(encoding="utf-8"), object_pairs_hook=_unique_collection_fields
+            )
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(f"invalid collection index {index_path}: {error}") from error
+        if not isinstance(raw_index, dict):
+            raise ValueError("collection index must contain schema_version 1 and a graphs array")
+        index = cast(dict[str, Any], raw_index)
+        if (
+            type(index.get("schema_version")) is not int
+            or index["schema_version"] != 1
+            or not isinstance(index.get("graphs"), list)
+        ):
+            raise ValueError("collection index must contain schema_version 1 and a graphs array")
+        by_key: dict[str, CollectionRecord] = {}
+        by_path: dict[str, CollectionRecord] = {}
+        for raw_record in cast(list[Any], index["graphs"]):
+            if not isinstance(raw_record, dict):
+                raise ValueError("each collection graph must be an object")
+            entry = cast(dict[str, object], raw_record)
+            if not all(field in entry for field in ("key", "path", "loop_id", "links")):
+                raise ValueError("each collection graph needs nonblank key, path, loop_id and string links")
+            key_value = entry["key"]
+            path_value = entry["path"]
+            loop_id_value = entry["loop_id"]
+            links = entry["links"]
+            if not all(isinstance(value, str) and value for value in (key_value, path_value, loop_id_value)):
+                raise ValueError("each collection graph needs nonblank key, path, loop_id and string links")
+            if not isinstance(links, list):
+                raise ValueError("each collection graph needs nonblank key, path, loop_id and string links")
+            link_values = cast(list[object], links)
+            for raw_target in link_values:
+                if not isinstance(raw_target, str) or not raw_target:
+                    raise ValueError("each collection graph needs nonblank key, path, loop_id and string links")
+            key, record_path, loop_id = cast(str, key_value), cast(str, path_value), cast(str, loop_id_value)
+            targets = cast(list[str], links)
+            if key in by_key:
+                raise ValueError(f"duplicate graph key {key!r}")
+            if record_path in by_path:
+                raise ValueError(f"duplicate graph path {record_path!r}")
+            if record_path not in graphs_by_path or graphs_by_path[record_path]["loop_id"] != loop_id:
+                raise ValueError(f"collection record {key!r} does not match a discovered graph at {record_path!r}")
+            registered: CollectionRecord = {"key": key, "path": record_path, "loop_id": loop_id, "links": targets}
+            by_key[key], by_path[record_path] = registered, registered
+        if set(by_path) != set(graphs_by_path):
+            missing = sorted(set(graphs_by_path) - set(by_path))
+            raise ValueError(f"collection index omits discovered graph path(s): {', '.join(missing)}")
+        for key, record in by_key.items():
+            if len(record["links"]) != len(set(record["links"])):
+                raise ValueError(f"duplicate graph link on {key!r}")
+            for target in record["links"]:
+                if target not in by_key:
+                    raise ValueError(f"unknown graph link target {target!r} from {key!r}")
+            graph = graphs_by_path[record["path"]]
+            graph["key"], graph["links"] = key, list(record["links"])
+    return {"graphs": [graphs_by_path[path] for path in sorted(graphs_by_path)], "unresolved_targets": []}

@@ -26,6 +26,7 @@ sys.path.insert(0, str(REPO))
 from scripts import codex_role_session as crs  # noqa: E402
 
 SHELL_TOOLS = {"exec_command", "write_stdin"}
+GUARDED = ("deploy-safety-reviewer", "design-scout", "disposition-scout", "preflight-scout", "source-auditor")
 
 
 class ResponsesFixture:
@@ -127,6 +128,7 @@ class CodexRoleSessionLiveTest(unittest.TestCase):
         self.assertNotIn("SHELL_RAN", fixture.outputs())
         self.assertTrue(any(n.endswith("cmd_run") for n in names), names)
         self.assertTrue(any(n.endswith("tests_run") for n in names), names)
+        self.assertIn("You are a citation auditor", json.dumps(fixture.bodies[0]))
 
     def test_negative_control_without_the_switch_the_shell_runs(self) -> None:
         """The same argv minus features.shell_tool=false offers the shell and the command executes."""
@@ -142,6 +144,21 @@ class CodexRoleSessionLiveTest(unittest.TestCase):
         mcp = [n for n in fixture.tool_names() if "cap" in n and ("inspect" in n or "diff" in n or "run" in n)]
         self.assertTrue(any("repo_inspect" in n for n in mcp), fixture.tool_names())
         self.assertFalse([n for n in mcp if "tests_run" in n or "cmd_run" in n], mcp)
+
+    def test_guarded_roles_have_no_nested_agent_tool(self) -> None:
+        """Every guarded role keeps its MCP server and cannot spawn another agent."""
+        for role in GUARDED:
+            with self.subTest(role=role):
+                names = self.run_session(crs.build_argv(role, REPO)).tool_names()
+                self.assertFalse([name for name in names if "spawn_agent" in name], names)
+                self.assertTrue(any("repo_inspect" in name for name in names), names)
+
+    def test_removing_nested_agent_switch_restores_spawn_tool(self) -> None:
+        """The new switch, rather than the fixture, removes the spawn tool."""
+        argv = crs.build_argv("design-scout", REPO)
+        at = argv.index("features.multi_agent=false")
+        names = self.run_session(argv[: at - 1] + argv[at + 1 :]).tool_names()
+        self.assertTrue(any("spawn_agent" in name for name in names), names)
 
 
 if __name__ == "__main__":

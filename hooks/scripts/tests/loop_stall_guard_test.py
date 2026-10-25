@@ -188,6 +188,16 @@ class StallGuardTests(HookTestCase):
         self.arm(path, self.stop(2, "awaiting-input", at=2.0e9 + 2.0e9))
         self.assertEqual(self.run_hook("loop_stall_guard", self.payload(trace)).returncode, 0)
 
+    def test_timestamp_less_new_user_prompt_cannot_release_old_row(self) -> None:
+        """A prompt with no timestamp makes the turn boundary unknown and blocks an older stop."""
+        path = self.progress(stops=[self.stop(1, "awaiting-input", at=2.0e9)])
+        trace = self.stopped("")
+        later = {"type": "user", "message": {"content": "continue"}}
+        trace.write_text(trace.read_text() + json.dumps(later) + "\n")
+        result = self.run_hook("loop_stall_guard", self.payload(trace))
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(json.loads(path.read_text())["stops"][0]["consumed"])
+
     @staticmethod
     def stop(seq: int, category: str, revision: int = 1, consumed: bool = False, at: float = 1.0e9) -> dict[str, Any]:
         """Build one recorded stop row exactly as graph.py stop writes it."""
@@ -273,7 +283,11 @@ class StallGuardTests(HookTestCase):
         final = trace.read_text().splitlines()[-1]
         for command in ("/agentic-loop", "/coderails:agentic-loop", "/coderails:agentic-loop   "):
             content = f"<command-name>/coderails:prep</command-name>\n<command-name>{command}</command-name>"
-            trace.write_text(json.dumps({"type": "user", "message": {"content": content}}) + "\n42\n{torn\n" + final)
+            trace.write_text(
+                json.dumps({"type": "user", "timestamp": "2000-01-01T00:00:00Z", "message": {"content": content}})
+                + "\n42\n{torn\n"
+                + final
+            )
             self.assertEqual(count_invocations(str(trace))[0], 1)
             self.assertEqual(self.run_hook("loop_stall_guard", self.payload(trace)).returncode, 0)
         self.assertEqual(json.loads(path.read_text())["loop_stop_counts"]["hard-stop"], 3)

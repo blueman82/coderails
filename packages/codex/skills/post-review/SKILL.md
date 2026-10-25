@@ -13,11 +13,11 @@ Require an explicitly supplied PR number. Inspect it before using it in any comm
 
 ## Native Codex review evidence
 
-Resolve the PR's current `headRefOid`, then use `spawn_agent` to run the relevant installed Codex custom reviewer agents against that exact PR head. Wait for every reviewer. Use only their observed findings; never invent or silently omit a finding.
+Resolve the PR's current `headRefOid`. Run guarded reviewers through `python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role <role> --prompt-file <file> --cwd <exact-head-worktree>` per [guarded role sessions](../using-coderails/references/guarded-role-sessions.md); use `spawn_agent` for other installed Codex custom reviewers. Wait for every reviewer. Use only their observed findings; never invent or silently omit a finding.
 
 Stop without posting when:
 
-- no spawned Codex custom reviewer completed successfully;
+- no Codex reviewer completed successfully;
 - any reviewer result is missing or ambiguous;
 - the PR head changes before posting; or
 - findings were fixed after the review, making the review stale. Review the new head first.

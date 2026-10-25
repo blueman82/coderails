@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Require a recorded loop stop row and validate completion evidence before release; final text is never read."""
+"""Require an explicit loop stop and validate completion evidence before release."""
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import sys
-from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
@@ -29,6 +27,7 @@ from hooks.scripts.lib.loop_state_common import (
     stable_invocations,
     stop_in_this_turn,
 )
+from hooks.scripts.lib.stall_notice import marker_name, record_notice, seen, status_notice
 from hooks.scripts.lib.trace_row import append_row
 
 
@@ -47,36 +46,37 @@ def graph_unresolved(state: LoopState) -> bool:
     )
 
 
-def emit_human_request(state: LoopState) -> None:
-    """Deduplicate the unresolved graph notice without weakening its blocking gate."""
-    loop = str(state.data.get("loop_id") or "")
-    revision = state.data.get("revision")
-    if not loop or not isinstance(revision, int) or isinstance(revision, bool):
-        return
-    safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", loop)
-    marker = state.path.parent / f".human-approval-{safe}-{revision}"
-    message = json.dumps(
-        {
-            "systemMessage": "Human approval required: the native graph is unresolved. Approve the next action "
-            "or resume the loop; stopping remains blocked until the graph is complete."
-        }
+def emit_human_request(state: LoopState) -> str:
+    """Emit the deduplicated unresolved-graph notice; return the status text for the model-facing stderr."""
+    name = marker_name(state.data, state.session)
+    base = (
+        "Human approval required: the native graph is unresolved. Approve the next action "
+        "or resume the loop; stopping remains blocked until the graph is complete."
     )
-    created = False
+    if name is None:
+        log(f"hook=loop_stall_guard session={state.session} human_request=no_marker_key")
+        try:
+            print(json.dumps({"systemMessage": base}))
+            sys.stdout.flush()
+        except (OSError, ValueError) as error:
+            raise ValueError("could not emit the required human request; retry stopping") from error
+        return ""
+    if seen(state.path, name):
+        return ""
+    graph_cli = Path(__file__).resolve().parents[2] / "skills/agentic-loop/scripts/graph.py"
+    status = status_notice(graph_cli, state.path, state.session, log)  # never raises
     try:
-        marker.mkdir()
-        created = True
-    except FileExistsError:
-        if marker.is_dir():
-            return
-    except OSError:
-        log(f"hook=loop_stall_guard session={state.session} human_request=dedupe_write_failed")
-    try:
-        print(message)
+        print(json.dumps({"systemMessage": f"{base}\n{status}"}))
+        sys.stdout.flush()  # the marker must not outlive an undelivered notice
     except (OSError, ValueError) as error:
-        if created:
-            with suppress(OSError):
-                marker.rmdir()
         raise ValueError("could not emit the required human request; retry stopping") from error
+    record_notice(state.path, state.session, name, log)  # only after the notice is out
+    return status
+
+
+def blocked_message(status: str) -> str:
+    """Stop-block reason; carries the status line and dispatch hint, since the model sees only stderr."""
+    return "Native graph unresolved; stopping remains blocked." + (f"\n{status}" if status else "")
 
 
 def complete(state: LoopState, transcript: str) -> list[str]:
@@ -102,7 +102,7 @@ def complete(state: LoopState, transcript: str) -> list[str]:
 
 
 def trace_missing_row(state: LoopState, session: str) -> None:
-    """Count a block that had no recorded stop to consume; never fabricate loop state for a loop that has none."""
+    """Count a block with no recorded stop; do not create missing loop state."""
     if state.path.is_file():
         append_row(
             "loop_stall_guard", "blocked", "stop_row_missing", session, str(state.data.get("loop_id") or "") or None
@@ -123,28 +123,41 @@ def main() -> int:
     if unstubbed_grace(state, "loop_stall_guard"):
         return 0
     recorded = recorded_stop(state.data)
-    loop_id = str(state.data.get("loop_id") or "") or None
-    if recorded and not stop_in_this_turn(transcript, recorded):  # a row from an earlier turn is stale, never a release
+    if recorded and not stop_in_this_turn(transcript, recorded):
         if state.path.is_file():
-            append_row("loop_stall_guard", "fallback", "stale_stop_row", session, loop_id)
+            append_row(
+                "loop_stall_guard", "fallback", "stale_stop_row", session, str(state.data.get("loop_id") or "") or None
+            )
         recorded = None
     category = str(recorded["category"]) if recorded else ""
     try:
         if recorded:
+            if not state.owned:
+                raise ValueError("Recorded stop belongs to another session; stopping remains blocked.")
             if category == "complete" and graph_unresolved(state):
-                emit_human_request(state)
-                raise ValueError("Native graph unresolved; stopping remains blocked.")
+                raise ValueError(blocked_message(emit_human_request(state)))
             messages = complete(state, transcript) if category == "complete" else []
-
             seq = recorded["seq"]
 
             def increment(data: dict[str, Any]) -> dict[str, Any]:
+                current = LoopState(state.path, session, count, data)
+                if not current.owned:
+                    raise ValueError("Recorded stop belongs to another session; stopping remains blocked.")
+                identity = ("schema_version", "session_id", "loop_id", "revision")
+                if any(data.get(key) != state.data.get(key) for key in identity):
+                    raise ValueError("Recorded stop belongs to an earlier graph state; stopping remains blocked.")
+                if recorded_stop(data) != recorded:
+                    raise ValueError("Recorded stop changed before consumption; stopping remains blocked.")
+                if category == "complete":
+                    if graph_unresolved(current):
+                        raise ValueError("Native graph unresolved; stopping remains blocked.")
+                    complete(current, transcript)
                 counters = data.setdefault("loop_stop_counts", {})
                 if not isinstance(counters, dict):
                     raise ValueError("loop_stop_counts must be an object")
                 counters = cast(dict[str, Any], counters)
                 counters[category] = counters.get(category, 0) + 1
-                consume_stop(data, seq)  # same write as the count, so a repeated Stop cannot double-count
+                consume_stop(data, seq)
                 return data
 
             if not atomic_progress_update(state.path, increment):
@@ -157,8 +170,7 @@ def main() -> int:
         if state.complete:
             return 0
         if graph_unresolved(state):
-            emit_human_request(state)
-            raise ValueError("Native graph unresolved; stopping remains blocked.")
+            raise ValueError(blocked_message(emit_human_request(state)))
     except ValueError as error:
         if not recorded:
             trace_missing_row(state, session)
@@ -179,4 +191,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("loop_stall_guard", main))

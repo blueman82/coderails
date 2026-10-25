@@ -20,6 +20,7 @@ from graph_identity import (
     REFUSED_OUTCOME,
     GraphError,
     classify_worker_evidence,
+    is_contract_wave,
     is_legacy_task_name,
     new_evidence_writes_enabled,
     next_attempt,
@@ -70,9 +71,7 @@ def _verify_dispatch(
     state: dict[str, Any], node_id: str, attempt: int, wave_id: str, call_id: str, requests: Requests
 ) -> None:
     """Recheck the native message and consumed v2 record for a contract-era Codex spawn."""
-    start = state["graph"].get("contract_from_revision")
-    wave = re.fullmatch(r"wave-([1-9][0-9]*)", wave_id)
-    if type(start) is not int or not wave or int(wave.group(1)) < start:
+    if not is_contract_wave(state, wave_id):
         return
     calls = requests.get(call_id, [])
     if len(calls) != 1 or not isinstance(calls[0], dict):
@@ -111,7 +110,7 @@ def _verify_dispatch(
         )
 
 
-def _verify_reference(
+def verify_reference(
     state: dict[str, Any],
     node_id: str,
     reference: dict[str, Any],
@@ -119,6 +118,7 @@ def _verify_reference(
     refusals: Refusals,
     requests: Requests,
 ) -> int:
+    """Validate one stored native transcript reference and return its spawn line."""
     spawns = indexes
     expected_task = task_name(state["loop_id"], node_id, reference["attempt"])
     call_id = reference["spawn_call_id"]
@@ -167,41 +167,6 @@ def _verify_reference(
     return spawn_line
 
 
-def bind_invalid_dispatch(state: dict[str, Any], node_id: str) -> dict[str, Any]:
-    """Bind one completed native spawn whose issued dispatch lacks a plaintext envelope."""
-    active = state["graph"]["active_wave"]
-    if active is None or active["nodes"] != [node_id]:
-        raise GraphError("invalid dispatch recovery requires a single-node active wave")
-    parent = read_records(thread_transcript(state["session_id"]), "parent transcript")
-    indexes, refusals = parent_indexes(parent), refused_launches(parent)
-    requests = native_dispatch_requests(parent)
-    attempt = next_attempt(state["graph"]["nodes"][node_id])
-    expected = task_name(state["loop_id"], node_id, attempt)
-    matches = [
-        (call, rows[0])
-        for call, rows in indexes.items()
-        if len(rows) == 1 and rows[0][0] > active["transcript_cursor"] and rows[0][1] == expected
-    ]
-    if len(matches) != 1 or any(
-        line > active["transcript_cursor"] and task == expected for line, task in refusals.values()
-    ):
-        raise GraphError("invalid dispatch recovery requires one unique native spawn")
-    call, (_, _, child, nickname, path, role) = matches[0]
-    terminal = child_terminal(state["session_id"], child, nickname, path, role)
-    reference = {
-        "kind": "codex_agent",
-        "attempt": attempt,
-        "wave_id": active["wave_id"],
-        "spawn_call_id": call,
-        "agent_thread_id": child,
-        "task_complete_turn_id": terminal,
-        "outcome": INVALID_DISPATCH_OUTCOME,
-    }
-    _verify_reference(state, node_id, reference, indexes, refusals, requests)
-    _stored_references(state, False, {call, child, terminal})
-    return reference
-
-
 def _validate_missing_attempts(
     state: dict[str, Any],
     node_id: str,
@@ -213,10 +178,11 @@ def _validate_missing_attempts(
     used: set[str],
 ) -> None:
     completed = {reference["attempt"]: reference for reference, _ in references}
+    contract_start = state["graph"].get("contract_from_revision")
     previous_line = 0
     for attempt in range(1, maximum + 1):
         if attempt in completed:
-            line = _verify_reference(state, node_id, completed[attempt], indexes, refusals, requests)
+            line = verify_reference(state, node_id, completed[attempt], indexes, refusals, requests)
         else:
             expected = task_name(state["loop_id"], node_id, attempt)
             matches = [
@@ -238,10 +204,39 @@ def _validate_missing_attempts(
             if len(issued) > 1:
                 raise GraphError(f"node {node_id} stale attempt has ambiguous dispatch records")
             if not issued:
-                raise graph_contract.DispatchDeniedError(
-                    "dispatch_missing_envelope", "stale attempt has no stored wave revision"
-                )
-            _verify_dispatch(state, node_id, attempt, issued[0]["wave_id"], call, requests)
+                later_waves = [
+                    (reference["attempt"], reference["wave_id"])
+                    for reference, _ in references
+                    if reference["attempt"] > attempt
+                ]
+                active = state["graph"].get("active_wave")
+                if isinstance(active, dict):
+                    active_wave = cast(dict[str, Any], active)
+                    if node_id in cast(list[str], active_wave.get("nodes", [])):
+                        later_waves.append(
+                            (next_attempt(state["graph"]["nodes"][node_id]), cast(str, active_wave["wave_id"]))
+                        )
+                upper_bounds = [
+                    int(match.group(1)) - 2 * (later_attempt - attempt)
+                    for later_attempt, wave_id in later_waves
+                    if (match := re.fullmatch(r"wave-([1-9][0-9]*)", wave_id))
+                ]
+                if not later_waves:
+                    upper_bounds.append(state["revision"] - (2 if active is not None else 1))
+                native_calls = requests.get(call, [])
+                native_request = native_calls[0] if len(native_calls) == 1 else None
+                if (
+                    type(contract_start) is not int
+                    or not upper_bounds
+                    or min(upper_bounds) >= contract_start
+                    or not isinstance(native_request, dict)
+                    or native_request.get("task_name") != expected
+                ):
+                    raise graph_contract.DispatchDeniedError(
+                        "dispatch_missing_envelope", "stale attempt has no stored wave revision"
+                    )
+            else:
+                _verify_dispatch(state, node_id, attempt, issued[0]["wave_id"], call, requests)
             child_read_records(state["session_id"], child, nickname, path, role)
             used.update({call, child})
         if line <= previous_line:
@@ -249,9 +244,10 @@ def _validate_missing_attempts(
         previous_line = line
 
 
-def _stored_references(
+def stored_references(
     state: dict[str, Any], require_complete: bool, known_identifiers: set[str] | None = None
 ) -> set[str]:
+    """Validate all saved worker references and return their used native identities."""
     parent = read_records(thread_transcript(state["session_id"]), "parent transcript")
     indexes, refusals = parent_indexes(parent), refused_launches(parent)
     requests = native_dispatch_requests(parent)
@@ -280,9 +276,10 @@ def _stored_references(
         ):
             raise GraphError(f"node {node_id} transcript attempts do not match its graph state")
         if node["status"] in {"done", "skipped"} and any(
-            item[0].get("outcome") == REFUSED_OUTCOME and item[0]["attempt"] == maximum for item in references
+            item[0].get("outcome") in {REFUSED_OUTCOME, INVALID_DISPATCH_OUTCOME} and item[0]["attempt"] == maximum
+            for item in references
         ):
-            raise GraphError(f"node {node_id} completed attempt cannot rest on a refused launch")
+            raise GraphError(f"node {node_id} completed attempt cannot rest on an invalid dispatch or refused launch")
         if require_complete and node["status"] not in {"done", "skipped"}:
             raise GraphError(f"node {node_id} has no completed transcript-backed attempt")
         previous_line = previous_wave = 0
@@ -296,7 +293,7 @@ def _stored_references(
             if used & identifiers:
                 raise GraphError(f"node {node_id} reuses transcript evidence")
             used.update(identifiers)
-            spawn_line = _verify_reference(state, node_id, reference, indexes, refusals, requests)
+            spawn_line = verify_reference(state, node_id, reference, indexes, refusals, requests)
             if spawn_line <= previous_line:
                 raise GraphError(f"node {node_id} transcript attempts are stale or out of order")
             previous_line = spawn_line
@@ -358,7 +355,7 @@ def bind_worker_evidence(
             }
             if call_id in used:
                 raise GraphError(f"node {node_id} reuses transcript evidence")
-            _verify_reference(state, node_id, reference, indexes, refusals, requests)
+            verify_reference(state, node_id, reference, indexes, refusals, requests)
             used.add(call_id)
             references[node_id] = reference
             continue
@@ -381,18 +378,19 @@ def bind_worker_evidence(
         request = next(iter(requests.get(call_id, ())), None)
         message = request.get("message") if isinstance(request, dict) else None
         if isinstance(message, str) and not message.startswith(graph_contract.ENVELOPE_KEY + "="):
-            if not new_evidence_writes_enabled():
+            if new_evidence_writes_enabled():
+                reference["message_sha256"] = hashlib.sha256(message.encode()).hexdigest()
+            elif not message.startswith("CODERAILS_GRAPH_TASK=") or is_contract_wave(state, active_wave["wave_id"]):
                 raise GraphError("set CODERAILS_A6_EVIDENCE_WRITE=on after reader verification")
-            reference["message_sha256"] = hashlib.sha256(message.encode()).hexdigest()
         identifiers = {call_id, agent_thread_id, terminal}
         if used & identifiers:
             raise GraphError(f"node {node_id} reuses transcript evidence")
-        _verify_reference(state, node_id, reference, indexes, refusals, requests)
+        verify_reference(state, node_id, reference, indexes, refusals, requests)
         used.update(identifiers)
         references[node_id] = reference
-    return references, _stored_references(state, False, used)
+    return references, stored_references(state, False, used)
 
 
 def validate_worker_evidence(state: dict[str, Any], require_complete: bool = True) -> None:
-    """Validate stored native evidence, requiring all nodes complete only at completion."""
-    _stored_references(state, require_complete)
+    """Validate native evidence; permit pending nodes only at driver cutover."""
+    stored_references(state, require_complete)

@@ -9,38 +9,16 @@ from graphlib import CycleError, TopologicalSorter
 from typing import Any, NoReturn, cast
 
 import graph_driver_mode
-from graph_vocab import decision_pending
+from graph_vocab import decision_pending, decision_sync_pending
+from node_metadata import LABELS
+from node_metadata import describe_node as _describe_node
+from node_metadata import node_names as _node_names
+
+__all__ = ["LABELS", "GraphSemanticError", "describe_node", "inspect", "node_names"]
 
 STATUSES = frozenset({"pending", "ready", "running", "blocked", "done", "skipped", "failed", "hard-stop", "stale"})
 SUCCESS = frozenset({"done", "skipped"})
 PERSISTED_STATUSES = STATUSES - {"failed"}
-LABELS = {
-    "S-2": "Initialize loop state",
-    "S-1": "Improve prompt",
-    "S0": "Read authorization envelope",
-    "S0.4": "Record model cost",
-    "S0.5": "Apply operating rules",
-    "S1": "Plan work",
-    "S2": "Run preflight",
-    "S2.5": "Resolve design fork",
-    "S2.6": "Choose disposition",
-    "J2": "Preflight decisions joined",
-    "S2.7a": "Write specification",
-    "S2.7b": "Write implementation plan",
-    "S2.7c": "Freeze loop evals",
-    "S2.7e": "Freeze proof plan",
-    "S2.8": "Assign model roles",
-    "J2.8": "Implementation ready",
-    "J12-all-units": "All units joined",
-    "G10": "Guard replacement worker",
-    "G11": "Check confidence labels",
-    "G12": "Fresh artifact check",
-    "S9-wiki": "Update wiki",
-    "S9-docs": "Sync docs",
-    "S13-proof": "Run frozen proofs",
-    "S13-retro": "Write loop retrospective",
-    "S13-complete": "Complete loop",
-}
 
 
 class GraphSemanticError(ValueError):
@@ -102,6 +80,16 @@ def _label_for(node_id: str) -> str:
         "10-respawn": "Respawn unit",
     }[match.group(1)]
     return f"{action} {match.group(2)}"
+
+
+def describe_node(node_id: str) -> dict[str, str | None]:
+    """Describe one registered node and keep its machine ID."""
+    return _describe_node(node_id, _label_for)
+
+
+def node_names(nodes: object) -> dict[str, dict[str, str | None]]:
+    """Describe graph nodes without changing the stored state."""
+    return _node_names(_object(nodes, "graph.nodes"), _label_for)
 
 
 def _validate_node(node_id: str, value: object) -> dict[str, Any]:
@@ -248,6 +236,8 @@ def ready(state: object) -> list[str]:
     graph = root["graph"]
     if graph["active_wave"] is not None or graph["hard_stop"] is not None:
         return []
+    if decision_sync_pending(root):
+        return []
     dependencies = _dependencies(graph)
     return sorted(
         node_id
@@ -342,6 +332,8 @@ def respawn_stale(state: object, node_id: object, reason: object) -> dict[str, A
     reason_text = _text(reason, "reason")
     if node_key not in graph["nodes"] or graph["nodes"][node_key]["status"] != "stale":
         _error("respawn", "respawn requires a stale node")
+    if decision_sync_pending(root):
+        _error("decision_pending", "cannot retry while decision sync is pending")
     if decision_pending(root, node_key):
         _error("decision_pending", "cannot retry a node with a pending worker decision")
     node = graph["nodes"][node_key]
@@ -380,6 +372,7 @@ def inspect(state: object) -> dict[str, Any]:
     graph = root["graph"]
     return {
         "revision": root["revision"],
+        "node_names": node_names(graph["nodes"]),
         "active_wave": copy.deepcopy(graph["active_wave"]),
         "running": sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] == "running"),
         "ready": ready(root),
@@ -392,9 +385,7 @@ def can_complete(state: object) -> dict[str, Any]:
     graph = validate(state)["graph"]
     blockers = [key for key in ("active_wave", "hard_stop") if graph[key] is not None]
     unfinished = sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] not in SUCCESS)
-    if unfinished:
-        blockers.append("unfinished:" + ",".join(unfinished))
+    blockers += ["unfinished:" + ",".join(unfinished)] if unfinished else []
     unreleased = sorted(join_id for join_id, join in graph["joins"].items() if not join["released"])
-    if unreleased:
-        blockers.append("unreleased:" + ",".join(unreleased))
+    blockers += ["unreleased:" + ",".join(unreleased)] if unreleased else []
     return {"eligible": not blockers, "blockers": blockers}

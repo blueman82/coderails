@@ -9,11 +9,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loop/scripts"))
+import graph as claude_graph
 import graph_convert
 
 from hooks.scripts.tests.lib import claude_transcript_fixture as claude
@@ -203,10 +206,37 @@ class GraphConvertTests(unittest.TestCase):
             self.assertIn("active_wave_ambiguous", result.stderr)
             self.assertEqual(case.path.read_bytes(), before)
             self.assertFalse(case.backup.exists())
+            unhashable = copy.deepcopy(in_flight)
+            unhashable["graph"]["active_wave"]["wave_id"] = []
+            case.write(unhashable)
+            before = case.path.read_bytes()
+            result = case.graph("convert", "--check")
+            self.assertNotEqual(result.returncode, 0, case.name)
+            self.assertIn("active_wave_ambiguous", result.stderr)
+            self.assertEqual(case.path.read_bytes(), before)
+            self.assertEqual(case.reasons()[-1], "convert_refused_active_wave_ambiguous")
             case.write(base)
             before = case.path.read_bytes()
             self.assertIn("foreign_session", case.graph("convert", session="someone-else").stderr)
             self.assertEqual(case.path.read_bytes(), before)
+
+    def test_claude_failed_atomic_write_never_reports_success(self) -> None:
+        """A failed locked write must keep source bytes and avoid convert_ok even after a report was built."""
+        case = self.cases[0]
+        before = case.path.read_bytes()
+
+        def fail_after_transform(path: Path, update: Callable[[dict[str, Any]], dict[str, Any]]) -> bool:
+            update(json.loads(path.read_text()))
+            return False
+
+        with (
+            patch.object(claude_graph, "atomic_progress_update", side_effect=fail_after_transform),
+            self.assertRaisesRegex(ValueError, "locked|unreadable|write"),
+        ):
+            claude_graph.convert_state(case.path, SESSION, False)
+        self.assertEqual(case.path.read_bytes(), before)
+        self.assertEqual(case.backup.read_bytes(), before)
+        self.assertNotIn("convert_ok", case.reasons())
 
     def test_existing_backup_is_never_overwritten(self) -> None:
         """A stale .pre-convert refuses the conversion rather than being replaced or deleted."""

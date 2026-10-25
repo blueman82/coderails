@@ -1,4 +1,4 @@
-"""Fetch and validate exact-head eval evidence and machine integrity attestation."""
+"""Fetch and validate exact-head eval evidence and GitHub Actions attestation."""
 
 from __future__ import annotations
 
@@ -11,7 +11,9 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.trace_row import append_row
-from scripts.lib.config import config_path, integrity_machine_user
+from scripts.lib.artifact_io import array_value
+from scripts.lib.config import config_path, integrity_enabled, integrity_status_login
+from scripts.lib.config_strict import ConfigRejected, strict_settings
 from scripts.lib.git_common import (
     branch,
     compat_failure_message,
@@ -27,11 +29,18 @@ from scripts.post_evals import smoke_verify
 
 
 def integrity_reason(number: str, sha: str, cwd: str, session: str = "") -> str:
-    """Require the newest exact-SHA success from the configured machine login."""
-    machine = integrity_machine_user(config_path(cwd))
-    if not machine:
+    """Require one parsed exact-SHA GitHub Actions status when configured."""
+    path = config_path(cwd)
+    if not path:
         return ""
     prefix = f"Blocked: gh pr merge {number} — "
+    try:
+        strict_settings(path)
+    except ConfigRejected as error:
+        return prefix + str(error)
+    if not integrity_enabled(path):
+        return ""
+    expected_login = integrity_status_login(path)
     try:
         result = run(
             "gh",
@@ -46,16 +55,22 @@ def integrity_reason(number: str, sha: str, cwd: str, session: str = "") -> str:
                 prefix + f"GitHub fetch failed, could not fetch integrity-review status for {sha}. Retry, "
                 f"or check gh auth/network."
             )
-        statuses = json.loads(result.stdout)
-        status = cast(dict[str, Any], statuses[0]) if isinstance(statuses, list) and statuses else {}
+        decoder = json.JSONDecoder()
+        remaining = result.stdout.lstrip()
+        statuses: list[object] = []
+        while remaining:
+            page, end = decoder.raw_decode(remaining)
+            if not isinstance(page, list):
+                raise ValueError("malformed status page")
+            statuses.extend(array_value(cast(object, page)))
+            remaining = remaining[end:].lstrip()
+        status = cast(dict[str, Any], statuses[0]) if statuses else {}
     except (OSError, ValueError, AttributeError, TypeError):
-        return (
-            prefix + f"no integrity-review status found for {sha}. The integrity daemon has not attested this SHA yet."
-        )
-    verdict = parse_attestation(status, sha, machine)
+        return prefix + f"no integrity-review status found for {sha}. GitHub Actions has not attested this SHA yet."
+    verdict = parse_attestation(status, sha, expected_login)
     if not verdict.ok:
         append_row("pr_merge_gate", "denied", verdict.reason_code, session, inputs={"sha": sha})
-        return prefix + f"{verdict.reason_code}: {verdict.detail}. The integrity daemon has not attested this SHA."
+        return prefix + f"{verdict.reason_code}: {verdict.detail}. GitHub Actions has not attested this SHA."
     return ""
 
 

@@ -9,14 +9,48 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import deny, log, read_payload
+from hooks.scripts.hook_common import (
+    RESOURCE_ERRNOS,
+    RESOURCE_MESSAGE,
+    HostResourceError,
+    deny,
+    log,
+    read_payload_strict,
+)
+
+try:
+    from hooks.scripts.lib.hook_telemetry import note_child
+except ImportError:  # telemetry must never be able to break the hook
+
+    def note_child(hook: str, returncode: int) -> None:
+        """Telemetry unavailable: no-op."""
+
 
 ALLOWED = {".md", ".txt", ".rst", ".yaml", ".yml", ".json", ".toml", ".ini", ".cfg"}
 
 
+def run_git(probe: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    """Run git in probe; resource exhaustion raises HostResourceError, any other OSError propagates."""
+    try:
+        return subprocess.run(["git", "-C", str(probe), *arguments], capture_output=True, text=True, check=False)
+    except OSError as error:
+        if error.errno in RESOURCE_ERRNOS:
+            raise HostResourceError(error.errno, RESOURCE_MESSAGE) from error
+        raise
+
+
 def main() -> int:
-    """Deny protected source edits made from a main or master checkout."""
-    payload = read_payload()
+    """Deny protected source edits from a main or master checkout; fail closed on host exhaustion."""
+    try:
+        return check()
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)  # fail closed: a gate that cannot read or probe must not allow the edit
+        return 0
+
+
+def check() -> int:
+    """Decide one payload."""
+    payload = read_payload_strict()
     data = payload.get("tool_input")
     if not isinstance(data, dict):
         return 0
@@ -46,16 +80,13 @@ def main() -> int:
     probe = path.parent
     while not probe.is_dir() and probe != probe.parent:
         probe = probe.parent
-    result = subprocess.run(
-        ["git", "-C", str(probe), "branch", "--show-current"], capture_output=True, text=True, check=False
-    )
+    result = run_git(probe, "branch", "--show-current")
+    note_child("no_edit_on_main", result.returncode)
     branch = result.stdout.strip()
     if branch not in {"main", "master"}:
         return 0
     if source:
-        root = subprocess.run(
-            ["git", "-C", str(probe), "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False
-        ).stdout.strip()
+        root = run_git(probe, "rev-parse", "--show-toplevel").stdout.strip()
         if not root or not (Path(root) / ".claude-plugin/plugin.json").is_file():
             return 0
     log(f"hook=no_edit_on_main decision=deny branch={branch} file={name}")
@@ -64,4 +95,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("no_edit_on_main", main))

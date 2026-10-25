@@ -20,7 +20,7 @@ class Attestation:
 
 
 def format_attestation(sha: str, extra: str = "") -> str:
-    """Render the description the root-owned daemon writes, so writer and parser round-trip."""
+    """Render the description used by the GitHub Actions attestor."""
     base = f"integrity=pass sha={sha}"
     return f"{base} {extra}" if extra else base
 
@@ -29,8 +29,8 @@ def _token(description: str, token: str) -> bool:
     return re.search(r"(^|\s)" + re.escape(token) + r"(\s|$)", description) is not None
 
 
-def parse_attestation(status: Mapping[str, Any] | None, sha: str, machine_user: str) -> Attestation:
-    """Check the newest status: present, success, posted by `machine_user`, bound to `sha`."""
+def parse_attestation(status: Mapping[str, Any] | None, sha: str, expected_login: str) -> Attestation:
+    """Check the newest status against the configured login and exact head SHA."""
     state = status.get("state") if isinstance(status, Mapping) else None
     if not state:
         return Attestation(False, "attest_missing", f"no integrity-review status found for {sha}")
@@ -39,8 +39,8 @@ def parse_attestation(status: Mapping[str, Any] | None, sha: str, machine_user: 
         return Attestation(False, "attest_not_success", f"integrity-review status for {sha} is '{state}'")
     creator: object = status.get("creator")
     login = cast("Mapping[str, Any]", creator).get("login", "") if isinstance(creator, Mapping) else ""
-    if login != machine_user:
-        return Attestation(False, "attest_wrong_creator", f"posted by '{login}', not machine user '{machine_user}'")
+    if login != expected_login:
+        return Attestation(False, "attest_wrong_creator", f"posted by '{login}', not '{expected_login}'")
     description = status.get("description")
     bound = isinstance(description, str) and _token(description, "integrity=pass") and _token(description, f"sha={sha}")
     if not bound:

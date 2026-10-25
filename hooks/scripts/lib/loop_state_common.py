@@ -73,6 +73,8 @@ def atomic_progress_update(
             temporary = stream.name
             json.dump(proposed, stream, indent=2)
             stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, path)
         return True
     except (OSError, ValueError, TypeError, KeyError):
@@ -213,7 +215,8 @@ def stop_in_this_turn(transcript: str, stop: dict[str, Any]) -> bool:
             )
         ):
             if "timestamp" not in record:
-                continue  # synthetic records without a clock cannot move the bound
+                prompt_at = float("inf")  # unknown turn boundary cannot authorize an older row
+                continue
             try:
                 prompt_at = datetime.fromisoformat(str(record["timestamp"]).replace("Z", "+00:00")).timestamp()
             except ValueError:
@@ -223,18 +226,22 @@ def stop_in_this_turn(transcript: str, stop: dict[str, Any]) -> bool:
 
 
 def mark_complete(cwd: str, session: str) -> bool:
-    """Stamp completion with this session's actual native loop-invocation ordinal."""
+    """Use native completion gates and the orders lifecycle with this session's invocation ordinal."""
     projects = Path(os.environ.get("CLAUDE_PROJECTS_DIR", str(Path.home() / ".claude/projects")))
     transcript = next((path for path in sorted(projects.glob(f"*/{session}.jsonl")) if path.is_file()), None)
     if transcript is None or not (count := stable_invocations(str(transcript))):
         return False
 
-    def stamp(state: dict[str, Any]) -> dict[str, Any]:
-        if state.get("schema_version") != 3 or state.get("session_id") != session:
-            raise ValueError("completion requires current state owned by this session")
-        return {**state, "status": "complete", "completed_marker": count}
+    from hooks.scripts.lib.graph_dispatch import complete  # noqa: PLC0415
 
-    return atomic_progress_update(resolve_path(cwd, session), stamp)
+    try:
+        result = complete(resolve_path(cwd, session), session, completed_marker=count)
+    except (OSError, ValueError) as error:
+        print(f"mark-complete: {error}", file=sys.stderr)
+        return False
+    if result.get("pending_teardown") is True:
+        print("mark-complete: standing-orders teardown pending; retry mark-complete", file=sys.stderr)
+    return result.get("pending_teardown") is False
 
 
 if __name__ == "__main__":

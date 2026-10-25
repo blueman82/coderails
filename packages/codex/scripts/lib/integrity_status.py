@@ -1,4 +1,4 @@
-"""Verify the newest root-owned integrity status for an exact head SHA."""
+"""Verify the newest configured integrity status for an exact head SHA."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .artifact_io import array_value, object_value
 from .integrity_attestation import parse_attestation
 
 
-def verify_integrity_status(sha: str, machine_user: str) -> None:
+def verify_integrity_status(sha: str, expected_login: str = "github-actions[bot]") -> None:
     """Refuse missing, stale, failed or incorrectly attributed attestations."""
     result = git.run(
         "gh",
@@ -32,6 +32,6 @@ def verify_integrity_status(sha: str, machine_user: str) -> None:
         text = text[end:].lstrip()
     status = statuses[0] if statuses else None
     fields = object_value(cast(object, status)) if isinstance(status, dict) else None
-    verdict = parse_attestation(fields, sha, machine_user)
+    verdict = parse_attestation(fields, sha, expected_login)
     if not verdict.ok:
         raise git.WorkflowError(f"integrity-review {verdict.reason_code}: {verdict.detail}")

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate native Codex review summaries before posting authoritative PR evidence."""
+
 from __future__ import annotations
 
 import argparse

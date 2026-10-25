@@ -250,7 +250,15 @@ class HookTests(unittest.TestCase):
     def grant(self, session: str, *extra: str, ok: bool = True) -> subprocess.CompletedProcess[str]:
         """Mint through the mirrored typed command (the only route; the hook never mints)."""
         result = subprocess.run(
-            [sys.executable, str(PACKAGE / "scripts/authority.py"), "grant", "--session", session]
+            [
+                sys.executable,
+                str(PACKAGE / "scripts/authority.py"),
+                "grant",
+                "--session",
+                session,
+                "--scope",
+                "autonomous_decisions",
+            ]
             + ["--max-prs", "0", *extra],
             env=self.environment | {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)},
             capture_output=True,
@@ -375,18 +383,15 @@ class HookTests(unittest.TestCase):
         config = self.repo / ".coderails/workflow.config.yaml"
         config.parent.mkdir()
         config.write_text('wiki_path: "."\n', encoding="utf-8")
-        (self.repo / "AGENTS-wiki-schema.md").write_text(
-            "## Page types\n\n- `concepts/`\n- `projects/`\n", encoding="utf-8"
-        )
+        (self.repo / "AGENTS-wiki-schema.md").write_text("## Page types\n\n- `concepts/`\n- `projects/`\n")
         for directory in ("concepts", "projects", "wrong"):
             (self.repo / directory).mkdir()
         result = self.hook(
             "wiki_taxonomy_gate",
             {"session_id": "s3", "cwd": str(self.repo), "tool_input": {"command": "*** Add File: wrong/new.md"}},
         )
-        reason = result["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertIn("wiki_schema_missing", reason)
+        self.assertIn("wiki_schema_missing", result["hookSpecificOutput"]["permissionDecisionReason"])
         rows = [json.loads(line) for line in (self.loop / "s3/trace.jsonl").read_text().splitlines()]
         self.assertEqual([row["reason_code"] for row in rows], ["wiki_schema_missing"])
 

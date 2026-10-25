@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,13 @@ class CodexAuthorityParityTests(unittest.TestCase):
         for relative in MIRRORED:
             with self.subTest(relative=relative):
                 self.assertEqual((ROOT / relative).read_bytes(), (CODEX / relative).read_bytes())
+
+    def test_bare_authorize_skill_has_usable_safe_defaults(self) -> None:
+        """The user-facing entrypoint must supply the CLI's required limit and a nonempty scope."""
+        skill = (CODEX / "skills/authorize/SKILL.md").read_text()
+        self.assertIn("--max-prs 0", skill)
+        self.assertIn("--scope autonomous_decisions", skill)
+        self.assertIn("--denied destructive_shell", skill)
 
     def test_mirrored_cli_resolves_trace_row_inside_the_codex_layout(self) -> None:
         """A copy of only packages/codex grants, traces and inspects: hooks.scripts.lib.trace_row resolves there."""
@@ -91,7 +99,17 @@ class CodexCrackOnGateTests(unittest.TestCase):
 
     def grant(self, session: str, ok: bool = True) -> None:
         """Mint through the mirrored typed command."""
-        cli = [sys.executable, str(CODEX / "scripts/authority.py"), "grant", "--session", session, "--max-prs", "0"]
+        cli = [
+            sys.executable,
+            str(CODEX / "scripts/authority.py"),
+            "grant",
+            "--session",
+            session,
+            "--scope",
+            "autonomous_decisions",
+            "--max-prs",
+            "0",
+        ]
         run = subprocess.run(cli, env=self.env, capture_output=True, text=True, check=False)
         self.assertEqual(run.returncode == 0, ok, run.stderr)
 
@@ -105,7 +123,12 @@ class CodexCrackOnGateTests(unittest.TestCase):
         for index, text in enumerate(PHRASES):
             session = f"neg{index}"
             context = self.prompt(text, session)["hookSpecificOutput"]["additionalContext"]
-            self.assertIn(f"authority.py grant --session {session} --max-prs N", context, text)
+            self.assertIn(
+                f"authority.py grant --session {session} --scope autonomous_decisions "
+                "--denied destructive_shell --max-prs N",
+                context,
+                text,
+            )
             self.assertIn("$coderails-codex:authorize", context)
             self.assertIn("Agents must not run", context)
             self.assertFalse((self.loop / session / "authority.json").exists(), text)
@@ -132,14 +155,47 @@ class CodexCrackOnGateTests(unittest.TestCase):
         path.write_text(json.dumps(obj))
         self.assertFalse(self.asks("g1"))
 
+    def test_printed_command_grants_the_scope_it_claims(self) -> None:
+        """The Codex hint must execute as a usable bounded grant."""
+        context = self.prompt("crack on", "hint")["hookSpecificOutput"]["additionalContext"]
+        command = context.split("or runs ", 1)[1].split(". Agents", 1)[0].replace("--max-prs N", "--max-prs 0")
+        run = subprocess.run(shlex.split(command), env=self.env, capture_output=True, text=True, check=False)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        obj = json.loads((self.loop / "hint/authority.json").read_text())
+        self.assertEqual(obj["scope"], ["autonomous_decisions"])
+        self.assertEqual(obj["denied"], ["destructive_shell"])
+        self.assertTrue(self.asks("hint"))
+
+    def test_narrow_to_empty_scope_allows_human_input(self) -> None:
+        """The native input hook reads the current scope after a typed narrowing."""
+        self.grant("narrow")
+        self.assertTrue(self.asks("narrow"))
+        narrowed = subprocess.run(
+            [sys.executable, str(CODEX / "scripts/authority.py"), "narrow", "--session", "narrow", "--scope", ""],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(narrowed.returncode, 0, narrowed.stderr)
+        self.assertEqual(json.loads((self.loop / "narrow/authority.json").read_text())["scope"], [])
+        self.assertFalse(self.asks("narrow"))
+
+    def test_shell_unsafe_session_ids_never_render_a_hint(self) -> None:
+        """The Codex hint uses the same safe ID set as its grant CLI."""
+        for session in ("s;echo INJECTED;#", "s evil", "`id`", "?", "s?"):
+            with self.subTest(session=session):
+                self.assertEqual(self.prompt("crack on", session), {})
+                self.grant(session, ok=False)
+                self.assertFalse((self.loop / session / "authority.json").exists())
+        self.assertIn("--session safe-1", self.prompt("crack on", "safe-1")["hookSpecificOutput"]["additionalContext"])
+
     def test_hook_common_no_longer_vendors_authority(self) -> None:
         """The vendored copies are gone; the mirrored lib is the single implementation."""
         source = (CODEX / "hooks/scripts/hook_common.py").read_text(encoding="utf-8")
         for name in ("authority_state", "write_authority", "parse_expiry"):
             self.assertNotIn(f"def {name}(", source, name)
-        # hook_common used to import parse_time from the mirrored lib only for its vendored receipt verify; that code
-        # now lives in the mirrored scripts/lib/action_receipt.py, which the gate imports directly.
-        self.assertNotIn("def receipt_verify(", source)
+        self.assertIn("from scripts.lib.authority_object import", source)
 
 
 if __name__ == "__main__":

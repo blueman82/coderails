@@ -1,7 +1,7 @@
-# P3: human-only minting of action receipts
+# P3: optional signed action receipts
 
-Status: built (unit U4, branch `feature/p3-signed-receipts`). Scope: how an action receipt for `gh pr merge` /
-`git push` to main is minted so that an agent cannot mint its own, and what that does and does not guarantee.
+Status: built in draft PR #513. Scope: how an optional action receipt for `gh pr merge` or `git push` to main is
+signed and bound to the action. Same-user minting remains possible.
 
 ## Question
 
@@ -33,7 +33,7 @@ So the Keychain-plus-dialog design is neither confirmed feasible nor ruled out. 
 
 ## Chosen design
 
-The minting step is a separate OWNER-RUN command, signed with a passphrase-protected key:
+Optional receipt minting uses a key with a passphrase:
 
 1. `python3 scripts/authority_keys.py init` (owner, at a terminal) creates a passphrase-protected ed25519 key
    `~/.coderails/keys/receipt_ed25519` and a signers file. `ssh-keygen` prompts on `/dev/tty`; the tool refuses
@@ -41,23 +41,18 @@ The minting step is a separate OWNER-RUN command, signed with a passphrase-prote
 2. `python3 scripts/action_receipt_cli.py approve-action ...` computes the binding itself
    (`scripts/lib/action_binding.py`: repository, destination ref, SHA; the owner never types a SHA), signs the
    canonical receipt body with `ssh-keygen -Y sign` (namespace `coderails-receipt`), and refuses without a
-   controlling terminal (`receipt_refused_no_tty`). An agent without the passphrase cannot mint.
+   controlling terminal (`receipt_refused_no_tty`). An agent without the passphrase cannot sign with that key,
+   but a same-user agent can replace the user-tier signers file and use another key.
 3. The hook verifies the signature against a trust root, then the binding, then consumes the receipt atomically
    (`O_CREAT|O_EXCL`). Unsigned, wrongly signed, edited, stale, replayed, v1 and unbound receipts are all refused.
-4. Trust root, in two tiers, with no environment-variable override (an env knob would be a bypass):
-   - ROOT tier `/Library/Application Support/Coderails/receipt_signers`, honoured only when the file and its
-     directory are owned by uid 0 and not group/other writable. The owner installs it with sudo
-     (`authority_keys.py install-root` only prints the commands). This is the real boundary. It is NOT installed
-     on this machine by this work.
-   - USER tier `~/.coderails/keys/receipt_signers`. The agent runs as the same user and can write this file, so
-     this tier is a cooperating-agent safeguard (traced `trust_root_user_tier`), not a boundary.
-   - Neither present: `trust_root_missing`, deny.
+4. The trust root is `~/.coderails/keys/receipt_signers`. The agent runs as the same user and can write this file, so
+   it is a cooperating-agent safeguard (traced `trust_root_user_tier`). If absent, verification reports
+   `trust_root_missing`.
 
 ## Residuals (what this does not stop)
 
 - The user-tier trust root and the key directory are agent-writable. A hostile same-user agent can replace the
-  signers file with its own key and sign its own receipts. Only the root tier prevents that. Until the owner runs
-  the sudo install, treat the whole mechanism as a cooperating-agent safeguard.
+  signers file with its own key and sign its own receipts. Treat this as a cooperating-agent safeguard.
 - An agent with Accessibility permission or control of the owner's terminal (pty injection, a tty it shares) can
   answer the passphrase prompt or type the command. The tty rule excludes headless agents, not a hostile process
   in the owner's session. A key loaded in `ssh-agent` could also sign without a prompt.
@@ -78,43 +73,49 @@ The minting step is a separate OWNER-RUN command, signed with a passphrase-prote
   receipts directory. `O_EXCL` stops races, not `unlink`: a same-user agent can delete `<id>.consumed` to replay a
   receipt until it expires (owner-chosen, default 1 h) or delete `<id>.revoked` to un-revoke it. Only a consumed
   ledger outside the agent's write reach (root-owned or append-only) would close this; it is not built.
+- A session lock covers selection, claim, note writes and execution markers for every guarded segment in one
+  command. A synchronous failure denies and removes markers this call created. If an execution marker cannot be
+  removed, consumed markers stay in place so the receipt cannot be reused. A process killed between marker writes
+  can leave a partial spend. The batch is not crash-atomic; confirm the command did not run before recovery.
 - An agent that fills the receipts directory with junk `*.json` sorted ahead of the real one can push the real
   receipt past the 50-receipt cap (`MAX_RECEIPTS`). That denies, never allows (a denial-of-service, not a bypass).
-- The hook fails open on its own exceptions (`action_authority_failed_open`, traced and written to stderr), so an
-  input that makes `binding()` or `guarded_segments()` raise would allow. No such input is known; `binding()`
-  returns None rather than raising for malformed commands. Fail-closed for enforce mode is not built.
-- The root tier now checks the file and every ancestor directory (uid 0, not group/other writable), but it is not
-  installed here, so the real boundary is not active until the owner runs the sudo install.
+- An unexpected hook error denies a guarded command under `enforce` or after live authority loads
+  (`denied_gate_error`). Advisory mode without live authority still fails open and traces
+  `action_authority_failed_open`. A failed budget lock or reservation release denies and keeps an ambiguous
+  reservation spent. `read_authority()` maps a file read error to no authority; in advisory mode, an unreadable
+  authority can therefore take the no-authority path. The user owns that file and can also turn the mode off.
 
-## Binding rules and default
+## Binding rules and mode
 
-The gate is default ON: absent or unreadable config, or any value other than `off` / `advisory`, is `enforce`
-(`action_authority: off` is the explicit switch). To keep the repository+ref+SHA binding honest, a guarded command is
+The gate is off unless config sets `action_authority: enforce` or `action_authority: advisory`. Thus a normal PR
+workflow does not require a key or passphrase. To keep the repository+ref+SHA binding honest, a guarded command is
 unbindable (`binding_unknown`, denied) when it:
 
 - carries an env assignment prefix (`GIT_DIR=`, `GIT_CONFIG_*=`, `GH_REPO=`, any `NAME=value`), `git -c`, `--git-dir` or
   `--work-tree` (they retarget the action; the prefix is kept in the hashed segment so it is never silently stripped);
 - is a bare or remote-only `git push` (push.default, `branch.*.remote` and `remote.*.push` decide the destination);
 - is `gh pr merge` without `--match-head-commit <live head sha>` (or `gh api .../merge` without `sha=`). GitHub then
-  refuses a merge whose head moved after the hook ran. `scripts/merge.py` pins the sha its own gates verified;
-- names the PR ambiguously (a branch name, two PRs, a `-R` that disagrees with the PR URL, a combined short flag
-  hiding a value option). The repository comes from `-R`, the PR URL or the api path, else `origin`.
+  refuses a merge whose head moved after the hook ran. Bare `scripts/merge.py <n>` is unbindable in enforce mode.
+  Use `scripts/merge.py <n> --expected-head <live head sha>` to bind a helper receipt;
+- names the PR ambiguously in `gh pr merge` (a branch name, two PRs, a `-R` that disagrees with the PR URL, a
+  combined short flag hiding a value option). The helper resolves its `auto` or branch target before it binds.
+  The repository comes from `-R`, the PR URL or the api path, else `origin`.
 
-`git push origin HEAD` binds the current branch (a detached HEAD is unbindable); the repository is the PUSH url
-(`git remote get-url --push --all`), so `remote.<n>.pushurl` / `pushInsteadOf` are seen, and a remote with more than one
-push url is unbindable (it would push to all of them while the receipt names one). A guarded segment that follows ANY
-segment that is not a known read-only command in the same command (allowlist: `status`, `log`, `diff`, `show`,
-`rev-parse`, `ls-remote`, `cd`, `echo`, `grep`, a `git push` to a remote other than `.`, a `gh pr merge`, ...; a
-redirect, command substitution or unknown program is a mover) is denied `state_mutated_before_guard`: the bound sha
-would be stale at execution (`git push . evil:feature`, `git worktree add -B`, `git filter-branch`, a write into
-`.git`, ...). Scripts and aliases that mutate are seen only as unknown commands, and only within the same command: a
-ref moved by an earlier, separate command is the state the hook binds.
-A `cd` is parsed like a shell: a plain existing path moves the bound directory; a variable, `cd -`, a missing path, a
-`( cd x && ... )` group, or a `cd` before `bash -c`/`eval` makes later guards unbindable (a pipeline `cd` is a subshell
-and moves nothing).
-Git global options before the subcommand (`-c`, `-C`, `--git-dir`, `--no-pager`) no longer hide a push from the
-matcher, which also tightens `enforce_pr_workflow`. Codex has no `receipt_counters` mirror on purpose: the counters
-read trace rows through the shared measurement script, which is provider independent.
+`git push origin HEAD` binds the current branch. A detached HEAD is unbindable. The repository is the push URL from
+`git remote get-url --push --all`, including `remote.<n>.pushurl` and `pushInsteadOf`. More than one push URL is
+unbindable because the command would push to each URL while a receipt names one.
+
+The hook checks earlier segments in the same command. A guarded segment after an unknown or state-changing segment
+is denied as `state_mutated_before_guard`: its bound SHA could be stale. Known read-only commands include `status`,
+`log`, `diff`, `show`, `rev-parse`, `ls-remote`, `cd`, `echo` and `grep`. A redirect, command substitution or unknown
+program may change state. Negative probes include `git push . evil:feature`, `git worktree add -B`, `git
+filter-branch` and a write into `.git`. A ref changed by a separate earlier command is the state the hook binds.
+
+A plain `cd` to an existing path changes the binding directory. A variable path, `cd -`, a missing path, a
+`( cd x && ... )` group, or `cd` before `bash -c` or `eval` makes later guards unbindable. A pipeline `cd` runs in a
+subshell and changes no directory for later segments. Git global options (`-c`, `-C`, `--git-dir`, `--no-pager`) no
+longer hide a push from the matcher; this also tightens `enforce_pr_workflow`. Codex has no `receipt_counters` mirror:
+the shared measurement script reads trace rows from both providers.
 
 ## Counters and reason codes
 

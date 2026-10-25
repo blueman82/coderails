@@ -138,6 +138,7 @@ def begin_wave(path: Path) -> dict[str, Any]:
         return {
             "wave_id": wave["wave_id"],
             "nodes": wave["nodes"],
+            "node_names": graph_semantics.node_names(proposed["graph"]["nodes"]),
             "task_names": task_names,
             "revision": proposed["revision"],
             "dispatches": dispatches,

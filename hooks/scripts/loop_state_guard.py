@@ -21,6 +21,7 @@ from hooks.scripts.lib.loop_state_common import (
     stable_invocations,
 )
 from hooks.scripts.lib.trace_row import append_row
+from scripts.lib import orders_completion
 
 
 def completion_evals(state: LoopState) -> str:
@@ -79,6 +80,13 @@ def main() -> int:
     if message := completion_evals(state):
         print(message, file=sys.stderr)
         return 2
+    if state.complete and state.owned and isinstance(state.data.get("graph"), dict):
+        try:
+            orders_completion.status(state.path, session)
+        except (OSError, ValueError) as error:
+            log(f"hook=loop_state_guard session={session} orders=pending blocked=1")
+            print(f"[loop-state-guard] Standing-orders teardown is pending: {error}", file=sys.stderr)
+            return 2
     if state.complete or state.path.is_file() and state.owned and state.data.get("status") != "complete":
         log(
             f"hook=loop_state_guard session={session} invocations={count} "
@@ -124,4 +132,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:  # telemetry must never be able to break the hook
+        raise SystemExit(main()) from None
+    raise SystemExit(run("loop_state_guard", main))

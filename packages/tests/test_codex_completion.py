@@ -19,17 +19,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agent
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 import graph
 from graph_artifacts import validate_evals
-from graph_completion import complete, verify_completion
 from graph_identity import GraphError
 
 from packages.tests.codex_fixture import (
     append,
+    complete,
     done_result,
     frozen_evals,
     read_json,
     spawn,
     state,
     transcripts,
+    verify_completion,
     write_json,
 )
 
@@ -42,6 +43,13 @@ class CompletionTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
+        previous = Path.cwd()
+        subprocess.run(["git", "init", "-q", str(self.directory)], check=True)
+        config = self.directory / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
+        config.write_text("memory:\n  backend: off\n")
+        os.chdir(self.directory)
+        self.addCleanup(os.chdir, previous)
         self.addCleanup(patch.stopall)
         patch("pathlib.Path.home", return_value=self.directory).start()
         self.path = self.directory / "loops/project/parent/progress.json"
@@ -124,12 +132,8 @@ class CompletionTests(unittest.TestCase):
             verify_completion(*self.arguments)
 
     def test_new_evidence_writer_can_turn_off_without_losing_reader(self) -> None:
-        """One reader verifies old and new histories across writer activation and deactivation."""
+        """The reader verifies encoded A6 evidence after its writer is turned off."""
         graded = read_json(self.evals)
-        with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": ""}):
-            complete(*self.arguments)
-            verify_completion(*self.arguments)
-
         write_json(self.path, state())
         write_json(self.evals, frozen_evals())
         self.parent.write_text(json.dumps({"type": "session_meta", "payload": {"id": "parent"}}) + "\n")

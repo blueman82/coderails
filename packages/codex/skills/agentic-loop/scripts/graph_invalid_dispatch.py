@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_semantics
-from graph_evidence import bind_invalid_dispatch
 from graph_identity import GraphError, new_evidence_writes_enabled
+from graph_invalid_evidence import bind_invalid_dispatch
 from graph_io import load, locked, write
 from graph_recovery import trace, traced_refusal
 

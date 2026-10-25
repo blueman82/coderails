@@ -80,9 +80,12 @@ def disposition_report(units: object) -> dict[str, Any]:
 
 
 def decision_pending(state: dict[str, Any], node_id: str) -> bool:
-    """Block this node on unanswered statuses; malformed status storage blocks all nodes."""
+    """Block unanswered statuses and their unresolved hash-chained memory sync."""
     rows = state.get("worker_statuses", [])
     if not isinstance(rows, list):
+        return True
+    decisions = state.get("decisions_absorbed", [])
+    if not isinstance(decisions, list):
         return True
     for raw in cast(list[object], rows):
         if not isinstance(raw, dict):
@@ -91,5 +94,42 @@ def decision_pending(state: dict[str, Any], node_id: str) -> bool:
         if not _filled(row.get("node")) or not isinstance(row.get("decision_pending"), bool):
             return True
         if row["node"] == node_id and row["decision_pending"]:
+            return True
+        if row["node"] == node_id and "resolved_by_decision" in row:
+            matched: list[dict[str, Any]] = []
+            for item in cast(list[object], decisions):
+                if isinstance(item, dict):
+                    candidate = cast(dict[str, Any], item)
+                    if candidate.get("seq") == row["resolved_by_decision"] and candidate.get(
+                        "worker_status_seq"
+                    ) == row.get("seq"):
+                        matched.append(candidate)
+            if len(matched) != 1:
+                return True
+            raw_sync: object = matched[0].get("muninn")
+            if not isinstance(raw_sync, dict):
+                return True
+            sync = cast(dict[str, Any], raw_sync)
+            if sync.get("state") not in {"written", "disabled"}:
+                return True
+    return False
+
+
+def decision_sync_pending(state: dict[str, Any]) -> bool:
+    """Block any hashed decision whose Muninn write has not reached a final accepted state."""
+    rows = state.get("decisions_absorbed", [])
+    if not isinstance(rows, list):
+        return True
+    for value in cast(list[object], rows):
+        if not isinstance(value, dict):
+            continue  # historic prose rows have no sync contract
+        row = cast(dict[str, Any], value)
+        if not row.get("row_sha256"):
+            continue
+        raw_sync: object = row.get("muninn")
+        if not isinstance(raw_sync, dict):
+            return True
+        sync = cast(dict[str, Any], raw_sync)
+        if sync.get("state") not in {"written", "disabled"}:
             return True
     return False

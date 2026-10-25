@@ -30,6 +30,33 @@ class MatchHardeningTests(unittest.TestCase):
         """Operation names guarded in `command`."""
         return [name for name, _, _ in match.guarded_segments(command, self.repo)]
 
+    def test_implicit_push_destination_is_guarded_and_unbindable(self) -> None:
+        """Git config can send a refspec-free push to main from a feature branch."""
+        for key, value in (("push.default", "matching"), ("remote.origin.push", "refs/heads/main:refs/heads/main")):
+            with self.subTest(config=key):
+                git(Path(self.repo), "config", key, value)
+                for command in ("git push", "git push origin"):
+                    self.assertEqual(match.guarded_segments(command, self.repo), [])
+                    found = match.guarded_segments(command, self.repo, implicit_push=True)
+                    self.assertEqual([name for name, _, _ in found], ["git_push"])
+                    self.assertIsNone(ab.binding("git_push", found[0][1], found[0][2]))
+                git(Path(self.repo), "config", "--unset", key)
+        self.assertEqual(self.names("git push origin feature"), [])
+
+    def test_later_push_to_main_is_not_hidden_by_feature_push(self) -> None:
+        """The legacy review gate checks a whole command, including pushes after a benign first push."""
+        command = "git push origin feature && git push origin HEAD:main"
+        self.assertTrue(match.targets_main(command, self.repo, "", "git_push"))
+        self.assertEqual(self.names(command), ["git_push"])
+
+    def test_async_merge_request_is_guarded_but_result_lookup_is_not(self) -> None:
+        """The stacked-PR PUT endpoint is a merge; polling its UUID is a read."""
+        sha = "f" * 40
+        request = f"gh api --method PUT repos/acme/widgets/pulls/7/merge-async -f sha={sha}"
+        result = "gh api repos/acme/widgets/pulls/7/merge-async/11111111-1111-1111-1111-111111111111"
+        self.assertEqual(self.names(request), ["merge"])
+        self.assertEqual(self.names(result), [])
+
     def test_quoted_variable_and_glob_destinations_are_guarded(self) -> None:
         """Quoting, escaping and expansion must not hide a push to main; non-literal destinations are unbindable."""
         for command in (
@@ -97,6 +124,12 @@ class MatchHardeningTests(unittest.TestCase):
                 self.assertEqual(len(found), 1)
                 self.assertIsNone(ab.binding("git_push", found[0][1], found[0][2]))
         found = match.guarded_segments("cd /tmp | cat; git push origin HEAD:main", self.repo)  # pipeline: no move
+        self.assertEqual([where for _, _, where in found], [self.repo])
+
+    def test_background_cd_cannot_move_parent_shell_directory(self) -> None:
+        """A background cd runs in a child; the guarded push remains in the original repo."""
+        target = str(self.root / "x y")
+        found = match.guarded_segments(f'cd "{target}" & git push origin HEAD:main', self.repo)
         self.assertEqual([where for _, _, where in found], [self.repo])
 
 

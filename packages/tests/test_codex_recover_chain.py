@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,10 +17,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 import graph
-from graph_completion import complete, verify_completion
 
 from packages.tests.codex_fixture import (
     append,
+    complete,
     done_result,
     frozen_evals,
     node,
@@ -26,6 +28,7 @@ from packages.tests.codex_fixture import (
     spawn,
     state,
     transcripts,
+    verify_completion,
     write_json,
 )
 
@@ -42,9 +45,17 @@ class RecoverChainTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
+        previous = Path.cwd()
+        subprocess.run(["git", "init", "-q", str(self.directory)], check=True)
+        config = self.directory / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
+        config.write_text("memory:\n  backend: off\n")
+        os.chdir(self.directory)
+        self.addCleanup(os.chdir, previous)
         self.addCleanup(patch.stopall)
         patch("pathlib.Path.home", return_value=self.directory).start()
-        self.path = self.directory / "progress.json"
+        self.path = self.directory / "loops/project/parent/progress.json"
+        self.path.parent.mkdir(parents=True)
         initial = state()
         initial["graph"]["nodes"]["U3[2]"] = node(2)
         write_json(self.path, initial)

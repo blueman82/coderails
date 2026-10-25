@@ -23,7 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, log, read_payload
 from hooks.scripts.lib.capability_scope import graph_bound, has_text
 from hooks.scripts.lib.trace_row import append_row
-from scripts.lib.config import config_path, config_value
+from scripts.lib.config import config_path
+from scripts.lib.config_strict import ConfigRejected, strict_settings
 
 REASON = "bash_agent_type_absent"
 
@@ -36,9 +37,19 @@ def main() -> int:
         return 0
     session = str(payload.get("session_id") or "?")
     cwd = str(payload.get("cwd") or os.getcwd())
-    path = config_path(cwd)
-    if (config_value(path, "subagent_identity_gate") if path else "") == "off" or not graph_bound(session, cwd):
+    if not graph_bound(session, cwd):
         return 0
+    path = config_path(cwd)
+    if path:
+        try:
+            settings = strict_settings(path, session)
+        except ConfigRejected as error:
+            log(f"hook=subagent_identity_gate session={session} denied=1 reason_code=config_rejected")
+            append_row("subagent_identity_gate", "denied", "config_rejected", session)
+            deny(f"Blocked (config_rejected): {error}. Fix .coderails/workflow.config.yaml.")
+            return 0
+        if settings["subagent_identity_gate"] == "off":
+            return 0
     log(f"hook=subagent_identity_gate session={session} denied=1 reason_code={REASON}")
     append_row("subagent_identity_gate", "denied", REASON, session)
     deny(

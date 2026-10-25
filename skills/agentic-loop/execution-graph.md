@@ -260,7 +260,6 @@ Rows marked `guard` describe conditional procedures; `instantiate` does not crea
 An ordinary failed wave result retries its node up to its bound. A stale worker with a completed artifact check uses
 `respawn-stale` on that worker node. Review findings require repair and a fresh review before the review node can be
 recorded done; an unresolved finding cannot release its dependent merge gate.
-
 `S0.5`, `U4`, `U4b-review`, `U6`, and `S13-complete` carry the Phase 11/12
 confidence-label and fresh-evidence rules; they are guards on the nodes above,
 not extra work. A review finding, failing eval, smoke failure, or verification

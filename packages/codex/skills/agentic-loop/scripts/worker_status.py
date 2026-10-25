@@ -3,8 +3,8 @@
 
 Pure (stdlib, py3.9) and mirrored byte-for-byte into the Codex plugin. graph_semantics stays untouched: both providers'
 `record_wave` call `prepare()` first, hand the translated results to the unchanged core, then `record_into()` and a
-`graph_stops` row on the post-record state, all inside the one locked write. `append_decision()` is the pure core of
-`graph.py record-decision`, which answers a recorded status.
+`graph_stops` row on the post-record state, all inside the one locked write. `resolve_pending()` is a pure status
+transform used by the hash-chained decision writer before its first locked save.
 
 A worker that must stop for a human returns one of STATUSES instead of an {outcome, evidence} result. `prepare()`
 rejects a malformed one (the whole report, atomically) and translates a valid one to core outcome `failed`, which
@@ -15,8 +15,6 @@ It is stripped before the core call and stored.
 
 from __future__ import annotations
 
-import copy
-from datetime import datetime, timezone
 from typing import Any, cast
 
 STATUSES = ("NEEDS_DECISION", "OUTSIDE_SCOPE", "IRREVERSIBLE_ACTION")
@@ -235,36 +233,15 @@ def stop_for(statuses: list[dict[str, Any]]) -> tuple[str, str, str]:
     return category, code, reason
 
 
-def append_decision(
-    state: dict[str, Any],
-    session: str,
-    fields: dict[str, str | None],
-    worker_status_seq: int | None = None,
-    human_answer: bool = False,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return (proposed state, row) with one typed row appended to `decisions_absorbed`; writes nothing.
+def resolve_pending(
+    proposed: dict[str, Any], worker_status_seq: int | None, chosen: str | None, human_answer: bool, decision_seq: int
+) -> None:
+    """Validate and resolve one pending status in a copied state, without appending a decision row.
 
-    `fields` carries phase, decision, chosen and optionally flip_condition (all typed flags, no prose parsing). With
-    `worker_status_seq` the named `worker_statuses` row is marked resolved: for NEEDS_DECISION `chosen` must be one of
-    its options, and an approval-gate status (OUTSIDE_SCOPE, IRREVERSIBLE_ACTION) needs `human_answer`. That flag is
-    self-asserted (documented limit: a same-user agent can pass it; it makes forgery deliberate, not impossible). The
-    revision is not bumped: a decision is not a graph change. Raises WorkerResultError `record_decision_refused_*`.
+    The caller commits this transform with its one hash-chained row under the same provider lock. `human_answer` is
+    self-asserted; a same-user agent can pass it, so the flag makes approval forgery deliberate, not impossible.
     """
-    if state.get("session_id") != session:
-        raise WorkerResultError("record_decision_refused_foreign", "session does not own this graph")
-    for name, value in fields.items():
-        if (value is not None or name != "flip_condition") and not _text(value):
-            raise WorkerResultError("record_decision_refused_field", f"--{name.replace('_', '-')} must be non-blank")
-    ledger = state.get("decisions_absorbed", [])
-    if not isinstance(ledger, list) or not all(isinstance(row, dict) for row in cast("list[object]", ledger)):
-        raise WorkerResultError("record_decision_refused_state", "decisions_absorbed must be an array of objects")
-    proposed = copy.deepcopy(state)
-    rows = cast("list[dict[str, Any]]", proposed.setdefault("decisions_absorbed", []))
-    seq = max((row["seq"] for row in rows if isinstance(row.get("seq"), int)), default=0) + 1
-    row: dict[str, Any] = {"seq": seq}
-    row.update({key: value.strip() for key, value in fields.items() if value is not None})
     if worker_status_seq is not None:
-        row["worker_status_seq"] = worker_status_seq
         statuses = _items(proposed.get("worker_statuses") or []) or []
         named = [status for status in statuses if status.get("seq") == worker_status_seq]
         if (
@@ -284,14 +261,11 @@ def append_decision(
                 or not all(_text(option) for option in cast("list[object]", options))
             ):
                 raise WorkerResultError("record_decision_refused_status", "pending status has malformed options")
-            if row["chosen"] not in options:
+            if chosen not in options:
                 raise WorkerResultError("record_decision_refused_chosen", "--chosen is not one of the status options")
         elif status.get("status") in STOP_FOR and not human_answer:
             raise WorkerResultError("record_decision_refused_human", "approval-gate status needs --human-answer")
-        status.update(decision_pending=False, resolved_by_decision=seq)
-    row.update(revision=state["revision"], recorded_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    rows.append(row)
-    return proposed, row
+        status.update(decision_pending=False, resolved_by_decision=decision_seq)
 
 
 def to_decision_request(result: dict[str, Any]) -> dict[str, Any]:

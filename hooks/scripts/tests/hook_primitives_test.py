@@ -66,8 +66,8 @@ class HookPrimitivesTests(unittest.TestCase):
             self.assertRegex(written.pop("updated_at"), r"^\d{4}-\d\d-\d\dT")  # stamped on progress.json writes
             self.assertEqual(written, {"revision": 2})
 
-    def test_completion_cli_uses_native_invocation_ordinal_and_atomic_writer(self) -> None:
-        """Direct teardown CLI preserves state and stamps actual transcript invocation count."""
+    def test_completion_cli_refuses_incomplete_native_graph(self) -> None:
+        """The direct teardown CLI cannot mark a thin state complete without native evidence."""
         helper = Path(__file__).resolve().parents[1] / "lib/loop_state_common.py"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -96,16 +96,14 @@ class HookPrimitivesTests(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.returncode, 1, result.stderr)
             written = json.loads(path.read_text())
-            written.pop("updated_at")
             self.assertEqual(
                 written,
                 {
                     "schema_version": 3,
                     "session_id": "S1",
-                    "status": "complete",
-                    "completed_marker": 2,
+                    "status": "in-progress",
                     "custom": {"key": "value"},
                 },
             )

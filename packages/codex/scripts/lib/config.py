@@ -69,6 +69,9 @@ def config_value(path: str | Path, key: str, section: str = "") -> str:
 SCHEMA_PATH = Path(__file__).resolve().parents[2] / "config.schema.json"
 KEY_LINE = re.compile(r"(\s*)([A-Za-z_][\w-]*):[ \t]*(.*)")
 NULLS = frozenset({"null", "~"})
+NUMERIC_SCALAR = re.compile(
+    r"[-+]?(?:0[xX][0-9a-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|(?:[0-9][0-9_]*(?:\.[0-9_]*)?|\.[0-9_]+)(?:[eE][-+]?[0-9_]+)?)"
+)
 
 
 def _without_comment(value: str) -> str:
@@ -92,6 +95,13 @@ def _without_comment(value: str) -> str:
             return value[:index].rstrip()
         index += 1
     return value
+
+
+def _scalar(value: str) -> dict[str, Any]:
+    """Keep quote marks as type evidence while removing the enclosing pair."""
+    raw = _without_comment(value).strip()
+    quoted = len(raw) >= 2 and raw[0] in "\"'" and raw[-1] == raw[0]
+    return {"raw": raw[1:-1] if quoted else raw, "quoted": quoted}
 
 
 def _schema() -> dict[str, Any]:
@@ -134,15 +144,21 @@ def _entries(text: str, findings: list[dict[str, str]] | None = None) -> dict[st
             current_top = match[2] if match else ""
             indent = None
             if match and current is not None:
-                current["raw"] = _without_comment(match[3]).strip().strip("\"'")
+                current.update(_scalar(match[3]))
                 if match[2] in top:
                     flag("config_duplicate_key", match[2])
                 top[match[2]] = current
             else:
                 flag("config_unparseable_line", where)
         elif current is not None and stripped.startswith("- "):
+            if current["raw"] or current.get("quoted") or current["children"]:
+                flag("config_unparseable_line", where)
+                continue
             current["items"].append(_without_comment(stripped[2:]).strip().strip("\"'"))
         elif current is not None and match:
+            if current["raw"] or current.get("quoted") or current["items"]:
+                flag("config_unparseable_line", where)
+                continue
             indent = len(match[1]) if indent is None else indent
             kids = cast("list[dict[str, Any]]", list(current["children"].values()))
             if len(match[1]) > indent and current_top == "jira" and kids and kids[-1]["raw"] == "":
@@ -152,7 +168,7 @@ def _entries(text: str, findings: list[dict[str, str]] | None = None) -> dict[st
             else:
                 if match[2] in current["children"]:
                     flag("config_duplicate_key", f"{match[2]} ({where})")
-                current["children"][match[2]] = {"raw": _without_comment(match[3]).strip().strip("\"'")}
+                current["children"][match[2]] = _scalar(match[3])
         else:
             flag("config_unparseable_line", where)
     return top
@@ -166,16 +182,19 @@ def _coerce(entry: dict[str, Any], spec: dict[str, Any]) -> tuple[Any, bool]:
         return {key: child["raw"] for key, child in entry["children"].items()}, True
     if entry.get("items") and "array" in types:
         return list(entry["items"]), True
+    if entry.get("quoted"):
+        return raw, "string" in types
     if raw == "":
-        return None, not (entry.get("items") or entry.get("children"))
+        return None, "null" in types and not (entry.get("items") or entry.get("children"))
     if raw in NULLS:
         return (None, True) if "null" in types else (raw, False)
-    if "boolean" in types and raw.lower() in ("true", "false"):
-        return raw.lower() == "true", True
-    if "integer" in types and re.fullmatch(r"[0-9]+", raw):
-        return int(raw), True
-    if "array" in types and raw.startswith("[") and raw.endswith("]"):
-        return [item.strip().strip("\"'") for item in raw[1:-1].split(",") if item.strip()], True
+    if raw.lower() in ("true", "false"):
+        return (raw.lower() == "true", True) if "boolean" in types else (raw, False)
+    if NUMERIC_SCALAR.fullmatch(raw):
+        return (int(raw), True) if "integer" in types and re.fullmatch(r"-?[0-9]+", raw) else (raw, False)
+    if raw.startswith("[") and raw.endswith("]"):
+        items = [item.strip().strip("\"'") for item in raw[1:-1].split(",") if item.strip()]
+        return (items, True) if "array" in types else (raw, False)
     return raw, "string" in types
 
 
@@ -203,8 +222,7 @@ def _typed(
             hint = _hint(value, dict.fromkeys(spec["enum"])) if ok else "/".join(spec["type"])
             findings.append({"code": code, "key": prefix + key, "hint": hint})
         elif isinstance(value, dict) and spec.get("properties"):
-            nested = cast("dict[str, Any]", value)
-            value = _typed({k: {"raw": v} for k, v in nested.items()}, spec["properties"], prefix + key + ".", findings)
+            value = _typed(entry["children"], spec["properties"], prefix + key + ".", findings)
         values[key] = value
     for key, spec in properties.items():
         if key not in values:
@@ -305,9 +323,23 @@ def _section(path: str | Path, key: str) -> dict[str, Any]:
     return cast("dict[str, Any]", value) if isinstance(value, dict) else {}
 
 
-def integrity_machine_user(path: str | Path) -> str:
-    """Read the configured root-owned attestor login; null or absent means inactive."""
-    return str(_section(path, "integrity_review").get("machine_user") or "")
+def integrity_enabled(path: str | Path) -> bool:
+    """Keep integrity checks on for invalid config and legacy machine-user settings."""
+    values, findings = load_config(path)
+    report_findings(findings)
+    section = values.get("integrity_review")
+    settings = cast("dict[str, Any]", section) if isinstance(section, dict) else {}
+    legacy = settings.get("machine_user")
+    return bool(findings) or settings.get("enabled") is True or (isinstance(legacy, str) and bool(legacy))
+
+
+def integrity_status_login(path: str | Path) -> str:
+    """Trust the old login until enabled=true selects the Actions bot."""
+    settings = _section(path, "integrity_review")
+    legacy = settings.get("machine_user")
+    if settings.get("enabled") is not True and isinstance(legacy, str) and legacy:
+        return legacy
+    return "github-actions[bot]"
 
 
 def require_signatures(path: str | Path) -> bool:

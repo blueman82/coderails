@@ -41,7 +41,7 @@ Create the provider-neutral `.coderails/workflow.config.yaml` in the current pro
    - **Engineering-principles paths** (comma-separated glob patterns, e.g. `**/container.py,**/typed_di/**`) — or "none"
    - **Engineering-principles skill** (the slash-command to run, e.g. `/engineering-principles-python`, `/engineering-principles-go`, `/engineering-principles-ts`, `/engineering-principles-bash`) — detect a sensible default: look for `go.mod` → `/engineering-principles-go`, `package.json` with `.ts` files → `/engineering-principles-ts`, no `go.mod`/`package.json` but `.sh` files present (e.g. an all-shell `bin/`/`scripts/` layout) → `/engineering-principles-bash`, otherwise `/engineering-principles-python`. Ask and let the user override. Answer "none" to disable engineering-principles entirely.
    - **Sandbox workers** — dispatch agentic-loop implementation-unit workers as separate OS-sandboxed processes (`@anthropic-ai/sandbox-runtime`) instead of in-process `Agent` calls, for write containment outside the agent's trust domain. Requires node/npx and a supported platform (macOS Seatbelt, Linux/WSL2 bubblewrap). Default: `false` (or omit the field — same effect). Status `read_by_prose_only` (see `config.schema.json`): the agentic-loop skill reads it from the resolve-config text and no script does.
-   - **Integrity machine user** (advanced, most projects should answer "none") — the GitHub login of a dedicated machine-user identity that posts SHA-bound `integrity-review` attestations. When set, `scripts/merge.py` and the `enforce_pr_workflow` hook require a successful attestation from exactly this login. Default: `null` (or omit the field — same effect, check inactive).
+   - **Integrity review local check** — choose `true` only after the GitHub Actions workflow and server rule are active. The check requires a current-head status from `github-actions[bot]`. Default: `false`. GitHub supplies the workflow token.
 
 7. Write `workflow.config.yaml` at the resolved config path from step 3 with the collected values. Use `null` for any field answered "none". Then validate the file with Ruby's standard YAML parser (`ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), permitted_classes: [], aliases: false)' <path>`). If the write or validation fails, stop. Leave every legacy file untouched and report the failure.
 
@@ -72,10 +72,10 @@ engineering_principles_paths:
   - "**/container.py"
 # or: engineering_principles_paths: null
 engineering_principles_skill: "/engineering-principles-python"   # nil = skip engineering-principles entirely; /engineering-principles-go, /engineering-principles-ts, /engineering-principles-bash also supported
-sandbox_workers: true    # default ON; false = in-process; sandboxed implementation workers use @anthropic-ai/sandbox-runtime; requires node/npx, macOS or Linux/WSL2
-action_authority: enforce   # enforce (default, also when omitted) = gh pr merge, merge.py and git push to main need an owner-signed receipt; advisory = warn only; off = gate off
+sandbox_workers: true    # default ON; requires npx and a supported OS for contained worker dispatch
+action_authority: advisory  # shipped setting: warn without a receipt; omitted means off; enforce requires a signed receipt
 integrity_review:
-  machine_user: null   # GitHub login of the integrity machine user; null/omitted = local gate inactive
+  enabled: false   # Turn on local status checks after the GitHub Actions ruleset is live
 ```
 
 8. After the canonical file validates, move each legacy file found in step 5 to the macOS Trash using Finder via `osascript`, one at a time. After each move, check that source path no longer exists. If a move or check fails, stop immediately: report the failed file and every file already moved, and do not attempt the remaining files. Never delete a legacy file directly. Files already moved remain recoverable in Trash; the moves are not atomic.

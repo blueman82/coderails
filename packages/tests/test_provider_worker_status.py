@@ -49,6 +49,28 @@ def typed(status: str, **over: object) -> dict[str, Any]:
     return result
 
 
+def answer(provider: Provider, phase: str, status_seq: str) -> dict[str, Any]:
+    """Record one answer through the hash writer with the native memory backend disabled."""
+    state = provider.read()
+    return provider.success(
+        "record-decision",
+        "--session",
+        provider.session,
+        "--loop-id",
+        state["loop_id"],
+        "--revision",
+        str(state["revision"]),
+        "--phase",
+        phase,
+        "--decision",
+        "answer",
+        "--chosen",
+        "a",
+        "--worker-status-seq",
+        status_seq,
+    )
+
+
 class WorkerStatusRecordWaveTests(unittest.TestCase):
     """Both providers validate before the unchanged core and write the typed rows in the same locked save."""
 
@@ -143,19 +165,7 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                 before = provider.path.read_bytes()
                 self.assertEqual(provider.call("begin-wave").returncode, 1)
                 self.assertEqual(provider.path.read_bytes(), before)
-                provider.success(
-                    "record-decision",
-                    "--session",
-                    provider.session,
-                    "--phase",
-                    "implementation",
-                    "--decision",
-                    "answer",
-                    "--chosen",
-                    "a",
-                    "--worker-status-seq",
-                    "1",
-                )
+                answer(provider, "implementation", "1")
                 self.assertEqual(provider.success("inspect")["ready"], [NODE])
                 provider.success("begin-wave")
 
@@ -173,19 +183,7 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                 self.assertEqual(blocked["graph"]["hard_stop"]["reason"], "retry exhaustion")
                 self.assertEqual(blocked["graph"]["nodes"][NODE]["retry"]["attempts"], maximum)
                 self.assertEqual(provider.success("inspect")["ready"], [])
-                provider.success(
-                    "record-decision",
-                    "--session",
-                    provider.session,
-                    "--phase",
-                    "implementation",
-                    "--decision",
-                    "answer",
-                    "--chosen",
-                    "a",
-                    "--worker-status-seq",
-                    "1",
-                )
+                answer(provider, "implementation", "1")
                 self.assertEqual(provider.success("inspect")["ready"], [])
 
     def test_terminal_decision_below_cap_uses_next_attempt(self) -> None:
@@ -203,19 +201,7 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                 node = current["graph"]["nodes"][NODE]
                 self.assertEqual(node["retry"], {"attempts": 2, "max": 3})
                 status_seq = str(current["worker_statuses"][-1]["seq"])
-                provider.success(
-                    "record-decision",
-                    "--session",
-                    provider.session,
-                    "--phase",
-                    "implementation",
-                    "--decision",
-                    "answer",
-                    "--chosen",
-                    "a",
-                    "--worker-status-seq",
-                    status_seq,
-                )
+                answer(provider, "implementation", status_seq)
                 self.assertEqual(provider.success("inspect")["ready"], [NODE])
                 failed = self.record(provider, {"outcome": "failed", "evidence": "next attempt"}, "failed")
                 self.assertEqual(failed.returncode, 0, failed.stderr)
@@ -235,24 +221,13 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                 result = provider.call("record-wave", json.dumps(report))
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(provider.read()["graph"]["nodes"][verification]["status"], "pending")
-                provider.success(
-                    "record-decision",
-                    "--session",
-                    provider.session,
-                    "--phase",
-                    "verification",
-                    "--decision",
-                    "answer",
-                    "--chosen",
-                    "a",
-                    "--worker-status-seq",
-                    "1",
-                )
+                answer(provider, "verification", "1")
                 self.assertEqual(provider.success("inspect")["ready"], [verification])
 
     def test_malformed_status_storage_inhibits_readiness(self) -> None:
         """Malformed rows fail closed instead of being mistaken for resolved decisions."""
         cases: list[Any] = [None, {}, [None], [{}], [{"node": NODE, "decision_pending": "false"}]]
+        cases += [{"bad": "row"}, [{"node": NODE, "decision_pending": True}]]
         for rows in cases:
             for provider in self.providers:
                 with self.subTest(provider=provider.name, rows=rows):
@@ -261,6 +236,8 @@ class WorkerStatusRecordWaveTests(unittest.TestCase):
                     provider.write(state)
                     self.assertEqual(provider.success("inspect")["ready"], [])
                     before = provider.path.read_bytes()
+                    summary = provider.success("summarize")
+                    self.assertEqual((summary["ready"], summary["pending"]), ([], [NODE]))
                     self.assertEqual(provider.call("begin-wave").returncode, 1)
                     self.assertEqual(provider.path.read_bytes(), before)
 

@@ -16,11 +16,11 @@ import graph_driver_controller
 import graph_driver_mode
 import graph_repair
 import graph_spec
+import worker_status
 from graph_vocab import DISPOSITION_KINDS, STOP_CATEGORIES, STOP_REASON_CODES, disposition_report
 
 from hooks.scripts.lib import (
     graph_controller,
-    graph_decisions,
     graph_driver_adapter,
     graph_driver_claude,
     graph_recovery,
@@ -32,37 +32,32 @@ from hooks.scripts.lib.graph_evidence_revalidate import revalidate_all
 from hooks.scripts.lib.graph_executor import graph_semantics, load, transition, validate_state
 from hooks.scripts.lib.graph_recovery import trace
 from hooks.scripts.lib.loop_state_common import atomic_progress_update
+from scripts.lib import decision_record
 
-GRAPH_COMMANDS = (
-    "start",
-    "add-unit",
-    "assign-unit-scope",
-    "append-unit-scope-note",
-    "instantiate",
-    "inspect",
-    "summarize",
-    "recover-wave",
-    "plan",
-    "begin-wave",
-    "begin-driver-wave",
-    "drive",
-    "record-wave",
-    "record-driver-wave",
-    "record-driver-control",
-    "record-unit",
-    "record-repair",
-    "respawn-stale",
-    "hard-stop",
-    "stop",
-    "authorize-dispatch",
-    "authorize-driver",
-    "complete",
-    "verify-completion",
-    "convert",
-    "cutover-driver",
-    "disposition-audit",
-    "record-decision",
-)
+
+def _add_unit_args(command: argparse.ArgumentParser) -> None:
+    """Register the owned work-unit fields and its disposition boundary."""
+    command.add_argument("--unit", required=True)
+    command.add_argument("--depends-on", action="append", default=[])
+    command.add_argument("--join", action="store_true")
+    command.add_argument("--manifest", action="append", default=[])
+    command.add_argument("--base-branch", help="remote branch used for first stacked publication")
+    command.add_argument("--worktree", help="absolute path of this unit's checkout")
+    command.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
+    command.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
+    command.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
+    command.add_argument("--scope", help="one-line scope statement for the worker")
+    command.add_argument("--disposition", choices=DISPOSITION_KINDS, help="clean-break | preserve-compat")
+    command.add_argument("--named-blocker", help="what blocks removal (preserve-compat only)")
+    command.add_argument("--removal-ticket", help="ticket that removes it (preserve-compat only)")
+
+
+GRAPH_COMMANDS = (  # noqa: SIM905 - keep the combined native and driver command list within CLI size limits.
+    "start add-unit assign-unit-scope append-unit-scope-note instantiate inspect summarize recover-wave "
+    "plan begin-wave begin-driver-wave drive record-wave record-driver-wave record-driver-control record-unit "
+    "record-repair respawn-stale hard-stop stop authorize-dispatch authorize-driver complete verify-completion "
+    "convert cutover-driver disposition-audit record-decision flush-decisions collection"
+).split()
 
 
 def parser() -> argparse.ArgumentParser:
@@ -74,6 +69,16 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("state", type=Path)
         if name in {"record-wave", "record-driver-wave"}:
             command.add_argument("results_json")
+        if name in {"record-decision", "flush-decisions"}:
+            command.add_argument("--session", required=True)
+            command.add_argument("--cite-quote")
+        if name == "record-decision":
+            command.add_argument("--loop-id", required=True)
+            command.add_argument("--revision", required=True, type=int)
+            command.add_argument("--phase", required=True)
+            command.add_argument("--decision", required=True)
+            command.add_argument("--flip-condition")
+            command.add_argument("--unit")
         if name == "record-unit":
             command.add_argument("--unit", required=True)
             command.add_argument("--status", required=True, choices=("done", "dropped"))
@@ -98,26 +103,14 @@ def parser() -> argparse.ArgumentParser:
         if name == "start":
             command.add_argument("--prompt-file", required=True, type=Path)
         if name == "add-unit":
-            command.add_argument("--unit", required=True)
-            command.add_argument("--depends-on", action="append", default=[])
-            command.add_argument("--join", action="store_true")
-            command.add_argument("--manifest", action="append", default=[])
-            command.add_argument("--base-branch", help="remote branch used for first stacked publication")
-            command.add_argument("--worktree", help="absolute path of this unit's checkout")
-            command.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
-            command.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
-            command.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
-            command.add_argument("--scope", help="one-line scope statement for the worker")
-            command.add_argument("--disposition", choices=DISPOSITION_KINDS, help="clean-break | preserve-compat")
-            command.add_argument("--named-blocker", help="what blocks removal (preserve-compat only)")
-            command.add_argument("--removal-ticket", help="ticket that removes it (preserve-compat only)")
-        if name == "convert":
-            mode = command.add_mutually_exclusive_group()
-            mode.add_argument("--check", action="store_true", help="report the conversion without writing")
-            mode.add_argument("--write", action="store_true", help="convert in place (the default)")
+            _add_unit_args(command)
         if name == "recover-wave":
             command.add_argument("--lease-seconds", type=int, default=900)
             command.add_argument("--report-only", action="store_true")
+        if name == "convert":
+            mode = command.add_mutually_exclusive_group()
+            mode.add_argument("--check", action="store_true")
+            mode.add_argument("--write", action="store_true")
         if name == "stop":
             command.add_argument("--category", required=True, choices=STOP_CATEGORIES)
             command.add_argument("--reason-code", required=True, choices=STOP_REASON_CODES)
@@ -128,7 +121,6 @@ def parser() -> argparse.ArgumentParser:
             "hard-stop",
             "authorize-dispatch",
             "record-unit",
-            "record-decision",
             "complete",
             "verify-completion",
             "recover-wave",
@@ -140,11 +132,9 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--node", required=True)
             command.add_argument("--reason", required=True)
         if name == "record-decision":
-            for flag in ("--phase", "--decision", "--chosen"):
-                command.add_argument(flag, required=True)
-            command.add_argument("--flip-condition", help="what would change this decision")
-            command.add_argument("--worker-status-seq", type=int, help="mark this worker_statuses row resolved")
-            command.add_argument("--human-answer", action="store_true", help="a human answered")
+            command.add_argument("--chosen", help="answer to a recorded worker status")
+            command.add_argument("--worker-status-seq", type=int, help="resolve this worker status with the decision")
+            command.add_argument("--human-answer", action="store_true", help="a human answered an approval-gate status")
         if name == "authorize-dispatch":
             command.add_argument("--prompt", required=True)
             command.add_argument("--subagent-type", required=True)
@@ -182,11 +172,11 @@ def record_stop(path: Path, session: str, category: str, reason_code: str, reaso
 
 
 class _NoWriteError(ValueError):
-    """Abort the locked update without writing: a check run or an already-current state."""
+    """Abort an update that only checks state or finds no change."""
 
 
 def convert_state(path: Path, session: str, check: bool) -> dict[str, Any]:
-    """Convert progress.json to the current minor under the sole Claude lock; refuse ambiguity, never guess."""
+    """Convert graph state under the Claude lock and keep a backup."""
     inputs: dict[str, Any] = {"session": session, "check": check}
     report: dict[str, Any] = {}
     backup: list[Path] = []
@@ -212,10 +202,10 @@ def convert_state(path: Path, session: str, check: bool) -> dict[str, Any]:
     if refusal:
         trace(path, {"session_id": session}, "refused", f"convert_refused_{refusal[0].code}", inputs, [], "convert")
         raise refusal[0]
-    if not saved and not report:
+    if not saved and (not report or (report["changed"] and not check)):
         raise ValueError("progress.json is locked, unreadable or not an object")
     if saved:
-        load(path)  # re-validate what was just written; the .pre-convert backup remains for manual recovery
+        load(path)
     trace(path, {"session_id": session}, "ok", "convert_ok", inputs, [], "convert")
     return {**report, "check": check, "backup": backup[0].name if backup else None}
 
@@ -270,6 +260,30 @@ def record_repair(
     return output
 
 
+def _decision(args: argparse.Namespace) -> dict[str, Any]:
+    """Record or flush a decision through the current graph transition."""
+    if args.command == "flush-decisions":
+        return decision_record.flush_pending(
+            args.state, args.session, transition=transition, cite_quote=args.cite_quote
+        )
+    return decision_record.record(
+        args.state,
+        args.session,
+        args.phase,
+        args.decision,
+        expected_loop_id=args.loop_id,
+        expected_revision=args.revision,
+        transition=transition,
+        flip_condition=args.flip_condition,
+        unit=args.unit,
+        cite_quote=args.cite_quote,
+        chosen=args.chosen,
+        worker_status_seq=args.worker_status_seq,
+        human_answer=args.human_answer,
+        status_resolver=worker_status.resolve_pending,
+    )
+
+
 def main() -> int:
     """Run one explicit graph operation with fail-closed CLI status."""
     args = parser().parse_args()
@@ -302,12 +316,8 @@ def main() -> int:
             }
         elif args.command == "summarize":
             output = graph_recovery.summarize(load(args.state))
-        elif args.command == "record-decision":
-            typed: dict[str, str | None] = {"phase": args.phase, "decision": args.decision, "chosen": args.chosen}
-            typed["flip_condition"] = args.flip_condition
-            output = graph_decisions.record_decision(
-                args.state, args.session, typed, args.worker_status_seq, args.human_answer
-            )
+        elif args.command == "collection":
+            output = graph_recovery.collection(args.state)
         elif args.command == "disposition-audit":
             report = disposition_report(load(args.state).get("work_units"))
             output = report
@@ -346,6 +356,8 @@ def main() -> int:
             output = graph_controller.record_unit(
                 args.state, args.session, args.unit, args.status, args.evidence or args.reason
             )
+        elif args.command in {"record-decision", "flush-decisions"}:
+            output = _decision(args)
         elif args.command == "record-repair":
             output = record_repair(
                 args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis
@@ -368,7 +380,7 @@ def main() -> int:
         print(f"graph: {error}", file=sys.stderr)
         return 1
     print(json.dumps(output, sort_keys=True))
-    return 0
+    return int(output.get("exit_code", 0)) if isinstance(output, dict) else 0
 
 
 if __name__ == "__main__":

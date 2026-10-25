@@ -70,10 +70,10 @@ class ScratchCase(unittest.TestCase):
 
 
 class ControlsTests(ScratchCase):
-    """(a) An empty valid config turns every control ON."""
+    """An empty valid config resolves controls to their shipped defaults."""
 
     def test_empty_config_resolves_every_control_to_on_value(self) -> None:
-        """Every control resolves to on_value once its prerequisite stack is present."""
+        """All controls except receipt authority resolve to ON with prerequisites present."""
         schema = json.loads((ROOT / "config.schema.json").read_text())
         found = controls(schema["properties"])
         self.assertGreaterEqual(len(found), 4)
@@ -83,14 +83,17 @@ class ControlsTests(ScratchCase):
         self.assertEqual(sorted(resolved), sorted(found))
         for key, spec in found.items():
             self.assertIn("on_value", spec, key)
-            self.assertEqual(resolved[key], spec["on_value"], key)
-            self.assertNotIn("blocked_on", spec, f"{key} is ON but still claims to be blocked")
+            if key == "action_authority":
+                self.assertEqual(resolved[key], "off")
+            else:
+                self.assertEqual(resolved[key], spec["on_value"], key)
+                self.assertNotIn("blocked_on", spec, f"{key} is ON but still claims to be blocked")
 
     def test_defaults_that_were_off_are_on(self) -> None:
-        """Schema defaults for sandbox_workers, action_authority, evals.require_signatures and diff_manifest."""
+        """Worker, signing, and diff controls default ON; optional receipts default off."""
         resolved = controls_resolved(load_config(self.write(""))[0])
         self.assertIs(resolved["sandbox_workers"], True)
-        self.assertEqual(resolved["action_authority"], "enforce")
+        self.assertEqual(resolved["action_authority"], "off")
         self.assertIs(resolved["evals.require_signatures"], True)
         self.assertEqual(resolved["diff_manifest"], "enforce")
 
@@ -122,6 +125,14 @@ class StrictTests(ScratchCase):
         with self.assertRaises(ConfigRejected) as caught:
             strict_settings(self.write("action_authority: enforse\n"))
         self.assertEqual(caught.exception.findings[0]["hint"], "enforce")
+
+    def test_blank_non_nullable_values_raise(self) -> None:
+        """An empty scalar cannot disable a required integer or enum control."""
+        for key in ("subagent_identity_gate", "wiki_debt_epoch_pr"):
+            with self.subTest(key):
+                with self.assertRaises(ConfigRejected) as caught:
+                    strict_settings(self.write(f"{key}:\n"))
+                self.assertEqual(caught.exception.findings[0]["code"], "config_bad_type")
 
     def test_missing_or_corrupt_schema_cannot_resolve_controls_to_off(self) -> None:
         """A missing schema is a typed refusal, never an empty controls table."""
@@ -175,6 +186,8 @@ class StrictTests(ScratchCase):
             ("evals:\n  require_signatures: no\n", True),
             ("evals:\n  require_signatures: false\n", False),
             ("evals:\n  require_signatures: false\n  require_signaturez: x\n", True),
+            ("evals: false\n  require_signatures: false\n", True),
+            ("evals:\n  require_signatures: false\n  - junk\n", True),
         ):
             with self.subTest(text):
                 self.assertIs(require_signatures(self.write(text)), expected)
@@ -246,8 +259,7 @@ class GuardedActionTests(HookCase):
         self.assertEqual(self.invoke("action_authority_gate", self.payload("ls -la")).stdout, "")
         self.config.unlink()
         absent = self.invoke("action_authority_gate", self.payload("gh pr merge 12"))
-        self.assertEqual(json.loads(absent.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertNotIn("config_rejected", absent.stdout)
+        self.assertEqual(absent.stdout, "")
 
 
 class ParityTests(unittest.TestCase):

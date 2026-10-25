@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -27,6 +28,16 @@ class RepositoryTests(unittest.TestCase):
         ):
             self.assertEqual(ab.normalise_repository(url), REPOSITORY, url)
         for url in ("/tmp/x/y.git", "origin", "", "file:///tmp/x/y.git"):
+            self.assertIsNone(ab.normalise_repository(url), url)
+
+    def test_ports_and_path_segments_are_canonical(self) -> None:
+        """An SSH port is not a path component, and traversal cannot name a repository."""
+        self.assertEqual(ab.normalise_repository("ssh://git@github.com:2222/acme/widgets.git"), REPOSITORY)
+        for url in (
+            "https://github.com/acme/../widgets.git",
+            "https://github.com/acme/x/../widgets.git",
+            "git@github.com:22/acme/widgets.git",
+        ):
             self.assertIsNone(ab.normalise_repository(url), url)
 
 
@@ -93,6 +104,19 @@ class PushTests(unittest.TestCase):
         ):  # fmt: skip
             self.assertIsNone(self.bind(command), command)
 
+    def test_destination_and_transport_overrides_are_unbindable(self) -> None:
+        """A transport or destination override may change the actual push target."""
+        for command in (
+            "git push --repo evil origin main",
+            "git push --repo=evil origin main",
+            "git push --receive-pack=evil origin main",
+            "git push --exec=evil origin main",
+            "git push --mirror=true origin main",
+            "git push --delete=true origin main",
+        ):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bind(command))
+
     def test_push_url_redirect_is_seen(self) -> None:
         """remote.<n>.pushurl is where the push really goes, so the repository follows it (negative control)."""
         git(self.repo, "config", "remote.origin.pushurl", "git@github.com:evil/widgets.git")
@@ -121,6 +145,28 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(got, {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": a})
         view.assert_called_once_with("12", str(self.repo), None)
 
+    def test_merge_script_resolves_auto_and_branch_target(self) -> None:
+        """Supported merge.py targets bind the same PR that the helper resolves."""
+        sha = "a" * 40
+        git(self.repo, "switch", "-q", "-c", "feature/x")
+        with (
+            mock.patch.object(ab, "pr_view", return_value=("main", sha)),
+            mock.patch.object(ab, "pr_number_for_branch", return_value="7") as number,
+        ):
+            for target in ("auto", "feature/x"):
+                with self.subTest(target=target):
+                    self.assertEqual(
+                        ab.binding("merge", f"python3 scripts/merge.py {target} --expected-head {sha}", str(self.repo)),
+                        {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": sha},
+                    )
+        self.assertEqual([call.args[0] for call in number.call_args_list], ["feature/x", "feature/x"])
+
+    def test_nonzero_gh_json_cannot_supply_a_binding(self) -> None:
+        """A failed gh process can print JSON, but it did not establish a live PR head."""
+        done = subprocess.CompletedProcess([], 1, '{"baseRefName":"main","headRefOid":"' + "a" * 40 + '"}', "failed")
+        with mock.patch("scripts.lib.action_binding.subprocess.run", return_value=done):
+            self.assertIsNone(ab.pr_view("12", str(self.repo)))
+
     def test_head_must_be_pinned(self) -> None:
         """No --match-head-commit, or a stale one, is unknowable (a head that moves later merges unreviewed code)."""
         a = "a" * 40
@@ -132,7 +178,27 @@ class MergeTests(unittest.TestCase):
             self.assertIsNotNone(
                 ab.binding("merge", f"gh api repos/acme/widgets/pulls/9/merge -f sha={a}", str(self.repo))
             )
-            self.assertIsNotNone(ab.binding("merge", "python3 scripts/merge.py 12", str(self.repo)))  # pins itself
+            self.assertIsNone(ab.binding("merge", "python3 scripts/merge.py 12", str(self.repo)))
+
+    def test_merge_script_requires_the_current_expected_head(self) -> None:
+        """Only a literal head that matches the live PR can bind a helper receipt."""
+        approved = "a" * 40
+        later = "b" * 40
+        with mock.patch.object(ab, "pr_view", return_value=("main", approved)) as view:
+            self.assertIsNone(ab.binding("merge", "python3 scripts/merge.py 12", str(self.repo)))
+            view.assert_not_called()
+            view.return_value = ("main", later)
+            self.assertIsNone(
+                ab.binding("merge", f"python3 scripts/merge.py 12 --expected-head {approved}", str(self.repo))
+            )
+            self.assertEqual(
+                ab.binding("merge", f"python3 scripts/merge.py 12 --expected-head {later}", str(self.repo)),
+                {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": later},
+            )
+            self.assertEqual(
+                ab.binding("merge", f"gh pr merge 12 --match-head-commit {later}", str(self.repo)),
+                {"repository": REPOSITORY, "ref": "refs/heads/main", "sha": later},
+            )
 
     def test_forms(self) -> None:
         """PR URL, gh api path and -R pick the repository; option values are never mistaken for the PR."""
@@ -144,6 +210,13 @@ class MergeTests(unittest.TestCase):
             self.assertEqual(by_url and by_url["repository"], "github.com/other/repo")
             api = ab.binding("merge", f"gh api repos/acme/gadgets/pulls/9/merge -f sha={b}", str(self.repo))
             self.assertEqual(api and api["repository"], "github.com/acme/gadgets")
+            async_api = ab.binding(
+                "merge", f"gh api --method PUT repos/acme/gadgets/pulls/9/merge-async -f sha={b}", str(self.repo)
+            )
+            self.assertIsNone(async_api)  # async merge may also merge open downstack PRs
+            self.assertIsNone(
+                ab.binding("merge", "gh api repos/acme/gadgets/pulls/9/merge-async/some-uuid", str(self.repo))
+            )
             got = ab.binding("merge", f"gh pr merge 3 -R other/repo {pin}", str(self.repo))
             body = ab.binding("merge", f"gh pr merge --body 7 5 {pin}", str(self.repo))
         self.assertEqual(got and got["repository"], "github.com/other/repo")

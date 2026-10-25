@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Owner-run key setup for signed action receipts. Never run by an agent: it needs the owner at a terminal.
+"""Optional user-tier key setup for signed action receipts.
 
 init          create the PASSPHRASE-PROTECTED ed25519 receipt key (ssh-keygen prompts on /dev/tty; refuses when
               there is no tty) and write the user-tier signers file (a cooperating-agent safeguard: the same user,
               hence an agent, can edit that file).
-install-root  only PRINTS the sudo command that installs the signers file as the root-owned trust root (the real
-              boundary); this tool never runs sudo.
-show          print the fingerprints of the key and of both trust-root tiers.
+show          print the fingerprints of the key and user-tier signers file.
 """
 
 from __future__ import annotations
@@ -50,23 +48,8 @@ def init(directory: Path | None = None, tty_ok: Callable[[], bool] = rs.have_tty
     signers = directory / "receipt_signers"
     signers.write_text(f'{rs.PRINCIPAL} namespaces="{rs.NAMESPACE}" {public}\n')
     signers.chmod(0o600)
-    print(f"created {key} and {signers} (user tier: cooperating-agent safeguard). For the real boundary run:")
-    print(f"  python3 {Path(__file__).name} install-root")
+    print(f"created {key} and {signers} (user tier: cooperating-agent safeguard)")
     return 0
-
-
-def install_root(directory: Path | None = None) -> int:
-    """Print (never run) the sudo commands that install the signers file as the root-owned trust root."""
-    src = (directory or rs.keys_dir()) / "receipt_signers"
-    dest = rs.ROOT_SIGNERS
-    print("# run these yourself; they make the signers file root-owned and not group/other writable:")
-    print(f"sudo install -d -o root -g wheel -m 755 {_quote(dest.parent)}")
-    print(f"sudo install -o root -g wheel -m 644 {_quote(src)} {_quote(dest)}")
-    return 0
-
-
-def _quote(path: Path) -> str:
-    return "'" + str(path).replace("'", "'\\''") + "'"
 
 
 def _fingerprint(line: str) -> str:
@@ -83,10 +66,9 @@ def _fingerprint(line: str) -> str:
 
 
 def show(directory: Path | None = None) -> int:
-    """Print the fingerprints of the key and of each trust-root tier that exists."""
+    """Print the fingerprints of the key and user-tier signers file."""
     where = directory or rs.keys_dir()
-    for label, path in (("key", where / "receipt_ed25519.pub"), ("user tier", where / "receipt_signers"),
-                        ("root tier", rs.ROOT_SIGNERS)):  # fmt: skip
+    for label, path in (("key", where / "receipt_ed25519.pub"), ("user tier", where / "receipt_signers")):
         if not path.is_file():
             print(f"{label}: absent ({path})")
             continue
@@ -98,11 +80,11 @@ def show(directory: Path | None = None) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Dispatch one subcommand."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "install-root", "show"))
+    parser.add_argument("command", choices=("init", "show"))
     args = parser.parse_args(argv)
     if args.command == "init":
         return init()
-    return install_root() if args.command == "install-root" else show()
+    return show()
 
 
 if __name__ == "__main__":

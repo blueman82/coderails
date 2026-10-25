@@ -101,6 +101,19 @@ class KeyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as empty, keys_in(empty):
             self.assertEqual(eval_signing.check(block, "payload"), "key_missing")
 
+    def test_invalid_signature_without_allowed_signers_is_refused(self) -> None:
+        """A missing trust list cannot conceal a cryptographically invalid signature."""
+        block = eval_signing.sign("payload")
+        lines = block["sig"].splitlines()
+        lines[2] = lines[2][:-4] + ("AAAA" if not lines[2].endswith("AAAA") else "BBBB")
+        with (
+            tempfile.TemporaryDirectory() as empty,
+            keys_in(empty),
+            self.assertRaises(eval_signing.SigningError) as caught,
+        ):
+            eval_signing.check({**block, "sig": "\n".join(lines) + "\n"}, "payload")
+        self.assertEqual(caught.exception.code, "signature_invalid")
+
     def test_missing_binary_is_degraded(self) -> None:
         """No ssh-keygen: sign raises key_missing and check degrades."""
         block = eval_signing.sign("payload")

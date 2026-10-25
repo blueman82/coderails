@@ -3,14 +3,17 @@
 
 from __future__ import annotations
 
+import re
+import shlex
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import git_common as git
-from scripts.lib import manifest_policy
-from scripts.lib.config import config_path, integrity_machine_user
+from scripts.lib import manifest_policy, merge_budget
+from scripts.lib.config import config_path, integrity_enabled, integrity_status_login
+from scripts.lib.config_strict import ConfigRejected, strict_settings
 from scripts.lib.integrity_status import verify_integrity_status
 from scripts.lib.receipt_gate import require_merge_receipt
 from scripts.lib.wiki_debt import has_wiki_ingest_for_merged_prs
@@ -52,9 +55,13 @@ def verify_gates(number: str) -> str:
     except OSError as error:
         raise git.WorkflowError("Local temporary file allocation/write failed for the smoke-verify gate") from error
     config = config_path()
-    machine_user = integrity_machine_user(config) if config else ""
-    if machine_user:
-        verify_integrity_status(sha, machine_user)
+    if config:
+        try:
+            strict_settings(config)
+        except ConfigRejected as error:
+            raise git.WorkflowError(str(error)) from error
+        if integrity_enabled(config):
+            verify_integrity_status(sha, integrity_status_login(config))
     has_wiki_ingest_for_merged_prs(number)
     return sha
 
@@ -79,6 +86,15 @@ def main(arguments: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if arguments is None else arguments
     argument = arguments[0] if arguments else "auto"
     try:
+        expected_sha: str | None = None
+        if len(arguments) == 3 and arguments[1] == "--expected-head":
+            expected_sha = arguments[2]
+        elif len(arguments) == 2 and arguments[1].startswith("--expected-head="):
+            expected_sha = arguments[1].split("=", 1)[1]
+        elif len(arguments) > 1:
+            raise git.WorkflowError("Usage: merge.py <PR or branch> [--expected-head <40-hex SHA>]")
+        if expected_sha is not None and not re.fullmatch(r"[0-9a-f]{40}", expected_sha):
+            raise git.WorkflowError("--expected-head must be a full lowercase commit SHA")
         git.require_repo()
         default = git.main()
         if argument == "auto":
@@ -95,10 +111,22 @@ def main(arguments: list[str] | None = None) -> int:
             if git.protected() and git.pr_field(number, "reviewDecision", "NONE") != "APPROVED":
                 raise git.WorkflowError("Not approved")
             sha = verify_gates(number)
+            if expected_sha is not None and expected_sha != sha:
+                raise git.WorkflowError("PR head changed after the expected SHA was chosen")
             manifest_policy.gate(number)
-            require_merge_receipt(number)  # fail-closed: a signed owner receipt, claimed before the merge runs
+            command = shlex.join(["python3", sys.argv[0], *arguments])
+            reservation = require_merge_receipt(
+                number, target=argument, verified_sha=sha, expected_sha=expected_sha, command=command
+            )
             # pin the head the gates verified: GitHub refuses the merge if the PR head moved since
-            git.run("gh", "pr", "merge", number, "--merge", "--match-head-commit", sha, check=True)
+            try:
+                git.run("gh", "pr", "merge", number, "--merge", "--match-head-commit", sha, check=True)
+            except git.WorkflowError:
+                if reservation and git.pr_field(number, "state") == "OPEN":
+                    merge_budget.settle(reservation, False)
+                raise
+            if reservation:
+                merge_budget.settle(reservation, True)
             print("✓ Merged")
         elif state == "MERGED":
             print("! Already merged")

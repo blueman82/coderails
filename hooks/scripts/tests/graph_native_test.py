@@ -57,6 +57,16 @@ class NativeGraphTest(unittest.TestCase):
         dispatch.validate_graph_completion(self.path, "fixture-session")
         self.assertEqual(graph["graph"]["nodes"]["U3[1]"]["evidence"][-1]["subagent_type"], "general-purpose")
 
+    def test_graph_outputs_include_descriptive_node_names(self) -> None:
+        """Claude dispatch output adds display metadata while preserving ownership IDs."""
+        wave = dispatch.begin_wave(self.path)
+        item = wave["dispatches"][0]
+        self.assertEqual(item["node_id"], "U3[1]")
+        self.assertEqual(item["job_name"], "Builder")
+        self.assertEqual(item["lane_code"], "A-1")
+        self.assertEqual(item["node_name_marker"], "CODERAILS_GRAPH_NODE_NAME=Builder · A-1 [U3[1]]")
+        self.assertIn('"node_id": "U3[1]"', item["prompt_prefix"])
+
     def test_no_spawn_or_incomplete_child_is_atomic(self) -> None:
         """A report alone or a launched worker without a terminal cannot finish."""
         graph = self.opened()

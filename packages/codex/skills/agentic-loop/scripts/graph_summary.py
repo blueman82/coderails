@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import graph_semantics
 from graph_io import load
+from graph_vocab import decision_pending
 
 
 def budget_spent(node: dict[str, Any]) -> bool:
@@ -21,8 +22,23 @@ def summarize(path: Path) -> dict[str, Any]:
     statuses = {node_id: node["status"] for node_id, node in graph["nodes"].items()}
     pending = sorted(n for n, status in statuses.items() if status not in {"done", "skipped"})
     ready = [] if graph["active_wave"] or graph["hard_stop"] else graph_semantics.ready(state)
-    decisions = cast(list[dict[str, Any]], state.get("worker_statuses") or [])
-    awaiting = [row for row in decisions if row.get("decision_pending") is True]
+    rows = state.get("worker_statuses")
+    decisions = cast(list[object], rows) if isinstance(rows, list) else []
+    awaiting: list[dict[str, Any]] = [
+        cast(dict[str, Any], row)
+        for row in decisions
+        if isinstance(row, dict)
+        and cast(dict[str, Any], row).get("decision_pending") is True
+        and all(key in row for key in ("node", "status", "seq"))
+    ]
+    syncing = [
+        cast(dict[str, Any], row)
+        for row in decisions
+        if isinstance(row, dict)
+        and cast(dict[str, Any], row).get("decision_pending") is False
+        and isinstance(cast(dict[str, Any], row).get("node"), str)
+        and decision_pending(state, cast(str, cast(dict[str, Any], row)["node"]))
+    ]
     if graph["hard_stop"] is not None:
         phase, detail = (
             "waiting for human",
@@ -40,6 +56,8 @@ def summarize(path: Path) -> dict[str, Any]:
         detail = "; ".join(
             f"{row['node']} {row['status']}: run record-decision --worker-status-seq {row['seq']}" for row in awaiting
         )
+    elif syncing:
+        phase, detail = "waiting for evidence", "decision sync pending: run flush-decisions after store reconciliation"
     elif not pending:
         phase, detail = "ready to complete", "run verify-completion"
     else:
@@ -47,6 +65,7 @@ def summarize(path: Path) -> dict[str, Any]:
     return {
         "phase": phase,
         "detail": detail,
+        "node_names": graph_semantics.node_names(graph["nodes"]),
         "done": sorted(n for n in statuses if n not in pending),
         "active": list(graph["active_wave"]["nodes"]) if graph["active_wave"] else [],
         "ready": ready,

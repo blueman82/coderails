@@ -16,6 +16,8 @@ Execute the merge workflow script:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/merge.py" "$ARGUMENTS"
 ```
 
+For `action_authority: enforce`, fetch the current PR head and use `python3 <absolute helper path> <target> --expected-head <40-hex SHA>`. Mint the receipt for that exact command. Direct executable invocation is unsupported in enforce mode because its command hash differs.
+
 The script handles:
 1. Detecting PR from argument (number, branch name, or current branch)
 2. Checking if repository requires PR approval

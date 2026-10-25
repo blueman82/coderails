@@ -187,8 +187,8 @@ class FinalReportAndPrepareTests(unittest.TestCase):
         self.assertEqual(ws.stop_for(statuses)[:2], ("approval-gate", "needs_approval"))
         self.assertEqual(ws.stop_for(statuses[:1])[:2], ("awaiting-input", "needs_human_input"))
 
-    def test_append_decision_row_and_refusals(self) -> None:
-        """The pure ledger core: typed row, resolved status, no input mutation, and each refusal code."""
+    def test_resolve_pending_status_and_refusals(self) -> None:
+        """The pure transform resolves only the named status and refuses an invalid sequence."""
         state: dict[str, Any] = {
             "session_id": "s",
             "revision": 4,
@@ -196,31 +196,19 @@ class FinalReportAndPrepareTests(unittest.TestCase):
                 {"seq": 1, "status": "NEEDS_DECISION", "payload": {"options": ["c", "d"]}, "decision_pending": True}
             ],
         }
-        fields: dict[str, str | None] = {"phase": " 2.6 ", "decision": "d", "chosen": "c", "flip_condition": None}
-        proposed, row = ws.append_decision(state, "s", fields, 1)
-        self.assertEqual(
-            list(row), ["seq", "phase", "decision", "chosen", "worker_status_seq", "revision", "recorded_at"]
-        )
-        self.assertEqual((row["seq"], row["phase"], row["revision"]), (1, "2.6", 4))
+        proposed = copy.deepcopy(state)
+        ws.resolve_pending(proposed, 1, "c", False, 7)
         self.assertEqual(
             proposed["worker_statuses"][0],
-            {**state["worker_statuses"][0], "decision_pending": False, "resolved_by_decision": 1},
+            {**state["worker_statuses"][0], "decision_pending": False, "resolved_by_decision": 7},
         )
-        self.assertNotIn("decisions_absorbed", state)
-        bad: list[tuple[dict[str, Any], str, dict[str, str | None], int | None]] = [
-            (state, "other", fields, None),
-            (state, "s", {**fields, "chosen": " "}, None),
-            ({**state, "decisions_absorbed": "torn"}, "s", fields, None),
-            (state, "s", fields, 7),
-            (proposed, "s", fields, 1),
-        ]
-        codes = ["foreign", "field", "state", "status", "status"]
-        for (current, session, given, seq), code in zip(bad, codes):
+        self.assertTrue(state["worker_statuses"][0]["decision_pending"])
+        for current, seq in ((state, 7), (proposed, 1)):
             with self.assertRaises(ws.WorkerResultError) as caught:
-                ws.append_decision(current, session, given, seq)
-            self.assertEqual(caught.exception.code, f"record_decision_refused_{code}")
+                ws.resolve_pending(current, seq, "c", False, 8)
+            self.assertEqual(caught.exception.code, "record_decision_refused_status")
 
-    def test_append_decision_binds_answer_to_the_status(self) -> None:
+    def test_resolve_pending_binds_answer_to_the_status(self) -> None:
         """The answer must be a NEEDS_DECISION option; approval-gate statuses need the human-answer marker."""
         pending = {"decision_pending": True}
         state: dict[str, Any] = {
@@ -231,13 +219,12 @@ class FinalReportAndPrepareTests(unittest.TestCase):
                 {"seq": 2, "status": "IRREVERSIBLE_ACTION", "payload": {}, **pending},
             ],
         }
-        fields: dict[str, str | None] = {"phase": "p", "decision": "d", "chosen": "z"}
         for seq, human, code in ((1, False, "chosen"), (2, False, "human")):
             with self.assertRaises(ws.WorkerResultError) as caught:
-                ws.append_decision(state, "s", fields, seq, human)
+                ws.resolve_pending(state, seq, "z", human, 1)
             self.assertEqual(caught.exception.code, f"record_decision_refused_{code}")
-        ws.append_decision(state, "s", {**fields, "chosen": "b"}, 1)
-        ws.append_decision(state, "s", fields, 2, True)
+        ws.resolve_pending(state, 1, "b", False, 1)
+        ws.resolve_pending(state, 2, "z", True, 2)
 
     def test_both_record_wave_paths_call_prepare(self) -> None:
         """Negative control anchor: deleting the pre-processor call from a provider fails here and in the CLI tests."""

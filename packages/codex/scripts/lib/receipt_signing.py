@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
-"""Receipt signatures over `ssh-keygen -Y sign/verify` (namespace coderails-receipt) and the two-tier trust root.
+"""Receipt signatures over `ssh-keygen -Y sign/verify` (namespace coderails-receipt).
 
-Trust root tiers, in order:
-  root  /Library/Application Support/Coderails/receipt_signers - honoured only when the file and its directory are
-        owned by uid 0 and not group/other writable. Owner-installed with sudo; this is the real boundary.
-  user  ~/.coderails/keys/receipt_signers - writable by the same user as the agent, so it is a
-        cooperating-agent safeguard only (traced as trust_root_user_tier), not a boundary.
-Neither present: trust_root_missing (deny). There is deliberately NO environment-variable override of the trust
-root: an env knob would be a bypass. Callers and tests pass the path as an argument.
-The owner key is passphrase-protected; ssh-keygen asks on /dev/tty, so an agent without a tty cannot sign.
+The user-tier signers file is writable by the same user as the agent. It is a cooperating-agent safeguard,
+not an independent approval boundary. A missing signers file gives trust_root_missing.
 """
 
 from __future__ import annotations
@@ -18,12 +12,11 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 NAMESPACE = "coderails-receipt"
 PRINCIPAL = "coderails-owner"
-ROOT_SIGNERS = Path("/Library/Application Support/Coderails/receipt_signers")
-ROOT_TIER, USER_TIER, MISSING = "trust_root_root_tier", "trust_root_user_tier", "trust_root_missing"
+USER_TIER, MISSING = "trust_root_user_tier", "trust_root_missing"
 _SIGNER = re.compile(r"^[A-Za-z0-9_.@-]{1,64}$")
 
 
@@ -46,19 +39,8 @@ def user_signers() -> Path:
     return keys_dir() / "receipt_signers"
 
 
-def _root_owned(path: Path, stat: Callable[[str], Any]) -> bool:
-    try:  # the file and EVERY ancestor directory: a user-writable ancestor could swap the root-owned directory
-        return all(s.st_uid == 0 and not s.st_mode & 0o022 for s in map(stat, map(str, (path, *path.parents))))
-    except OSError:
-        return False
-
-
-def resolve_trust_root(
-    root: Path = ROOT_SIGNERS, user: Path | None = None, stat: Callable[[str], Any] = os.stat
-) -> tuple[Path | None, str]:
-    """(signers file, tier reason): the root tier when genuinely root-owned, else the user tier, else missing."""
-    if root.is_file() and _root_owned(root, stat):
-        return root, ROOT_TIER
+def resolve_trust_root(user: Path | None = None) -> tuple[Path | None, str]:
+    """Return the user-tier signers file when present, or a missing-trust-root reason."""
     user = user or user_signers()
     return (user, USER_TIER) if user.is_file() else (None, MISSING)
 
@@ -92,14 +74,16 @@ def check(text: str, block: object, signers: Path | None) -> str:
         return MISSING
     with tempfile.TemporaryDirectory() as scratch:
         sig = Path(scratch) / "body.sig"
-        sig.write_text(armored)
         try:
+            sig.write_bytes(armored.encode("ascii"))
             if _run(["ssh-keygen", "-Y", "check-novalidate", "-n", NAMESPACE, "-s", str(sig)], text).returncode:
                 return "signature_invalid"
             trusted = _run(
                 ["ssh-keygen", "-Y", "verify", "-f", str(signers), "-I", signer, "-n", NAMESPACE, "-s", str(sig)],
                 text,
             )
+        except UnicodeEncodeError:
+            return "signature_invalid"
         except SigningError:
             return MISSING
     return "signer_unknown" if trusted.returncode else "ok"

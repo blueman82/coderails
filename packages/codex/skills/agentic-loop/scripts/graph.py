@@ -10,18 +10,18 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
-import graph_convert
 import graph_dispatch
 import graph_driver_cutover
 import graph_invalid_dispatch
 import graph_ledger
+import graph_mutations
 import graph_repair
 import graph_semantics
 import graph_spec
 import graph_stops
 from graph_completion import complete, verify_completion
 from graph_controller import add_unit, instantiate, start
-from graph_dispatch import apply_record as apply_record
+from graph_dispatch import apply_record as _apply_record
 from graph_dispatch import authorize_dispatch as authorize_dispatch
 from graph_dispatch import begin_wave as begin_wave
 from graph_dispatch import record_wave as record_wave
@@ -30,8 +30,9 @@ from graph_io import load as _load
 from graph_io import locked as _locked
 from graph_io import write as _write
 from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace, traced_refusal
+from graph_recovery import collection as collect
 from graph_summary import budget_spent as _budget_spent
-from graph_summary import summarize
+from graph_summary import summarize as summarize
 from graph_vocab import DISPOSITION_KINDS
 
 reject_invalid_dispatch = graph_invalid_dispatch.reject_invalid_dispatch
@@ -52,59 +53,6 @@ def transition(path: Path, session: str, operation: str, node: str, reason: str)
         _write(path, proposed)
         key = "respawn" if operation == "respawn_stale" else "hard_stop"
         return cast(dict[str, Any], transition[key])
-
-
-def convert_state(path: Path, session: str, check: bool) -> dict[str, Any]:
-    """Convert progress.json to the current minor under the state lock; refuse ambiguity, never guess."""
-    inputs: dict[str, Any] = {"session": session, "check": check}
-    backup: Path | None = None
-    report: dict[str, Any] = {}
-    try:
-        with _locked(path):
-            try:
-                raw: object = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError) as error:
-                raise GraphError(f"cannot read state: {error}") from error
-            converted, report = graph_convert.convert(raw, session)
-            if report["changed"] and not check:
-                try:
-                    graph_semantics.validate(converted)
-                except ValueError as error:
-                    raise graph_convert.ConvertRefusedError("invalid_result", str(error)) from error
-                backup = graph_convert.write_backup(path)
-                _write(path, converted)
-                _load(path)  # re-validate what was just written; the .pre-convert backup remains for manual recovery
-    except graph_convert.ConvertRefusedError as error:
-        trace(path, {"session_id": session}, "refused", f"convert_refused_{error.code}", inputs, [], "convert")
-        raise GraphError(str(error)) from error
-    trace(path, {"session_id": session}, "ok", "convert_ok", inputs, [], "convert")
-    return {**report, "check": check, "backup": backup.name if backup else None}
-
-
-def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str) -> dict[str, Any]:
-    """Record an independently checked work-unit decision under the state lock."""
-    with _locked(path):
-        state = _load(path)
-        if state["session_id"] != session:
-            raise GraphError("session does not own this loop")
-        if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
-            raise GraphError("work unit requires an in-progress graph without an active wave")
-        units = cast(object, state.get("work_units"))
-        if not isinstance(cast(object, unit_id), str) or not unit_id.strip() or not isinstance(units, dict):
-            raise GraphError("work unit must be registered")
-        unit = cast(dict[str, object], units).get(unit_id)
-        if not isinstance(unit, dict):
-            raise GraphError("work unit must be registered and pending")
-        record = cast(dict[str, object], unit)
-        if record.get("status") != "pending":
-            raise GraphError("work unit must be registered and pending")
-        if status not in {"done", "dropped"} or not isinstance(cast(object, detail), str) or not detail.strip():
-            raise GraphError("work unit decision requires a status and nonblank evidence or reason")
-        record["status"] = status
-        record["evidence" if status == "done" else "dropped_reason"] = detail.strip()
-        graph_semantics.validate(state)
-        _write(path, state)
-        return {"unit": unit_id, "status": status, "revision": state["revision"]}
 
 
 def record_repair(
@@ -129,9 +77,8 @@ def inspect(path: Path) -> dict[str, Any]:
     return {
         "session_id": state["session_id"],
         "loop_id": state["loop_id"],
-        "revision": state["revision"],
         "status": state.get("status"),
-        "active_wave": graph["active_wave"],
+        **graph_semantics.inspect(state),
         "task_names": (
             {
                 node_id: task_name(state["loop_id"], node_id, next_attempt(graph["nodes"][node_id]))
@@ -140,9 +87,6 @@ def inspect(path: Path) -> dict[str, Any]:
             if graph["active_wave"] is not None
             else {}
         ),
-        "running": sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] == "running"),
-        "ready": graph_semantics.ready(state) if graph["active_wave"] is None and graph["hard_stop"] is None else [],
-        "hard_stop": graph["hard_stop"],
     }
 
 
@@ -195,9 +139,7 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
         check = {"checked": True, "method": f"lease {lease}s expired", "result": "no worker activity"}
         results = {n: {"outcome": "stale", "evidence": "lease expired", "stale_check": check} for n in nodes}
         with traced_refusal(path, state, "recover-wave", session):
-            proposed, _ = graph_dispatch.apply_record(
-                state, json.dumps({"wave_id": active["wave_id"], "results": results})
-            )
+            proposed, _ = _apply_record(state, json.dumps({"wave_id": active["wave_id"], "results": results}))
         for node_id in nodes:
             try:
                 respawned = graph_semantics.respawn_stale(proposed, node_id, "lease expired")
@@ -220,12 +162,29 @@ def recover_wave(
     return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
 
 
+def _add_unit_args(controller: argparse.ArgumentParser) -> None:
+    """Register work-unit ownership and disposition fields."""
+    controller.add_argument("--unit", required=True)
+    controller.add_argument("--depends-on", action="append", default=[])
+    controller.add_argument("--join", action="store_true")
+    controller.add_argument("--manifest", action="append", default=[])
+    controller.add_argument("--base-branch", help="remote branch used for first stacked publication")
+    controller.add_argument("--worktree", help="absolute path of this unit's checkout")
+    controller.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
+    controller.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
+    controller.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
+    controller.add_argument("--scope", help="one-line scope statement for the worker")
+    controller.add_argument("--disposition", choices=DISPOSITION_KINDS, help="clean-break | preserve-compat")
+    controller.add_argument("--named-blocker", help="what blocks removal (preserve-compat only)")
+    controller.add_argument("--removal-ticket", help="ticket that removes it (preserve-compat only)")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Operate one native Codex agentic-loop graph.")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("begin-wave", "inspect", "summarize"):
+    for name in ("begin-wave", "inspect", "summarize", "collection"):
         command = commands.add_parser(name)
-        command.add_argument("state", type=Path)
+        command.add_argument("root" if name == "collection" else "state", type=Path)
     for name in ("start", "add-unit"):
         controller = commands.add_parser(name)
         controller.add_argument("state", type=Path)
@@ -234,19 +193,7 @@ def _parser() -> argparse.ArgumentParser:
         if name == "start":
             controller.add_argument("--prompt-file", required=True, type=Path)
         else:
-            controller.add_argument("--unit", required=True)
-            controller.add_argument("--depends-on", action="append", default=[])
-            controller.add_argument("--join", action="store_true")
-            controller.add_argument("--manifest", action="append", default=[])
-            controller.add_argument("--base-branch", help="remote branch used for first stacked publication")
-            controller.add_argument("--worktree", help="absolute path of this unit's checkout")
-            controller.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
-            controller.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
-            controller.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
-            controller.add_argument("--scope", help="one-line scope statement for the worker")
-            controller.add_argument("--disposition", choices=DISPOSITION_KINDS, help="clean-break | preserve-compat")
-            controller.add_argument("--named-blocker", help="what blocks removal (preserve-compat only)")
-            controller.add_argument("--removal-ticket", help="ticket that removes it (preserve-compat only)")
+            _add_unit_args(controller)
     graph_dispatch.add_scope_arguments(commands)
     graph_ledger.add_parsers(commands.add_parser)
     spec = commands.add_parser("instantiate")
@@ -259,8 +206,8 @@ def _parser() -> argparse.ArgumentParser:
     convert.add_argument("state", type=Path)
     convert.add_argument("--session", required=True)
     mode = convert.add_mutually_exclusive_group()
-    mode.add_argument("--check", action="store_true", help="report the conversion without writing")
-    mode.add_argument("--write", action="store_true", help="convert in place (the default)")
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--write", action="store_true")
     recover = commands.add_parser("recover-wave")
     recover.add_argument("state", type=Path)
     recover.add_argument("--session", required=True)
@@ -276,6 +223,23 @@ def _parser() -> argparse.ArgumentParser:
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
     graph_driver_cutover.add_parsers(commands.add_parser)
+    for name in ("record-decision", "flush-decisions"):
+        decision = commands.add_parser(name)
+        decision.add_argument("state", type=Path)
+        decision.add_argument("--session", required=True)
+        decision.add_argument("--cite-quote")
+        if name == "record-decision":
+            decision.add_argument("--loop-id", required=True)
+            decision.add_argument("--revision", required=True, type=int)
+            decision.add_argument("--phase", required=True)
+            decision.add_argument("--decision", required=True)
+            decision.add_argument("--flip-condition")
+            decision.add_argument("--unit")
+            decision.add_argument("--chosen", help="answer to a recorded worker status")
+            decision.add_argument("--worker-status-seq", type=int, help="resolve this worker status with the decision")
+            decision.add_argument(
+                "--human-answer", action="store_true", help="a human answered an approval-gate status"
+            )
     unit = commands.add_parser("record-unit")
     unit.add_argument("state", type=Path)
     unit.add_argument("--session", required=True)
@@ -345,7 +309,13 @@ def main() -> int:
         elif args.command == "record-unit":
             if (args.status == "done") != (args.evidence is not None):
                 raise GraphError("done requires --evidence; dropped requires --reason")
-            output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
+            output = graph_mutations.record_unit(
+                args.state, args.session, args.unit, args.status, args.evidence or args.reason
+            )
+        elif args.command == "record-decision":
+            output = graph_mutations.record_decision(args)
+        elif args.command == "flush-decisions":
+            output = graph_mutations.flush_decisions(args)
         elif args.command == "record-repair":
             output = record_repair(
                 args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis
@@ -360,7 +330,7 @@ def main() -> int:
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "convert":
-            output = convert_state(args.state, args.session, args.check)
+            output = graph_mutations.convert_state(args.state, args.session, args.check)
         elif args.command == "recover-wave":
             output = recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
         elif args.command == "reject-invalid-dispatch":
@@ -369,6 +339,8 @@ def main() -> int:
             )
         elif args.command == "summarize":
             output = summarize(args.state)
+        elif args.command == "collection":
+            output = collect(args.root)
         elif args.command == "inspect":
             output = inspect(args.state)
         elif args.command == "authorize-dispatch":
@@ -390,7 +362,7 @@ def main() -> int:
         print(f"graph: {error}", file=sys.stderr)
         return 1
     print(json.dumps(output, sort_keys=True))
-    return 0
+    return int(output.get("exit_code", 0))
 
 
 if __name__ == "__main__":

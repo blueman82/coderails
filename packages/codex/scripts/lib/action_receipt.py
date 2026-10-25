@@ -10,6 +10,7 @@ cooperating-agent safeguard, not a boundary (see docs/decisions/p3-human-only-mi
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -149,7 +150,7 @@ def verify(
         return False, "expired"
     if data["session_id"] != session_id:
         return False, "foreign_session"
-    if data["loop_id"] is not None and data["loop_id"] != loop_id:
+    if data["loop_id"] != loop_id:
         return False, "foreign_loop"
     if consumed:
         return False, "consumed"
@@ -189,11 +190,36 @@ def read_receipt(path: Path) -> dict[str, Any] | None:
 
 def _claim(path: Path, suffix: str) -> bool:
     """Create <id><suffix> with O_CREAT|O_EXCL; True only for the single caller that created it."""
+    return _claim_marker(path, suffix)[0]
+
+
+def _claim_marker(path: Path, suffix: str) -> tuple[bool, bool]:
+    """Return (closed, owned); a close error cannot erase ownership of an exclusive creation."""
     try:
-        os.close(os.open(str(path.with_suffix(suffix)), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+        descriptor = os.open(str(path.with_suffix(suffix)), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
     except OSError:
-        return False
-    return True
+        return False, False
+    try:
+        os.close(descriptor)
+    except OSError:
+        return False, True
+    return True, True
+
+
+def _rollback_claims(consumed: list[Path], executed: list[Path]) -> bool:
+    """Remove only owned markers; retain consumed protection if any execution marker remains."""
+    for path in executed:
+        try:
+            path.with_suffix(".executed").unlink()
+        except OSError:
+            return False
+    clean = True
+    for path in consumed:
+        try:
+            path.with_suffix(".consumed").unlink()
+        except OSError:
+            clean = False
+    return clean
 
 
 def revoke_receipt(path: Path) -> bool:
@@ -240,23 +266,94 @@ def find_valid(
     base: Path | None = None,
     consume_it: bool = False,
     signers: Path | None = None,
+    excluded: set[str] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     """Return (receipt, "ok") for the first receipt in this session that verifies, else (None, refusal code).
 
     With consume_it a match is claimed atomically; losing the claim race reports "consumed".
     """
+    if consume_it:
+        claimed, code, _ = claim_many(session_id, [proposed], now, loop_id, base, signers)
+        return (claimed[0], "ok") if claimed else (None, code)
     auth = authority_path(session_id, base)
     if auth is None:
         return None, "no_session" if not session_id else "malformed"
     paths = sorted((auth.parent / "receipts").glob("*.json"))[:MAX_RECEIPTS]
     refusals: list[str] = []
     for path in paths:
-        data = effective(path)
+        data = read_receipt(path)
+        if data is None or path != receipt_path(session_id, data.get("receipt_id", ""), base):
+            refusals.append("malformed")
+            continue
+        data["revoked"] = data.get("revoked") is True or is_revoked(path)
         ok, code = verify(data, proposed, now, session_id, loop_id, is_consumed(path), signers)
         if not ok:
             refusals.append(code)
-        elif data is not None and consume_it and not consume(path):
+        elif data["receipt_id"] in (excluded or set()):
             refusals.append("consumed")
-        elif data is not None:
+        else:
             return data, "ok"
     return None, next((c for c in refusals if c != "malformed"), refusals[0] if refusals else "no_receipt")
+
+
+def claim_many(
+    session_id: str,
+    proposals: list[dict[str, Any]],
+    now: datetime,
+    loop_id: str | None,
+    base: Path | None = None,
+    signers: Path | None = None,
+    record: bool = False,
+) -> tuple[list[dict[str, Any]] | None, str, int]:
+    """Claim distinct receipts under one lock; optionally record execution before releasing it."""
+    auth = authority_path(session_id, base)
+    if auth is None:
+        return None, "no_session" if not session_id else "malformed", 0
+    directory = auth.parent / "receipts"
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        with (directory / ".claims.lock").open("a+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            selected: list[dict[str, Any]] = []
+            ids: set[str] = set()
+            for index, proposed in enumerate(proposals):
+                found, code = find_valid(session_id, proposed, now, loop_id, base, signers=signers, excluded=ids)
+                if found is None:
+                    return None, code, index
+                selected.append(found)
+                ids.add(found["receipt_id"])
+            claimed: list[Path] = []
+            for index, found in enumerate(selected):
+                path = receipt_path(session_id, found["receipt_id"], base)
+                if path is None:
+                    clean = _rollback_claims(claimed, [])
+                    return None, "malformed" if clean else "marker_cleanup_failed", index
+                closed, owned = _claim_marker(path, ".consumed")
+                if owned:
+                    claimed.append(path)
+                if not closed:
+                    clean = _rollback_claims(claimed, [])
+                    return None, "consumed" if clean else "marker_cleanup_failed", index
+            if record:
+                executed: list[Path] = []
+                for index, (path, proposed) in enumerate(zip(claimed, proposals)):
+                    try:
+                        note = {
+                            "hash": proposed["exact_payload_hash"],
+                            "number": proposed.get("number", ""),
+                            "action": proposed["action"],
+                        }
+                        path.with_suffix(".consumed").write_text(json.dumps(note), encoding="utf-8")
+                    except Exception:  # noqa: BLE001 - no recording error may let a guarded action run
+                        clean = _rollback_claims(claimed, executed)
+                        return None, "marker_write_failed" if clean else "marker_cleanup_failed", index
+                    if proposed["action"] == "merge" and not proposed.get("script"):
+                        closed, owned = _claim_marker(path, ".executed")
+                        if owned:
+                            executed.append(path)
+                        if not closed:
+                            clean = _rollback_claims(claimed, executed)
+                            return None, "executed_marker_unavailable" if clean else "marker_cleanup_failed", index
+            return selected, "ok", 0
+    except OSError:
+        return None, "consumed", 0

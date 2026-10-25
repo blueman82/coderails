@@ -29,7 +29,11 @@ gate_policy_test = importlib.import_module("gate_policy_test")
 gate_pr: Any = importlib.import_module("integrity_policy").gate_pr
 SHA = "a" * 40
 MODULE = "hooks.scripts.lib.pr_merge_gate"
-VALID: dict[str, Any] = {"state": "success", "creator": {"login": "machine"}, "description": format_attestation(SHA)}
+VALID: dict[str, Any] = {
+    "state": "success",
+    "creator": {"login": "github-actions[bot]"},
+    "description": format_attestation(SHA),
+}
 TABLE: list[tuple[str, list[dict[str, Any]], str]] = [
     ("passed", [{**VALID, "description": f"integrity=passed sha={SHA}"}], "attest_not_bound"),
     ("prefixed", [{**VALID, "description": f"xintegrity=pass sha={SHA}"}], "attest_not_bound"),
@@ -46,7 +50,9 @@ def merge_gate_code(rows: list[object]) -> str:
     """Run pr_merge_gate.integrity_reason against canned statuses; return the code or ''."""
     with (
         patch(MODULE + ".config_path", return_value="config"),
-        patch(MODULE + ".integrity_machine_user", return_value="machine"),
+        patch(MODULE + ".strict_settings", return_value={}),
+        patch(MODULE + ".integrity_enabled", return_value=True),
+        patch(MODULE + ".integrity_status_login", return_value="github-actions[bot]"),
         patch(MODULE + ".repo", return_value="owner/repo"),
         patch(MODULE + ".run", return_value=subprocess.CompletedProcess([], 0, json.dumps(rows))),
     ):
@@ -61,7 +67,7 @@ def status_code(rows: list[object]) -> str:
         patch.object(git, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(rows))),
     ):
         try:
-            verify_integrity_status(SHA, "machine")
+            verify_integrity_status(SHA, "github-actions[bot]")
         except git.WorkflowError as error:
             found = re.search(r"attest_\w+", str(error))
             return found.group(0) if found else "uncoded"
@@ -75,13 +81,16 @@ class AttestationTests(unittest.TestCase):
         """Every mutated attestation yields one closed code through the parser, merge.py and the hook."""
         for name, rows, code in TABLE:
             with self.subTest(name):
-                self.assertEqual(parse_attestation(rows[0] if rows else None, SHA, "machine").reason_code, code)
+                self.assertEqual(
+                    parse_attestation(rows[0] if rows else None, SHA, "github-actions[bot]").reason_code,
+                    code,
+                )
                 self.assertEqual(status_code(list(rows)), code)
                 self.assertEqual(merge_gate_code(list(rows)), code)
 
     def test_valid_line_passes_both(self) -> None:
         """A well-formed attestation is accepted by the parser and both callers."""
-        self.assertTrue(parse_attestation(VALID, SHA, "machine").ok)
+        self.assertTrue(parse_attestation(VALID, SHA, "github-actions[bot]").ok)
         self.assertEqual(status_code([VALID]), "")
         self.assertEqual(merge_gate_code([VALID]), "")
 
@@ -91,7 +100,9 @@ class AttestationTests(unittest.TestCase):
             rows = [{**VALID, "state": "pending"}]
             with (
                 patch(MODULE + ".config_path", return_value="config"),
-                patch(MODULE + ".integrity_machine_user", return_value="machine"),
+                patch(MODULE + ".strict_settings", return_value={}),
+                patch(MODULE + ".integrity_enabled", return_value=True),
+                patch(MODULE + ".integrity_status_login", return_value="github-actions[bot]"),
                 patch(MODULE + ".repo", return_value="owner/repo"),
                 patch(MODULE + ".run", return_value=subprocess.CompletedProcess([], 0, json.dumps(rows))),
             ):
@@ -100,16 +111,16 @@ class AttestationTests(unittest.TestCase):
             self.assertEqual([json.loads(x)["reason_code"] for x in lines], ["attest_not_success"])
             self.assertEqual(count_reasons(Path(base))["attest_not_success"], 1)
 
-    def test_daemon_description_parses(self) -> None:
-        """The root-owned daemon's real success description is accepted by the parser."""
+    def test_actions_description_parses(self) -> None:
+        """The GitHub Actions policy's real success description is accepted by the parser."""
         client: Any = gate_policy_test.EvidenceFixture()
         with redirect_stdout(StringIO()):
             self.assertEqual(gate_pr(client, 7, 204800, 720), 0)
         description: str = client.posts[-1][2]
-        daemon_sha: str = gate_policy_test.SHA
-        status = {"state": "success", "creator": {"login": "machine"}, "description": description}
-        self.assertTrue(parse_attestation(status, daemon_sha, "machine").ok, description)
-        self.assertTrue(description.startswith(format_attestation(daemon_sha)))
+        policy_sha: str = gate_policy_test.SHA
+        status = {"state": "success", "creator": {"login": "github-actions[bot]"}, "description": description}
+        self.assertTrue(parse_attestation(status, policy_sha, "github-actions[bot]").ok, description)
+        self.assertTrue(description.startswith(format_attestation(policy_sha)))
 
     def test_only_parser_knows_the_token(self) -> None:
         """No other caller regex-matches the attestation tokens; the Codex mirror is byte-identical."""

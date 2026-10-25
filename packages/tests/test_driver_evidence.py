@@ -49,7 +49,7 @@ class DriverEvidenceTests(unittest.TestCase):
 
     def test_native_history_check_allows_pending_nodes_for_cutover(self) -> None:
         """Cutover rechecks past native evidence without requiring graph completion."""
-        with patch("graph_evidence._stored_references", return_value=set()) as check:
+        with patch("graph_evidence.stored_references", return_value=set()) as check:
             validate_worker_evidence({}, require_complete=False)
         check.assert_called_once_with({}, False)
 
