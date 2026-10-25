@@ -8,7 +8,10 @@ paths: "**/*.sh"
 # Engineering Principles Bash - Language-Specific Standards
 
 **Version:** 1.0.0
-**Purpose:** Enforce shell idioms and safety patterns on `.sh` files. Shebang-identified shell scripts without a `.sh` extension are routed here by the `engineering-principles` coordinator's own dispatch table before this skill loads — see that skill's Phase 0 for the detection logic; this file doesn't need to duplicate it.
+**Purpose:** Enforce shell idioms and safety patterns on `.sh` files. The
+`engineering-principles` coordinator also sends shell scripts without a `.sh`
+extension here when they have a shebang. See Phase 0 of that skill for the
+detection rule.
 
 ---
 
@@ -17,37 +20,38 @@ Coderails-owned hooks, workflow helpers, launchers, and tests are Python. The ru
 ## Bash Idioms (MANDATORY)
 
 ### Safety Header
-- **`set -euo pipefail`** at the top of every standalone script that is *executed* (not sourced) — `-e` stops on the first unhandled error, `-u` turns a typo'd variable name into a hard failure instead of a silent empty string, `-o pipefail` makes a failure anywhere in a pipeline propagate instead of being masked by the last command's exit status.
-- **Sourced library files are the deliberate exception.** A file that is `source`d into other scripts (helper libraries, hook utilities) must NOT impose `set -e`/`set -u` on its caller — that decision belongs to the top-level script. If you add `set -e` to a library file, say so in a comment and confirm every caller actually wants it.
-- **PreToolUse/hook scripts are a second deliberate exception.** A hook invoked by the Claude Code harness in a shell-based integration must degrade gracefully and almost always `exit 0` even on internal failure — a hook that aborts hard can break the calling harness rather than just failing its own check. These scripts intentionally skip `set -e` and guard every risky read with `|| true` or an explicit fallback. This is not sloppiness; it is a documented tradeoff for a different execution context. Don't "fix" a hook script by bolting on `set -euo pipefail` without checking whether that changes its failure mode from "degrade" to "abort."
+- **Use `set -euo pipefail`** at the top of each executed standalone script. Do not impose it on a sourced file. `-e` stops on the first unhandled error. `-u` rejects an unset variable. `pipefail` reports a failed pipeline command even if the last command succeeds.
+- **Sourced library files are an exception.** A sourced file must not impose `set -e` or `set -u` on its caller. The top-level script owns that choice. If you add `set -e` to a library, explain the choice in a comment and check every caller.
+- **PreToolUse and hook scripts are another exception.** A hook in a shell-based Claude Code integration must usually return `exit 0` after an internal error. An abrupt exit can break the calling harness. These scripts skip `set -e` and protect risky reads with `|| true` or an explicit fallback. Check this failure contract before adding `set -euo pipefail` to a hook.
 
 ### Quoting & Expansion
 - **Quote every variable expansion** unless you specifically want word-splitting or globbing (`"$var"`, not `$var`). Unquoted expansions are the single most common source of bugs when a value contains spaces, globs, or is empty.
 - **Quote command substitutions too**: `local x="$(cmd)"`, not `local x=$(cmd)` used later unquoted.
 - **Prefer `"${arr[@]}"` over `${arr[*]}`** when iterating or passing an array — `[@]` preserves element boundaries, `[*]` flattens to one word.
-- **Use `printf '%s\n'` instead of `echo`** for arbitrary/untrusted content — `echo` interprets some sequences differently across shells (`echo -n`, `-e`) and can misbehave if the string starts with a flag-like token (e.g. `echo "$user_input"` where the input is literally `-n`).
+- **Use `printf '%s\n'` instead of `echo`** for arbitrary or untrusted content. Shells interpret some `echo` options differently. For example, input of `-n` can change the behavior of `echo "$user_input"`.
 
 ### `[[ ]]` over `[ ]`
-- Use `[[ ]]` (bash's extended test) instead of POSIX `[ ]` in bash scripts: no word-splitting/glob-expansion of unquoted operands, supports `&&`/`||`/`=~` directly, and `==`/`!=` pattern matching. `[ ]` is only appropriate when a script must stay POSIX-`sh`-portable (rare in this repo — check the shebang: `#!/bin/sh` means stay in `[ ]`, `#!/bin/bash` or `#!/usr/bin/env bash` means `[[ ]]` is available and preferred).
+- Use `[[ ]]` in Bash scripts. It avoids splitting and glob expansion of operands. It supports `&&`, `||`, `=~`, and pattern matching with `==` or `!=`.
+- Use POSIX `[ ]` when the script must run under `sh`. Check the shebang: `#!/bin/sh` requires portable syntax. `#!/bin/bash` and `#!/usr/bin/env bash` allow `[[ ]]`.
 
 ### Avoid Footguns
-- **Never `eval` untrusted input.** If you find yourself reaching for `eval` to build a command dynamically, there is almost always a safer construct: an array of arguments (`cmd=(git commit -m "$msg")`; `"${cmd[@]}"`), a `case` dispatch, or a function-name lookup (`"$fn_name" "$@"` — calling a function by variable name doesn't need `eval`).
-- **Avoid unquoted glob expansion in loops** (`for f in *.txt` breaks when there are zero matches, unless `nullglob` is set, and breaks on filenames with spaces if `IFS` isn't handled). Prefer `find ... -print0 | while IFS= read -r -d '' f` for anything touching a real filesystem, or `shopt -s nullglob` when a plain glob loop is genuinely simpler and the empty-match case is handled.
-- **Don't rely on word-splitting as your loop mechanism.** `for word in $(some_command)` splits on whitespace unconditionally, including inside values that shouldn't be split. Prefer `while IFS= read -r line; do ... done < <(some_command)` when lines (not words) are the unit, or an array (`mapfile -t lines < <(some_command)`) when you need random access afterward.
-- **`cd` inside a subshell, not the caller's shell**, when you only need a temporary directory change: `(cd "$dir" && cmd)` instead of `cd "$dir"; cmd; cd -` — the subshell can't leak a directory change back to the rest of the script even if an earlier step fails partway through.
+- **Never `eval` untrusted input.** For a dynamic command, use an argument array such as `cmd=(git commit -m "$msg")` followed by `"${cmd[@]}"`. A `case` branch or a function call through `"$fn_name" "$@"` may also fit. Neither needs `eval`.
+- **Avoid unquoted glob expansion in loops.** `for f in *.txt` can fail when no file matches. Set `nullglob` and handle the empty case if a glob loop is simplest. For filesystem input, prefer `find ... -print0 | while IFS= read -r -d '' f`; it handles names with spaces.
+- **Do not use word splitting as a loop mechanism.** `for word in $(some_command)` splits inside values that contain spaces. For lines, use `while IFS= read -r line; do ... done < <(some_command)`. Use `mapfile -t lines < <(some_command)` when later steps need random access.
+- **Use a subshell for a temporary directory change:** `(cd "$dir" && cmd)`. Do not use `cd "$dir"; cmd; cd -` for this case. The subshell keeps the caller's directory unchanged if a step fails.
 
 ### Fail-Fast Argument & Precondition Validation
 - **Validate arguments before doing any work**, and fail with a clear message on stderr. Check required parameters, repository identity and branch constraints before mutating Git state.
 - **A helper that can fail must say why it failed**, not just return non-zero. Centralize the stderr format while preserving the caller's exit-status contract.
-- **No silent `|| true` without a reason.** `|| true` (or `|| :`) suppresses a command's failure — sometimes correct (a best-effort cleanup step, a check where "not found" and "lookup failed" are both fine to treat as absent), but it hides a real bug just as often. When you use it, say in a comment *why* this particular failure is safe to ignore.
+- **Do not use silent `|| true` without a reason.** It suppresses a command failure. This can be correct for best-effort cleanup or an optional lookup. Add a comment that says why this failure is safe to ignore.
 
 ### Function Decomposition Over Monolithic Scripts
 - **Break a script into named functions** for argument parsing, precondition validation, execution and reporting. A short `main` function should make their order visible.
 - **Namespace function names when a library is sourced by multiple callers**, such as `widget::create` and `widget::exists`, to avoid silent collisions.
-- **No monolithic "do everything inline" scripts** — if a script's body reads top-to-bottom as 100+ lines with no function boundaries, that's a KISS/decomposition violation, not a style preference. Extract steps into functions even if each is called exactly once; it makes the control flow (and the `set -e` failure points) legible.
+- **Avoid a monolithic script.** A 100-line body with no function boundaries hides its control flow and `set -e` failure points. Extract named steps even when each runs once.
 
 ### Avoiding Global Mutable State
-- **Prefer `local` for every function-scoped variable.** A bash function's variables are global by default; forgetting `local` on a loop counter or accumulator is a classic source of one function silently corrupting another's state. Declare function-scoped shell variables explicitly, for example `local force_with_lease=0 msg="" want_add=0`, at the top of the function body. Python modules use Python scoping instead.
+- **Use `local` for function-scoped variables.** Bash variables are global by default. An unmarked counter can change another function's state. Declare local values near the start of the function, for example `local force_with_lease=0 msg="" want_add=0`. Python modules use Python scoping.
 - **Command substitution runs in a subshell.** A variable assigned inside `$(...)` does not survive in the caller. Capture stdout when only a value is needed; invoke the function directly when its variable assignments must remain visible.
 - **A subshell-local cache does not persist across calls.** Make the lifetime explicit. Do not describe a variable set by a command-substituted helper as a script-wide cache.
 

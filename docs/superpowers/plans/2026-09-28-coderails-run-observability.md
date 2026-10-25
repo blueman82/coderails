@@ -1,10 +1,14 @@
 # Coderails Run Observability Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Use `superpowers:subagent-driven-development` or `superpowers:executing-plans`. Prefer the first skill. Implement one task at a time. Checkboxes (`- [ ]`) track the steps.
 
 **Goal:** Add a local, read-only session trace and a measured post-cutover baseline for native Claude and Codex runs.
 
-**Architecture:** Each independently installed provider dashboard discovers and parses its own native session, worker, graph, hook, and completion evidence. It builds an OpenTelemetry-aligned trace in a rebuildable local JSONL cache, then serves a paginated session timeline without changing authoritative files. Baseline metrics are reported with explicit cohort, denominators, exclusions, and evidence.
+**Architecture:** Each provider dashboard finds and parses its own native
+session, worker, graph, hook, and completion evidence. It builds an
+OpenTelemetry-aligned trace in a rebuildable local JSONL cache. It then serves
+a paginated session timeline without changing authoritative files. Baseline
+metrics name the cohort, denominators, exclusions, and evidence.
 
 **Tech Stack:** Existing TypeScript/Next.js dashboards, Node filesystem APIs, Vitest; no new runtime dependency, OTel SDK/collector, LangSmith integration, or remote exporter.
 
@@ -15,7 +19,7 @@
 - Provider adapters, transcript parsing, evidence validation, and caches remain independent in the Claude and Codex installs.
 - The graph-semantics kernel and graph runtime do not import dashboard or telemetry code.
 - Native evidence remains authoritative; the local cache is disposable, derived, and read-only with respect to sources.
-- The cache, session-list API, and trace-summary API store/return normalized metadata and source references only; they do not copy prompts, tool arguments, command output, or transcript contents. Full details are read only after an explicit user request through the existing local-origin and dashboard-token boundary.
+- The cache, session-list API, and trace-summary API store only normalized metadata and source references. They do not copy prompts, tool arguments, command output, or transcripts. Read full details only after an explicit user request. Apply the existing local-origin and dashboard-token checks first.
 - Missing timestamp, usage, cost, duration, identity, or status remains explicitly unavailable; never substitute zero or file mtime for event time.
 - A dashboard `runId` is not a native session ID without an explicit tested link.
 - OTel alignment means trace/span identity, hierarchy, events, status, and applicable GenAI/tool attributes; the local JSONL is not OTLP export.
@@ -42,8 +46,17 @@
 
 **Interfaces:**
 - Both modules independently export `TraceEvent`, `TraceManifest`, `TracePage`, `NativeSessionSummary`, `TraceCollectionDeps`, `SourceRef`, and `TraceDetail` plus `TRACE_SCHEMA_VERSION = 1`.
-- `TraceEvent` fields: `traceId`, `spanId`, nullable `parentSpanId`, `name`, `kind` (`internal`, `client`, `server`, `producer`, or `consumer`), `status` (`unset`, `ok`, `error`, or `unavailable` plus basis), nullable `startTimeUnixNano`/`endTimeUnixNano`, ordered events, primitive-valued attributes, and provenance (`provider`, native session/thread ID, source identity/ordinal, basis, source reference).
-- `TraceManifest` fields: schema/parser versions, provider/session IDs, source fingerprints/cursors, generation time, completeness, errors, and event count. `TracePage` fields: events, input/next cursor, and completeness. `NativeSessionSummary` exposes native ID, provider, safe project/display label, and last-activity value with its basis. `TraceCollectionDeps` injects source/cache roots, clock, and filesystem operations. `SourceRef` is a provider-defined source kind plus validated record ID/ordinal; `TraceDetail` is one requested record's content and provenance, never cached.
+- `TraceEvent` records `traceId`, `spanId`, nullable `parentSpanId`, and `name`.
+  Its `kind` is `internal`, `client`, `server`, `producer`, or `consumer`.
+  Its `status` is `unset`, `ok`, `error`, or `unavailable`, with a basis.
+  It also records nullable `startTimeUnixNano` and `endTimeUnixNano`, ordered events, and primitive-valued attributes.
+  Provenance records provider, native session or thread ID, source identity and order, basis, and source reference.
+- `TraceManifest` records schema and parser versions, provider and session IDs, source fingerprints and cursors, creation time, completeness, errors, and event count.
+- `TracePage` records events, input and next cursors, and completeness.
+- `NativeSessionSummary` records native ID, provider, safe project or display label, and last activity with its basis.
+- `TraceCollectionDeps` supplies source and cache roots, clock, and filesystem operations.
+- `SourceRef` combines a provider-defined source kind with a validated record ID and order.
+- `TraceDetail` holds one requested record's content and provenance. Never cache it.
 - Unknown time/status/usage is `null` or explicit `unavailable`; derived fields carry method and source IDs.
 
 - [ ] **Step 1: Write failing contract tests** in both test files. Assert the schema version and all interface fields above, nullable timing, and that serialized events contain no prompt, raw arguments, or result body fields.
@@ -60,14 +73,17 @@
 - Read-only sources: `hooks/scripts/lib/graph_evidence.py`, `graph_evidence_bind.py`, `graph_evidence_revalidate.py`, `loop_cost.py`
 
 **Interfaces:**
-- Export `listClaudeSessions(deps: TraceCollectionDeps): Promise<NativeSessionSummary[]>`, `collectClaudeSessionTrace(sessionId: string, deps: TraceCollectionDeps): Promise<TraceManifest>`, `readClaudeTracePage(sessionId: string, cursor: string | null, limit: number, deps: TraceCollectionDeps): Promise<TracePage>`, and `readClaudeTraceDetail(sessionId: string, sourceRef: SourceRef, deps: TraceCollectionDeps): Promise<TraceDetail>`.
+- Export `listClaudeSessions(deps: TraceCollectionDeps): Promise<NativeSessionSummary[]>`.
+- Export `collectClaudeSessionTrace(sessionId: string, deps: TraceCollectionDeps): Promise<TraceManifest>`.
+- Export `readClaudeTracePage(sessionId: string, cursor: string | null, limit: number, deps: TraceCollectionDeps): Promise<TracePage>`.
+- Export `readClaudeTraceDetail(sessionId: string, sourceRef: SourceRef, deps: TraceCollectionDeps): Promise<TraceDetail>`.
 - Resolve parent JSONL under `~/.claude/projects`; join child `subagents/agent-<agentId>.jsonl` only through native Agent tool-use/result IDs and validated graph dispatch envelopes.
 - Cache root: `~/.coderails/telemetry/claude/<safe-session-id>/manifest.json` and `events.jsonl`; raw details are read from native sources only on demand and never cached.
 
-- [ ] **Step 1: Add failing tests** for parent/child correlation, native source ordinals, source timestamps when present, missing timestamps, retry/hard-stop and evidence references, ambiguous child linkage, malformed/truncated JSONL, and metadata-only serialization.
+- [ ] **Step 1: Add failing tests** for parent-child links and native source order. Cover known and missing timestamps. Cover retry, hard stop, evidence references, and ambiguous child links. Cover malformed or truncated JSONL and metadata-only output.
 - [ ] **Step 2: Run the focused Claude tests** with `npm test -- test/sessionTrace.claude.test.ts`; expected: FAIL for missing collector and page reader.
 - [ ] **Step 3: Implement provider-local parsing and correlation** using the native transcript/evidence contracts; never infer completion from a terminal-looking message or accept a child without validated parent linkage.
-- [ ] **Step 4: Add cache rebuild/invalidation** using schema/parser version, file identity, size, mtime, full-content fingerprint, and record cursor; compute fingerprints while reading source bytes so same-size/same-mtime rewrites are detected, and atomically replace manifest/events when a source changes or truncates.
+- [ ] **Step 4: Add cache rebuild and invalidation** using schema and parser version, file identity, size, mtime, content fingerprint, and record cursor. Compute fingerprints while reading source bytes. Detect rewrites even when size and mtime match. Replace the manifest and events atomically when a source changes or is truncated.
 - [ ] **Step 5: Re-run focused tests**; expected: PASS, with malformed/ambiguous records surfaced as incomplete and no writes to source artifacts.
 
 ### Task 3: Build the Codex native trace adapter and cache
@@ -79,11 +95,14 @@
 - Read-only sources: `packages/codex/skills/agentic-loop/scripts/graph_transcript.py`, `graph_evidence.py`, `graph_artifacts.py`; `packages/tests/codex_fixture.py`
 
 **Interfaces:**
-- Export `listCodexSessions(deps: TraceCollectionDeps): Promise<NativeSessionSummary[]>`, `collectCodexSessionTrace(sessionId: string, deps: TraceCollectionDeps): Promise<TraceManifest>`, `readCodexTracePage(sessionId: string, cursor: string | null, limit: number, deps: TraceCollectionDeps): Promise<TracePage>`, and `readCodexTraceDetail(sessionId: string, sourceRef: SourceRef, deps: TraceCollectionDeps): Promise<TraceDetail>`.
+- Export `listCodexSessions(deps: TraceCollectionDeps): Promise<NativeSessionSummary[]>`.
+- Export `collectCodexSessionTrace(sessionId: string, deps: TraceCollectionDeps): Promise<TraceManifest>`.
+- Export `readCodexTracePage(sessionId: string, cursor: string | null, limit: number, deps: TraceCollectionDeps): Promise<TracePage>`.
+- Export `readCodexTraceDetail(sessionId: string, sourceRef: SourceRef, deps: TraceCollectionDeps): Promise<TraceDetail>`.
 - Resolve native transcripts under `~/.codex/sessions`; validate `session_meta.payload.id`, join `spawn_agent` call IDs to `SubAgentActivity` and child thread metadata, and preserve legacy `CollabAgentToolCall` only when the current graph evidence contract accepts it.
 - Cache root: `~/.coderails/telemetry/codex/<safe-session-id>/manifest.json` and `events.jsonl`.
 
-- [ ] **Step 1: Add failing tests** for current and legacy dispatch shapes, native parent/child joins, task lifecycle, tool/command/MCP/file-change records, source order where timestamps are absent, missing usage, duplicate calls, foreign child metadata, and metadata-only serialization.
+- [ ] **Step 1: Add failing tests** for current and legacy dispatch shapes, parent-child joins, and task life cycle. Cover tool, command, MCP, and file-change records. Cover missing time or usage, duplicate calls, foreign child data, and metadata-only output.
 - [ ] **Step 2: Run the focused Codex tests** with `npm test -- test/sessionTrace.codex.test.ts`; expected: FAIL for missing collector and page reader.
 - [ ] **Step 3: Implement Codex-native parsing and validated joins**; use the graph evidence helpers’ contracts without importing graph state mutation or changing evidence validation.
 - [ ] **Step 4: Add the same cache invalidation and atomic rebuild rules** as Task 2, under the Codex provider namespace.
@@ -105,7 +124,7 @@
 **Interfaces:**
 - `GET /api/sessions` returns lightweight native session summaries; it never uses project-directory mtime as native event time.
 - `GET /api/sessions/<id>/trace` accepts an opaque cursor and bounded limit and returns page metadata/provenance only. `GET /api/sessions/<id>/trace/detail` resolves one validated source reference and returns that detail only after explicit request.
-- Every route enforces `isLocalOrigin`, the dashboard token via `tokensEqual`, and a UUID-shaped native-ID pattern. Detail routes validate the source-reference shape, session ownership, indexed reference and source fingerprint before reading one record. Native transcript details stay under the provider's transcript root; hook details come only from the configured audit path; graph details come only from allowlisted artifacts in the uniquely discovered, session-owned graph root under the configured loops root. Trace assembly runs on request, outside the fast activity/KPI frame.
+- Every route checks `isLocalOrigin`, the dashboard token with `tokensEqual`, and a UUID-shaped native ID. A detail route checks reference shape, session ownership, indexed reference, and source fingerprint before it reads one record. Native transcript details stay under the provider's transcript root. Hook details come from the configured audit path. Graph details come from allowed artifacts in the unique, session-owned graph root under the configured loops root. Build the trace on request, outside the fast activity and KPI frame.
 
 - [ ] **Step 1: Add failing route tests** proving bad origin/token/session/source refs are rejected, pagination is stable, no detail is returned by list/trace routes, and explicit detail requests return only the referenced record.
 - [ ] **Step 2: Run `npm test -- test/sessionTrace.route.test.ts`** in both packages; expected: FAIL until the routes exist.
@@ -122,9 +141,9 @@
 
 **Interfaces:**
 - Add a native-session list/picker because current dashboards expose project activity and loop rows, not native session-ID rows. It links only validated native IDs and renders orchestrator/worker spans, source events, graph/eval/proof/retro links, usage/cost, status, and provenance.
-- Details load only after a user expands a source event and passes the dashboard token; summaries and trace pages never embed transcript content. Requested detail is escaped plain text, not HTML, and is not cached or logged. Every derived or unavailable value carries its visible basis.
+- Load details only after the user expands a source event and passes the dashboard token check. Summaries and trace pages never embed transcript content. Escape requested detail as plain text, not HTML. Do not cache or log it. Show the basis of each derived or unavailable value.
 
-- [ ] **Step 1: Add failing render tests** for native session selection, parallel workers, dispatch/retry/hard-stop, failures/abort, unresolved joins, null time, source-order ties, absent usage/cost, explicit detail loading, plain-text escaping, and distinction between dashboard run ID and native session ID.
+- [ ] **Step 1: Add failing render tests** for native session selection and parallel workers. Cover dispatch, retry, hard stop, failure, abort, and unresolved joins. Cover null time, source-order ties, missing usage or cost, explicit detail loading, plain-text escaping, and the difference between dashboard run ID and native session ID.
 - [ ] **Step 2: Run focused component tests** in each package; expected: FAIL until the detail view and data hook are wired.
 - [ ] **Step 3: Implement provider-local timeline UI** with OTel parent/child grouping and clear observed/derived/unavailable labels; load large details only after an explicit detail request.
 - [ ] **Step 4: Re-run focused component tests**; expected: PASS and no unverified external-effect/completion wording.

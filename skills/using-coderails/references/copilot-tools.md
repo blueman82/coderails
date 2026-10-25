@@ -20,11 +20,11 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 
 ## Instructions file
 
-When a skill mentions "your instructions file", on Copilot CLI this is **`AGENTS.md`** at the repository root. If both `AGENTS.md` and `.github/copilot-instructions.md` are present, Copilot reads both.
+On Copilot CLI, "your instructions file" means **`AGENTS.md`** at the repository root. If `.github/copilot-instructions.md` also exists, Copilot reads both.
 
 ## Personal skills directory
 
-User-level skills live at **`~/.copilot/skills/`**. Copilot CLI also recognizes the cross-runtime alias **`~/.agents/skills/`**, which is shared with Codex and Gemini CLI. Each skill is a subdirectory containing a `SKILL.md` (with `name` and `description` frontmatter).
+User-level skills live at **`~/.copilot/skills/`**. Copilot CLI also reads **`~/.agents/skills/`**, which Codex and Gemini CLI share. Each skill has a `SKILL.md` with `name` and `description` frontmatter.
 
 ## Async shell sessions
 

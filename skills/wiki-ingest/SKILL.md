@@ -22,7 +22,19 @@ that and stop rather than guessing which artifact to record.
 
 ### Step 0: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start (per the project's `CLAUDE.md`) — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root (same pattern as `config_path` in `scripts/lib/config.py`) — a fork's cwd may be a subdirectory of the project repo. If no `AGENTS.md` is found by the git root, tell the user to run `/wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.coderails/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
+The project's `CLAUDE.md` loads the Git root's `AGENTS.md` at session start.
+Read its wiki schema section. Another project can link to a separate
+`AGENTS-wiki-schema.md` file. Coderails keeps its schema in `AGENTS.md` and
+its live page types in `wiki.schema.json`.
+
+If `AGENTS.md` is not in context, walk from the current directory to the Git
+root. Check each level for `AGENTS.md`. Use the same walk-up pattern as
+`config_path` in `scripts/lib/config.py`. A fork can start in a project
+subdirectory. If you do not find the file, tell the user to run `/wiki-init`.
+
+The wiki vault is a separate repo, for example `../coderails-wiki`. The
+project's `.coderails/workflow.config.yaml` points to the vault. Do not look
+for `AGENTS.md` in the vault. A fork can run outside the vault.
 
 The git/vault/supervision settings below are **not** read from AGENTS.md — they are flat
 keys in that same project's `.coderails/workflow.config.yaml` (the repo the source being
@@ -31,8 +43,8 @@ walk-up pattern as `config_path` in `scripts/lib/config.py`: starting from the
 project repo location, check each directory up to its git root for
 `.coderails/workflow.config.yaml`; the first one found wins.
 
-- `wiki_path` — the wiki vault path; resolved relative to the directory containing that
-  `workflow.config.yaml` unless already absolute. Referred to as `vault` below.
+- `wiki_path` — the wiki vault path. Resolve a relative path from the project
+  repo root. Use an absolute path as given. This is `vault` below.
 - `wiki_git_worktree` — whether to use git worktree/PR flow (`true`) or write directly
   (`false`). Default when absent: **`true`** (PR flow) — the fail-safe choice, since
   defaulting to direct-write would silently start committing straight to the vault for a
@@ -154,10 +166,10 @@ git commit -m "wiki: ingest <description>"
 
 ### Step 7: Report
 
-Pages created/updated, new wiki-links added, gaps identified. **If worktree flow: the PR URL/number is the final deliverable — report it and stop. The PR is not merged by this skill; a human, or an explicit separate follow-up instruction, merges it.** Also report `WORKTREE_PATH` and the cleanup command from Step 6, so whoever merges the PR knows to remove the worktree afterward.
+Report the pages changed, new wiki links, and gaps. **For worktree flow, report the PR URL or number and stop.** This skill does not merge the PR. A human or an explicit follow-up instruction handles that step. Also report `WORKTREE_PATH` and the Step 6 cleanup command.
 
 ### Step 8: Run wiki-lint
 
-**If `wiki_git_worktree` is `false` (direct-write): always run `coderails:wiki-lint` immediately after ingest completes.** An ingest without a follow-up lint leaves the new/updated pages unverified — treat ingest and lint as one combined step, not two independently optional ones. (`agentic-loop` batches this at the cluster level when running many ingests across a loop's PRs; a solo invocation of this skill still pairs immediately, since there's no larger batch to wait for.)
+**If `wiki_git_worktree` is `false` (direct-write), run `coderails:wiki-lint` after ingest.** It checks the vault after the changed pages enter it. A solo ingest pairs with lint. During an agentic loop, the loop can batch lint across several wiki ingests.
 
-**If `wiki_git_worktree` is `true` (PR flow): do not run wiki-lint yet.** The ingest PR from Step 6 is still open — `wiki-lint` audits the vault's current merged state (`origin/main`), which does not yet include these pages, so running it now would not verify them. Run `coderails:wiki-lint` as a separate follow-up once the ingest PR has actually merged.
+**If `wiki_git_worktree` is `true` (PR flow), wait to run wiki-lint.** The ingest PR is open. `wiki-lint` reads merged `origin/main`, which does not yet contain the new pages. Run `coderails:wiki-lint` after the ingest PR merges.

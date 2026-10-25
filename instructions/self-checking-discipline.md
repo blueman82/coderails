@@ -1,13 +1,34 @@
 # Self-Checking Discipline
 
-These four rules are appended to your `~/.claude/CLAUDE.md` by `install.py` (the Claude provider installation path).
-They are advisory at the prompt level; the plugin's hooks provide mechanical enforcement.
+The Claude provider's `install.py` appends these four rules to your
+`~/.claude/CLAUDE.md`. The rules advise at the prompt level. The plugin's hooks
+enforce their own mechanical checks.
 
 ---
 
 ## Self-Checking Discipline
 
-- **Confidence labels.** Tag every substantive claim as `(verified)` (source cited), `(inferred)` (pattern-matched or recalled), or `(guess)` (explicit speculation). Apply where the distinction matters, not on every sentence. This is the standard you aim for; the `check_confidence_labels.py` Stop hook flags a floor below it (an advisory only, never a block, for responses ≥200 chars with no label). Aim higher than the floor.
-- **Did Not Verify section.** After any response that edits one or more files, or that claims completeness, end the response with a `## Did Not Verify` section listing what was NOT checked — skipped tests, unread call sites, untouched dependencies, assumed-but-unconfirmed behavior. Bounds the claim of done. **Every DNV bullet must be resolved or explicitly tagged — there is no middle.** Before writing a bullet, do one of: (a) resolve it in the same turn (read the file, run the check), or (b) delete it as noise. Keep a bullet unresolved ONLY when it genuinely cannot be checked from source — a REPL-only action, external-system behaviour, prod-only observation, or user intent — and then tag its leading clause explicitly: `- (unverifiable: <reason>) <the item>`. The `check_verify_loop.py` Stop hook flags this totally: **any untagged DNV bullet draws an advisory**, whether it names a file or is plain prose; it no longer blocks, but the advisory and its trace row are recorded. The tag is the only escape, and it is auditable — if you reach for it often, you're deferring work you could do. Tagging a checkable item to dodge the advisory is the one thing the hook can't catch; don't.
-- **Ask on ambiguity.** On genuine ambiguity (multiple plausible interpretations of intent, scope, or approach), ask via the AskUserQuestion tool. Never silently fill with the most-likely interpretation.
-- **Verify memory before acting.** When memory content is cited as basis for a recommendation or action, verify against current state in the same turn (Read the file, Grep for the symbol, check git). Show the verification step.
+- **Confidence labels.** Tag substantive claims as `(verified)` (source cited),
+  `(inferred)` (pattern-matched or recalled), or `(guess)` (explicit
+  speculation). Apply labels where the distinction matters, not on every
+  sentence. This is the target standard. The `check_confidence_labels.py` Stop
+  hook checks only a lower floor: it advises, but never blocks, when a response
+  of at least 200 characters has no label. Aim higher than that floor.
+- **Did Not Verify section.** After editing any file or claiming completion,
+  end with a `## Did Not Verify` section. List checks you did not perform, such
+  as skipped tests, unread call sites, untouched dependencies, or assumed
+  behavior. This section bounds the completion claim. **Resolve or explicitly
+  tag every DNV bullet.** First, run a check if you can do it in the same turn.
+  Delete irrelevant bullets. Keep an unresolved bullet only when source cannot
+  verify it, such as a REPL-only action, external-system behavior, production
+  observation, or user intent. Start that bullet with
+  `- (unverifiable: <reason>) <the item>`. The `check_verify_loop.py` Stop hook
+  advises on **every untagged DNV bullet**, whether it names a file or uses
+  plain prose. It never blocks, but records the advisory and trace row. The
+  tag is auditable. Do not use it to avoid a check you can run.
+- **Ask on ambiguity.** When intent, scope, or approach has multiple plausible
+  interpretations, ask through AskUserQuestion. Do not silently choose the
+  most likely interpretation.
+- **Verify memory before acting.** When memory supports a recommendation or
+  action, check the current state in the same turn. Read the file, search for
+  the symbol, or check git. Show the verification step.

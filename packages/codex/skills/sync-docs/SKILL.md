@@ -1,11 +1,12 @@
 ---
 name: sync-docs
-description: Analyze documentation drift and generate sync reports for any project. Enhanced with Serena semantic discovery for deep code analysis. Use when asked to sync docs, check documentation, audit documentation drift, or when $coderails-codex:sync-docs is invoked. Supports --semantic for deeper undocumented-code discovery.
+description: Find drift between code and documentation. Produce a report with file references and suggested updates. Use for documentation checks or $coderails-codex:sync-docs. Use --semantic for Serena code discovery.
 ---
 
 # Sync Docs - Universal Documentation Synchronization
 
-Analyze any codebase and its documentation to identify drift and generate actionable sync reports. **Enhanced with Serena for semantic code discovery.**
+Compare code with its documentation. Report each gap with a file reference.
+Use Serena for deeper code discovery when `--semantic` is requested.
 
 ## Invocation
 
@@ -117,7 +118,7 @@ If infrastructure files exist:
 
 ## Phase 2.5: Semantic Discovery (--semantic flag)
 
-**When `--semantic` flag is provided**, use Serena MCP servers for deep code discovery.
+Use Serena MCP servers for code discovery when `--semantic` is set.
 
 ### Prerequisites
 
@@ -126,12 +127,12 @@ If infrastructure files exist:
 ### Step 1: Compare to Documentation
 
 For each discovered file:
-1. Check if file/class is mentioned in any documentation
-2. If NOT mentioned → flag as **UNDOCUMENTED**
+1. Check whether docs name the file or its classes.
+2. Mark an unnamed file or class **UNDOCUMENTED**.
 
-### Step 3: Serena Precise Navigation
+### Step 2: Serena Precise Navigation
 
-For each undocumented entity, extract precise details:
+Use Serena to inspect each undocumented entity:
 
 ```javascript
 // Execute via mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
@@ -152,14 +153,14 @@ const classDetails = await serena.find_symbol({
 });
 ```
 
-**Extract for documentation:**
+Record these details for the report:
 - Class names and purposes
 - Method signatures
 - Constants and configuration values
 - Protocol/interface definitions
 - Dependencies on other services
 
-### Step 4: Generate Semantic Discovery Report
+### Step 3: Generate Semantic Discovery Report
 
 ```markdown
 ## Semantic Discovery Findings (Serena)
@@ -246,8 +247,8 @@ const classDetails = await serena.find_symbol({
 - When you suspect undocumented features exist
 - Large codebases where manual discovery is impractical
 
-**Key insight:**
-- Serena answers both: "What code exists that docs don't mention?" and "What exactly does that code do?" — combined, a complete picture of documentation gaps
+Serena can identify code absent from docs. It can also show what that code
+does. Use both findings to describe each gap.
 
 ---
 
@@ -323,8 +324,8 @@ Add after section 6:
 
 ## Notes
 
-- Tool adapts to any project structure
-- Configuration optional (auto-discovery handles most cases)
-- Prioritization focuses effort on important gaps
+- Discover the project structure before the audit.
+- Use auto-discovery when no config is present.
+- Prioritize findings by their effect.
 - `--semantic` requires Serena project activation
 - Health score accounts for both traditional and semantic findings

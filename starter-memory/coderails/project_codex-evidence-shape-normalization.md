@@ -6,19 +6,26 @@ type: project
 
 # Codex evidence tampering closure
 
-> Supersession note (2026-09-21): This is a historical evidence-normalization handoff. Current native transcript parsers and Python adversarial suites supersede its old shell paths and open-repair status. Keep raw provider evidence checks distinct from the pure schema-3 semantic core, and derive any new audit from current source and current owned state.
+> Supersession note (2026-09-21): This is a historical evidence-normalization handoff. Current
+> native transcript parsers and Python adversarial suites replace the old shell paths. The
+> open-repair status below is historical. Keep raw provider evidence checks separate from the pure
+> schema-3 semantic core. Base any new audit on current source and owned state.
 
 ## Goal
 
-Fix only the native Codex graph-evidence tampering gap under `packages/codex/`. PR #446 closed the six known single-layer shapes and nested identity reuse, but a fresh executed probe found that a twice-encoded JSON reference still bypasses classification and allows one worker identity to be reused across nodes through completion.
+Fix only the native Codex graph-evidence tampering gap under `packages/codex/`.
+PR #446 closed six known single-layer shapes and nested identity reuse. A new
+executed probe found that a twice-encoded JSON reference still bypasses
+classification. It lets one worker identity be reused across nodes through
+completion.
 
-Before merge, independently attack the exact PR head and confirm that no tampering bypass remains within the defined evidence-shape threat model. Do not turn “tests passed” into a universal claim that no undiscovered software defect can exist.
+Before merge, independently attack the exact PR head. Check for tampering bypasses within the defined evidence-shape threat model. Passing tests cannot prove that no other software defect exists.
 
 ## Decisions
 
 - Scope is Codex only under `packages/codex/`. Do not modify the root Claude plugin.
 - Keep Claude and Codex implementations independent. Do not port Claude code or introduce shared provider code.
-- Fix the class, not the twice-encoded example: repeatedly normalize JSON-encoded strings until they no longer decode, then recursively inspect every resulting object, array, key, and value.
+- Fix the class of fault. Decode JSON-encoded strings until they no longer decode. Inspect each resulting object, array, key, and value recursively.
 - Do not use a fixed decoding-depth limit that can be bypassed by adding one more encoding layer. Bound input size and work instead.
 - Route binding, stored-reference collection, uniqueness checking, and completion-time revalidation through the same classifier.
 - A canonical Codex worker reference remains a top-level object with the exact required fields and `kind: codex_agent`.

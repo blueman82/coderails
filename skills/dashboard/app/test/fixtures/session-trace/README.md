@@ -1,5 +1,18 @@
-# Real parallel worker fixtures
+# Real parallel Claude worker fixture
 
-These records were reduced from the sanitized native samples used in the final independent run-observability review. The samples represented an actual overlapping two-worker Claude session and an actual overlapping two-worker Codex session. Only dispatch calls, child identity links, lifecycle rows, and relevant source timestamps remain. Native session, child, and call IDs are retained solely where the adapter uses them to correlate records. Prompts, instructions, tool argument and result bodies, model names, unrelated rows, original row UUIDs, and other incidental metadata were removed. The harmless HTML-shaped text is a synthetic rendering sentinel.
+This folder contains a sanitized native Claude sample from the final
+independent review of run observability. It has two Claude workers that
+ran at the same time. The Codex plugin has a separate Codex sample.
 
-The tests copy these fixtures into temporary native source layouts and use the provider collector, authenticated route handlers, and React panel. They do not replay the original full session or attest task success. Broken-link controls alter a child identity in a copied fixture and confirm that the correctness assertion rejects it.
+The fixture keeps dispatch calls, child identity links, lifecycle rows,
+and relevant timestamps. It keeps native IDs only when the adapter needs
+them to match records. It removes prompts, instructions, tool arguments
+and results, model names, unrelated rows, original row UUIDs, and other
+incidental data. The HTML-shaped text is synthetic. It tests rendering.
+
+Tests copy the fixture into a temporary Claude source layout. They exercise
+the Claude collector, authenticated route handlers, and React panel.
+The fixture does not replay the full session or prove task success.
+
+A broken-link control changes one child identity in a copy. The test checks
+that its correctness assertion rejects the changed fixture.

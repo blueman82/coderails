@@ -6,17 +6,19 @@ description: Scaffold a workflow.config.yaml for the current project
 
 ## Purpose
 
-Create the provider-neutral `.coderails/workflow.config.yaml` in the current project directory. This file is read by `/coderails:prep`, `/coderails:workflow`, and `/coderails:push` to avoid hardcoded project-specific values.
+Create `.coderails/workflow.config.yaml` in the current project directory. `/coderails:prep`, `/coderails:workflow`, and `/coderails:push` read this shared file for project settings.
 
 ## Steps
 
 1. Determine the git root: `git rev-parse --show-toplevel`
 2. Determine the project name: use `$ARGUMENTS` if provided, otherwise `basename $(pwd)`
-3. Determine the config path: `$(pwd)/.coderails/workflow.config.yaml` (create `.coderails/` if needed). The workflow commands resolve config by walking up from the current directory to the git root — the first `.coderails/workflow.config.yaml` found wins (see "Config resolution" in `AGENTS.md`). Run `/init` from the directory whose config you want to set: a project subdir in a monorepo, or the git root for a standalone repo.
-4. Before migration, confirm that every provider the user will continue to use is upgraded and reloaded to a version that reads `.coderails/workflow.config.yaml`. If any is not, stop and report it. Do not call or reload another provider.
+3. Set the config path to `$(pwd)/.coderails/workflow.config.yaml`. Create `.coderails/` if needed.
+   Workflow commands search upward to the git root. They use the first `.coderails/workflow.config.yaml` they find. See "Config resolution" in `AGENTS.md`.
+   Run `/init` in the directory you want to configure. Use a project subdirectory in a monorepo. Use the git root in a standalone repo.
+4. Before migration, confirm that every provider the user will continue to use has been upgraded and reloaded. Each must read `.coderails/workflow.config.yaml`. If any does not, stop and report it. Do not call or reload another provider.
 5. Check the target and both legacy paths in this same directory: `.claude/workflow.config.yaml` and `.codex/workflow.config.yaml`.
    - If both legacy files exist, compare them byte-for-byte with `cmp -s`. If they differ, stop before writing anything and ask the user to reconcile them. Never choose one silently.
-   - If one legacy file exists, or both exist and match, migrate by reading that file and writing its complete contents unchanged to the canonical target. Do not prompt field-by-field: preserving unknown fields and values, including `sandbox_workers`, is required.
+   - If one legacy file exists, or both exist and match, read one of them. Write its complete contents unchanged to the canonical target. Preserve all fields and values, including unknown fields and `sandbox_workers`. Do not ask for each field again.
    - If the canonical target already exists, confirm before replacing it.
    - If no legacy file exists, continue with the field collection below.
 
@@ -39,11 +41,16 @@ Create the provider-neutral `.coderails/workflow.config.yaml` in the current pro
    - **Worktree base path** — where sibling worktrees will be created. Default: parent directory of the git root (i.e. `dirname $(git rev-parse --show-toplevel)`). Show the resolved default to the user so they can confirm or override.
    - **Worktree script** (path from project root, e.g. `./worktree-add`) — or "none"
    - **Engineering-principles paths** (comma-separated glob patterns, e.g. `**/container.py,**/typed_di/**`) — or "none"
-   - **Engineering-principles skill** (the slash-command to run, e.g. `/engineering-principles-python`, `/engineering-principles-go`, `/engineering-principles-ts`, `/engineering-principles-bash`) — detect a sensible default: look for `go.mod` → `/engineering-principles-go`, `package.json` with `.ts` files → `/engineering-principles-ts`, no `go.mod`/`package.json` but `.sh` files present (e.g. an all-shell `bin/`/`scripts/` layout) → `/engineering-principles-bash`, otherwise `/engineering-principles-python`. Ask and let the user override. Answer "none" to disable engineering-principles entirely.
-   - **Sandbox workers** — dispatch agentic-loop implementation-unit workers as separate OS-sandboxed processes (`@anthropic-ai/sandbox-runtime`) instead of in-process `Agent` calls, for write containment outside the agent's trust domain. Requires node/npx and a supported platform (macOS Seatbelt, Linux/WSL2 bubblewrap). Default: `false` (or omit the field — same effect). Status `read_by_prose_only` (see `config.schema.json`): the agentic-loop skill reads it from the resolve-config text and no script does.
+   - **Engineering-principles skill** — select the slash command from the project files:
+     - `go.mod` → `/engineering-principles-go`
+     - `package.json` with `.ts` files → `/engineering-principles-ts`
+     - `.sh` files but no `go.mod` or `package.json` → `/engineering-principles-bash`
+     - Otherwise → `/engineering-principles-python`
+     Show the selected default and let the user change it. "None" disables engineering-principles.
+   - **Sandbox workers** — run implementation-unit workers in separate OS-sandboxed processes (`@anthropic-ai/sandbox-runtime`). This contains their writes outside the agent's trust domain. It requires node/npx and macOS Seatbelt or Linux/WSL2 bubblewrap. The default is `false`; omitting the field has the same effect. The agentic-loop skill reads the resolved value. No script reads it. The schema calls this `read_by_prose_only`.
    - **Integrity review local check** — choose `true` only after the GitHub Actions workflow and server rule are active. The check requires a current-head status from `github-actions[bot]`. Default: `false`. GitHub supplies the workflow token.
 
-7. Write `workflow.config.yaml` at the resolved config path from step 3 with the collected values. Use `null` for any field answered "none". Then validate the file with Ruby's standard YAML parser (`ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), permitted_classes: [], aliases: false)' <path>`). If the write or validation fails, stop. Leave every legacy file untouched and report the failure.
+7. Write `workflow.config.yaml` at the path from step 3. Use `null` for each field answered "none". Validate the file with Ruby's standard YAML parser (`ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), permitted_classes: [], aliases: false)' <path>`). If writing or validation fails, stop. Leave every legacy file untouched and report the failure.
 
 Example output:
 ```yaml
@@ -78,7 +85,9 @@ integrity_review:
   enabled: false   # Turn on local status checks after the GitHub Actions ruleset is live
 ```
 
-8. After the canonical file validates, move each legacy file found in step 5 to the macOS Trash using Finder via `osascript`, one at a time. After each move, check that source path no longer exists. If a move or check fails, stop immediately: report the failed file and every file already moved, and do not attempt the remaining files. Never delete a legacy file directly. Files already moved remain recoverable in Trash; the moves are not atomic.
+8. After validation, move each legacy file from step 5 to the macOS Trash. Use Finder through `osascript`. Move one file at a time.
+   After each move, check that the old path is absent. If the move or check fails, stop. Report the failed file and the files already moved. Leave the remaining files in place.
+   Never delete a legacy file directly. The files in Trash remain recoverable. The moves are not atomic.
 
 9. Report the path written, any legacy files moved to Trash, and remind the user to commit the canonical file.
 

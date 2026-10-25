@@ -2,58 +2,65 @@
 
 ## Status and intent
 
-Design approved; implementation plan review pending. This covers the accepted post-cutover observability and measurement phase. The target is an inspectable trace of one native Coderails session, including parallel workers, alongside an evidence-based post-migration baseline.
+Design approved; implementation plan review pending. This design covers the
+accepted post-cutover observability and measurement phase. It calls for a trace
+of one native Coderails session, including parallel workers, and an
+evidence-based post-migration baseline.
 
-The design preserves provider-local dispatch, transcript parsing, graph state, evidence validation, and completion authority. It does not update the LLM Wiki, unify `work_units` with graph nodes, or introduce a shared runtime in the graph-semantics package.
+Each provider keeps its own dispatch and transcript parser. Graph state, evidence checks, and completion authority stay with the provider. This design does not update the LLM Wiki. It does not combine `work_units` with graph nodes. It does not add a shared runtime to the graph-semantics package.
 
 ## User outcome
 
-For a selected native session, the user can follow what the orchestrator and workers attempted, how work relates to graph nodes/waves/attempts, what returned or failed, what recovery occurred, what files or external actions were reported, what evidence supports completion, and which facts are unavailable or inferred. The trace is a diagnostic view, not a second source of truth.
+For a selected native session, the user can see the actions that the orchestrator and workers attempted. The view links work to graph nodes, waves, and attempts. It shows results, failures, and recovery. It shows reported file changes and external actions. It links completion to its evidence. It marks facts that are unavailable or inferred. The trace is a diagnostic view. It is not a second source of truth.
 
-The measurement output must support comparisons of state divergence, duplicate mutations, repair incidents, false completion blocks/passes, adapter/test duplication, and maintenance cost. Each measurement names its observation method and denominator. Separate `work_units` and `graph.nodes` remain separate; a difference between them is not itself a defect.
+The measurement output compares state divergence, duplicate mutations, and repair incidents. It also compares false completion blocks and passes, duplicated adapter or test work, and maintenance cost. Each measurement names its method and denominator. `work_units` and `graph.nodes` remain separate. A difference between their counts is not itself a defect.
 
 ## Current source evidence
 
 - Both providers have a native session identifier and session-scoped graph state. Graph state is a snapshot and does not by itself preserve every transition.
-- Claude graph evidence binds worker attempts to the parent transcript's Agent tool call, parent record UUID, subagent type, child agent ID, wave, and attempt. Completion revalidates those links. Native transcript records include timestamps, tool requests/results, model, and usage. Usage from headless child sessions without parent linkage is excluded by the current cost miner.
-- Codex native session transcripts contain timestamped turn/model metadata, token-usage records, tool calls/results, command durations/status, file-change records, MCP call status/duration, and subagent activity. Existing graph evidence joins the parent call, child thread, attempt, and wave. The dashboard currently reads the older `~/.codex/projects` tree for broad activity/usage, while native graph verification uses `~/.codex/sessions`.
+- Claude graph evidence binds each worker attempt to its parent Agent call and record UUID. It also records the subagent type, child agent ID, wave, and attempt. Completion checks those links again. Native transcripts record time, tool calls and results, model, and usage. The current cost miner excludes headless child usage when no parent link exists.
+- Codex native transcripts record turn and model time, token usage, and tool calls and results. They also record command status and duration, file changes, MCP call status and duration, and subagent activity. Graph evidence joins the parent call to the child thread, attempt, and wave. The dashboard reads the older `~/.codex/projects` tree for broad activity and usage. Native graph verification reads `~/.codex/sessions`.
 - Codex hook audit defaults to `~/.coderails/codex/discipline.log`, while the dashboard health collector defaults to `~/.codex/discipline.log`; unless `CODERAILS_DISCIPLINE_LOG` aligns them, its hook-count tile may not observe the Codex plugin's hook log.
 - Dashboard button runs have a separate random `runId`; no durable native session link is present. A `runId` must not be treated as a native session ID without explicit evidence.
 - Dashboard views currently summarize project activity, run totals, and frozen loop cost separately. They do not assemble a session-level timeline.
 - Tool invocation and recorded result do not prove every external side effect. Wait duration may be estimated from timestamps; the reason for a wait is not directly emitted.
 
-Source anchors: `hooks/scripts/lib/graph_evidence.py`, `hooks/scripts/lib/graph_evidence_bind.py`, `hooks/scripts/lib/graph_evidence_revalidate.py`, `hooks/scripts/lib/loop_cost.py`; `packages/codex/skills/agentic-loop/scripts/graph_transcript.py`, `graph_evidence.py`, `graph_artifacts.py`; Codex `packages/codex/hooks/scripts/hook_common.py` and dashboard `app/src/lib/collect/{sessions,usage,cost,contextTrend,health}.ts`; dashboard `app/src/app/api/{events,run}/route.ts` in each provider bundle.
+Source anchors:
+
+- Claude: `hooks/scripts/lib/graph_evidence.py`, `graph_evidence_bind.py`, `graph_evidence_revalidate.py`, and `loop_cost.py`.
+- Codex: `packages/codex/skills/agentic-loop/scripts/graph_transcript.py`, `graph_evidence.py`, and `graph_artifacts.py`; also `packages/codex/hooks/scripts/hook_common.py`.
+- Dashboards: `app/src/lib/collect/{sessions,usage,cost,contextTrend,health}.ts` and `app/src/app/api/{events,run}/route.ts` in each provider bundle.
 
 ## Proposed architecture
 
 ### OpenTelemetry choice
 
-Use the OpenTelemetry trace model for trace/span identity, parent-child work relationships, span events, status, and standard GenAI/tool attributes where they fit. Keep Coderails provenance, source ordering, nullable timestamps, and derived/unavailable markers as explicit Coderails attributes because historical provider records do not always satisfy live-span timing requirements. Serialize the rebuildable local index in the provider-owned JSONL format below; it is OTel-aligned, not an OTLP export. Do not add an OTel SDK, collector, LangSmith integration, remote exporter, or network transmission in this phase. This reconstructs traces from existing native evidence rather than instrumenting the model runtime.
+Use the OpenTelemetry trace model for trace and span IDs. Use it for parent-child work, span events, status, and suitable GenAI or tool attributes. Keep Coderails provenance and source order as explicit attributes. Keep nullable times and derived or unavailable markers explicit. Historical records do not always meet live-span timing requirements. Store the rebuildable local index as provider-owned JSONL, as shown below. Its format follows OTel, but it is not an OTLP export. This phase adds no OTel SDK, collector, LangSmith integration, remote exporter, or network transfer. It reconstructs traces from native evidence. It does not instrument the model runtime.
 
 ### 1. Provider-owned read adapters
 
-Each provider bundle owns its native session discovery, transcript parsing, worker correlation, graph/artifact loading, and provenance checks. Each adapter maps supported source records into a small versioned normalized trace-event shape. Provider-only source IDs and fields remain available as source references; normalization must not erase differences that affect meaning.
+Each provider bundle finds its own sessions and parses its own transcripts. It links workers, loads graph records and artifacts, and checks provenance. Each adapter maps supported records to a small, versioned trace-event shape. Provider-specific IDs and fields remain available as source references. Normalization must retain differences that affect meaning.
 
 The dashboard may orchestrate these adapters and render the normalized events. The graph-semantic kernel and installed graph runtime do not import the dashboard or a telemetry service. Adapters are read-only and never repair graph state, synthesize completion, or rewrite source evidence.
 
 ### 2. On-demand trace assembly and local cache
 
-Assemble a session trace on request from native transcripts, current graph state, linked worker transcripts, hook audit records, and eval/proof/retro artifacts. Use a rebuildable, provider-owned local index rather than a second raw-evidence store:
+Build a session trace when requested. Read native and linked worker transcripts, current graph state, hook audit records, and eval, proof, and retro artifacts. Use a rebuildable local index owned by the provider:
 
 ```text
 ~/.coderails/telemetry/<provider>/<safe-session-id>/manifest.json
 ~/.coderails/telemetry/<provider>/<safe-session-id>/events.jsonl
 ```
 
-The manifest records schema/parser version, provider/session/loop IDs, source file identities and fingerprints, scan cursors, generated time, and completeness/errors. `events.jsonl` stores only normalized event metadata, correlation IDs, provenance, and source references; it does not copy prompts, tool arguments, command output, or transcript contents. Provider adapters own path resolution, parsing, locking, atomic replacement, and rebuild behavior. On changed or truncated sources, rebuild the derived index. The index is disposable and never authorizes a graph transition. It can be deleted and regenerated from native artifacts.
+The manifest records schema and parser versions. It records provider, session, and loop IDs; source identities and fingerprints; scan cursors; creation time; and any errors or gaps. `events.jsonl` stores event metadata, correlation IDs, provenance, and source references. It does not copy prompts, tool arguments, command output, or transcript content. Provider adapters resolve paths, parse records, lock files, and replace or rebuild the index. Rebuild the index when a source changes or is truncated. The index is disposable. It never authorizes a graph transition. Native artifacts can regenerate it.
 
-Keep source paths/record IDs/line or item references so each event can be checked against its origin. Load large tool inputs/results from the native source only when the detail view requests them; preserve source content and make any unavailable/truncated content explicit. Do not add an independent time-based expiry before real cache size and retrieval behavior are measured. The user can clear derived indexes; source deletion makes the corresponding trace unavailable rather than leaving copied content behind.
+Keep source paths, record IDs, and line or item references. A reader must be able to check each event against its source. Load large tool input or output only when the detail view requests it. Preserve source content and mark missing or truncated content. Do not add a time-based expiry until cache size and retrieval behavior are measured. The user can clear derived indexes. If a source is deleted, its trace becomes unavailable because the index holds no copy of its content.
 
 The first surface is a session detail/timeline view in the existing local dashboard, linked from a native session row. A dashboard button `runId` can link to a native session only when the run output or explicit metadata establishes that relation; otherwise show it as a separate run.
 
 ### 3. Event shape and provenance
 
-Every normalized event carries: schema version, deterministic event ID, provider, native session/thread ID, event kind, actor/worker identity when available, and a source reference. A timestamp is nullable because graph snapshots and some artifacts are untimed. Each event also carries source-local sequence/ordinal data. Optional correlation fields include loop ID, graph revision, wave ID, node ID, attempt, native tool/call ID, child thread/agent ID, and parent-event ID. Event-specific fields include duration, status/error, command/tool name, file-change summary, usage, and evidence-artifact references.
+Every event records its schema version, deterministic ID, provider, native session or thread ID, event kind, and source reference. It records the actor or worker when known. Time is nullable because some graph snapshots and artifacts have no time. Each event keeps its source-local order. Optional links identify the loop, graph revision, wave, node, attempt, native call, child thread or agent, and parent event. Event fields can record duration, status or error, command or tool name, file changes, usage, and evidence references.
 
 Proposed JSONL event record:
 
@@ -82,9 +89,9 @@ Proposed JSONL event record:
 }
 ```
 
-`timestamp.value` and `duration_ms` are nullable. `basis` is `source`, `derived`, or `unavailable`; source sequence is retained when available. For untimed snapshots/artifacts, preserve their source order and show time as unknown. Merge sources by timestamp only where timestamps are valid; ties or untimed cross-source ordering are marked ambiguous and use a stable source/order tie-break solely for display. Never synthesize a timestamp from file mtime and present it as event time.
+`timestamp.value` and `duration_ms` can be null. `basis` is `source`, `derived`, or `unavailable`. Keep source order when known. For an untimed snapshot or artifact, show time as unknown. Merge sources by time only when their times are valid. Mark ties and untimed cross-source order as ambiguous. Use a stable source and order tie-break only for display. Never present a file modification time as event time.
 
-Facts are marked `observed`, `derived`, or `unavailable`. Derived values include timestamp-gap durations and cross-source joins; record the calculation/source IDs. Do not encode missing model/usage/cost/timing as numeric zero. Observed token usage remains separate from estimated USD cost. Existing frozen retro cost is labeled as an estimate and is not repriced by the viewer.
+Mark each fact `observed`, `derived`, or `unavailable`. Derived values include durations between timestamps and joins across sources. Record the calculation and source IDs. Do not record missing model, usage, cost, or time as zero. Keep observed token usage separate from estimated USD cost. Label frozen retro cost as an estimate. The viewer must not reprice it.
 
 ### 4. Trace sections
 
@@ -98,20 +105,20 @@ Facts are marked `observed`, `derived`, or `unavailable`. Derived values include
 
 ### 5. Baseline measurement and counting rules
 
-Use a census of sessions in a declared date window and provider set, with exclusions listed. Every metric record contains metric name/version, numerator, denominator, rate (nullable), cohort/window, source references, observation method, exclusions, and `observed`/`derived`/`manual` basis. Publish counts alongside rates and do not claim a stable rate from a small cohort.
+Count sessions in a declared date window and provider set. List exclusions. Each metric records its name and version, numerator, denominator, and nullable rate. It also records the cohort and window, source references, method, exclusions, and `observed`, `derived`, or `manual` basis. Publish counts with rates. Do not claim a stable rate from a small cohort.
 
 Counting rules:
 
-- **State divergence:** count only mismatches for explicitly declared work-unit/node relationships, divided by the number of those relationships independently inspected. Current `eval_refs` are not such a mapping. Until a mapping exists, report divergence as `not measurable`; report the two structures' counts separately without calling count differences defects.
-- **Duplicate mutation:** count same-target, same-operation retries that an independent audit confirms repeated an already accepted state change, divided by all independently audited mutation sequences. Exclude rejected calls and retries required to finish a transition. Use a manual incident record until a source can prove this mechanically.
-- **Repair incidents:** count independently grouped repair episodes, divided by sessions inspected. Record session, affected state, trigger, repair action, and evidence. Multiple commands in one episode count once.
-- **False completion block:** count blocks independently shown to violate their documented gate condition, divided by completion blocks independently replayed from their exact source artifacts.
-- **False completion pass:** count successful completions independently shown to violate a required condition, divided by successful completions independently audited. A provider's own success claim is never the independent check.
-- **Adapter/test duplication:** for each shared semantic change, record provider-specific implementation and test files/lines added or changed and the number of duplicated semantic cases. Report per change and in total; do not count required provider-native behavior as duplication.
-- **Repeated updates across state views:** count audited work items that required manual repeated status updates in both `work_units` and graph nodes, divided by work items for which an owner explicitly intended both views to represent the same decision. Do not assume a one-to-one relation.
-- **Maintenance cost:** use a small manual task record of active engineering minutes for graph changes, split into shared-kernel, Claude-adapter, Codex-adapter, test, and repair work. Report per change and summed by category; do not estimate minutes from token usage.
+- **State divergence:** Count mismatches only for declared relationships between work units and nodes. Divide by the number of those relationships independently inspected. Current `eval_refs` do not define that relationship. Until a mapping exists, report divergence as `not measurable`. Report structure counts separately; a count difference is not a defect by itself.
+- **Duplicate mutation:** Count retries that repeat an accepted change to the same target and operation, when an independent audit confirms them. Divide by all audited mutation sequences. Exclude rejected calls and retries needed to finish a transition. Use a manual incident record until the source can prove repetition mechanically.
+- **Repair incidents:** Count independently grouped repair episodes. Divide by sessions inspected. Record the session, affected state, trigger, repair action, and evidence. Count multiple commands in one episode once.
+- **False completion block:** Count blocks independently shown to violate their documented gate condition. Divide by completion blocks independently replayed from exact source artifacts.
+- **False completion pass:** Count completed runs independently shown to violate a required condition. Divide by successful completions independently audited. A provider's success claim is not an independent check.
+- **Adapter/test duplication:** For each shared semantic change, record provider-specific implementation and test files or lines changed. Record duplicated semantic cases. Report counts per change and in total. Do not count required provider-native behavior as duplication.
+- **Repeated updates across state views:** Count audited work items that needed manual status updates in both `work_units` and graph nodes. Divide by items for which an owner intended both views to show the same decision. Do not assume a one-to-one relation.
+- **Maintenance cost:** Record active engineering minutes for graph changes in a small manual task log. Separate shared-kernel, Claude-adapter, Codex-adapter, test, and repair work. Report per change and sum by category. Do not infer minutes from token usage.
 
-Acceptance thresholds for the observability release: every emitted event has a resolvable source reference or is explicitly marked unavailable; all correlation fields are source-backed or labeled derived; 100% of published metric values have a defined denominator and source/method; 0 missing values are silently represented as zero; adversarial fixtures produce zero false external-effect or completion claims. The real-run baseline is a census of the declared cohort, with the cohort size and all exclusions reported. No numeric operational target is set until that first baseline exists.
+Acceptance requires a resolvable source reference for every event, or an explicit unavailable marker. Every correlation field has a source or a derived label. Every published metric has a denominator, source, and method. Missing values must never appear as zero. Adversarial fixtures must produce no false claim of an external effect or completion. The real-run baseline counts the declared cohort and reports its size and exclusions. Set no numeric operational target until that baseline exists.
 
 The baseline report compares the current separated state model and adapters as operated. It does not decide whether state unification is desirable. A separate RFC is considered only if the measured evidence supports one.
 
@@ -119,7 +126,7 @@ The baseline report compares the current separated state model and adapters as o
 
 - Keep reads local to the existing dashboard and provider artifact roots; do not upload telemetry or publish it.
 - Do not duplicate full transcripts into a new durable store. Source files remain authoritative; expose source references and load details when requested.
-- Treat tool inputs/results as potentially sensitive. Keep details out of cache, session-list responses, and trace-summary pages. Reveal one requested record only after explicit expansion through the dashboard's local-origin and token checks; render it as escaped plain text, never HTML, and never log it. This boundary controls access and rendering; it does not promise secret redaction. Do not silently omit content while calling the trace complete.
+- Treat tool inputs and results as potentially sensitive. Keep details out of cache, session lists, and trace summaries. Reveal one record only after the user expands it and the dashboard checks local origin and token. Render it as escaped plain text. Do not render it as HTML or log it. This boundary controls access and display. It does not promise secret redaction. Do not call a trace complete if content was omitted without notice.
 - Respect each provider's transcript permissions and uniqueness checks. Ambiguous session or worker linkage is shown as unresolved, not guessed.
 - Bound scans by measured source behavior and paginate large traces; report scanned/emitted counts and truncation explicitly instead of assuming a fixed safe excerpt size.
 
@@ -138,8 +145,8 @@ The baseline report compares the current separated state model and adapters as o
 
 - The selected trace model is OpenTelemetry-aligned local JSONL, with no OTel SDK/collector or remote exporter in this phase.
 - Trace assembly and cache logic live in provider-local dashboard modules, not provider CLIs; each install remains independent.
-- Support only native transcript/event shapes established by sanitized real fixtures and current evidence readers. Unknown or malformed shapes remain incomplete/unresolved; no version or launch-mode behavior is inferred from undocumented fields.
-- Session summaries and trace pages contain metadata only. One detail is revealed on explicit request, behind the existing dashboard origin/token boundary, escaped as plain text, and never cached or logged; this is not secret redaction.
-- Baseline cohort starts at the Python cutover merge (`e1090098`, 2026-09-28 11:32:24 UTC) and ends at the UTC census time recorded in the report. The report itself carries metric and incident/task records; unavailable historical maintenance minutes are reported unavailable, never estimated.
+- Support native transcript and event shapes backed by sanitized real fixtures and current evidence readers. Show unknown or malformed shapes as incomplete or unresolved. Do not infer version or launch-mode behavior from undocumented fields.
+- Session summaries and trace pages contain metadata only. Reveal one detail on request, behind the dashboard origin and token checks. Escape it as plain text. Do not cache or log it. This is not secret redaction.
+- The baseline cohort begins at the Python cutover merge (`e1090098`, 2026-09-28 11:32:24 UTC). It ends at the UTC census time in the report. The report contains metric, incident, and task records. Mark unavailable historical maintenance minutes as unavailable; do not estimate them.
 
 These decisions add no daemon, remote backend, new graph authority, or speculative state-unification work.

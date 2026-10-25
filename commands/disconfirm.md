@@ -4,11 +4,11 @@ description: Argue against your own most recent recommendation - find the strong
 
 # Disconfirm
 
-Take your most recent recommendation, suggestion, or conclusion. Argue against it. Find the strongest case that it is wrong, incomplete, or harmful. Consider:
+Take your most recent recommendation, suggestion, or conclusion. Find the strongest evidence that it is wrong, incomplete, or harmful. Consider:
 
 - What evidence would falsify it?
 - What edge cases break it?
 - What did the analysis miss or assume away?
 - Who would push back, and on what grounds?
 
-Steelman the opposition. Do not hedge. After the disconfirmation, state honestly whether your original recommendation still holds.
+Make the strongest case against your position. Do not hedge. Then state whether your original recommendation still holds.

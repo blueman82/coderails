@@ -6,13 +6,20 @@ type: project
 
 # Coderails Graph-Engineering Walkthrough
 
-> Supersession note (2026-09-21): This is the pre-cutover walkthrough baseline. Absolute checkout paths, shell filenames, and provider-role assumptions below are historical. The current implementation uses schema 3, independent work_units, provider-native dispatch with explicit instruction bodies, and Python graph adapters over independently materialized pure semantics. Use current source and skills for runnable examples.
+> Supersession note (2026-09-21): This is the pre-cutover walkthrough baseline. The checkout paths,
+> shell filenames, and provider-role assumptions below are historical. The current implementation
+> uses schema 3 and separate `work_units`. Each provider dispatches its own agents with explicit
+> instructions. Python graph adapters use separate copies of the maintained pure semantics. Use
+> current source and skills for runnable examples.
 
 ## Goal
 
-Teach the user the complete current Coderails graph-engineering loop until they can explain it confidently to another person. Cover the working examples first, then every relevant code path, document, hook, script, node, edge, wave, retry, evidence link, and every field in every JSON file created or consumed by the loop.
+Teach the user the Coderails graph-engineering loop until they can explain it
+to another person. Start with working examples. Then cover every relevant
+code path, document, hook, script, node, edge, wave, retry, evidence link, and
+field in each JSON file the loop creates or consumes.
 
-This is a teaching session, not an implementation session. Work from the current merged source and move one small concept at a time; never dump the whole architecture at once.
+This is a teaching session, not an implementation session. Use the current merged source. Teach one small concept at a time. Do not present the whole architecture at once.
 
 ## Decisions
 
@@ -20,9 +27,9 @@ This is a teaching session, not an implementation session. Work from the current
 - Start with a small graph containing parallel nodes, a join, and one failed-then-successful retry. Reuse the repository's existing fixtures and scripts; do not create a new teaching framework.
 - Teach the shared graph idea first, then trace the Claude and Codex implementations separately. They are independent provider plugins and must not be presented as one mixed implementation.
 - Claude uses the root plugin and Bash graph helpers. Codex uses `packages/codex/` and native Python graph helpers plus native `spawn_agent` dispatch.
-- Coderails is manually operated graph engineering. The model reads readiness, dispatches ready work, records outcomes, and advances the graph. There is no automatic scheduler, and the walkthrough must not imply one.
+- Coderails runs the graph manually. The model checks readiness, dispatches work, records results, and advances the graph. There is no automatic scheduler. The walkthrough must not imply one.
 - Evidence-backed graph execution is not tamper-proof security. Local hooks and `progress.json` remain in the orchestrator's trust domain.
-- PR #458 closes the agreed Claude gap: deleting one retry attempt's evidence while later evidence and retry metadata remain intact now blocks completion. Coordinated changes to several orchestrator-owned fields remain a disclosed trust-boundary limit.
+- PR #458 closes the agreed Claude gap. Completion now blocks if one retry attempt's evidence is deleted while later evidence and retry metadata remain. Coordinated changes to several orchestrator-owned fields remain a disclosed trust limit.
 - PR #459 adds Claude and Codex instructions for starting in a folder that is not yet a Git repository.
 - PR #460 adds Codex Superpowers guidance. Superpowers guidance is advisory; `graph.py` remains the readiness authority and native `spawn_agent` remains the dispatcher.
 - Use current merged `main` at `10b0e42a780fba73dd65306d6aa34aa9a2478f98` as the initial walkthrough baseline. Recheck HEAD at the start because the repository may move.

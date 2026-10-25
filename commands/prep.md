@@ -28,7 +28,7 @@ $ARGUMENTS
 
 ## Parse Arguments
 
-The raw args block above is whatever the user typed after `/prep`. **Parse it yourself** — do NOT rely on positional `$1`/`$2` substitution, which does a naive whitespace-split that does not honour quotes and breaks on tokens containing `/`, `:`, or spaces.
+The raw args block above contains what the user typed after `/prep`. **Parse it yourself.** Do not use positional `$1`/`$2` substitution. It splits on whitespace without respecting quotes. It also breaks tokens that contain `/`, `:`, or spaces.
 
 Extract four fields from `$ARGUMENTS`:
 
@@ -53,7 +53,7 @@ All of these must work:
 /prep feature/add-retry-logic --type Task --summary "Add retry logic" --description "Implement exponential back-off..."
 ```
 
-If the user's args don't match any of these shapes but the intent is clear, best-effort parse and proceed. If the intent is ambiguous, ask one targeted clarifying question — don't guess the branch name.
+If the args have a different shape but the intent is clear, parse them and proceed. If the intent is unclear, ask one targeted question. Do not guess the branch name.
 
 ## Task Part 1: Worktree Creation
 
@@ -79,15 +79,21 @@ Feature and bug work must be isolated in a git worktree — never branch off or 
 
 ## Task Part 1b: Progress Stub (best-effort, non-blocking)
 
-After the worktree is created, initialize a current-schema `progress.json` only if the resolved path does not already exist. This optional bootstrap must not overwrite an active or completed loop. Existing state belongs to the agentic-loop workflow: leave it unchanged, including its ownership, graph, review cache, and hook-owned fields. A failure here does **not** abort `/prep`; later graph dispatch and completion still enforce their own gates.
+After you create the worktree, initialize a current-schema `progress.json` only if the resolved path is absent. This step is optional. Do not overwrite an active or completed loop. Keep the existing ownership, graph, review cache, and hook-owned fields. A failure does **not** abort `/prep`. Graph dispatch and completion use their own gates.
 
-Resolve the path by running the path helper — do NOT compute the path yourself. It keys the path on cwd and `$CLAUDE_CODE_SESSION_ID` (read automatically; no argument needed):
+Run the path helper to resolve the path. Do not compute it yourself. The helper reads cwd and `$CLAUDE_CODE_SESSION_ID` without arguments:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"
 ```
 
-If that path is absent, put the user's `/prep` invocation, verbatim, in a temporary file and run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<a unique non-blank id>" --prompt-file "$PROMPT_FILE"`. `start` writes the current-schema state atomically and refuses (with a `[reason_code=...]`) to replace an unfinished loop, so it adopts existing state consistently with the agentic-loop workflow. Never hand-write `progress.json`.
+If the path is absent, put the user's `/prep` invocation verbatim in a temporary file. Then run:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<a unique non-blank id>" --prompt-file "$PROMPT_FILE"
+```
+
+`start` writes current-schema state atomically. It refuses to replace an unfinished loop and reports a `[reason_code=...]`. This follows the agentic-loop adoption rule. Never hand-write `progress.json`.
 
 If the path helper is unavailable, or `start` fails for any reason, log a warning to the user and continue to Task Part 2. The worktree and branches are already safe at this point.
 
@@ -100,7 +106,9 @@ If the path helper is unavailable, or `start` fails for any reason, log a warnin
 - Transition status: `mcp__<mcp_namespace>__transition_jira_status_by_name`
 - Search/query: `mcp__<mcp_namespace>__search_jira_issues`
 
-The `allowed-tools` frontmatter pre-authorises `mcp__jira__*` for the zero-config default. For a different namespace, calls still work but are governed by the normal permission system (one-time prompt or a `mcp__<mcp_namespace>__*` rule in `settings.json` `permissions.allow` — see INSTALLATION.md). If no Jira MCP is available at all, skip and tell the user Jira features need a Jira MCP server configured; the branches are already created, so this is non-fatal.
+The `allowed-tools` frontmatter pre-authorises `mcp__jira__*` for the default namespace. A different namespace uses the normal permission system. It can prompt once, or use a `mcp__<mcp_namespace>__*` rule in `settings.json` `permissions.allow`. See INSTALLATION.md.
+
+If no Jira MCP is available, skip Jira work. Tell the user that Jira features need a Jira MCP server. The branches already exist, so this does not block `/prep`.
 
 After successfully creating the branches, create a Jira ticket:
 

@@ -55,7 +55,7 @@ paths: "**/*.py"
 
 ## Imperative → Declarative Patterns (MANDATORY)
 
-Scan for these anti-patterns and replace with idiomatic Python.
+Find these patterns and replace them with the matching Python idiom.
 
 ### Loop Anti-Patterns
 
@@ -243,7 +243,9 @@ When inserting untrusted text (AI output, user input, external API responses) in
 
 **Rule:** Any text from AI models, user input, or external APIs MUST be treated as untrusted. Sanitize at the point of insertion, not at the point of collection.
 
-**Allowlist > blocklist:** When building status/result dicts consumed by callers, prefer allowlist checks (`if status not in ("success", "disabled")`) over blocklist checks (`if status == "error"`) — fail-closed prevents silent failures from unhandled return values.
+**Allowlist > blocklist:** Callers must handle every unexpected status. Check
+`if status not in ("success", "disabled")` when you build a status or result
+dict. A check for only `if status == "error"` can miss a new failure value.
 
 ---
 

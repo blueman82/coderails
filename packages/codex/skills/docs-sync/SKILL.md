@@ -26,8 +26,8 @@ drift between this repo's documentation and its actual code.
 `README.md`, `AGENTS.md`, `CLAUDE.md`, and tracked files under `docs/`
 — **except the self-governance deny-list in step 4 below**
 (`skills/**/SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`,
-anything under `.codex/`, `examples/dashboard-config.json`). Yes, this
-means `AGENTS.md` and `AGENTS.md` are named in both the general scope
+anything under `.codex/`, `examples/dashboard-config.json`). This
+means `AGENTS.md` and `CLAUDE.md` are named in both the general scope
 above and the deny-list — read the deny-list as an override: if the
 audit finds drift in a deny-listed file, report it, do not fix it. This
 routine can flag that its own governing documents look stale; it can
@@ -166,18 +166,10 @@ invoking session ends before writing a real terminal marker, the provisional
 `abort=incomplete-run` line remains the honest final outcome.
 
 Any of steps 5–9 can REFUSE rather than the routine choosing to abort.
-**The trigger is the mechanism, not the reason: if the step's command
-exits non-zero, that is a refusal.** This is deliberately keyed on the
-exit code rather than on a list of rejecting reasons, because a list
-only covers the outcomes someone thought to enumerate. `$SKILL_DIR/../../scripts/merge.py`
-alone has more than thirty distinct non-zero exits through one shared
-`err` function, PLUS failures that bypass `err` entirely — it runs under
-`set -euo pipefail`, so an unguarded command aborts the script directly
-(the `gh pr merge` call is exactly this: its own comment says "its
-failure must abort"). Counting the `err` calls therefore does not
-enumerate the exits either, which is the point. A run must terminate on
-every one of them, including the ones added after this sentence was
-written.
+**Treat each non-zero command exit as a refusal.** Check the exit status,
+not a list of known error messages. `$SKILL_DIR/../../scripts/merge.py` can
+fail for many reasons, including a failed `gh pr merge` call. Stop the run
+for every non-zero exit, including failure modes added later.
 
 Treat a refusal the same as an abort: close the PR if one is open,
 delete the branch locally and on the remote, and append a

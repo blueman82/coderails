@@ -1,45 +1,56 @@
 ---
 name: mixed-provider-graph-policy-superseded
-description: Superseded historical design; replaced by independent Claude and Codex plugins with no cross-provider review.
+description: Superseded design for mixed-provider review. Independent Claude and Codex plugins replaced it; they do not cross-review.
 type: project
 ---
 
 # Mixed-Provider Graph Policy
 
 > **SUPERSEDED:** Do not implement this design. PR #427 removed mixed-provider
-> routing and review. The current direction is recorded in
-> `project_codex-claude-graph-parity.md`: independent plugins with matching graph
-> behaviour and no provider handoff or cross-review.
+> routing and review. See `project_codex-claude-graph-parity.md` for the
+> independent plugin direction. The providers do not hand work to each
+> other or cross-review.
 
 ## Goal
 
-Extend Coderails so selected graph stages can be reviewed independently by Claude and Codex, while preserving separate provider runtimes. A stage may proceed only after the configured cross-provider review policy is satisfied.
+The old goal was independent Claude and Codex review of selected graph
+stages. Each provider would keep its own runtime. A stage would proceed
+only after it met the cross-provider review policy.
 
 ## Decisions
 
-- The owner approved explicit provider-specific entries in `skills/index.yaml`; neither provider route wins globally.
+- The owner approved provider-specific entries in `skills/index.yaml`.
+  Neither provider route would win for all tasks.
 - Mixed mode is an additional graph policy, not a replacement for provider-specific routing.
-- The preferred mixed mode is parallel review: one provider may implement a stage, while Claude and Codex independently review the frozen output.
-- Reviewers receive the same frozen input/artifact, do not see each other's verdict before submitting, and write separate evidence.
-- The default release policy should be unanimous approval; disagreement becomes a durable hard-stop for adjudication.
-- A fresh neutral session must design and freeze the shared contract and acceptance tests before provider implementations begin.
-- Claude and Codex implementations are separate workstreams in separate provider-owned worktrees.
-- Final verification must be independent of both implementers: a fresh verification session runs mechanical acceptance and a human resolves substantive disagreements.
+- The preferred mixed mode was parallel review. One provider would build
+  a stage. Both providers would review its frozen output independently.
+- Reviewers would receive the same frozen input. Each would submit a
+  verdict and evidence before seeing the other's verdict.
+- The proposed release policy required unanimous approval. A disagreement
+  would create a durable hard stop for adjudication.
+- A fresh neutral session would define the shared contract and freeze
+  acceptance tests before implementation.
+- Claude and Codex implementations would use separate provider worktrees.
+- A fresh session would run mechanical acceptance. A human would resolve
+  substantive disagreements.
 
 ## Constraints
 
-- Do not merge Claude and Codex runtimes into one implementation or import one provider's runtime from the other.
-- Do not make the active Claude follow-on worker or the prior Codex session unilaterally define shared graph semantics.
-- Do not treat a provider-specific route, a fixture, or a successful invocation marker as proof that cross-provider review happened.
-- Dual execution is stronger but more expensive than dual review and requires an explicit comparison/adjudication stage; it is not the default.
+- Do not merge the provider runtimes. Do not import one runtime from the other.
+- Do not let one provider's worker define the shared graph semantics alone.
+- A route, fixture, or invocation marker does not prove cross-provider review.
+- Dual execution would cost more than dual review. It would need a
+  comparison and adjudication stage. It was not the default.
 
 ## Schema / Taxonomy
 
 Candidate graph policy values:
 
 - `single`: one configured provider executes/reviews the node.
-- `parallel-review`: Claude and Codex independently review the same frozen stage artifact; a join applies the release policy.
-- `dual-execution`: both providers independently produce outputs; a comparison/adjudication stage evaluates them.
+- `parallel-review`: Both providers review the same frozen stage artifact.
+  A join applies the release policy.
+- `dual-execution`: Both providers produce outputs independently. A
+  comparison and adjudication stage evaluates them.
 
 Candidate route shape:
 
@@ -65,18 +76,23 @@ U4b-review:
 
 ## Done so far
 
-- PR #413 Codex live graph work merged to `main` as merge commit `a4d0067e`; current `main` later advanced to `cbfa64a6`.
-- Claude PRs #411 and #412 merged; Claude is continuing S9/J12 wiring separately.
+- PR #413 merged the Codex live graph work at `a4d0067e`. At the time of
+  this record, `main` had later advanced to `cbfa64a6`.
+- Claude PRs #411 and #412 merged. Claude continued S9/J12 wiring separately.
 - The owner approved provider-specific routing and the mixed-provider direction.
 - No mixed-provider runtime implementation has started.
 
 ## Next steps
 
-1. In a fresh neutral session, inspect the current graph/index contracts and write a minimal mixed-mode design plus frozen task-evals.
-2. Decide the exact shared record shape for reviewer inputs, independent outputs, join policy, disagreement, retries, and run-bound evidence.
-3. Split implementation into Claude-owned and Codex-owned worktrees with disjoint provider runtime files.
-4. Run a fresh independent verifier against a real mixed Claude+Codex acceptance path; require both provider artifacts and a passing join.
-5. Have the human owner adjudicate any substantive provider disagreement before merge.
+1. In a fresh neutral session, inspect the graph and index contracts. Write
+   a minimal mixed-mode design and freeze task evals.
+2. Define the record shape for reviewer inputs, outputs, joins, disagreement,
+   retries, and evidence bound to a run.
+3. Use separate Claude and Codex worktrees. Keep provider runtime files
+   disjoint.
+4. Run an independent verifier against a real mixed-provider path. Require
+   evidence from both providers and a passing join.
+5. Ask the human owner to resolve substantive disagreements before merge.
 
 ## Open questions
 

@@ -1,14 +1,17 @@
 # E1: demote the Stop discipline gates?
 
-> Superseded 2026-10-04 by `2026-10-04-not-in-gate-demotion.md`: the user overrode the unmet criteria and demoted both gates to advisory lints. The verdict below is retained as the record of why the criteria were not met.
+> Superseded on 2026-10-04 by `2026-10-04-not-in-gate-demotion.md`. The user
+> overrode the unmet criteria and demoted both gates to advisory lints. The
+> verdict below records why the criteria were not met.
 
 Verdict: **criteria NOT met. No behaviour change. No exit code edited. Hooks stay.**
 
 ## Rule
 
-`docs/graph-alignment-measurement.md`, rule (a): a gate is a demotion candidate only if all hold: at least 100
-`decisions`; `blocked / decisions` of at least 10%; and a hand-sampled real-fix rate below 30% over at least 30
-of its blocks. "Without the sampled rate, no gate may be called demotable."
+Under rule (a) in `docs/graph-alignment-measurement.md`, a gate needs at
+least 100 `decisions`. Its `blocked / decisions` ratio must be at least
+10%. A manual sample of at least 30 blocks must find a real-fix rate below
+30%. Without that sample, the gate is not a demotion candidate.
 
 ## Numbers (2026-10-04, local Claude log 2026-08-04 to 2026-10-04)
 
@@ -24,7 +27,9 @@ The earlier 194/258 baseline is stale. The log is a live append-only file, so fi
 
 - Hand-sample of at least 30 `confidence_labels` blocks: **not taken** (it needs transcript reads, which the
   measurement script deliberately never does). Status: undecided, not "passed".
-- Read on all evaluations the doc says `confidence_labels` would not cross 10%.
+- With all evaluation lines as the denominator, `confidence_labels` stays
+  below 10%, as the measurement document says. Rule (a) uses decisions as
+  its denominator; the measured value there is 73.5%.
 - `verify_loop` fails the ratio leg regardless of any sample, so it stays blocking.
 
 ## Behaviour at time of writing (read from source; superseded, outside-loop `Stop` is now an advisory exit 0 for both hooks)
@@ -47,7 +52,11 @@ The earlier 194/258 baseline is stale. The log is a live append-only file, so fi
 
 ## Flip condition
 
-If a hand-sample of at least 30 `confidence_labels` blocks (next turn changed substance, versus a token appended)
-shows a real-fix rate under 30%, with 100+ decisions and blocked/decisions of at least 10% still holding, demote
-only the outside-loop `Stop` branch of `check_confidence_labels.py` by reusing its existing warn-and-exit-0 branch,
-keeping the `blocked` / `would_block` / `warned` log fields. `verify_loop` stays blocking either way.
+This was the flip condition at the time of the verdict. Sample at least 30
+`confidence_labels` blocks. Count a real fix only when the next turn
+changes substance, rather than adding a token. If the rate is below 30%,
+and the volume and ratio rules still hold, demote only the outside-loop
+Stop branch of `check_confidence_labels.py`. Reuse its warn-and-exit-0
+branch and keep the `blocked`, `would_block`, and `warned` log fields.
+`verify_loop` would stay blocking under this verdict. The 2026-10-04
+override above later demoted both hooks.

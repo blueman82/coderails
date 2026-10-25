@@ -1,14 +1,14 @@
 # Provider graph-alignment implementation plan
 
-> Current implementation note (2026-09-21): retain the shell rosters and earlier phase commands below as the frozen migration baseline. The clean-break amendment supersedes every instruction to execute or retain those old paths. Current delivery uses `install.py` and `scripts/installer/files.py`; current entrypoints and tests are Python, including `hooks/scripts/tests/run_all.py`, `packages/tests/test_graph_semantics_fixtures.py`, and `packages/tests/test_provider_graph_parity.py`. Follow [the component reference](../../REFERENCE.md) and [installation guide](../../../INSTALLATION.md) for operational commands. No shell wrapper or schema-v1/v2 graph reader remains.
+> Current implementation note (2026-09-21): The shell rosters and early phase commands below are a frozen migration baseline. The clean-break amendment replaces instructions to run or retain those paths. Current delivery uses `install.py` and `scripts/installer/files.py`. Current entry points and tests are Python, including `hooks/scripts/tests/run_all.py`, `packages/tests/test_graph_semantics_fixtures.py`, and `packages/tests/test_provider_graph_parity.py`. Use [the component reference](../../REFERENCE.md) and [installation guide](../../../INSTALLATION.md) for current commands. No shell wrapper or schema-v1/v2 graph reader remains.
 
 ## Purpose and fixed boundaries
 
 Implement the approved schema-v3 graph contract from
-`docs/superpowers/specs/2026-09-02-provider-graph-alignment-design.md` without
-creating a shared installed runtime. `packages/graph-semantics/` is the one
-maintained Python source; `install.sh` materializes it into the independently
-installable Claude and Codex bundles. (verified)
+`docs/superpowers/specs/2026-09-02-provider-graph-alignment-design.md`. Keep
+the installed Claude and Codex runtimes separate. `packages/graph-semantics/`
+is the one maintained Python source. Under this frozen migration baseline,
+`install.sh` copies it into each independently installable bundle. (verified)
 
 The core owns only pure validation and state transitions. Provider adapters
 retain state paths, locks, atomic writes, native dispatch, transcript parsing,
@@ -86,10 +86,12 @@ mapping blocks deletion. (verified)
 | Workflow-audit production | `skills/workflow-audit/scripts/{scan_transcripts,cluster_ngrams,write_queue_entry}.sh` | `workflow-audit/SKILL.md` pipes scan to cluster and pipes judge output to queue writer. Preserve JSONL and privacy filtering, but invoke the three Python entry points directly. |
 | Workflow-audit test runners | `skills/workflow-audit/scripts/tests/{cluster_ngrams,e2e,scan_transcripts,write_queue_entry}.test.sh` | Each directly runs one or more workflow-audit production scripts. Convert them to Python tests before deleting the production shell files; retain unit and scan-to-cluster integration coverage. |
 
-The Codex package test surface outside the package directory is also retired:
-`packages/tests/{codex_frozen_evals,codex_graph_evidence_shapes,codex_graph_runtime_adversarial,codex_hooks,codex_installer,codex_native_package,codex_shell_retirement_contracts,provider_graph_adversarial,provider_graph_final_adversarial,provider_graph_lifecycle_adversarial,provider_graph_parity,stop_hook_human_escalation}.test.sh`
-and `packages/tests/lib/codex_transcript_fixture.sh` become Python tests/module
-in M2X. (verified)
+The Codex package tests outside the package directory are also retired. In M2X,
+the following paths become Python tests or a Python module: (verified)
+
+- `packages/tests/{codex_frozen_evals,codex_graph_evidence_shapes,codex_graph_runtime_adversarial,codex_hooks,codex_installer,codex_native_package,codex_shell_retirement_contracts}.test.sh`
+- `packages/tests/{provider_graph_adversarial,provider_graph_final_adversarial,provider_graph_lifecycle_adversarial,provider_graph_parity,stop_hook_human_escalation}.test.sh`
+- `packages/tests/lib/codex_transcript_fixture.sh`
 
 ### Ordered migration batches and gates
 

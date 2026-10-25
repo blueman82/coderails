@@ -1,8 +1,8 @@
 # Verified routines
 
-A **routine** is a scheduled skill run that isn't considered done just
-because `claude` exited 0. It's done when a specific artifact exists,
-is fresh enough, and satisfies a predicate — the **artifact gate**. Five
+A **routine** is a scheduled skill run. Exit code 0 from `claude` does not
+complete it. The run is complete when an artifact exists, is fresh enough,
+and satisfies a predicate. This check is the **artifact gate**. Five
 routines ship today: `wiki-lint` (nightly), `sync-docs-nightly` (nightly),
 `memory-consolidation-weekly` (weekly), `loop-retro-promotion-weekly`
 (weekly), `workflow-audit-weekly` (weekly).
@@ -181,11 +181,26 @@ cron job piping into `claude -p`.
 
 ## `workflow-audit-weekly`: transcript mining with queue-mode proposals
 
-This routine mines transcripts from the last 7 days, clusters repeated tool-use patterns, judges them as skill candidates, and writes any `propose` verdicts as queue entries in the dashboard approval queue. It runs in **queue-mode mandatory**: in-session skill creation is forbidden, and every proposal appears as a queue entry awaiting the owner's Approve click, never auto-built.
+This routine mines transcripts from the last 7 days. It groups repeated tool
+use, checks whether each group could become a skill, and writes `propose`
+verdicts to the dashboard approval queue. **Queue-mode is mandatory.** The
+routine cannot create a skill in the session. Each proposal waits in the queue
+for the owner's Approve click; it is never built automatically.
 
-The routine's run note lives at `~/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md` and records `proposals_written: <N>` (count of queue entries actually written this run). The artifact gate checks for the completion marker `## [{date}] workflow-audit complete`, which the routine emits **only** if it finishes cleanly **and** `proposals_written == proposals_attempted` (no queue write failures). A week with zero proposals (`proposals_written: 0` with no failures) is a **successful run** — the marker is emitted and the gate passes. A crash, or a shortfall where some proposals failed to write, causes the marker to be omitted and the gate to fail.
+The run note is at
+`~/.claude/coderails-dashboard/routines/workflow-audit/run-{date}.md`.
+It records `proposals_written: <N>`, the number of queue entries written.
+The artifact gate checks for `## [{date}] workflow-audit complete`. The
+routine writes that marker only after a clean finish with
+`proposals_written == proposals_attempted`. A run with zero proposals
+and no write failures still gets the marker and passes. A crash or failed
+queue write omits the marker and fails the gate.
 
-The 8-day artifact-gate freshness window (`maxAgeSeconds: 691200`) provides catch-up grace for a run that fires late (e.g. the machine was asleep at the scheduled time) — a run inside that window still passes the gate. Read `proposals_written: 0` plainly: no repeated patterns reached the proposal threshold this week, and zero proposals is not a failure or a request to lower the threshold — it's the expected norm in a healthy workflow. Report it as a green, completed run just like any other passing gate.
+The artifact gate allows eight days of freshness
+(`maxAgeSeconds: 691200`). A late run can still pass within that window,
+such as after the machine wakes. `proposals_written: 0` means no pattern
+met the proposal threshold that week. It is a successful run, not a
+reason to lower the threshold. Report it as completed with a passing gate.
 
 ## `sync-docs-nightly`: self-merging documentation drift fixer
 
@@ -261,8 +276,9 @@ whole surface.
 (`bypass`). Its mitigation is the same shape as that routine's: no hook
 protects a `claude -p` run, so the entire merge rail is the manifest
 lock (docs-only, three-dot-scoped) plus `scripts/merge.py`'s own
-script-internal artifact gates and `/pr-review-toolkit:review-pr` — not
-any hook or server-side check.
+artifact gates and `/pr-review-toolkit:review-pr`. The active GitHub
+`integrity-review` rule also checks the PR head before merge. Local hooks
+do not protect this headless run.
 
 ## `loop-retro-promotion-weekly`: a dormant-by-default routine
 

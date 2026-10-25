@@ -1,13 +1,22 @@
 ---
 name: premortem
-description: 'Use this skill for premortem analysis: assume a plan, decision, or approach has already failed, then reason backwards to identify the failure modes and causes. Trigger on explicit premortem requests ("premortem this/X"), "steelman the failure", "what could go wrong with this plan", or requests to adversarially stress-test a specific commitment. The distinguishing signal is backwards reasoning from an assumed bad outcome — not forward-looking checklists ("what should I check before X"), code review, general architecture critique, or fact verification.'
+description: >-
+  Assume a plan, decision, or approach has failed. Work backward to find
+  the causes. Use this skill for "premortem this/X",
+  "steelman the failure", "what could go wrong with this plan", or a
+  request to stress-test a commitment.
+  Do not use it for a forward-looking checklist, code review, architecture
+  critique, or fact check.
 ---
 
 # Premortem
 
-A premortem is a planning technique where you assume something has already failed — then work backwards to find out why. It's the opposite of a postmortem. The goal is to surface failure modes *before* you commit, while you can still act on them.
+For a premortem, assume the plan failed. Work backward to find why. Use
+the findings before commitment, while you can still change the plan.
 
-This skill works on plans, decisions, arguments, features, architectures, or your own previous response. The user may explicitly invoke it (`premortem this`, `premortem <X>`) or it may be appropriate to trigger it proactively before a high-stakes commitment.
+Apply this skill to a plan, decision, argument, feature, architecture, or
+your previous response. Use it when the user asks for a premortem or
+before a high-stakes commitment.
 
 ---
 
@@ -15,39 +24,45 @@ This skill works on plans, decisions, arguments, features, architectures, or you
 
 ### Step 1: Establish what's being premortemed
 
-If it's clear from context (e.g., the user just made a plan, or said "premortem your answer"), extract it directly — don't ask. If genuinely ambiguous, ask one question: "What specifically should I premortem?"
+If the subject is clear from context, identify it directly. For example,
+the user might ask you to assess a plan or your previous answer. If the
+subject is unclear, ask: "What specifically should I premortem?"
 
 ### Step 2: Reason adversarially
 
-Use a `<thinking>` block to reason before writing output. The goal is genuine adversarial thinking, not a checklist. Work through:
+Use a `<thinking>` block before the output. Examine the plan from an
+adversarial position. Consider these sources of failure:
 
-- **Assumption failures**: what does this plan assume that might not be true?
-- **Execution failures**: even if the plan is sound, where could the execution break down?
-- **People failures**: who might resist, disengage, or behave differently than expected?
-- **Dependency failures**: what external things does this rely on that could change or fail?
-- **Optimism bias**: where is the plan unduly optimistic? What's being glossed over?
-- **Unknown unknowns**: what hasn't been considered at all?
-- **Timing failures**: what's sensitive to sequencing or deadlines that could slip?
+- **Assumptions:** Which assumption might be false?
+- **Execution:** Where could execution fail, even with a sound plan?
+- **People:** Who might resist, disengage, or act differently?
+- **Dependencies:** Which external condition might change or fail?
+- **Optimism:** Where does the plan assume too much success?
+- **Unknown factors:** What has the plan not considered?
+- **Timing:** Which sequence or deadline could slip?
 
-Don't be comprehensive for its own sake. Surface the *most credible* failure modes — the ones that are both plausible and consequential. A few sharp ones beat a long generic list.
+Select the most plausible and consequential failures. Keep the list short
+and specific.
 
 ### Step 3: Assess each failure
 
 For each significant failure mode, give a brief verdict:
-- **Likelihood**: low / medium / high (use judgment, not pseudoscience)
+- **Likelihood**: low / medium / high (use judgment)
 - **Impact**: if it happens, how bad?
 - **Mitigation**: what would actually reduce this risk?
 
-Keep mitigations honest. "Monitor closely" is not a mitigation. "Add a circuit breaker here" or "validate assumption X before committing" are.
+Give an action that reduces the risk. "Monitor closely" does not do this.
+"Add a circuit breaker" and "validate assumption X before commitment"
+are concrete actions.
 
 ### Step 4: Verdict
 
-End with a crisp bottom line:
+End with one direct verdict:
 - Is this plan basically sound with specific risks to address?
 - Are there structural problems that should reshape the plan?
 - Is there a fatal flaw that makes the plan unlikely to succeed as stated?
 
-If you're premortemed your own answer, say so explicitly and update your recommendation if warranted.
+If you assess your own answer, say so. Update your recommendation if needed.
 
 ---
 
@@ -72,20 +87,20 @@ If you're premortemed your own answer, say so explicitly and update your recomme
 [2–5 failure modes. More is usually noise.]
 
 **Verdict**
-[One short paragraph: is the plan sound? what's the most important thing to fix or watch?]
+[One short paragraph. Is the plan sound? Name the first issue to fix or watch.]
 ```
 
 ---
 
 ## What good looks like
 
-- Failure modes are *specific to this plan*, not generic project risks copy-pasted from a template.
+- Failure modes refer to this plan and its evidence.
 - Mitigations are *actionable*, not reassurances.
-- The verdict is *direct* — it doesn't hedge by listing everything as "worth considering".
-- If the plan is mostly fine, say so. A premortem that finds catastrophe in everything is as useless as one that finds nothing.
+- The verdict states the main risk directly.
+- If the plan is mostly sound, say so. Do not invent a severe failure.
 
 ## What to avoid
 
 - Generic risk lists ("team alignment", "scope creep", "technical debt") without grounding them in *this specific plan*.
-- Polite softening. The value of a premortem is honest adversarial thinking — if something is a bad idea, say so.
-- Exhaustive lists. Five sharp failure modes are more useful than fifteen shallow ones.
+- Softening a serious finding. State when an idea has a serious flaw.
+- Exhaustive lists. Give a few specific failure modes.

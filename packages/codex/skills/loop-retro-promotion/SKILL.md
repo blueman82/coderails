@@ -166,4 +166,7 @@ marker for a completed delivery.
 
 ## 5. Prohibitions
 
-This pipeline writes exactly one repo file. It never edits SKILL.md, hook scripts, gate logic, its own skill definition, external scheduler configuration, or the graduation predicate. It never relaxes, reorders, or skips a gate. It merges only via `$coderails-codex:merge`, never raw `gh pr merge`, so the package merge script's artifact checks remain in force.
+This pipeline writes exactly one repo file.
+It never edits SKILL.md, hook scripts, gate logic, its own skill definition, external scheduler configuration, or the graduation predicate.
+It never relaxes, reorders, or skips a gate.
+It merges only via `$coderails-codex:merge`, never raw `gh pr merge`, so the package merge script's artifact checks remain in force.

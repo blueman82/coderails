@@ -6,17 +6,24 @@ type: project
 
 # Stop-hook human escalation
 
-> Supersession note (2026-09-21): This is a historical Stop-hook repair handoff. Current root Stop gates are hooks/scripts/loop_state_guard.py and loop_stall_guard.py; Codex uses packages/codex/hooks/scripts/graph_completion_guard.py. The shell paths and proposed shared names below are not current entrypoints. Preserve the distinct provider-native response contracts.
+> Supersession note (2026-09-21): This is a historical Stop-hook repair handoff.
+> Current root Stop gates are `hooks/scripts/loop_state_guard.py` and
+> `hooks/scripts/loop_stall_guard.py`. Codex uses
+> `packages/codex/hooks/scripts/graph_completion_guard.py`. The shell paths
+> and proposed shared names below are not current entry points. Keep each
+> provider's native response contract.
 
 ## Goal
 
-Fix the rough edge shared by the Claude and Codex plugins: an incomplete agentic-loop graph must result in one clear, human-readable escalation, not repeated raw Stop-hook prompts.
+When an agentic-loop graph is incomplete, raise one clear human escalation.
+This goal applies to both Claude and Codex Stop hooks. Avoid repeated raw
+Stop-hook prompts.
 
 ## Decisions
 
 - Preserve fail-closed graph completion. Do not silently mark a graph complete or discard a hard stop.
 - Keep Claude and Codex implementations independent, but give them the same human-facing behaviour.
-- An escalation must say what is missing, why work cannot continue, and the exact next action the human can approve or decline.
+- An escalation must state what is missing. It must explain why work cannot continue. It must name the next action the human can approve or decline.
 - Deduplicate by session and graph revision. A later graph-state change may produce one new escalation; unchanged state must not repeat.
 
 ## Constraints
@@ -46,7 +53,7 @@ Fix the rough edge shared by the Claude and Codex plugins: an incomplete agentic
 ## Next steps
 
 1. Read both providers' Stop-hook and loop-skill paths side by side; trace every incomplete/no-ready/hard-stop branch.
-2. Write a small shared behaviour specification and frozen tests for: one prompt per unchanged session+revision, clear approval wording, recovery after a changed revision, and no prompt flood.
+2. Write a small shared behaviour specification and frozen tests. Cover one prompt per unchanged session and revision. Cover clear approval wording, recovery after a revision change, and no prompt flood.
 3. Implement provider-native deduplication and a structured escalation payload in both plugins.
 4. Update both agentic-loop skills to require the assistant to present the approval once and then wait, rather than treating injected hook text as user work.
 5. Run both providers' hook tests plus a controlled transcript-level regression test proving one escalation only.

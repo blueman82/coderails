@@ -4,7 +4,11 @@
 
 ## Problem and decision
 
-The Claude graph contract is defined by `skills/agentic-loop/loop-state.md` and `skills/agentic-loop/execution-graph.md`, while the Codex contract is implemented in `packages/codex/skills/agentic-loop/scripts/graph.py`. (verified) Their current state shapes differ, including the active-wave identifier. (verified)
+`skills/agentic-loop/loop-state.md` and
+`skills/agentic-loop/execution-graph.md` define the Claude graph contract.
+`packages/codex/skills/agentic-loop/scripts/graph.py` implements the Codex
+contract. (verified) Their state shapes differed, including the active-wave
+identifier. (verified)
 
 **Decision.** New graph state is interpreted and mutated by one canonical Python graph-semantic core. Claude and Codex call it through thin provider-local adapters. The core owns only graph validation, readiness, wave transitions, joins, retry transitions, and graph-completion eligibility. (verified)
 
@@ -124,7 +128,19 @@ The nine-token accepted state/result vocabulary is exactly: `pending`, `ready`, 
 
 `failed` is accepted only as a `record_wave` result for retryable work, never as a persisted canonical node status in newly-created v3 state. In the same atomic transition, the core increments `retry.attempts` and maps the node to `pending`; if the increment exhausts `retry.max`, it maps the node to `hard-stop`. Validation rejects a persisted `failed` status in newly-created v3 state. (verified) A `stale` `record_wave` result is accepted only with a `stale_check` object whose `checked` is boolean `true` and whose `method` and `result` are nonblank strings recording the check that made it stale. The core persists `stale`, clears the active wave, and makes completion ineligible; stale work cannot automatically retry, release a dependency, or complete. (inferred)
 
-`respawn_stale(node_id, reason)` is the only permitted recovery of a persisted `stale` node. Its preconditions are: the stable node is `stale`; it retains a valid `stale_check`; `active_wave` is `null`; and `reason` is nonblank. The core increments `respawn.generation`, records `respawn.intent` with that generation and reason, preserves the stale audit evidence/history, sets the same stable node to `pending`, and does not increment `retry.attempts`. It creates no node, changes no edge or join, and does not dispatch. At the later `begin_wave`, the adapter must allocate a fresh provider-native worker identity for the recorded respawn generation and validate it before it sends normalized evidence to `record_wave`; worker and evidence references are neither required nor recorded before dispatch. (inferred)
+`respawn_stale(node_id, reason)` is the only recovery for a persisted `stale`
+node. It requires a stable `stale` node with a valid `stale_check`. It also
+requires `active_wave: null` and a nonblank `reason`.
+
+The core increments `respawn.generation`. It records `respawn.intent` with
+that generation and reason. It keeps the stale audit history and sets the
+same node to `pending`. It does not increment `retry.attempts`, add a node,
+change an edge or join, or dispatch a worker.
+
+At a later `begin_wave`, the adapter gives that respawn generation a fresh
+provider-native worker identity. It validates the identity before sending
+normalized evidence to `record_wave`. Worker and evidence references do not
+exist before dispatch. (inferred)
 
 `hard_stop(node_id, reason)` is a core-owned operation for a replacement that cannot be prepared or validated. It requires an existing node, a nonblank reason, and a node that is not `done` or `skipped`; it persists `hard-stop` with the reason and leaves topology unchanged. If the node is in an active wave, the core removes only that unstarted node from the wave and retains the remaining active nodes; if none remain, it clears `active_wave`. This is the explicit exception to normal complete-wave recording for a worker that could not be prepared or validated before dispatch. No provider adapter may mutate canonical graph fields directly. (inferred)
 
@@ -150,7 +166,25 @@ The core exposes a minimal semantic API: `validate`, `ready`, `begin_wave`, `rec
 
 `begin_wave` selects all currently ready independent non-join nodes in stable node-ID order, marks them `running`, and records one `active_wave`. (inferred) `record_wave` accepts only the matching `wave_id` and exactly the active node set; a rejected record leaves state unchanged. (verified) `can_complete` accepts the canonical graph only and returns either `eligible` or ordered blocking reasons; it ignores `work_units`. (inferred)
 
-`work_units` is optional and independent of `graph.nodes`. Schema-v3 requires the same strict object contract for both providers: `{ "<unit-id>": { "status": "pending" | "in-progress" | "blocked" | "done" | "dropped", "dropped_reason"?: "..." } }`. An absent, `null`, or empty object passes the optional predicate. A nonempty value must be an object keyed by unit ID with object entries; every entry must be `done`, or `dropped` with a nonblank `dropped_reason`, for final `work_units` eligibility. Any array, malformed object or entry, unknown status, or unreasoned `dropped` blocks final completion. Codex adopts this v3 contract and the Claude adapter/hook carries it for v3; Claude's historical v1/v2 array tolerance is irrelevant because aligned runtime rejects those schemas. Final completion requires both graph eligibility and this independent provider predicate, followed by the provider-native evidence, evaluation, proof, and retrospective gates; adapters must not map or reconcile `work_units` to graph nodes. (inferred)
+`work_units` is optional and independent of `graph.nodes`. Schema 3 uses the
+same object contract in both providers:
+
+```text
+{ "<unit-id>": { "status": "pending" | "in-progress" | "blocked" | "done" | "dropped", "dropped_reason"?: "..." } }
+```
+
+The field can be absent, `null`, or an empty object. A nonempty value must
+be an object keyed by unit ID, with an object for each unit. For final
+eligibility, every unit must be `done` or `dropped` with a nonblank
+`dropped_reason`. An array, malformed entry, unknown status, or unexplained
+`dropped` result blocks completion.
+
+Codex and the Claude adapter/hook use this schema-3 rule. The older Claude
+schema-1/2 array tolerance does not apply because the aligned runtime
+rejects those schemas. Final completion requires graph eligibility and the
+separate work-unit predicate. It then requires provider-native evidence,
+evals, proofs, and a retrospective. Adapters must not map or reconcile
+`work_units` to graph nodes. (inferred)
 
 ## Component boundaries and ownership
 
