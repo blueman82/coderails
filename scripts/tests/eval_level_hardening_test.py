@@ -137,7 +137,7 @@ class MergeFreezeAndFactsTests(RepoCase):
                 mock.patch.object(git, "gate_eval_summary_for_pr", return_value=summary),
             ):
                 codes = [v["code"] for v in publication_gate.eval_level_check("7", head, "", "")]
-                self.assertEqual(codes, [] if units == 1 else ["level_below_derived"])
+                self.assertEqual(codes, [] if units == 1 else ["level_below_derived", "eval_facts_level_mismatch"])
 
 
 class OffSwitchTests(RepoCase):
@@ -148,9 +148,9 @@ class OffSwitchTests(RepoCase):
         head = self.commit("install.py")
         summary, _ = self.posted(0, "")
         for values, expected in (
-            ({}, ["level_below_derived"]),
-            ({"eval_level": "enforce"}, ["level_below_derived"]),
-            ({"eval_level": "bogus"}, ["level_below_derived"]),
+            ({}, ["level_below_derived", "eval_facts_level_mismatch"]),
+            ({"eval_level": "enforce"}, ["level_below_derived", "eval_facts_level_mismatch"]),
+            ({"eval_level": "bogus"}, ["level_below_derived", "eval_facts_level_mismatch"]),
             ({"eval_level": "off"}, []),
         ):
             with (
