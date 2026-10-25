@@ -60,7 +60,11 @@ Partial, extra, malformed, wrong-wave, stale, failed, duplicate, foreign-session
 Before each `graph.py record-decision` call, read the current `loop_id` and `revision` from `progress.json`.
 Pass them as `--loop-id` and `--revision`. The CLI refuses a stale caller.
 
-**What consumes the thread limit.** Every spawned agent thread, including completed and idle ones, counts until it is retired. Before a scout spawn, retire completed threads with the provider's close tool where one exists (Codex: `close_agent`); otherwise nothing frees the slot, so record the limit in the refusal and halt rather than assume a thread was freed.
+**What consumes the thread limit.** A spawned agent thread can keep a slot after its turn completes. The current
+Codex collaboration surface has no `close_agent` tool. `interrupt_agent` stops a running turn but does not retire
+the thread. Before a scout spawn, check the available collaboration tools and live agent status. Use a close tool
+only if this session actually exposes one. If no slot is available, report the refusal and halt. Do not claim that
+a completed or interrupted turn freed a slot.
 
 After independently verifying a deliverable and recording its wave, decide its registered work unit through `python3 "$SKILL_DIR/scripts/graph.py" record-unit "$STATE" --session "$SESSION" --unit "<id>" --status done --evidence "<observed check>"`. If the authorized deliverable is withdrawn, use `--status dropped --reason "<reason>"`. The command requires a pending unit and no active wave and records the decision atomically. The graph revision remains unchanged so stored wave evidence stays valid. A completed graph node never changes a work unit by itself. Grade final evals against the current graph revision.
 

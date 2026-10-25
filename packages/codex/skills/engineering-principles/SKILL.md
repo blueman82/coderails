@@ -1,6 +1,6 @@
 ---
 name: engineering-principles
-description: Enforce engineering principles (YAGNI, KISS, DRY, Fail Fast, SSOT, Law of Demeter) and language-specific coding standards (Python/Go/TypeScript/Bash) on code being written or modified. Uses Serena LSP for call site analysis and reference counting. Use PROACTIVELY when writing, modifying, or reviewing code. Triggers on code changes, "enforce standards", "check principles", "apply standards", "code quality", or explicit /engineering-principles command.
+description: Check engineering principles (YAGNI, KISS, DRY, Fail Fast, SSOT, Law of Demeter) and language-specific coding standards (Python/Go/TypeScript/Bash). Use Serena for call-site analysis only when this session provides it. Use when writing, modifying, or reviewing code.
 allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 ---
 
@@ -8,7 +8,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 
 **Version:** 4.0.0
 **Purpose:** Proactively enforce engineering principles and language-specific idioms.
-Uses LSP (Serena) for structural verification and reference counting. **Dispatches to language-specific skills for idiom enforcement.**
+Use structural tools when this session provides them. **Dispatch to language-specific skills for idiom enforcement.**
 
 ## When to Activate
 
@@ -39,7 +39,7 @@ Uses LSP (Serena) for structural verification and reference counting. **Dispatch
 
 ## Phase 1: MCP Environment Setup
 
-Before analysis, activate Serena for the current project.
+Check whether this session provides Serena before analysis. If it does, activate the current project. Otherwise, use the static checks in this skill. Do not run the example below when its named tool is absent.
 
 ```javascript
 // Execute via mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
@@ -92,7 +92,7 @@ async function checkYAGNI(symbolName) {
 }
 ```
 
-**YAGNI rule:** If `referenceCount === 0` and symbol is not exported/public, flag for deletion.
+**YAGNI rule:** If a private symbol has no found references, inspect dynamic calls and external uses before flagging it for deletion.
 
 ### 2.3 Symbol Depth Analysis (Law of Demeter)
 

@@ -18,7 +18,7 @@ description: Go-specific coding standards and idioms. Invoked by engineering-pri
 
 ### Error Handling
 - **Errors are values** — Handle them or return them, never ignore with `_ =`
-- **Wrap errors with context** — Use `fmt.Errorf("context: %w", err)` for stack traces
+- **Wrap errors with context** — Use `fmt.Errorf("context: %w", err)` to add context and preserve the wrapped error for `errors.Is` or `errors.As`.
 - **Early returns** — Check errors immediately, return early
 
 ### Testing
@@ -83,8 +83,8 @@ languages. Apply the Go idioms below to reduce repetition and improve clarity.
 | Manual goroutine + WaitGroup | `errgroup.Group` (handles errors + waiting) |
 | Manual channel collect | `errgroup` or pipeline pattern |
 | Unbounded goroutine spawn | Worker pool with semaphore channel |
-| Manual mutex map | `sync.Map` (for append-heavy, read-many patterns) |
-| Select without `default` or timeout | Add `context.Context` deadline or `default` |
+| Manual mutex map | Consider `sync.Map` for mostly stable keys with many readers, or disjoint key writes; check the access pattern first |
+| Select that must stop but has no cancellation path | Add a `context.Context` cancellation case or deadline |
 | Channel for single value | Direct return or callback |
 
 ### Stdlib Shortcuts

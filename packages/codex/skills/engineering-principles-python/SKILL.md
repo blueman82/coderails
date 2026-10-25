@@ -236,7 +236,7 @@ When inserting untrusted text (AI output, user input, external API responses) in
 | **Slack mrkdwn** | `<!channel>`, `<!here>`, `<!everyone>`, `<@U...>` | `re.sub(r'<[!@][^>]+>', '', text)` |
 | **HTML** | `<script>`, `onclick=`, entity injection | `html.escape(text)` |
 | **SQL** | `'; DROP TABLE`, `OR 1=1` | Parameterized queries only, never f-strings |
-| **Shell** | `$(cmd)`, `` `cmd` ``, `; rm -rf` | `shlex.quote(text)` |
+| **Shell** | `$(cmd)`, `` `cmd` ``, `; rm -rf` | Pass an argument list with `shell=False`. Use `shlex.quote(text)` only when a shell command string is required. |
 | **JSON in templates** | Unescaped quotes, newlines | `json.dumps(text)` |
 
 **Rule:** Any text from AI models, user input, or external APIs MUST be treated as untrusted. Sanitize at the point of insertion, not at the point of collection.

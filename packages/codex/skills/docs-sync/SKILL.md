@@ -19,7 +19,7 @@ This skill is package-local and needs no external or user-specific skill path.
 ## 1. Audit
 
 Invoke `$coderails-codex:sync-docs` and run its audit phases: discover
-project structure, traditional audit, generate a drift report) to detect
+project structure, traditional audit, and generate a drift report to detect
 drift between this repo's documentation and its actual code.
 
 **Scope of docs this routine may fix: git-tracked `.md` files only** —
@@ -107,7 +107,7 @@ fixing.
    - any `skills/**/SKILL.md` — including this skill's own file, and
      every other skill in the plugin
    - `AGENTS.md`
-   - `AGENTS.md`
+   - `CLAUDE.md`
    - `docs/routines.md`
    - anything under `.codex/`
    - `examples/dashboard-config.json` (already excluded by the
@@ -137,7 +137,9 @@ fixing.
    head against this run's scope and manifest. For a production surface, run
    `deploy-safety-reviewer` via `python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role deploy-safety-reviewer --prompt-file <file> --cwd <exact-head-worktree>`
    per [guarded role sessions](../using-coderails/references/guarded-role-sessions.md).
-   Wait for both results and close the spawned agent.
+   Wait for both results. Close the spawned agent only if the current
+   collaboration tools provide a close operation. An ended turn can still
+   occupy a thread slot.
 7. Invoke `$coderails-codex:post-review <PR#>`.
 8. Invoke `$coderails-codex:post-evals <PR#>`.
 9. Invoke `$coderails-codex:merge`. Once the merge succeeds, append a terminal
