@@ -7,7 +7,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -16,114 +15,24 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
-import graph_dispatch
 from graph_artifacts import validate_completion_evidence, validate_evals
 from graph_identity import GraphError
 
+from packages.tests.codex_completion_fixture import IDENTITY, CompletionFixture, assemble_test_retro
+from packages.tests.codex_completion_head_case import assert_changed_head, assert_empty_proof_disposition
 from packages.tests.codex_fixture import (
-    append,
     complete,
     frozen_evals,
     read_json,
-    spawn,
-    state,
-    transcripts,
     verify_completion,
     write_json,
 )
 from scripts.lib import proof_results as pr
+from scripts.lib import retro, retro_check, teardown_steps
 
-IDENTITY = {"session_id": "parent", "loop_id": "loop"}
 
-
-class CompletionTests(unittest.TestCase):
+class CompletionTests(CompletionFixture):
     """Only current native evidence and successful observed proofs permit completion."""
-
-    def setUp(self) -> None:
-        """Create a completed worker with independent proof and eval artifacts."""
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.directory = Path(temporary.name)
-        previous = Path.cwd()
-        subprocess.run(["git", "init", "-q", str(self.directory)], check=True)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(self.directory),
-                "-c",
-                "user.name=Fixture",
-                "-c",
-                "user.email=fixture@example.test",
-                "commit",
-                "-q",
-                "--allow-empty",
-                "-m",
-                "fixture",
-            ],
-            check=True,
-        )
-        config = self.directory / ".coderails/workflow.config.yaml"
-        config.parent.mkdir()
-        config.write_text("memory:\n  backend: off\n")
-        os.chdir(self.directory)
-        self.addCleanup(os.chdir, previous)
-        self.addCleanup(patch.stopall)
-        patch("pathlib.Path.home", return_value=self.directory).start()
-        self.path = self.directory / "loops/project/parent/progress.json"
-        self.path.parent.mkdir(parents=True)
-        write_json(self.path, state())
-        self.evals = self.path.with_name("evals.json")
-        write_json(self.evals, frozen_evals())
-        parent = transcripts(self.directory)
-        graph_dispatch.begin_wave(self.path)
-        self.child = spawn(parent, read_json(self.path))
-        graph_dispatch.record_wave(
-            self.path,
-            json.dumps({"wave_id": "wave-2", "results": {"U3[1]": {"outcome": "done", "evidence": "checked"}}}),
-        )
-        suite: dict[str, Any] = frozen_evals() | {
-            "verification_level": 0,
-            "revision": 3,
-            "evals": [],
-            "amendments": [],
-            "result": "VERIFICATION_LEVEL0",
-            "grading": {
-                "by": "post_evals.py grade-loop",
-                "checksum": hashlib.sha256(b"[]\nVERIFICATION_LEVEL0").hexdigest(),
-                "amendments_at_grade": 0,
-            },
-        }
-        write_json(self.evals, suite)
-        self.proof, self.retro = self.path.with_name("proof.json"), self.path.with_name("retro.json")
-        self.document: dict[str, Any] = {
-            "schema_version": 2,
-            "session_id": "parent",
-            "loop_id": "loop",
-            "proofs": [{"id": "P1", "cmd": "true", "expect": {"exit_code": 0}}],
-        }
-        write_json(self.proof, self.document)
-        self.results = self.path.with_name(pr.RESULTS_NAME)
-        pr.append(self.results, kind="freeze", proof_json_sha256=pr.doc_sha(self.document), **IDENTITY)
-        self.proof_result("satisfied")
-        write_json(self.retro, {"schema_version": 2, "session_id": "parent", "loop_id": "loop", "status": "complete"})
-        self.transcript = self.path.with_name("proof.jsonl")
-        append(self.transcript, {"type": "turn_context", "payload": {"loop_id": "loop"}})
-        self.arguments = (self.path, "parent", self.evals, self.proof, self.retro, self.transcript)
-
-    def proof_result(self, verdict: str, cmd: str = "true", **identity: str) -> None:
-        """Append one controller run row for proof P1."""
-        pr.append(
-            self.results,
-            kind="run",
-            proof_id="P1",
-            cmd_sha256=pr.sha(cmd),
-            proof_json_sha256=pr.doc_sha(self.document),
-            verdict=verdict,
-            cwd=str(Path.cwd()),
-            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-            **(IDENTITY | identity),
-        )
 
     def test_success_and_revalidation(self) -> None:
         """A completed graph is revalidated against the latest run row."""
@@ -133,39 +42,47 @@ class CompletionTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             verify_completion(*self.arguments)
 
+    def test_preparation_binding_is_source_checked(self) -> None:
+        """Each D4 binding field must match the owned state and producer source."""
+        complete(*self.arguments)
+        rows = teardown_steps.read_rows(self.path.parent)
+        row = next(item for item in rows if item["step"] == "orders_prepared")
+        artifact = self.path.parent / f"orders-prepared-{hashlib.sha256(b'loop').hexdigest()}.json"
+        saved = artifact.read_bytes()
+        for key, value in {
+            "repo_dir": "/foreign/repo",
+            "state_dir": "/foreign/state",
+            "session_id": "foreign",
+            "loop_id": "foreign",
+            "revision": row["revision"] + 1,
+            "progress_sha256": "0" * 64,
+        }.items():
+            with self.subTest(binding=key):
+                changed = dict(row, binding=row["binding"] | {key: value})
+                if key == "revision":
+                    changed["revision"] = value
+                (self.path.parent / teardown_steps.NAME).write_text(
+                    "\n".join(json.dumps(item) for item in [*rows, changed]) + "\n"
+                )
+                with self.assertRaises(GraphError):
+                    verify_completion(*self.arguments)
+                (self.path.parent / teardown_steps.NAME).write_text("\n".join(json.dumps(item) for item in rows) + "\n")
+                artifact.write_bytes(saved)
+                verify_completion(*self.arguments)
+
+    def test_prepared_artifact_digest_is_source_checked(self) -> None:
+        """Editing prepared records invalidates the completion evidence digest."""
+        complete(*self.arguments)
+        artifact = self.path.parent / f"orders-prepared-{hashlib.sha256(b'loop').hexdigest()}.json"
+        prepared = json.loads(artifact.read_text())
+        prepared["records"].append({"id": "tampered"})
+        artifact.write_text(json.dumps(prepared))
+        with self.assertRaises(GraphError):
+            verify_completion(*self.arguments)
+
     def test_changed_head_invalidates_codex_completion(self) -> None:
         """Revalidation refuses a proof that passed before this worktree advanced."""
-        subprocess.run(["git", "-C", str(self.directory), "init", "-q"], check=True)
-
-        def commit(message: str) -> None:
-            subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(self.directory),
-                    "-c",
-                    "user.name=Test",
-                    "-c",
-                    "user.email=test@example.com",
-                    "commit",
-                    "--allow-empty",
-                    "-qm",
-                    message,
-                ],
-                check=True,
-            )
-
-        commit("first")
-        before = Path.cwd()
-        try:
-            os.chdir(self.directory)
-            self.proof_result("satisfied")
-            complete(*self.arguments)
-            commit("second")
-            with self.assertRaisesRegex(GraphError, r"P1\(proof_stale_head\)"):
-                verify_completion(*self.arguments)
-        finally:
-            os.chdir(before)
+        assert_changed_head(self, assemble_test_retro)
 
     def test_unsatisfied_foreign_or_stale_rows_cannot_pass(self) -> None:
         """Failed, mismatched, foreign-loop, wrong-cmd and status-only proofs never complete the graph."""
@@ -191,32 +108,93 @@ class CompletionTests(unittest.TestCase):
     def test_no_proof_needs_a_typed_disposition(self) -> None:
         """With no proof.json a bare none is rejected and none-with-reason or the typed form completes."""
         self.proof.unlink()
+        assemble_test_retro(self.path.parent, "parent")
         current = read_json(self.path)
         rejected: tuple[object, ...] = (None, "none", "none: ")
         for disposition in rejected:
             write_json(self.path, current | {"proof_disposition": disposition})
+            assemble_test_retro(self.path.parent, "parent")
             with self.assertRaisesRegex(GraphError, "proof_disposition_no_reason"):
                 complete(*self.arguments)
         typed = {"kind": "none", "reason_code": "docs_only", "reason": "documentation only"}
         accepted: tuple[object, ...] = ("none: no executable surface", typed)
         for disposition in accepted:
             write_json(self.path, current | {"proof_disposition": disposition})
+            assemble_test_retro(self.path.parent, "parent")
             validate_completion_evidence(
                 read_json(self.path), current["revision"], self.evals, self.proof, self.retro, self.transcript
             )
         complete(*self.arguments)
 
+    def test_retro_gate_recomputes_hashes_on_the_codex_gate(self) -> None:
+        """(a)(b)(c)(d)(e) The Codex gate refuses a hand-written, edited, step-less or chain-broken retro."""
+        self.decide()
+        complete(*self.arguments)
+        verify_completion(*self.arguments)
+        original = read_json(self.path)
+        edited = [dict(original["decisions_absorbed"][0], decision="Adopt shape A")]
+        write_json(self.path, original | {"decisions_absorbed": edited})
+        with self.assertRaisesRegex(GraphError, r"retro_source_mismatch: .*progress\.decisions_absorbed"):
+            verify_completion(*self.arguments)
+        write_json(self.path, original)
+        write_json(self.retro, read_json(self.retro) | {"schema_version": 2})
+        with self.assertRaisesRegex(GraphError, "retro_not_assembled"):
+            verify_completion(*self.arguments)
+        assemble_test_retro(self.path.parent, "parent")
+        pr.append(self.results, kind="disposition", verdict="other", excerpt="later", **IDENTITY)
+        with self.assertRaisesRegex(GraphError, r"retro_source_mismatch: proof_results\.jsonl"):
+            verify_completion(*self.arguments)
+        assemble_test_retro(self.path.parent, "parent")
+        verify_completion(*self.arguments)
+        teardown = self.path.with_name("teardown.jsonl")
+        kept = [x for x in teardown.read_text().splitlines() if '"step": "orders_prepared"' not in x]
+        teardown.write_text("\n".join(kept) + "\n")
+        retro.assemble(self.path.parent, "parent")
+        with self.assertRaisesRegex(GraphError, "retro_steps_missing"):
+            verify_completion(*self.arguments)
+
+    def test_retro_in_a_scratch_directory_is_refused_and_control(self) -> None:
+        """A retro from another directory (decoy sources) is refused; the same retro beside the real files passes."""
+        self.decide()
+        scratch = self.directory / "scratch"
+        scratch.mkdir()
+        real = self.arguments
+        decoy = scratch / "retro.json"
+        decoy.write_text(self.retro.read_text())
+        with self.assertRaisesRegex(GraphError, "one state directory"):
+            complete(real[0], real[1], real[2], real[3], decoy, real[5])
+        complete(*real)  # control: the genuine layout is accepted
+        verify_completion(*real)
+
+    def test_broken_decision_chain_is_refused_on_the_codex_gate(self) -> None:
+        """(e) A decision edited before re-assembly still fails verify_chain."""
+        self.decide()
+        self.decide("clean-break")
+        original = read_json(self.path)
+        rows = original["decisions_absorbed"]
+        write_json(self.path, original | {"decisions_absorbed": [rows[0], dict(rows[1], decision="edited")]})
+        assemble_test_retro(self.path.parent, "parent")
+        with self.assertRaisesRegex(GraphError, r"retro_decisions_chain_broken.*seq 2"):
+            complete(*self.arguments)
+
+    def test_muninn_degrade_is_disclosed_not_blocking_and_gate_wiring_is_enforcing(self) -> None:
+        """(f)(6) A degraded decision is disclosed in the result; with the gate unwired a tampered retro would pass."""
+        self.decide(muninn={"state": "degraded", "id": None, "reason_code": "muninn_absent"})
+        done = complete(*self.arguments)
+        self.assertEqual(len(done["disclosures"]), 1)
+        self.assertIn("Memory degraded: 1 decision(s) not in Muninn", done["disclosures"][0])
+        write_json(self.retro, read_json(self.retro) | {"schema_version": 2})
+        with self.assertRaisesRegex(GraphError, "retro_not_assembled"):
+            verify_completion(*self.arguments)
+        with patch.object(retro_check, "check", return_value=[]):
+            state = read_json(self.path)
+            validate_completion_evidence(
+                state, state["completion"]["revision"], self.evals, self.proof, self.retro, self.transcript
+            )  # removing this one gate would admit the hand-written retro
+
     def test_empty_proof_file_uses_a_valid_disposition(self) -> None:
         """An owned empty proof document follows the same disposition rule as Claude."""
-        self.document["proofs"] = []
-        write_json(self.proof, self.document)
-        current = read_json(self.path)
-        write_json(
-            self.path,
-            current
-            | {"proof_disposition": {"kind": "none", "reason_code": "docs_only", "reason": "no executable proof"}},
-        )
-        complete(*self.arguments)
+        assert_empty_proof_disposition(self, assemble_test_retro)
 
     def test_disposition_does_not_hide_unobserved_withdrawal(self) -> None:
         """Codex completion requires an observed failed run for a withdrawn proof."""
@@ -229,9 +207,11 @@ class CompletionTests(unittest.TestCase):
         pr.append(self.results, kind="freeze", proof_json_sha256=pr.doc_sha(self.document), **IDENTITY)
         current = read_json(self.path)
         write_json(self.path, current | {"proof_disposition": "none: no executable surface"})
+        assemble_test_retro(self.path.parent, "parent")
         with self.assertRaisesRegex(GraphError, r"P1\(proof_withdrawn_unobserved\)"):
             complete(*self.arguments)
         self.proof_result("failed")
+        assemble_test_retro(self.path.parent, "parent")
         complete(*self.arguments)
 
     def test_proof_array_shape_and_combined_cap(self) -> None:

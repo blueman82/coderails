@@ -253,6 +253,20 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
 | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
 | `lesson_not_current` | no unambiguous current cited claim exists; inspect conflicting current evidence, or explicitly re-record a retracted/expired lesson with a fresh quote. |
+| `retro_not_assembled` | For a new loop, assemble schema-3 retro.json with `retro.py assemble` after the final stop and orders preparation. Preserve the source artifacts. For an old completed loop, see the recovery rule below. |
+| `retro_source_mismatch` | A named source changed after assembly; finish that source and re-assemble. |
+| `retro_decisions_chain_broken` | Restore the damaged decision row; record decisions through the graph CLI. |
+| `retro_steps_missing` | Run the missing proof, decision flush or orders preparation step, then re-assemble. |
+| `decisions_not_flushed` | Flush decisions before the final stop and orders preparation. If an incomplete loop already has a stale preparation, use the supported `prepare --refresh-from-sha256` path after the final source update, then assemble the retro. |
+| `retro_state_error` | Restore the owned, readable progress.json before assembly. |
+| `retro_wrong_session` | Use the session that owns progress.json. |
+| `retro_free_invalid` | Supply one JSON object in the free-file. |
+| `handoff_state_unreadable` | Pass the readable, owned progress.json to handoff_derive. |
+| `graph_unavailable` | Run graph.py summarize and inspect to diagnose the unavailable graph. |
+
+Retained schema-1 and schema-2 retros are historical records. This version requires schema 3 when it checks completion. An old completed loop can lack the proof results and orders receipts that schema 3 binds. Do not rewrite its retro or claim that an install upgrades it. For a historical completion check or teardown retry, use the prior plugin version in an isolated checkout. Start a new session and loop for new work, and use the current teardown sequence.
+
+After this version writes a schema-3 retro, a code rollback to the preceding proof-only version cannot validate that retro. Its orders command can refuse graduation with `order_retro_validator_unavailable`. Keep a matching version with `retro_check.py` in an isolated checkout for a completion check or orders retry on that loop. Preserve its progress, proof, retro and orders receipts together; a code rollback does not convert them.
 
 - Limits: only the orchestrator session can write (subagent threads are not citable); cites must anchor in a user
   prompt; the hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Measurement note: compare

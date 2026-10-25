@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from hooks.scripts.test_output import file_lock
-from scripts.lib.orders_atomic import write_bytes
+from scripts.lib import orders_atomic, teardown_steps
 
 ROOT = Path(__file__).resolve().parents[2]
 CODEX = (ROOT / ".codex-plugin/plugin.json").is_file()
@@ -83,6 +83,7 @@ def source_state(state: dict[str, Any]) -> dict[str, Any]:
         source["revision"] = completion["revision"]
     elif "completion" in state:
         raise ValueError("order_source_invalid")
+    teardown_steps.normalize_consumed_complete_stop(source)
     for key in ("status", "completion", "completed_marker"):
         source.pop(key, None)
     if isinstance(counts := source.get("loop_stop_counts"), dict):
@@ -330,7 +331,7 @@ def observe(
             "evidence_sha256": digest,
             "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
-        write_bytes(path, prior + (json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
+        orders_atomic.write_bytes(path, prior + (json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
         return True
 
 

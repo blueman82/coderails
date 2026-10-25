@@ -160,7 +160,7 @@ def main() -> int:
                 consume_stop(data, seq)
                 return data
 
-            if not atomic_progress_update(state.path, increment):
+            if not atomic_progress_update(state.path, increment, preserve_updated_at=category == "complete"):
                 log(f"hook=loop_stall_guard session={session} counter_write=json_failed category={category}")
                 raise ValueError("Recorded stop could not be consumed; stopping remains blocked.")
             if messages:

@@ -1,8 +1,7 @@
 # Teardown write contract — `retro.json` and standing-orders
 
-Detail-carrier for Phase 13's teardown. The main skill keeps the imperative (run the five steps in
-order, before the `complete` declaration); this file is the field spec and the mechanics you
-consult **while writing the retro**.
+Detail-carrier for Phase 13's teardown. Prepare and assemble before the durable completion save;
+apply standing orders afterward. Use the source-writing commands below.
 
 `loop_stall_guard` blocks a `complete` declaration when `retro.json` is absent, malformed, or
 below `schema_version` 1 (the hook accepts `schema_version >= 1`, forward-compatible with the cost
@@ -72,41 +71,33 @@ means nothing to run: record `proof.py disposition <state-dir> --none --reason-c
 
 ## Step 2 — Assemble `retro.json`
 
-Written at `schema_version` 2, beside `progress.json`.
+After Step 3 preparation and final decision flush, run
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/retro.py" assemble <state-dir> --session <session_id>`.
+It writes schema 3 beside `progress.json`, derives the envelope, counters, decisions, evals, proof results,
+dispositions, cost and memory disclosure from their sources, and records `retro_assembled` in `teardown.jsonl`.
+`source_hashes` binds the precompletion sources and the required receipts: `proof_run`, `decisions_flushed`,
+`orders_prepared`, `retro_assembled`. A postcompletion `orders_ticked` observation does not change those hashes.
+Exit 3 means degraded memory sync is disclosed in the assembled retro; it does not waive graph or proof gates.
+Do not hand-write or edit the assembled fields. Optional prose belongs in a JSON object passed through `--free-file`.
 
-| Field | Notes |
-|---|---|
-| `session_id`, `created` | Identity and timestamp. |
-| `loop_id` | Copied **verbatim** from `progress.json`. |
-| `loop_ordinal` | = `completed_marker` after the native `mark-complete` helper stamps it (the live agentic-loop invocation count, not a running loop-number ordinal — see `loop-state.md`). |
-| `envelope` | Verbatim from `progress.json`'s `authorising_prompt_raw`. |
-| `loop_stop_counts` | Copied **verbatim** from `progress.json` — HOOK-OWNED, never recomputed. |
-| `decisions_absorbed` | Copied **verbatim** from `progress.json`'s array, not reconstructed from conversation memory. |
-| `disposition_record` | Distinguish "0 violations" from "no-record" (an audit failure, not a pass). |
-| `evals` | `result` / `amendments` / unresolved P1s. |
-| `artifacts` | PRs + the verifying check (Phase 12), not the agent's claim. |
-| `hook_blocks` | Via `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/discipline_common.py" "<session_id>"`. |
-| `review_themes`, `raw_notes` | Free-form. |
-| `models_used` | Top-level array of model ids observed this loop — lifted out of the cost-miner's output. |
-| `cost` | The dated per-model token/USD breakdown. |
+### Schema 3 field spec
 
-The schema has **no `verdict` field** — raw and unscored is structural, not an oversight: the
-retro records what happened, it does not grade it.
+The derived fields are `session_id`, `loop_id`, `created`, `status`, `envelope`, `loop_stop_counts`,
+`decisions_absorbed`, `disposition_record`, `evals`, `proof_results`, `hook_blocks`, `models_used`,
+`cost`, `teardown`, `memory`, `source_hashes`, and `free`. The schema has no `verdict` field.
 
 ## Cost-mining sub-step
 
-Same step 1, after assembling the fields above. Run `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_cost.py" <session_id>`. It enumerates this loop's transcripts (the orchestrator's own
+`retro.py assemble` invokes `loop_cost.py` while deriving the cost field. It enumerates this loop's transcripts (the orchestrator's own
 `~/.claude/projects/<slug>/<sid>.jsonl` plus every worker transcript under
 `<proj>/<sid>/subagents/`, recursively), dedupes by `message.id` so a transcript read twice isn't
 double-counted, sums per-model token usage, prices it from a dated price table, and returns a
 single object carrying `prices_as_of`, `per_model`, `total_tokens`, `total_usd_estimate`, and
 `models_used` all as siblings.
 
-**Fold-in is a split, not a copy.** Write the miner's returned object as `retro.cost` (its own
-nested `schema_version` 1, independent of the retro's), then lift its `models_used` array OUT to
-`retro.models_used` (top-level) — `models_used` lives at retro top-level only, never duplicated
-inside `cost`. This split is what bumps the retro's own `schema_version` to 2; the
-`cost`/`models_used` fields don't exist under `schema_version` 1.
+**Fold-in is a split, not a copy.** The assembler writes the miner's returned object as `retro.cost` (its own
+nested `schema_version` 1, independent of the retro's), then lifts its `models_used` array to
+`retro.models_used` (top-level). The retro itself is schema 3.
 
 **Fail-open.** The miner never blocks teardown — on any environmental error (missing/invalid
 price file) it returns `{}`, so both `retro.cost` and `retro.models_used` end up empty and a
@@ -140,7 +131,7 @@ Pass the separate logical `loop_id` copied from owned `progress.json`; it is not
 1. For each failure mode in this loop's retro, `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop <loop_id> --quote "<verbatim words of the owner's own prompt, 12-300 chars>"`. Add `--scope agnostic` for a lesson that applies
    to any repo. Before completion this stages the observation and any cited sync; it changes no lifecycle counters.
    An id must name the same failure mode and scope. A claim over 500 collapsed characters is refused, never truncated.
-2. After final progress updates, the native completion command runs `$O prepare --loop <loop_id>`. It validates the
+2. After final progress updates and decision flush, record one `graph.py stop --category complete` row. Then run `$O prepare --loop <loop_id>` before assembling the retro. It validates the
    owned eligible graph and work units, binds the source directory, session, logical loop, revision and progress hash,
    and records `orders_prepared`. This also runs when the retro has no failure mode. Prospective eligibility authorizes
    preparation only.
@@ -148,7 +139,7 @@ Pass the separate logical `loop_id` copied from owned `progress.json`; it is not
    `$O prepare --loop <loop_id> --refresh-from-sha256 <CURRENT evidence_sha256>` using the canonical hash returned by
    the current preparation. It preserves staged records, refuses rollback/foreign/already-applied sources, and has
    no lifecycle effect. A saved replacement whose receipt failed needs ordinary unchanged `prepare` to repair it.
-   Flush and reload pending source updates before final preparation. Never refresh after durable completion.
+   Flush and reload pending source updates before the final stop. Do not record another stop on retry. Never refresh after durable completion.
 3. After native completion is durably saved, that command runs `$O tick --loop <loop_id>` and `$O render --loop
    <loop_id>`. It applies staged recurrences and ages every unmatched active order once. A new completed session+loop
    recurrence resets the counter and revives a tombstone; replay does neither. At **K=5** an order becomes `decayed`,
@@ -183,16 +174,15 @@ ledger, then retire the hand-written source before generating `standing-orders.m
 ## Steps 4 and 5
 
 4. **Write feedback-type auto-memories** for lessons that generalise beyond this loop.
-5. **Only then** run `loop_state_common.py mark-complete <cwd> <session_id>` to validate native completion, prepare and
-   recheck orders, save progress, apply the tick and render, and stamp `completed_marker` — e.g.
+5. **Only then** run `loop_state_common.py mark-complete <cwd> <session_id>` to validate native completion, recheck the
+   prepared orders source, save progress, apply the tick and render, and stamp `completed_marker` — e.g.
    `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/loop_state_common.py" mark-complete "$PWD" "<session_id>"`.
    Never write `status: "complete"` via a bare atomic update — that leaves
    `completed_marker` unstamped at its prior value (permanently 0 for a loop's first completion),
    which false-positives `loop_state_guard`'s `stale_complete_rearmed` block on every later turn of
    the same session. If completion reports pending teardown, repeat `mark-complete` to resume it. Then run
-   `graph.py verify-completion <state> --session <session_id>` to check the graph and bound orders evidence. Then run
-   `graph.py stop <state> --session <session_id> --category complete --reason-code work_complete --reason "<reason>"`
-   and render `LOOP-STOP: complete` for the human. The hook reads the recorded row, not this text. First apply
+   `graph.py verify-completion <state> --session <session_id>` to check the graph and bound orders evidence. Render
+   `LOOP-STOP: complete` for the human. The hook reads the row recorded before preparation, not this text. First apply
    `superpowers:verification-before-completion` to the orchestrator's own completion claim
    (SKILL.md's Phase 13 links the `finishing-out.md` detail). The `loop_stall_guard` proof gate
    blocks the declaration itself if Step 1 was skipped or left a proof unexecuted/failed — it does

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,49 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from packages.tests.provider_fixture import Provider
+
+
+def artifacts_with_orders_prepared(provider: Provider) -> None:
+    """Run the prepare CLI, then bind its receipt into the final retro assembly."""
+    provider.artifacts()
+    state_dir = provider.path.parent
+    prepared = subprocess.run(
+        [
+            sys.executable,
+            str(provider.plugin / "scripts/lib/orders.py"),
+            "--dir",
+            str(state_dir.parent),
+            "--session",
+            provider.session,
+            "prepare",
+            "--loop",
+            provider.read()["loop_id"],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=provider.environment,
+        cwd=provider.home,
+    )
+    if prepared.returncode:
+        raise AssertionError(prepared.stderr)
+    assembled = subprocess.run(
+        [
+            sys.executable,
+            str(provider.plugin / "scripts/lib/retro.py"),
+            "assemble",
+            str(state_dir),
+            "--session",
+            provider.session,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**provider.environment, "PATH": "/nonexistent"},
+        cwd=provider.home,
+    )
+    if assembled.returncode not in (0, 3):
+        raise AssertionError(assembled.stderr)
 
 
 class ProviderLifecycleTests(unittest.TestCase):
@@ -39,7 +83,7 @@ class ProviderLifecycleTests(unittest.TestCase):
             provider.success("recover-wave", "--session", provider.session, "--lease-seconds", "600")
             first = "wave-2" if provider.name == "claude" else "loop_worker_"
             provider.finish_wave()
-            provider.artifacts()
+            artifacts_with_orders_prepared(provider)
             original = provider.parent.read_text()
             lines = original.splitlines(keepends=True)
             provider.parent.write_text("".join(line for line in lines if first not in line or "_a2" in line))

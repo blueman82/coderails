@@ -23,6 +23,12 @@ Generate two artefacts that allow a fresh Codex session to continue the current 
 
 If a native loop graph exists for this session, take `$STATE` (the `<session>/progress.json` path) and `$SESSION` from
 the SessionStart bootstrap text (it reports the active state path), then run
+`python3 "$SKILL_DIR/../../scripts/lib/handoff_derive.py" "$STATE" --session "$SESSION"`. It reads the recorded state
+read-only and prints a JSON skeleton `{goal, decisions[{id, cite, text}], done, recorded_proof_results, next_steps, open_questions, lessons,
+degraded[]}` (decisions carry their Muninn K-ids and cites; proof verdicts are recorded claims, not `done`). Use it for Goal, Decisions, Done
+and Next steps instead of reconstructing them from the conversation. **State `degraded[]` to the user in the handoff
+under a "Memory degraded" line**, reason code by reason code (exit 3 means it is non-empty); never skip it and never
+replace it with hand-written Markdown. The commands it wraps, for reference or when you need a field it does not print:
 `python3 "$SKILL_DIR/../agentic-loop/scripts/graph.py" summarize "$STATE"` (JSON: `phase`, `detail`, `done`, `active`,
 `ready`, `pending`), `... graph.py collection <state-root>` (JSON graph list with each node's stable ID, readable name and status), `... graph.py inspect "$STATE"` (JSON: `revision`, `active_wave`, `running`, `ready`, `hard_stop`),
 and `python3 "$SKILL_DIR/../../scripts/lib/memory_adapter.py" list --type decision --scope loop --loop "<loop id from inspect>" --session "$SESSION"`

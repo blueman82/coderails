@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
 """Exercise native Stop lifecycle counters and completion gates with explicit v3 fixtures."""
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -15,48 +15,45 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.loop_evals import EvalStatus, EvalVerdict
 from hooks.scripts.lib.loop_state_common import LoopState, count_invocations
 from hooks.scripts.loop_stall_guard import complete
-from hooks.scripts.tests.lib.hook_test_support import HookTestCase
+from hooks.scripts.tests.lib.loop_stall_fixture import StallGuardCase, assemble_test_retro
+from scripts.lib import orders_completion
 from scripts.lib import proof_results as pr
-from scripts.lib.eval_artifact import grading_checksum
 
 
-class StallGuardTests(HookTestCase):
+class StallGuardTests(StallGuardCase):
     """Keep declared-stop release distinct from audited, identity-bound completion."""
 
-    def setUp(self) -> None:
-        """Use a native Claude home for graph transcript ownership validation."""
-        super().setUp()
-        self.environment["HOME"] = str(self.directory)
-        self.environment["CLAUDE_PROJECTS_DIR"] = str(self.directory / ".claude/projects")
+    def test_completed_stop_keeps_prepared_source_bound(self) -> None:
+        """A real Claude Stop consumes the final row after durable completion."""
+        path = self.complete_fixture([self.stop(1, "awaiting-input"), self.stop(2, "complete")])
+        from hooks.scripts.lib import graph_dispatch
 
-    def transcript(self, text: str = "", invocations: int = 1) -> Path:
-        """Place fixture transcript under its actual native session filename."""
-        temporary = super().transcript(text, invocations)
-        path = self.directory / ".claude/projects/fixture" / f"{self.session}.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary.replace(path)
-        return path
-
-    def complete_fixture(self) -> Path:
-        """Create a zero-work current graph, explicit proof disposition, and graded artifacts."""
-        graph: dict[str, Any] = dict(nodes={}, edges=[], joins={}, active_wave=None, hard_stop=None, wave_history={})
-        path = self.progress(graph=graph, proof_disposition="none: no executable surface", work_units={})
-        identity = {"session_id": self.session, "loop_id": "loop-test"}
-        path.with_name("retro.json").write_text(json.dumps({"schema_version": 2, **identity}))
-        suite_path = path.with_name("evals.json")
-        suite: dict[str, Any] = {
-            "scope": "loop",
-            "result": "GO",
-            "verification_level": 0,
-            "verification_justification": "zero work fixture",
-            "revision": 1,
-            "evals": [],
-            **identity,
-        }
-        suite_path.write_text(json.dumps(suite))
-        suite["grading"] = {"by": "post_evals.py grade-loop", "checksum": grading_checksum(suite_path, "GO")}
-        suite_path.write_text(json.dumps(suite))
-        return path
+        payload = self.payload(self.stopped("LOOP-STOP: complete"))
+        repo_dir = path.parent.parent
+        subprocess.run(["git", "init", "-q", str(repo_dir)], check=True)
+        original_dir = Path.cwd()
+        try:
+            os.chdir(repo_dir)
+            with patch.dict(os.environ, self.environment):
+                completed = graph_dispatch.complete(path, self.session)
+            self.assertEqual(completed.get("pending_teardown"), False, completed)
+            self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
+            with patch.dict(os.environ, self.environment):
+                orders_completion.status(path, self.session)
+                graph_dispatch.complete(path, self.session)
+            saved = json.loads(path.read_text())
+            late = json.loads(path.read_text())
+            late["stops"].append(self.stop(3, "complete"))
+            path.write_text(json.dumps(late))
+            with self.assertRaisesRegex(ValueError, "order_source_mismatch"):
+                orders_completion.status(path, self.session)
+            changed_earlier = saved
+            changed_earlier["stops"][0]["consumed"] = True
+            path.write_text(json.dumps(changed_earlier))
+            with self.assertRaisesRegex(ValueError, "order_source_mismatch"):
+                orders_completion.status(path, self.session)
+        finally:
+            os.chdir(original_dir)
 
     def test_complete_matches_on_eval_verdict_status(self) -> None:
         """complete() branches on EvalVerdict.status and renders tamper_code as a field."""
@@ -113,12 +110,6 @@ class StallGuardTests(HookTestCase):
         self.assertEqual(after, before)
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)  # both rows consumed: no free pass
 
-    def trace_reasons(self) -> list[str]:
-        """Return the non-authoritative trace reason codes written for this session."""
-        path = self.directory / "state" / self.session / "trace.jsonl"
-        rows = path.read_text().splitlines() if path.is_file() else []
-        return [value["reason_code"] for row in rows if (value := json.loads(row)).get("command") == "loop_stall_guard"]
-
     def test_text_is_only_a_rendering_the_row_decides(self) -> None:
         """Matrix scenario: conflicting text releases as the row's category; the same text with no row blocks."""
         text = "LOOP-STOP: complete - x\nLOOP-STOP: hard-stop inline"
@@ -135,20 +126,6 @@ class StallGuardTests(HookTestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(path.read_text(), before)
         self.assertEqual(self.trace_reasons(), ["stop_row_missing"])
-
-    def arm(self, path: Path, *rows: dict[str, Any]) -> None:
-        """Replace the stops array (counters stay), as a fresh `graph.py stop` would."""
-        data = json.loads(path.read_text())
-        data["stops"] = list(rows)
-        path.write_text(json.dumps(data))
-
-    def stopped(self, text: str) -> Path:
-        """Transcript whose current turn ran graph.py stop, as a real recorded stop would."""
-        path = self.transcript(text)
-        call = {"type": "tool_use", "name": "Bash", "input": {"command": "python3 graph.py stop --category x"}}
-        row = {"type": "assistant", "message": {"content": [call]}}
-        path.write_text(path.read_text() + json.dumps(row) + "\n")
-        return path
 
     def test_stale_row_from_an_earlier_turn_never_releases(self) -> None:
         """A row recorded before the last user prompt is stale: chatting afterwards stays blocked (finding 1)."""
@@ -192,19 +169,6 @@ class StallGuardTests(HookTestCase):
         result = self.run_hook("loop_stall_guard", self.payload(trace))
         self.assertEqual(result.returncode, 2)
         self.assertFalse(json.loads(path.read_text())["stops"][0]["consumed"])
-
-    @staticmethod
-    def stop(seq: int, category: str, revision: int = 1, consumed: bool = False, at: float = 1.0e9) -> dict[str, Any]:
-        """Build one recorded stop row exactly as graph.py stop writes it."""
-        return {
-            "seq": seq,
-            "category": category,
-            "reason_code": "other",
-            "reason": "r",
-            "revision": revision,
-            "consumed": consumed,
-            "at": at,
-        }
 
     def test_recorded_stop_decides_the_category_and_is_consumed_once(self) -> None:
         """A recorded stop decides the category, is consumed with the count, and never double-counts."""
@@ -314,11 +278,18 @@ class StallGuardTests(HookTestCase):
             self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)
             self.assertNotIn("loop_stop_counts", json.loads(path.read_text()))
             self.assertFalse(json.loads(path.read_text())["stops"][0]["consumed"])
-        for version in (1, 2, 99):
+        for version in (1, 2):  # below 3 is a hand-written retro: retro_not_assembled
             self.arm(path, self.stop(1, "complete"))
             retro.write_text(json.dumps({**original, "schema_version": version}))
-            self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
-        self.assertEqual(json.loads(path.read_text())["loop_stop_counts"], {"complete": 3})
+            result = self.run_hook("loop_stall_guard", payload)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("retro_not_assembled", result.stderr)
+        for version in (3, 99):
+            self.arm(path, self.stop(1, "complete"))
+            retro.write_text(json.dumps({**original, "schema_version": version}))
+            result = self.run_hook("loop_stall_guard", payload)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(path.read_text())["loop_stop_counts"], {"complete": 2})
 
     def test_completion_identity_proof_eval_and_legacy_refusals(self) -> None:
         """Exact identity and frozen grade remain mandatory even with no unfinished graph nodes."""
@@ -369,16 +340,34 @@ class StallGuardTests(HookTestCase):
         identity = {"session_id": self.session, "loop_id": "loop-test"}
         digest = pr.doc_sha(document)
         pr.append(results, kind="freeze", proof_json_sha256=digest, **identity)
-        run = {
-            "proof_id": "P1",
-            "cmd_sha256": pr.sha(cmd),
-            "proof_json_sha256": digest,
-            "verdict": "satisfied",
-            "cwd": str(Path.cwd()),
-            "head_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-        }
-        pr.append(results, kind="run", **run, **identity)
-        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
+        pr.append(
+            results,
+            kind="run",
+            proof_id="P1",
+            cmd_sha256=pr.sha(cmd),
+            proof_json_sha256=digest,
+            verdict="satisfied",
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            **identity,
+        )
+        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)  # old retro binds old proof files
+        assemble_test_retro(path.parent, self.session)
+        result = self.run_hook("loop_stall_guard", payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_muninn_degrade_is_printed_and_never_blocks(self) -> None:
+        """Degraded memory disclosure does not block completion."""
+        path = self.complete_fixture()
+        state = json.loads(path.read_text())
+        state["decisions_absorbed"] = [
+            {"seq": 1, "phase": "2.5", "decision": "x", "muninn": {"state": "degraded", "reason_code": "muninn_absent"}}
+        ]
+        path.write_text(json.dumps(state))
+        assemble_test_retro(path.parent, self.session)
+        result = self.run_hook("loop_stall_guard", self.payload(self.transcript("LOOP-STOP: complete")))
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("1 decision(s) not in Muninn (muninn_absent: 1)", result.stdout)
 
     def test_shared_absent_grace_and_complete_off_switch(self) -> None:
         """Only matching absent-state grace releases; existing active state stays policed."""

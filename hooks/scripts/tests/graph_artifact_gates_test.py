@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.agentic_loop_path import resolve_path
 from hooks.scripts.tests.claude_graph_test_support import ROOT, GraphCase, dispatch, fixture, load
+from hooks.scripts.tests.lib import assembled_retro
 from scripts.lib import proof_results as pr
+from scripts.lib import retro, teardown_steps
 from scripts.post_evals import grade_loop
 
 
@@ -46,7 +50,6 @@ def artifacts(case: GraphCase, state: dict[str, Any]) -> None:
     }
     fixture.write_json(case.path.with_name("evals.json"), suite)
     grade_loop(case.path.with_name("evals.json"))
-    fixture.write_json(case.path.with_name("retro.json"), {**identity, "schema_version": 1, "status": "complete"})
     proofs = {**identity, "schema_version": 2, "proofs": [{"id": "P1", "cmd": "true", "expect": {"exit_code": 0}}]}
     fixture.write_json(case.path.with_name("proof.json"), proofs)
     results = case.path.with_name(pr.RESULTS_NAME)
@@ -64,6 +67,45 @@ def artifacts(case: GraphCase, state: dict[str, Any]) -> None:
         head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
         **identity,
     )
+    prepared_retro(case, state["session_id"])
+
+
+def prepared_retro(case: GraphCase, session: str) -> dict[str, Any]:
+    """Freeze a correctly owned D4 preparation receipt after the fixture sources are final."""
+    state_dir = case.path.parent
+    assembled_retro.write(state_dir, session)
+    state: dict[str, Any] = json.loads(case.path.read_text(encoding="utf-8"))
+    loop_id = str(state["loop_id"])
+    source = dict(state)
+    for key in ("status", "completion", "completed_marker"):
+        source.pop(key, None)
+    if isinstance(source.get("loop_stop_counts"), dict):
+        source["loop_stop_counts"].pop("complete", None)
+    binding = {
+        "repo_dir": str(state_dir.parent.resolve()),
+        "state_dir": str(state_dir.resolve()),
+        "session_id": session,
+        "loop_id": loop_id,
+        "revision": state["revision"],
+        "progress_sha256": teardown_steps.sha_json(source),
+    }
+    prepared: dict[str, Any] = {"schema": 1, "binding": binding, "records": []}
+    prep_path = state_dir / f"orders-prepared-{hashlib.sha256(loop_id.encode()).hexdigest()}.json"
+    prep_path.write_text(json.dumps(prepared), encoding="utf-8")
+    row = {
+        "step": "orders_prepared",
+        **{key: binding[key] for key in ("session_id", "loop_id", "revision")},
+        "binding": binding,
+        "evidence_sha256": teardown_steps.sha_json(prepared),
+        "ts": "2026-10-19T00:00:00+00:00",
+    }
+    with (state_dir / teardown_steps.NAME).open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(row) + "\n")
+    with patch.dict(os.environ, {"PATH": "/nonexistent"}):
+        payload, code = retro.assemble(state_dir, session)
+    if code == 2:
+        raise AssertionError(payload)
+    return cast("dict[str, Any]", json.loads((state_dir / "retro.json").read_text(encoding="utf-8")))
 
 
 class ArtifactGateTests(GraphCase):
@@ -135,17 +177,21 @@ class ArtifactGateTests(GraphCase):
         state = self.finish()
         artifacts(self, state)
         self.path.with_name("proof.json").unlink()
+        prepared_retro(self, "fixture-session")  # bind the removed file's absence before reassembly
         with self.assertRaisesRegex(ValueError, "no proof_disposition"):
             dispatch.complete(self.path, "fixture-session", write=False)
         self.save({**state, "proof_disposition": "none"})
+        prepared_retro(self, "fixture-session")
         with self.assertRaisesRegex(ValueError, "no proof_disposition"):
             dispatch.complete(self.path, "fixture-session", write=False)
         docs = {"kind": "none", "reason_code": "docs_only", "reason": "docs"}
         for disposition in ("none: no executable surface", docs):
             self.save({**state, "proof_disposition": disposition})
+            prepared_retro(self, "fixture-session")
             dispatch.complete(self.path, "fixture-session", write=False)
         for version in (1, 2):
             self.save({**state, "schema_version": version, "proof_disposition": "none: x"})
+            prepared_retro(self, "fixture-session")
             with self.assertRaisesRegex(ValueError, "schema_version must be 3"):
                 dispatch.complete(self.path, "fixture-session", write=False)
 
@@ -161,10 +207,12 @@ class ArtifactGateTests(GraphCase):
         )
         for units in bad_units:
             self.save({**state, "work_units": units})
+            prepared_retro(self, "fixture-session")
             with self.assertRaisesRegex(ValueError, "work_units"):
                 dispatch.complete(self.path, "fixture-session", write=False)
         for units in ({}, {"unit": {"status": "done"}}, {"unit": {"status": "dropped", "dropped_reason": "duplicate"}}):
             self.save({**state, "work_units": units})
+            prepared_retro(self, "fixture-session")  # recompute the disposition and preparation binding
             dispatch.complete(self.path, "fixture-session", write=False)
 
     def test_stop_gate_proof_identity_and_absence(self) -> None:
@@ -230,6 +278,7 @@ class ArtifactGateTests(GraphCase):
                 proof.unlink(missing_ok=True)
             else:
                 fixture.write_json(proof, document)
+            prepared_retro(self, "fixture-session")
             result = subprocess.run(
                 [sys.executable, str(ROOT / "hooks/scripts/loop_stall_guard.py")],
                 input=json.dumps(payload),

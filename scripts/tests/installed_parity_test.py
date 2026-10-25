@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "installed_parity.py"
+REPO = SCRIPT.parent.parent
 
 
 def write(root: Path, relative: str, content: bytes = b"same\n") -> None:
@@ -113,6 +114,43 @@ class InstalledParityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("codex", result.stdout)
         self.assertNotIn("DIFF claude", result.stdout)
+
+
+class Mirrors(unittest.TestCase):
+    """(j) Codex mirrors are byte copies and every new file stays under 400 lines."""
+
+    FILES = (
+        "teardown_steps",
+        "retro",
+        "retro_check",
+        "handoff_derive",
+        "proof",
+        "orders",
+        "decision_record",
+        "memory_reasons",
+    )
+
+    def test_mirrors_identical_and_short(self) -> None:
+        """Each shared lib equals its packages/codex copy; the new ones are under 400 lines."""
+        for name in self.FILES:
+            body = (REPO / f"scripts/lib/{name}.py").read_bytes()
+            self.assertEqual(body, (REPO / f"packages/codex/scripts/lib/{name}.py").read_bytes(), name)
+            self.assertLess(len(body.splitlines()), 400, name)
+
+    def test_stale_hand_written_lessons_prose_is_gone(self) -> None:
+        """teardown.md no longer tells the model to assemble the retro by hand or to hand-write lessons."""
+        text = (REPO / "skills/agentic-loop/teardown.md").read_text()
+        for stale in (
+            "hand-written lessons",
+            "Written at `schema_version` 2",
+            "| `review_themes`, `raw_notes` | Free-form. |",
+        ):
+            self.assertNotIn(stale, text)
+        self.assertIn("retro.py assemble", text)
+        self.assertIn("Schema 3 field spec", text)
+        skill = (REPO / "skills/agentic-loop/SKILL.md").read_text()
+        self.assertIn("scripts/lib/retro.py", skill)
+        self.assertNotIn("Assemble `retro.json` (`schema_version` 2)", skill)
 
 
 if __name__ == "__main__":
