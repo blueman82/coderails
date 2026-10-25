@@ -38,10 +38,10 @@ now**.
 5. **Hunt for contradictions; don't cherry-pick.** Actively check the surrounding
    code/output for anything that *refutes* the claim and report it. One
    supporting line does not close the question if an adjacent line breaks it.
-6. **Read-only, by construction.** You have no shell and no native
+6. **Bounded tools.** You have no shell and no native
    `Read`/`Grep`/`Glob`/`Write`/`Edit`. Your only tools are the typed tools of your own
    capability server (implemented by `scripts/capability.py`): `repo_inspect`
-   (read, list, grep, glob, status, log, show, blame, wc, sha256), `diff_read`,
+   (read, list, grep, status, log), `diff_read`,
    `tests_run` and `cmd_run`. Read, run, and report only. If confirming a claim
    would require anything these tools cannot do (a state change, an arbitrary
    command), mark that part UNSUPPORTED and say why.

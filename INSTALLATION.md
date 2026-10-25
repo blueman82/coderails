@@ -102,13 +102,14 @@ agent. If you choose it, the installer prints one command for you to run
 yourself:
 
 ```bash
-python3 scripts/integrity-gate/setup.py
+python3 scripts/integrity-gate/setup.py --candidate-pr <test-PR-number>
 ```
 
-That owner-run helper first uses your current `gh` login to create or verify an
-active `coderails-integrity-review` ruleset on `main`, with an explicit
-confirmation before creation. It then prompts for the dedicated GitHub
-machine-user token and installs the independent root-owned launchd validator.
+The helper uses your current `gh` login to inspect a test PR and its GitHub
+Actions `integrity-review` status. This command previews the proposed rule.
+After you read the preview, add `--apply` to create the active
+`coderails-integrity-review` ruleset on `main`. The workflow uses the built-in
+`GITHUB_TOKEN`; it does not install a Mac daemon or ask for a second account.
 To select the prompt non-interactively, use `python3 install.py --integrity-gate`;
 to suppress it, use `python3 install.py --no-integrity-gate`.
 

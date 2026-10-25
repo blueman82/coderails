@@ -33,11 +33,14 @@ task names before invoking a skill on it.
 
 Before or alongside the skill sequence:
 
-- Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/lessons.py" --dir <repo-key dir> --session <native caller session id> query --format contract` for verbatim
-  current, live, verified owner-cited lessons. The generated, read-only `standing-orders.md` is context only; it may lag
-  a retraction and cannot replace a current query. Exit 2 is a refusal; exit 3 is a degraded read: report the printed
-  reason and mark lesson intake unknown. Never substitute `orders.json` or an older view for authoritative lesson text.
-  Bind the actual caller's supplied native session id; do not invent one or assume an environment variable is present.
+- Use the current `lessons.py query --format contract` result if the caller
+  supplies it with the native caller session id and repo-key directory. The
+  caller runs `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/lessons.py" --dir <repo-key dir> --session <native caller session id> query --format contract`
+  before dispatch because this role has no shell. The generated
+  `standing-orders.md` view is context only; it may lag a retraction. If the
+  query refused (exit 2), degraded (exit 3), or was not supplied, report the
+  reason and mark lesson intake unknown. Do not substitute `orders.json` or an
+  older view. Do not invent the caller session id.
 - Read the last 5 `retro.json` files (by mtime) in that same location.
 - From these, extract two things:
   - **Observed-failure premortem seeds** — premortem entries whose failure mode
@@ -76,8 +79,8 @@ human-owned, not something a pre-flight pass talks its way into.
 ## Tools
 
 You have no shell. Your tools are `Skill` plus the two typed, read-only tools
-of your own capability server, `repo_inspect` (read, list, grep, glob, status,
-log, show, blame, wc, sha256) and `diff_read`; there is no native
+of your own capability server, `repo_inspect` (read, list, grep, status,
+log) and `diff_read`; there is no native
 `Read`/`Grep`/`Glob`. A skill that wants to shell out (e.g. wiki-query running
 a search command) cannot: report that skill's step as UNSUPPORTED and say why,
 do not look for another way to run the command. `Write`/`Edit`/`NotebookEdit`

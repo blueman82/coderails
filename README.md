@@ -10,7 +10,7 @@ agents, and hooks; neither dispatches to the other. They provide:
   (verified)/(inferred), is nudged at stop by advisory lints (never a block) to
   add the `## Did Not Verify` section and resolve it, and is gated on destructive bash and
   failing project tests.
-- **Integrity gate** — A three-layer evidence check (local gate, root-owned attestor,
+- **Integrity gate** — A three-layer evidence check (local gate, GitHub Actions attestor,
   GitHub ruleset) that blocks stale, missing, or malformed review/eval evidence.
   See [`docs/INTEGRITY-GATE.md`](./docs/INTEGRITY-GATE.md) for details.
 
@@ -142,25 +142,23 @@ Claude receives a native `subagent_type`; Codex receives the helper's printed
 includes the relevant agent instruction body explicitly. A custom Coderails
 label is not required and does not prove that instructions were loaded.
 
-How far that goes varies by agent, and the honest split is worth stating:
-`spec-reviewer` declares `tools: Read, Grep, Glob` and therefore *cannot* write.
-`source-auditor` needs `Bash` to re-derive numbers, so it withholds
-`Write`/`Edit` via `disallowedTools` but its read-only property still rests
-partly on instruction. `pr-review-toolkit:code-reviewer` declares no `tools:`
-key at all and so has full tool access — its read-only discipline is prose, not
-enforcement.
+Tool access varies by agent. `spec-reviewer` declares `Read`, `Grep`, and
+`Glob`. The guarded scouts use typed `repo_inspect` and `diff_read` tools.
+`source-auditor` can also run declared tests and commands; these can write
+caches in the repository. `pr-review-toolkit:code-reviewer` declares no
+`tools:` key here, so its read-only discipline relies on its instructions.
 
 | Agent | Purpose | Tools |
 |---|---|---|
-| `coderails:source-auditor` | Re-derives a claim from durable sources only; returns PASS/FAIL/UNSUPPORTED. Backs `/coderails:cite-check` | read + Bash; `Write`/`Edit` disallowed |
+| `coderails:source-auditor` | Re-derives a claim from durable sources only; returns PASS/FAIL/UNSUPPORTED. Backs `/coderails:cite-check` | typed inspection, diff, declared tests and commands; no shell |
 | `coderails:spec-reviewer` | Reviews a spec for completeness, consistency, clarity, scope, YAGNI before planning | read-only |
 | `coderails:wiki-writer` | Authors and maintains LLM Wiki pages against the schema; commits and opens PRs | read + write |
 | `coderails:loop-worker` | Implements one scoped task: code, tests, commit, self-review, evidence-backed report | read + write |
-| `coderails:deploy-safety-reviewer` | Reviews a PR/change for deploy-safety risk — rollback risk, blast radius, migration/schema safety, feature-flag applicability, deploy-time observability coverage | read + Bash; `Write`/`Edit` disallowed |
-| `coderails:design-scout` | Resolves one unresolved architectural fork by reading actual code paths and originating ONE recommendation with a named flip-condition; never reviews an existing document | read + Bash; `Write`/`Edit` disallowed |
-| `coderails:disposition-scout` | Resolves the clean-break vs preserve-compat fork per retirement unit in a Phase 1 plan, from the actual consumers and constraints | read + Bash; `Write`/`Edit` disallowed |
+| `coderails:deploy-safety-reviewer` | Reviews a PR/change for deploy-safety risk — rollback risk, blast radius, migration/schema safety, feature-flag applicability, deploy-time observability coverage | typed inspection and diff; no shell |
+| `coderails:design-scout` | Resolves one unresolved architectural fork by reading actual code paths and originating ONE recommendation with a named flip-condition; never reviews an existing document | typed inspection and diff; no shell |
+| `coderails:disposition-scout` | Resolves the clean-break vs preserve-compat fork per retirement unit in a Phase 1 plan, from the actual consumers and constraints | typed inspection and diff; no shell |
 | `coderails:docs-auditor` | Runs `/sync-docs` to audit in-tree docs for drift against just-merged code; fixes only loop-caused drift, surfaces pre-existing drift to the human | read + Bash + `Edit`; `Write` disallowed |
-| `coderails:preflight-scout` | Runs the pre-planning skill sequence (planning-sequence, premortem, assumptions, notchecked, wiki-query) plus a retro-intake pass; additive-only, never relaxes a gate | read + Bash; `Write`/`Edit` disallowed |
+| `coderails:preflight-scout` | Runs the pre-planning skill sequence (planning-sequence, premortem, assumptions, notchecked, wiki-query) plus a retro-intake pass; additive-only, never relaxes a gate | typed inspection and diff plus Skill; no shell |
 | `coderails:proof-author` | Writes a frozen `proof.json` from `authorising_prompt_raw` + `session_id` + `loop_id` (explicit dispatch inputs) and directly-referenced docs — never the plan or dispatching conversation; every proof stays `pending` | read + Bash + `Write` |
 
 Review agents are **not** duplicated here — `pr-review-toolkit@claude-plugins-official`
@@ -198,7 +196,7 @@ and explicitly defers code-level error-handling correctness to `silent-failure-h
 | `PreToolUse` (Agent) | `loop_dispatch_guard.py` | **block** — validates graph schema 3, session/loop ownership, current revision, active wave, node and `CODERAILS_GRAPH_DISPATCH` envelope against the native request. Available native roles are accepted; custom Coderails roles are optional. With a nonempty work-unit roster, implementation dispatch requires owned frozen or valid graded evals; frozen evals bind session + loop, not the changing graph revision. Preparation nodes remain exempt from that eval check. Missing state blocks marked/custom-worker dispatch; foreign state blocks every Agent request. The Python sandbox launcher invokes the same guard before allocating scratch. |
 | `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.py` | **block** — on main/master, blocks edits to any file EXCEPT an explicit allowlist (`.md`/`.txt`/`.rst`, `.yaml`/`.yml`/`.json`/`.toml`/`.ini`/`.cfg`, `.gitignore`, `LICENSE`); plugin-source markdown (`skills/*/SKILL.md`, `commands/*.md`) is also blocked. Also blocks `.claude/settings.json` / `.claude/settings.local.json` edits on **any** branch (the permission files that can bypass every gate) |
 | `PreToolUse` (Write/Edit/MultiEdit) | `comment_citation_gate.py` | **block** — blocks new comment content that cites a session-artifact label (`E#:`, `F# fix`, `CHANGE B#`/`C#`, `Task A#`, `TA-I#`, "reviewer finding", "per the plan", etc.) instead of stating the constraint the code enforces; `.md` files exempt; fails open |
-| `PreToolUse` (Write/Edit/MultiEdit) | `wiki_taxonomy_gate.py` | **block** — inert until `.coderails/workflow.config.yaml` exists at the plugin root (absent on a fresh clone until `/coderails:init` scaffolds it); once present, in an LLM wiki vault (identified positively: the write's repo root must equal `wiki_path`, resolved relative to `CLAUDE_PLUGIN_ROOT` unless absolute, corroborated by ≥2 of the parsed "## Page types" directories existing on disk as a secondary sanity check), blocks a write into a top-level directory not sanctioned by that section (read from the plugin's `AGENTS.md`); taxonomy is parsed live, never hardcoded; fails open on any ambiguity (schema absent, no config, the vault not being a git repo, `wiki_path` unresolvable, no section, unparseable, write outside the configured vault, or <2 directories present) |
+| `PreToolUse` (Write/Edit/MultiEdit) | `wiki_taxonomy_gate.py` | **block** — inert until `.coderails/workflow.config.yaml` exists. It identifies the configured wiki vault by repo root and `wiki_path`. It reads sanctioned directories from `wiki.schema.json`, never from this README. Once the vault is identified, a missing or invalid schema denies the write. With a valid schema, an unsanctioned top-level directory is denied when at least two sanctioned directories exist. Other identity ambiguities pass through. |
 | `PostToolUse` (Write/Edit/MultiEdit) | `quality_feedback.py` | **warn-only** — injects quality feedback into `PostToolUse` context; always exits successfully and cannot block a write |
 
 Test-gate runs retain complete stdout/stderr under `~/.coderails/test-output/`
