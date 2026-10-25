@@ -65,7 +65,7 @@ Find these patterns and replace them with the matching Python idiom.
 |-------------|-------------|---------|
 | Independent nested loops 3+ deep | `itertools.product` or extract function | Use `product(x, y, z)` only when each iterable is independent of the outer loop. |
 | Manual counter | `enumerate()` | If the original loop increments from 0 before use, use `for i, x in enumerate(items, start=1):`. |
-| Parallel iteration by index | `zip()` | Use `zip(a, b, strict=True)` when unequal lengths must fail; ordinary `zip` truncates. |
+| Parallel iteration by index | `zip()` | On Python 3.10 or later, use `zip(a, b, strict=True)` when unequal lengths must fail. On Python 3.9, check lengths first. Ordinary `zip` truncates. |
 | Loop with early break on condition | `any()` / `all()` | `for x in items: if pred(x): found = True; break` → `found = any(pred(x) for x in items)` |
 | Loop building dict | dict comprehension | `d = {}; for k, v in pairs: d[k] = f(v)` → `{k: f(v) for k, v in pairs}` |
 | Loop building set | set comprehension | `s = set(); for x in items: s.add(f(x))` → `{f(x) for x in items}` |
