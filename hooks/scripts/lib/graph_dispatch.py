@@ -4,43 +4,32 @@ from __future__ import annotations
 
 import copy
 import json
-import re
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
+from scripts.lib import orders_completion
+
+from .dir_lock import acquire_dir_lock, release_dir_lock
 from .graph_evidence import ENVELOPE_KEY, cursor, envelope, object_value, transcript
 from .graph_evidence_bind import bind_wave
 from .graph_evidence_revalidate import revalidate_all
-from .graph_executor import ROOT, graph_semantics, load, transition, validate_state
+from .graph_executor import ROOT, graph_repair, graph_semantics, graph_spec, load, transition, validate_state
 from .graph_recovery import recover_wave as recover_wave
+from .graph_recovery import trace
 from .loop_completion import validate_completion
-from .loop_evals import read_loop_evals_result
+from .loop_evals import EvalStatus, read_loop_evals
 from .loop_state_common import LoopState, read_state
 
-TARGETS = {
-    "S-1": "skills/improve-prompt/SKILL.md",
-    "S2": "agents/preflight-scout.md",
-    "S2.5": "agents/design-scout.md",
-    "S2.6": "agents/disposition-scout.md",
-    "S2.7a": "agents/spec-reviewer.md",
-    "S2.7c": "skills/task-evals/SKILL.md",
-    "S2.7e": "agents/proof-author.md",
-    "G12": "skills/verify-merged-pr/SKILL.md",
-    "S9-wiki": "agents/wiki-writer.md",
-    "S9-docs": "agents/docs-auditor.md",
-    "U3": "agents/loop-worker.md",
-    "U6": "commands/push.md",
-}
-
-
-def before_freeze(node_id: str) -> bool:
-    """Recognize only documented preparation nodes that author the frozen suite."""
-    return bool(re.match(r"^(S-|S0|S1(?:$|[^0-9])|S2(?:$|[^0-9])|J2(?:$|[^0-9]))", node_id))
+sys.path.insert(0, str(ROOT))
+from scripts.lib.config import config_path, load_config  # noqa: E402
+from scripts.lib.config_strict import sandbox_mode, strict_settings  # noqa: E402
 
 
 def validate_dispatch_evals(path: Path, state: dict[str, Any], node_id: str, worker: bool = False) -> None:
     """Require session-bound frozen eval authority for implementation dispatch."""
-    if before_freeze(node_id) and not worker:
+    if graph_spec.before_freeze(graph_spec.load_spec(), node_id) and not worker:
         return
     units = state.get("work_units", {})
     if not isinstance(units, dict):
@@ -50,9 +39,9 @@ def validate_dispatch_evals(path: Path, state: dict[str, Any], node_id: str, wor
     suite = read_state(path.with_name("evals.json"))
     if any(suite.get(key) != state[key] for key in ("session_id", "loop_id")):
         raise ValueError("frozen eval suite belongs to another session or loop")
-    verdict = read_loop_evals_result(path.parent)
-    if verdict not in {"GO", "VERIFICATION_LEVEL0", "FROZEN"}:
-        raise ValueError(f"dispatch requires frozen loop evals before build; current verdict: {verdict}")
+    verdict = read_loop_evals(path.parent)
+    if verdict.status not in {EvalStatus.GO, EvalStatus.VERIFICATION_LEVEL0, EvalStatus.FROZEN}:
+        raise ValueError(f"dispatch requires frozen loop evals before build; current verdict: {verdict.label}")
 
 
 def ownership(state: dict[str, Any], node_id: str) -> dict[str, Any]:
@@ -72,18 +61,33 @@ def plan(path: Path) -> list[dict[str, Any]]:
     state = load(path)
     nodes = state["graph"]["active_wave"]["nodes"] if state["graph"]["active_wave"] else graph_semantics.ready(state)
     result: list[dict[str, Any]] = []
+    config = config_path()
+    settings = strict_settings(config) if config else load_config("")[0]
+    mode = sandbox_mode(settings)  # sandbox_workers has a typed code reader here
+    spec, policy = graph_spec.load_spec(), graph_spec.load_policy()
     for node_id in nodes:
-        role = state["graph"]["nodes"][node_id].get("graph_role") or re.sub(r"\[.*\]$", "", node_id)
-        source = TARGETS.get(role)
+        role = state["graph"]["nodes"][node_id].get("graph_role") or graph_spec.split_id(node_id)[0]
+        entry = graph_spec.role_node(spec, role)
+        source = entry["source"] if entry else None
         item: dict[str, Any] = {
             "node_id": node_id,
+            **graph_semantics.describe_node(node_id),
             "graph_role": role,
             "path": source,
             "unresolved": not source or not (ROOT / source).is_file(),
         }
+        if entry and entry["agent_role"] == "loop-worker":
+            item["dispatch_mode"] = mode
+        spec_node = graph_spec.node_for(spec, node_id)
+        if spec_node and spec_node["skip_when"]:
+            item["skip_when_met"] = graph_spec.skip_when_met(state, spec, policy, node_id)
         if state["graph"]["active_wave"]:
             item["prompt_prefix"] = ENVELOPE_KEY + "=" + json.dumps(ownership(state, node_id), sort_keys=True)
+            item["node_name_marker"] = "CODERAILS_GRAPH_NODE_NAME=" + item["display"]
         result.append(item)
+    met = [(item["node_id"], None, None) for item in result if item.get("skip_when_met")]
+    if met:  # counted by scripts/lib/spec_counters.py: one row per node whose skip predicate held at plan time
+        trace(path, state, "reported", "skip_when_met", {"units": len(state["work_units"])}, met, "plan")
     return result
 
 
@@ -118,6 +122,7 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
         proposal = graph_semantics.record_wave(state, report["wave_id"], results)
+        graph_repair.apply_failed_gates(proposal, results)
         references = bind_wave(state, results)
         proposed = object_value(proposal["state"], "proposed graph")
         for node_id, refs in references.items():
@@ -187,7 +192,7 @@ def validate_artifacts(path: Path, state: dict[str, Any]) -> None:
         suite.get("revision") != state["revision"]
         or grading.get("by") != "post_evals.py grade-loop"
         or grading.get("amendments_at_grade") != len(suite.get("amendments", []))
-        or read_loop_evals_result(path.parent) != "GO"
+        or read_loop_evals(path.parent).status is not EvalStatus.GO
     ):
         raise ValueError("loop evals lack current neutral GO grading")
     retro = read_state(path.with_name("retro.json"))
@@ -196,15 +201,50 @@ def validate_artifacts(path: Path, state: dict[str, Any]) -> None:
     validate_completion(LoopState(path, session, 0, state), str(transcript(session)))
 
 
-def complete(path: Path, session: str, write: bool = True) -> dict[str, Any]:
-    """Validate all native gates under the state lock before completion is written."""
+def complete(path: Path, session: str, write: bool = True, completed_marker: int | None = None) -> dict[str, Any]:
+    """Prepare orders, save validated completion, then apply the lifecycle outside both locks."""
+    current = load(path)
+    if write and current["status"] != "complete":
+        validate_graph_state_completion(current, session)
+        validate_artifacts(path, current)
+    digest = (
+        orders_completion.prepare(path, session, current["loop_id"])
+        if write and current["status"] != "complete"
+        else None
+    )
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
         validate_graph_state_completion(state, session)
         validate_artifacts(path, state)
+        if write and state["status"] != "complete":
+            if digest is None:
+                raise ValueError("order_source_mismatch")
+            orders_completion.validate_prepared(path, state, digest)
         proposed = copy.deepcopy(state)
         proposed["status"] = "complete"
+        if completed_marker is not None:
+            proposed["completed_marker"] = completed_marker
         return proposed
 
-    state = transition(path, update) if write else update(load(path))
-    return {"session_id": session, "loop_id": state["loop_id"], "status": state["status"]}
+    if (
+        write
+        and current["status"] == "complete"
+        and (completed_marker is None or current.get("completed_marker") == completed_marker)
+    ):
+        lock = Path(f"{path}.lock")
+        attempts = int(os.environ.get("CLAUDE_HOOK_MAX_ATTEMPTS", "5"))
+        delay = float(os.environ.get("CLAUDE_HOOK_SLEEP_S", "0.3"))
+        if not acquire_dir_lock(lock, attempts, delay)[0]:
+            raise ValueError("graph lock or atomic update failed")
+        try:
+            state = update(load(path))
+        finally:
+            release_dir_lock(lock)
+    else:
+        state = transition(path, update, preserve_updated_at=True) if write else update(load(path))
+    result: dict[str, Any] = {"session_id": session, "loop_id": state["loop_id"], "status": state["status"]}
+    if write:
+        result.update(orders_completion.finish(path, session, state["loop_id"]))
+    elif current["status"] == "complete":
+        orders_completion.status(path, session)
+    return result

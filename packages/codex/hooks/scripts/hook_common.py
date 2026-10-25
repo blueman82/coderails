@@ -8,7 +8,6 @@ import json
 import os
 import re
 import select
-import shlex
 import subprocess
 import sys
 import time
@@ -17,6 +16,11 @@ from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # Codex ships scripts/ beside hooks/
+from scripts.lib.authority_object import safe_session  # noqa: E402
+
+safe_id = safe_session
 
 RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM})
 RESOURCE_MESSAGE = (
@@ -86,68 +90,9 @@ def loop_root() -> Path:
     return Path(override or Path.home() / ".coderails" / "agentic-loop")
 
 
-def safe_id(session_id: str) -> bool:
-    """True for a nonempty id that is path-local as written (never sanitised, so ids cannot collide)."""
-    return (
-        bool(session_id)
-        and session_id not in {"?", "."}
-        and "/" not in session_id
-        and ".." not in session_id
-        and "\0" not in session_id
-    )
-
-
 def authority_path(session_id: str) -> Path | None:
     """Return <loop root>/<session_id>/authority.json, or None for an unsafe id."""
     return loop_root() / session_id / "authority.json" if safe_id(session_id) else None
-
-
-def parse_expiry(value: object) -> datetime | None:
-    """Parse a timezone-aware ISO-8601 time, or None."""
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else None
-
-
-def authority_state(session_id: str) -> tuple[str, dict[str, object]]:
-    """Classify this session's authority file as live/expired/foreign/none.
-
-    Vendored subset of scripts/lib/authority_object.validate (the Codex package ships without scripts/lib):
-    exact session binding, unexpired, merge approval-required. Anything unreadable or malformed is none.
-    """
-    path = authority_path(session_id)
-    try:
-        raw: object = json.loads(path.read_text(encoding="utf-8")) if path else None
-    except (OSError, ValueError):
-        return "none", {}
-    if not isinstance(raw, dict):
-        return "none", {}
-    data = cast(dict[str, object], raw)
-    if data.get("session_id") != session_id:
-        return "foreign", {}
-    expires = parse_expiry(data.get("expires_at"))
-    approvals = data.get("approval_required_for")
-    if expires is None or not isinstance(approvals, list) or "merge" not in approvals:
-        return "none", {}
-    return ("expired" if expires <= datetime.now(timezone.utc) else "live"), data
-
-
-def write_authority(path: Path, obj: dict[str, object]) -> bool:
-    """Write atomically (tmp + os.replace): a crash leaves the old file or none. False on any OSError."""
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        os.replace(tmp, path)
-    except OSError:
-        with suppress(OSError):
-            tmp.unlink()
-        return False
-    return True
 
 
 def append_trace_row(
@@ -183,103 +128,6 @@ def append_trace_row(
     return True
 
 
-RECEIPT_FIELDS = (
-    "receipt_id", "authority_id", "session_id", "loop_id", "action", "exact_payload_hash",
-    "artifact_sha", "scope", "issued_at", "expires_at", "single_use", "revoked",
-)  # fmt: skip
-
-
-def receipt_proposed(
-    kind: str, segment: str, cwd: str, branch: str, artifact_sha: str | None = None
-) -> dict[str, object]:
-    """Vendored subset of scripts/lib/action_receipt.proposed_action (parity-tested)."""
-    try:
-        argv = shlex.split(segment)
-    except ValueError:
-        argv = [segment.strip()]
-    blob = json.dumps({"argv": argv, "cwd": cwd, "branch": branch}, sort_keys=True, separators=(",", ":"))
-    digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
-    return {"action": kind, "exact_payload_hash": digest, "artifact_sha": artifact_sha}
-
-
-def receipt_verify(
-    rec: object,
-    proposed: dict[str, object],
-    now: datetime,
-    session_id: str,
-    loop_id: str | None,
-    consumed: bool = False,
-) -> tuple[bool, str]:
-    """Vendored subset of scripts/lib/action_receipt.verify: same checks, same order, same reason codes."""
-    if not isinstance(rec, dict):
-        return False, "malformed"
-    data = cast(dict[str, object], rec)
-    if set(data) != set(RECEIPT_FIELDS):
-        return False, "malformed"
-    names = ("receipt_id", "session_id", "action", "exact_payload_hash")
-    text = all(isinstance(data[n], str) and data[n] for n in names)
-    nullable = ("authority_id", "loop_id", "artifact_sha")
-    optional = all(data[n] is None or (isinstance(data[n], str) and data[n]) for n in nullable)
-    flags = isinstance(data["single_use"], bool) and isinstance(data["revoked"], bool)
-    expires = parse_expiry(data["expires_at"])
-    shaped = text and optional and flags and isinstance(data["scope"], str)
-    if not (shaped and expires and parse_expiry(data["issued_at"])):
-        return False, "malformed"
-    if data["revoked"]:
-        return False, "revoked"
-    if expires <= now:
-        return False, "expired"
-    if data["session_id"] != session_id:
-        return False, "foreign_session"
-    if data["loop_id"] is not None and data["loop_id"] != loop_id:
-        return False, "foreign_loop"
-    if consumed:
-        return False, "consumed"
-    if data["action"] != proposed.get("action"):
-        return False, "kind_mismatch"
-    if data["exact_payload_hash"] != proposed.get("exact_payload_hash"):
-        return False, "hash_mismatch"
-    if data["artifact_sha"] is not None and data["artifact_sha"] != proposed.get("artifact_sha"):
-        return False, "sha_mismatch"
-    return True, "ok"
-
-
-def _receipt_claim(path: Path, suffix: str) -> bool:
-    """O_CREAT|O_EXCL marker beside the receipt; True only for the one caller that created it."""
-    try:
-        os.close(os.open(str(path.with_suffix(suffix)), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
-    except OSError:
-        return False
-    return True
-
-
-def receipt_find_valid(
-    session_id: str, proposed: dict[str, object], now: datetime, loop_id: str | None, consume_it: bool = False
-) -> tuple[dict[str, object] | None, str]:
-    """Vendored subset of scripts/lib/action_receipt.find_valid (revoke/consume are O_EXCL marker files)."""
-    auth = authority_path(session_id)
-    if auth is None:
-        return None, "no_session" if not session_id else "malformed"
-    refusals: list[str] = []
-    for path in sorted((auth.parent / "receipts").glob("*.json"))[:50]:  # MAX_RECEIPTS
-        try:
-            raw: object = json.loads(path.read_text(encoding="utf-8")) if path.stat().st_size <= 8192 else None
-        except (OSError, ValueError):
-            raw = None
-        data: dict[str, object] | None = None
-        if isinstance(raw, dict):
-            fields = cast(dict[str, object], raw)
-            data = {**fields, "revoked": fields.get("revoked") is True or path.with_suffix(".revoked").exists()}
-        ok, code = receipt_verify(data, proposed, now, session_id, loop_id, path.with_suffix(".consumed").exists())
-        if not ok:
-            refusals.append(code)
-        elif data is not None and data["single_use"] and consume_it and not _receipt_claim(path, ".consumed"):
-            refusals.append("consumed")
-        elif data is not None:
-            return data, "ok"
-    return None, next((c for c in refusals if c != "malformed"), refusals[0] if refusals else "no_receipt")
-
-
 def continue_turn(reason: str) -> None:
     """Emit the established Stop-hook block response."""
     print(json.dumps({"decision": "block", "reason": reason}))
@@ -287,12 +135,17 @@ def continue_turn(reason: str) -> None:
 
 def deny(reason: str) -> None:
     """Emit the native PreToolUse denial envelope."""
-    envelope = {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}
-    print(json.dumps({"hookSpecificOutput": envelope}))
-    with suppress(ImportError):  # telemetry must never be able to break the hook
-        from lib.hook_telemetry import mark_deny
-
-        mark_deny()
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+    )
 
 
 def session_dir(session_id: str) -> Path | None:
@@ -344,16 +197,16 @@ def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
     """Run one graph command and return its object output when valid."""
     try:
         result = subprocess.run(
-            ["python3", graph, *arguments], stdout=subprocess.PIPE, check=False, stderr=subprocess.DEVNULL, text=True
+            ["python3", str(graph), *arguments],
+            stdout=subprocess.PIPE,
+            check=False,
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
     except OSError as error:
         if error.errno in RESOURCE_ERRNOS:
             raise HostResourceError(error.errno, str(error)) from error
         return None
-    with suppress(ImportError):  # telemetry must never be able to break the hook
-        from lib.hook_telemetry import note_child
-
-        note_child("graph_output", result.returncode)
     if result.returncode != 0:
         return None
     try:

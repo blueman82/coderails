@@ -67,7 +67,7 @@ def parse(segment: str) -> tuple[str, str, str]:
         return AMBIGUOUS, "", ""
     if tokens[:2] == ["gh", "api"]:
         endpoint = next((token for token, _ in _option_items(tokens[2:]) if not token.startswith("-")), "")
-        if api := re.fullmatch(r"/?repos/([^/]+/[^/]+)/pulls/(\d+)/merge", endpoint):
+        if api := re.fullmatch(r"/?repos/([^/]+/[^/]+)/pulls/(\d+)/merge(?:-async)?", endpoint):
             return f"https://github.com/{api[1]}/pull/{api[2]}", "", ""
         return AMBIGUOUS, "", ""
     start = next((i for i, t in enumerate(tokens) if t == "merge" or re.search(r"(^|/)merge\.(py|sh)$", t)), None)
@@ -108,6 +108,7 @@ def resolve(target: str) -> str:
     if url := _URL.match(target):
         if url[1].lower() != git.repo().lower():
             return ""
+        return url[2]
     elif "://" in target:
         return ""
-    return git.pr_field(target, "number")
+    return git.pr_num(target)

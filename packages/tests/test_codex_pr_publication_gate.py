@@ -19,6 +19,7 @@ HOOK = ROOT / "packages/codex/hooks/scripts/pr_publication_gate.py"
 SECRET = ".en" + "v"  # two parts so no source line spells the secret-file name
 GH_SHIM = """#!/bin/sh
 case "$1 $2" in
+  "pr list") if [ "$4" = feat-b ]; then echo 7; fi ;;
   "pr view")
     case "$5" in
       headRefOid) if [ "$3" = 1 ]; then echo "$CLEAN_SHA"; else echo "$FAKE_SHA"; fi ;;

@@ -103,16 +103,19 @@ class ResolveTests(unittest.TestCase):
 
     def test_number_url_branch(self) -> None:
         """Digits pass through; a same-repo URL and a branch go through gh; no target is the current branch."""
+
+        def number(name: str) -> str:
+            return "3" if name == "cur" else "7"
+
         with (
             mock.patch.object(git, "repo", return_value="o/r"),
-            mock.patch.object(git, "pr_field", return_value="7") as field,
-            mock.patch.object(git, "pr_num", return_value="3"),
+            mock.patch.object(git, "pr_num", side_effect=number) as lookup,
             mock.patch.object(git, "branch", return_value="cur"),
         ):
             self.assertEqual(merge_target.resolve("42"), "42")
             self.assertEqual(merge_target.resolve("https://github.com/o/r/pull/7"), "7")
             self.assertEqual(merge_target.resolve("feat-b"), "7")
-            self.assertEqual(field.call_args.args, ("feat-b", "number"))
+            self.assertEqual(lookup.call_args.args, ("feat-b",))
             self.assertEqual(merge_target.resolve(""), "3")
 
     def test_unresolvable_is_empty(self) -> None:
@@ -120,7 +123,7 @@ class ResolveTests(unittest.TestCase):
         with (
             mock.patch.object(git, "repo", return_value="o/r"),
             mock.patch.object(git, "pr_field", return_value=""),
-            mock.patch.object(git, "pr_num", return_value="3"),
+            mock.patch.object(git, "pr_num", return_value=""),
         ):
             self.assertEqual(merge_target.resolve(merge_target.AMBIGUOUS), "")
             self.assertEqual(merge_target.resolve("https://github.com/x/y/pull/7"), "")

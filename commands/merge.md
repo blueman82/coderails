@@ -16,8 +16,9 @@ Execute the merge workflow script:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/merge.py" "$ARGUMENTS"
 ```
 
-If this session owns a graph unit in this worktree, append its exact
-`--unit <id> --progress <absolute state path>` to that command. Read both values from the active graph.
+For a graph work unit, pass `--unit <id> --progress <absolute progress.json>` so the publication gate checks the frozen unit manifest. The helper checks the PR's actual head diff against the shipped policy by default. A direct merge receives the same publication check from `enforce_pr_workflow`.
+
+For `action_authority: enforce`, fetch the current PR head and use `python3 <absolute helper path> <target> --expected-head <40-hex SHA>`. Mint the receipt for that exact command. Direct executable invocation is unsupported in enforce mode because its command hash differs.
 
 The script handles:
 1. Detecting PR from argument (number, branch name, or current branch)

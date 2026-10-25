@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import json
+import os
 import subprocess
 import sys
 import unittest
@@ -80,9 +82,9 @@ class DependencyTests(GraphCase):
         for status, expected in (
             ("done", "ready"),
             ("skipped", "ready"),
-            ("pending", "blocked"),
-            ("stale", "blocked"),
-            ("failed", "blocked"),
+            ("pending", "predecessor_pending"),
+            ("stale", "predecessor_pending"),
+            ("failed", "state_unreadable"),  # malformed persisted failure rejects: unreadable, not pending
         ):
             state = self.shape(["U3[1]", "U4[1]"], [("U3[1]", "U4[1]")], {})
             state["graph"]["nodes"]["U3[1]"].update(status=status, outcome=status)
@@ -99,8 +101,9 @@ class DependencyTests(GraphCase):
                 capture_output=True,
                 text=True,
                 check=False,
+                env={**os.environ, "CLAUDE_AGENTIC_LOOP_DIR": str(self.home / "loops")},
             )
-            self.assertEqual(result.stdout.strip(), expected)
+            self.assertEqual(json.loads(result.stdout), {"ready": expected == "ready", "reason_code": expected})
             self.assertEqual(result.returncode, 0 if expected == "ready" else 1)
             self.assertEqual(before, self.path.read_bytes())
 

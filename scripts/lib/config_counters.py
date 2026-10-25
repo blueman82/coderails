@@ -1,4 +1,7 @@
-"""Count typed-config and wiki-schema reason codes from per-session trace rows (read-only)."""
+"""Count typed-config and wiki-schema reason codes from per-session trace rows (read-only).
+
+wiki_schema_fail_closed counts wiki_taxonomy_gate rows with outcome failed_closed: the writes it denied.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +14,11 @@ from typing import Any, cast
 REASONS = (
     "config_unknown_key",
     "config_bad_type",
+    "config_bad_value",
     "config_unreadable",
+    "config_schema_unreadable",
+    "config_rejected",
+    "wiki_schema_fail_closed",
     "wiki_schema_missing",
     "wiki_schema_invalid",
     "wiki_schema_legacy",
@@ -40,6 +47,9 @@ def count_reasons(root: Path, since: str = "") -> dict[str, int]:
                 continue
             if isinstance(code, str) and code in counts:
                 counts[code] += 1
+            fields = cast("dict[str, Any]", row) if isinstance(row, dict) else {}
+            if fields.get("command") == "wiki_taxonomy_gate" and fields.get("outcome") == "failed_closed":
+                counts["wiki_schema_fail_closed"] += 1  # denials, a subset of missing/invalid/config_rejected rows
     return counts
 
 

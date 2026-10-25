@@ -67,6 +67,9 @@ class ValidatorTests(unittest.TestCase):
             (good(loop_id=""), "loop_id"),
             (good(scope=["a"], denied=["a"]), "scope_denied_overlap"),
             (good(extra=1), "unknown:extra"),
+            (good(granted_by="phrase"), "granted_by"),
+            (good(granted_by=None), "granted_by"),
+            (good(granted_by=1), "granted_by"),
         ]
         for obj, expected in cases:
             with self.subTest(expected=expected, obj=obj):
@@ -74,6 +77,12 @@ class ValidatorTests(unittest.TestCase):
         missing = good()
         del missing["denied"]
         self.assertIn("missing:denied", ao.validate(missing, NOW))
+
+    def test_granted_by_optional_and_closed(self) -> None:
+        """Objects without granted_by (legacy files) validate; command and legacy_phrase validate; nothing else does."""
+        self.assertEqual(ao.validate(good(), NOW), [])
+        for value in ("command", "legacy_phrase"):
+            self.assertEqual(ao.validate(good(granted_by=value), NOW), [], value)
 
     def test_z_suffix_expiry_accepted(self) -> None:
         """A trailing Z parses as UTC."""
@@ -136,7 +145,7 @@ class StorageTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
-    """create/inspect/narrow/revoke through the real script."""
+    """grant/inspect/narrow/revoke through the real script."""
 
     def setUp(self) -> None:
         """Isolate the loop dir via env."""
@@ -157,23 +166,23 @@ class CliTests(unittest.TestCase):
         return [json.loads(x)["reason_code"] for x in path.read_text().splitlines()] if path.is_file() else []
 
     def create(self, *extra: str) -> subprocess.CompletedProcess[str]:
-        """Create s1 with scope a,b and max 3 PRs."""
-        return self.run_cli("create", "--session", "s1", "--scope", "a,b", "--max-prs", "3", *extra)
+        """Grant s1 with scope a,b and max 3 PRs."""
+        return self.run_cli("grant", "--session", "s1", "--scope", "a,b", "--max-prs", "3", *extra)
 
     def test_every_refusal_has_a_stable_trace_code(self) -> None:
         """Each refusal path writes one refused row with its own low-cardinality reason code."""
-        self.assertEqual(self.run_cli("create", "--session", "s2", "--max-prs", "1", "--scope", "a").returncode, 0)
+        self.assertEqual(self.run_cli("grant", "--session", "s2", "--max-prs", "1", "--scope", "a").returncode, 0)
         self.assertEqual(self.run_cli("narrow", "--session", "s2", "--max-prs", "5").returncode, 2)
         self.assertEqual(self.run_cli("narrow", "--session", "s2", "--scope", "z").returncode, 2)
         self.assertEqual(self.run_cli("narrow", "--session", "s2").returncode, 2)
-        self.assertEqual(self.run_cli("create", "--session", "s2", "--max-prs", "1").returncode, 2)
+        self.assertEqual(self.run_cli("grant", "--session", "s2", "--max-prs", "1").returncode, 2)
         self.assertEqual(self.run_cli("revoke", "--session", "nope").returncode, 2)
-        self.assertEqual(self.run_cli("create", "--session", "s3", "--max-prs", "1", "--not-revocable").returncode, 0)
+        self.assertEqual(self.run_cli("grant", "--session", "s3", "--max-prs", "1", "--not-revocable").returncode, 0)
         self.assertEqual(self.run_cli("revoke", "--session", "s3").returncode, 2)
         self.assertEqual(
             self.reasons("s2"),
             [
-                "authority_created",
+                "authority_granted_command",
                 "authority_refused_widen_max_prs",
                 "authority_refused_widen_scope",
                 "authority_refused_narrow_empty",
@@ -196,14 +205,15 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.reasons("x"), ["authority_refused_missing"])
 
     def test_create_inspect_always_requires_merge(self) -> None:
-        """Create writes a valid object whose approval list always has merge; a second create is refused."""
+        """Grant writes a valid object whose approval list always has merge; a second grant is refused."""
         result = self.create("--approval-for", "push")
         self.assertEqual(result.returncode, 0, result.stderr)
         shown = json.loads(self.run_cli("inspect", "--session", "s1").stdout)
         self.assertEqual(shown["approval_required_for"], ["merge", "push"])
         self.assertIsNone(shown["loop_id"])
+        self.assertEqual(shown["granted_by"], "command")
         self.assertEqual(self.create().returncode, 2)
-        self.assertEqual(self.reasons(), ["authority_created", "authority_refused_exists"])
+        self.assertEqual(self.reasons(), ["authority_granted_command", "authority_refused_exists"])
 
     def test_narrow_only_shrinks(self) -> None:
         """Subset scope and lower max_prs are applied; wider or larger values are refused and change nothing."""
@@ -218,7 +228,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual((after["scope"], after["max_prs"]), (["a"], 2))
         self.assertEqual(
             [r for r in self.reasons() if not r.startswith("authority_refused")],
-            ["authority_created", "authority_narrowed"],
+            ["authority_granted_command", "authority_narrowed"],
         )
         self.assertEqual(len(self.reasons()), 6)  # plus one refused row per refusal above
 
@@ -227,18 +237,18 @@ class CliTests(unittest.TestCase):
         self.create()
         self.assertEqual(self.run_cli("revoke", "--session", "s1").returncode, 0)
         self.assertFalse((self.base / "s1" / "authority.json").exists())
-        self.assertEqual(self.run_cli("create", "--session", "s2", "--max-prs", "1", "--not-revocable").returncode, 0)
+        self.assertEqual(self.run_cli("grant", "--session", "s2", "--max-prs", "1", "--not-revocable").returncode, 0)
         refused = self.run_cli("revoke", "--session", "s2")
         self.assertEqual(refused.returncode, 2)
         self.assertTrue((self.base / "s2" / "authority.json").exists())
-        self.assertEqual(self.reasons(), ["authority_created", "authority_revoked"])
-        self.assertEqual(self.reasons("s2"), ["authority_created", "authority_refused_not_revocable"])
+        self.assertEqual(self.reasons(), ["authority_granted_command", "authority_revoked"])
+        self.assertEqual(self.reasons("s2"), ["authority_granted_command", "authority_refused_not_revocable"])
 
     def test_unsafe_session_ids_refused_not_sanitised(self) -> None:
         """A slash or dotdot id is refused outright; nothing is written."""
         for session in ("a/b", "..", "a..b"):
             with self.subTest(session=session):
-                result = self.run_cli("create", "--session", session, "--max-prs", "1")
+                result = self.run_cli("grant", "--session", session, "--max-prs", "1")
                 self.assertEqual(result.returncode, 2)
         self.assertEqual(list(self.base.iterdir()), [])
 
@@ -251,17 +261,42 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.run_cli("narrow", "--session", "s9", "--max-prs", "1").returncode, 2)
         self.assertEqual(self.reasons("s9"), ["authority_refused_foreign", "authority_refused_foreign"])
 
-    def test_crack_on_creates_authority_not_legacy_flag(self) -> None:
-        """Superseded E3 control: crack on now writes a valid authority object and no legacy flag."""
+    def test_create_is_an_alias_of_grant(self) -> None:
+        """The one-release alias takes the same code path: granted_by=command and the same trace row."""
+        result = self.run_cli("create", "--session", "s5", "--max-prs", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["granted_by"], "command")
+        self.assertEqual(self.reasons("s5"), ["authority_granted_command"])
+        self.assertEqual(self.run_cli("create", "--session", "s5", "--max-prs", "1").returncode, 2)
+        self.assertEqual(self.reasons("s5")[-1], "authority_refused_exists")
+
+    def test_grant_session_defaults_to_environment_and_never_to_blank(self) -> None:
+        """An empty --session (unexpanded ${CLAUDE_SESSION_ID}) falls back to the env id, never to blank."""
+        self.env["CLAUDE_CODE_SESSION_ID"] = "env-s"
+        self.assertEqual(self.run_cli("grant", "--session", "", "--max-prs", "1").returncode, 0)
+        self.assertIsNotNone(ao.read_authority("env-s", self.base))
+        self.env.pop("CLAUDE_CODE_SESSION_ID")
+        self.assertEqual(self.run_cli("grant", "--session", "", "--max-prs", "1").returncode, 2)
+
+    def test_phrase_never_creates_authority(self) -> None:
+        """Superseded E3 control: the prompt 'crack on' writes no authority object and no legacy flag."""
         payload = {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "please crack on"}
         env = {**self.env, "CLAUDE_DISCIPLINE_LOG": str(self.base / "d.log")}
         result = subprocess.run(
             [sys.executable, str(CRACK_ON)], input=json.dumps(payload), capture_output=True, text=True, env=env
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((self.base / "s1" / "authority.json").is_file())
+        self.assertFalse((self.base / "s1" / "authority.json").exists())
         self.assertFalse((self.base / "s1" / "crack_on_active").exists())
-        self.assertIsNotNone(ao.read_authority("s1", self.base))
+        self.assertIsNone(ao.read_authority("s1", self.base))
+
+    def test_legacy_object_without_granted_by_is_honoured(self) -> None:
+        """A pre-granted_by file (phrase-minted before this release) still reads as live authority."""
+        obj = good(session_id="old", expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat())
+        path = self.base / "old" / "authority.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps(obj))
+        self.assertEqual(ao.read_authority("old", self.base), obj)
 
 
 if __name__ == "__main__":

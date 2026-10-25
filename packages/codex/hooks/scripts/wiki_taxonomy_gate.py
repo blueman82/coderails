@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Keep native apply-patch writes within the configured wiki taxonomy."""
+
 from __future__ import annotations
 
 import os
@@ -18,7 +19,8 @@ from hook_common import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.lib.config import legacy_page_types, settings, wiki_page_types  # noqa: E402
+from scripts.lib.config import load_config, wiki_page_types  # noqa: E402
+from scripts.lib.config_strict import ConfigRejected, strict_settings  # noqa: E402
 
 
 def configuration(cwd: Path, root: Path) -> Path | None:
@@ -32,8 +34,8 @@ def configuration(cwd: Path, root: Path) -> Path | None:
     return None
 
 
-def taxonomy(cwd: Path, session: str) -> tuple[Path, Path, list[str]] | None:
-    """Resolve a positively identified vault and schema, failing open on ambiguity."""
+def taxonomy(cwd: Path, session: str) -> tuple[Path, Path, list[str], str, str] | None:
+    """Resolve a positively identified vault and its schema outcome; None means identity is ambiguous."""
     root = repo_for_path(cwd)
     if root is None:
         return None
@@ -42,25 +44,21 @@ def taxonomy(cwd: Path, session: str) -> tuple[Path, Path, list[str]] | None:
         return None
     schema = root / "wiki.schema.json"
     try:
-        value = str(settings(config, session).get("wiki_path") or "")
+        value = str(load_config(config)[0].get("wiki_path") or "")
         if not value:
             return None
         vault = (config.parent.parent / value).resolve(strict=True)
+        try:
+            strict_settings(config, session)
+        except ConfigRejected as error:
+            return vault, schema, [], "config_rejected", str(error)
         types, problem = wiki_page_types(schema)
-        legacy = root / "AGENTS-wiki-schema.md"
-        if problem == "wiki_schema_missing" and legacy.is_file():
-            # Vaults made by older wiki-init have only the prose schema: keep policing, say so.
-            types = legacy_page_types(legacy)
-            schema, problem = legacy, "" if types else "wiki_schema_invalid"
-            if types:
-                append_trace_row("wiki_taxonomy_gate", "fallback", "wiki_schema_legacy", session)
         if problem:
-            append_trace_row("wiki_taxonomy_gate", "failed_open", problem, session)
-            return None
+            return vault, schema, [], problem, f"{schema} is {problem}"
         sanctioned = [name + "/" for name in types]
         if sum((vault / directory).is_dir() for directory in sanctioned) < 2:
             return None
-        return vault, schema, sanctioned
+        return vault, schema, sanctioned, "", ""
     except (OSError, ValueError):
         return None
 
@@ -72,7 +70,7 @@ def main() -> int:
     resolved = taxonomy(cwd, text_field(payload, "session_id", ""))
     if resolved is None:
         return 0
-    vault, schema, sanctioned = resolved
+    vault, schema, sanctioned, problem, why = resolved
     for file in patch_paths(payload):
         absolute = (cwd / file).resolve()
         if repo_for_path(absolute) != vault:
@@ -81,6 +79,13 @@ def main() -> int:
             parts = absolute.relative_to(vault).parts
         except ValueError:
             continue
+        if problem:
+            append_trace_row("wiki_taxonomy_gate", "failed_closed", problem, text_field(payload, "session_id", ""))
+            deny(
+                f"Blocked: wiki write inside the vault while {why} ({problem}). Fix it (python3 scripts/lib/config.py "
+                "resolve-config --json lists config findings) and retry."
+            )
+            return 0
         if len(parts) < 2:
             continue
         topdir = parts[0] + "/"

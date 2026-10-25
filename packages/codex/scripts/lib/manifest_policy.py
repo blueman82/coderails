@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from . import git_common as git
-from .config import config_path, load_config
+from .config import config_path
+from .config_strict import ConfigRejected, strict_settings
 
 DEFAULT_POLICY = Path(__file__).resolve().parents[2] / "policy" / "diff-policy.default.json"
 MODES = ("off", "advisory", "enforce")
@@ -258,9 +259,8 @@ def unit_flags(arguments: list[str]) -> tuple[list[str], str, str]:
 
 def settings() -> tuple[str, str, bool]:
     """(mode, policy file, mode_invalid) from the typed config; no config file means the defaults."""
-    values, findings = load_config(config_path() or "")
-    if any(finding["code"] == "config_unreadable" for finding in findings):
-        raise ValueError("config unreadable")
+    path = config_path()
+    values = strict_settings(path) if path else {}
     mode = str(values.get("diff_manifest", "enforce"))
     configured_policy = values.get("diff_manifest_policy")
     policy = str(DEFAULT_POLICY if configured_policy is None else configured_policy)
@@ -308,6 +308,10 @@ def violations(pr: str = "", unit: str = "", progress: str = "", head: str = "")
     """
     try:
         mode, policy_file, invalid = settings()
+    except ConfigRejected as error:
+        trace(f"pr-{pr}" if pr else "config", "refused", "config_rejected")
+        print(f"! {error}", file=sys.stderr)
+        return [{"code": "config_rejected", "detail": str(error)}]
     except Exception:  # noqa: BLE001 - unreadable config must not turn the default-ON gate off or raise raw
         trace(f"pr-{pr}" if pr else "config", "refused", "manifest_internal_error")
         print("! diff_manifest manifest_internal_error: config unreadable", file=sys.stderr)

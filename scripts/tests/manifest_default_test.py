@@ -216,12 +216,12 @@ class DefaultGateTests(RepoCase):
         rows = [json.loads(x) for f in self.loop.rglob("trace.jsonl") for x in f.read_text().splitlines()]
         self.assertIn(("warned", "denied_path"), [(r["outcome"], r["reason_code"]) for r in rows])
 
-    def test_invalid_mode_is_enforce_and_reported(self) -> None:
-        """An unknown mode is treated as enforce and reported as diff_manifest_mode_invalid."""
+    def test_invalid_mode_is_rejected(self) -> None:
+        """An unknown mode is refused by the strict config reader."""
         self.commit(SECRET, "k=v\n")
-        self.assertEqual(self.refusal("diff_manifest: sometimes\n"), "diff_manifest:denied_path")
+        self.assertEqual(self.refusal("diff_manifest: sometimes\n"), "config_rejected")
         rows = [json.loads(x) for f in self.loop.rglob("trace.jsonl") for x in f.read_text().splitlines()]
-        self.assertIn("diff_manifest_mode_invalid", [r["reason_code"] for r in rows])
+        self.assertIn("config_rejected", [r["reason_code"] for r in rows])
 
     def test_missing_policy_file_refuses(self) -> None:
         """Negative control: a policy file that cannot be read refuses, never silently passes."""

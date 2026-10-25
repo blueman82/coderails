@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any, cast
 
-from graph_identity import next_attempt, task_name
+from graph_identity import GraphError, next_attempt, task_name
 
 
 def node(number: int = 1, status: str = "pending") -> dict[str, Any]:
@@ -29,6 +32,8 @@ def state() -> dict[str, Any]:
         "loop_id": "loop",
         "revision": 1,
         "status": "in-progress",
+        "created": "2026-10-24T10:00:00+00:00",
+        "authorising_prompt_raw": "Run this bounded Codex graph test.",
         "graph": {"nodes": {"U3[1]": node()}, "edges": [], "joins": {}, "active_wave": None, "hard_stop": None},
     }
 
@@ -41,6 +46,51 @@ def write_json(path: Path, value: object) -> None:
 def read_json(path: Path) -> dict[str, Any]:
     """Read a JSON fixture."""
     return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+
+
+def _completion(
+    operation: str, path: Path, session: str, evals: Path, proof: Path, retro: Path, transcript: Path
+) -> dict[str, Any]:
+    """Run a separate Codex provider process so its D4 modules do not mix with Claude imports."""
+    graph = Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts/graph.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(graph),
+            operation,
+            str(path),
+            "--session",
+            session,
+            "--evals",
+            str(evals),
+            "--proof",
+            str(proof),
+            "--retro",
+            str(retro),
+            "--transcript",
+            str(transcript),
+        ],
+        cwd=Path.home(),
+        env={**os.environ, "HOME": str(Path.home())},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        raise GraphError(result.stderr.strip())
+    return cast(dict[str, Any], json.loads(result.stdout))
+
+
+def complete(path: Path, session: str, evals: Path, proof: Path, retro: Path, transcript: Path) -> dict[str, Any]:
+    """Complete through the independent Codex CLI."""
+    return _completion("complete", path, session, evals, proof, retro, transcript)
+
+
+def verify_completion(
+    path: Path, session: str, evals: Path, proof: Path, retro: Path, transcript: Path
+) -> dict[str, Any]:
+    """Verify through the independent Codex CLI."""
+    return _completion("verify-completion", path, session, evals, proof, retro, transcript)
 
 
 def frozen_evals() -> dict[str, Any]:

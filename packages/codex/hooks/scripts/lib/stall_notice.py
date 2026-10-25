@@ -118,7 +118,14 @@ def _names(summary: dict[str, Any], key: str) -> str:
     value = summary.get(key)
     if not isinstance(value, list):
         return "-"
-    return ", ".join(str(item) for item in cast("list[object]", value)) or "-"
+    node_names = summary.get("node_names")
+    rendered: list[str] = []
+    for node_id in cast("list[object]", value):
+        names = cast("dict[str, Any]", node_names) if isinstance(node_names, dict) else {}
+        node = names.get(node_id) if isinstance(node_id, str) else None
+        display = cast("dict[str, Any]", node).get("display") if isinstance(node, dict) else None
+        rendered.append(display if isinstance(display, str) else str(node_id))
+    return ", ".join(rendered) or "-"
 
 
 def status_notice(graph: Path, state: Path, session: str, log: Callable[[str], None] = _quiet) -> str:

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 # Capabilities reached through scripts/capability.py <tool>; the others are harness-level (Write/Edit, raw Bash).
-TOOLS = ("repo.inspect", "diff.read", "tests.run", "pr.comment")
+TOOLS = ("repo.inspect", "diff.read", "tests.run", "pr.comment", "cmd.run")
 
 
 def load_profiles(root: Path) -> dict[str, Any]:

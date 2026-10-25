@@ -91,7 +91,7 @@ class ContextManifestTests(unittest.TestCase):
             self.assertNotIn("EXTREMELY_IMPORTANT", text)
             for expected in ("coderails: active=yes", "id=fixture-loop", f"owner={provider.session}", "revision=1"):
                 self.assertIn(expected, text, provider.name)
-            self.assertIn("ready=U3[1]", text)
+            self.assertIn("ready=Builder · A-1 [U3[1]]", text)
             self.assertIn("hard_stop=-", text)
             self.assertIn("skills: list via the Skill tool / native skill list", text)
             self.assertIn("route: ", text)
