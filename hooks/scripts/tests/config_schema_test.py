@@ -205,7 +205,7 @@ class ReaderTests(ConfigCase):
     """Re-pointed readers keep their old answers."""
 
     def test_integrity_toggle_and_signatures(self) -> None:
-        """Local status checks turn on only for explicit true."""
+        """Local status checks turn on for explicit true or invalid configured input."""
         with contextlib.redirect_stderr(io.StringIO()):
             self._readers()
 
@@ -219,7 +219,8 @@ class ReaderTests(ConfigCase):
         )
         self.assertFalse(integrity_enabled(self.write("integrity_review:\n  enabled: null\n")))
         self.assertFalse(integrity_enabled(self.write("integrity_review:\n  machine_user: null\n")))
-        self.assertFalse(integrity_enabled("/nonexistent"))
+        self.assertTrue(integrity_enabled("/nonexistent"))  # a configured path that cannot be read fails closed
+        self.assertFalse(integrity_enabled(""))  # no config keeps the gate inert
         self.assertTrue(require_signatures(self.write("evals:\n  require_signatures: true\n")))
         self.assertTrue(require_signatures(self.write("evals:\n  require_signatures: yes\n")))  # bad type: fail closed
         self.assertFalse(require_signatures(""))

@@ -324,10 +324,13 @@ def _section(path: str | Path, key: str) -> dict[str, Any]:
 
 
 def integrity_enabled(path: str | Path) -> bool:
-    """Keep legacy machine-user gates active until explicit config migration."""
-    settings = _section(path, "integrity_review")
+    """Keep integrity checks on for invalid config and legacy machine-user settings."""
+    values, findings = load_config(path)
+    report_findings(findings)
+    section = values.get("integrity_review")
+    settings = cast("dict[str, Any]", section) if isinstance(section, dict) else {}
     legacy = settings.get("machine_user")
-    return settings.get("enabled") is True or (isinstance(legacy, str) and bool(legacy))
+    return bool(findings) or settings.get("enabled") is True or (isinstance(legacy, str) and bool(legacy))
 
 
 def integrity_status_login(path: str | Path) -> str:

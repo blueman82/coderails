@@ -142,6 +142,27 @@ class WorkflowCliTests(unittest.TestCase):
                 self.assertEqual(merge.verify_gates("7"), head)
             integrity.assert_called_once_with(head, "github-actions[bot]")
 
+    def test_invalid_integrity_type_keeps_merge_helper_status_check(self) -> None:
+        """Quoted true is invalid, but cannot turn off the integrity status check."""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "workflow.config.yaml"
+            path.write_text('integrity_review:\n  enabled: "true"\n')
+            head = "f" * 40
+            with (
+                patch.object(merge, "config_path", return_value=str(path)),
+                patch.object(git_common, "pr_field", return_value=head),
+                patch.object(git_common, "gate_review_summary_for_pr", return_value=(0, "")),
+                patch.object(
+                    git_common, "gate_eval_summary_for_pr", return_value=git_common.EvalSummary(0, embed="{}")
+                ),
+                patch.object(merge, "smoke_verify", return_value=0),
+                patch.object(merge, "has_wiki_ingest_for_merged_prs"),
+                patch.object(merge, "verify_integrity_status") as integrity,
+                self.assertRaisesRegex(git_common.WorkflowError, "config_rejected"),
+            ):
+                merge.verify_gates("7")
+            integrity.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

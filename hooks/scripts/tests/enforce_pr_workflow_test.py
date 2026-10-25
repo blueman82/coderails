@@ -21,6 +21,43 @@ FIXTURES = Path(__file__).with_name("fixtures")
 class WorkflowGateTests(HookTestCase):
     """Replay original registration, review ordering, branches, and exact-head eval gates."""
 
+    def test_invalid_integrity_value_keeps_status_gate_on(self) -> None:
+        """A quoted Boolean cannot make the Bash merge hook skip the missing status."""
+        repo = self.git_repo("integrity_repo", "main")
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@t.t"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "T"], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        subprocess.run(
+            ["git", "-C", str(repo), "remote", "add", "origin", "https://github.com/acme/widgets.git"], check=True
+        )
+        head = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+        (repo / ".coderails").mkdir()
+        config = repo / ".coderails/workflow.config.yaml"
+        transcript = self.directory / "review.jsonl"
+        transcript.write_text(json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Skill", "input": {"skill": "pr-review-toolkit:review-pr", "args": "42"}}
+        ]}}) + "\n")  # fmt: skip
+        mock = self.directory / "mockbin"
+        mock.mkdir()
+        shutil.copyfile(FIXTURES / "pr_gh.py", mock / "gh")
+        (mock / "gh").chmod(0o755)
+        payload = {"session_id": "S1", "cwd": str(repo), "transcript_path": str(transcript),
+                   "tool_name": "Bash", "tool_input": {"command": "gh pr merge 42 --squash"}}  # fmt: skip
+        env = {"PATH": str(mock) + os.pathsep + os.environ["PATH"], "FIXTURE_HEAD_SHA": head}
+        for value in ("true", "'true'"):
+            with self.subTest(value=value):
+                config.write_text(f"integrity_review:\n  enabled: {value}\n")
+                result = self.run_hook("enforce_pr_workflow", payload, **env)
+                self.assertIn('"deny"', result.stdout)
+                self.assertIn("integrity-review status" if value == "true" else "config_rejected", result.stdout)
+                status = json.dumps([{"state": "success", "creator": {"login": "github-actions[bot]"},
+                                      "description": f"integrity=pass sha={head}"}])  # fmt: skip
+                result = self.run_hook("enforce_pr_workflow", payload, **env, MOCK_TR_STATUSES_JSON=status)
+                if value == "true":
+                    self.assertNotIn('"deny"', result.stdout)
+                else:
+                    self.assertIn("config_rejected", result.stdout)
+
     def test_original_corpus(self) -> None:
         """Every original hook input retains allow/deny behavior after native migration."""
         cases: list[dict[str, Any]] = sorted(
