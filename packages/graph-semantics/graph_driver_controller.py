@@ -161,7 +161,7 @@ def _checkout_problem(state: dict[str, Any], nodes: list[str], checkouts: Checko
             if isinstance(item, dict):
                 reference = cast(dict[str, Any], item)
                 if reference.get("kind") == "driver_worker":
-                    manifest = graph_driver_evidence.validate(path, state, node_id, reference)
+                    manifest = graph_driver_evidence.validate(path, state, node_id, reference, historical=True)
                     if Path(manifest["checkout"]) in paths:
                         return "checkout_already_used"
     return None
