@@ -8,7 +8,7 @@ import re
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, NoReturn, cast
 
-from graph_vocab import decision_pending, decision_sync_pending
+from graph_vocab import completion_pending_nodes, decision_pending, decision_sync_pending
 from node_metadata import LABELS
 from node_metadata import describe_node as _describe_node
 from node_metadata import node_names as _node_names
@@ -386,7 +386,7 @@ def can_complete(state: object) -> dict[str, Any]:
     blockers = [key for key in ("active_wave", "hard_stop") if graph[key] is not None]
     if decision_sync_pending(root):
         blockers.append("decision_sync_pending")
-    pending = sorted(node_id for node_id in graph["nodes"] if decision_pending(root, node_id))
+    pending = completion_pending_nodes(root, graph["nodes"])
     if pending:
         blockers.append("decision_pending:" + ",".join(pending))
     unfinished = sorted(node_id for node_id, node in graph["nodes"].items() if node["status"] not in SUCCESS)

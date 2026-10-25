@@ -105,6 +105,57 @@ class ProviderLifecycleTests(unittest.TestCase):
                 )
                 self.assertEqual(graph_semantics.can_complete(state), {"eligible": True, "blockers": []})
 
+    def test_empty_graph_rejects_malformed_worker_status_storage(self) -> None:
+        """Stored status shape must block completion even without registered nodes."""
+        for provider in self.providers:
+            provider.path.unlink()
+            prompt = provider.home / "prompt.txt"
+            prompt.write_text("go")
+            provider.success(
+                "start", "--session", provider.session, "--loop-id", "fixture-loop", "--prompt-file", str(prompt)
+            )
+            state = provider.read()
+            state["worker_statuses"] = {"unexpected": "object"}
+            provider.write(state)
+            provider.freeze()
+            provider.artifacts()
+            self.assertFalse(graph_semantics.can_complete(state)["eligible"])
+            before = provider.path.read_bytes()
+            result = provider.complete()
+            self.assertNotEqual(result.returncode, 0, (provider.name, result.stderr))
+            self.assertIn("decision_pending", result.stdout + result.stderr)
+            self.assertEqual(provider.path.read_bytes(), before)
+            state.pop("worker_statuses")
+            provider.write(state)
+            self.assertTrue(graph_semantics.can_complete(state)["eligible"])
+
+    def test_empty_graph_rejects_orphan_pending_worker_status(self) -> None:
+        """A pending worker answer must block completion even if its node is absent."""
+        for provider in self.providers:
+            provider.path.unlink()
+            prompt = provider.home / "prompt.txt"
+            prompt.write_text("go")
+            provider.success(
+                "start", "--session", provider.session, "--loop-id", "fixture-loop", "--prompt-file", str(prompt)
+            )
+            state = provider.read()
+            state["worker_statuses"] = [
+                {"seq": 1, "node": "U3[1]", "status": "NEEDS_DECISION", "decision_pending": True}
+            ]
+            provider.write(state)
+            provider.freeze()
+            provider.artifacts()
+            self.assertIn("decision_pending:U3[1]", graph_semantics.can_complete(state)["blockers"])
+            before = provider.path.read_bytes()
+            result = provider.complete()
+            self.assertNotEqual(result.returncode, 0, (provider.name, result.stderr))
+            self.assertIn("decision_pending:U3[1]", result.stdout + result.stderr)
+            self.assertEqual(provider.path.read_bytes(), before)
+            state.pop("worker_statuses")
+            provider.write(state)
+            released = provider.complete()
+            self.assertEqual(provider.read()["status"], "complete", (provider.name, released.stdout, released.stderr))
+
     def test_dispatch_exact_owner_scope_and_retry_name(self) -> None:
         """Foreign ownership and old attempt names cannot authorize a new native worker."""
         for provider in self.providers:

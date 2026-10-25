@@ -115,6 +115,20 @@ def decision_pending(state: dict[str, Any], node_id: str) -> bool:
     return False
 
 
+def completion_pending_nodes(state: dict[str, Any], nodes: dict[str, Any]) -> list[str]:
+    """Check stored worker answers even when their nodes are absent from the graph."""
+    rows = state.get("worker_statuses", [])
+    status_nodes: set[str] = set()
+    if isinstance(rows, list):
+        for raw in cast(list[object], rows):
+            if isinstance(raw, dict):
+                node = cast(dict[str, object], raw).get("node")
+                if isinstance(node, str) and node.strip():
+                    status_nodes.add(node)
+    pending = sorted(node_id for node_id in nodes.keys() | status_nodes if decision_pending(state, node_id))
+    return pending or (["worker_statuses"] if decision_pending(state, "") else [])
+
+
 def decision_sync_pending(state: dict[str, Any]) -> bool:
     """Block any hashed decision whose Muninn write has not reached a final accepted state."""
     rows = state.get("decisions_absorbed", [])
