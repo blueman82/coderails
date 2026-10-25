@@ -55,7 +55,7 @@ def main() -> int:
             return 0
         cwd = str(payload.get("cwd") or os.getcwd())
         mode_ = mode(cwd)
-        if mode_ == "off" or not (segments := guarded_segments(command, cwd)):
+        if mode_ == "off" or not (segments := guarded_segments(command, cwd, implicit_push=True)):
             return 0
         authority = read_authority(session)
         loop_id = authority["loop_id"] if authority else None

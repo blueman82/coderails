@@ -393,7 +393,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   key; `show` prints fingerprints), then mint for the exact command:
   `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge|git_push --command '<exact command>' --cwd <directory it runs in>`
   (single-use, 1h by default; the CLI computes repository+ref+SHA itself, signs, and refuses without a tty with
-  `receipt_refused_no_tty`; `inspect-receipt` / `revoke-receipt` take `--receipt-id`). `signer_unknown` / `trust_root_missing`
+  `receipt_refused_no_tty`; add `--loop <loop id>` when the session authority has a loop; `inspect-receipt` /
+  `revoke-receipt` take `--receipt-id`). `signer_unknown` / `trust_root_missing`
   mean the signers file does not list the key that signed (or does not exist). `hash_mismatch` means args, cwd or branch differ from the minted
   command; `sha_mismatch` means HEAD (push source) or the PR head moved since minting: re-mint. `git push origin feature:main` binds
   the sha of `feature`, not HEAD. `foreign_session` can also mean a worker whose `session_id` differs from the minter's
@@ -402,7 +403,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `cd <dir>` moves the directory the hash binds (mint with `--cwd` set to where the command really runs). The binding comes from
   `scripts/lib/action_binding.py` (push: refspec source sha and destination ref; merge: live PR head via `gh pr view`, 4s timeout);
   unknowable means `binding_unknown`, fail closed. Bindable forms only: `git [-C dir] push <remote> <ref>` (no env prefix,
-  `-c`, `--git-dir`; bare `git push` is `binding_unknown`; `HEAD` alone means the current branch; the repository is the push url) and
+  `-c`, `--git-dir`; a push without an explicit refspec is guarded but is `binding_unknown`; `HEAD` alone means the current branch; the repository is the push url) and
   `gh pr merge <n> --match-head-commit <live head sha>` (or `gh api .../merge -f sha=<sha>`). Bare
   `scripts/merge.py <n>` is unbindable under receipt enforcement because it fetches the head after the hook.
   Run ref-moving steps (`commit`, `branch -f`, `reset`, `config`, ...) as separate commands before the guarded one.

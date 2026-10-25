@@ -30,6 +30,19 @@ class MatchHardeningTests(unittest.TestCase):
         """Operation names guarded in `command`."""
         return [name for name, _, _ in match.guarded_segments(command, self.repo)]
 
+    def test_implicit_push_destination_is_guarded_and_unbindable(self) -> None:
+        """Git config can send a refspec-free push to main from a feature branch."""
+        for key, value in (("push.default", "matching"), ("remote.origin.push", "refs/heads/main:refs/heads/main")):
+            with self.subTest(config=key):
+                git(Path(self.repo), "config", key, value)
+                for command in ("git push", "git push origin"):
+                    self.assertEqual(match.guarded_segments(command, self.repo), [])
+                    found = match.guarded_segments(command, self.repo, implicit_push=True)
+                    self.assertEqual([name for name, _, _ in found], ["git_push"])
+                    self.assertIsNone(ab.binding("git_push", found[0][1], found[0][2]))
+                git(Path(self.repo), "config", "--unset", key)
+        self.assertEqual(self.names("git push origin feature"), [])
+
     def test_quoted_variable_and_glob_destinations_are_guarded(self) -> None:
         """Quoting, escaping and expansion must not hide a push to main; non-literal destinations are unbindable."""
         for command in (

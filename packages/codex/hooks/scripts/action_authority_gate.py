@@ -52,7 +52,7 @@ def main() -> int:
         cwd = text_field(payload, "cwd") or os.getcwd()
         if not isinstance(command, str) or not command or (mode_ := mode(cwd)) == "off":
             return 0
-        if not (segments := guarded_segments(command, cwd)):
+        if not (segments := guarded_segments(command, cwd, implicit_push=True)):
             return 0
         authority = read_authority(session) or {}
         loop_id = authority.get("loop_id")
