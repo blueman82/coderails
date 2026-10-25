@@ -21,6 +21,7 @@ _VALUE_FLAGS = {
     "-b", "--body", "-F", "--body-file", "-t", "--subject", "-A", "--author-email", "--match-head-commit",
     "--unit", "--progress", "-R", "--repo", "-X", "--method", "-H", "--header", "-f", "--field",
     "--raw-field", "--input", "--jq", "-q", "--template", "--hostname", "--cache", "--preview",
+    "--expected-head",
 }  # fmt: skip
 _URL = re.compile(r"https?://github\.com/([^/]+/[^/]+)/pull/(\d+)/?$", re.IGNORECASE)
 

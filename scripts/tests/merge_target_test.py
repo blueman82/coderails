@@ -79,6 +79,13 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(got, ("5", "2", "p.json"))
         self.assertEqual(merge_target.parse("python3 scripts/merge.py auto"), ("", "", ""))
 
+    def test_merge_script_expected_head_value_is_not_a_second_target(self) -> None:
+        """The pinned head is an option value; the hook still resolves the named PR."""
+        sha = "a" * 40
+        self.assertEqual(merge_target.parse(f"python3 scripts/merge.py 516 --expected-head {sha}"), ("516", "", ""))
+        self.assertEqual(merge_target.parse(f"python3 scripts/merge.py --expected-head={sha} 516"), ("516", "", ""))
+        self.assertEqual(merge_target.parse("python3 scripts/merge.py 516 --expected-head 517"), ("516", "", ""))
+
     def test_unit_flags_inline_missing_and_duplicates(self) -> None:
         """Wrapper flags support equals syntax and refuse missing or ambiguous values."""
         self.assertEqual(manifest_policy.unit_flags(["42", "--unit=2", "--progress=p.json"]), (["42"], "2", "p.json"))
