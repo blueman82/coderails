@@ -10,13 +10,9 @@ import graph_contract
 import graph_encrypted_content
 from graph_artifacts import validate_completion_evidence as validate_completion_evidence
 from graph_artifacts import validate_evals as validate_evals
-from graph_data import nonempty, object_value, read_records
+from graph_data import read_records
 from graph_identity import (
-    ENCRYPTED_REFERENCE_KEYS,
-    INVALID_DISPATCH_KEYS,
     INVALID_DISPATCH_OUTCOME,
-    REFERENCE_KEYS,
-    REFUSED_KEYS,
     REFUSED_OUTCOME,
     GraphError,
     classify_worker_evidence,
@@ -27,6 +23,9 @@ from graph_identity import (
     task_name,
 )
 from graph_recovery import RecoveryRefusedError
+from graph_scout_skip import bind as bind_skip
+from graph_scout_skip import parse_reference as _reference
+from graph_scout_skip import verify as verify_skip
 from graph_transcript import (
     child_read_records,
     child_terminal,
@@ -47,24 +46,6 @@ def _legacy_refusal(node_id: str, attempt: object) -> RecoveryRefusedError:
         f"node {node_id} attempt {attempt} carries a pre-loop-scoped task name; re-dispatch under the loop-scoped name"
     )
     return RecoveryRefusedError(LEGACY_REFUSED, message, (node_id,), attempt if isinstance(attempt, int) else None)
-
-
-def _reference(value: object, label: str) -> dict[str, Any]:
-    reference = object_value(value, label)
-    refused = set(reference) == REFUSED_KEYS and reference.get("outcome") == REFUSED_OUTCOME
-    invalid = set(reference) == INVALID_DISPATCH_KEYS and reference.get("outcome") == INVALID_DISPATCH_OUTCOME
-    encrypted = set(reference) == ENCRYPTED_REFERENCE_KEYS
-    valid = refused or invalid or encrypted or set(reference) == REFERENCE_KEYS
-    if not valid or reference.get("kind") != "codex_agent":
-        raise GraphError(f"{label} has invalid transcript reference fields")
-    attempt = reference.get("attempt")
-    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
-        raise GraphError(f"{label}.attempt must be a positive integer")
-    for key in set(reference) - {"kind", "attempt"}:
-        nonempty(reference.get(key), f"{label}.{key}")
-    if encrypted and not re.fullmatch(r"[0-9a-f]{64}", reference["message_sha256"]):
-        raise GraphError(f"{label}.message_sha256 must be a SHA-256 digest")
-    return reference
 
 
 def _verify_dispatch(
@@ -119,6 +100,8 @@ def verify_reference(
     requests: Requests,
 ) -> int:
     """Validate one stored native transcript reference and return its spawn line."""
+    if reference.get("kind") == "graph_skip":
+        return verify_skip(state, node_id, reference, indexes, refusals)
     spawns = indexes
     expected_task = task_name(state["loop_id"], node_id, reference["attempt"])
     call_id = reference["spawn_call_id"]
@@ -325,6 +308,7 @@ def bind_worker_evidence(
     active_wave: dict[str, Any],
     stale_nodes: frozenset[str] = frozenset(),
     failed_nodes: frozenset[str] = frozenset(),
+    skip_evidence: dict[str, str] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], set[str]]:
     """Bind wave records; a failed node may use its last refused spawn_agent call."""
     used: set[str] = set()
@@ -336,6 +320,11 @@ def bind_worker_evidence(
         raise GraphError("active wave has no valid transcript cursor")
     references: dict[str, dict[str, Any]] = {}
     for node_id in active_wave["nodes"]:
+        if skip_evidence and node_id in skip_evidence:
+            references[node_id] = bind_skip(
+                state, active_wave, node_id, skip_evidence[node_id], cursor, indexes, refusals
+            )
+            continue
         attempt = next_attempt(state["graph"]["nodes"][node_id])
         expected_task = task_name(state["loop_id"], node_id, attempt)
         matching = [

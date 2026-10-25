@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any, cast
 
 from .graph_evidence import child_identity, notifications, object_value, spawns, transcript
 from .graph_executor import graph_contract
+from .graph_scout_approval import approval
+
+SKIP_PREFIXES = {"S2.5": "no_design_fork:", "S2.6": "no_retired_path:"}
 
 
 def check_record(state: dict[str, Any], row: dict[str, Any]) -> None:
@@ -46,7 +50,7 @@ def provenance(value: object, depth: int = 0) -> bool:
         return any(provenance(item, depth + 1) for item in cast(list[object], value))
     if isinstance(value, str):
         normalized = re.sub(r"[^a-z_]", "", value.lower())
-        if "claude_agent" in normalized or "toolu_" in value:
+        if "claude_agent" in normalized or "graph_skip" in normalized or "toolu_" in value:
             return True
         try:
             decoded: object = json.loads(value)
@@ -76,6 +80,8 @@ def used_references(state: dict[str, Any]) -> tuple[set[str], set[str]]:
                     raise ValueError("stored evidence contains malformed native provenance")
                 continue
             item = cast(dict[str, Any], item)
+            if item.get("kind") == "graph_skip":
+                continue
             if item.get("kind") != "claude_agent" or any(
                 provenance(cast(object, value)) for value in item.values() if isinstance(value, (dict, list))
             ):
@@ -111,9 +117,38 @@ def bind_wave(state: dict[str, Any], results: dict[str, Any]) -> dict[str, list[
             for row in rows
             if row["node_id"] == node_id and row["wave_id"] == active["wave_id"] and row["line"] > boundary
         ]
+        node = state["graph"]["nodes"][node_id]
+        evidence = result["evidence"]
+        if result["outcome"] == "skipped" and isinstance(evidence, str):
+            approved = evidence.startswith("non_independent:")
+            prefix = "non_independent:" if approved else SKIP_PREFIXES.get(node_id)
+            if prefix and evidence.startswith(prefix):
+                if not evidence[len(prefix) :].strip() or node["respawn"]["generation"]:
+                    raise ValueError("scout skip needs a reason and no stale attempt")
+                if candidates:
+                    raise ValueError("scout skip cannot reuse a native spawn")
+                attempt = node["retry"]["attempts"] + 1
+                if approved:
+                    if not evidence.startswith("non_independent: human approved") or attempt < 2:
+                        raise ValueError("non-independent skip needs a prior refusal and explicit approval")
+                    approval_ref = approval(state, node_id, attempt, rows)
+                else:
+                    if attempt != 1:
+                        raise ValueError("no-work scout skip must precede any scout attempt")
+                    approval_ref = {}
+                bound[node_id] = [
+                    {
+                        "kind": "graph_skip",
+                        "attempt": attempt,
+                        "wave_id": active["wave_id"],
+                        "reason": prefix[:-1],
+                        "evidence_sha256": hashlib.sha256(evidence.encode()).hexdigest(),
+                        **approval_ref,
+                    }
+                ]
+                continue
         if not candidates:
             raise ValueError(f"node {node_id} has no native spawn after the wave cursor")
-        node = state["graph"]["nodes"][node_id]
         attempt = node["retry"]["attempts"] + node["respawn"]["generation"] + 1
         references: list[dict[str, Any]] = []
         for row in candidates:
