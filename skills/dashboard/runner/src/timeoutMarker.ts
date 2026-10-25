@@ -61,6 +61,17 @@ function readRows(contents: Buffer): RoutineRow[] {
   return rows;
 }
 
+function mergeAttemptState(routine: RoutineDef, ctx: ArtifactCheckContext): "none" | "attempt" | "unavailable" {
+  const template = routine.expectedArtifact.artifactPath.replace("{date}", "active");
+  const human = resolveArtifactPath(template, ctx);
+  try {
+    const state = JSON.parse(readFileSync(`${human.slice(0, -4)}.state.json`, "utf-8"));
+    return state.run_id === ctx.runId && state.routine === routine.name && state.merge_attempt ? "attempt" : "none";
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ENOENT" ? "none" : "unavailable";
+  }
+}
+
 // Only rows appended after the caller's prelaunch boundary can establish this invocation's terminal evidence.
 // The fallback appends remain unlocked against concurrent Python emits; its result still prevents false success.
 export function ensureTerminalRow(
@@ -85,6 +96,9 @@ export function ensureTerminalRow(
     if (own.some((row) => row.outcome === "run_incomplete" && row.reason_code === "merged_incomplete")) {
       return { passed: false, reason: "routine_merged_incomplete" };
     }
+    const mergeAttempt = mergeAttemptState(routine, ctx);
+    if (mergeAttempt === "unavailable") return { passed: false, reason: "routine_state_unavailable" };
+    const pendingMerge = mergeAttempt === "attempt";
     const ts = new Date().toISOString();
     const row = {
       v: 1,
@@ -92,13 +106,14 @@ export function ensureTerminalRow(
       run_id: ctx.runId,
       routine: routine.name,
       stage: "runner",
-      outcome: "run_abort",
-      reason_code: "runner_exit_no_terminal",
+      outcome: pendingMerge ? "run_incomplete" : "run_abort",
+      reason_code: pendingMerge ? "merge_state_unknown" : "runner_exit_no_terminal",
     };
     mkdirSync(dirname(jsonl), { recursive: true });
     appendFileSync(jsonl, `${JSON.stringify(row)}\n`);
-    if (writeMarker) appendFileSync(human, `${ts} ${resolveArtifactPath(predicate.failures[0], ctx)}runner_exit_no_terminal\n`);
-    return { passed: false, reason: "runner_exit_no_terminal" };
+    if (pendingMerge) appendFileSync(human, `${ts} incomplete=merge-unknown\n`);
+    else if (writeMarker) appendFileSync(human, `${ts} ${resolveArtifactPath(predicate.failures[0], ctx)}runner_exit_no_terminal\n`);
+    return { passed: false, reason: pendingMerge ? "routine_merge_state_unknown" : "runner_exit_no_terminal" };
   } catch (err) {
     return { passed: false, reason: `routine_log_unavailable: ${err instanceof Error ? err.message : String(err)}` };
   }

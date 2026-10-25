@@ -286,7 +286,7 @@ export async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
           // place, so there's nothing to correct for that case. A timeout
           // kill DID claim it and will never write its own terminal marker
           // now, so the runner writes the failure marker on its behalf.
-          if (execResult.spawnFailure === "timeout" && terminalResult.reason !== "routine_merged_incomplete") {
+          if (execResult.spawnFailure === "timeout" && !["routine_merged_incomplete", "routine_merge_state_unknown"].includes(terminalResult.reason)) {
             recordTimeoutMarker(routine, artifactContext);
           }
           escalate({

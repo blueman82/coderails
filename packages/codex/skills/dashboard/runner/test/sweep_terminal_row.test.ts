@@ -195,4 +195,16 @@ describe("runner terminal-row check after a routine child exits", () => {
     expect(rowsOf()).toHaveLength(1);
     expect(readFileSync(human(), "utf-8")).not.toContain("runner-timeout-kill");
   });
+
+  it.each([undefined, "timeout"] as const)("keeps a persisted merge attempt red after log loss (%s)", async (failure) => {
+    const { result, ownId } = await sweepWith((id) => {
+      writeFileSync(join(root, "run-active.state.json"), JSON.stringify({
+        v: 1, run_id: id, routine: "docs-sync",
+        merge_attempt: { number: 7, url: "https://github.com/example/test/pull/7", headRefName: "docs/fix", headRefOid: "a".repeat(40) },
+      }));
+    }, failure ? 1 : 0, failure);
+    expect(result).toMatchObject({ succeeded: 0, failed: 1 });
+    expect(rowsOf().at(-1)).toMatchObject({ run_id: ownId, outcome: "run_incomplete", reason_code: "merge_state_unknown" });
+    expect(readFileSync(human(), "utf-8")).not.toContain("abort=");
+  });
 });

@@ -382,7 +382,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 ## A routine run ended incomplete, aborted or refused
 
 - Symptom: the dashboard gate for `docs-sync` or `loop-retro-promotion` reads red; the run log's last marker is
-  `abort=incomplete-run`, `abort=<code>`, `refused=<gate>` or `incomplete=merged`.
+  `abort=incomplete-run`, `abort=<code>`, `refused=<gate>`, `incomplete=merged` or `incomplete=merge-unknown`.
 - Query: the JSONL beside the run log (`run-{date}.jsonl`, `promotion-runs.jsonl`): the last row for the newest
   `run_id` gives `stage`, `outcome` (`stage_ok`, `run_ok`, `run_abort`, `run_refused`, `run_incomplete`) and
   `reason_code`. Counters: `trace.by_reason` keys `routine/<outcome>/<reason_code>`, tallied by
