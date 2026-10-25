@@ -113,3 +113,23 @@ def decision_pending(state: dict[str, Any], node_id: str) -> bool:
             if sync.get("state") not in {"written", "disabled"}:
                 return True
     return False
+
+
+def decision_sync_pending(state: dict[str, Any]) -> bool:
+    """Block any hashed decision whose Muninn write has not reached a final accepted state."""
+    rows = state.get("decisions_absorbed", [])
+    if not isinstance(rows, list):
+        return True
+    for value in cast(list[object], rows):
+        if not isinstance(value, dict):
+            continue  # historic prose rows have no sync contract
+        row = cast(dict[str, Any], value)
+        if not row.get("row_sha256"):
+            continue
+        raw_sync: object = row.get("muninn")
+        if not isinstance(raw_sync, dict):
+            return True
+        sync = cast(dict[str, Any], raw_sync)
+        if sync.get("state") not in {"written", "disabled"}:
+            return True
+    return False

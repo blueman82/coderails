@@ -8,7 +8,7 @@ import re
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, NoReturn, cast
 
-from graph_vocab import decision_pending
+from graph_vocab import decision_pending, decision_sync_pending
 from node_metadata import LABELS
 from node_metadata import describe_node as _describe_node
 from node_metadata import node_names as _node_names
@@ -235,7 +235,7 @@ def ready(state: object) -> list[str]:
     graph = root["graph"]
     if graph["active_wave"] is not None or graph["hard_stop"] is not None:
         return []
-    if _decision_sync_pending(root):
+    if decision_sync_pending(root):
         return []
     dependencies = _dependencies(graph)
     return sorted(
@@ -246,18 +246,6 @@ def ready(state: object) -> list[str]:
         and not decision_pending(root, node_id)
         and all(graph["nodes"][source]["status"] in SUCCESS for source in dependencies[node_id])
     )
-
-
-def _decision_sync_pending(state: dict[str, Any]) -> bool:
-    """A typed decision must reach an accepted sync state before the next wave."""
-    for value in _array(state.get("decisions_absorbed", []), "decisions_absorbed"):
-        if not isinstance(value, dict):
-            continue  # historic prose rows have no sync contract
-        row = cast(dict[str, Any], value)
-        sync = _object(row.get("muninn"), "decision.muninn") if row.get("row_sha256") else {}
-        if row.get("row_sha256") and sync.get("state") not in ("written", "disabled"):
-            return True
-    return False
 
 
 def begin_wave(state: object) -> dict[str, Any]:
@@ -343,6 +331,8 @@ def respawn_stale(state: object, node_id: object, reason: object) -> dict[str, A
     reason_text = _text(reason, "reason")
     if node_key not in graph["nodes"] or graph["nodes"][node_key]["status"] != "stale":
         _error("respawn", "respawn requires a stale node")
+    if decision_sync_pending(root):
+        _error("decision_pending", "cannot retry while decision sync is pending")
     if decision_pending(root, node_key):
         _error("decision_pending", "cannot retry a node with a pending worker decision")
     node = graph["nodes"][node_key]
