@@ -31,8 +31,8 @@ subject is unclear, ask: "What specifically should I premortem?"
 
 ### Step 2: Reason adversarially
 
-Use a `<thinking>` block before the output. Examine the plan from an
-adversarial position. Consider these sources of failure:
+Examine the plan from an adversarial position. Consider these sources of
+failure:
 
 - **Assumptions:** Which assumption might be false?
 - **Execution:** Where could execution fail, even with a sound plan?
@@ -72,10 +72,6 @@ If you assess your own answer, say so. Update your recommendation if needed.
 ```
 **Premortem: [what's being assessed]**
 
-<thinking>
-[adversarial reasoning — assumption failures, execution gaps, optimism bias, unknowns]
-</thinking>
-
 **Failure modes**
 
 1. **[Name]** — [what goes wrong and why it's credible]
@@ -88,7 +84,7 @@ If you assess your own answer, say so. Update your recommendation if needed.
 [2–5 failure modes. More is usually noise.]
 
 **Verdict**
-[One short paragraph. Is the plan sound? Name the first issue to fix or watch.]
+[One short paragraph. State the main risk and first action.]
 ```
 
 ---

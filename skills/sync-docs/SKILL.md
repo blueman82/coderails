@@ -1,333 +1,93 @@
 ---
 name: sync-docs
-description: Analyze documentation drift and generate sync reports for any project. Enhanced with Serena semantic discovery for deep code analysis. Use when: "sync docs", "check documentation", "documentation drift", "doc audit", "/sync-docs". Supports --semantic flag for AI-powered undocumented code discovery.
+description: Compare project documentation with source and report concrete drift. Use for "sync docs", "check documentation", "documentation drift", "doc audit", or "/sync-docs". The --semantic option asks for deeper code discovery when a supported tool is available.
 model: sonnet
 ---
 
-# Sync Docs - Universal Documentation Synchronization
+# Sync docs
 
-Compare a codebase with its documentation. Report specific drift and
-proposed updates. Use Serena for semantic code discovery when requested.
+Compare the project's documentation with its current source. Report each
+mismatch with file references and a proposed correction. Keep the report
+about the project under review; do not use invented services or counts.
 
-## Invocation
+## Options
 
-```bash
-/sync-docs                          # Generate full drift report
-/sync-docs --check                  # Only show drift report (no suggestions)
-/sync-docs --suggest-updates        # Include proposed markdown for updates
-/sync-docs --semantic               # Use Serena for deep code discovery
-/sync-docs --compare <section>      # Deep-dive analysis of specific section
-/sync-docs --verbose                # Include detailed file references
-/sync-docs --diagrams-only          # Audit only docs/diagrams/
-```
+| Option | Result |
+|---|---|
+| `--check` | Report verified drift without proposed text. |
+| `--suggest-updates` | Include proposed Markdown for verified gaps. |
+| `--semantic` | Inspect symbols and callers when a supported semantic tool is available. |
+| `--compare <section>` | Limit the comparison to one named section. |
+| `--verbose` | Include relevant source lines and check details. |
+| `--diagrams-only` | Check diagrams and the source they describe. |
 
-## Workflow Overview
+## 1. Find the documentation
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     SYNC-DOCS WORKFLOW                                   │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  Phase 1: Discover Project Structure                                     │
-│    ├─ Identify documentation files (README, CLAUDE.md, docs/)           │
-│    ├─ Detect project type (microservices, monolithic, library)          │
-│    └─ Extract documented components and services                         │
-│                                                                          │
-│  Phase 2: Traditional Audit                                              │
-│    ├─ Compare documented vs actual components                           │
-│    ├─ Verify configuration documentation                                │
-│    ├─ Check version numbers and dates                                   │
-│    └─ Validate diagrams match code                                       │
-│                                                                          │
-│  Phase 2.5: Semantic Discovery (--semantic)          ◀── NEW            │
-│    ├─ Serena: Precise symbol extraction                                  │
-│    └─ Cross-reference: Match code entities to docs                       │
-│                                                                          │
-│  Phase 3: Generate Drift Report                                          │
-│    ├─ Prioritize findings (Critical → Low)                              │
-│    ├─ Provide specific file references                                   │
-│    └─ Include health score                                               │
-│                                                                          │
-│  Phase 4: Suggest Updates (--suggest-updates)                           │
-│    └─ Generate markdown patches for each gap                             │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+Find the project's instructions, README, architecture notes, API reference,
+configuration guide, and diagrams. Use tracked paths where possible. Record
+which files and sections you checked. A file outside the selected scope is
+not evidence that a feature is undocumented.
 
----
+Identify the source for each documented claim. Examples include a command
+handler, configuration schema, installed manifest, or generated diagram
+input. Record the source revision used for the comparison.
 
-## Phase 1: Discover Project Structure
+## 2. Check claims against source
 
-### 1.1 Identify Documentation Sources
+Check commands, defaults, configuration values, version and service counts,
+component names, links, and diagrams that appear in the selected docs.
+Read the actual implementation before calling a claim wrong. A missing text
+match alone does not prove drift.
 
-Scan for primary documentation:
-- `README.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `ARCHITECTURE.md`
-- `docs/`, `documentation/`, `wiki/`, `guides/`
-- `docs/diagrams/`, `docs/internal_documentation/`
-- API docs: `openapi.yaml`, `swagger.json`, `api-docs/`
+For each mismatch, record:
 
-### 1.2 Detect Project Type
+- The exact documentation path and claim.
+- The source path and behavior that contradict it.
+- The effect on a reader who follows the documentation.
+- The smallest text change that makes the claim accurate.
 
-| Project Type | Indicators |
-|--------------|------------|
-| Microservices | Multiple service directories, docker-compose.yml, k8s configs |
-| Monolithic | Single main application, traditional MVC structure |
-| Library | package.json/setup.py/Cargo.toml with library config |
-| Frontend | React/Vue/Angular configs, public/static directories |
-| Serverless | serverless.yml, SAM templates, Lambda functions |
+Separate a dated historical record from current operating instructions.
+Preserve the historical statement; add a dated current note when needed.
 
-### 1.3 Extract Documented Elements
+## 3. Inspect omitted code when requested
 
-From discovered documentation:
-- Services/components with descriptions
-- Architecture patterns and design decisions
-- Technology stack and dependencies
-- Feature flags and configuration options
-- Deployment procedures
-- Container/service counts
+With `--semantic`, use an available, supported code-navigation tool to find
+symbols and callers that the selected docs might omit. If a Serena MCP
+server is available and the project is active, its symbol tools can help.
+Check the live tool names and argument contract before calling it; this
+skill does not define a portable Serena API. If no semantic tool is
+available, use repository search and source reads, and report that limit.
 
----
+A symbol with no text match in documentation is a lead, not a finding.
+Confirm that the behavior is public or operationally relevant before
+reporting a documentation gap. Cite the source and the searched doc scope.
 
-## Phase 2: Traditional Audit
+## 4. Report
 
-### 2.1 Component Verification
-
-```bash
-# Compare documented services to actual directories
-ls -d */ | grep -v node_modules
-```
-
-- Check if all discovered services/modules are documented
-- Identify orphaned documentation (describes non-existent components)
-- Validate inter-component dependencies
-
-### 2.2 Configuration Audit
-
-If infrastructure files exist:
-- Extract environment variables from docker-compose.yml
-- Compare against documented configuration
-- Identify undocumented feature flags
-- Check container counts (documented vs actual)
-
-### 2.3 Version and Date Check
-
-- Verify version numbers match latest release
-- Check "Last Updated" dates aren't stale
-- Validate service counts in documentation
-
----
-
-## Phase 2.5: Semantic Discovery (--semantic flag)
-
-When the user passes `--semantic`, use Serena MCP for code discovery.
-
-### Prerequisites
-
-- Serena MCP server running with project activated
-
-### Step 1: Compare to Documentation
-
-For each discovered file:
-1. Check if file/class is mentioned in any documentation
-2. If NOT mentioned → flag as **UNDOCUMENTED**
-
-### Step 3: Serena Precise Navigation
-
-For each undocumented entity, extract precise details:
-
-```javascript
-// Execute via mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
-
-// First activate project
-await serena.activate_project({ project: "/path/to/project" });
-
-// Get symbol overview for each discovered file
-const symbols = await serena.get_symbols_overview({
-  relative_path: "path/to/undocumented/file.py"
-});
-// Returns: { Class: ['ClassName'], Function: ['func_name'], Constant: [...] }
-
-// For deeper analysis
-const classDetails = await serena.find_symbol({
-  name: "DiscoveredClassName",
-  symbol_type: "class"
-});
-```
-
-**Extract for documentation:**
-- Class names and purposes
-- Method signatures
-- Constants and configuration values
-- Protocol/interface definitions
-- Dependencies on other services
-
-### Step 4: Generate Semantic Discovery Report
+Use this structure:
 
 ```markdown
-## Semantic Discovery Findings (Serena)
+# Documentation drift report
 
-### Undocumented Code Discovered
+Source revision: <commit>
+Documentation scope: <paths or sections>
+Checks: <checks run and limits>
 
-#### 1. [Component Name]
-- **Source Files**: `path/to/file.py`
-- **Classes** (Serena): ClassName1, ClassName2
-- **Protocols**: ProtocolName1, ProtocolName2
-- **Missing From**: doc1.md, doc2.md
-- **Recommended Action**: Add section following [existing pattern]
+## Confirmed drift
 
-### Coverage Summary
-- Files discovered via Serena: X
-- Undocumented entities: Y
-- Documentation coverage: Z%
+1. <Short finding>
+   - Docs: <path and claim>
+   - Source: <path and observed behavior>
+   - Effect: <reader impact>
+   - Correction: <specific text change>
+
+## Leads that need verification
+
+- <Lead and missing evidence, if any>
 ```
 
----
-
-## Phase 3: Generate Drift Report
-
-### Report Format
-
-```markdown
-# Documentation Drift Report - [Project Name]
-
-## Overall Health Score
-[X% of documentation is current and accurate]
-
-## Critical Updates Needed
-[Blocks understanding or deployment]
-- [ ] Item with file reference
-
-## High Priority Updates
-[Impacts daily workflow]
-- [ ] Item with file reference
-
-## Medium Priority Updates
-[Improves clarity]
-- [ ] Item with file reference
-
-## Low Priority Updates
-[Minor improvements]
-- [ ] Item with file reference
-
-## Semantic Discovery Findings (if --semantic)
-[Undocumented code patterns found]
-
-## Detailed Action Items
-### 1. [File Path]
-- **Current state**: [what's documented]
-- **Actual state**: [what's in codebase]
-- **Suggested update**: [markdown snippet]
-
-## Summary
-- Total gaps: X
-- Critical: Y
-- From semantic discovery: Z
-```
-
----
-
-## Phase 4: Present Results
-
-| Flag | Behavior |
-|------|----------|
-| `--check` | Report only, no suggestions |
-| `--suggest-updates` | Include proposed markdown patches |
-| `--semantic` | Run Serena semantic discovery (Phase 2.5) |
-| `--compare <section>` | Deep-dive single section |
-| `--verbose` | Include line numbers and full context |
-| `--diagrams-only` | Audit visual documentation only |
-
----
-
-## When to Use `--semantic`
-
-**Best for:**
-- After major refactoring or new service deployment
-- When documentation health score is low
-- Comprehensive quarterly audits
-- When you suspect undocumented features exist
-- Large codebases where manual discovery is impractical
-
-**Serena checks:**
-- Find code that the documentation omits.
-- Inspect that code to describe its purpose.
-
----
-
-## Examples
-
-### Basic Drift Check
-```
-User: /sync-docs --check
-Claude:
-Scanning project structure...
-Found 4 documentation files, 7 services
-
-Documentation Drift Report - myproject
-
-Health Score: 68%
-
-Critical:
-- [ ] CSOPM Notifier missing from 04-background-services.md
-
-High:
-- [ ] Container count wrong (docs: 11, actual: 12)
-- [ ] Version stale (docs: v2.360.347, actual: v2.360.369)
-```
-
-### With Semantic Discovery
-```
-User: /sync-docs --semantic
-Claude:
-Phase 1: Discovering project structure...
-Phase 2: Traditional audit...
-Phase 2.5: Semantic discovery with Serena...
-
-Serena found 13 files related to "scheduler service background" and extracted: CSOPMScheduler, CSOPMJIRAPoller, CSOPMSlackNotifier...
-
-Semantic Discovery Findings:
-- notifier_service/ (7 files) - UNDOCUMENTED
-  Classes: CSOPMScheduler, CSOPMJIRAPoller, CSOPMSlackNotifier,
-           CSOPMReminderService, CSOPMTicketStatusPoller
-  Protocols: 9 TypedDI protocols in csopm_protocols.py
-  Missing from: All diagram docs, feature_flags.md
-
-Health Score: 52% (dropped due to semantic findings)
-```
-
-### Generate Update Suggestions
-```
-User: /sync-docs --suggest-updates
-Claude:
-[Full report plus:]
-
-Suggested Updates:
-
-### For 04-background-services.md
-
-Add after section 6:
-
-```markdown
-### 7. notifier-service (SINGLETON)
-
-**Purpose:** Automated CSOPM ticket assignment notifications
-
-**Schedule:** 08:00 and 16:00 UTC daily
-
-**Services:**
-- CSOPMJIRAPoller - Poll JIRA for assignments
-- CSOPMSlackNotifier - Send Slack DMs
-- CSOPMReminderService - RCA/closure reminders
-...
-```
-```
-
----
-
-## Notes
-
-- Tool adapts to any project structure
-- Configuration optional (auto-discovery handles most cases)
-- Prioritization focuses effort on important gaps
-- `--semantic` requires Serena project activation
-- Health score accounts for both traditional and semantic findings
+Order confirmed drift by effect on the reader. Do not invent a health
+score from an undefined denominator. If `--check` is set, omit the
+`Correction` field. If `--suggest-updates` is set, include concise Markdown
+for each confirmed correction. State when a tool, source, or target surface
+was unavailable.

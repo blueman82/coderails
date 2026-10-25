@@ -29,8 +29,9 @@ interface Intent {
 ```
 
 `parseIntent(raw: unknown): Intent` validates input and returns a typed
-`Intent`. It throws `IntentValidationError` for malformed input. Each build
-runs `test/schema-compat.test.ts`. That test checks this type against the
+`Intent`. It throws `IntentValidationError` for malformed input. The
+package's `npm test` command runs `test/schema-compat.test.ts` through Vitest.
+That test checks this type against the
 Obsidian plugin's `IntentFile` type so the two types stay compatible.
 
 The Obsidian button writes `source: "obsidian"`. The runner's routine seed
@@ -63,8 +64,9 @@ claimed by rename (never copied, never edited in place):
 2. `processing/<runId>.json` — claimed by the runner via `fs.renameSync`.
    The atomicity of a same-filesystem rename is what prevents two runner
    instances from double-claiming the same intent.
-3. On success: `archive/<runId>.json` — never deleted, subject to a
-   configurable retention prune.
+3. On success: `archive/<runId>.json`. The current runner moves the file
+   here and does not prune this directory. Retention pruning is a future
+   operational decision.
 4. On malformed input (fails `parseIntent`): `quarantine/<runId>.json` —
    the sweep continues past it rather than crash-looping.
 

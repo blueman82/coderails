@@ -41,7 +41,9 @@ shared principles and MCP analysis.
 
 ## Phase 1: MCP Environment Setup
 
-Before analysis, activate Serena for the current project.
+Check whether this session provides Serena. If it does, activate the
+current project. Do not run the example below when its named tool is
+absent. If Serena is unavailable, use Read, Grep, and Glob.
 
 ```javascript
 // Execute via mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
@@ -57,8 +59,6 @@ if (hasSerena) {
   await serena.activate_project({ project: process.cwd() });
 }
 ```
-
-If Serena is unavailable, use Read, Grep, and Glob for file analysis.
 
 ---
 
@@ -94,7 +94,8 @@ async function checkYAGNI(symbolName) {
 }
 ```
 
-**YAGNI rule:** If `referenceCount === 0` and symbol is not exported/public, flag for deletion.
+**YAGNI rule:** A private symbol with no found references is a lead.
+Check dynamic calls and external use before you flag it for deletion.
 
 ### 2.3 Symbol Depth Analysis (Law of Demeter)
 
@@ -232,14 +233,14 @@ Read the file extension. **Invoke the matching language skill:**
 
 ### Step 3: Fix or Flag
 
-**Fix directly** (LSP-confirmed safe):
+**Fix after checking behavior and tests:**
 - Naming convention violations
 - Missing type hints
 - Redundant `else` after `return`
 - Verbose patterns with idiomatic replacements
 - Unused imports
 
-**Flag to user** (need confirmation):
+**Flag for review when behavior or ownership is unclear:**
 - Removing functions with 0 references
 - Collapsing single-method class
 - Extracting duplicated code

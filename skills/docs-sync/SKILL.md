@@ -239,7 +239,7 @@ merge rail.
 
 It must NEVER edit `INSTALLATION.md`'s workflow-tools/claude-guardrails
 migration section — those names document live installer behaviour
-(`install.py:232` hard-exits on them) and are not documentation drift for
+(`scripts/installer/claude.py:29-40` refuses those installed plugins) and are not documentation drift for
 this routine to "fix."
 
 It never "fixes" a doc to match code it has not read — no guessing. If

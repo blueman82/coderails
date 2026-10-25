@@ -30,7 +30,9 @@ Coderails-owned hooks, workflow helpers, launchers, and tests are Python. The ru
 
 ### Quoting & Expansion
 - **Quote every variable expansion** unless you specifically want word-splitting or globbing (`"$var"`, not `$var`). Unquoted expansions are the single most common source of bugs when a value contains spaces, globs, or is empty.
-- **Quote command substitutions too**: `local x="$(cmd)"`, not `local x=$(cmd)` used later unquoted.
+- **Quote command substitutions.** To keep the command's exit status,
+  declare and assign separately: `local x; x="$(cmd)"`. A combined
+  `local x="$(cmd)"` assignment reports `local`'s status instead.
 - **Prefer `"${arr[@]}"` over `${arr[*]}`** when iterating or passing an array — `[@]` preserves element boundaries, `[*]` flattens to one word.
 - **Use `printf '%s\n'` instead of `echo`** for arbitrary or untrusted content. Shells interpret some `echo` options differently. For example, input of `-n` can change the behavior of `echo "$user_input"`.
 

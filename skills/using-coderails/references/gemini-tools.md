@@ -43,12 +43,14 @@ prompt yourself. On Gemini CLI:
 | Names a reviewer agent (`pr-review-toolkit:code-reviewer`, `coderails:spec-reviewer`, `coderails:source-auditor`) | Same, but state the read-only constraint explicitly in the prompt — `generalist` still has write tools |
 | Inline prompt (no agent named) | `invoke_agent` with `agent_name: "generalist"` and your inline prompt |
 
-The read-only note matters, and the Claude Code side is weaker than it looks:
-only `coderails:spec-reviewer` truly withholds write tools via its `tools:` list.
-`coderails:source-auditor` disallows `Write`/`Edit` but keeps `Bash`, and
-`pr-review-toolkit:code-reviewer` declares no `tools:` key at all, so it has full
-access. On Gemini CLI there is no tool-level enforcement either way, so state the
-read-only constraint explicitly in the prompt for every reviewer or auditor.
+The read-only note matters. The current Coderails Claude agent files give
+`spec-reviewer` only Read, Grep, and Glob. The guarded `source-auditor`,
+`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, and
+`preflight-scout` files use scoped capability tools and withhold Bash and
+write tools. An external reviewer such as `pr-review-toolkit:code-reviewer`
+has its own tool policy; inspect that role before dispatch. Gemini's
+`generalist` does not inherit these Claude tool limits. State the read-only
+rule in its prompt, and treat it as an instruction rather than a tool boundary.
 
 ### Prompt filling
 

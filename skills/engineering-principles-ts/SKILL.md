@@ -43,7 +43,7 @@ paths: "**/*.ts,**/*.tsx"
 
 | Pattern | Before | After |
 |---------|--------|-------|
-| Optional chaining | `user && user.profile && user.profile.name` | `user?.profile?.name` |
+| Optional chaining | `user && user.profile && user.profile.name` | Use `user?.profile?.name` only when returning `undefined` instead of `null` or another false-like value is acceptable. |
 | Nullish coalescing when false-like values are valid | `value \|\| 'default'` | `value ?? 'default'` preserves `0`, `false`, and `''`; confirm that behavior is intended. |
 | Object shorthand | `{ name: name, age: age }` | `{ name, age }` |
 | Template literal | `'Hello ' + name + '!'` | `` `Hello ${name}!` `` |
@@ -61,7 +61,7 @@ Find these patterns and replace them with the matching TypeScript idiom.
 | Anti-Pattern | Replacement | Example |
 |-------------|-------------|---------|
 | `for` loop with `push` | `.map()` / `.filter()` / `.reduce()` | `for (const x of items) { result.push(f(x)); }` → `items.map(x => f(x))` |
-| `for` loop with conditional push | `.filter()` then `.map()` | `for (x of items) { if (pred(x)) result.push(f(x)); }` → `items.filter(pred).map(f)` |
+| Pure `for` loop with conditional push | `.filter()` then `.map()` | Use `items.filter(pred).map(f)` only when callback side effects, call arguments, and their order do not matter. |
 | `for` loop with `break` | `.find()` / `.some()` / `.every()` | `for (x of items) { if (pred(x)) { found = x; break; } }` → `items.find(pred)` |
 | Nested `for` loops | `.flatMap()` | `for (a of lists) { for (b of a) { ... } }` → `lists.flatMap(a => a.map(...))` |
 | Index-based `for (let i)` | `for...of` / `.forEach()` / `.entries()` | `for (let i = 0; i < arr.length; i++)` → `for (const [i, val] of arr.entries())` |

@@ -5,9 +5,11 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 | Action skills request | Copilot CLI equivalent |
 |----------------------|----------------------|
 | Read a file | `view` |
-| Create / edit / delete a file | `apply_patch` (Copilot CLI has no separate create/edit/write tools) |
+| Create a file | `create` or `apply_patch` |
+| Edit a file | `edit` or `apply_patch` |
+| Delete a file | `apply_patch` |
 | Run a shell command | `bash` |
-| Search file contents | `rg` (ripgrep; Copilot CLI does not expose a `grep` tool) |
+| Search file contents | `grep` or `rg` |
 | Find files by name | `glob` |
 | Fetch a URL | `web_fetch` |
 | Search the web | `web_search` |
@@ -17,6 +19,10 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 | Subagent status/output/control | `read_agent`, `list_agents`, `write_agent` |
 | Task tracking ("create a todo", "mark complete") | `update_todo` |
 | Enter / exit plan mode | No equivalent — stay in the main session |
+
+The [Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)
+lists the current file, search, and agent tools. Check the live tool list
+if your installed version differs.
 
 ## Instructions file
 

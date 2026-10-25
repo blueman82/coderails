@@ -43,7 +43,9 @@ Starting from `repo`, check each directory up to its git root; the first config 
 - `wiki_path` — the wiki vault path. Resolve a relative path from the project
   repo root. Use an absolute path as given. This is `vault` below.
 - `wiki_git_worktree` — whether to use worktree/PR flow (`true`) or write directly (`false`).
-  Default when absent: **`true`** (PR flow) — the fail-safe choice, since defaulting to direct-write would silently start committing straight to the vault for a project that expected review.
+  If absent or `null`, use **`true`** (PR flow). The config loader
+  preserves an explicit `null`, so resolve it before choosing a write path.
+  This avoids a direct write when a project expected review.
 - `wiki_git_bypass_flag` — env var for PR creation/merge (e.g. `BYPASS_REVIEW=1`)
 - `wiki_git_pull_path` — path to pull after merge. Default when absent: skip the post-merge pull.
 - `wiki_stale_days` — age in days before a page becomes a **candidate** for the

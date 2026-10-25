@@ -63,8 +63,8 @@ the code shorter and clearer.
 | Manual string building in loop | `strings.Builder` or `strings.Join` | `s += item + ","` → `b.WriteString(item)` |
 | Append without pre-allocation | `make([]T, 0, len(src))` when size known | `var result []T` → `result := make([]T, 0, len(src))` |
 | Manual map building without size | `make(map[K]V, len(src))` when size known | `m := map[K]V{}` → `m := make(map[K]V, len(src))` |
-| Manual contains check on slice | `map[T]bool` or `map[T]struct{}` lookup | `for _, v := range items { if v == target }` → `if lookup[target]` |
-| Range over index only | Use `_` or range value directly | `for i := range items { items[i].X }` → `for _, item := range items { item.X }` |
+| Repeated contains checks on the same slice | Build a set once when many lookups justify it | Keep a direct loop or use `slices.Contains` for one check. Build `lookup` before reading `lookup[target]`. |
+| Range over index only | Use a range value when a copy is sufficient | Keep `for i := range items` when assigning through `items[i]` or taking its address. |
 | Manual reverse iteration | Reverse index when the slice must stay unchanged | `slices.Reverse(s)` mutates the slice; use it only when that mutation is intended. |
 | Manual min/max in loop | `min()`/`max()` builtins (1.21+) | `if x < current { current = x }` → `current = min(current, x)` |
 | Manual slice contains | `slices.Contains` (1.21+) | `for _, v := range s { if v == target }` → `slices.Contains(s, target)` |

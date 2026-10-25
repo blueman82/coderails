@@ -17,13 +17,18 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 ## Instruction Priority
 
-coderails skills override default system prompt behavior, but **user instructions always take precedence**:
+Follow the runtime instruction hierarchy. A Coderails skill gives task
+guidance within that hierarchy. Apply these priorities:
 
-1. **User's explicit instructions** (CLAUDE.md, GEMINI.md, AGENTS.md, direct requests) — highest priority
-2. **coderails skills** — override default system behavior where they conflict
-3. **Default system prompt** — lowest priority
+1. **System and developer instructions** — highest priority.
+2. **User instructions** — direct requests and applicable project instruction
+   files, subject to higher-priority instructions.
+3. **Coderails skills** — follow them unless a higher-priority instruction
+   conflicts.
 
-If CLAUDE.md, GEMINI.md, or AGENTS.md says "don't use TDD" and a skill says "always use TDD," follow the user's instructions. The user is in control.
+If a user or applicable project instruction says not to use TDD and a skill
+says to use it, follow the user or project instruction unless a higher
+priority instruction requires TDD.
 
 ## How to Access Skills
 

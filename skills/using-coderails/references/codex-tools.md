@@ -10,7 +10,7 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 | Search file contents | `exec_command` with `rg` |
 | Find files by name | `exec_command` with `rg --files` or `find` |
 | Fetch a URL | the available web tool, or `exec_command` with `curl` when appropriate |
-| Search the web | `web_search` (enabled by default; configurable in `config.toml` via the top-level `web_search` setting — `live`, `cached`, or `disabled`) |
+| Search the web | Use the web-search tool exposed by the current Codex host. Its name and availability can differ by host. |
 | Invoke a skill | Skills load natively — just follow the instructions |
 | Dispatch a subagent (a skill naming an agent, e.g. `coderails:loop-worker`) | `spawn_agent` (see [Subagent dispatch requires multi-agent support](#subagent-dispatch-requires-multi-agent-support)) |
 | Multiple parallel dispatches | Multiple `spawn_agent` calls in one response |
@@ -28,14 +28,12 @@ User-level skills live at **`$CODEX_HOME/skills/`** (default `~/.codex/skills/`)
 
 ## Subagent dispatch requires multi-agent support
 
-Add to your Codex config (`~/.codex/config.toml`):
-
-```toml
-[features]
-multi_agent = true
-```
-
-This enables `spawn_agent` and `wait_agent` for skills such as `superpowers:dispatching-parallel-agents` and `superpowers:subagent-driven-development`. The current collaboration surface has no `close_agent`; a completed agent frees its slot.
+Before a skill delegates, check whether this session exposes `spawn_agent`
+and `wait_agent`. Multi-agent support is set by the host at session start;
+do not assume a repository skill can enable it. If the tools are absent,
+use the host's documented setup or keep dependent work in the main session.
+The current collaboration surface has no `close_agent`; a completed agent
+frees its slot.
 
 Legacy note: Codex builds before `rust-v0.115.0` exposed spawned-agent
 waiting as `wait`. Current Codex uses `wait_agent` for spawned agents. The
