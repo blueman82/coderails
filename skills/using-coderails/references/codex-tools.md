@@ -16,11 +16,16 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 | Multiple parallel dispatches | Multiple `spawn_agent` calls in one response |
 | Wait for subagent result | `wait_agent` |
 | Free up a subagent slot | Wait for the agent to finish; this tool surface has no `close_agent` |
-| Task tracking ("create a todo", "mark complete") | `update_plan` |
+| Task tracking ("create a todo", "mark complete") | Use a plan tool when the host exposes one. Otherwise keep a concise checklist in the session or an approved work file. |
 
 ## Instructions file
 
-On Codex, "your instructions file" means **`AGENTS.md`** at the project root. Codex also reads `~/.codex/AGENTS.md` for global context. An `AGENTS.override.md` in the project tree or `~/.codex/` takes precedence. Codex loads `AGENTS.md` files from the project root down to the current directory. The default `project_doc_max_bytes` limit is 32 KiB.
+On Codex, project instructions commonly come from **`AGENTS.md`** at the
+project root and applicable nested paths. A host can also supply an
+`AGENTS.md` block in the user input. Global instructions may come from
+`~/.codex/AGENTS.md`; an applicable `AGENTS.override.md` takes precedence.
+Check the instruction sources presented in this session. A host can cap
+the bytes it loads from project files.
 
 ## Personal skills directory
 

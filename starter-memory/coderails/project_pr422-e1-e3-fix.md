@@ -1,6 +1,6 @@
 ---
 name: pr422-e1-e3-fix-and-rerun
-description: PR #422 exact-head investigation, root-cause fixes, and fresh E1-E3 eval rerun handoff.
+description: Historical PR #422 E1-E3 investigation and eval rerun handoff. Its old PR head and shell paths are not current instructions.
 type: project
 ---
 

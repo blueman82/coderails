@@ -1,6 +1,6 @@
 ---
 name: stop-hook-human-escalation
-description: Repair Claude and Codex loop-stop handling so an unresolved graph raises one clear human approval instead of repeated raw hook prompts.
+description: Historical Stop-hook repair handoff. Current Python hook paths supersede the shell entry points recorded here.
 type: project
 ---
 

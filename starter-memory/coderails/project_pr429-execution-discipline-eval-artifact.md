@@ -1,6 +1,6 @@
 ---
 name: pr429-execution-discipline-eval-artifact
-description: PR #429 execution-discipline rename and Bash worktree-detection fix, awaiting only the exact-head eval PR artifact.
+description: Historical PR #429 execution-discipline and eval-artifact handoff. Its pending-artifact claim is dated.
 type: project
 ---
 

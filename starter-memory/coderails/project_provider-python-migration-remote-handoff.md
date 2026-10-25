@@ -1,6 +1,6 @@
 ---
 name: provider-python-migration-remote-handoff
-description: Continue the incomplete two-provider Python clean cutover from the pushed feature branch on another computer.
+description: Historical remote-machine handoff for the two-provider Python cutover. Its branch and unfinished-work claims are dated.
 type: project
 ---
 

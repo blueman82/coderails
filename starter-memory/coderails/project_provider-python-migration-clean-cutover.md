@@ -1,6 +1,6 @@
 ---
 name: provider-python-migration-clean-cutover
-description: Resume the approved clean-cutover migration of both Coderails providers to Python and a single current graph contract.
+description: Historical Python migration handoff. The current checkout uses Python entry points and schema 3; its old resume details are closed.
 type: project
 ---
 

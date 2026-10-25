@@ -32,7 +32,10 @@ priority instruction requires TDD.
 
 ## How to Access Skills
 
-**Never read skill files manually with file tools** — always use your platform's skill-loading mechanism so the skill is properly activated.
+Use the skill-loading mechanism that your platform provides. Claude Code
+uses `Skill`; Gemini CLI uses `activate_skill`; Codex loads skills natively.
+Antigravity and Pi load a `SKILL.md` through their file-read tools when no
+dedicated skill tool is available. Use their linked mappings below.
 
 **In Claude Code:** Use the `Skill` tool. When you invoke a skill, its content is loaded and presented to you — follow it directly.
 

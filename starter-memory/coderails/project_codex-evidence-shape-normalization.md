@@ -1,6 +1,6 @@
 ---
 name: Codex evidence tampering closure
-description: Close the remaining Codex evidence-encoding bypass and require an independent exact-head tampering audit before merge.
+description: Historical Codex evidence-normalization handoff. Current Python parsers and adversarial tests supersede its open-repair status.
 type: project
 ---
 

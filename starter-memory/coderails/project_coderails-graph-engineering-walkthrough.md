@@ -1,6 +1,6 @@
 ---
 name: Coderails graph-engineering walkthrough
-description: Current verified baseline and teaching contract for a complete example-first walkthrough of Claude and Codex graph engineering.
+description: Historical pre-cutover baseline for an example-first walkthrough of Claude and Codex graph engineering.
 type: project
 ---
 

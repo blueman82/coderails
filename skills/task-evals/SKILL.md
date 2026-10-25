@@ -1,6 +1,6 @@
 ---
 name: task-evals
-description: 'Use at task intake, before implementation starts, to turn any non-trivial task into a frozen, graded set of independent, game-resistant success evals — inside an agentic loop or not. Trigger at loop scope (per-loop and per-work-unit), when a plan is written, or directly on user request. Produces a frozen evals.json (schema_version 1) defining game-resistant success evals for a task, designed to gate merge at pr scope and loop completion at loop scope. Not self-verification — evals must not share an oracle with the implementation.'
+description: Freeze independent, game-resistant task evals before implementation. Use at task intake, in an agentic loop, when writing a plan, or on direct request. Grade them for PR merge or loop completion.
 effort: high
 ---
 
@@ -60,9 +60,16 @@ This runs once per eval, immediately before freezing. An eval that fails the sel
 
 ## Freeze-time smoke-run (mandatory, separate from the gameability self-check)
 
-Immediately before freezing, execute every scripted eval's `cmd` and its `negative_control` once, for real, and read the raw output. This is a different question from rule 2 and from the self-check above: the negative control proves a check *can fail*; the smoke-run proves the check *can execute at all*. A negative control can pass cleanly while the `cmd` it pairs with never runs — so passing the self-check does not satisfy this step, and this step does not substitute for the self-check either. Both are required.
+Immediately before freezing, run each scripted `cmd` and its
+`negative_control`. Read their raw output. The negative control proves
+that a check can fail. The smoke-run proves that each command can run.
+A control can work when its paired `cmd` does not. Keep the gameability
+self-check and smoke-run as separate required steps.
 
-A broken instrument looks like this in the raw output: a reporter-loading error instead of a test summary, a module-resolution error (e.g. `ERR_MODULE_NOT_FOUND`) instead of an install log, a stack trace where an assertion result should be, or a gate/policy denial instead of the command's own output. In every case the tell is the same — the output shows the command never reached the artifact it claims to check, even though the process exited non-zero and would otherwise read as a passing "fail."
+A broken check can show a reporter-load or module-resolution error instead
+of a test result. A stack trace or gate denial can also show that it never
+reached the target artifact. Do not count that nonzero exit as a valid
+content failure.
 
 What to do on discovery depends on timing: at freeze time the file is not yet frozen, so a broken `cmd` or `negative_control` is simply rewritten and re-run — no amendment needed, nothing to record. Discovered after `frozen_at`/`frozen_sha` are stamped, it goes through the amendment path instead: recorded reason, assertion left unchanged, and if a grader verdict already exists for that eval, a fresh re-grade per rule 5.
 
@@ -104,7 +111,10 @@ This is the pass/skip/fail distinction applied where it is load-bearing: "did no
 
 ## Discriminating-check gate (mechanical, optional, `fixtures`-only)
 
-A frozen, blind-authored scripted check can be broken in itself — incapable of ever passing (false alarm) or ever failing (vacuous) — and the smoke-run above does not catch this, because it only proves the check *executes*, not that its verdict *tracks the input*. Real instance (loop 8b69e779): an awk formula that exited 1 unconditionally, so a genuine 39/39 pass and a genuine 18/40 fail produced identical exit codes and could never pass for any code state.
+A scripted check can be unable to pass or unable to fail. The smoke-run
+proves only that it executes. It does not prove that its result changes
+with input. In loop 8b69e779, an awk formula always exited 1. It gave
+the same result for a genuine 39/39 pass and an 18/40 fail.
 
 An eval may carry an optional `fixtures` object on top of the schema below:
 
@@ -112,19 +122,43 @@ An eval may carry an optional `fixtures` object on top of the schema below:
 "fixtures": { "good": "<sample stdin that SHOULD pass>", "bad": "<sample stdin that SHOULD fail>", "formula": "<optional: the verdict-stage command; if absent, derived as the segment after the LAST top-level pipe in cmd>" }
 ```
 
-When present, `scripts/post_evals.py validate-discriminating` pipes `fixtures.good` and `fixtures.bad` into the formula and requires opposite outcomes (good exits 0, bad exits non-zero) — rejecting the eval, by name, if both fixtures produce the same exit code (non-discriminating) or if the formula can't be reasonably derived from `cmd` (fail-closed, asks the author to supply `fixtures.formula` explicitly). The derivation splits on the last top-level pipe by text position, not shell syntax — a quoted pipe (e.g. inside an `awk` or `grep` pattern) forces `fixtures.formula` to be supplied explicitly, since the split would otherwise land inside the quoted string.
+When `fixtures` is present, `scripts/post_evals.py validate-discriminating`
+pipes `fixtures.good` and `fixtures.bad` into the formula. Good input
+must exit 0; bad input must exit nonzero. The command rejects an eval
+when both give the same exit code. It also rejects an eval when it cannot
+derive the formula from `cmd`. Supply `fixtures.formula` in that case.
+The derivation splits at the last top-level pipe by text position, not
+by shell syntax. A quoted pipe in an awk or grep pattern therefore needs
+an explicit formula.
 
-**Honest boundary, stated plainly:** this gate validates only checks that carry `fixtures`. Checks without `fixtures` are grandfathered — validated exactly as they were before this gate existed, with zero behaviour change. Adding `fixtures` to an eval is opt-in, never retroactive: freezing this gate does NOT retroactively validate any existing eval or evals.json that predates it, and an author who never adds `fixtures` gets no discrimination proof at all. And even where `fixtures` is present, a pass only proves the formula CAN discriminate between these two specific inputs — it proves nothing about whether the formula tests the RIGHT claim, whether `cmd` and `fixtures.formula` stay in sync after edits, or whether the fixtures themselves are representative. This gate closes the "never fails" class of defect; it is not a general correctness proof of the check.
+This gate checks only evals with `fixtures`. Existing evals without them
+keep their earlier validation. Adding fixtures is optional and does not
+retroactively test old evals. A pass proves that the formula distinguishes
+these two inputs. It does not prove that the formula tests the right
+claim, stays aligned with `cmd`, or covers other inputs.
 
 ## Verification level rules (self-exemption defence)
 
 Concrete predicates, not vibes — same design rationale as agentic-loop Phase 2.6's "what named thing does this remove?" test for disposition.
 
-- **Verification level 0 (exempt, justified):** single work-unit AND no outward/irreversible surface AND an existing test or verify-criterion already covers the goal state. The exemption is still a written artifact — the gates accept a justified exemption, never an absence. Anything rule 6 names — something a human sees or interacts with (a UI, CLI output, a rendered artifact, a served endpoint) — **is** an outward surface for this predicate: a user-facing change is minimum verification_level 1 and carries rule 6's ≥1 P0 drive-the-artifact eval. (This widens only the verification_level-0 test: verification_level 2's outward predicate stays scoped to its own parenthetical list — publish, deploy, migration, data deletion, external send — so user-facing alone does not escalate past verification_level 1.)
+- **Verification level 0 (exempt, justified):** one work unit, no outward
+  or irreversible surface, and an existing test or criterion that covers
+  the goal. The exemption still needs a written artifact. A UI, CLI
+  output, rendered artifact, or served endpoint is an outward surface for
+  this rule. It needs at least level 1 and a P0 eval that drives the
+  artifact. A user-facing change alone does not require level 2.
 - **Verification level 1 (standard):** anything above verification_level 0 that doesn't meet a verification_level-2 predicate — 3–5 end-state evals, ≥1 negative control, P0/P1 split.
 - **Verification level 2 (full suite):** ≥3 work-units (the line agentic-loop Phase 2.7/Phase 3 already draw) OR any irreversible/outward surface (publish, deploy, migration, data deletion, external send). Full suite with pre+post surfaces where applicable and the GO/NO-GO rule stated in the artifact.
 
-`verification_justification` is required at every verification_level, not only verification_level 0: at verification_level 0 it states why the exemption is legitimate; at verification_level 1/2 it names which predicate fired (e.g. "2 work-units, no irreversible surface" or "≥3 work-units"). A blank justification is refused by the writer (`post_evals.py validate-structure`, check 2) at pr scope, and by the loop gates at loop scope — `loop_state_guard.py`/`loop_stall_guard.py` at completion and `loop_dispatch_guard.py` at dispatch, all three via `loop_evals.read_loop_evals` — the pr-scope MERGE reader itself only parses the posted marker comment (result/verification_level, no justification field), so enforcement there is entirely writer-side, at post time.
+Every level needs `verification_justification`. At level 0, explain the
+exemption. At levels 1 and 2, name the predicate, such as two work units
+without an irreversible surface or at least three work units. At PR
+scope, `post_evals.py validate-structure` check 2 refuses a blank value.
+At loop scope, `loop_dispatch_guard.py` checks it at dispatch and
+`loop_state_guard.py` and `loop_stall_guard.py` check it at completion
+through `loop_evals.read_loop_evals`. The PR merge reader sees only the
+posted marker, which omits justification. PR enforcement therefore occurs
+when the writer posts the eval artifact.
 
 Verification level fields remain planning metadata for selecting an appropriate eval set. The trusted GitHub Actions workflow does not judge verification_level semantics. It checks the current SHA's review/eval evidence, provenance fields, policy paths, and bounded diff as data. Merge authorization depends on its `integrity-review` status after the server rule is active.
 
@@ -141,7 +175,16 @@ Each eval object in the `evals` array carries:
 - **Negative control** — required for scripted mode: a command proving the check can fail.
 - **Expected outcome** — what a pass looks like.
 
-**PR-scope path safety.** A pr-scope `artifact-path`/`merged-state` eval that reads or builds against a specific ref (the PR branch, a frozen base SHA) must never hardcode a shared, orchestrator-owned checkout path (e.g. the main working tree everyone else is also using) and assume its current contents match that ref — the shared checkout reflects whatever was last checked out there, not the ref under test, and drifts independently of the PR being graded. Use `git show <remote-ref>:<path>` for a blob read (no checkout needed), or a **persistent, create-if-absent** worktree of the exact ref (guarded by `git show-ref --verify --quiet` so a not-yet-existent branch fails loudly rather than vacuously passing) for anything that needs to build or run. Never destroy-and-recreate that worktree per invocation — it discards the build cache and can push a warm single-run check over a validator's timeout on every cold hit. Sanity-check: if the shared checkout's `HEAD` were on a totally different commit than the ref under test, would this eval still (correctly) fail? If not, it's observing the wrong thing.
+**PR-scope path safety.** Bind an `artifact-path` or `merged-state` eval
+to the ref it tests. Do not assume a shared checkout contains the PR
+branch or frozen base SHA; other work can change it. For a blob read,
+use `git show <remote-ref>:<path>`. For a build or run, use a persistent
+worktree of the exact ref. Create it only when absent. Check the ref
+with `git show-ref --verify --quiet` so a missing branch fails loudly.
+Keep the worktree between runs to retain its build cache. Recreating it
+for every run can make a check exceed the validator timeout. Check that
+the eval would still observe the intended ref if the shared checkout's
+HEAD moved elsewhere.
 
 ## GO/NO-GO rule
 
@@ -187,11 +230,35 @@ GO requires all P0 evals to pass. P1 failures don't block the gate but must be l
 }
 ```
 
-`grading` (`{by, checksum, amendments_at_grade, suite_hash, integrity, chain_len, chain_head}`) is write-time provenance, absent at freeze and written only when `post_evals.py grade-loop` grades a loop-scope file (see the Verifier agent contract below) — optional and additive; pr-scope files and every existing reader tolerate its absence. Adding it does not bump `schema_version` past 1. `grade-loop` also stamps top-level `.session_id`/`.loop_id`/`.revision` at the same write, read fresh from the sibling `progress.json` at grade time, and FAILS CLOSED: a missing, unparseable, id-less or foreign `progress.json` refuses the grade (previously a missing file fell open).
+`grading` records `by`, `checksum`, `amendments_at_grade`, `suite_hash`,
+`integrity`, `chain_len`, and `chain_head`. It is absent at freeze.
+`post_evals.py grade-loop` writes it for loop scope. PR-scope files and
+existing readers accept its absence. This additive field keeps
+`schema_version` at 1.
+
+At the same write, `grade-loop` reads the sibling `progress.json` and
+stamps `session_id`, `loop_id`, and `revision`. It refuses a missing,
+invalid, id-less, or foreign state file.
 
 `smoke` is required on scripted evals at pr scope (check 9) and carries no `schema_version` bump: it is additive, and loop-scope files — which check 9 does not gate — tolerate its absence exactly as before. Loop scope does not require `smoke`, but `grade-loop` executes each scripted `negative_control` (see below).
 
-**Loop-scope controls are executed (decision).** `grade-loop` runs every scripted `negative_control` of a verification_level>=1 loop suite (caller cwd, 10s cap): exit 0 refuses `control_passes`, an environmental exit (126/127/>=128) refuses `control_env`, any other non-zero exit is accepted. `grade-loop` also re-executes each scripted `cmd` (same cwd and cap): a recorded `pass` whose `cmd` exits non-zero refuses `pass_exit_nonzero`, an environmental exit refuses `cmd_env`. The loop-stop guard stays a time-bounded presence-and-hash check; it executes nothing. `grade-loop` also fails closed on identity: a missing `progress.json` (`progress_missing`), one that does not parse or lacks `session_id`/`loop_id` (`progress_unparseable`), or a suite already stamped with different ids (`progress_foreign`) refuses; there is no bypass flag, restore `progress.json` for an archived suite. `schema_version` 3 is not required (schema 2 grades, traced `legacy_progress_schema`).
+**Loop-scope controls run during grading.** For a level-1-or-higher loop
+suite, `grade-loop` runs each scripted `negative_control` and `cmd` from
+the caller's cwd with a ten-second cap.
+
+- A control exit of 0 gives `control_passes`.
+- A control environmental exit (126, 127, or at least 128) gives
+  `control_env`.
+- Another nonzero control exit is accepted.
+- A recorded pass whose `cmd` exits nonzero gives `pass_exit_nonzero`.
+- An environmental `cmd` exit gives `cmd_env`.
+
+The loop-stop guard checks presence and hashes; it runs no eval command.
+`grade-loop` refuses a missing `progress.json` as `progress_missing`, an
+invalid or id-less one as `progress_unparseable`, and a suite stamped with
+other IDs as `progress_foreign`. There is no bypass flag. Restore the
+state file for an archived suite. Schema 2 can still grade and emits
+`legacy_progress_schema`; schema 3 is not required by this grade.
 
 **Tamper-evidence (Phase F).** `post_evals.py smoke-run` stamps a top-level `frozen_hash`.
 It is the SHA-256 hash of the oracle.
@@ -248,7 +315,12 @@ Runbook: `docs/graph-alignment-measurement.md`.
 
 **Gate rules added.** At the gate (`verify_execution`, via `validate-structure` and `smoke-verify`) an eval recorded `status: pass` whose `cmd` exits non-zero is refused `pass_exit_nonzero`; freeze-time `smoke` still accepts a non-zero (TDD-red) `cmd` exit. When `fixtures` are present, `fixtures.formula` must be the literal tail of `cmd` (`fixture_formula_not_in_cmd`), so fixtures run against the real checker text.
 
-`new_cases[]` covers a third gap distinct from the other two amendment paths: a later independent review discovers the frozen suite is missing a case ENTIRELY — no eval was ever written for it because nobody anticipated it at freeze time. This differs from `amendments[]` (which edits an EXISTING eval id) and from `withdrawn_proofs` (a proof that ran and legitimately failed): here nothing was ever graded for the case until it was folded into an existing eval's `id`. Each `new_cases[]` entry's `id` must equal a real `.evals[].id` in the same file — `post_evals.py validate-structure` (check 11) refuses any entry whose `id` matches no `.evals[].id`, same posture as the other structural checks (non-zero exit, printed reason, no stamp written). Absent or empty `new_cases[]` is a no-op — most PRs never discover an uncovered case, and check 11 does not regress those files.
+`new_cases[]` records a case that independent review found missing from
+the frozen suite. It differs from `amendments[]`, which changes an
+existing eval, and from `withdrawn_proofs`, which records an observed
+failed proof. Fold each new case into a real eval and set its `id` to
+that eval's `.evals[].id`. `post_evals.py validate-structure` check 11
+refuses an unmatched ID. An absent or empty array changes nothing.
 
 The Claude and Codex skill files both describe this eval format. The
 enforcement code is in `scripts/lib/eval_artifact.py`, `scripts/post_evals.py`,
@@ -277,4 +349,36 @@ A plan's or loop's per-work-unit eval refs travel in worker prompts the same way
 
 ## Verifier agent contract (agent-run evals)
 
-For agent-run evals, a fresh sonnet subagent is spawned to grade. Its prompt contains: the `evals.json` content, artifact references (PR number, clone path, artifact path or local endpoint, deployed surface), and the confidence-label contract — and explicitly nothing else. It must not receive the implementation conversation, the implementer's summary, or the orchestrator's opinion of the outcome — the same principle behind agentic-loop Phase 4b's clean-break gate (the author is the least able to see its own shims). The verifier returns per-eval status plus evidence; the orchestrator folds those statuses into `evals.json` — nothing more. Computing and stamping `result` is a separate, neutral step: `post_evals.py` for pr scope, `post_evals.py grade-loop` for loop scope. The orchestrator never writes `result` at either scope. Folding applies to fresh grader output only: an eval amended after a grader verdict goes back to a fresh grader, whose per-eval output is folded the same way, and the post-verdict amendment records who re-graded in a `regraded_by` field — `grade-loop` refuses to re-grade a post-verdict amendment that lacks it. `grade-loop` also stamps a `grading` object (`by`, a `checksum` over the per-eval statuses + result) that the loop-stop guard checks before accepting a GO/VERIFICATION_LEVEL0 verdict — honest boundary: the stamp catches accidental drift (a status edited after grading), not deliberate tampering. The stamp also records `amendments_at_grade`, which is what lets `grade-loop` detect a post-verdict amendment. The backstop's boundaries, stated plainly: it keys on amendment count growth after a grade-loop stamp. A status flipped with no accompanying amendment, an existing amendment edited or replaced in place, and a flip folded in before the first grade-loop run are all invisible to it, as is a hand-edited `amendments_at_grade` stamp (the stamp sits outside the checksum canon) — those cases are held by this rule and the Phase 13 audit alone. Amending means editing the graded file in place; regenerating the file sheds the stamp, and `grade-loop` treats remaining grade residue (`graded_at`/`result`) as the prior verdict, so a regenerated-but-residued file still refuses.
+For an agent-run eval, send a fresh sonnet subagent only:
+
+1. The `evals.json` content.
+2. Artifact references, such as the PR number, clone path, local artifact
+   or endpoint, or deployed surface.
+3. The confidence-label contract.
+
+Do not send the implementation conversation, implementer's summary, or
+orchestrator's opinion. The grader returns a status and evidence for each
+eval. Fold only that fresh output into `evals.json`.
+
+Compute `result` in a separate neutral step. Use `post_evals.py` for PR
+scope and `post_evals.py grade-loop` for loop scope. The orchestrator
+never writes `result`.
+
+If an eval changes after a grader verdict, send it to a new grader.
+Record that grader in `regraded_by`. `grade-loop` refuses a post-verdict
+amendment with no `regraded_by` value.
+
+At loop scope, `grade-loop` writes a `grading` object with `by`, a checksum
+over eval statuses and result, and `amendments_at_grade`. The loop-stop
+guard checks this stamp before it accepts GO or VERIFICATION_LEVEL0. The
+stamp catches accidental status drift and an increased amendment count.
+It does not prove that the author could not alter the file deliberately.
+
+The amendment-count check cannot detect a status flip with no amendment,
+an amendment edited in place, or a flip folded in before the first grade.
+`amendments_at_grade` is outside the checksum and can itself be edited.
+Use the Phase 13 audit as an additional check on those limits.
+
+Amend the graded file in place. If the file is regenerated, it loses the
+stamp. `grade-loop` still treats any remaining `graded_at` or `result`
+as a prior verdict and refuses to grade it as new.

@@ -1,6 +1,6 @@
 ---
 name: Codex graph evidence binding
-description: Implement the approved Codex-only plan that binds native worker transcript events to orchestrator-owned progress.json graph state.
+description: Historical Codex evidence-binding plan. Read the current native graph and transcript modules for live behavior.
 type: project
 ---
 
@@ -94,11 +94,11 @@ The exact field names may follow existing local naming, but the information and 
 6. Recheck all stored references during completion.
 7. Update the Codex agentic-loop skill: workers only return results and the orchestrator alone owns graph state.
 8. Add focused tests for valid evidence, missing evidence, forged IDs, wrong session/wave/node, duplicate agents, stale events, terminal failure, retries, and reuse.
-10. Run focused Codex graph and hook tests, provider parity/adversarial tests, and `scripts/quality/check.sh --strict --changed`.
-11. Install the Codex plugin into a clean temporary location and run native live acceptance:
+9. Run focused Codex graph and hook tests, provider parity/adversarial tests, and `scripts/quality/check.sh --strict --changed`.
+10. Install the Codex plugin into a clean temporary location and run native live acceptance:
     - `A || B -> all-input join -> C`.
     - One failed node followed by retry and resume.
-12. Verify completion from `progress.json` plus the matching native transcript, then commit, push, and open a PR. Do not merge without a separate request.
+11. Verify completion from `progress.json` plus the matching native transcript, then commit, push, and open a PR. Do not merge without a separate request.
 
 ## Open questions
 

@@ -1,6 +1,6 @@
 ---
 name: neutral workflow config init
-description: Implement provider-native SessionStart nudges and migrate Claude and Codex to one canonical .coderails/workflow.config.yaml.
+description: Historical handoff for provider-native SessionStart nudges and the migration to one workflow configuration file.
 type: project
 ---
 

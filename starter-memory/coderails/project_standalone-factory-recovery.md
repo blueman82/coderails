@@ -6,6 +6,10 @@ type: project
 
 # Standalone Factory recovery
 
+> Historical recovery checkpoint. The graph path, test results, and next
+> steps below describe that session. Check current source and owned graph
+> state before using this record to plan new work.
+
 ## Goal
 
 Build a local Factory web app in `factory/`. It must launch one selected

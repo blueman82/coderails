@@ -53,10 +53,15 @@ MCP. Then invoke the type by the name you gave it. `manage_subagents` lists
 or stops running subagents.
 
 Skills dispatch by naming an agent (e.g. `coderails:loop-worker`,
-`pr-review-toolkit:code-reviewer`) or by supplying an inline prompt. Antigravity
-has no equivalent of a named agent definition, so the agent's own system prompt
-does not come along — read the agent file and carry its body into the prompt
-yourself. On Antigravity:
+`pr-review-toolkit:code-reviewer`) or by supplying an inline prompt.
+Antigravity can discover Markdown custom-agent definitions in a plugin's
+`agents/` directory, a workspace `.agents/agents/` directory, or its global
+agent directory. Their Markdown bodies become system prompts. Check that
+the named role is installed and that its tool policy fits the task. If the
+role is unavailable, use a built-in type and carry the role instructions
+explicitly in the prompt. See the [Antigravity custom-agent guide](https://www.agy.dev/docs/subagents?tab=cli).
+
+When no installed custom role fits:
 
 | Skill dispatch form | Antigravity equivalent |
 |---------------------|----------------------|

@@ -12,12 +12,12 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 | Search file contents | `grep` or `rg` |
 | Find files by name | `glob` |
 | Fetch a URL | `web_fetch` |
-| Search the web | `web_search` |
+| Search the web | Use an available search extension or `web_fetch` for a known URL; check the live tool list. |
 | Invoke a skill | `skill` |
 | Dispatch a subagent (a skill naming an agent, e.g. `coderails:loop-worker`) | `task` with `agent_type: "general-purpose"` (other accepted types: `explore`, `task`, `code-review`, `research`, `configure-copilot`) |
 | Multiple parallel dispatches | Multiple `task` calls in one response |
 | Subagent status/output/control | `read_agent`, `list_agents`, `write_agent` |
-| Task tracking ("create a todo", "mark complete") | `update_todo` |
+| Task tracking ("create a todo", "mark complete") | Use the CLI's task view or a concise session checklist; check the live tool list for an installed todo tool. |
 | Enter / exit plan mode | No equivalent — stay in the main session |
 
 The [Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)
