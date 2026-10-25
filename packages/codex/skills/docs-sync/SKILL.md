@@ -110,14 +110,17 @@ enforce it; a call out of order aborts the run (`stage_out_of_order`).
    Then `RR finish ok` (emits `run_ok`, the last terminal row).
 
 **The trigger is the mechanism, not the reason: `run-gate` exits non-zero
-when the gate command does, and that is a refusal.** It records
+when a gate fails and the PR is still open.** It records
 `run_refused` for that gate (`refused=<gate>`), cleans up, and never emits
 `run_ok`. This is keyed on the exit code, not on a list of rejecting reasons:
 `merge.py` has more than thirty distinct non-zero exits plus failures that
 bypass its own error function, so any list is incomplete. A non-zero exit that
 is neither a pass nor a rejection is still a refusal; the worked example is a
 `pending` `integrity-review` status, where `$coderails-codex:merge` exits
-non-zero because the daemon has not yet attested. **Never wait, poll, or retry
+non-zero because GitHub Actions has not yet posted the required status. If
+GitHub confirms the exact PR and head merged despite a CLI error,
+`run-gate merge` advances the stage. If GitHub cannot confirm the state,
+the run stays red and cleanup stops. **Never wait, poll, or retry
 for a gate to resolve**, never retry past a refusal in the same run, never
 relax the gate that refused, and **never invent a new marker**: `RR abort
 CODE` and `RR refuse GATE` accept only the spec's closed reason codes (the
@@ -129,7 +132,7 @@ Cleanup (on `abort`, `refuse`, a manifest violation or a refused gate) runs
 once, in code, with `git` and `gh` only: close the PR if one was opened,
 delete the current local branch only while still on the branch recorded at
 `fetch_branch`. The remote branch is left intact. No file is removed with
-`rm`.
+`rm`. A confirmed merged PR is never closed or logged as an abort.
 
 ## 4. Run log and failure visibility
 

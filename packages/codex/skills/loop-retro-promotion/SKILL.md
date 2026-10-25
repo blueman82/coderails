@@ -148,8 +148,11 @@ enforce it (a call out of order aborts the run: `stage_out_of_order`).
    then `RR finish ok` — the ONLY point that emits `run_ok` for a delivery run,
    after the `merge` stage row.
 
-`run-gate` exits non-zero when the gate command does, and that is a refusal: it
-records `run_refused` for that gate, cleans up and never emits `run_ok`. Never
+`run-gate` exits non-zero when a gate fails and the PR is still open: it
+records `run_refused` for that gate, cleans up and never emits `run_ok`.
+For merge, the runner checks the exact PR and head after the command. A
+confirmed merge can advance despite a CLI error; an unknown result stays red
+and blocks cleanup. A merged PR is never closed or logged as an abort. Never
 wait, poll or retry for a gate, and never invent a marker (`RR abort CODE` /
 `RR refuse GATE` accept only the spec's closed reason codes). Cleanup runs once,
 in code, with `git` and `gh` only: close the PR and delete the current local
