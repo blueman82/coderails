@@ -12,9 +12,10 @@ missing argument. Unlike `wiki-ingest` and `wiki-query`, this skill has a
 meaningful behaviour with no argument, so it does not stop. Be aware the whole
 vault is in scope. Spawn the installed `wiki-writer` custom agent with
 `spawn_agent`, passing the scope and project location in a self-contained
-prompt. Collect its result with `wait_agent`, use `send_input` only for a
-specific missing check, then `close_agent`. The agent can write and commit: report
-findings before making sweeping changes across pages you were not asked about.
+prompt. Collect its result with `wait_agent`. For a specific missing check,
+use `send_message` while it runs or `followup_task` after it ends. The
+agent can write and commit. Report findings before broad changes to
+other pages.
 
 Periodically health-check the wiki. The LLM is good at finding inconsistencies, gaps, and new connections — and at suggesting further questions to ask and sources to look for.
 
@@ -22,14 +23,29 @@ Periodically health-check the wiki. The LLM is good at finding inconsistencies, 
 
 ### Step 0: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root. If no `AGENTS.md` is found by the git root, tell the user to invoke `$coderails-codex:wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.coderails/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
+The git root's `AGENTS.md` loads at session start.
+Read its wiki schema section, or the `AGENTS-wiki-schema.md` file it links to.
+Coderails keeps the schema in `AGENTS.md` and the live page types in `wiki.schema.json`.
+If `AGENTS.md` is not in context, walk up from the current directory to the git root.
+Check each level for `AGENTS.md`; a fork can start in a project subdirectory.
+If you do not find it, tell the user to invoke `$coderails-codex:wiki-init` first.
+The wiki vault is a separate sibling repo, such as `../coderails-wiki`.
+The project's `.coderails/workflow.config.yaml` points to it.
+Do not look for `AGENTS.md` in the vault.
+A fork does not need to run from inside the vault.
 
-`repo` — absolute path to the **code** repo root: the directory containing the `AGENTS.md` you just located. Step 2's staleness check compares against its git history, so resolve this explicitly rather than assuming cwd.
+`repo` — absolute path to the **code** repo root: the directory containing the `AGENTS.md` you just located.
+Step 2's staleness check compares against its git history, so resolve this explicitly rather than assuming cwd.
 
-The git/vault settings below are **not** read from AGENTS.md — they are flat keys in that same `repo`'s `.coderails/workflow.config.yaml`. Starting from `repo`, check each directory up to its git root; the first config found wins.
+The git/vault settings below are **not** read from AGENTS.md — they are flat keys in that same `repo`'s `.coderails/workflow.config.yaml`.
+Starting from `repo`, check each directory up to its git root; the first config found wins.
 
-- `wiki_path` — the wiki vault path; resolved relative to the directory containing that `workflow.config.yaml` unless already absolute. This is `vault` below.
-- `wiki_git_worktree` — whether to use worktree/PR flow (`true`) or write directly (`false`). Default when absent: **`true`** (PR flow) — the fail-safe choice, since defaulting to direct-write would silently start committing straight to the vault for a project that expected review.
+- `wiki_path` — the wiki vault path. Resolve a relative path from the project
+  repo root. Use an absolute path as given. This is `vault` below.
+- `wiki_git_worktree` — whether to use worktree/PR flow (`true`) or write directly (`false`).
+  If absent or `null`, use **`true`** (PR flow). The config loader
+  preserves an explicit `null`, so resolve it before choosing a write path.
+  This avoids a direct write when a project expected review.
 - `wiki_git_bypass_flag` — env var for PR creation/merge (e.g. `BYPASS_REVIEW=1`)
 - `wiki_git_pull_path` — path to pull after merge. Default when absent: skip the post-merge pull.
 - `wiki_stale_days` — age in days before a page becomes a **candidate** for the
@@ -197,7 +213,10 @@ After reporting findings:
 
 ### Step 5: Update Log
 
-Append to `$vault/log.md`: `## [YYYY-MM-DD] lint | <summary of findings>`
+Append to `$WORKTREE_PATH/log.md`:
+`## [YYYY-MM-DD] lint | <summary of findings>`.
+In direct-write mode, `WORKTREE_PATH` is the vault. In PR mode, it is the
+wiki worktree, so the log update enters the same commit as the other edits.
 
 Immediately after that line, append a structured findings-count record on its
 own line: `<!-- lint-findings: N -->`, where `N` is the total number of
@@ -216,16 +235,26 @@ cd "$WORKTREE_PATH"
 git add -A
 git commit -m "wiki(lint): <summary of fixes>"
 git push -u origin "$BRANCH"
-${wiki_git_bypass_flag} gh pr create --title "wiki(lint): <summary>" --body "Findings: <list>"
-${wiki_git_bypass_flag} gh pr merge --squash --delete-branch
-# Note: enforce_pr_workflow gates `gh pr create`/`gh pr merge` only in a repo that has a
-# workflow.config.yaml (a wiki vault usually has none → no-op). When it does apply, the
-# satisfier is `$coderails-codex:push` for creation or a fresh review from the installed
-# `spec-reviewer` custom agent for merge, or an explicit Bash permission. ${wiki_git_bypass_flag} is the wiki's own
-# delivery bypass, separate from that hook.
-git -C "${wiki_git_pull_path}" pull
+wiki_gh() {
+  if [ -n "$wiki_git_bypass_flag" ]; then
+    env "$wiki_git_bypass_flag" gh "$@"
+  else
+    gh "$@"
+  fi
+}
+wiki_gh pr create --title "wiki(lint): <summary>" --body "Findings: <list>"
+wiki_gh pr merge --squash --delete-branch
+if [ -n "$wiki_git_pull_path" ]; then
+  git -C "$wiki_git_pull_path" pull
+fi
 git -C "$vault" worktree remove "$WORKTREE_PATH"
 ```
+
+`wiki_git_bypass_flag` is one `NAME=value` environment assignment. A shell
+does not treat an expanded variable before `gh` as an assignment; pass it
+through `env` as shown. When the vault has a workflow config, resolve any
+`enforce_pr_workflow` review and eval gate before merge. The wiki bypass flag
+does not clear that gate. Skip the post-merge pull when no pull path is set.
 
 **If `wiki_git_worktree` is `false`**:
 ```bash

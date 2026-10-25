@@ -1,5 +1,16 @@
 # Real parallel worker fixture
 
-These records are a minimal reduction of the sanitized native Codex sample used in the final independent run-observability review. The reviewed native session had two overlapping workers. Only parent spawn calls, native activity links, child metadata, lifecycle rows, and their source timestamps remain. Session, child, and call IDs are retained for correlation. Prompts, instructions, actual arguments and results, unrelated events, paths, and incidental metadata were removed. The HTML-shaped argument marker is synthetic and tests text escaping.
+These records come from a sanitized native Codex sample. The final independent run-observability review used this sample. The native session had two workers that ran at the same time.
 
-The integration test copies this fixture into a temporary native source layout and exercises the collector, authenticated route handlers, and React panel. It is a replay of the selected correlation shape, not of the full original session or task outcome. Its broken-link control mutates a copied child parent identity and confirms the correctness assertion rejects the trace.
+The fixture keeps parent spawn calls, native activity links, child metadata, lifecycle rows, and source timestamps.
+It keeps session, child, and call IDs so the test can match records.
+It removes prompts, instructions, actual arguments and results, unrelated events, paths, and incidental metadata.
+The HTML-shaped argument marker is synthetic.
+It tests text escaping.
+
+The integration test copies this fixture into a temporary native source layout.
+It exercises the collector, authenticated route handlers, and React panel.
+The fixture contains only the records needed to test how those parts link workers to the parent.
+It does not replay the full session or prove that the task succeeded.
+
+The broken-link control changes a copied child's parent identity. The test checks that the correctness assertion rejects that trace.

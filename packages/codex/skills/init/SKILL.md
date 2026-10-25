@@ -12,10 +12,13 @@ Create the provider-neutral `.coderails/workflow.config.yaml` for the current pr
 1. Run `git rev-parse --show-toplevel` to find the repository root.
 2. Use the current directory as the configuration scope. This allows a monorepo subdirectory to have its own settings.
 3. Set the target to `<current-directory>/.coderails/workflow.config.yaml`.
-4. Before migration, confirm that every provider the user will continue to use is upgraded and reloaded to a version that reads `.coderails/workflow.config.yaml`. If any is not, stop and report it. Do not call or reload another provider.
+4. Before migration, confirm that every provider the user will continue to use is upgraded and reloaded to a version that reads `.coderails/workflow.config.yaml`.
+   If any is not, stop and report it.
+   Do not call or reload another provider.
 5. Inspect `<current-directory>/.claude/workflow.config.yaml` and `<current-directory>/.codex/workflow.config.yaml` as legacy inputs.
    - If both exist, compare them byte-for-byte with `cmp -s`. If they differ, stop before writing anything and ask the user to reconcile them. Never choose one silently.
-   - If one exists, or both exist and match, read one and write its complete contents unchanged to the canonical target. Do not collect replacement settings: unknown fields and values, including `sandbox_workers`, must survive migration.
+   - If one exists, or both exist and match, read one and write its complete contents unchanged to the canonical target.
+     Do not collect replacement settings: unknown fields and values, including `sandbox_workers`, must survive migration.
    - If the canonical target exists, read it and ask for confirmation before replacing it. Preserve it unless replacement is explicitly approved.
 6. When no legacy input exists, use the project name supplied in the user's request; otherwise use the current directory's basename, then collect settings below.
 
@@ -25,11 +28,16 @@ Use `request_user_input` when available. Group related fields into a few clear r
 
 Collect:
 
-- Jira project key, epic key, component name, component ID, epic-link field ID, story-points field ID, fix-version name, start transition, resolve transition, and MCP namespace. Default the namespace to `jira`; set the whole `jira` value to `null` if Jira is not used.
-- Wiki path, supervision mode (`discuss` by default or `autonomous`), git worktree flow (`true` by default), git bypass environment assignment, and git pull path. Set wiki-dependent fields to `null` when no wiki path is configured.
+- Jira project key, epic key, component name, component ID, epic-link field ID, story-points field ID, fix-version name, start transition, resolve transition, and MCP namespace.
+  Default the namespace to `jira`; set the whole `jira` value to `null` if Jira is not used.
+- Wiki path, supervision mode (`discuss` by default or `autonomous`), git worktree flow (`true` by default), git bypass environment assignment, and git pull path.
+  Set wiki-dependent fields to `null` when no wiki path is configured.
 - Worktree base path. Default to the parent of the repository root and show the resolved path before accepting it.
 - Worktree script path relative to the repository root, or `none`.
-- Engineering-principles path globs and skill. Detect a default from repository files: Go for `go.mod`; TypeScript for a `package.json` project containing TypeScript; Bash for a shell-only project; otherwise Python. Use the installed native Coderails Codex skill name, such as `coderails-codex:engineering-principles-python`, without command syntax. Accept `none` to disable it.
+- Engineering-principles path globs and skill.
+  Detect a default from repository files: Go for `go.mod`; TypeScript for a `package.json` project containing TypeScript; Bash for a shell-only project; otherwise Python.
+  Use the installed native Coderails Codex skill name, such as `coderails-codex:engineering-principles-python`, without command syntax.
+  Accept `none` to disable it.
 - Sandbox workers. Default to `false`. Preserve this field exactly during migration.
 - Integrity review. Default to `false`; set `true` after the GitHub Actions ruleset is live.
 
@@ -69,8 +77,14 @@ integrity_review:
 
 Use `jira: null`, `engineering_principles_paths: null`, or other `null` values where the user disabled an optional feature.
 
-Validate the canonical file with Ruby's standard YAML parser (`ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), permitted_classes: [], aliases: false)' <path>`). If the write or validation fails, stop, leave every legacy file untouched, and report the failure.
+Validate the canonical file with Ruby's standard YAML parser (`ruby -e 'require "yaml"; YAML.safe_load(File.read(ARGV.fetch(0)), permitted_classes: [], aliases: false)' <path>`).
+If the write or validation fails, stop, leave every legacy file untouched, and report the failure.
 
-Only after validation succeeds, move each legacy file found above to the macOS Trash using Finder via `osascript`, one at a time. After each move, check that source path no longer exists. If a move or check fails, stop immediately: report the failed file and every file already moved, and do not attempt the remaining files. Never delete a legacy file directly. Anything already moved remains recoverable in Trash; the moves are not atomic.
+After validation succeeds, move each legacy file found above to the macOS Trash using Finder via `osascript`.
+Move one file at a time and check that its source path no longer exists.
+If a move or check fails, stop and report the failed file and every file already moved.
+Do not attempt the remaining files.
+Never delete a legacy file directly.
+Files already moved remain recoverable in Trash; the moves are not atomic.
 
 Report the exact file written, any legacy files moved to Trash, and remind the user to commit it.

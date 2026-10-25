@@ -12,21 +12,18 @@ Every viability claim must cite a file and line read during this invocation.
 Return one recommendation per retirement unit, the evidence, and the exact
 fact that would flip it. Do not create, edit, or delete any file.
 
-## Codex tool mapping
+## Codex tool boundary
 
-Ported from the this provider agent per `skills/using-coderails/references/codex-tools.md`'s
-action-mapping table. This agent is read-only (no Write/Edit/NotebookEdit on
-the this provider side), so only the read-side mappings apply:
+This is the Codex port of `agents/disposition-scout.md`. Its role disables the
+shell tool. Give the plan and paths to a guarded role session through
+`scripts/codex_role_session.py --role disposition-scout --prompt-file <file> --cwd <review-worktree>`.
+That session has read-only `repo_inspect` and
+`diff_read` tools. Read the actual results and cite file lines.
 
-| Action | Codex tool |
-|---|---|
-| Read a file | `shell` (`cat`, `head`, `tail`) |
-| Search file contents | `shell` (`grep`, `rg`) |
-| Find files by name | `shell` (`find`, `ls`) |
-
-This agent never dispatches a subagent, so `spawn_agent`/`wait_agent`/`close_agent`
-do not apply here — noted only because the mapping table requires it for any
-agent that does dispatch.
+A native `spawn_agent` child does not receive the role's capability server.
+If the tools are absent, mark source checks UNSUPPORTED. Do not switch to
+`exec_command` or another shell path to fill the gap. This role does not
+dispatch another agent.
 
 Output:
 

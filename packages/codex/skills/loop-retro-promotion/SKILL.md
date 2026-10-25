@@ -20,8 +20,9 @@ anything else:
    `CODERAILS_AGENTIC_LOOP_DIR`; default to
    `$HOME/.coderails/agentic-loop`. The caller must scope this directory to
    the current repo. Do not call a root plugin hook or graph helper.
-2. Run `python3 "$SKILL_DIR/../../scripts/lib/lessons.py" --dir <repo-key-dir> --session <native caller session id> predicate`
-   (resolve the path from this `SKILL.md`) and read `graduation` from its JSON;
+2. Set `SKILL_DIR` to the absolute directory that contains this `SKILL.md`.
+   Run `python3 "$SKILL_DIR/../../scripts/lib/lessons.py" --dir <repo-key-dir> --session <native caller session id> predicate`
+   and read `graduation` from its JSON;
    do not count files or read Markdown by hand. It checks **>= 10 distinct completed retros**
    with owned validated progress and matching source hashes,
 3. `recurred` **>= 1** — an order in `orders.json` whose typed `last_recurred` !=
@@ -120,34 +121,26 @@ own path.
    `promotion-runs.log`. Do not leave orphaned branches, PRs, or partial
    state. **ABORT, never warn-and-continue.**
 
-   Both flags are load-bearing, not stylistic:
+   Keep both flags:
 
-   - **Two-dot compares against a base that MOVES.** `git diff origin/main`
-     diffs the working tree against wherever `origin/main` happens to be at
-     assertion time. If a sibling PR merges mid-run, that base has moved and
-     the diff indicts this branch for files it never touched — aborting a
-     clean run. Three-dot compares against the merge-base as of when this
-     branch forked, which is the only comparison scoped to what *this*
-     pipeline changed.
-   - **`--name-only` cannot see a rename's source or tell a deletion from an
-     edit.** It prints a rename as its DESTINATION path alone, so
-     `git mv scripts/gate.sh skills/agentic-loop/learned-failure-modes.md`
-     appears as the bare expected filename and PASSES a `--name-only` check
-     while smuggling a shell script onto `main` under a permitted name.
-     `--name-status` exposes it — as `R100 scripts/gate.sh <target>` when the
-     destination did not pre-exist, or as a `D`+`M` pair when it did. Either
-     shape fails "exactly one `M` line", so both abort. Likewise `git rm` of
-     the target prints the identical single line an edit does under
-     `--name-only`, while `--name-status` prints `D`. (All proven empirically
-     in a scratch repo, 2026-07-17.)
+   - **Three dots fix the comparison base.** `git diff origin/main` compares
+     against the current `origin/main`. A sibling PR can move that base during
+     this run. The result can then include files this branch did not change.
+     `origin/main...HEAD` compares from the merge base, so it scopes the
+     assertion to this branch's work.
+   - **`--name-status` shows the change type.** `--name-only` can print the
+     target path for a rename or a deletion. It cannot prove the target was
+     modified. For example, a rename from `scripts/gate.sh` to the allowed
+     target can appear as the expected path with `--name-only`.
+     `--name-status` shows `R100` for that rename, or `D` plus `M` when Git
+     records the changes separately. A deletion shows `D`. Each fails the
+     required single `M` line. These cases were tested in a scratch repo on
+     2026-07-17.
 
-   **What this assertion does NOT catch, stated plainly:** it is a PATH
-   check, not a CONTENT check. A commit that legitimately modifies only
-   `learned-failure-modes.md`, but fills it with something other than a
-   mined lesson, is a lone `M` of the permitted path and PASSES here. That
-   residual is held by the mining rules in section 2 and by the review/eval
-   gates in steps 6-8 — not by this step. No path-based manifest can close
-   it, and pretending otherwise would be worse than naming it.
+   This assertion checks paths and change types. It does not check content.
+   A bad edit to the one allowed file still appears as one `M` line. The
+   mining rules in section 2 and the review and eval gates in steps 6–8
+   must check that content.
 5. Invoke `$coderails-codex:push`.
 6. Spawn the installed `spec-reviewer` custom agent to review the current PR
    head against the mined evidence and one-file manifest. Wait for it and
@@ -166,4 +159,7 @@ marker for a completed delivery.
 
 ## 5. Prohibitions
 
-This pipeline writes exactly one repo file. It never edits SKILL.md, hook scripts, gate logic, its own skill definition, external scheduler configuration, or the graduation predicate. It never relaxes, reorders, or skips a gate. It merges only via `$coderails-codex:merge`, never raw `gh pr merge`, so the package merge script's artifact checks remain in force.
+This pipeline writes exactly one repo file.
+It never edits SKILL.md, hook scripts, gate logic, its own skill definition, external scheduler configuration, or the graduation predicate.
+It never relaxes, reorders, or skips a gate.
+It merges only via `$coderails-codex:merge`, never raw `gh pr merge`, so the package merge script's artifact checks remain in force.

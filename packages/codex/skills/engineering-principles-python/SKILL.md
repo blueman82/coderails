@@ -236,12 +236,14 @@ When inserting untrusted text (AI output, user input, external API responses) in
 | **Slack mrkdwn** | `<!channel>`, `<!here>`, `<!everyone>`, `<@U...>` | `re.sub(r'<[!@][^>]+>', '', text)` |
 | **HTML** | `<script>`, `onclick=`, entity injection | `html.escape(text)` |
 | **SQL** | `'; DROP TABLE`, `OR 1=1` | Parameterized queries only, never f-strings |
-| **Shell** | `$(cmd)`, `` `cmd` ``, `; rm -rf` | `shlex.quote(text)` |
+| **Shell** | `$(cmd)`, `` `cmd` ``, `; rm -rf` | Pass an argument list with `shell=False`. Use `shlex.quote(text)` only when a shell command string is required. |
 | **JSON in templates** | Unescaped quotes, newlines | `json.dumps(text)` |
 
 **Rule:** Any text from AI models, user input, or external APIs MUST be treated as untrusted. Sanitize at the point of insertion, not at the point of collection.
 
-**Allowlist > blocklist:** When building status/result dicts consumed by callers, prefer allowlist checks (`if status not in ("success", "disabled")`) over blocklist checks (`if status == "error"`) — fail-closed prevents silent failures from unhandled return values.
+**Allowlist > blocklist:** Callers must handle every unexpected status. Check
+`if status not in ("success", "disabled")` when you build a status or result
+dict. A check for only `if status == "error"` can miss a new failure value.
 
 ---
 

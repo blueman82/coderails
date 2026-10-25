@@ -1,13 +1,14 @@
 ---
 name: engineering-principles
-description: Enforce engineering principles (YAGNI, KISS, DRY, Fail Fast, SSOT, Law of Demeter) and language-specific coding standards (Python/Go/TypeScript/Bash) on code being written or modified. Uses Serena LSP for call site analysis and reference counting. Use PROACTIVELY when writing, modifying, or reviewing code. Triggers on code changes, "enforce standards", "check principles", "apply standards", "code quality", or explicit /engineering-principles command.
+description: Check engineering principles (YAGNI, KISS, DRY, Fail Fast, SSOT, Law of Demeter) and language-specific coding standards (Python/Go/TypeScript/Bash). Use Serena for call-site analysis only when this session provides it. Use when writing, modifying, or reviewing code.
 allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 ---
 
 # Engineering Principles & Language Standards
 
 **Version:** 4.0.0
-**Purpose:** Proactively enforce engineering principles and language-specific idioms. Uses LSP (Serena) for structural verification and reference counting. **Dispatches to language-specific skills for idiom enforcement.**
+**Purpose:** Proactively enforce engineering principles and language-specific idioms.
+Use structural tools when this session provides them. **Dispatch to language-specific skills for idiom enforcement.**
 
 ## When to Activate
 
@@ -38,7 +39,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 
 ## Phase 1: MCP Environment Setup
 
-Before analysis, activate Serena for the current project.
+Check whether this session provides Serena before analysis. If it does, activate the current project. Otherwise, use the static checks in this skill. Do not run the example below when its named tool is absent.
 
 ```javascript
 // Execute via mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
@@ -91,7 +92,7 @@ async function checkYAGNI(symbolName) {
 }
 ```
 
-**YAGNI rule:** If `referenceCount === 0` and symbol is not exported/public, flag for deletion.
+**YAGNI rule:** If a private symbol has no found references, inspect dynamic calls and external uses before flagging it for deletion.
 
 ### 2.3 Symbol Depth Analysis (Law of Demeter)
 
@@ -127,37 +128,21 @@ async function checkKISS(className) {
 
 ### 2.5 Return Value Contract Verification
 
-For functions returning status dicts/enums/tagged unions, verify all callers handle all possible return values:
+For a function that returns a status dict, enum, or tagged union:
 
-```javascript
-// Execute via mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
+1. Read every return path, including error and fallback paths. List the
+   values the function can return.
+2. Find each caller with Serena when it is available. Otherwise, search
+   for call sites and check dynamic uses by hand.
+3. Read the caller's control flow. Check explicit branches, generic
+   fallbacks, and propagated results. A missing literal status name does
+   not prove that the caller ignores that status.
+4. Report a HIGH silent-failure path only when a specific returned value
+   reaches a caller that neither handles nor propagates it. Name both paths.
+   If handling is uncertain, report the uncertainty and what would test it.
 
-async function checkReturnContracts(functionName) {
-  // 1. Read the function body to find all return paths
-  const detail = await serena.find_symbol({ name: functionName, depth: 2 });
-  const body = detail.body || '';
-
-  // 2. Extract distinct return values (status strings, enum variants, error types)
-  const returnStatuses = body.match(/return\s+\{[^}]*"status":\s*"(\w+)"/g) || [];
-  const statusValues = [...new Set(returnStatuses.map(r => r.match(/"(\w+)"$/)?.[1]).filter(Boolean))];
-
-  // 3. Find all callers
-  const callers = await serena.find_referencing_symbols({ name_path: functionName });
-
-  // 4. For each caller, check which return values they handle
-  for (const caller of callers) {
-    const callerBody = (await serena.find_symbol({ name: caller.name, depth: 1 })).body || '';
-    const handledStatuses = statusValues.filter(s => callerBody.includes(`"${s}"`));
-    const unhandled = statusValues.filter(s => !handledStatuses.includes(s));
-
-    if (unhandled.length > 0) {
-      console.log(`[CONTRACT] ${caller.name} does not handle: ${unhandled.join(', ')} from ${functionName}`);
-    }
-  }
-}
-```
-
-**Contract rule:** If a function returns N distinct status values but a caller only checks M < N, flag as "silent failure path" (HIGH severity). Prefer allowlist checks (`status not in (good_values)`) over blocklist checks (`status == "error"`) — fail-closed by default.
+Prefer allowlist checks (`status not in (good_values)`) over blocklist checks
+(`status == "error"`) when the caller must reject unknown values.
 
 ---
 

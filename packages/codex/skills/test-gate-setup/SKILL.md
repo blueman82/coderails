@@ -5,11 +5,16 @@ description: Configure the native Coderails Codex commit test gate for the curre
 
 # Test Gate Setup
 
-Configure the current project's opt-in commit test gate. The Coderails Codex `PreToolUse` hook reads one command from the current worktree's trusted Git metadata and denies `git commit` when that command fails. A repository file cannot configure this gate.
+Configure the current project's opt-in commit test gate.
+The Coderails Codex `PreToolUse` hook reads one command from the current worktree's trusted Git metadata and denies `git commit` when that command fails.
+A repository file cannot configure this gate.
 
 Work from the project's root directory.
 
-1. Resolve the configuration path with `git rev-parse --git-path coderails/test_command`. If that file exists, read and report its current command. Use `request_user_input` to ask whether to keep or replace it. Stop without changing the file if the user keeps it.
+1. Resolve the configuration path with `git rev-parse --git-path coderails/test_command`.
+   If that file exists, read and report its current command.
+   Use `request_user_input` to ask whether to keep or replace it.
+   Stop without changing the file if the user keeps it.
 2. Otherwise, detect available test commands:
    - `package.json` with a `test` script: `npm test`
    - `Cargo.toml`: `cargo test`

@@ -5,6 +5,8 @@ description: Re-derive a specific claim from sources only - no recall, no infere
 
 # Cite-check
 
+Set `SKILL_DIR` to the absolute directory containing this `SKILL.md`.
+
 Write the claim text and evidence rules below to a self-contained prompt file,
 then run `python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role source-auditor --prompt-file <file> --cwd <review-worktree>`.
 Read its actual result and exit status. Follow [guarded role sessions](../using-coderails/references/guarded-role-sessions.md);
