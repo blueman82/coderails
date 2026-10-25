@@ -137,13 +137,15 @@ def canonical(segment: str) -> str:
     return shlex.join(tokens) if tokens else segment
 
 
-def guarded_segments(command: str, cwd: str, *, implicit_push: bool = False) -> list[tuple[str, str, str]]:
+def guarded_segments(
+    command: str, cwd: str, *, implicit_push: bool = False, _blind: bool = False
+) -> list[tuple[str, str, str]]:
     """Every guarded (merge | git_push to main) segment as (operation, segment, effective cwd).
 
     Track literal cwd changes through groups and shell -c strings. Unknown destinations remain unbindable.
     """
     found: list[tuple[str, str, str]] = []
-    blind = False
+    blind = _blind
     stack: list[tuple[str, bool]] = []
     masked = _SHELL_C.sub(lambda match: " " * len(match[0]), command)
     parts = _SEP.split(masked)
@@ -159,7 +161,7 @@ def guarded_segments(command: str, cwd: str, *, implicit_push: bool = False) -> 
         closes = len(raw.rstrip()) - len(raw.rstrip().rstrip(")"))
         plain = unwrap(raw)
         for inner in _SHELL_C.finditer(plain):
-            found.extend(guarded_segments(inner[2], cwd, implicit_push=implicit_push))
+            found.extend(guarded_segments(inner[2], cwd, implicit_push=implicit_push, _blind=blind))
         plain = _SHELL_C.sub("", plain).strip()
         segment = canonical(plain)
         # An env assignment (GIT_DIR=, GH_REPO=, GIT_CONFIG_*=) can retarget the action: keep the prefix in the

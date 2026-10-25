@@ -74,3 +74,16 @@ class MatchParityTests(unittest.TestCase):
                         for fn in ("guarded_segments", "state_mutated_before_guard"):
                             args = (command, tmp)[: 2 if fn == "guarded_segments" else 1]
                             self.assertEqual(getattr(claude_match, fn)(*args), getattr(codex_match, fn)(*args))
+
+    def test_unknown_cwd_stays_unbindable_inside_nested_shell(self) -> None:
+        """A shell wrapper cannot restore the old cwd after an unknown cd."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for matcher in (claude_match, codex_match):
+                for command in (
+                    'cd $UNKNOWN_DIR && bash -c "gh pr merge 516"',
+                    "cd $UNKNOWN_DIR && bash -c 'git push origin HEAD:main'",
+                ):
+                    with self.subTest(matcher=matcher.__name__, command=command):
+                        found = matcher.guarded_segments(command, tmp)
+                        self.assertEqual(len(found), 1)
+                        self.assertTrue(found[0][1].startswith(matcher.UNBINDABLE), found)
