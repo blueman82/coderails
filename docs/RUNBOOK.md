@@ -259,7 +259,7 @@ The active decision and order paths request a Muninn review of an indexed source
 | `legacy_uncited` | An imported hand-written order has no Muninn request. Review the source session before any new request. |
 | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
 | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
-| `lesson_not_current` | no unambiguous current cited claim exists; inspect conflicting current evidence, or explicitly re-record a retracted/expired lesson with a fresh quote. |
+| `lesson_not_current` | No single active note matches the saved request. Inspect its receipt and any conflicting, retracted or expired notes. Request a new review from the source session if needed. |
 
 - Limits: only the orchestrator session can request learning. Muninn reviews its source window; the old `--quote`
   option is ignored. The hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Compare
@@ -315,8 +315,8 @@ The active decision and order paths request a Muninn review of an indexed source
   that lock. If they differ, completion stays pending; repeat the native completion command to render again.
   The Claude Stop guard and Codex `verify-completion` block when the tick or bound generated views are incomplete.
   If render fails on the installed Muninn API, the pending result and later verifier show its actual reason code.
-  The installed Muninn uses a current request-bound API that this D4 adapter does not support. Treat live lesson
-  activation as pending; do not use ledger text as a substitute for a current cited claim.
+  This adapter uses Muninn's request-bound API. Treat live lesson activation as pending until the installed Muninn
+  completes a request and current-note check. Do not use ledger text as a substitute for a current note.
 - Pre-D4 complete loop: review its retained evidence before the exact-hash admission. The receipt then follows only
   completion bookkeeping; other graph changes still block. See `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 - Completed text replacement: when this session/loop observation already exists, explicit `record` captures
