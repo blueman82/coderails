@@ -24,6 +24,7 @@ from typing import Any, cast
 from hook_common import append_trace_row, deny, payload_object, read_input, text_field
 from lib.action_match import MERGE_SCRIPT, Operation, guarded_operations, repository, state_mutated_before_guard
 from lib.destructive_patterns import git_output
+from lib.shell_context import opaque_execution
 
 from scripts.lib import advisory_merge, merge_budget
 from scripts.lib.action_binding import binding, merge_number
@@ -131,6 +132,9 @@ def main() -> int:
         command = cast(dict[str, object], data).get("command") if isinstance(data, dict) else None
         cwd = text_field(payload, "cwd") or os.getcwd()
         if not isinstance(command, str) or not command:
+            return 0
+        if opaque_execution(command, cwd):
+            deny("Blocked: executable shell body exceeds the guarded parser depth.")
             return 0
         if not (calls := guarded_operations(command, cwd, implicit_push=True)):
             return 0

@@ -16,9 +16,9 @@ from typing import Any, cast
 
 from hook_common import append_trace_row, loop_state_path
 from lib import argv_match
-from lib.ceiling_key import mirror, worktree_key
+from lib.ceiling_key import legacy_key, mirror, worktree_key
 from lib.dir_lock import acquire_dir_lock, release_dir_lock
-from lib.shell_context import invocations, payload_cwd
+from lib.shell_context import invocations, opaque_execution, payload_cwd
 from test_output import file_lock
 
 SUITES = ("run_all.py", "run_all.sh", "test_codex_hooks.py")
@@ -116,6 +116,9 @@ def main() -> int:
     command = typed_tool_input.get("cmd", typed_tool_input.get("command"))
     if not isinstance(command, str) or isinstance(payload.get("agent_id"), str) and payload["agent_id"]:
         return 0
+    if opaque_execution(command, payload_cwd(payload)):
+        deny("Verification-volume ceiling: executable shell body exceeds the guarded parser depth.")
+        return 0
     found = counted_invocations(command, payload_cwd(payload))
     if not found:
         return 0
@@ -144,7 +147,15 @@ def main() -> int:
                 deny(LOCK_ERROR)
                 return 0
             locked.append(lock)
-        totals = {key: count_for(path) + amounts[key] for key, path in paths.items()}
+        migrated: set[tuple[str, str]] = set()
+        totals: dict[tuple[str, str], int] = {}
+        for key, path in paths.items():
+            source = path
+            if not path.exists():
+                source = state_dir / legacy_key(contexts[key][1], key[1], codex=True)
+                if source.exists():
+                    migrated.add(key)
+            totals[key] = count_for(source) + amounts[key]
         exceeded = next((key for key, count in totals.items() if count >= 3), None)
         for key, path in paths.items():
             if exceeded and totals[key] < 3:
@@ -155,6 +166,8 @@ def main() -> int:
                 deny(WRITE_ERROR)
                 return 0
             top, cwd = contexts[key]
+            if key in migrated and isinstance(session, str):
+                append_trace_row("argv", "allowed", "ceiling_legacy_migrated", session)
             mirror_count(cwd, session if isinstance(session, str) else "", top, key[1], totals[key])
     finally:
         for lock in reversed(locked):

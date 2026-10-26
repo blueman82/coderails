@@ -24,7 +24,7 @@ except ImportError:  # telemetry must never be able to break the hook
 from hooks.scripts.hook_common import output as hook_output
 from hooks.scripts.lib.argv_match import git_invocation, git_prefix
 from hooks.scripts.lib.destructive_patterns import git_output
-from hooks.scripts.lib.shell_context import invocations, payload_cwd
+from hooks.scripts.lib.shell_context import invocations, opaque_execution, payload_cwd
 from hooks.scripts.test_output import begin_run, finish_run
 
 
@@ -90,6 +90,9 @@ def main() -> int:
     if not (command := command_from(raw)):
         return 0
     payload = cast(dict[str, object], json.loads(raw))
+    if opaque_execution(command, payload_cwd(payload)):
+        deny("git commit", "Executable shell body exceeds the guarded parser depth.")
+        return 0
     checked: set[Path] = set()
     for _, argv, cwd in invocations(command, payload_cwd(payload)):
         call = git_invocation(argv, cwd)

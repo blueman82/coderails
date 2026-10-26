@@ -15,7 +15,7 @@ from typing import cast
 
 from lib.argv_match import git_invocation, git_prefix
 from lib.destructive_patterns import git_output
-from lib.shell_context import invocations, payload_cwd
+from lib.shell_context import invocations, opaque_execution, payload_cwd
 from test_output import begin_run, finish_run
 
 TEMPFILE_ERROR = "Test gate could not create a temporary output file, so the commit is blocked."
@@ -102,6 +102,9 @@ def main() -> int:
     """Run the trusted command for Git commits and deny a failed command."""
     payload = payload_object(read_input())
     command = command_for(payload)
+    if opaque_execution(command, payload_cwd(payload)):
+        deny("Executable shell body exceeds the guarded parser depth.")
+        return 0
     checked: set[tuple[Path, str]] = set()
     for _, argv, cwd in invocations(command, payload_cwd(payload)):
         call = git_invocation(argv, cwd)

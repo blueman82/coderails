@@ -37,6 +37,14 @@ class MirrorTests(unittest.TestCase):
             found = codex_match.guarded_operations('env -S "git push origin HEAD:main"', tmp, implicit_push=True)
             self.assertEqual([call.name for call in found], ["git_push"])
 
+    def test_codex_external_time_value_options_do_not_hide_push(self) -> None:
+        """GNU time option values precede the executable in the Codex matcher."""
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            subprocess.run(["git", "-C", tmp, "symbolic-ref", "HEAD", "refs/heads/feature"], check=True)
+            command = "/usr/bin/time -f %E -o report git push origin HEAD:main"
+            self.assertEqual([call.name for call in codex_match.guarded_operations(command, tmp)], ["git_push"])
+
     def test_mirrors_byte_identical(self) -> None:
         """Every mirrored file matches its Claude source."""
         for name in MIRRORS:

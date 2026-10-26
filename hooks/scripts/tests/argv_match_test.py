@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import sys
 import unittest
 from pathlib import Path
@@ -168,6 +169,23 @@ ABBREVIATED_NO_VERIFY = ["--no-verif", "--no-ver", "--no-v"]
 
 class HardeningTests(unittest.TestCase):
     """Reviewer findings: wrapper options, shell keywords, redirections, comments and -c option values."""
+
+    def test_shell_depth_marks_opaque_executable_bodies(self) -> None:
+        """Bash, eval and quoted substitutions cannot disappear beyond five levels."""
+        for inner in (
+            "bash -c 'git push origin HEAD:main'",
+            "eval 'git push origin HEAD:main'",
+            'echo "$(git push origin HEAD:main)"',
+        ):
+            command = inner
+            for _ in range(5):
+                command = "bash -c " + shlex.quote(command)
+            with self.subTest(inner=inner):
+                self.assertTrue(shell_context.opaque_execution(command))
+        command = "git push origin HEAD:main"
+        for _ in range(5):
+            command = "bash -c " + shlex.quote(command)
+        self.assertFalse(shell_context.opaque_execution(command))
 
     def test_directories_are_invocation_local(self) -> None:
         """Git -C composes while wrapper, nested shell and subshell directories stay local."""

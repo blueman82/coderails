@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -24,6 +24,7 @@ from hooks.scripts.lib.pr_workflow_match import (
     targets_main_call,
     transcript_entries,
 )
+from hooks.scripts.lib.shell_context import opaque_execution
 from hooks.scripts.lib.trace_row import append_row
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -60,6 +61,15 @@ def _push_changes_repository(calls: list[Operation], cwd: str) -> bool:
     return False
 
 
+def _transcripts(payload: Mapping[str, object]) -> list[str]:
+    """Keep only readable transcript paths from this hook request."""
+    return [
+        str(payload[key])
+        for key in ("transcript_path", "agent_transcript_path")
+        if isinstance(payload.get(key), str) and Path(str(payload[key])).is_file()
+    ]
+
+
 def main() -> int:
     """Redirect missing workflow steps and fail closed on live merge evidence failure."""
     try:
@@ -72,6 +82,9 @@ def main() -> int:
     if not isinstance(command, str) or not command:
         return 0
     cwd = str(payload.get("cwd") or os.getcwd())
+    if opaque_execution(command, cwd):
+        deny("Blocked: executable shell body exceeds the guarded parser depth.")
+        return 0
     raw_session = payload.get("session_id")
     session = raw_session if isinstance(raw_session, str) else ""
     calls = operations(command, cwd)
@@ -101,11 +114,7 @@ def main() -> int:
         append_row("action_authority", "denied", f"denied_{verdict['reason']}", session)
         deny(f"Blocked: gh pr merge — this session's authority refuses it ({verdict['reason']}); authority.py inspect.")
         return 0
-    paths = [
-        str(payload[key])
-        for key in ("transcript_path", "agent_transcript_path")
-        if isinstance(payload.get(key), str) and Path(str(payload[key])).is_file()
-    ]
+    paths = _transcripts(payload)
     configured_calls = [
         call for call in calls if (config_path(repository(call)) or config_path(cwd)) and targets_main_call(call)
     ]
@@ -116,11 +125,10 @@ def main() -> int:
         return 0
     entries = transcript_entries(paths)
     for call in merges:
-        selected = repository(call)
         requested, unit, progress = merge_target.parse(call.segment)
         previous = os.getcwd()
         try:
-            os.chdir(selected)
+            os.chdir(repository(call))
             number = merge_target.resolve(requested)
             sha = git.pr_field(number, "headRefOid") if number else ""
             if not sha:

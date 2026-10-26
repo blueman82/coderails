@@ -14,10 +14,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, read_payload
 from hooks.scripts.lib import argv_match
 from hooks.scripts.lib.agentic_loop_path import resolve_path
-from hooks.scripts.lib.ceiling_key import mirror, worktree_key
+from hooks.scripts.lib.ceiling_key import legacy_key, mirror, worktree_key
 from hooks.scripts.lib.dir_lock import acquire_dir_lock, release_dir_lock
 from hooks.scripts.lib.loop_state_common import atomic_progress_update, read_state
-from hooks.scripts.lib.shell_context import invocations, payload_cwd
+from hooks.scripts.lib.shell_context import invocations, opaque_execution, payload_cwd
 from hooks.scripts.lib.trace_row import append_row
 
 SUITES = ("run_all.py", "run_all.sh", "test_codex_hooks.py")
@@ -59,6 +59,9 @@ def main() -> int:
     command = data.get("command", "") if isinstance(data, dict) else ""
     if not isinstance(command, str) or isinstance(payload.get("agent_id"), str) and payload["agent_id"]:
         return 0
+    if opaque_execution(command, payload_cwd(payload)):
+        deny("Verification-volume ceiling: executable shell body exceeds the guarded parser depth.")
+        return 0
     found = counted_invocations(command, payload_cwd(payload))
     if not found:
         return 0
@@ -88,9 +91,15 @@ def main() -> int:
                 return 0
             locked.append(lock)
         totals: dict[tuple[str, str], int] = {}
+        migrated: set[tuple[str, str]] = set()
         for key, path in paths.items():
+            source = path
+            if not path.exists():
+                source = state / legacy_key(contexts[key][1], key[1])
+                if source.exists():
+                    migrated.add(key)
             try:
-                raw = path.read_text().strip()
+                raw = source.read_text().strip()
                 count = int(raw) if raw.isdigit() else 0
             except OSError:
                 count = 0
@@ -105,6 +114,8 @@ def main() -> int:
                 deny("Verification-volume ceiling: could not write its count file; failing closed.")
                 return 0
             top, cwd = contexts[key]
+            if key in migrated:
+                append_row("argv", "allowed", "ceiling_legacy_migrated", str(payload.get("session_id") or "?"))
             mirror_count(cwd, payload.get("session_id"), top, key[1], totals[key])
     finally:
         for lock in reversed(locked):

@@ -55,6 +55,10 @@ class MatchHardeningTests(unittest.TestCase):
         found = match.guarded_operations(command, self.repo, implicit_push=True)
         self.assertEqual([call.name for call in found], ["git_push"])
 
+    def test_external_time_value_options_do_not_hide_push(self) -> None:
+        """GNU time option values precede the executable."""
+        self.assertEqual(self.names("/usr/bin/time -f %E -o report git push origin HEAD:main"), ["git_push"])
+
     def test_async_merge_request_is_guarded_but_result_lookup_is_not(self) -> None:
         """The stacked-PR PUT endpoint is a merge; polling its UUID is a read."""
         sha = "f" * 40

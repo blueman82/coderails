@@ -47,6 +47,21 @@ def owned_state(repo: Path) -> dict[str, object]:
 class CeilingLockTests(unittest.TestCase):
     """A dead-owner lock must not deny forever."""
 
+    def test_legacy_branch_count_is_carried_into_worktree_key(self) -> None:
+        """An upgrade cannot grant a third full run on the same branch."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, repo = Path(tmp) / "data", Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", "-b", "feature/old", str(repo)], check=True)
+            legacy = data / "verification-ceiling/feature-old__full-suite.count"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("2\n")
+            self.assertIn('"deny"', run_hook(data, repo))
+            key = hashlib.sha1((os.path.realpath(repo / ".git") + os.path.realpath(repo)).encode()).hexdigest()
+            self.assertEqual((legacy.parent / f"{key}__full-suite.count").read_text(), "3\n")
+            self.assertIn('"deny"', run_hook(data, repo))
+            self.assertEqual((legacy.parent / f"{key}__full-suite.count").read_text(), "4\n")
+            self.assertEqual((data.parent / "loops/s1/trace.jsonl").read_text().count("ceiling_legacy_migrated"), 1)
+
     def test_three_runs_in_one_command_are_denied(self) -> None:
         """One tool call cannot hide the third run in later shell segments."""
         with tempfile.TemporaryDirectory() as tmp:

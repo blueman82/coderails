@@ -55,6 +55,18 @@ class CeilingSourceTests(HookCase):
         self.assertEqual(self.run_times(RUN_ALL, repo, 1), [True])
         self.assertEqual(self.counter(repo, "run_all").read_text(encoding="utf-8").strip(), "3")
 
+    def test_legacy_branch_count_is_carried_into_worktree_key(self) -> None:
+        """An upgrade cannot grant a third full run on the same branch."""
+        repo = self.repository("repo", "feature/old")
+        legacy = self.loop / "verification-ceiling/feature-old__run_all.count"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("2", encoding="utf-8")
+        self.assertEqual(self.run_times(RUN_ALL, repo, 1, session_id="s1"), [True])
+        self.assertEqual(self.counter(repo, "run_all").read_text().strip(), "3")
+        self.assertEqual(self.run_times(RUN_ALL, repo, 1, session_id="s1"), [True])
+        self.assertEqual(self.counter(repo, "run_all").read_text().strip(), "4")
+        self.assertEqual((self.loop / "s1/trace.jsonl").read_text().count("ceiling_legacy_migrated"), 1)
+
     def test_same_branch_name_in_two_repositories_counts_independently(self) -> None:
         """Two repositories sharing a branch name keep separate counters."""
         first, second = self.repository("one", "unit-1"), self.repository("two", "unit-1")

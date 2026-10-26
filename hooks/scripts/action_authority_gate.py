@@ -37,6 +37,7 @@ from hooks.scripts.lib.pr_workflow_match import (
     repository,
     state_mutated_before_guard,
 )
+from hooks.scripts.lib.shell_context import opaque_execution
 from hooks.scripts.lib.trace_row import append_row
 from scripts.lib import advisory_merge, merge_budget
 from scripts.lib.action_binding import binding, merge_number
@@ -149,6 +150,9 @@ def main() -> int:
         if not isinstance(command, str) or not command:
             return 0
         cwd = str(payload.get("cwd") or os.getcwd())
+        if opaque_execution(command, cwd):
+            deny("Blocked: executable shell body exceeds the guarded parser depth.")
+            return 0
         if not (calls := guarded_operations(command, cwd, implicit_push=True)):
             return 0
         source_mode, _ = resolve_mode(cwd)

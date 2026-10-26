@@ -34,6 +34,23 @@ def worktree_key(cwd: str) -> tuple[str, str]:
     return hashlib.sha1((common + top).encode()).hexdigest(), top
 
 
+def legacy_key(cwd: str, target: str, *, codex: bool = False) -> str:
+    """Return the pre-worktree counter filename for the selected branch."""
+    try:
+        branch = (
+            subprocess.run(
+                ["git", "-C", cwd, "branch", "--show-current"], capture_output=True, text=True, check=False
+            ).stdout.strip()
+            or "(no-branch)"
+        )
+    except OSError:
+        branch = "(no-branch)"
+    slug = branch.replace("/", "-")
+    if codex:
+        slug = slug.replace(" ", "-")
+    return f"{slug}__{target}.count"
+
+
 def mirror(state: dict[str, Any], top: str, field: str, total: int, session: str, loop: str) -> bool:
     """Mirror only one worktree unit registered in this exact session's live current wave."""
     if not session or not loop or state.get("schema_version") != 3 or state.get("status") != "in-progress":

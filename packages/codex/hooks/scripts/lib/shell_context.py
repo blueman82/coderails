@@ -16,7 +16,7 @@ _WRAPPERS: dict[str, tuple[str, tuple[str, ...], int]] = {
     "env": ("uCS", ("--unset", "--chdir", "--split-string"), 0),
     "sudo": ("ugphCDRT", ("--user", "--group", "--host", "--prompt", "--chdir", "--chroot", "--close-from"), 0),
     "command": ("", (), 0),
-    "time": ("", (), 0),
+    "time": ("fo", ("--format", "--output"), 0),
     "nohup": ("", (), 0),
     "nice": ("n", ("--adjustment",), 0),
     "exec": ("a", (), 0),
@@ -28,6 +28,10 @@ _WRAPPERS: dict[str, tuple[str, tuple[str, ...], int]] = {
 }
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 _FALLBACK_SPLIT = re.compile(r"&&|\|\||[;|&()\n]")
+
+
+class OpaqueShellError(ValueError):
+    """A command body would execute beyond the parser's bounded recursion."""
 
 
 def move(cwd: str, target: str) -> str:
@@ -197,7 +201,9 @@ def shell_body(argv: list[str]) -> str | None:
     return None
 
 
-def invocations(command: str, cwd: str = "", depth: int = 0) -> list[tuple[str, list[str], str]]:
+def invocations(
+    command: str, cwd: str = "", depth: int = 0, *, strict: bool = False
+) -> list[tuple[str, list[str], str]]:
     """Yield exact source, unwrapped argv and effective cwd, with local shell/subshell scope."""
     found: list[tuple[str, list[str], str]] = []
     directories: list[str] = []
@@ -215,9 +221,12 @@ def invocations(command: str, cwd: str = "", depth: int = 0) -> list[tuple[str, 
                 cwd = directories.pop()
             continue
         argv, where = unwrap(tokens, cwd)
-        if depth < 5:
-            for embedded in quoted_commands(segment):
-                found.extend(invocations(embedded, cwd, depth + 1))
+        for embedded in quoted_commands(segment):
+            if depth >= 5:
+                if strict:
+                    raise OpaqueShellError("quoted command exceeds shell depth")
+            else:
+                found.extend(invocations(embedded, cwd, depth + 1, strict=strict))
         if not argv:
             continue
         if argv[0] == "cd":
@@ -231,11 +240,25 @@ def invocations(command: str, cwd: str = "", depth: int = 0) -> list[tuple[str, 
                 cwd = move(where, args[0])
             continue
         found.append((segment, argv, where))
-        if (body := shell_body(argv)) is not None and depth < 5:
-            found.extend(invocations(body, where, depth + 1))
-        elif argv[0] == "eval" and len(argv) > 1 and depth < 5:
-            found.extend(invocations(" ".join(argv[1:]), where, depth + 1))
+        body = shell_body(argv)
+        if body is None and argv[0] == "eval" and len(argv) > 1:
+            body = " ".join(argv[1:])
+        if body is not None:
+            if depth >= 5:
+                if strict:
+                    raise OpaqueShellError("shell command exceeds shell depth")
+            else:
+                found.extend(invocations(body, where, depth + 1, strict=strict))
     return found
+
+
+def opaque_execution(command: str, cwd: str = "") -> bool:
+    """True if supported shell forms would execute beyond the parser's depth limit."""
+    try:
+        invocations(command, cwd, strict=True)
+    except OpaqueShellError:
+        return True
+    return False
 
 
 def payload_cwd(payload: Mapping[str, object]) -> str:
