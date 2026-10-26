@@ -806,7 +806,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
 
 ## Dispatch refused: `dispatch_*` or `role_mismatch`
 
-- Symptom: `loop_dispatch_guard` (Claude `Agent`, Codex `spawn_agent`) denies a spawn in a graph-bound session, or
+- Symptom: `loop_dispatch_guard` (Claude `Agent`, Codex `spawn_agent`, which this Codex host reports to hooks as
+  `collaborationspawn_agent`) denies a spawn in a graph-bound session, or
   `begin-wave` / `graph.py authorize-dispatch` fails. The hook message names the failure; the reason code is a row in the
   loop's `recovery-trace.jsonl` (`authorize-dispatch/refused/<code>`, allowed spawns are `authorized/dispatch_authorized`).
 - Query: `python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]` counts `dispatch_authorized` and every refusal code.
@@ -850,7 +851,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `security-reviewer`, `source-auditor`) are role-contained;
   `spec-reviewer` (empty capability list), the `shell.raw` roles (`docs-auditor`, `wiki-writer`, `proof-author`) and nodes
   with no `agent_role` (default `loop-worker`) may run as explicit `general-purpose` on Claude, or with omitted or exact
-  role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent` and `spawn_agent` only, so `SendMessage` on
+  role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent`, `spawn_agent`, and
+  `collaborationspawn_agent` only, so `SendMessage` on
   Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
   (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
   `spawn_agent` function-call message with its v2 record, role and consumed authorization; a task-name-only legacy event

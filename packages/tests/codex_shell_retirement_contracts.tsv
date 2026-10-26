@@ -7,7 +7,7 @@ hooks/scripts/graph_completion_guard.py	hook	complete graph allows	incomplete gr
 hooks/scripts/inject_bootstrap.py	hook	startup injects context	invalid input degrades	stdout hook JSON	SessionStart: 0	stdin JSON PLUGIN_ROOT	SessionStart startup|resume|clear|compact
 hooks/scripts/inject_context.py	hook	prompt injects context	invalid input degrades	stdout hook JSON	UserPromptSubmit: 0	stdin JSON	UserPromptSubmit
 hooks/scripts/hook_common.py	hook-helper	helper emits hook output	helper degrades safely	stdout hook JSON	caller-defined	PLUGIN_ROOT jq	imported by hook entries
-hooks/scripts/loop_dispatch_guard.py	hook	authorized dispatch allows	missing graph state denies	stdout deny JSON	PreToolUse: 0	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	PreToolUse ^spawn_agent$
+hooks/scripts/loop_dispatch_guard.py	hook	authorized dispatch allows	missing graph state denies	stdout deny JSON	PreToolUse: 0	stdin JSON CLAUDE_AGENTIC_LOOP_DIR	PreToolUse ^(?:spawn_agent|collaborationspawn_agent)$
 hooks/scripts/no_edit_on_main.py	hook	allowed write allows	protected write denies	stdout deny JSON	PreToolUse: 0	stdin JSON	PreToolUse ^apply_patch$
 hooks/scripts/quality_feedback.py	hook	quality feedback emits	invalid input degrades	stdout hook JSON	PostToolUse: 0	stdin JSON PLUGIN_ROOT	PostToolUse ^apply_patch$
 hooks/scripts/test_gate.py	hook	passing trusted test allows	failing trusted test denies	stdout deny JSON	PreToolUse: 0	stdin JSON	PreToolUse ^Bash$
