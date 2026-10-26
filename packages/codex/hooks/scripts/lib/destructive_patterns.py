@@ -6,6 +6,9 @@ import re
 import subprocess
 from pathlib import Path
 
+from . import argv_match, protected_paths
+from .shell_context import invocations
+
 
 def normalize_ifs(command: str) -> str:
     """Normalize IFS expansions using the hook's bounded literal rules."""
@@ -83,7 +86,6 @@ def permanent_pattern(command: str, cwd: str) -> tuple[str, str]:
         (r"\bdd\s+if=", "dd-if"),
         (r"\bmkfs\.", "mkfs-format"),
         (r"\bchmod\s+-R\s+777", "chmod-r-777"),
-        (r"\bgit\s+commit\s+.*--no-verify", "git-commit-no-verify"),
     ]
     for line in command.split("\n"):
         matches = [
@@ -94,14 +96,28 @@ def permanent_pattern(command: str, cwd: str) -> tuple[str, str]:
         if matches:
             _, text, identifier = min(matches)
             return text, identifier
+    for segment, argv, _ in invocations(command):
+        call = argv_match.git_invocation(argv)
+        if call is None or call[0] != "commit":
+            continue
+        subcommand, _, rest = call
+        given = argv_match.flags(rest, "mFCct")  # git accepts any unambiguous prefix, so --no-ver is --no-verify
+        abbreviated = any("--no-verify".startswith(f) and f.startswith("--no-v") for f in given)
+        if subcommand == "commit" and ("-n" in given or abbreviated):
+            # Match text only after argv confirms a real no-verify operation, preserving the existing reason.
+            commit_match = re.search(r"\bgit\s+commit\s+.*--no-verify", segment, re.I)
+            return commit_match[0] if commit_match else "git commit --no-verify", "git-commit-no-verify"
     return "", ""
 
 
 def source_write(command: str, cwd: str) -> str:
     """Return a source-edit denial, preserving target-repository branch resolution."""
-    extension = r"\.(py|ts|tsx|js|jsx|go)([\s'\"]|$)"
-    plugin = r"(^|[\s/'\"])(skills/[^/]+/SKILL\.md|commands/[^/]+\.md)([\s'\"]|$)"
-    source = f"{extension}|{plugin}"
+    try:
+        source, unreadable = protected_paths.source_regex(protected_paths.load()), ""
+    except ValueError:  # fail closed: every target is a source file until the policy is repaired
+        source, unreadable = ".", f"{protected_paths.UNREADABLE}: "
+    if (tokens := command.split()) and protected_paths.is_policy(tokens[-1].strip("\"'")):
+        source = "."
     target = ""
     if re.search(r"^\s*(cp|mv)\b", command, re.I):
         target = command.split()[-1]
@@ -110,7 +126,7 @@ def source_write(command: str, cwd: str) -> str:
         target = match[1] if match else ""
     if target and re.search(source, target, re.I) and target_branch(target, cwd) in {"main", "master"}:
         return (
-            f"In-Bash source write (cp/mv/dd) on main branch blocked.\nFull command: {command}\n"
+            f"{unreadable}In-Bash source write (cp/mv/dd) on main branch blocked.\nFull command: {command}\n"
             "Writing source files via cp/mv/dd on main is blocked. Switch to a feature branch."
         )
     editing = False
@@ -125,7 +141,7 @@ def source_write(command: str, cwd: str) -> str:
     branch = target_branch(target, cwd) if editing else ""
     if branch in {"main", "master"}:
         return (
-            f"In-Bash source edit on {branch} branch blocked.\nFull command: {command}\n"
+            f"{unreadable}In-Bash source edit on {branch} branch blocked.\nFull command: {command}\n"
             "Editing source files via sed/perl/redirect/tee on main is blocked. "
             "Switch to a feature branch or use the Edit tool."
         )

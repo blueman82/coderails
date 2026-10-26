@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import select
 import subprocess
 import sys
@@ -23,9 +22,10 @@ except ImportError:  # telemetry must never be able to break the hook
 
 
 from hooks.scripts.hook_common import output as hook_output
+from hooks.scripts.lib.argv_match import git_invocation, git_prefix
+from hooks.scripts.lib.destructive_patterns import git_output
+from hooks.scripts.lib.shell_context import invocations, payload_cwd
 from hooks.scripts.test_output import begin_run, finish_run
-
-COMMIT_COMMAND = re.compile(r"\bgit +commit\b")
 
 
 def read_payload(timeout_seconds: float = 5.0) -> str:
@@ -67,10 +67,10 @@ def command_from(raw_payload: str) -> str:
     return command if isinstance(command, str) else ""
 
 
-def configured_test_command() -> str:
+def configured_test_command(directory: Path = Path(".")) -> str:
     """Read the first project-local test command line, preserving the hook contract."""
     try:
-        return Path(".claude/test_command").read_text(encoding="utf-8").splitlines()[0]
+        return (directory / ".claude/test_command").read_text(encoding="utf-8").splitlines()[0]
     except (IndexError, OSError):
         return ""
 
@@ -86,23 +86,40 @@ def deny(command: str, output: str) -> None:
 
 def main() -> int:
     """Deny a commit only when the configured project test command fails."""
-    if not (command := command_from(read_payload())) or not COMMIT_COMMAND.search(command):
+    raw = read_payload()
+    if not (command := command_from(raw)):
         return 0
-    if not (test_command := configured_test_command()):
-        return 0
-    try:
-        run = begin_run("claude", Path.cwd(), test_command)
-        with (run / "output.log").open("wb") as log_file:
-            result = subprocess.run(
-                ["/bin/bash", "-c", test_command], stdout=log_file, stderr=subprocess.STDOUT, check=False
-            )
-        notice = finish_run(run, result.returncode)
-    except (OSError, ValueError):
-        deny(test_command, "Test output could not be captured or recorded; commit blocked.")
-        return 0
-    note_child("test_gate", result.returncode)
-    if result.returncode != 0:
-        deny(test_command, notice)
+    payload = cast(dict[str, object], json.loads(raw))
+    checked: set[Path] = set()
+    for _, argv, cwd in invocations(command, payload_cwd(payload)):
+        call = git_invocation(argv, cwd)
+        if call is None or call[0] != "commit":
+            continue
+        prefix = git_prefix(argv, call[2])
+        directory = Path(git_output(cwd, *prefix, "rev-parse", "--show-toplevel") or call[1]).resolve()
+        if directory in checked:
+            continue
+        checked.add(directory)
+        if not (test_command := configured_test_command(directory)):
+            continue
+        try:
+            run = begin_run("claude", directory, test_command)
+            with (run / "output.log").open("wb") as log_file:
+                result = subprocess.run(
+                    ["/bin/bash", "-c", test_command],
+                    cwd=directory,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                )
+            notice = finish_run(run, result.returncode)
+        except (OSError, ValueError):
+            deny(test_command, "Test output could not be captured or recorded; commit blocked.")
+            return 0
+        note_child("test_gate", result.returncode)
+        if result.returncode != 0:
+            deny(test_command, notice)
+            return 0
     return 0
 
 
