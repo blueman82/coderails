@@ -41,13 +41,13 @@ class HookDecisionTests(unittest.TestCase):
     def test_record_uses_actual_reason_and_catalog_remediation(self) -> None:
         """An alias selects recovery text without replacing the emitted reason."""
         with patch.object(hook_decision, "CATALOG", self.catalog):
-            record = hook_decision.make_record("autonomous", "blocked", "crack_on_legacy_flag", {"cmd": "abc"})
+            record = hook_decision.make_record("autonomous", "blocked", "authority_deny", {"cmd": "abc"})
         self.assertEqual(
             record,
             {
                 "hook": "autonomous",
                 "decision": "blocked",
-                "reason_code": "crack_on_legacy_flag",
+                "reason_code": "authority_deny",
                 "params": {"cmd": "abc"},
                 "remediation": "Revoke the authority.",
             },
