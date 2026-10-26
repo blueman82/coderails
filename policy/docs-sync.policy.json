@@ -1,0 +1,13 @@
+{
+  "docs_sync": {
+    "allow": ["**/*.md"],
+    "deny": [
+      "skills/**/SKILL.md",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "docs/routines.md",
+      ".claude/**",
+      "examples/dashboard-config.json"
+    ]
+  }
+}

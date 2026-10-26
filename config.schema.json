@@ -173,7 +173,7 @@
       "status": "enforced_by_code",
       "control": true,
       "on_value": "enforce",
-      "description": "off | advisory | enforce, read by scripts/push.py and scripts/merge.py. Default enforce but inert until diff_manifest_policy names a policy file (the default policy is a Phase 4 deliverable)."
+      "description": "Diff-manifest publication gate for push.py, merge.py and direct-merge hooks. Default enforce uses the shipped policy; invalid values are rejected by strict config consumers."
     },
     "diff_manifest_policy": {
       "type": [
@@ -182,7 +182,7 @@
       ],
       "default": null,
       "status": "enforced_by_code",
-      "description": "Path to the diff-manifest policy JSON; null or absent = the diff check is inactive."
+      "description": "Path to the diff-manifest policy JSON; null or absent uses policy/diff-policy.default.json."
     },
     "integrity_review": {
       "type": [

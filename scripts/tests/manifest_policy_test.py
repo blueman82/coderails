@@ -204,7 +204,9 @@ class GateTests(RepoCase):
         git_cmd(self.dir, "commit", "-qam", "doc")
         self.cfg = self.dir.parent / "workflow.config.yaml"
         self.policy_path = self.policy({"deny": ["README.md"]})
-        self.env = mock.patch.dict(os.environ, {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)})
+        self.env = mock.patch.dict(
+            os.environ, {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop), "CODERAILS_PUBLICATION_SESSION_ID": "s"}
+        )
         self.env.start()
         self.addCleanup(self.env.stop)
         cwd = os.getcwd()
@@ -239,18 +241,104 @@ class GateTests(RepoCase):
         rows = [r for r in self.rows() if r["outcome"] != "legacy"]
         self.assertEqual([(r["outcome"], r["reason_code"]) for r in rows], [("refused", "denied_path")])
 
-    def test_off_and_no_policy_do_nothing(self) -> None:
-        """Off, or no policy file, skips the check and writes nothing."""
+    def test_off_skips_and_no_policy_uses_default(self) -> None:
+        """Off skips; no policy path checks the shipped default."""
         with self.configure("off"):
             manifest_policy.gate()
+        self.assertEqual(self.rows(), [])
         with self.configure("enforce", policy=False):
             manifest_policy.gate()
-        self.assertEqual(self.rows(), [])
+        self.assertIn("diff_manifest_ok", [row["reason_code"] for row in self.rows()])
 
     def test_counters(self) -> None:
         """manifest_counters tallies only diff-manifest rows from a by_reason map."""
         by_reason = {"diff-manifest/warned/denied_path": 2, "authority/created/x": 5, "diff-manifest/ok/ok": 1}
         self.assertEqual(manifest_counters.counts(by_reason), {"warned/denied_path": 2, "ok/ok": 1})
+
+    def test_supported_graph_unit_binds_manifest_for_both_providers(self) -> None:
+        """A real start/add-unit state bounds its diff and requires explicit unit flags."""
+        helper = REPO / "hooks/scripts/lib/agentic_loop_path.py"
+        session = "manifest-test-session"
+        prompt = self.dir.parent / "prompt.txt"
+        prompt.write_text("Build the unit")
+        with mock.patch.dict(
+            os.environ,
+            {
+                "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
+                "CODERAILS_AGENTIC_LOOP_DIR": str(self.loop),
+                "CLAUDE_CODE_SESSION_ID": session,
+                "CODERAILS_PUBLICATION_SESSION_ID": session,
+            },
+        ):
+            progress = Path(subprocess.check_output([sys.executable, str(helper)], cwd=self.dir, text=True).strip())
+            for graph in (
+                REPO / "skills/agentic-loop/scripts/graph.py",
+                REPO / "packages/codex/skills/agentic-loop/scripts/graph.py",
+            ):
+                with self.subTest(provider=str(graph)):
+                    if progress.exists():
+                        progress.unlink()
+                    start = ["--session", session, "--loop-id", "manifest-test", "--prompt-file", str(prompt)]
+                    add = ["--session", session, "--loop-id", "manifest-test", "--unit", "1", "--manifest", "src/**"]
+                    for command, flags in (("start", start), ("add-unit", add)):
+                        subprocess.run(
+                            [sys.executable, str(graph), command, str(progress), *flags],
+                            cwd=self.dir,
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                    self.assertEqual(manifest_policy.unit_manifest(str(progress), "1"), ["src/**"])
+                    with mock.patch.object(
+                        manifest_policy, "settings", return_value=("enforce", self.policy({}), False)
+                    ):
+                        explicit = manifest_policy.violations(unit="1", progress=str(progress))
+                        omitted = manifest_policy.violations()
+                    self.assertIn("diff_manifest:out_of_manifest", [row["code"] for row in explicit])
+                    self.assertIn("diff_manifest:manifest_unreadable", [row["code"] for row in omitted])
+
+                    with (
+                        mock.patch.dict(os.environ, {"CODERAILS_PUBLICATION_SESSION_ID": ""}),
+                        self.assertRaises(ValueError),
+                    ):
+                        manifest_policy.unit_manifest(str(progress), "1")
+
+    def test_existing_same_session_fallback_graph_requires_binding(self) -> None:
+        """The supported path helper can find an old repo slug; omitted flags still refuse."""
+        from packages.tests.graph_manifest_fixture import graph_progress
+
+        session = "fallback-session"
+        with mock.patch.dict(
+            os.environ,
+            {
+                "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
+                "CODERAILS_PUBLICATION_SESSION_ID": session,
+            },
+        ):
+            progress = graph_progress(self.dir, self.loop, ["docs/**"], session=session)
+            other = self.dir.parent / "other-repo"
+            other.mkdir()
+            git_cmd(other, "init", "-q", "-b", "main")
+            (other / "README.md").write_text("base\n")
+            git_cmd(other, "add", "-A")
+            git_cmd(other, "commit", "-qm", "base")
+            git_cmd(other, "update-ref", "refs/remotes/origin/main", "HEAD")
+            git_cmd(other, "checkout", "-qb", "feature")
+            (other / "README.md").write_text("change\n")
+            git_cmd(other, "commit", "-qam", "change")
+            os.chdir(other)
+            try:
+                with mock.patch.object(manifest_policy, "settings", return_value=("enforce", self.policy({}), False)):
+                    self.assertIn(
+                        "diff_manifest:manifest_unreadable",
+                        [row["code"] for row in manifest_policy.violations()],
+                    )
+                    self.assertIn(
+                        "diff_manifest:manifest_unreadable",
+                        [row["code"] for row in manifest_policy.violations(unit="1", progress=str(progress))],
+                    )
+            finally:
+                os.chdir(self.dir)
 
 
 class MergeCallTests(unittest.TestCase):
@@ -265,18 +353,18 @@ class MergeCallTests(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, "", "")
 
         with (
-            mock.patch.object(merge, "verify_gates"),
-            mock.patch.object(merge, "require_merge_receipt"),  # the receipt seam has its own suite
+            mock.patch.object(merge, "verify_gates", return_value="a" * 40),
+            mock.patch.object(merge, "require_merge_receipt", return_value=None),  # receipt seam has its own suite
             mock.patch.object(git, "require_repo"),
             mock.patch.object(git, "main", return_value="main"),
             mock.patch.object(git, "pr_field", return_value="OPEN"),
             mock.patch.object(git, "protected", return_value=False),
             mock.patch.object(git, "run", side_effect=fake_run),
             mock.patch.object(merge, "cleanup"),
-            mock.patch.object(manifest_policy, "gate", side_effect=gate_effect) as gate,
+            mock.patch("scripts.lib.publication_gate.enforce", side_effect=gate_effect) as gate,
         ):
             status = merge.main(["7"])
-        gate.assert_called_once_with("7")
+        gate.assert_called_once_with("7", "a" * 40, unit="", progress="")
         return status, [a for a in seen if a[:3] == ("gh", "pr", "merge")]
 
     def test_enforce_refusal_blocks_merge(self) -> None:
@@ -296,7 +384,7 @@ class WiringTests(unittest.TestCase):
     def test_call_sites_present(self) -> None:
         """Negative control target: removing a call site fails this test."""
         self.assertIn("manifest_policy.gate(", (REPO / "scripts/push.py").read_text())
-        self.assertIn("manifest_policy.gate(", (REPO / "scripts/merge.py").read_text())
+        self.assertIn("publication_gate.enforce(", (REPO / "scripts/merge.py").read_text())
 
     def test_codex_mirror_is_byte_identical(self) -> None:
         """Lib, CLI and push are byte-identical in the Codex package."""

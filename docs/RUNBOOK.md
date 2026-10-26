@@ -41,16 +41,16 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `python3 scripts/lib/config_counters.py` (`config_rejected`, `config_bad_value`, `wiki_schema_fail_closed`).
 - Remediation: run `python3 scripts/lib/config.py resolve-config --json`, fix each finding (typo'd key, wrong type, value
   outside the enum), or restore `wiki.schema.json` (`page_types` non-empty list of directory names). Only the guarded
-  action is denied; every other command and tool passes. With NO config file nothing is read and every gate stays inert
-  (repos not using coderails), and an ambiguous wiki identity (no `wiki_path`, other repository, vault not a directory)
-  still allows.
-- Limit: the controls are only as strong as the config file. A same-user agent can `mv` it away (every gate goes inert)
-  or edit a control to `off` in place; no hook guards `.coderails/workflow.config.yaml`. Review config diffs like code
-  (the diff-manifest policy can list it as a protected path). `evals.require_signatures` fails closed: only an
-  explicit `false` turns it off. Malformed lines and duplicate keys are `config_unparseable_line` /
-  `config_duplicate_key` findings.
-- Defaults: an existing config with no other keys enables `sandbox_workers: true`,
-  `evals.require_signatures: true`, and `diff_manifest: enforce` (inert until `diff_manifest_policy` names a file).
+  action is denied; other commands and tools can continue. Without a config file, config-dependent gates do not run.
+  The diff-manifest check still uses its shipped policy. An ambiguous wiki identity (no `wiki_path`, another repository,
+  or a path that is not a vault) does not block a write.
+- Limit: a same-user agent can remove the config file or set a control to `off`; no hook guards
+  `.coderails/workflow.config.yaml`. Removing the file does not disable the default diff-manifest check. Review config
+  diffs like code. The diff-manifest policy can list the config file as a protected path. `evals.require_signatures`
+  fails closed: only an explicit `false` turns it off. Malformed lines and duplicate keys are
+  `config_unparseable_line` / `config_duplicate_key` findings.
+- Defaults: the diff-manifest check uses `enforce` mode and `policy/diff-policy.default.json` even without a config file.
+  An existing config with no other keys enables `sandbox_workers: true` and `evals.require_signatures: true`.
   `action_authority` defaults to `off`. The shipped config sets it to `advisory`, which warns about missing receipts
   without a passphrase. Set `enforce` only when signed receipts are required.
 
@@ -381,17 +381,54 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Diff-manifest check warned or refused
 
-- Symptom: `push.py` or `merge.py` prints `! diff_manifest <code>: <path>`, or refuses with `diff_manifest:<code>`
-  (config `diff_manifest: enforce`). `scripts/diff_manifest.py --policy FILE` shows the same verdict without hooks.
+- Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)
+  refuses with `diff_manifest:<code>` and prints `! diff_manifest <code>: <path>` on stderr. The check is ON by default
+  (`diff_manifest: enforce`, no config file needed, shipped policy `policy/diff-policy.default.json`); `off` and
+  `advisory` (warn only) are the explicit switches. `scripts/diff_manifest.py [--policy FILE]` is a diagnostic verdict
+  reader: it reports unreadable inputs with exit 0; the publication callers refuse them under enforce.
 - Query: `trace.by_reason` for `diff-manifest/ok/diff_manifest_ok`, `diff-manifest/warned|refused/<code>` (rows are keyed by
-  `<repo>@<branch>` or `<repo>@pr-<N>`), plus `diff-manifest/failed_open/manifest_unreadable`,
+  `<repo>@<branch>` or `<repo>@pr-<N>`), `publication/refused/diff_manifest:<code>` (one row per refusal from the single
+  publication gate, every path), plus `diff-manifest/failed_open/manifest_unreadable` (advisory only),
   `diff-manifest/legacy/manifest_legacy_absent` (policy file without a manifest key; also written by the gate) and `diff-manifest/refused/foreign_session`. Tally them with
-  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/manifest_counters.py`.
-- Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink).
+  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`
+  (`manifest_counters.py` still tallies only `diff-manifest`). See `docs/workflow-gates-measurement.md`.
+- Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink), `mode_change`, `status_not_allowed` (policy `statuses`), `too_many_paths` (policy `max_paths`), `manifest_unreadable`, `manifest_internal_error`, `diff_manifest_mode_invalid` (unknown mode, treated as enforce).
 - Remediation: a real violation means the diff left its declared scope; fix the diff, or widen `unit.manifest`
-  (re-register with `add-unit --manifest`) or the policy file on purpose. `manifest_unreadable` means the policy file,
-  progress.json or diff could not be read (fails open when advisory; refuses under enforce); fix the path. Set
-  `diff_manifest: off` to disable.
+  (re-register with `add-unit --manifest`) or the policy file on purpose. `push.py`/`merge.py --unit N --progress PATH`
+  bound the diff to that unit's manifest. `manifest_unreadable` means the policy file, progress.json or diff (or an
+  unresolved PR head) could not be read: it refuses under enforce (fails open only under advisory); fix the path.
+  `manifest_internal_error` refuses under enforce; advisory records `failed_open` and continues, including when repository
+  metadata lookup fails. Set `diff_manifest: off` to disable. Invalid modes, including an empty mode, enforce and report
+  `diff_manifest_mode_invalid`. A null policy value selects the shipped default; the typed config grammar also coerces
+  an empty nullable scalar to null.
+- Limits: a cooperating-agent safeguard. A same-user agent can edit the config to `off`; direct hooks only see merges
+  `guarded_segments` can match; Codex hooks need `/hooks` trust before they run. Claude checks the manifest even without
+  config or a transcript; its review/eval sequence still needs both.
+- Hardening notes: `mode_change` refuses a chmod (100644 to 100755). The default denylist is best-effort secret shapes
+  (`.env*`, `*.pem`, `*.key`, `*.p12`, `credentials*.json`, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa|dsa|ecdsa|ed25519*`)
+  and the gate's own files (`.coderails/workflow.config.yaml`, `policy/diff-policy*.json`, the Codex copy), so a PR that
+  edits or deletes them is refused; deleting a secret-shaped path is allowed. It cannot catch a secret under another name. The gate reads config
+  and policy from the local checkout: a same-user boundary, not a defence against someone who controls that checkout.
+  `--unit` without `--progress` (or the reverse) refuses `manifest_unreadable`. Both separated and `--unit=N`/`--progress=PATH`
+  forms are supported; empty or repeated flag values refuse. A requested unit must exist and carry a string-list `manifest`
+  and a nonblank absolute `worktree` whose real path equals the current Git repository root. The progress object must carry
+  nonblank string `session_id` and `loop_id` fields. Missing, malformed or mismatched metadata refuses `manifest_unreadable`;
+  `manifest: []` allows no changed paths. A session that owns a graph unit in this worktree must supply both flags.
+  Without a matching graph unit, standalone publication uses the policy alone. Unit and policy
+  manifests both apply, so a unit cannot widen policy scope. Custom policies retain the default denylist. An unreadable config
+  refuses `manifest_internal_error` and emits its refusal trace. Direct-merge hooks parse
+  the target with `scripts/lib/merge_target.py` (flag values skipped, URL and branch resolved through gh); `-R/--repo`, another
+  repo's URL, multiple targets or an unknown branch deny `pr_number_invalid`; `GH_REPO` retargeting denies `pr_repo_override`.
+  A same-call `gh pr edit` or `gh api .../pulls/N` plus merge denies `pr_base_mutation`; make the edit in a separate call so the next check sees
+  the new base.
+  The diff uses the PR's live `baseRefOid` and checked head, not the local default branch. `merge.py` accepts one number, URL or branch
+  and pins all gates and the merge to the same head
+  with `--match-head-commit`; a hook
+  cannot pin the agent's own `gh pr merge`, so a push or out-of-band base retarget between the hook check and that merge
+  is a known gap. Unit metadata
+  is a shape and worktree check, not publisher authentication: a same-user actor can forge owner fields for the same
+  worktree. It does not compare a worker's session with its parent's. Raw Git operations and unseen aliases remain
+  outside this manifest arm.
 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 

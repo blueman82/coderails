@@ -98,13 +98,18 @@ class WorkflowGateTests(HookTestCase):
         for raw, branch in repositories.items():
             name = raw.replace("{sandbox}/", "")
             repo = self.git_repo(name, branch)
+            # fixed dates make every fixture repo's init commit the same sha, so the PR head exists in each one;
+            # origin/main at that commit gives the publication gate a computable (empty) diff and no network fetch
+            date = "2026-01-01T00:00:00Z"
+            fixed = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
             for command in (
                 ("config", "user.email", "t@t.t"),
                 ("config", "user.name", "t"),
                 ("remote", "add", "origin", "https://github.com/acme/widgets.git"),
                 ("commit", "-q", "--allow-empty", "-m", "init"),
+                ("update-ref", "refs/remotes/origin/main", "HEAD"),
             ):
-                subprocess.run(["git", "-C", str(repo), *command], check=True)
+                subprocess.run(["git", "-C", str(repo), *command], check=True, env=fixed)
         fixture_sha = subprocess.check_output(
             ["git", "-C", str(self.directory / "repo"), "rev-parse", "HEAD"], text=True
         ).strip()
@@ -122,6 +127,7 @@ class WorkflowGateTests(HookTestCase):
             case = json.loads(
                 json.dumps(original).replace("{sandbox}", str(self.directory)).replace("{head_sha}", fixture_sha)
             )
+            case["request"]["session_id"] = "S1"  # corpus predates the required hook session field
             for path in previous:
                 path.unlink(missing_ok=True)
             previous = set()
@@ -140,7 +146,15 @@ class WorkflowGateTests(HookTestCase):
                     check=False,
                 )
                 self.assertEqual(result.returncode, case["returncode"], result.stderr)
-                self.assertEqual('"deny"' in result.stdout, case["denied"], result.stdout + result.stderr)
+                wrapped_merge = case["request"]["tool_input"]["command"] in (
+                    "command bash scripts/merge.sh 140",
+                    "command python3 scripts/merge.py 140",
+                )
+                self.assertEqual(
+                    '"deny"' in result.stdout, case["denied"] or wrapped_merge, result.stdout + result.stderr
+                )
+                if wrapped_merge:
+                    self.assertIn("requires /pr-review-toolkit:review-pr", result.stdout)
         self.assertEqual(original_count, 114)
 
 
@@ -165,15 +179,15 @@ class AuthorityEarlyDenialTests(HookTestCase):
         return str(json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]) if out.strip() else ""
 
     def test_denied_merge_and_spent_max_prs_are_early_denials(self) -> None:
-        """authority_denied and max_prs_exceeded deny; no authority or a live budget stands aside."""
-        self.assertEqual(self.reason(), "")
+        """Authority refusals precede the default-on publication check."""
+        self.assertIn("publication check failed", self.reason())
         self.grant(denied=["merge"])
         self.assertIn("authority_denied", self.reason())
         self.assertIn("authority_denied", self.reason("python3 scripts/merge.py 5"))
         self.grant(denied=[], max_prs=0)
         self.assertIn("max_prs_exceeded", self.reason())
         self.grant(denied=[], max_prs=1)
-        self.assertEqual(self.reason(), "")
+        self.assertIn("publication check failed", self.reason())
         self.assertEqual(self.reason("gh pr create"), "")
 
     def test_calls_permits_once_for_merge_only(self) -> None:

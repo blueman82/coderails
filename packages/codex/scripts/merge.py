@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import git_common as git
-from scripts.lib import manifest_policy, merge_budget
+from scripts.lib import manifest_policy, merge_budget, merge_target, publication_gate
 from scripts.lib.config import config_path, integrity_enabled, integrity_status_login
 from scripts.lib.config_strict import ConfigRejected, strict_settings
 from scripts.lib.integrity_status import verify_integrity_status
@@ -81,9 +81,13 @@ def cleanup(number: str, default: str) -> None:
 
 def main(arguments: list[str] | None = None) -> int:
     """Resolve the PR and preserve all gates before calling the remote merge."""
-    arguments = sys.argv[1:] if arguments is None else arguments
-    argument = arguments[0] if arguments else "auto"
+    original = sys.argv[1:] if arguments is None else arguments
     try:
+        arguments, unit, progress = manifest_policy.unit_flags(original)
+        argument = arguments[0] if arguments else "auto"
+        if merge_target.has_repo_override():
+            publication_gate.trace_preflight("pr_repo_override")
+            raise git.WorkflowError("pr_repo_override: unset GH_REPO before merging")
         expected_sha: str | None = None
         if len(arguments) == 3 and arguments[1] == "--expected-head":
             expected_sha = arguments[2]
@@ -98,9 +102,9 @@ def main(arguments: list[str] | None = None) -> int:
         if argument == "auto":
             if git.branch() == default:
                 raise git.WorkflowError(f"On {default} ─ specify PR# or branch")
-            number = git.pr_num()
+            number = merge_target.resolve("")
         else:
-            number = argument if argument[:1].isdigit() else git.pr_num(argument)
+            number = merge_target.resolve(argument)
         if not number:
             raise git.WorkflowError(f"No PR for {argument}")
         print(f"• PR #{number} │ {git.pr_field(number, 'title', f'PR #{number}')}")
@@ -111,8 +115,8 @@ def main(arguments: list[str] | None = None) -> int:
             sha = verify_gates(number)
             if expected_sha is not None and expected_sha != sha:
                 raise git.WorkflowError("PR head changed after the expected SHA was chosen")
-            manifest_policy.gate(number)
-            command = shlex.join(["python3", sys.argv[0], *arguments])
+            publication_gate.enforce(number, sha, unit=unit, progress=progress)
+            command = shlex.join(["python3", sys.argv[0], *original])
             reservation = require_merge_receipt(
                 number, target=argument, verified_sha=sha, expected_sha=expected_sha, command=command
             )
