@@ -818,6 +818,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   `begin-wave` / `graph.py authorize-dispatch` fails. The hook message names the failure; the reason code is a row in the
   loop's `recovery-trace.jsonl` (`authorize-dispatch/refused/<code>`, allowed spawns are `authorized/dispatch_authorized`).
 - Query: `python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]` counts `dispatch_authorized` and every refusal code.
+- If the Codex hook cannot create or write its temporary message file, it denies the spawn with
+  `dispatch_message_unavailable` and records that code in `discipline.log`. Repair local scratch storage and retry.
 - Codes and fixes: `dispatch_missing_envelope` (no/old/garbled first-line `CODERAILS_GRAPH_DISPATCH` envelope: paste the
   `prompt_prefix` from `plan` or `begin-wave`; a plaintext Codex spawn needs it, while an opaque native hook message uses the exact issued `task_name` and call id),
   `dispatch_unknown_id` (the id was never issued: run `begin-wave`), `dispatch_foreign` (session, loop, node, wave or Codex

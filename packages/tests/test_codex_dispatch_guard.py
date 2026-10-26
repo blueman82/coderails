@@ -136,6 +136,13 @@ class DispatchGuardTests(unittest.TestCase):
         self.assertEqual(self._run(authorized=False), (True, 2))
         self.assertEqual(self.sent[1][arguments_index(self.sent[1], "--agent-type")], "worker")
 
+    def test_message_staging_failure_denies_before_authority(self) -> None:
+        """A full or inaccessible scratch directory cannot bypass the graph dispatch check."""
+        with patch("loop_dispatch_guard.tempfile.TemporaryDirectory", side_effect=OSError("scratch unavailable")):
+            self.assertEqual(self._run(), (True, 0))
+        with patch("loop_dispatch_guard.Path.write_text", side_effect=OSError("disk full")):
+            self.assertEqual(self._run(), (True, 0))
+
     def test_blank_or_malformed_native_role_denied_before_authority(self) -> None:
         """A supplied agent_type must be a nonblank string."""
         for value in ("", "  ", None, 3):
