@@ -66,7 +66,6 @@ The first table gives an action for each control category. The second table list
 | `hooks/scripts/worker_containment_gate.py` | `containment_fallback_low_risk` | Use the required containment acknowledgement or a low-risk path. |
 | `hooks/scripts/worker_containment_gate.py` | `containment_gate_error` | Use the required containment acknowledgement or a low-risk path. |
 | `hooks/scripts/worker_containment_gate.py` | `containment_unavailable` | Use the required containment acknowledgement or a low-risk path. |
-| `hooks/scripts/autonomous_gate.py` | `crack_on_legacy_flag` | Use the typed authority command, or continue after the authority expires. |
 | `hooks/scripts/action_authority_gate.py` | `denied_gate_error` | Use the configured authority path for the exact action and session. |
 | `hooks/scripts/lib/hook_state.py` | `hook_state_unreadable` | Restore the owned hook state file and retry. |
 | `hooks/scripts/lib/hook_state.py` | `nudge_first` | The first nudge was recorded; continue the required workflow. |
@@ -293,20 +292,16 @@ The first table gives an action for each control category. The second table list
 - Query: `trace.by_reason` for `authority/granted/authority_granted_command` (the typed grant),
   `autonomous/ignored/authority_phrase_ignored` (the phrase was seen and ignored; the hint with the grant command was shown),
   `autonomous/blocked/authority_deny`,
-  `autonomous/allowed/authority_expired_allow`, `autonomous/blocked/crack_on_legacy_flag`,
-  `autonomous/ignored/authority_corrupt_ignored` (authority.json unparseable: treated as none; legacy flag still honoured),
+  `autonomous/allowed/authority_expired_allow`,
+  `autonomous/ignored/authority_corrupt_ignored` (authority.json cannot be read: it grants nothing),
   `authority/refused/authority_refused_write_failed` (the grant could not write, so nothing is suppressed),
   `authority/refused/authority_refused_foreign`. Inspect with
   `python3 scripts/authority.py inspect --session <exact id>`.
-- Remediation: revoke with `python3 scripts/authority.py revoke --session <id>` (also deletes any legacy flag). An old flag
-  (`crack_on_legacy_flag`) is cleared with `rm <loop dir>/<id>/crack_on_active` (Codex:
-  `$PLUGIN_DATA/sessions/<id>/crack_on_active`). Allowed right after "autonomous": by design, the word only prints the grant command
+- Remediation: revoke with `python3 scripts/authority.py revoke --session <id>`. Old `crack_on_active` files have no effect and remain on disk. Allowed right after "autonomous": the word only prints the grant command
   (`authority_phrase_ignored`); type `/coderails:authorise` (fixed defaults, `max_prs` 0; Codex: `$coderails-codex:authorise`) to grant. `authority_expired_allow` shows the 24h object lapsed;
   grant again (an expired file is replaced; a live one is refused `authority_refused_exists`). `authority_refused_unsafe_session` also
   means `/coderails:authorise` got an empty or unsubstituted (`${...}`) session id: the substitution in the command file is not
-  live-probed (see `docs/decisions/e3-authority-object.md`); check the session ID, then retry the command. Objects written before this change have no `granted_by`
-  (read as `legacy_phrase`) and are honoured until expiry. Limit: an agent with shell access can also run `grant`
-  (cooperating-agent safeguard against accidental or pasted-text grants, not a hostile same-user agent). Same-user boundary: `granted_by` is an unsigned, self-asserted label. Besides running `grant`, an agent can write `authority.json` directly (Write or a shell redirect, with any `granted_by` or none) or touch the legacy `crack_on_active` flag (no expiry, still honoured), and nothing guards those paths; the autonomous hint tells agents not to grant.
+  live-probed (see `docs/decisions/e3-authority-object.md`); check the session ID, then retry the command. Objects without `granted_by: command` grant nothing. The command can replace an expired or invalid object. An agent with file access can write the unsigned `granted_by: command` label directly. The hint tells agents not to grant authority for the user.
 - Baseline note: the old 103 fires / 5 blocks figure (`docs/graph-alignment-measurement.md`) came from discipline-log
   telemetry; after-numbers come from trace rows, so they are not comparable. Reproduce:
   `python3 scripts/measure_graph_alignment.py --root . --json`.

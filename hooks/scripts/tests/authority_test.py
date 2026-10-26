@@ -19,7 +19,7 @@ from scripts.lib import authority_object as ao
 
 REPO = Path(__file__).resolve().parents[3]
 CLI = REPO / "scripts" / "authority.py"
-CRACK_ON = REPO / "hooks" / "scripts" / "autonomous_gate.py"
+AUTONOMOUS_HOOK = REPO / "hooks" / "scripts" / "autonomous_gate.py"
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
@@ -35,6 +35,7 @@ def good(**over: object) -> dict[str, Any]:
         "expires_at": (NOW + timedelta(hours=1)).isoformat(),
         "revocable": True,
         "approval_required_for": ["merge"],
+        "granted_by": "command",
     }
     obj.update(over)
     return obj
@@ -78,11 +79,13 @@ class ValidatorTests(unittest.TestCase):
         del missing["denied"]
         self.assertIn("missing:denied", ao.validate(missing, NOW))
 
-    def test_granted_by_optional_and_closed(self) -> None:
-        """Objects without granted_by (legacy files) validate; command and legacy_phrase validate; nothing else does."""
+    def test_only_typed_grants_validate(self) -> None:
+        """Missing and phrase grant markers are refused."""
+        obj = good()
+        del obj["granted_by"]
+        self.assertIn("missing:granted_by", ao.validate(obj, NOW))
+        self.assertIn("granted_by", ao.validate(good(granted_by="legacy_phrase"), NOW))
         self.assertEqual(ao.validate(good(), NOW), [])
-        for value in ("command", "legacy_phrase"):
-            self.assertEqual(ao.validate(good(granted_by=value), NOW), [], value)
 
     def test_z_suffix_expiry_accepted(self) -> None:
         """A trailing Z parses as UTC."""
@@ -261,14 +264,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.run_cli("narrow", "--session", "s9", "--max-prs", "1").returncode, 2)
         self.assertEqual(self.reasons("s9"), ["authority_refused_foreign", "authority_refused_foreign"])
 
-    def test_create_is_an_alias_of_grant(self) -> None:
-        """The one-release alias takes the same code path: granted_by=command and the same trace row."""
+    def test_create_alias_is_removed(self) -> None:
+        """The one-release alias cannot grant authority."""
         result = self.run_cli("create", "--session", "s5", "--max-prs", "1")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["granted_by"], "command")
-        self.assertEqual(self.reasons("s5"), ["authority_granted_command"])
-        self.assertEqual(self.run_cli("create", "--session", "s5", "--max-prs", "1").returncode, 2)
-        self.assertEqual(self.reasons("s5")[-1], "authority_refused_exists")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.base / "s5" / "authority.json").exists())
 
     def test_grant_session_defaults_to_environment_and_never_to_blank(self) -> None:
         """An empty --session (unexpanded ${CLAUDE_SESSION_ID}) falls back to the env id, never to blank."""
@@ -279,24 +279,30 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.run_cli("grant", "--session", "", "--max-prs", "1").returncode, 2)
 
     def test_phrase_never_creates_authority(self) -> None:
-        """The prompt 'autonomous' writes no authority object and no legacy flag."""
+        """Superseded E3 control: the prompt 'autonomous' writes no authority object and no legacy flag."""
         payload = {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "please be autonomous"}
         env = {**self.env, "CLAUDE_DISCIPLINE_LOG": str(self.base / "d.log")}
         result = subprocess.run(
-            [sys.executable, str(CRACK_ON)], input=json.dumps(payload), capture_output=True, text=True, env=env
+            [sys.executable, str(AUTONOMOUS_HOOK)], input=json.dumps(payload), capture_output=True, text=True, env=env
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.base / "s1" / "authority.json").exists())
         self.assertFalse((self.base / "s1" / "crack_on_active").exists())
         self.assertIsNone(ao.read_authority("s1", self.base))
 
-    def test_legacy_object_without_granted_by_is_honoured(self) -> None:
-        """A pre-granted_by file (phrase-minted before this release) still reads as live authority."""
+    def test_legacy_objects_are_not_authority(self) -> None:
+        """A fieldless or phrase-minted file grants nothing and remains on disk."""
         obj = good(session_id="old", expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat())
         path = self.base / "old" / "authority.json"
         path.parent.mkdir()
-        path.write_text(json.dumps(obj))
-        self.assertEqual(ao.read_authority("old", self.base), obj)
+        for marker in (None, "legacy_phrase"):
+            if marker is None:
+                obj.pop("granted_by")
+            else:
+                obj["granted_by"] = marker
+            path.write_text(json.dumps(obj))
+            self.assertIsNone(ao.read_authority("old", self.base))
+            self.assertTrue(path.exists())
 
 
 if __name__ == "__main__":

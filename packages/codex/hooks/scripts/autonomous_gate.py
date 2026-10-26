@@ -18,7 +18,6 @@ from hook_common import (
     payload_object,
     read_input,
     safe_id,
-    session_dir,
     text_field,
 )
 
@@ -34,10 +33,6 @@ HINT = (
 DENIAL = (
     "Autonomous authority is active for this session (expiring, revocable). Continue within the user's "
     "scope, or end with a clear report if the work is genuinely blocked. Merge still needs explicit approval."
-)
-LEGACY_DENIAL = (
-    "Autonomous authority is active (old flag, no expiry; support is removed in the next release). "
-    "Clear it with: rm {flag}  -- or grant an expiring, revocable authority with $coderails-codex:authorise."
 )
 
 
@@ -80,12 +75,6 @@ def main() -> int:
         deny(DENIAL)
     elif data.get("session_id") == session_id and validate(data, datetime.now(timezone.utc)) == ["expired"]:
         append_trace_row("autonomous", "allowed", "authority_expired_allow", session_id)
-    else:
-        directory = session_dir(session_id)
-        if directory is not None and (directory / "crack_on_active").is_file():
-            append_trace_row("autonomous", "blocked", "crack_on_legacy_flag", session_id)
-            log(f"hook=autonomous_gate event=PreToolUse session={session_id} tool=request_user_input denied=1 legacy=1")
-            deny(LEGACY_DENIAL.format(flag=directory / "crack_on_active"))
     return 0
 
 
