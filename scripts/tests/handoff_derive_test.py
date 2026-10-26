@@ -170,8 +170,8 @@ class Derive(StoreCase):
         )
         got, code = self.derive()
         self.assertEqual(code, 0)
-        self.assertIn("proof P1: satisfied", got["recorded_proof_results"])
-        self.assertIn("verify proof P1: satisfied", got["next_steps"])
+        self.assertIn("proof P1: failed", got["recorded_proof_results"])
+        self.assertIn("proof P1: failed", got["next_steps"])
         self.assertFalse(any("proof P1" in line for line in got["done"]))
 
     def test_backend_off_is_an_explicit_opt_out(self) -> None:

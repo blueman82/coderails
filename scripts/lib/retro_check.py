@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
-from scripts.lib import decision_record, proof_results, teardown_steps  # noqa: E402
+from scripts.lib import decision_record, proof_results, proof_suite, teardown_steps  # noqa: E402
 
 SCHEMA = 3
 FILES = ("evals.json", "proof.json", "proof_results.jsonl")
@@ -97,14 +97,40 @@ def retro_step_hashes(state: dict[str, Any], state_dir: Path) -> dict[str, str |
     return out
 
 
-def proof_summary(state_dir: Path) -> dict[str, Any]:
-    """Latest verdict per proof id plus any typed no-proof disposition, from the chained results file."""
+def proof_summary(state_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    """Recorded verdicts for the selected suite, plus any typed no-proof disposition."""
     try:
-        rows = proof_results.read_rows(state_dir / proof_results.RESULTS_NAME)
+        proof, rows, cutoff = proof_suite.active_suite(state_dir / "proof.json", state)
     except proof_results.ChainError:
         return {"error": "proof_chain_broken"}
-    verdicts = {r["proof_id"]: r["verdict"] for r in rows if r["kind"] == "run"}
-    notes = [f"{r['verdict']}: {r['excerpt']}" for r in rows if r["kind"] == "disposition"]
+    except proof_suite.SuiteError as error:
+        return {"error": str(error)}
+    active = (
+        {
+            item["id"]: item
+            for item, _ in proof_suite.items(proof)
+            if isinstance(item.get("id"), str) and isinstance(item.get("cmd"), str)
+        }
+        if proof
+        else {}
+    )
+    verdicts = {
+        r["proof_id"]: r["verdict"]
+        for r in rows
+        if r["seq"] > cutoff
+        and r["kind"] == "run"
+        and r["proof_id"] in active
+        and (r["session_id"], r["loop_id"]) == (state.get("session_id"), state.get("loop_id"))
+        and r["proof_json_sha256"] == proof_results.doc_sha(proof)
+        and r["cmd_sha256"] == proof_results.sha(active[r["proof_id"]]["cmd"])
+    }
+    notes = [
+        f"{r['verdict']}: {r['excerpt']}"
+        for r in rows
+        if r["seq"] > cutoff
+        and r["kind"] == "disposition"
+        and (r["session_id"], r["loop_id"]) == (state.get("session_id"), state.get("loop_id"))
+    ]
     return {"verdicts": verdicts, "disposition": notes[-1] if notes else ""}
 
 
@@ -294,6 +320,15 @@ def check(state: dict[str, Any], retro: dict[str, Any], state_dir: Path) -> list
             "retro_not_assembled", f"retro.json must be schema_version {SCHEMA}+; run `python3 scripts/lib/retro.py "
             "assemble <state-dir> --session <session_id>`"
         )  # fmt: skip
+    for field, expected in (
+        ("session_id", state.get("session_id")),
+        ("loop_id", state.get("loop_id")),
+        ("status", "complete"),
+    ):
+        if retro.get(field) != expected:
+            raise RetroError(
+                "retro_source_mismatch", f"retro.{field} differs from owned loop; re-run retro.py assemble"
+            )
     have = cast("dict[str, Any]", stored)
     fresh = source_hashes(state, state_dir)
     changed = sorted(k for k in fresh if fresh[k] != have.get(k))
@@ -323,7 +358,7 @@ def check(state: dict[str, Any], retro: dict[str, Any], state_dir: Path) -> list
         )
     for field, derived in (
         ("evals", evals_section(state_dir)),
-        ("proof_results", proof_summary(state_dir)),
+        ("proof_results", proof_summary(state_dir, state)),
         ("disposition_record", disposition_record(state)),
     ):
         if retro.get(field) != derived:

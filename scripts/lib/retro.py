@@ -177,7 +177,7 @@ def assemble(state_dir: Path, session: str, free: dict[str, Any] | None = None) 
         "decisions_absorbed": state.get("decisions_absorbed"),
         "disposition_record": retro_check.disposition_record(state),
         "evals": retro_check.evals_section(state_dir),
-        "proof_results": retro_check.proof_summary(state_dir),
+        "proof_results": retro_check.proof_summary(state_dir, state),
         "hook_blocks": blocks if isinstance(blocks, dict) else {},
         "models_used": models,
         "cost": cost,

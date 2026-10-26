@@ -23,7 +23,7 @@ from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))  # plugin root, so `scripts.lib` resolves as a script
-from scripts.lib import decision_record, lessons, proof_results, teardown_steps  # noqa: E402
+from scripts.lib import decision_record, lessons, proof_results, proof_suite, teardown_steps  # noqa: E402
 from scripts.lib import memory_adapter as ma  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
 
@@ -125,26 +125,36 @@ def lesson_rows(repo_dir: Path, degraded: list[dict[str, str]]) -> list[dict[str
     return cast("list[dict[str, Any]]", lessons.contract(got)["lessons"])
 
 
-def proof_lines(state_dir: Path, degraded: list[dict[str, str]]) -> tuple[list[str], list[str]]:
+def proof_lines(state_dir: Path, state: dict[str, Any], degraded: list[dict[str, str]]) -> tuple[list[str], list[str]]:
     """Show recorded proof verdicts separately from verified work and name unresolved proofs."""
     try:
-        rows = proof_results.read_rows(state_dir / proof_results.RESULTS_NAME)
+        proof_doc, rows, cutoff = proof_suite.active_suite(state_dir / "proof.json", state)
     except proof_results.ChainError:
         degraded.append({"source": "proofs", "reason": "proof_chain_broken"})
         return [], []
-    proof_path = state_dir / "proof.json"
-    if not proof_path.exists():
+    except proof_suite.SuiteError as error:
+        degraded.append({"source": "proofs", "reason": str(error).split(":", 1)[0]})
         return [], []
-    try:
-        document: object = json.loads(proof_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    if proof_doc is None:
+        return [], []
+    if not isinstance(proof_doc.get("proofs"), list):
         degraded.append({"source": "proofs", "reason": "proof_unreadable"})
         return [], []
-    if not isinstance(document, dict) or not isinstance(cast("dict[str, Any]", document).get("proofs"), list):
-        degraded.append({"source": "proofs", "reason": "proof_unreadable"})
-        return [], []
-    proof_doc = cast("dict[str, Any]", document)
-    latest = {r["proof_id"]: r["verdict"] for r in rows if r["kind"] == "run"}
+    active = {
+        item["id"]: item["cmd"]
+        for item, _ in proof_suite.items(proof_doc)
+        if isinstance(item.get("id"), str) and isinstance(item.get("cmd"), str)
+    }
+    latest = {
+        r["proof_id"]: r["verdict"]
+        for r in rows
+        if r["seq"] > cutoff
+        and r["kind"] == "run"
+        and (r["session_id"], r["loop_id"]) == (state.get("session_id"), state.get("loop_id"))
+        and r["proof_json_sha256"] == proof_results.doc_sha(proof_doc)
+        and r["proof_id"] in active
+        and r["cmd_sha256"] == proof_results.sha(active[r["proof_id"]])
+    }
     recorded: list[str] = []
     next_steps: list[str] = []
     for item in cast("list[object]", proof_doc["proofs"]):
@@ -187,7 +197,7 @@ def derive(state_path: Path, session: str) -> tuple[dict[str, Any], int]:
     completed = [name for name in _names(summary.get("done")) if name not in skipped]
     prompt = " ".join(str(state.get("authorising_prompt_raw") or "").split())
     hard_stop: object = inspected.get("hard_stop")
-    proof_recorded, proof_next = proof_lines(state_path.parent, degraded)
+    proof_recorded, proof_next = proof_lines(state_path.parent, state, degraded)
     skeleton: dict[str, Any] = {
         "goal": prompt[:GOAL_MAX],
         "decisions": decisions(state, str(state.get("loop_id") or ""), session, degraded),

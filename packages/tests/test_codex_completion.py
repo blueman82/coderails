@@ -214,6 +214,16 @@ class CompletionTests(CompletionFixture):
         assemble_test_retro(self.path.parent, "parent")
         complete(*self.arguments)
 
+    def test_retro_identity_and_status_match_owned_graph(self) -> None:
+        """Codex completion rejects a retro copied from another loop or left incomplete."""
+        original = read_json(self.retro)
+        for field, value in (("session_id", "foreign"), ("loop_id", "other"), ("status", "in-progress")):
+            with self.subTest(field=field):
+                write_json(self.retro, original | {field: value})
+                with self.assertRaises(GraphError):
+                    complete(*self.arguments)
+        write_json(self.retro, original)
+
     def test_proof_array_shape_and_combined_cap(self) -> None:
         """Codex completion enforces both proof arrays and the shared count cap."""
         cases: tuple[tuple[dict[str, Any], str], ...] = (
