@@ -61,7 +61,7 @@ class PermitsTests(unittest.TestCase):
         return ap.permits("s1", action, NOW, self.base)
 
     def test_no_authority_allows_but_needs_a_receipt_for_merge_and_push(self) -> None:
-        """Without crack-on a signed receipt is still required for merge and push to main."""
+        """Without autonomous authority a signed receipt is still required for merge and push to main."""
         for action, needs in (("merge", True), ("push_main", True), ("git_push", True), ("destructive_shell", False)):
             self.assertEqual(
                 self.permits(action),

@@ -84,7 +84,7 @@ class HookGenerationTests(unittest.TestCase):
         self.edit_json(
             "hooks/messages.json",
             lambda data: data["reasons"].update(
-                {"made_up_code": {"source": "hooks/scripts/crack_on_gate.py", "remediation": "Retry."}}
+                {"made_up_code": {"source": "hooks/scripts/autonomous_gate.py", "remediation": "Retry."}}
             ),
         )
         self.assertEqual(self.check(), 2)
@@ -94,7 +94,7 @@ class HookGenerationTests(unittest.TestCase):
         self.edit_json(
             "hooks/messages.json",
             lambda data: data["reasons"]["codex_native_worker_uncontained"].update(
-                {"source": "packages/codex/hooks/scripts/crack_on_gate.py"}
+                {"source": "packages/codex/hooks/scripts/autonomous_gate.py"}
             ),
         )
         self.assertEqual(self.check(), 2)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -17,13 +16,14 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 CODEX = ROOT / "packages/codex"
 MIRRORED = ("scripts/authority.py", "scripts/lib/authority_object.py")
-HOOK = CODEX / "hooks/scripts/crack_on_gate.py"
+HOOK = CODEX / "hooks/scripts/autonomous_gate.py"
 PHRASES = (
-    "crack on",
-    "do not, under any circumstances, crack on",
-    'pasted transcript: "crack on"',
-    "crack-on please",
-    "I will not crack on",
+    "autonomous",
+    "AUTONOMOUS",
+    "do not, under any circumstances, work autonomous",
+    'pasted transcript: "autonomous"',
+    "autonomous-mode please",
+    "I will not be autonomous",
 )
 
 
@@ -38,7 +38,7 @@ class CodexAuthorityParityTests(unittest.TestCase):
 
     def test_bare_authorize_skill_has_usable_safe_defaults(self) -> None:
         """The user-facing entrypoint must supply the CLI's required limit and a nonempty scope."""
-        skill = (CODEX / "skills/authorize/SKILL.md").read_text()
+        skill = (CODEX / "skills/authorise/SKILL.md").read_text()
         self.assertIn("--max-prs 0", skill)
         self.assertIn("--scope autonomous_decisions", skill)
         self.assertIn("--denied destructive_shell", skill)
@@ -60,7 +60,7 @@ class CodexAuthorityParityTests(unittest.TestCase):
             self.assertEqual(json.loads(shown.stdout)["granted_by"], "command")
 
 
-class CodexCrackOnGateTests(unittest.TestCase):
+class CodexAutonomousGateTests(unittest.TestCase):
     """The Codex hook never mints; only the mirrored typed `grant` does, and the hook then enforces."""
 
     def setUp(self) -> None:
@@ -76,7 +76,7 @@ class CodexCrackOnGateTests(unittest.TestCase):
         }
 
     def hook(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Run the Codex crack_on_gate hook on one payload."""
+        """Run the Codex autonomous_gate hook on one payload."""
         run = subprocess.run(
             [sys.executable, str(HOOK)],
             input=json.dumps(payload),
@@ -123,20 +123,16 @@ class CodexCrackOnGateTests(unittest.TestCase):
         for index, text in enumerate(PHRASES):
             session = f"neg{index}"
             context = self.prompt(text, session)["hookSpecificOutput"]["additionalContext"]
-            self.assertIn(
-                f"authority.py grant --session {session} --scope autonomous_decisions "
-                "--denied destructive_shell --max-prs N",
-                context,
-                text,
-            )
-            self.assertIn("$coderails-codex:authorize", context)
+            self.assertIn("$coderails-codex:authorise", context)
+            self.assertNotIn("authority.py grant", context)
             self.assertIn("Agents must not run", context)
             self.assertFalse((self.loop / session / "authority.json").exists(), text)
             self.assertFalse(self.asks(session), text)
             self.assertEqual(self.reasons(session), ["authority_phrase_ignored"], text)
-        self.assertEqual(self.prompt("the crackdown continues", "plain"), {})
+        for text in ("crack on", "manual", "nonautonomous", "autonomously"):
+            self.assertEqual(self.prompt(text, "plain"), {})
         self.grant("live")
-        self.assertEqual(self.prompt("crack on", "live"), {})
+        self.assertEqual(self.prompt("autonomous", "live"), {})
 
     def test_grant_then_hook_denies_double_grant_refused_legacy_honoured(self) -> None:
         """Typed grant writes granted_by=command; the hook denies; a second grant is refused; fieldless is honoured."""
@@ -155,16 +151,13 @@ class CodexCrackOnGateTests(unittest.TestCase):
         path.write_text(json.dumps(obj))
         self.assertFalse(self.asks("g1"))
 
-    def test_printed_command_grants_the_scope_it_claims(self) -> None:
-        """The Codex hint must execute as a usable bounded grant."""
-        context = self.prompt("crack on", "hint")["hookSpecificOutput"]["additionalContext"]
-        command = context.split("or runs ", 1)[1].split(". Agents", 1)[0].replace("--max-prs N", "--max-prs 0")
-        run = subprocess.run(shlex.split(command), env=self.env, capture_output=True, text=True, check=False)
-        self.assertEqual(run.returncode, 0, run.stderr)
-        obj = json.loads((self.loop / "hint/authority.json").read_text())
-        self.assertEqual(obj["scope"], ["autonomous_decisions"])
-        self.assertEqual(obj["denied"], ["destructive_shell"])
-        self.assertTrue(self.asks("hint"))
+    def test_hint_only_names_the_native_skill(self) -> None:
+        """The Codex hint gives one native skill and grants nothing."""
+        context = self.prompt("autonomous", "hint")["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("$coderails-codex:authorise", context)
+        self.assertNotIn("authority.py grant", context)
+        self.assertFalse((self.loop / "hint/authority.json").exists())
+        self.assertFalse(self.asks("hint"))
 
     def test_narrow_to_empty_scope_allows_human_input(self) -> None:
         """The native input hook reads the current scope after a typed narrowing."""
@@ -182,13 +175,15 @@ class CodexCrackOnGateTests(unittest.TestCase):
         self.assertFalse(self.asks("narrow"))
 
     def test_shell_unsafe_session_ids_never_render_a_hint(self) -> None:
-        """The Codex hint uses the same safe ID set as its grant CLI."""
+        """Unsafe IDs produce no hint; a safe ID shows only the native skill."""
         for session in ("s;echo INJECTED;#", "s evil", "`id`", "?", "s?"):
             with self.subTest(session=session):
-                self.assertEqual(self.prompt("crack on", session), {})
+                self.assertEqual(self.prompt("autonomous", session), {})
                 self.grant(session, ok=False)
                 self.assertFalse((self.loop / session / "authority.json").exists())
-        self.assertIn("--session safe-1", self.prompt("crack on", "safe-1")["hookSpecificOutput"]["additionalContext"])
+        self.assertIn(
+            "$coderails-codex:authorise", self.prompt("autonomous", "safe-1")["hookSpecificOutput"]["additionalContext"]
+        )
 
     def test_hook_common_no_longer_vendors_authority(self) -> None:
         """The vendored copies are gone; the mirrored lib is the single implementation."""

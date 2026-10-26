@@ -46,7 +46,7 @@ It surfaces ambiguities, fills gaps with grounded assumptions, and produces a re
 
 **Step 2 — Adopt the improved prompt. Ask only outside a full-autonomous envelope.**
 
-Step 2 has two paths. Which one applies is decided by the authorising prompt's envelope class (the same classification Phase 0 makes): "crack on", "human is dead", "ship N PRs without asking", "no human gates", or equivalent means full-autonomous. These words still select the envelope class for your reasoning, but they no longer create authority: the `AskUserQuestion` denial exists only after the user types `/coderails:authorize` (or `authority.py grant` runs); on the phrase alone the hook just prints that command.
+Step 2 has two paths. Which one applies is decided by the authorising prompt's envelope class (the same classification Phase 0 makes): "autonomous", "human is dead", "ship N PRs without asking", "no human gates", or equivalent means full-autonomous. These words still select the envelope class for your reasoning, but they no longer create authority: the `AskUserQuestion` denial exists only after the user types `/coderails:authorise` (or `authority.py grant` runs); on the word alone the hook just prints that command.
 
 **Full-autonomous envelope → auto-adopt, do not ask.** An `AskUserQuestion` here is a human gate, and a full-autonomous envelope has already withdrawn consent for gates. Do not resolve that contradiction by skipping Phase -1 — the improve-prompt output is worth more in autonomous operation, not less, because there is no human downstream to catch a vague envelope. Instead: run Step 1, auto-adopt outcome **A** without asking, and emit the improved prompt so it stays on the record. Concretely:
 
@@ -106,7 +106,7 @@ Then respond.
 **Envelope examples:**
 - "Ship N PRs without asking" → full-autonomous. Includes deploys, post-deploy cleanup, follow-up tickets within the same theme. Merges are included only up to the live authority's `max_prs` and each needs an owner-signed receipt (the envelope class never mints either: `authority.py grant --max-prs N` plus `action_receipt_cli.py approve-action`). With no authority, or `max_prs` 0, the loop prepares the PR and asks the owner to mint a receipt.
 - "Fix this bug" → narrow-fix. Confirm before scope creep into adjacent files.
-- "Crack on / human is dead" → full-autonomous. All routine sub-steps autonomous; only break the loop on verification failure, destructive/irreversible actions, or a merge/push-to-main the authority and receipt gate refuses (`authority_denied`, `max_prs_exceeded`, `no_receipt`).
+- "Autonomous / human is dead" → full-autonomous. All routine sub-steps autonomous; only break the loop on verification failure, destructive/irreversible actions, or a merge/push-to-main the authority and receipt gate refuses (`authority_denied`, `max_prs_exceeded`, `no_receipt`).
 - "Help me debug" → diagnostic-only. Do not write code without explicit go-ahead.
 
 Match the confirmation cadence to the envelope class for the rest of the session — every "do you want me to..." inside an authorised envelope is a stall the user has to clear, and stalls cost more than the occasional over-reach you'd avoid by asking.
@@ -187,7 +187,7 @@ For that decision, read the current loop ID and revision. Pass `--loop-id` and `
 **What consumes the thread limit.** Every spawned agent thread, including completed and idle ones, counts until it is retired. Before a scout spawn, retire completed threads with the provider's close tool where one exists; otherwise nothing frees the slot, so record the limit in the refusal and halt rather than assume a thread was freed.
 
 What happens with that recommendation depends on the envelope class (Phase 0) — this phase resolves the fork, it does NOT add a new human gate:
-- **Full-autonomous ("crack on / ship N PRs without asking"):** auto-adopt the design agent's recommendation. Read the current loop ID and revision. Run `graph.py record-decision` with `--loop-id`, `--revision`, phase `2.5`, the chosen shape as `--decision`, and the flip condition as `--flip-condition`. Note it at the next approval gate. Do not stall for sign-off; the loop proceeds under Phase 0.
+- **Full-autonomous ("autonomous / ship N PRs without asking"):** auto-adopt the design agent's recommendation. Read the current loop ID and revision. Run `graph.py record-decision` with `--loop-id`, `--revision`, phase `2.5`, the chosen shape as `--decision`, and the flip condition as `--flip-condition`. Note it at the next approval gate. Do not stall for sign-off; the loop proceeds under Phase 0.
 - **Narrow-fix / diagnostic / ambiguous envelope:** surface the one recommendation as a single decision — "here's the shape, here's why, approve or redirect" — bounded like Phase 1 (ask once, don't loop), then enter Phase 3.
 
 Either way the fork is closed by ONE design artifact before building starts — the loop does not start half-built while the design is still being argued turn by turn.

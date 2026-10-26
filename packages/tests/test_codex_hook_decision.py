@@ -28,8 +28,8 @@ class CodexHookDecisionTests(unittest.TestCase):
             catalog.write_text(
                 json.dumps(
                     {
-                        "hooks": {"crack_on_gate": {"reason_code": "authority_deny", "remediation": "Retry."}},
-                        "aliases": {"crack_on": "crack_on_gate"},
+                        "hooks": {"autonomous_gate": {"reason_code": "authority_deny", "remediation": "Retry."}},
+                        "aliases": {"autonomous": "autonomous_gate"},
                         "reasons": {"stop_row_missing": {"remediation": "Record the current Stop result."}},
                         "fallback": {"remediation": "Read the hook reason."},
                     }
@@ -40,7 +40,7 @@ class CodexHookDecisionTests(unittest.TestCase):
                 "from hooks.scripts import hook_common\n"
                 "from hooks.scripts.lib import hook_decision\n"
                 "hook_decision.CATALOG = Path(sys.argv[1])\n"
-                "assert hook_common.append_trace_row('crack_on', 'blocked', 'stop_row_missing', 's1', "
+                "assert hook_common.append_trace_row('autonomous', 'blocked', 'stop_row_missing', 's1', "
                 "{'inputs': {'cmd': 'SECRET'}})\n"
             )
             env = {

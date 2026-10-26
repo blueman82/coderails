@@ -64,7 +64,7 @@
       "activation": "registered for its provider event",
       "category": "comment citation gate"
     },
-    "crack_on_gate": {
+    "autonomous_gate": {
       "providers": [
         "claude",
         "codex"
@@ -73,7 +73,7 @@
       "failure": "deny or block with a visible reason",
       "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
       "activation": "the phrase grants nothing; a live typed authority can block questions",
-      "category": "crack on gate"
+      "category": "autonomous input gate"
     },
     "destructive_bash_gate": {
       "providers": [

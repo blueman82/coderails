@@ -352,8 +352,8 @@ class MeasureTests(unittest.TestCase):
         )
         self.assertEqual(receipts["by_outcome"], {"allowed": 1, "approved": 1, "denied": 2})
 
-    def test_trace_counts_crack_on_reason_codes(self) -> None:
-        """Each crack-on reason code is tallied under command/outcome/reason_code and deduped by event_id."""
+    def test_trace_counts_historical_authority_reason_codes(self) -> None:
+        """Historical authority traces keep their original codes and event deduplication."""
         codes = (
             ("granted", "authority_granted"),
             ("blocked", "authority_deny"),
