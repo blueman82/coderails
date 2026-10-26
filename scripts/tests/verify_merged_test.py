@@ -16,7 +16,10 @@ from scripts import verify_merged
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts/verify_merged.py"
-GH_SHIM = '#!/bin/sh\n[ "$1 $2 $3 $4 $5" = "pr view 7 --repo testowner/testrepo" ] || exit 1\ncat "$FAKE_PR_JSON"\n'
+GH_SHIM = (
+    '#!/bin/sh\n[ "$1 $2 $3 $4 $5" = "pr view 7 --repo github.com/testowner/testrepo" ] || exit 1\n'
+    'cat "$FAKE_PR_JSON"\n'
+)
 OLD_RULE_ON_SQUASH = 1  # `git merge-base --is-ancestor <pr head> origin/main` on a squash merge: not an ancestor
 
 
@@ -232,16 +235,29 @@ class VerifyMergedTests(VerifyMergedCase):
             "PATH": f"{self.pr_json.parent / 'bin'}:{os.environ['PATH']}",
             "FAKE_PR_JSON": str(self.pr_json),
         }
+        for number in ("7x", "--comments"):
+            with self.subTest(number=number):
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), number, "--repo", str(self.work)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(json.loads(result.stdout)["reasons"], ["pr_number_invalid"])
+        self.assertEqual(verify_merged.verify(self.work, "--comments", "", "")["reasons"], ["pr_number_invalid"])
+
+    def test_help_still_uses_argparse(self) -> None:
+        """The option-shaped PR guard must keep the standard help command."""
         result = subprocess.run(
-            [sys.executable, str(SCRIPT), "7x", "--repo", str(self.work)],
-            env=env,
+            [sys.executable, str(SCRIPT), "--help"],
             capture_output=True,
             text=True,
             check=False,
         )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("pr_number_invalid", result.stdout)
-        self.assertEqual(verify_merged.verify(self.work, "--comments", "", "")["reasons"], ["pr_number_invalid"])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("usage:", result.stdout)
 
     def test_gh_repo_override_cannot_select_another_repository(self) -> None:
         """The GitHub PR and the fetched origin must refer to the same repository."""
@@ -262,6 +278,35 @@ class VerifyMergedTests(VerifyMergedCase):
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("repo_mismatch", result.stdout)
+
+    def test_gh_host_override_cannot_select_another_host(self) -> None:
+        """The gh repository argument pins github.com even when GH_HOST names another host."""
+        merge_commit = self.land(squash=False)
+        self.pr_json.write_text(
+            json.dumps(
+                {
+                    "state": "MERGED",
+                    "mergedAt": "2026-10-01T00:00:00Z",
+                    "mergeCommit": {"oid": merge_commit},
+                    "baseRefName": "main",
+                    "headRefOid": self.head,
+                }
+            )
+        )
+        env = {
+            **os.environ,
+            "PATH": f"{self.pr_json.parent / 'bin'}:{os.environ['PATH']}",
+            "FAKE_PR_JSON": str(self.pr_json),
+            "GH_HOST": "example.invalid",
+        }
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "7", "--repo", str(self.work)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 class SkillPairTests(unittest.TestCase):

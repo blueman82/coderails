@@ -39,7 +39,7 @@ def pr_facts(repo: Path, number: str, origin_repo: str) -> dict[str, object] | N
         "view",
         number,
         "--repo",
-        origin_repo,
+        f"github.com/{origin_repo}",
         "--json",
         "state,mergedAt,mergeCommit,baseRefName,headRefOid",
     )
@@ -128,6 +128,15 @@ def trace(repo: Path, verdict: dict[str, object]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry."""
+    arguments = sys.argv[1:] if argv is None else argv
+    if (
+        arguments
+        and arguments[0].startswith("-")
+        and arguments[0] not in ("-h", "--help", "--grep", "--path", "--repo", "--")
+    ):
+        verdict = verify(Path.cwd(), arguments[0], "", "")
+        print(json.dumps(verdict, indent=2))
+        return 1
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pr")
     parser.add_argument(
@@ -137,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--path", default="", help="limit the grep to this path")
     parser.add_argument("--repo", type=Path, default=Path.cwd())
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     verdict = verify(args.repo.resolve(), args.pr, args.grep, args.path)
     trace(args.repo.resolve(), verdict)
     print(json.dumps(verdict, indent=2))
