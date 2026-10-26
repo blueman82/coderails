@@ -43,6 +43,9 @@ def main() -> int:
     cwd = str(payload.get("cwd") or os.getcwd())
     session = str(payload.get("session_id") or "")
     merges = [(part, where) for kind, part, where in guarded_segments(command, cwd) if kind == "merge"]
+    if len(merges) > 1:
+        deny("Blocked: run one PR merge per command so each PR receives its own review, eval and integrity checks.")
+        return 0
     if merges:
         name, segment, cwd = "merge", merges[0][0], merges[0][1]
     if merges and not (verdict := permits(session, "merge"))["allow"]:  # early; nothing is consumed

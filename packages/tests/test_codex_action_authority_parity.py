@@ -87,3 +87,15 @@ class MatchParityTests(unittest.TestCase):
                         found = matcher.guarded_segments(command, tmp)
                         self.assertEqual(len(found), 1)
                         self.assertTrue(found[0][1].startswith(matcher.UNBINDABLE), found)
+
+    def test_headless_prompts_and_quoted_git_directory_are_guarded_by_both_providers(self) -> None:
+        """A child prompt or spaced Git directory cannot hide a protected action."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for matcher in (claude_match, codex_match):
+                for command, expected in (
+                    ("codex exec 'gh pr merge 2 --squash'", "merge"),
+                    ("claude -p 'gh pr merge 2 --squash'", "merge"),
+                    ('git -C "/tmp/path with spaces" push origin HEAD:main', "git_push"),
+                ):
+                    with self.subTest(matcher=matcher.__name__, command=command):
+                        self.assertEqual([name for name, _, _ in matcher.guarded_segments(command, tmp)], [expected])

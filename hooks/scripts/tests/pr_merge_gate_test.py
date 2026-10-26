@@ -172,6 +172,25 @@ class MergeEvidenceTests(HookTestCase):
                 enforce_pr_workflow.main()
                 gate.assert_called_once_with("42", directory, "", unit="2", progress="p.json")
 
+    def test_compound_merges_cannot_reuse_first_pr_evidence(self) -> None:
+        """A second PR without eval evidence cannot pass on the first PR's result."""
+        module = "hooks.scripts.enforce_pr_workflow"
+        command = "gh pr merge 1 --squash && gh pr merge 2 --squash"
+        payload = {"cwd": str(self.directory), "transcript_path": __file__, "tool_input": {"command": command}}
+        with (
+            patch(module + ".read_payload_strict", return_value=payload),
+            patch(module + ".config_path", return_value="config"),
+            patch(module + ".transcript_entries", return_value=[]),
+            patch(module + ".git.pr_field", return_value="head"),
+            patch(module + ".publication_gate.enforce"),
+            patch(module + ".step_found", return_value=True),
+            patch(module + ".merge_reason", side_effect=["", "no eval"]) as gate,
+            patch(module + ".deny") as deny,
+        ):
+            enforce_pr_workflow.main()
+            deny.assert_called_once()
+            self.assertTrue("one PR merge" in deny.call_args.args[0] or gate.call_count == 2)
+
     def test_gh_repo_retarget_denies_before_evidence_lookup(self) -> None:
         """A merge retargeted by GH_REPO cannot borrow this repository's review and eval evidence."""
         module = "hooks.scripts.enforce_pr_workflow"

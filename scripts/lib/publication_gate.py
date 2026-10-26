@@ -30,23 +30,28 @@ def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list
     only with verdict `pass`; the artifact's `blocking` flag never waives a required pass. Fails closed. Config
     `review_passes: off` skips the check; absent or any other value enforces.
     """
+
+    def refused(code: str, detail: str = "") -> list[Violation]:
+        manifest_policy.trace(f"{git.repo()}@pr-{number}", "refused", code, command="review-passes")
+        return [{"code": code, "detail": detail}]
+
     values, _ = load_config(config_path() or "")
     if str(values.get("review_passes") or "enforce") == "off":
         manifest_policy.trace(f"{git.repo()}@pr-{number}", "skipped", "review_passes_off", command="review-passes")
         return []
     found = git.review_passes_for_pr(number, sha)
     if found.status:
-        return [{"code": "review_artifact_missing", "detail": found.failure_reason or "no artifact for this head"}]
+        return refused("review_artifact_missing", found.failure_reason or "no artifact for this head")
     if found.passes is None:
-        return [{"code": "review_passes_malformed", "detail": ""}]
+        return refused("review_passes_malformed")
     try:
         policy = review_passes.load_policy()
         base = git.pr_field(number, "baseRefOid")
         changes = manifest_policy.diff_changes(sha, f"pull/{number}/head", base) if base else None
     except ValueError:
-        return [{"code": "review_policy_unreadable", "detail": ""}]
+        return refused("review_policy_unreadable")
     if changes is None:
-        return [{"code": "review_policy_unreadable", "detail": "diff unavailable"}]
+        return refused("review_policy_unreadable", "diff unavailable")
     verdicts = {p["name"]: p["verdict"] for p in found.passes}
     needed = review_passes.required(changes, policy)
     # a failed pass that marks itself blocking refuses even when the policy did not ask for it
