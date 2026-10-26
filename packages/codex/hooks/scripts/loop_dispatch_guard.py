@@ -27,7 +27,7 @@ from hook_common import (
     text_field,
 )
 
-from scripts.lib.config import config_path
+from scripts.lib.config_discovery import strict_config_path
 from scripts.lib.config_strict import ConfigRejected, strict_settings
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/agentic-loop/scripts"))
@@ -95,7 +95,7 @@ def _refuse(code: str, message: str, session_id: object = None) -> None:
 def _discover(cwd: str, session_id: str, deadline: float) -> tuple[bool, Path | None]:
     """Separate proven graph absence from discovery errors."""
     try:
-        config = config_path(cwd, strict=True, timeout_seconds=_remaining_budget(deadline))
+        config = strict_config_path(cwd, timeout_seconds=_remaining_budget(deadline))
         if config:
             strict_settings(config, session_id)
         state = loop_state_path(cwd, session_id, strict=True, timeout_seconds=_remaining_budget(deadline))

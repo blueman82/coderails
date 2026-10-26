@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/script
 import loop_dispatch_guard as guard
 from hook_common import loop_state_path
 
-from scripts.lib.config import config_path
+from scripts.lib.config_discovery import strict_config_path
 
 ENVELOPE = (
     'CODERAILS_GRAPH_DISPATCH={"envelope_version":2,"dispatch_id":"disp_1","session_id":"parent",'
@@ -72,7 +72,7 @@ class DispatchGuardTests(unittest.TestCase):
 
         with (
             patch.object(guard, "read_input", return_value=json.dumps(self.payload)),
-            patch.object(guard, "config_path", return_value=str(config) if config else "", create=True),
+            patch.object(guard, "strict_config_path", return_value=str(config) if config else ""),
             patch.object(guard, "loop_state_path", side_effect=state_path),
             patch.object(guard, "graph_path", return_value=Path(guard.__file__)),
             patch.object(guard, "graph_output", side_effect=graph_output),
@@ -201,8 +201,8 @@ class DispatchGuardTests(unittest.TestCase):
         failure = OSError(errno.ENFILE, "file table full")
         with patch("hook_common.subprocess.run", side_effect=failure), self.assertRaises(OSError):
             loop_state_path(str(self.state.parent), "parent", strict=True)
-        with patch("scripts.lib.config.subprocess.run", side_effect=failure), self.assertRaises(OSError):
-            config_path(self.state.parent, strict=True)
+        with patch("scripts.lib.config_discovery.subprocess.run", side_effect=failure), self.assertRaises(OSError):
+            strict_config_path(self.state.parent)
 
     def test_strict_graph_discovery_rejects_ambiguous_fallback(self) -> None:
         """Two sibling graphs for one session are not a proven no-graph state."""
@@ -261,7 +261,7 @@ class DispatchGuardTests(unittest.TestCase):
             return original_stat(path)
 
         with patch.object(Path, "stat", stat_candidate), self.assertRaises(OSError):
-            config_path(self.state.parent, strict=True)
+            strict_config_path(self.state.parent)
 
     def test_hook_denies_discovery_error_but_allows_proven_absence(self) -> None:
         """An ordinary spawn is free only after both discovery paths finish without error."""
@@ -285,7 +285,7 @@ class DispatchGuardTests(unittest.TestCase):
             self.assertIn("dispatch_discovery_error", denial.call_args.args[0])
         with (
             patch.object(guard, "read_input", return_value=json.dumps(self.payload)),
-            patch.object(guard, "config_path", return_value=""),
+            patch.object(guard, "strict_config_path", return_value=""),
             patch("hook_common.subprocess.run", side_effect=failure),
             patch.object(guard, "deny") as denial,
             patch.object(guard, "log"),
@@ -332,7 +332,7 @@ class DispatchGuardTests(unittest.TestCase):
                 patch.object(guard, "log"),
             ]
             if config is not None:
-                patches.append(patch.object(guard, "config_path", return_value=config))
+                patches.append(patch.object(guard, "strict_config_path", return_value=config))
             with patches[0], patches[1], patches[2] as denial, patches[3]:
                 if config is not None:
                     with patches[4]:
