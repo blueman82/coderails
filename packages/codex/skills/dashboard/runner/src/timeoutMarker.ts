@@ -25,6 +25,10 @@ export function recordTimeoutMarker(routine: RoutineDef, ctx: ArtifactCheckConte
 
 const TERMINAL_OUTCOMES = new Set(["run_ok", "run_abort", "run_refused"]);
 
+function stateRoutineName(name: string): string {
+  return { "sync-docs-nightly": "docs-sync", "loop-retro-promotion-weekly": "loop-retro-promotion" }[name] ?? name;
+}
+
 interface RoutineRow {
   ts: string;
   run_id: string;
@@ -66,7 +70,7 @@ function mergeAttemptState(routine: RoutineDef, ctx: ArtifactCheckContext): "non
   const human = resolveArtifactPath(template, ctx);
   try {
     const state = JSON.parse(readFileSync(`${human.slice(0, -4)}.state.json`, "utf-8"));
-    if (state.v !== 1 || state.run_id !== ctx.runId || state.routine !== routine.name) return "unavailable";
+    if (state.v !== 1 || state.run_id !== ctx.runId || state.routine !== stateRoutineName(routine.name)) return "unavailable";
     return state.merge_attempt ? "attempt" : "none";
   } catch {
     return "unavailable";
@@ -91,7 +95,7 @@ export function ensureTerminalRow(
       return { passed: false, reason: "routine_log_changed: existing event log changed during invocation" };
     }
     const mine = readRows(contents.subarray(boundary.length));
-    const own = mine.filter((row) => row.run_id === ctx.runId && row.routine === routine.name);
+    const own = mine.filter((row) => row.run_id === ctx.runId && row.routine === stateRoutineName(routine.name));
     const terminal = own.filter((row) => TERMINAL_OUTCOMES.has(row.outcome)).pop();
     if (terminal) {
       if (terminal.outcome !== "run_ok") return { passed: false, reason: `routine_terminal:${terminal.outcome}` };
@@ -110,7 +114,7 @@ export function ensureTerminalRow(
       v: 1,
       ts,
       run_id: ctx.runId,
-      routine: routine.name,
+      routine: stateRoutineName(routine.name),
       stage: "runner",
       outcome: pendingMerge ? "run_incomplete" : "run_abort",
       reason_code: pendingMerge ? "merge_state_unknown" : "runner_exit_no_terminal",

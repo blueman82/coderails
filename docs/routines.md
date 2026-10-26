@@ -196,6 +196,9 @@ Commands are `begin`, `stage NAME`, `run-gate STAGE -- ARGV`, `abort CODE`,
 `~/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log` (Codex:
 `~/.codex/coderails-dashboard/routines/docs-sync/run-{date}.log`).
 Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
+The dashboard names `sync-docs-nightly` and `loop-retro-promotion-weekly`
+map to the Python state/event names `docs-sync` and `loop-retro-promotion`.
+The runner uses those state names for its JSONL and state checks.
 
 - `begin` writes state and a provisional `run_incomplete` row, deriving
   `abort=incomplete-run`. A mid-sequence exit is red and distinguishable from
@@ -208,7 +211,8 @@ Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
   `run-gate push` rechecks the manifest before executing its command.
 - Gate argv must resolve to the configured script under the provider's shipped
   `scripts/` directory, directly or through the active Python interpreter.
-  Same-basename files elsewhere are refused with `gate_argv_not_allowed`.
+  Posting gates require their `post` subcommand. Same-basename files elsewhere,
+  help-only and validation-only invocations are refused with `gate_argv_not_allowed`.
 - A nonzero gate exit becomes `run_refused` for that gate, including a command
   that cannot spawn (`gate_spawn_failed` on stderr). At the merge stage, the
   exact PR and head are saved first. A live `MERGED` result takes precedence
@@ -230,6 +234,8 @@ Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
   that same child ID; manual calls keep the variable unset. Explicit
   `begin --new` can replace an earlier run. The runner accepts terminal rows for its
   own ID only.
+  Manual 12-character runs have no child-token ownership check; access to their
+  log and state path remains the same-user boundary.
 - After a merge attempt, a failed PR fetch or changed head keeps the run red
   and blocks cleanup. A confirmed merge cannot be aborted or cleaned up.
   If later state is incomplete, the row is `run_incomplete merged_incomplete`

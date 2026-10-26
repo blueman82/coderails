@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync, appendFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { sweepOnce } from "../src/sweep.ts";
 import { ensureTerminalRow } from "../src/timeoutMarker.ts";
 import type { DashboardConfig } from "@coderails/dashboard-lib";
@@ -30,10 +31,11 @@ function configFor(): DashboardConfig {
   return {
     repos: [],
     wikiPaths: [],
-    buttons: [{ name: "docs-sync", label: "DS", command: "/coderails:docs-sync", cwd: "/tmp", profile: "read-only" }],
+    buttons: [{ name: "sync-docs", label: "DS", command: "/coderails:docs-sync", cwd: "/tmp", profile: "read-only" }],
     routines: [
       {
-        name: "docs-sync",
+        name: "sync-docs-nightly",
+        buttonRef: "sync-docs",
         skillCommand: "/coderails:docs-sync",
         cadence: "0 3 * * *",
         expectedArtifact: {
@@ -47,13 +49,13 @@ function configFor(): DashboardConfig {
   };
 }
 
-function row(runId: string, outcome: string, reason = ""): string {
-  const fields = { v: 1, ts: new Date().toISOString(), run_id: runId, routine: "docs-sync", stage: "x", outcome, reason_code: reason };
+function row(runId: string, outcome: string, reason = "", routine = "docs-sync"): string {
+  const fields = { v: 1, ts: new Date().toISOString(), run_id: runId, routine, stage: "x", outcome, reason_code: reason };
   return JSON.stringify(fields) + "\n";
 }
 
 async function sweepWith(child: (runId: string) => void, exitCode = 0, spawnFailure?: "timeout") {
-  writeFileSync(join(queueDir, "r.json"), JSON.stringify({ button: "docs-sync", requestedAt: Date.now(), source: "cli" }));
+  writeFileSync(join(queueDir, "r.json"), JSON.stringify({ button: "sync-docs", requestedAt: Date.now(), source: "cli" }));
   const notifyImpl = vi.fn();
   let ownId = "";
   const runClaudeImpl = vi.fn().mockImplementation(async (_argv: string[], _cwd: string, opts: { routineRunId?: string }) => {
@@ -71,6 +73,40 @@ async function sweepWith(child: (runId: string) => void, exitCode = 0, spawnFail
 const rowsOf = () => readFileSync(jsonl(), "utf-8").trim().split("\n").map((l) => JSON.parse(l));
 
 describe("runner terminal-row check after a routine child exits", () => {
+  it("accepts the shipped docs-sync routine name with real Python begin and finish", async () => {
+    const script = resolve(import.meta.dirname, "../../../../scripts/routine_run.py");
+    const { result, ownId } = await sweepWith((id) => {
+      rmSync(join(root, "run-active.state.json"));
+      for (const step of [["begin"], ["finish", "no_drift"]]) {
+        const run = spawnSync("python3", [script, "--log", human(), "docs-sync", ...step], {
+          encoding: "utf-8", env: { ...process.env, CODERAILS_ROUTINE_RUN_ID: id },
+        });
+        expect(run.status).toBe(0);
+      }
+    });
+    expect(result).toMatchObject({ succeeded: 1, failed: 0 });
+    expect(rowsOf().at(-1)).toMatchObject({ run_id: ownId, routine: "docs-sync", outcome: "run_ok" });
+  });
+
+  it("accepts the shipped loop-retro name with its canonical state and event identity", () => {
+    const routine = { ...configFor().routines![0], name: "loop-retro-promotion-weekly" };
+    const ctx = { date: "2026-07-23", runId: "0123456789abcdef", vault: "" };
+    const script = resolve(import.meta.dirname, "../../../../scripts/routine_run.py");
+    for (const step of [["begin"], ["finish", "no_drift"]]) {
+      const run = spawnSync("python3", [script, "--log", human(), "loop-retro-promotion", ...step], {
+        encoding: "utf-8", env: { ...process.env, CODERAILS_ROUTINE_RUN_ID: ctx.runId },
+      });
+      expect(run.status).toBe(0);
+    }
+    expect(rowsOf().at(-1)).toMatchObject({ routine: "loop-retro-promotion", outcome: "run_ok" });
+    expect(ensureTerminalRow(routine, ctx, Buffer.alloc(0))).toMatchObject({ passed: true });
+    writeFileSync(join(root, "run-active.state.json"), JSON.stringify({
+      v: 1, run_id: ctx.runId, routine: "loop-retro-promotion", merge_attempt: { number: 7 },
+    }));
+    writeFileSync(jsonl(), row(ctx.runId, "run_incomplete", "incomplete-run", "loop-retro-promotion"));
+    expect(ensureTerminalRow(routine, ctx, Buffer.alloc(0))).toMatchObject({ passed: false, reason: "routine_merge_state_unknown" });
+    expect(rowsOf().at(-1)).toMatchObject({ routine: "loop-retro-promotion", reason_code: "merge_state_unknown" });
+  });
   it("cannot reuse an earlier success from the same timestamp second", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-07-23T20:00:00.750Z"));

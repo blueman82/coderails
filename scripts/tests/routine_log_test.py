@@ -133,9 +133,16 @@ class EmitTests(unittest.TestCase):
                 )
 
                 def broken_open(
-                    path: Path, mode: str = "r", *, encoding: str | None = None, human_path: Path = human
+                    path: Path,
+                    mode: str = "r",
+                    buffering: int = -1,
+                    encoding: str | None = None,
+                    errors: str | None = None,
+                    newline: str | None = None,
+                    *,
+                    human_path: Path = human,
                 ) -> TextIO | BrokenHuman:
-                    stream = cast(TextIO, original_open(path, mode, encoding=encoding))
+                    stream = cast(TextIO, original_open(path, mode, buffering, encoding, errors, newline))
                     return BrokenHuman(stream) if path == human_path else stream
 
                 with mock.patch.object(Path, "open", broken_open):

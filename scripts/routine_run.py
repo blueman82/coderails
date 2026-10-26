@@ -39,7 +39,6 @@ class Run:
         self.spec, self.routine = spec, routine
         self.today = datetime.now().strftime("%Y-%m-%d")
         self.human = Path(template.replace("{date}", self.today)).expanduser()
-        # the state file is keyed by the template, not the date, so a run that crosses midnight keeps its state
         keyed = Path(template.replace("{date}", "active")).expanduser()
         self.jsonl, self.state_path = self.human.with_suffix(".jsonl"), keyed.with_suffix(".state.json")
         self.state: dict[str, Any] = {}
@@ -249,19 +248,22 @@ def cmd_stage(run: Run, args: argparse.Namespace) -> int:
 
 
 def gate_allowed(script: str, argv: list[str]) -> bool:
-    """Accept only the shipped gate script, invoked directly or by this Python interpreter."""
+    """Accept the shipped gate script and posting form, directly or via Python."""
+    if any(arg in ("-h", "--help") for arg in argv):
+        return False
     expected = (ROOT / "scripts" / script).resolve()
     if not script or not expected.is_file() or not argv:
         return False
     command = Path(argv[0])
     executable = Path(shutil.which(argv[0]) or argv[0]).resolve()
     if command.name == script and executable == expected:
-        return True
+        return not script.startswith("post_") or argv[1:2] == ["post"]
     interpreter = Path(shutil.which("python3") or "").resolve()
     return (
         executable in {Path(sys.executable).resolve(), interpreter}
         and len(argv) > 1
         and Path(argv[1]).resolve() == expected
+        and (not script.startswith("post_") or argv[2:3] == ["post"])
     )
 
 

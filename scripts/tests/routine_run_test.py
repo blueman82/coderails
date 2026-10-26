@@ -125,7 +125,7 @@ class RoutineCase(unittest.TestCase):
         """Perform a stage: gates through run-gate with `true`, the rest through stage."""
         gates = ("push", *LATER)
         if name in gates:
-            args = ("7",) if name == "merge" else ()
+            args = {"merge": ("7",), "post_review": ("post", "7"), "post_evals": ("post", "7")}.get(name, ())
             return self.run_tool("run-gate", name, "--", str(self.plugin / "scripts" / f"{name}.py"), *args)
         return self.run_tool("stage", name)
 
