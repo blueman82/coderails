@@ -12,11 +12,34 @@ from typing import Any, cast
 
 from .destructive_patterns import git_output
 from .discipline_common import tool_uses
-from .headless_command import headless_prompt
+from .headless_command import headless_cwd_override, headless_prompt
 
 MERGE_SCRIPT = r"""(?:(?:bash|sh|python3?)\s+)?["']?(?:[^\s"']*/)?merge\.(?:py|sh)["']?(?:\s|$)"""
 _GIT_OPT = r"(?:-C\s+\S+|-c\s+\S+|--[\w-]+=\S+|--(?:git-dir|work-tree|namespace|exec-path)\s+\S+|--[\w-]+|-[pP])"
-_GIT = re.compile(r"^git((?:\s+" + _GIT_OPT + r")*)\s+(merge|push)(?:\s|$)")
+
+
+def _git_command(segment: str) -> tuple[str, str]:
+    """Read a Git subcommand after global options, including quoted -C paths."""
+    try:
+        tokens = shlex.split(segment)
+    except ValueError:
+        return "", ""
+    if tokens[:1] != ["git"]:
+        return "", ""
+    index, directory = 1, ""
+    while index < len(tokens):
+        flag = tokens[index]
+        if flag in {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}:
+            if index + 1 >= len(tokens):
+                return "", ""
+            if flag == "-C":
+                directory = tokens[index + 1]
+            index += 2
+        elif flag in {"-p", "-P"} or re.fullmatch(r"--[\w-]+(?:=.*)?", flag):
+            index += 1
+        else:
+            break
+    return (tokens[index], directory) if index < len(tokens) and tokens[index] in {"merge", "push"} else ("", "")
 
 
 def operation(command: str) -> tuple[str, str, str]:
@@ -37,9 +60,8 @@ def operation(command: str) -> tuple[str, str, str]:
         ):
             if re.search(pattern, segment):
                 return name, segment, ""
-        if match := _GIT.match(segment):  # git global options (-c, -C, --git-dir, --no-pager ...) before the subcommand
-            directory = re.search(r"-C\s+(\S+)", match[1])
-            return f"git_{match[2]}", segment, directory[1] if directory else ""
+        if (git_command := _git_command(segment))[0]:
+            return f"git_{git_command[0]}", segment, git_command[1]
     return "", "", ""
 
 
@@ -57,7 +79,7 @@ def targets_main(command: str, cwd: str, target: str, name: str, *, implicit_pus
         return False
     for raw in _SEP.split(command)[::2]:
         segment = canonical(unwrap(raw))
-        if (git := _GIT.match(segment)) and git[2] == "push" and _push_guarded(segment, implicit_push=implicit_push):
+        if _git_command(segment)[0] == "push" and _push_guarded(segment, implicit_push=implicit_push):
             return True
     if re.search(r":(refs/heads/)?(main|master)([\s;&|)]|$)", command):
         return True
@@ -176,7 +198,9 @@ def guarded_segments(
     Track literal cwd changes through groups and shell -c strings. Unknown destinations remain unbindable.
     """
     if prompt := headless_prompt(unwrap(command)):
-        return guarded_segments(prompt, cwd, implicit_push=implicit_push, _blind=_blind)
+        return guarded_segments(
+            prompt, cwd, implicit_push=implicit_push, _blind=_blind or headless_cwd_override(command)
+        )
     found: list[tuple[str, str, str]] = []
     blind = _blind
     stack: list[tuple[str, bool]] = []
@@ -196,7 +220,9 @@ def guarded_segments(
         for inner in _SHELL_C.finditer(plain):
             found.extend(guarded_segments(inner[2], cwd, implicit_push=implicit_push, _blind=blind))
         if prompt := headless_prompt(plain):
-            found.extend(guarded_segments(prompt, cwd, implicit_push=implicit_push, _blind=blind))
+            found.extend(
+                guarded_segments(prompt, cwd, implicit_push=implicit_push, _blind=blind or headless_cwd_override(plain))
+            )
         plain = _SHELL_C.sub("", plain).strip()
         segment = canonical(plain)
         # An env assignment (GIT_DIR=, GH_REPO=, GIT_CONFIG_*=) can retarget the action: keep the prefix in the

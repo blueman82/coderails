@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny,
 from hooks.scripts.lib.loop_state_common import log
 from hooks.scripts.lib.pr_merge_gate import merge_reason
 from hooks.scripts.lib.pr_workflow_match import (
+    UNBINDABLE,
     guarded_segments,
     operation,
     pr_number,
@@ -42,7 +44,30 @@ def main() -> int:
     name, segment, target = operation(command)
     cwd = str(payload.get("cwd") or os.getcwd())
     session = str(payload.get("session_id") or "")
-    merges = [(part, where) for kind, part, where in guarded_segments(command, cwd) if kind == "merge"]
+    guarded = guarded_segments(command, cwd)
+    merges = [(part, where) for kind, part, where in guarded if kind == "merge"]
+    if len(guarded) > 1:
+        deny("Blocked: run one protected action per command so each gets its own review and evidence check.")
+        return 0
+    if guarded and guarded[0][1].startswith(UNBINDABLE):
+        deny("Blocked: child working directory or command target cannot be bound to this repository.")
+        return 0
+    for kind, part, _ in guarded:
+        if kind != "git_push":
+            continue
+        try:
+            tokens = shlex.split(part)
+        except ValueError:
+            tokens = []
+        options = tokens[: tokens.index("push")] if "push" in tokens else tokens
+        if any(
+            token in {"-C", "--git-dir", "--work-tree"} or token.startswith(("--git-dir=", "--work-tree="))
+            for token in options
+        ):
+            deny("Blocked: Git working directory differs from this repository; run that action separately.")
+            return 0
+    if guarded and not merges:
+        name, segment, cwd = guarded[0]
     if merges:
         name, segment, cwd = "merge", merges[0][0], merges[0][1]
     if merges and not (verdict := permits(session, "merge"))["allow"]:  # early; nothing is consumed
@@ -57,7 +82,7 @@ def main() -> int:
         publication_gate.trace_preflight("pr_base_mutation")
         deny("pr_base_mutation: edit the PR and re-run the checked merge separately.")
         return 0
-    configured = bool(name and config_path(cwd) and targets_main(command, cwd, target, name))
+    configured = bool(name and config_path(cwd) and (bool(guarded) or targets_main(command, cwd, target, name)))
     paths = [
         str(payload[key])
         for key in ("transcript_path", "agent_transcript_path")

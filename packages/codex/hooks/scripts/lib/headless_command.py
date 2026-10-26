@@ -33,6 +33,23 @@ _HEADLESS_VALUE_OPTIONS = {
     "--profile",
     "--image",
     "-i",
+    "--agent",
+    "--fallback-model",
+    "--effort",
+    "--add-dir",
+    "--output-schema",
+    "--thread-source",
+    "--enable",
+    "--disable",
+    "--output-last-message",
+    "--local-provider",
+    "--ask-for-approval",
+    "-a",
+    "--color",
+    "--cyber-access-program",
+    "--permission-prompts",
+    "--plugin-dir",
+    "--plugin-url",
 }
 
 
@@ -45,14 +62,10 @@ def headless_prompt(segment: str) -> str:
     if not args:
         return ""
     program = os.path.basename(args[0])
-    if program == "claude":
-        mode = any(arg in {"-p", "--print"} for arg in args[1:])
-        options = args[1:]
-    elif program == "codex" and len(args) > 1 and args[1] == "exec":
-        mode, options = True, args[2:]
-    else:
+    if program not in {"claude", "codex"}:
         return ""
-    if not mode:
+    options = args[1:]
+    if program == "claude" and not any(arg in {"-p", "--print"} for arg in options):
         return ""
     prompts: list[str] = []
     skip = False
@@ -65,4 +78,17 @@ def headless_prompt(segment: str) -> str:
             continue
         else:
             prompts.append(arg)
+    if program == "codex":
+        if not prompts or prompts[0] not in {"exec", "e"}:
+            return ""
+        prompts.pop(0)
     return prompts[0] if len(prompts) == 1 else ""
+
+
+def headless_cwd_override(segment: str) -> bool:
+    """A child with its own working directory cannot use the parent's PR evidence."""
+    try:
+        args = shlex.split(segment)
+    except ValueError:
+        return False
+    return any(arg.startswith("-C") or arg == "--cd" or arg.startswith("--cd=") for arg in args[1:])

@@ -41,12 +41,12 @@ def has_base_mutation(command: str) -> bool:
     )
 
 
-def _option_items(tokens: list[str]) -> Iterator[tuple[str, str]]:
+def _option_items(tokens: list[str], value_flags: set[str] = _VALUE_FLAGS) -> Iterator[tuple[str, str]]:
     """Yield arguments with their consumed values, using the merge option arities."""
     items = iter(tokens)
     for token in items:
         flag, equals, value = token.partition("=")
-        if flag in _VALUE_FLAGS:
+        if flag in value_flags:
             yield flag, value if equals else next(items, "")
         else:
             yield token, ""
@@ -55,7 +55,22 @@ def _option_items(tokens: list[str]) -> Iterator[tuple[str, str]]:
 def has_noop_option(segment: str) -> bool:
     """Only an actual help/dry-run option makes a command harmless; an option value does not."""
     try:
-        return any(token in {"--help", "--dry-run"} for token, _ in _option_items(shlex.split(segment)))
+        tokens = shlex.split(segment)
+        offset = 1
+        if tokens[:1] == ["git"]:
+            while offset < len(tokens):
+                flag = tokens[offset]
+                if flag in {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}:
+                    offset += 2
+                elif flag in {"-p", "-P", "--no-pager", "--paginate"} or flag.startswith(
+                    ("--git-dir=", "--work-tree=", "--namespace=", "--exec-path=")
+                ):
+                    offset += 1
+                else:
+                    break
+        push = tokens[:1] == ["git"] and tokens[offset : offset + 1] == ["push"]
+        value_flags = _VALUE_FLAGS | {"-o", "--push-option"} if push else _VALUE_FLAGS
+        return any(token in {"--help", "--dry-run"} for token, _ in _option_items(tokens, value_flags))
     except ValueError:
         return False
 
@@ -65,6 +80,8 @@ def parse(segment: str) -> tuple[str, str, str]:
     try:
         tokens = shlex.split(segment)
     except ValueError:
+        return AMBIGUOUS, "", ""
+    if tokens[:1] == ["CODERAILS_UNBINDABLE=1"]:
         return AMBIGUOUS, "", ""
     if tokens[:2] == ["gh", "api"]:
         endpoint = next((token for token, _ in _option_items(tokens[2:]) if not token.startswith("-")), "")

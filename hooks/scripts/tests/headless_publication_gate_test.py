@@ -12,6 +12,13 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+DENIED_COMMANDS = (
+    'claude -p --dangerously-skip-permissions "gh pr merge 42"',
+    'codex exec --dangerously-bypass-approvals-and-sandbox "gh pr merge 42"',
+    'echo ready && claude -p "gh pr merge 42 && echo done"',
+    'codex -C /tmp exec "gh pr merge 42"',
+    'claude --cd /tmp -p "gh pr merge 42"',
+)
 
 
 class InstalledHeadlessGateTests(unittest.TestCase):
@@ -115,17 +122,13 @@ class InstalledHeadlessGateTests(unittest.TestCase):
                         target = bundle / relative
                         target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copyfile(origin, target)
-                for command in (
-                    'claude -p --dangerously-skip-permissions "gh pr merge 42"',
-                    'codex exec --dangerously-bypass-approvals-and-sandbox "gh pr merge 42"',
-                    'echo ready && claude -p "gh pr merge 42 && echo done"',
-                ):
+                for command in DENIED_COMMANDS:
                     with self.subTest(provider=provider, command=command):
                         result = self.run_installed_hook(bundle, hook, repo, environment, transcript, command)
                         self.assertEqual(result.returncode, 0, result.stderr)
                         self.assertIn('"deny"', result.stdout, result.stdout + result.stderr)
                         self.assertNotIn("config_rejected", result.stdout, result.stdout + result.stderr)
-                        if provider == "codex":
+                        if provider == "codex" and " /tmp " not in command:
                             self.assertIn("diff_manifest:manifest_unreadable", result.stdout)
                 for command in (
                     "echo 'claude -p \"gh pr merge 42\"'",
