@@ -14,9 +14,7 @@
     "**/id_ed25519*",
     ".coderails/workflow.config.yaml",
     "policy/diff-policy*.json",
-    "policy/review_policy.json",
-    "packages/codex/policy/diff-policy*.json",
-    "packages/codex/policy/review_policy.json"
+    "packages/codex/policy/diff-policy*.json"
   ],
   "require_linked_worktree": false
 }

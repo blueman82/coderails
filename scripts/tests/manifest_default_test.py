@@ -73,6 +73,13 @@ class CheckKeyTests(unittest.TestCase):
 
     policy: dict[str, Any] = {"manifest": ["a.md"], "statuses": ["M"], "max_paths": 1}
 
+    def test_custom_deny_still_blocks_first_review_policy_addition(self) -> None:
+        """The first-install exception cannot override an explicit custom deny rule."""
+        for path in ("policy/review_policy.json", "packages/codex/policy/review_policy.json"):
+            with self.subTest(path=path):
+                result = manifest_policy.check([("A", [path])], {"deny": ["**"]})
+                self.assertEqual(result["violations"], [{"code": "denied_path", "path": path}])
+
     def test_added_status_refused(self) -> None:
         """An A where only M is allowed reports status_not_allowed."""
         result = manifest_policy.check([("A", ["a.md"])], self.policy, ["a.md"])

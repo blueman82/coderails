@@ -116,9 +116,7 @@ def check(
         for path in paths:
             review_policy = matches(path, REVIEW_POLICY_PATHS)
             if (review_policy and not status.startswith("A")) or (
-                not review_policy
-                and matches(path, deny)
-                and (not status.startswith("D") or matches(path, PROTECTED_POLICY_PATHS))
+                matches(path, deny) and (not status.startswith("D") or matches(path, PROTECTED_POLICY_PATHS))
             ):
                 add("denied_path", path)
             if (manifest is not None and not matches(path, manifest)) or (allow and not matches(path, allow)):
