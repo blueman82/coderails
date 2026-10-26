@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages/codex/ski
 from hooks.scripts.tests.claude_graph_test_support import node
 from hooks.scripts.tests.lib import claude_transcript_fixture as claude
 from packages.tests import codex_fixture as codex
+from scripts.lib import proof_results
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -80,7 +81,7 @@ class Provider:
             text=True,
             check=False,
             env=self.environment,
-            cwd=self.home,
+            cwd=ROOT if operation in ("complete", "verify-completion") else self.home,
         )
 
     def success(self, operation: str, *arguments: str) -> dict[str, Any]:
@@ -156,63 +157,29 @@ class Provider:
         )
         if result.returncode:
             raise AssertionError(result.stderr)
-        self.write(
-            {
-                **identity,
-                "schema_version": 1,
-                "proofs": [{"id": "P1", "cmd": "true", "status": "pass", "evidence": "observed"}],
-                "withdrawn_proofs": [],
-            },
-            "proof.json",
-        )
+        document = {
+            **identity,
+            "schema_version": 2,
+            "proofs": [{"id": "P1", "cmd": "true", "expect": {"exit_code": 0}}],
+            "withdrawn_proofs": [],
+        }
+        self.write(document, "proof.json")
         self.write({**identity, "schema_version": 1, "status": "complete"}, "retro.json")
-        if self.name == "claude":
-            claude.append(
-                self.parent,
-                {
-                    "type": "assistant",
-                    "sessionId": self.session,
-                    "message": {
-                        "content": [{"type": "tool_use", "name": "Bash", "id": "proof-1", "input": {"command": "true"}}]
-                    },
-                },
-            )
-            claude.append(
-                self.parent,
-                {
-                    "type": "user",
-                    "sessionId": self.session,
-                    "message": {
-                        "content": [
-                            {"type": "tool_result", "tool_use_id": "proof-1", "is_error": False, "content": "success"}
-                        ]
-                    },
-                },
-            )
-        else:
-            codex.append(
-                self.parent,
-                {
-                    "type": "response_item",
-                    "payload": {
-                        "type": "function_call",
-                        "name": "exec_command",
-                        "call_id": "proof-1",
-                        "arguments": json.dumps({"cmd": "true"}),
-                    },
-                },
-            )
-            codex.append(
-                self.parent,
-                {
-                    "type": "response_item",
-                    "payload": {
-                        "type": "function_call_output",
-                        "call_id": "proof-1",
-                        "output": json.dumps({"exit_code": 0}),
-                    },
-                },
-            )
+        results = self.path.with_name(proof_results.RESULTS_NAME)
+        results.unlink(missing_ok=True)
+        digest = proof_results.doc_sha(document)
+        proof_results.append(results, kind="freeze", proof_json_sha256=digest, **identity)
+        proof_results.append(
+            results,
+            kind="run",
+            proof_id="P1",
+            cmd_sha256=proof_results.sha("true"),
+            proof_json_sha256=digest,
+            verdict="satisfied",
+            cwd=str(ROOT),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+            **identity,
+        )
 
     def complete(self) -> subprocess.CompletedProcess[str]:
         """Run each provider's native completion options without sharing runtime code."""
@@ -245,5 +212,5 @@ class Provider:
             text=True,
             check=False,
             env=self.environment,
-            cwd=self.home,
+            cwd=ROOT if name == "graph_completion_guard" else self.home,
         )

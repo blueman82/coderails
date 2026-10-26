@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 import graph
+import graph_dispatch
 
 from packages.tests.codex_fixture import (
     append,
@@ -30,6 +31,7 @@ from packages.tests.codex_fixture import (
     verify_completion,
     write_json,
 )
+from scripts.lib import proof_results as pr
 
 LEASE = 600
 STALLED = 1_789_948_802.0 + LEASE
@@ -46,6 +48,23 @@ class RecoverChainTests(unittest.TestCase):
         self.directory = Path(temporary.name)
         previous = Path.cwd()
         subprocess.run(["git", "init", "-q", str(self.directory)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.directory),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
+            check=True,
+        )
         config = self.directory / ".coderails/workflow.config.yaml"
         config.parent.mkdir()
         config.write_text("memory:\n  backend: off\n")
@@ -69,7 +88,7 @@ class RecoverChainTests(unittest.TestCase):
         """Record every unit done."""
         wave = read_json(self.path)["graph"]["active_wave"]["wave_id"]
         results = {unit: {"outcome": "done", "evidence": "ok"} for unit in UNITS}
-        graph.record_wave(self.path, json.dumps({"wave_id": wave, "results": results}))
+        graph_dispatch.record_wave(self.path, json.dumps({"wave_id": wave, "results": results}))
 
     def _verify(self) -> dict[str, Any]:
         """Freeze a level-0 suite at the current revision and verify completion."""
@@ -88,27 +107,41 @@ class RecoverChainTests(unittest.TestCase):
         suite = self.path.with_name("evals.json")
         write_json(suite, evals)
         proof, retro, log = (self.path.with_name(n) for n in ("proof.json", "retro.json", "proof.jsonl"))
-        proofs = [{"id": "P1", "cmd": "true", "status": "pass", "evidence": "observed"}]
-        write_json(proof, {"session_id": "parent", "loop_id": "loop", "proofs": proofs})
+        document = {
+            "schema_version": 2,
+            "session_id": "parent",
+            "loop_id": "loop",
+            "proofs": [{"id": "P1", "cmd": "true", "expect": {"exit_code": 0}}],
+        }
+        write_json(proof, document)
         write_json(retro, {"schema_version": 2, "session_id": "parent", "loop_id": "loop", "status": "complete"})
         append(log, {"type": "turn_context", "payload": {"loop_id": "loop"}})
-        call = {"type": "custom_tool_call", "name": "exec", "call_id": "p", "input": 'tools.exec_command({cmd:"true"})'}
-        append(log, {"type": "response_item", "payload": call})
-        out = [{"type": "input_text", "text": json.dumps({"loop_id": "loop", "exit_code": 0})}]
-        done = {"type": "custom_tool_call_output", "call_id": "p", "output": out}
-        append(log, {"type": "response_item", "payload": done})
+        results = self.path.with_name(pr.RESULTS_NAME)
+        identity = {"session_id": "parent", "loop_id": "loop"}
+        pr.append(results, kind="freeze", proof_json_sha256=pr.doc_sha(document), **identity)
+        pr.append(
+            results,
+            kind="run",
+            proof_id="P1",
+            cmd_sha256=pr.sha("true"),
+            proof_json_sha256=pr.doc_sha(document),
+            verdict="satisfied",
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            **identity,
+        )
         complete(self.path, "parent", suite, proof, retro, log)
         return verify_completion(self.path, "parent", suite, proof, retro, log)
 
     def test_stalled_then_late_a1_completion_then_a2_done_verifies(self) -> None:
         """A late a1 finish neither breaks a2 validation nor completion."""
-        graph.begin_wave(self.path)
+        graph_dispatch.begin_wave(self.path)
         first = self._spawn(terminal=False)
         self.assertTrue(graph.recover_wave(self.path, "parent", LEASE, now=STALLED)["recovered"])
         late = {"timestamp": "2026-09-21T01:00:00Z", "type": "event_msg", "payload": {"type": "task_complete"}}
         for child in first:  # the abandoned a1 workers finish after recovery
             append(child, late)
-        wave = graph.begin_wave(self.path)
+        wave = graph_dispatch.begin_wave(self.path)
         self.assertTrue(all(name.endswith("_a2") for name in wave["task_names"].values()))
         self._spawn(terminal=True)
         self._record_done()
@@ -116,7 +149,7 @@ class RecoverChainTests(unittest.TestCase):
 
     def test_no_spawn_node_is_never_recorded_and_a_late_spawn_verifies(self) -> None:
         """A node that was never spawned changes nothing; spawning it late then records and verifies normally."""
-        graph.begin_wave(self.path)
+        graph_dispatch.begin_wave(self.path)
         before = self.path.read_text(encoding="utf-8")
         report = graph.recover_wave(self.path, "parent", LEASE, now=STALLED)
         self.assertEqual((report["recovered"], report["reason_code"]), (False, "no_spawn_dispatch"))
