@@ -101,7 +101,7 @@ def complete(
             state["status"] = "complete"
             state["revision"] += 1
             state["completion"] = {"revision": revision}
-            _write(path, state)
+            _write(path, state, preserve_updated_at=True)
     result = {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
     result.update(orders.finish(path, session, state["loop_id"]))
     return result

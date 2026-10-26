@@ -43,7 +43,10 @@ def read_state(path: Path) -> dict[str, Any]:
 
 
 def atomic_progress_update(
-    path: Path, update: Callable[[dict[str, Any]], dict[str, Any]], create: bool = False
+    path: Path,
+    update: Callable[[dict[str, Any]], dict[str, Any]],
+    create: bool = False,
+    preserve_updated_at: bool = False,
 ) -> bool:
     """Serialize one provider-local read, transform, and atomic file replacement.
 
@@ -64,9 +67,17 @@ def atomic_progress_update(
         state: object = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
         if not isinstance(state, dict):
             return False
-        proposed = update(cast(dict[str, Any], state))
+        source = cast(dict[str, Any], state)
+        proposed = update(source)
         if path.name == "progress.json":  # stamped only on a write that happens; a refused update raises above
-            proposed = {**proposed, "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+            stamp = (
+                source.get("updated_at")
+                if preserve_updated_at
+                else datetime.now(timezone.utc).isoformat(timespec="seconds")
+            )
+            if not isinstance(stamp, str) or not stamp:
+                return False
+            proposed = {**proposed, "updated_at": stamp}
         with tempfile.NamedTemporaryFile(
             mode="w", dir=path.parent, prefix=f"{path.name}.tmp.", delete=False, encoding="utf-8"
         ) as stream:

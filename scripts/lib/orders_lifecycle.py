@@ -83,7 +83,7 @@ def source_state(state: dict[str, Any]) -> dict[str, Any]:
         source["revision"] = completion["revision"]
     elif "completion" in state:
         raise ValueError("order_source_invalid")
-    for key in ("status", "completion", "completed_marker", "updated_at"):
+    for key in ("status", "completion", "completed_marker"):
         source.pop(key, None)
     if isinstance(counts := source.get("loop_stop_counts"), dict):
         remaining = {k: v for k, v in cast("dict[str, Any]", counts).items() if k != "complete"}

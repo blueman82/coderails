@@ -366,7 +366,7 @@ def complete(path: Path, session: str, write: bool = True, completed_marker: int
         finally:
             release_dir_lock(lock)
     else:
-        state = transition(path, update) if write else update(load(path))
+        state = transition(path, update, preserve_updated_at=True) if write else update(load(path))
     result: dict[str, Any] = {"session_id": session, "loop_id": state["loop_id"], "status": state["status"]}
     if write:
         result.update(orders_completion.finish(path, session, state["loop_id"]))

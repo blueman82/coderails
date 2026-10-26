@@ -148,7 +148,7 @@ class RecoveryCase(StoreCase):
             state["status"] = "complete"
             return state
 
-        self.assertTrue(atomic_progress_update(self.repo / session / "progress.json", change))
+        self.assertTrue(atomic_progress_update(self.repo / session / "progress.json", change, preserve_updated_at=True))
 
     def trace_rows(self) -> list[dict[str, Any]]:
         """Read actual per-session trace files from this fixture's private boundary."""

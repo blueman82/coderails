@@ -53,7 +53,9 @@ def load(path: Path) -> dict[str, Any]:
         raise ValueError(f"cannot read graph: {error}") from error
 
 
-def transition(path: Path, transform: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
+def transition(
+    path: Path, transform: Callable[[dict[str, Any]], dict[str, Any]], preserve_updated_at: bool = False
+) -> dict[str, Any]:
     """Read, validate, transform and replace once under the sole Claude state lock."""
     result: dict[str, Any] = {}
     errors: list[str] = []
@@ -72,7 +74,7 @@ def transition(path: Path, transform: Callable[[dict[str, Any]], dict[str, Any]]
             errors.append(str(error))
             raise
 
-    if not atomic_progress_update(path, update):
+    if not atomic_progress_update(path, update, preserve_updated_at=preserve_updated_at):
         raise ValueError(errors[0] if errors else "graph lock or atomic update failed")
     return result
 
