@@ -7,6 +7,31 @@ import re
 from typing import Any, cast
 
 from .graph_evidence import child_identity, notifications, object_value, spawns, transcript
+from .graph_executor import graph_contract
+
+
+def check_record(state: dict[str, Any], row: dict[str, Any]) -> None:
+    """A spawn in a wave at or after contract_from_revision must match its begin-wave record and sections digest."""
+    start = state["graph"].get("contract_from_revision")
+    if type(start) is not int or row["revision"] < start:
+        return  # history from before the dispatch contract (the converter stamps the first contract revision)
+    if "dispatch_id" not in row:
+        raise graph_contract.DispatchDeniedError(
+            "dispatch_missing_envelope", "native spawn lacks a v2 dispatch envelope"
+        )
+    if graph_contract.dispatch_off():
+        graph_contract.check_ownership(state, row, live=False)
+        return
+    record = graph_contract.check_dispatch(state, row, row["prompt"], live=False)
+    graph_contract.assert_role(record["contract"], row["subagent_type"], "coderails:", graph_contract.CLAUDE_TYPES)
+    authorized: object = record.get("authorized")
+    authorized = cast(dict[str, Any], authorized) if isinstance(authorized, dict) else None
+    if not isinstance(authorized, dict) or (
+        authorized.get("tool_use_id") is not None and authorized.get("tool_use_id") != row["tool_use_id"]
+    ):
+        raise graph_contract.DispatchDeniedError(
+            "dispatch_unauthorized", "native spawn does not match its consumed dispatch authorization"
+        )
 
 
 def provenance(value: object, depth: int = 0) -> bool:
@@ -77,6 +102,7 @@ def bind_wave(state: dict[str, Any], results: dict[str, Any]) -> dict[str, list[
     rows, notices = spawns(path, session), notifications(path, session)
     tools, agents = used_references(state)
     bound: dict[str, list[dict[str, Any]]] = {}
+    ids: set[str] = set()
     for node_id, result in results.items():
         if provenance(result.get("evidence")):
             raise ValueError("caller evidence must not assert native worker provenance")
@@ -93,6 +119,11 @@ def bind_wave(state: dict[str, Any], results: dict[str, Any]) -> dict[str, list[
         for row in candidates:
             if any(row[key] != state[key] for key in ("session_id", "loop_id", "revision")):
                 raise ValueError("native spawn envelope does not own this session/loop/revision")
+            check_record(state, row)
+            if "dispatch_id" in row:
+                if row["dispatch_id"] in ids:
+                    raise graph_contract.DispatchDeniedError("dispatch_replayed", "two spawns carry one dispatch id")
+                ids.add(row["dispatch_id"])
             tool = row["tool_use_id"]
             if tool in tools:
                 raise ValueError("native tool identity has already been bound")

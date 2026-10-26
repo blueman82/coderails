@@ -22,7 +22,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.agentic_loop_path import resolve_path
-from hooks.scripts.lib.graph_evidence import notifications, transcript
+from hooks.scripts.lib.graph_evidence import notifications, records, transcript
 from hooks.scripts.lib.graph_executor import load
 from hooks.scripts.tests.lib import claude_transcript_fixture as fixture
 from hooks.scripts.tests.lib.native_api_fixture import NativeAPIFixture
@@ -66,21 +66,24 @@ class ClaudeCLIAcceptanceTest(unittest.TestCase):
         fixture.write_json(self.path.with_name("evals.json"), suite)
         self.bad_envelope = False
         self.preparing = True
+        self.started = False
 
     def dispatches(self) -> list[dict[str, Any]]:
         """Ask the actual CLI for two workers using its native general-purpose role."""
         if self.preparing:
             return [{"type": "text", "text": "NATIVE_SESSION_INITIALIZED"}]
+        if self.started:
+            return [{"type": "text", "text": "NATIVE_PARENT_COMPLETED"}]
         opened = dispatch.begin_wave(self.path)
+        self.started = True
         graph = load(self.path)
         blocks: list[dict[str, Any]] = []
         for index, node in enumerate(opened["nodes"]):
-            ownership = dispatch.ownership(graph, node)
+            body = (ROOT / "agents/loop-worker.md").read_text()
+            body += "\nTask: return NATIVE_CHILD_COMPLETED. No files, commits, network calls or further agents."
+            prompt = fixture.dispatch_prompt(graph, node, body)
             if self.bad_envelope:
-                ownership["wave_id"] = "wave-foreign"
-            prompt = "CODERAILS_GRAPH_DISPATCH=" + json.dumps(ownership) + "\n"
-            prompt += (ROOT / "agents/loop-worker.md").read_text()
-            prompt += "\nTask: return NATIVE_CHILD_COMPLETED. No files, commits, network calls or further agents."
+                prompt = prompt.replace(graph["graph"]["active_wave"]["wave_id"], "wave-foreign", 1)
             blocks.append(
                 {
                     "type": "tool_use",
@@ -149,6 +152,68 @@ class ClaudeCLIAcceptanceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             dispatch.record_wave(self.path, fixture.report(load(self.path)))
         self.assertEqual(self.path.read_bytes(), original)
+
+    def test_real_native_children_bind_with_api_metadata(self) -> None:
+        """Claude's own API metadata does not hide two authorized child completions."""
+        result, _ = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout[-2000:])
+        state = load(self.path)
+        native = transcript(self.session)
+        agents = [
+            row["toolUseResult"]["agentId"]
+            for row in records(native)
+            if row.get("type") == "user"
+            and isinstance(row.get("toolUseResult"), dict)
+            and row["toolUseResult"].get("status") == "async_launched"
+        ]
+        self.assertEqual(len(agents), 2)
+        self.assertEqual(len(set(agents)), 2)
+        children = [native.with_suffix("") / "subagents" / f"agent-{agent}.jsonl" for agent in agents]
+        for child in children:
+            rows = records(child)
+            self.assertTrue(any(row.get("type") == "api-request-shape" for row in rows))
+            self.assertTrue(any(row.get("type") == "api-request-blob" for row in rows))
+            self.assertTrue(any(row.get("type") == "api-request" for row in rows))
+            self.assertTrue(
+                any("isSidechain" not in row for row in rows if row.get("type", "").startswith("api-request"))
+            )
+
+        original = self.path.read_bytes()
+        report = fixture.report(state)
+        for child in children:
+            baseline = child.read_bytes()
+            for row_type, key, value in (
+                ("api-request-shape", "sessionId", "foreign"),
+                ("api-request-shape", "agentId", "foreign"),
+                ("api-request-shape", "isSidechain", False),
+                ("assistant", "isSidechain", False),
+                ("assistant", "attributionAgent", "Plan"),
+            ):
+                altered = records(child)
+                target = next(row for row in altered if row.get("type") == row_type)
+                target[key] = value
+                child.write_text("".join(json.dumps(row) + "\n" for row in altered))
+                with self.assertRaisesRegex(ValueError, "native child"):
+                    dispatch.record_wave(self.path, report)
+                self.assertEqual(self.path.read_bytes(), original)
+                child.write_bytes(baseline)
+            altered = records(child)
+            next(row for row in altered if row.get("type") == "assistant").pop("isSidechain")
+            child.write_text("".join(json.dumps(row) + "\n" for row in altered))
+            with self.assertRaisesRegex(ValueError, "native child"):
+                dispatch.record_wave(self.path, report)
+            self.assertEqual(self.path.read_bytes(), original)
+            child.write_bytes(baseline)
+
+        dispatch.record_wave(self.path, report)
+        finished = load(self.path)
+        self.assertTrue(
+            all(finished["graph"]["nodes"][node]["status"] == "done" for node in state["graph"]["active_wave"]["nodes"])
+        )
+        saved = self.path.read_bytes()
+        with self.assertRaises(ValueError):
+            dispatch.record_wave(self.path, report)
+        self.assertEqual(self.path.read_bytes(), saved)
 
 
 if __name__ == "__main__":
