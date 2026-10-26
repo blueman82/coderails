@@ -196,6 +196,9 @@ class Provider:
             verdict="satisfied",
             cwd=str(self.checkout),
             head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.checkout, text=True).strip(),
+            source_tree_sha=subprocess.check_output(
+                ["git", "rev-parse", "HEAD^{tree}"], cwd=self.checkout, text=True
+            ).strip(),
             **identity,
         )
         assembled_retro.write(self.path.parent, identity["session_id"])  # last: the retro binds every source above

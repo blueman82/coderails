@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Controller-run proofs: freeze proof.json, execute each frozen cmd verbatim, record chained results.
-
-Usage:
-  proof.py freeze <state-dir>
-  proof.py run <state-dir> [--id ID | --all]
-  proof.py status <state-dir>
-  proof.py disposition <state-dir> --none --reason-code CODE --reason TEXT
-  proof.py supersede <state-dir> --candidate PATH --reason TEXT --original-sha256 SHA --author-evidence PATH
-
-<state-dir> holds proof.json (and progress.json); rows go to proof_results.jsonl beside it. The frozen cmd runs
-through pinned sandbox-runtime with read-only host paths and no network. Exit 0 ok, 1 unsatisfied, 2 refused.
-"""
+"""Run frozen proofs with SHA-bound results; exit 0 satisfied, 1 unsatisfied, 2 refused."""
 
 from __future__ import annotations
 
@@ -21,6 +10,7 @@ import json
 import os
 import secrets
 import selectors
+import shlex
 import signal
 import subprocess
 import sys
@@ -34,12 +24,12 @@ from hooks.scripts.lib.destructive_patterns import permanent_pattern, secret_pat
 from scripts.lib import proof_results as pr  # noqa: E402
 from scripts.lib import proof_suite as suite  # noqa: E402
 from scripts.lib import teardown_steps  # noqa: E402
+from scripts.lib.proof_runtime import git_environment, runtime_argv, source_snapshot, trusted_executable  # noqa: E402
 from scripts.lib.proof_suite import items, validate  # noqa: E402
 
 DEFAULT_TIMEOUT_S = 600
 EXCERPT_CAP = 2000
 MAX_OUTPUT_BYTES = 1_048_576
-SRT_VERSION = "0.0.65"
 
 
 def _now() -> str:
@@ -103,18 +93,24 @@ def _capture(process: subprocess.Popen[bytes], timeout: float) -> tuple[bytes, b
     return bytes(output[0]), bytes(output[1]), timed_out, overflow
 
 
-def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool, bool, bool]:
+def _execute(cmd: str, timeout: float, head: str | None) -> tuple[int | None, str, str, bool, bool, bool, str | None]:
     """Return exit, stdout, stderr, timeout, and proof that the sandbox started."""
     with tempfile.TemporaryDirectory(prefix="coderails-proof.", dir="/tmp") as temporary:
         scratch = Path(temporary)
-        settings = scratch / "settings.json"
+        runner = scratch / "runner"
+        runner.mkdir()
+        runtime = runtime_argv(Path.cwd().resolve())
+        if not head:
+            raise OSError("proof source HEAD is unavailable")
+        source_cwd, source_root, source_tree = source_snapshot(Path.cwd(), head, scratch)
+        settings = runner / "settings.json"
         home = Path.home()
         settings.write_text(
             json.dumps(
                 {
                     "filesystem": {
-                        "denyRead": [],
-                        "allowWrite": [temporary],
+                        "denyRead": [str(source_root)],
+                        "allowWrite": [str(runner)],
                         "denyWrite": [
                             str(settings),
                             "/tmp/claude",
@@ -128,22 +124,20 @@ def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool, bool
             )
         )
         marker = f"CODERAILS_PROOF_SANDBOX_{secrets.token_hex(16)}"
-        wrapped = f"printf '%s\\n' '{marker}'\n{cmd}"
+        wrapped = f"cd {shlex.quote(str(source_cwd))} || exit 1\nprintf '%s\\n' '{marker}'\n{cmd}"
         environment = os.environ.copy()
         environment.update(
-            TMPDIR=temporary,
-            CLAUDE_CODE_TMPDIR=temporary,
-            XDG_CACHE_HOME=temporary,
+            TMPDIR=str(runner),
+            CLAUDE_CODE_TMPDIR=str(runner),
+            XDG_CACHE_HOME=str(runner),
             PYTHONDONTWRITEBYTECODE="1",
         )
-        environment.pop("CLAUDE_TMPDIR", None)
+        for key in ("CLAUDE_TMPDIR", "NODE_OPTIONS", "NODE_PATH"):
+            environment.pop(key, None)
         try:
             process = subprocess.Popen(
                 [
-                    "npx",
-                    "--offline",
-                    "--yes",
-                    f"@anthropic-ai/sandbox-runtime@{SRT_VERSION}",
+                    *runtime,
                     "--settings",
                     str(settings),
                     "-c",
@@ -153,10 +147,35 @@ def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool, bool
                 stderr=subprocess.PIPE,
                 start_new_session=True,
                 env=environment,
+                cwd=runner,
             )
         except OSError as error:
-            return None, "", str(error), False, False, False
+            return None, "", str(error), False, False, False, None
         stdout, stderr, timed_out, overflow = _capture(process, timeout)
+        git = trusted_executable("git", Path.cwd())
+        unchanged = subprocess.run(
+            [git, "-C", str(source_cwd), "status", "--porcelain=v1", "--untracked-files=all"],
+            env=git_environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        identity = subprocess.run(
+            [git, "-C", str(source_cwd), "rev-parse", "HEAD", "HEAD^{tree}"],
+            env=git_environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if (
+            unchanged.returncode
+            or unchanged.stdout
+            or identity.returncode
+            or identity.stdout.splitlines() != [head, source_tree]
+        ):
+            return None, "", "proof source snapshot changed", False, False, False, None
         out, err = stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace")
         prefix = marker + "\n"
         started = out.startswith(prefix)
@@ -167,6 +186,7 @@ def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool, bool
             timed_out,
             started,
             overflow,
+            source_tree,
         )
 
 
@@ -186,6 +206,7 @@ def _judge(entry: dict[str, Any], code: int | None, out: str, timed_out: bool) -
 
 def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path: Path) -> str:
     cmd, cwd = cast(str, entry["cmd"]), os.getcwd()
+    context = pr.git_context(Path.cwd())
     base: dict[str, Any] = {
         "kind": "run",
         "proof_id": entry["id"],
@@ -194,20 +215,19 @@ def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path:
         "session_id": who[0],
         "loop_id": who[1],
         "cwd": cwd,
-        "head_sha": subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
-        ).stdout.strip()
-        or None,
+        "head_sha": context[1] if context else None,
         "started": _now(),
     }
-    if permanent_pattern(cmd, cwd)[0] or secret_path(cmd):
+    if permanent_pattern(cmd, cwd, proof_only=True)[0] or secret_path(cmd):
         pr.append(path, **base, ended=_now(), verdict="refused", expect_matched=False)
         pr.trace("proof.run", "refused", "proof_cmd_destructive", who[0], who[1])
         return "refused"
     try:
-        code, out, err, timed_out, started, overflow = _execute(cmd, float(entry.get("timeout_s") or DEFAULT_TIMEOUT_S))
-    except OSError as error:
-        code, out, err, timed_out, started, overflow = None, "", str(error), False, False, False
+        code, out, err, timed_out, started, overflow, source_tree = _execute(
+            cmd, float(entry.get("timeout_s") or DEFAULT_TIMEOUT_S), cast("str | None", base["head_sha"])
+        )
+    except (OSError, subprocess.TimeoutExpired, ValueError) as error:
+        code, out, err, timed_out, started, overflow, source_tree = None, "", str(error), False, False, False, None
     if overflow:
         verdict, matched = "output_limit", False
     elif timed_out:
@@ -222,6 +242,7 @@ def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path:
         exit_code=code,
         stdout_sha256=pr.sha(out),
         stderr_sha256=pr.sha(err),
+        source_tree_sha=source_tree,
         excerpt=note + (out + err)[: EXCERPT_CAP - len(note)],
         expect_matched=matched,
         verdict=verdict,
@@ -328,8 +349,9 @@ def cmd_disposition(state_dir: Path, code: str, reason: str) -> int:
         )
         return 2
     who = _identity(state_dir, {})
+    result_path = state_dir / pr.RESULTS_NAME
     pr.append(
-        state_dir / pr.RESULTS_NAME,
+        result_path,
         kind="disposition",
         session_id=who[0],
         loop_id=who[1],
@@ -340,12 +362,8 @@ def cmd_disposition(state_dir: Path, code: str, reason: str) -> int:
     )
     pr.trace("proof.freeze", "disposition", "", *who)
     teardown_steps.record(
-        state_dir,
-        "proof_run",
-        str(who[0]),
-        cast("str | None", who[1]),
-        teardown_steps.file_sha(state_dir / pr.RESULTS_NAME),
-    )  # the proof stage is resolved by the typed disposition
+        state_dir, "proof_run", str(who[0]), cast("str | None", who[1]), teardown_steps.file_sha(result_path)
+    )  # the typed disposition resolves the proof stage
     return 0
 
 
