@@ -1,22 +1,25 @@
-# E3: authority objects (originally additive; now consumed by crack_on_gate, see the Superseded section)
+# E3: authority object history and the current autonomous command
 
-## What the two crack-on gates enforce today
+This page records several earlier designs. The old hook names and commands below are historical evidence.
+For the current source behavior, read [Current behavior](#current-behavior-26-october-2026).
+Source behavior does not prove that installed plugins use this version.
 
-Read from source: `hooks/scripts/crack_on_gate.py` (88 lines) and `hooks/scripts/crack_on_prose_gate.py` (212 lines).
-Reproduce: `sed -n 1,88p hooks/scripts/crack_on_gate.py; sed -n 1,60p hooks/scripts/crack_on_prose_gate.py`.
+## Historical state: phrase hooks before authority objects
 
-| Piece | Event | What it does | Evidence |
+The original design read `hooks/scripts/crack_on_gate.py` and `hooks/scripts/crack_on_prose_gate.py`.
+Those paths are no longer active. The table records what the hooks did at that time.
+
+| Piece | Event | What it did | Evidence |
 | --- | --- | --- | --- |
-| `crack_on_gate.py` stamp | `UserPromptSubmit` | If the prompt matches `crack on` with no negation in the three words before it, writes the bare file `<CLAUDE_AGENTIC_LOOP_DIR or ~/.coderails/agentic-loop>/<session_id>/crack_on_active`. | `invoked()`, `stamp()`, `flag_path()` |
-| `crack_on_gate.py` denial | `PreToolUse` on `AskUserQuestion` | Denies the tool while that flag file exists. | `main()` |
-| `crack_on_prose_gate.py` | `Stop` | While the flag exists, blocks (exit 2) a final message that hands a question to the human (regex `MODAL` / `ASK_PATTERNS`), at most `CLAUDE_CRACK_ON_PROSE_MAX_BLOCKS` (default 3) times per turn; skipped when `CODERAILS_HEADLESS_RUN=1`. | `match_question()`, `main()` |
+| `crack_on_gate.py` stamp | `UserPromptSubmit` | Wrote `<CLAUDE_AGENTIC_LOOP_DIR or ~/.coderails/agentic-loop>/<session_id>/crack_on_active` when the prompt matched `crack on` without negation in the three preceding words. | `invoked()`, `stamp()`, `flag_path()` |
+| `crack_on_gate.py` denial | `PreToolUse` on `AskUserQuestion` | Denied the tool while that flag file existed. | `main()` |
+| `crack_on_prose_gate.py` | `Stop` | Blocked a final message that handed a question to the human while the flag existed. It used `MODAL` / `ASK_PATTERNS` and allowed at most three blocks per turn. It skipped the check when `CODERAILS_HEADLESS_RUN=1`. | `match_question()`, `main()` |
 
-Both key on `session_id` only. The flag is a bare file: no scope, no expiry, no revocation, no loop binding. Both
-sanitise the id with `replace("/", "_").replace("..", "")`, so distinct ids can collide on one flag path. Neither
-mentions merge: the "crack on never pre-authorises `/coderails:merge`" rule is a convention, not something either
-gate enforces.
+Both keyed on `session_id` only. The flag was a bare file with no scope, expiry, revocation, or loop binding.
+Both sanitised the id with `replace("/", "_").replace("..", "")`, so distinct ids could collide on one flag path.
+Neither hook checked merge approval. That rule was a convention.
 
-## What this change adds
+## Original authority object addition (historical)
 
 - `scripts/lib/authority_object.py`: pure `validate(obj, now)`, `read_authority(session_id, dir)`, atomic
   `write_authority` (tmp + `os.replace`).
@@ -36,37 +39,37 @@ The original change kept both gates untouched, did not let the crack-on stamp cr
 prose gate (that needed the user's sign-off after the object had run in practice), and left `read_authority` without
 a consumer. Those four lines are superseded by the next section; the user directed the retirement.
 
-## Superseded: crack-on grants and enforces through the authority object; the prose gate is retired
+## Earlier phrase grant through authority objects (superseded)
 
-- `crack_on_gate.py` UserPromptSubmit: "crack on" (outside `"..."`/backticks, no negation (`don't`/any `n't`, `not`, `never`, `avoid`, ...) in the three words
-  before it, and not a question, i.e. no `?` later in the same sentence) writes a 24h revocable object for the exact session id (scope `autonomous_decisions`, denied
-  `destructive_shell`, `max_prs` 0, `merge` approval-required, `loop_id` from `CLAUDE_LOOP_ID`) and echoes it to the
-  model. It calls `write_authority` directly because `authority.py create` refuses when a file exists, which would
-  block re-granting after expiry.
-- PreToolUse `AskUserQuestion`: denied only while `read_authority` returns a live object. Expired -> allowed and
-  traced `authority_expired_allow`. Revoked/foreign -> allowed (foreign traced by the library). Corrupt (unparseable or non-object) = no valid
-  authority: traced `authority_corrupt_ignored`, never a crash, and a legacy flag, if any, is still honoured.
-- Migration: a pre-existing `crack_on_active` flag (exact, path-safe id only) still denies, traced
-  `crack_on_legacy_flag` with a message naming the `rm` that clears it. It is never converted to an object silently.
-  Remove the fallback in the next release; the removal is a delete of `legacy_flag()` and its branch.
-- `crack_on_prose_gate.py` (Claude and Codex) is deleted with its Stop registrations and tests. This is a
-  LOOSENING: a final message that hands a question back in prose is no longer blocked under crack-on; only the
-  `AskUserQuestion` / `request_user_input` tools are. The 4.9% block rate (5 of 103) in
-  `docs/graph-alignment-measurement.md` is the cost of that retirement.
-- Codex mirror: the package has no `scripts/lib`, so `hook_common.py` vendors a validator subset (exact session
-  binding, unexpiry, merge approval-required). Storage is the shared loop dir, so one CLI revokes both providers.
+This section records the former phrase grant. It is not the current input gate.
+
+- `crack_on_gate.py` on `UserPromptSubmit` wrote a 24-hour revocable object for a `crack on` prompt.
+  It ignored quoted text, backticks, negation in the three prior words, and questions in the same sentence.
+  It used the exact session id, scope `autonomous_decisions`, denied
+  `destructive_shell`, `max_prs` 0, required merge approval, and took `loop_id` from `CLAUDE_LOOP_ID`.
+  It called `write_authority` directly to allow a grant after expiry.
+- `AskUserQuestion` was denied while `read_authority` returned a live object. Expired, revoked, foreign, or corrupt
+  objects did not cause that denial. The old flag could still cause denial. The hook traced each reason.
+- A pre-existing `crack_on_active` flag still denied input then, with reason `crack_on_legacy_flag`.
+  It was not converted into an authority object. The follow-up below removed this reader.
+- `crack_on_prose_gate.py` (Claude and Codex) was deleted with its Stop registrations and tests.
+  That change allowed a final message with a question in prose. It left the `AskUserQuestion` /
+  `request_user_input` tool gate. The measured prose block rate was 4.9% (5 of 103) in
+  `docs/graph-alignment-measurement.md`.
+- The Codex package had no `scripts/lib` then, so `hook_common.py` included a validator subset.
+  Storage used the shared loop directory, so one CLI revoked both providers.
 - Reason codes: `authority_granted`, `authority_deny`, `authority_expired_allow`, `crack_on_legacy_flag`, `authority_corrupt_ignored` (command
   `crack_on`); `authority_refused_foreign` (command `authority`).
 
-### Effect on a live running session
+### Historical effect on a running session
 
-- (inferred, not run) A session already stamped keeps `AskUserQuestion` denied through the legacy path, with no
-  expiry, until `rm <CLAUDE_AGENTIC_LOOP_DIR or ~/.coderails/agentic-loop>/<session_id>/crack_on_active`.
-- (inferred) The prose Stop block stops once hooks reload. (guess) Claude Code may snapshot hooks at session start,
-  so the old prose gate could persist until that session restarts; unknown.
-- A new "crack on" in a running session writes `authority.json` (24h). Revoke:
-  `python3 scripts/authority.py revoke --session <session_id>` (emits `authority_revoked`).
-- Old Codex flags live under `$PLUGIN_DATA/sessions/<id>/crack_on_active` (a different directory); clear that path.
+- (Inferred, not run at that time) A stamped session would have kept `AskUserQuestion` denied through the old flag path
+  until the flag was removed. That path had no expiry.
+- (Inferred at that time) The prose Stop block would have stopped after hooks reloaded. Whether Claude Code kept
+  the old hook until session restart was unknown.
+- At that time, a new phrase grant wrote `authority.json` for 24 hours. The revoke command was
+  `python3 scripts/authority.py revoke --session <session_id>` (emitted `authority_revoked`).
+- Old Codex flags lived under `$PLUGIN_DATA/sessions/<id>/crack_on_active`.
 
 ## Action receipts (roadmap item 3): approval bound to one exact action
 
@@ -105,35 +108,35 @@ a consumer. Those four lines are superseded by the next section; the user direct
 
 The shipped workflow config sets `advisory`. With no config or an unknown value, the gate is off. Routine pushes and merges do not need a key or passphrase. Explicit `enforce` requires a signed receipt. A direct `merge.py` call also needs `--expected-head <sha>` to bind that receipt. PR review, eval, and integrity gates still govern merges.
 
-## Superseded again: grant moves off prose matching to a typed command
+## Earlier typed grant with legacy readers (superseded)
+
+This section records the next source version. The final section gives the current source behavior.
 
 The phrase heuristics (`invoked()`, negation, question and quote handling, about 45 lines) are deleted. Verified defect:
 `invoked("do not, under any circumstances, crack on")` returned True, so negated and pasted text could mint authority.
 
 - Mint: `scripts/authority.py grant --session <id> --max-prs N [--loop --scope --denied --expires-in-hours --approval-for]`
-  writes `granted_by: command` and traces `authority/granted/authority_granted_command`. `create` is a thin alias on the same
-  code path for one release. Merge approval stays mandatory; a live object is never replaced (`authority_refused_exists`),
-  an expired or torn file is.
-- `scripts/lib/authority_object.py`: optional field `granted_by` in `{command, legacy_phrase}`; any other value fails `validate`.
-  Objects without it (written by the old hook) read as `legacy_phrase` and are honoured until expiry. `FIELDS` otherwise stays closed.
-- `commands/authorize.md` (`/coderails:authorize`, `disable-model-invocation: true`) pre-executes the grant with
-  `--session "${CLAUDE_SESSION_ID}"` and fixed defaults (scope `autonomous_decisions`, denied `destructive_shell`, `max_prs` 0); user text is never
-  spliced into the `!` command (an existing test forbids `$ARGUMENTS` there), so other limits mean running the CLI directly. The script falls back to `$CLAUDE_CODE_SESSION_ID` when the expansion is empty.
-  Codex: `packages/codex/skills/authorize/SKILL.md` instructs the same command (no pre-execution).
-- `crack_on_gate.py` (Claude and Codex) on `UserPromptSubmit` never writes. On "crack on" / "crack-on" with no live authority it emits
-  `additionalContext` with the grant command and traces `crack_on/ignored/authority_phrase_ignored`. The AskUserQuestion /
-  request_user_input denial, expiry, revoked, foreign and legacy-flag paths are unchanged. A later B3 correction
-  makes each hook check for `autonomous_decisions` in the current grant scope. The printed grant command now includes
-  that scope and `--denied destructive_shell`. A narrowed grant with an empty scope allows user input.
-- Codex mirror: `packages/codex/scripts/authority.py` and `packages/codex/scripts/lib/authority_object.py` are byte-identical to
-  the Claude files (parity test); `hook_common.py` no longer vendors `authority_state`/`write_authority`/`parse_expiry` and imports the
-  mirrored lib. Both trace and authority paths now honour `CODERAILS_AGENTIC_LOOP_DIR` as a fallback, as the old Codex vendored code did.
-- A session ID must start with an ASCII letter or digit. It can then contain ASCII letters, digits, `.`, `_`, or `-`,
-  but not `..`. Both grant CLIs and both hooks use this check. Other characters cannot enter a printed shell command.
+  wrote `granted_by: command` and traced `authority/granted/authority_granted_command`. `create` was a one-release alias.
+  Merge approval stayed mandatory. A live object was not replaced (`authority_refused_exists`); an expired or torn file was.
+- `scripts/lib/authority_object.py` allowed `granted_by` in `{command, legacy_phrase}` and refused other values.
+  Old objects without the field read as `legacy_phrase` and remained valid until expiry. `FIELDS` stayed closed otherwise.
+- `commands/authorize.md` (`/coderails:authorize`, `disable-model-invocation: true`) pre-executed the grant with
+  `--session "${CLAUDE_SESSION_ID}"` and fixed defaults (scope `autonomous_decisions`, denied `destructive_shell`, `max_prs` 0).
+  It did not splice user text into the `!` command. Other limits required the CLI. The script used
+  `$CLAUDE_CODE_SESSION_ID` if the expansion was empty.
+  Codex: `packages/codex/skills/authorize/SKILL.md` instructed the same command (no pre-execution).
+- `crack_on_gate.py` (Claude and Codex) did not write on `UserPromptSubmit`. The old phrase printed a grant hint and
+  traced `crack_on/ignored/authority_phrase_ignored`. The input gate still read legacy flags at that time.
+  A later correction checked for `autonomous_decisions` in the grant scope. An empty scope allowed user input.
+- Codex mirror: `packages/codex/scripts/authority.py` and `packages/codex/scripts/lib/authority_object.py` matched
+  the Claude files byte for byte (parity test). `hook_common.py` stopped carrying its own authority validator
+  and imported the mirrored library. Trace and authority paths used `CODERAILS_AGENTIC_LOOP_DIR` as a fallback.
+- A session ID had to start with an ASCII letter or digit. It could then contain ASCII letters, digits, `.`, `_`,
+  or `-`, but not `..`. Both grant CLIs and both hooks used this check.
 - Limit (cooperating-agent safeguard): an agent with shell access can also run `authority.py grant` (for Codex the skill is itself an
-  instruction to do so). The change stops accidental, negated and pasted-text grants and removes the false precision of a prose
-  matcher; it does not stop a hostile same-user agent. Optional signed receipts are a separate unit.
-- Same-user boundary: `granted_by` is an unsigned, self-asserted label. Besides running `grant`, an agent can write `authority.json` directly (Write or a shell redirect, with any `granted_by` or none) or touch the legacy `crack_on_active` flag (no expiry, still honoured), and nothing guards those paths; the crack-on hint tells agents not to grant.
+  instruction to do so). The change stopped accidental, negated, and pasted-text grants. It did not stop a hostile
+  same-user agent. Optional signed receipts were a separate unit.
+- Same-user boundary at that time: `granted_by` was an unsigned, self-asserted label. An agent could run `grant`, write `authority.json`, or touch a legacy `crack_on_active` flag. The old flag still caused denial then. The hint told agents not to grant.
 - Not verified: that `${CLAUDE_SESSION_ID}` is substituted before the `!` pre-execution runs in Claude Code 2.1.289 (strings in the binary show
   substitution in the skill body, ordering vs shell execution not observed); the env fallback covers an empty expansion. The
   UserPromptSubmit prefix-match fallback named in the plan was not built.
@@ -142,14 +145,15 @@ The phrase heuristics (`invoked()`, negation, question and quote handling, about
   `CLAUDE_CODE_SESSION_ID` (the fallback source), and `grant` now refuses any session id containing `$` or `{` (a literal
   `${CLAUDE_SESSION_ID}` from a failed substitution) or an empty id with the env var unset, each with
   `authority_refused_unsafe_session` and nothing written (`scripts/tests/authority_session_guard_test.py`). A failed substitution
-  therefore fails loudly instead of reporting a grant no hook can see. Human action to close: run `/coderails:authorize` once in a
-  live session and confirm the printed result names the real session id.
+  therefore failed loudly instead of reporting a grant no hook could see. The live command check remained open at that time.
 
-## Follow-up: retire old authority readers, 26 October 2026
+## Current behavior, 26 October 2026
 
-This source change removes the one-release readers. A valid authority object now needs `granted_by: command`.
+This source revision uses `autonomous_gate.py` for both providers. The user command is `/coderails:authorise`.
+It grants authority through `scripts/authority.py grant`. The word `autonomous` only prints a hint.
+The source removes the one-release readers. A valid authority object needs `granted_by: command`.
 Objects without that field, or with `legacy_phrase`, grant nothing. The `create` alias no longer runs.
 The Claude and Codex `autonomous_gate.py` hooks ignore old `crack_on_active` flags. Grant and revoke leave those files on disk.
 The file check before this source change found 255 loop session directories, no authority objects, and two old flags.
 The Codex plugin data directory had no sessions. This check does not prove that installed plugins use this source.
-Check retained state again before the release. Then install both providers and test `authorise` and revoke in live sessions.
+Release acceptance requires another retained-state check, both provider installs, and live `authorise` and revoke tests.
