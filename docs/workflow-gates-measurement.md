@@ -19,7 +19,7 @@ tallied by `measure_graph_alignment.py` into `trace.by_reason` keyed
 | `diff-manifest/legacy/manifest_legacy_absent` | the policy has no `manifest` key |
 | `diff-manifest/warned/diff_manifest_mode_invalid` | an unknown `diff_manifest` value was treated as enforce |
 | `review-passes/ok/review_passes_ok` | the artifact's passes covered every pass the diff requires |
-| `review-passes/refused/<code>` | `<code>` is `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`, `review_artifact_missing` or `review_policy_unreadable` |
+| `review-passes/refused/<code>` | `<code>` is `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`, `review_artifact_missing`, `review_policy_unreadable` or `review_policy_modified` |
 | `publication/refused/<code>` | the gate refused; `<code>` is `diff_manifest:<code>`, a review code, `pr_repo_override`, `pr_base_mutation`, or a later unit's code |
 
 Manifest codes are `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`,

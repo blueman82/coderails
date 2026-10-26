@@ -448,7 +448,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   with `{name, verdict, blocking, summary_sha256}` per pass. `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]`
   validates each summary, derives each verdict from the text (a bullet under `## Critical` is `fail`) and posts it. A v1
   artifact with no passes line counts as no passes: `review-pr` is satisfied by the marker, but a `hooks/` PR is refused
-  until it is re-posted. A passes line naming another `head_sha` is ignored.
+  until it is re-posted. A passes line naming another `head_sha` is refused as malformed (`review_passes_malformed`).
 - Query: `trace.by_reason` for `review-passes/ok/review_passes_ok` and `review-passes/refused/<code>`, plus
   `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
 - Remediation: spawn the missing reviewer (`security-reviewer`, `deploy-safety-reviewer`; both providers ship them),
