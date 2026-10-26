@@ -1,4 +1,4 @@
-"""Recheck opaque native evidence against its exact consumed call and ciphertext."""
+"""Refuse opaque native evidence even when an old ciphertext receipt exists."""
 
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ from packages.tests.test_codex_native_dispatch_cli import TASK, seeded_state
 
 
 class OpaqueEvidenceTests(unittest.TestCase):
-    """Read actual native request arguments and compare consumed receipts."""
+    """Read native request arguments and reject opaque prompts."""
 
-    def test_opaque_evidence_rechecks_actual_call_and_ciphertext(self) -> None:
-        """A consumed receipt binds exactly one native call and its observed ciphertext."""
+    def test_opaque_evidence_rejects_old_consumed_receipt(self) -> None:
+        """A matching call and hash cannot prove hidden worker instructions."""
         with tempfile.TemporaryDirectory() as scratch:
             state = seeded_state(Path(scratch) / "progress.json")
             record = next(iter(state["graph"]["dispatches"].values()))
@@ -31,7 +31,8 @@ class OpaqueEvidenceTests(unittest.TestCase):
             requests: dict[str, list[dict[str, Any] | None]] = {
                 "call_native_1": [{"task_name": TASK, "message": token}]
             }
-            _verify_dispatch(state, "U3[7]", 1, "wave-2", "call_native_1", requests)
+            with self.assertRaisesRegex(graph_contract.DispatchDeniedError, "dispatch_prompt_unverifiable"):
+                _verify_dispatch(state, "U3[7]", 1, "wave-2", "call_native_1", requests)
             for altered in (
                 {"tool_use_id": None, "ciphertext_sha256": receipt["ciphertext_sha256"]},
                 {"tool_use_id": "other", "ciphertext_sha256": receipt["ciphertext_sha256"]},

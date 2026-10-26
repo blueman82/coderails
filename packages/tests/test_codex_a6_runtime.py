@@ -14,7 +14,6 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 
 import graph  # noqa: E402
-import graph_contract  # noqa: E402
 import graph_semantics  # noqa: E402
 from graph_evidence import validate_worker_evidence  # noqa: E402
 from graph_identity import GraphError, task_name  # noqa: E402
@@ -142,8 +141,8 @@ class A6RuntimeTests(RuntimeFixture):
         self.record()
         validate_worker_evidence(read_json(self.path))
 
-    def test_hook_authorized_encrypted_native_dispatch(self) -> None:
-        """A consumed plaintext hook receipt can bind an opaque native transcript message."""
+    def test_old_encrypted_receipt_cannot_bind_native_dispatch(self) -> None:
+        """An old ciphertext receipt cannot complete an unverifiable worker."""
         graph.begin_wave(self.path)
         spawn(self.parent, read_json(self.path))
         lines = self.parent.read_text(encoding="utf-8").splitlines()
@@ -167,25 +166,12 @@ class A6RuntimeTests(RuntimeFixture):
             "ciphertext_sha256": hashlib.sha256(ciphertext.encode()).hexdigest(),
         }
         write_json(self.path, current)
-        arguments["message"] = "not encrypted"
-        call["payload"]["arguments"] = json.dumps(arguments)
-        lines[1] = json.dumps(call)
-        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
         self.assert_unchanged(self.record)
-        arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x00" * 72).decode("ascii")
-        call["payload"]["arguments"] = json.dumps(arguments)
-        lines[1] = json.dumps(call)
-        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        self.assert_unchanged(self.record)
-        with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": "on"}):
+        with (
+            patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": "on"}),
+            self.assertRaisesRegex(GraphError, "dispatch_prompt_unverifiable"),
+        ):
             self.record()
-        validate_worker_evidence(read_json(self.path))
-        arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x01" * 72).decode("ascii")
-        call["payload"]["arguments"] = json.dumps(arguments)
-        lines[1] = json.dumps(call)
-        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        with self.assertRaisesRegex(graph_contract.DispatchDeniedError, "consumed hook authorization"):
-            validate_worker_evidence(read_json(self.path))
 
     def test_encrypted_dispatch_refuses_off_switch_receipt(self) -> None:
         """An off-mode receipt cannot bind an opaque native prompt to an approved call."""

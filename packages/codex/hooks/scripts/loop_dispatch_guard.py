@@ -31,6 +31,7 @@ from scripts.lib.config import config_path
 from scripts.lib.config_strict import ConfigRejected, strict_settings
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/agentic-loop/scripts"))
+from graph_encrypted_content import is_opaque  # noqa: E402
 from graph_recovery import trace as recovery_trace  # noqa: E402
 
 ENVELOPE_KEY = "CODERAILS_GRAPH_DISPATCH"
@@ -125,17 +126,29 @@ def _graph_call(
     return False, None
 
 
-def _trace_staging_refusal(path: Path, inspection: dict[str, object]) -> None:
-    """Record a hook-side staging failure in the graph's recovery sidecar."""
+def _trace_graph_refusal(path: Path, inspection: dict[str, object], code: str) -> None:
+    """Record a hook-side refusal in the graph's recovery sidecar."""
     state = {
         "session_id": inspection.get("session_id"),
         "loop_id": inspection.get("loop_id"),
         "revision": inspection.get("revision"),
         "graph": {"active_wave": inspection.get("active_wave")},
     }
-    recovery_trace(
-        path, state, "refused", "dispatch_message_unavailable", {}, [(None, None, None)], "authorize-dispatch"
+    recovery_trace(path, state, "refused", code, {}, [(None, None, None)], "authorize-dispatch")
+
+
+def _refuse_opaque(path: Path, inspection: dict[str, object], message: str, session_id: str) -> bool:
+    """Refuse a message whose hidden instructions cannot be checked."""
+    if not is_opaque(message):
+        return False
+    _trace_graph_refusal(path, inspection, "dispatch_prompt_unverifiable")
+    _refuse(
+        "dispatch_prompt_unverifiable",
+        "Graph worker dispatch cannot verify encrypted prompt instructions. "
+        "Use the Codex OAuth graph driver after it is installed. Do not retry native spawn",
+        session_id,
     )
+    return True
 
 
 def _identity(payload: dict[str, object]) -> tuple[str, str] | None:
@@ -161,10 +174,8 @@ def _check() -> int:
         deny("Codex graph workers must use native spawn_agent.")
         return 0
     tool_input = object_field(payload, "tool_input")
-    message = tool_input.get("message")
-    message = message if isinstance(message, str) else ""
-    task = tool_input.get("task_name")
-    task = task if isinstance(task, str) else ""
+    message = text_field(tool_input, "message")
+    task = text_field(tool_input, "task_name")
     enveloped = message.startswith(ENVELOPE_KEY + "=")
     graph_named = bool(GRAPH_TASK.fullmatch(task))
     if "agent_type" in tool_input and (
@@ -208,6 +219,8 @@ def _check() -> int:
     if inspection.get("status") == "complete":
         _refuse("dispatch_graph_complete", "A completed graph cannot dispatch native workers", session_id)
         return 0
+    if _refuse_opaque(state, inspection, message, session_id):
+        return 0
     agent_type = tool_input.get("agent_type")
     try:
         with tempfile.TemporaryDirectory() as scratch:
@@ -233,7 +246,7 @@ def _check() -> int:
                 tool_use_id,
             )
     except OSError:
-        _trace_staging_refusal(state, inspection)
+        _trace_graph_refusal(state, inspection, "dispatch_message_unavailable")
         log(f"hook=loop_dispatch_guard session={session_id} blocked=1 reason_code=dispatch_message_unavailable")
         deny("Graph worker dispatch could not stage its message [reason_code=dispatch_message_unavailable].")
         return 0

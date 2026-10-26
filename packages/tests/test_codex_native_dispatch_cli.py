@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import os
 import subprocess
@@ -129,7 +128,7 @@ class NativeDispatchCliTests(unittest.TestCase):
                         self.assertIn(code, decision["permissionDecisionReason"])
                         added = audit.read_text()[len(before) :]
                         self.assertIn(f"reason_code={code}", added)
-                        self.assertNotIn(str(mutation.get("session_id", "..")), added)
+                        self.assertNotIn(f"session={mutation.get('session_id', '..')}", added)
                         rows = trace.read_text().splitlines()
                         self.assertEqual(len(rows), trace_before + 1)
                         self.assertEqual(json.loads(rows[-1])["reason_code"], code)
@@ -208,8 +207,8 @@ class NativeDispatchCliTests(unittest.TestCase):
                 assert holder.stdout is not None
                 holder.stdout.close()
 
-    def test_opaque_native_message_binds_clear_task_and_call_identity(self) -> None:
-        """An opaque hook message needs one current dispatch; replay and altered clear fields fail."""
+    def test_opaque_native_message_is_refused_without_consuming_dispatch(self) -> None:
+        """Visible task and ciphertext hash cannot prove the hidden prompt instructions."""
         plugin = ROOT / "packages/codex"
         with tempfile.TemporaryDirectory() as scratch:
             directory = Path(scratch)
@@ -239,15 +238,16 @@ class NativeDispatchCliTests(unittest.TestCase):
                 "PLUGIN_DATA": str(directory / "data"),
             }
             token = base64.urlsafe_b64encode(bytes([128]) + bytes(8 + 16 + 16 + 32)).decode()
+            tool_input: dict[str, str] = {"task_name": TASK, "message": token}
             payload = {
                 "tool_name": "collaborationspawn_agent",
                 "tool_use_id": "call_native_1",
                 "session_id": "parent",
                 "cwd": scratch,
-                "tool_input": {"task_name": TASK, "message": token},
+                "tool_input": tool_input,
             }
 
-            def run() -> bool:
+            def run() -> tuple[bool, str]:
                 result = subprocess.run(
                     [sys.executable, str(plugin / "hooks/scripts/loop_dispatch_guard.py")],
                     input=json.dumps(payload),
@@ -257,38 +257,32 @@ class NativeDispatchCliTests(unittest.TestCase):
                     check=False,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-                return (
-                    bool(result.stdout)
-                    and json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
-                )
+                if not result.stdout:
+                    return False, ""
+                output = json.loads(result.stdout)["hookSpecificOutput"]
+                return output["permissionDecision"] == "deny", str(output["permissionDecisionReason"])
 
-            self.assertFalse(run())
+            before = state_path.read_bytes()
+            altered = base64.urlsafe_b64encode(bytes([128, 1]) + bytes(71)).decode()
+            for message in (token, altered, token):
+                tool_input["message"] = message
+                denied, reason = run()
+                self.assertTrue(denied)
+                self.assertIn("dispatch_prompt_unverifiable", reason)
+                self.assertIn("Codex OAuth graph driver", reason)
+                self.assertIn("Do not retry native spawn", reason)
+                self.assertEqual(state_path.read_bytes(), before)
+                record = next(iter(json.loads(state_path.read_text())["graph"]["dispatches"].values()))
+                self.assertIsNone(record["authorized"])
+                trace = json.loads(state_path.with_name("recovery-trace.jsonl").read_text().splitlines()[-1])
+                self.assertEqual(trace["reason_code"], "dispatch_prompt_unverifiable")
+            tool_input["message"] = message_for(state)
+            denied, _reason = run()
+            self.assertFalse(denied)
             record = next(iter(json.loads(state_path.read_text())["graph"]["dispatches"].values()))
-            self.assertEqual(record["authorized"]["tool_use_id"], "call_native_1")
-            self.assertEqual(record["authorized"]["ciphertext_sha256"], hashlib.sha256(token.encode()).hexdigest())
-            self.assertTrue(run())
-            state_path.write_text(json.dumps(state))
-            tool = payload["tool_input"]
-            assert isinstance(tool, dict)
-            tool["agent_type"] = "explorer"
-            self.assertTrue(run(), "wrong named role")
-            tool.pop("agent_type")
-            payload["tool_use_id"] = ""
-            self.assertTrue(run(), "missing native call id")
-            payload["tool_use_id"] = "call_native_1"
-            stale = json.loads(json.dumps(state))
-            next(iter(stale["graph"]["dispatches"].values()))["attempt"] = 2
-            state_path.write_text(json.dumps(stale))
-            self.assertTrue(run(), "stored attempt differs from issued dispatch")
-            for change in ({"task_name": "loop_worker_6c6f6f70_55335b385d"}, {"message": "gAAAA"}):
-                state_path.write_text(json.dumps(state))
-                tool = payload["tool_input"]
-                assert isinstance(tool, dict)
-                tool.update(change)
-                self.assertTrue(run())
-                payload["tool_input"] = {"task_name": TASK, "message": token}
+            self.assertEqual(record["authorized"], {"tool_use_id": None})
             state_path.unlink()
-            self.assertTrue(run(), "a graph-shaped task name cannot bypass a missing graph")
+            self.assertTrue(run()[0], "a graph-shaped task name cannot bypass a missing graph")
 
     def test_v3_native_dispatch_authority(self) -> None:
         """Allow an owned dispatch once; deny replay, missing evals, foreign session, task and bare spawns."""
