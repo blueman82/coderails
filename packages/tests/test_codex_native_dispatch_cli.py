@@ -269,6 +269,8 @@ class NativeDispatchCliTests(unittest.TestCase):
                 denied, reason = run()
                 self.assertTrue(denied)
                 self.assertIn("dispatch_prompt_unverifiable", reason)
+                self.assertIn("Codex OAuth graph driver", reason)
+                self.assertIn("Do not retry native spawn", reason)
                 self.assertEqual(state_path.read_bytes(), before)
                 record = next(iter(json.loads(state_path.read_text())["graph"]["dispatches"].values()))
                 self.assertIsNone(record["authorized"])

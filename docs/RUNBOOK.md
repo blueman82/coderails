@@ -873,7 +873,12 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   `collaborationspawn_agent` only, so `SendMessage` on
   Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
   (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
-  `spawn_agent` function-call message with its v2 record, role and consumed authorization; an opaque hook message stores the call id and ciphertext SHA256 for the evidence reader to check against that native event. The hook does not decrypt or verify the prompt sections, so ciphertext content is outside its check. A task-name-only legacy event
+  `spawn_agent` function-call message with its v2 record, role and consumed authorization.
+  Current Codex native calls give the hook an encrypted worker prompt.
+  The hook refuses them with `dispatch_prompt_unverifiable` before a worker starts.
+  Do not retry a native graph spawn.
+  Use the checked local Codex OAuth graph driver after it is installed.
+  Until then, stop graph dispatch. A task-name-only legacy event
   cannot bind a contract-era wave. Claude matches a non-null hook `tool_use_id` to the native Agent call; when the hook
   supplies no id, it retains the consumed flag and one-spawn-per-id check without claiming call-id proof. Historical
   pre-contract attempts retain their original evidence rules. Claude hooks can still fail open if the hook times out

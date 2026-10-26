@@ -132,7 +132,10 @@ def _refuse_opaque(path: Path, inspection: dict[str, object], message: str, sess
         return False
     _trace_graph_refusal(path, inspection, "dispatch_prompt_unverifiable")
     _refuse(
-        "dispatch_prompt_unverifiable", "Graph worker dispatch cannot verify encrypted prompt instructions", session_id
+        "dispatch_prompt_unverifiable",
+        "Graph worker dispatch cannot verify encrypted prompt instructions. "
+        "Use the Codex OAuth graph driver after it is installed. Do not retry native spawn",
+        session_id,
     )
     return True
 
