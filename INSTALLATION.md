@@ -112,19 +112,22 @@ machine-user token and installs the independent root-owned launchd validator.
 To select the prompt non-interactively, use `python3 install.py --integrity-gate`;
 to suppress it, use `python3 install.py --no-integrity-gate`.
 
-**3. Restart Claude Code, then run in order:**
+**3. Install Coderails from the local marketplace in a terminal:**
 
 ```
-/plugin marketplace add ~/Documents/Github/coderails
-/plugin install coderails@coderails
+claude plugin install coderails --marketplace ~/Documents/Github/coderails
+```
+
+Then restart Claude Code and run:
+
+```
 /plugin install pr-review-toolkit@claude-plugins-official
 /plugin install superpowers@claude-plugins-official
 /reload-plugins
 ```
 
-The installer already wrote the settings entry, so `marketplace add` resolves the
-local directory instead of trying to clone it as a git URL. `marketplace add` first,
-then `install`.
+The `--marketplace` option adds the local directory to Claude Code and installs
+Coderails in one command. Use the path where you cloned this repository.
 
 **4. Per project (run once per repo):**
 

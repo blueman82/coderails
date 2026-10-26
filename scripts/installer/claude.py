@@ -135,7 +135,7 @@ def install(root: Path, home: Path, memory: Path, *, dry_run: bool) -> None:
     else:
         register(root, home)
     discipline_and_memory(root, home, memory, dry_run=dry_run)
-    print("Run in Claude Code: /plugin install coderails@coderails")
+    print(f"Run in terminal: claude plugin install coderails --marketplace {root}")
 
 
 def uninstall(home: Path) -> None:

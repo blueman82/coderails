@@ -96,6 +96,8 @@ class InstallModeSweepTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            install_plugin = f"Run in terminal: claude plugin install coderails --marketplace {root.resolve()}"
+            self.assertIn(install_plugin, result.stdout)
             registry = json.loads(settings.read_text())["extraKnownMarketplaces"]
             self.assertNotIn("workflow-tools", registry)
             self.assertIn("other", registry)
