@@ -819,12 +819,12 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   loop's `recovery-trace.jsonl` (`authorize-dispatch/refused/<code>`, allowed spawns are `authorized/dispatch_authorized`).
 - Query: `python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]` counts `dispatch_authorized` and every refusal code.
 - Codes and fixes: `dispatch_missing_envelope` (no/old/garbled first-line `CODERAILS_GRAPH_DISPATCH` envelope: paste the
-  `prompt_prefix` from `plan` or `begin-wave`; on Codex this includes a spawn with any `task_name` and no envelope),
+  `prompt_prefix` from `plan` or `begin-wave`; a plaintext Codex spawn needs it, while an opaque native hook message uses the exact issued `task_name` and call id),
   `dispatch_unknown_id` (the id was never issued: run `begin-wave`), `dispatch_foreign` (session, loop, node, wave or Codex
   `task_name` is not the record's), `dispatch_stale_revision` (the envelope predates the graph's current revision:
   re-run `begin-wave` after `recover-wave`), `dispatch_attempt_mismatch` (the stored attempt does not match its dispatch id
   or the node's next attempt: inspect state and recover the wave), `dispatch_replayed` (the id was already used: one spawn per id; a retry needs a
-  new wave), `dispatch_contract_altered` (the stored contract no longer matches its digest or lost a field: the state was
+  new wave), `dispatch_call_id_missing` (the opaque native hook message has no usable call id: check the native hook payload), `dispatch_contract_altered` (the stored contract no longer matches its digest or lost a field: the state was
   edited, restart the wave via `recover-wave`), `dispatch_sections_missing` (the pasted contract block was edited or left
   out: paste `prompt_sections` verbatim), `role_mismatch` (dispatch a guarded scout as `coderails:<role>` / Codex
   `agent_type: <role>`; other roles accept their own type or `general-purpose` on Claude, and their own type or omitted
@@ -872,7 +872,7 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
   (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
   `spawn_agent` function-call message with its v2 record, role and consumed authorization; encrypted messages also require
-  the PreToolUse `tool_use_id` to equal the native function-call id, so off-mode receipts cannot bind them. A task-name-only legacy event
+  the PreToolUse `tool_use_id` to equal the native function-call id and the stored ciphertext SHA-256 to equal the actual native request message. The hook and reader cannot decrypt or verify the hidden prompt. An off-mode receipt or task-name-only legacy event
   cannot bind a contract-era wave. Claude matches a non-null hook `tool_use_id` to the native Agent call; when the hook
   supplies no id, it retains the consumed flag and one-spawn-per-id check without claiming call-id proof. Historical
   pre-contract attempts retain their original evidence rules. Claude hooks can still fail open if the hook times out

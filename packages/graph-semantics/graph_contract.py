@@ -39,6 +39,7 @@ ENVELOPE_FIELDS = ("envelope_version", "dispatch_id", "session_id", "loop_id", "
 LEGACY_FIELDS = ("session_id", "loop_id", "revision", "wave_id", "node_id")
 CODES = (
     "dispatch_missing_envelope",
+    "dispatch_call_id_missing",
     "dispatch_unknown_id",
     "dispatch_foreign",
     "dispatch_stale_revision",

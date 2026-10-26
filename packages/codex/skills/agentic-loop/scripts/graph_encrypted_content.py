@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 from typing import Any, cast
 
 import graph_contract
@@ -30,7 +31,8 @@ def check(
         for identifier, record in state["graph"].get("dispatches", {}).items()
         if record.get("node_id") == node_id and record.get("attempt") == attempt and record.get("wave_id") == wave_id
     ]
-    if len(issued) != 1 or issued[0][1].get("authorized") != {"tool_use_id": call_id}:
+    expected = {"tool_use_id": call_id, "ciphertext_sha256": hashlib.sha256(message.encode()).hexdigest()}
+    if len(issued) != 1 or issued[0][1].get("authorized") != expected:
         raise graph_contract.DispatchDeniedError(
             "dispatch_missing_envelope", "native spawn lacks consumed hook authorization"
         )

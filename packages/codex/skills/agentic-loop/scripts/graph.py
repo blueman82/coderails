@@ -299,7 +299,7 @@ def _parser() -> argparse.ArgumentParser:
         dispatch.add_argument(f"--{option}", required=True)
     dispatch.add_argument("--message-file", required=True, type=Path)
     dispatch.add_argument("--agent-type", default="", help="the spawn_agent agent_type; empty when none was given")
-    dispatch.add_argument("--tool-use-id", default="", help="native tool-call id from PreToolUse")
+    dispatch.add_argument("--tool-use-id", default="", help="the native hook call identity for opaque messages")
     dispatch.add_argument("--evals", type=Path, help="default: evals.json beside the state")
     for name in ("complete", "verify-completion"):
         complete = commands.add_parser(name)

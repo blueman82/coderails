@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import json
 import sys
 import tempfile
@@ -13,6 +14,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 
 import graph  # noqa: E402
+import graph_contract  # noqa: E402
 import graph_semantics  # noqa: E402
 from graph_evidence import validate_worker_evidence  # noqa: E402
 from graph_identity import GraphError, task_name  # noqa: E402
@@ -90,6 +92,7 @@ class A6RuntimeTests(RuntimeFixture):
         call = json.loads(lines[1])
         arguments = json.loads(call["payload"]["arguments"])
         arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x00" * 72).decode("ascii")
+        ciphertext = arguments["message"]
         call["payload"]["arguments"] = json.dumps(arguments)
         lines[1] = json.dumps(call)
         self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -101,7 +104,10 @@ class A6RuntimeTests(RuntimeFixture):
         dispatch["authorized"] = {"tool_use_id": "wrong-call"}
         write_json(self.path, current)
         self.assert_unchanged(self.record)
-        dispatch["authorized"] = {"tool_use_id": call["payload"]["call_id"]}
+        dispatch["authorized"] = {
+            "tool_use_id": call["payload"]["call_id"],
+            "ciphertext_sha256": hashlib.sha256(ciphertext.encode()).hexdigest(),
+        }
         write_json(self.path, current)
         arguments["message"] = "not encrypted"
         call["payload"]["arguments"] = json.dumps(arguments)
@@ -120,7 +126,7 @@ class A6RuntimeTests(RuntimeFixture):
         call["payload"]["arguments"] = json.dumps(arguments)
         lines[1] = json.dumps(call)
         self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        with self.assertRaisesRegex(GraphError, "encrypted native message changed"):
+        with self.assertRaisesRegex(graph_contract.DispatchDeniedError, "consumed hook authorization"):
             validate_worker_evidence(read_json(self.path))
 
     def test_encrypted_dispatch_refuses_off_switch_receipt(self) -> None:

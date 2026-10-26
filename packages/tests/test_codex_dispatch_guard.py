@@ -51,13 +51,17 @@ class DispatchGuardTests(unittest.TestCase):
         self.message_file_text = ""
 
     def _run(
-        self, authorized: bool = True, status: str = "in-progress", config: Path | None = None
+        self,
+        authorized: bool = True,
+        status: str = "in-progress",
+        config: Path | None = None,
+        inspection_node: str = "S2",
     ) -> tuple[bool, int]:
         """Run the hook; return (denied, authorize calls)."""
 
         def graph_output(_graph: Path, *arguments: str) -> dict[str, Any] | None:
             if arguments[0] == "inspect":
-                return {"status": status}
+                return {"status": status, "task_names": {inspection_node: self.tool_input["task_name"]}}
             self.sent.append(arguments)
             self.message_file_text = Path(arguments[arguments.index("--message-file") + 1]).read_text()
             return {"loop_id": "loop", "wave_id": "wave-2", "dispatch_id": "disp_1"} if authorized else None
@@ -98,6 +102,14 @@ class DispatchGuardTests(unittest.TestCase):
         config = Path(self.scratch.name) / "workflow.config.yaml"
         config.write_text("sandbox_workers: false\n", encoding="utf-8")
         self.assertEqual(self._run(config=config), (False, 1))
+
+    def test_opaque_implementation_cannot_bypass_containment(self) -> None:
+        """Resolve an encrypted worker's node from the graph's issued task mapping."""
+        self.tool_input["message"] = "gAAAAABopaque"
+        self.assertEqual(self._run(inspection_node="U3[1]"), (True, 0))
+        config = Path(self.scratch.name) / "workflow.config.yaml"
+        config.write_text("sandbox_workers: false\n", encoding="utf-8")
+        self.assertEqual(self._run(config=config, inspection_node="U3[1]"), (False, 1))
 
     def test_roleless_dispatch_reaches_authority(self) -> None:
         """Require the existing active-wave and frozen-eval authority for role-less workers."""
@@ -178,11 +190,13 @@ class DispatchGuardTests(unittest.TestCase):
         self.tool_input["message"] = ENVELOPE + "\nx"
         self.assertEqual(self._run(status="complete"), (True, 0))
 
-    def test_missing_identity_denies_only_enveloped_dispatch(self) -> None:
-        """Without a session id the hook cannot bind a spawn, but it will not authorize an envelope blind."""
+    def test_missing_identity_denies_graph_named_dispatch(self) -> None:
+        """Without a session id the hook cannot bind a graph name, even if its prompt is opaque."""
         self.payload["session_id"] = ""
         self.assertEqual(self._run(), (True, 0))
         self.tool_input["message"] = "Read documentation."
+        self.assertEqual(self._run(), (True, 0))
+        self.tool_input["task_name"] = "ordinary"
         self.assertEqual(self._run(), (False, 0))
 
     def test_other_tools_denied(self) -> None:

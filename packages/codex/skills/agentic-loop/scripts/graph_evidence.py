@@ -88,7 +88,9 @@ def _verify_dispatch(
         if error.code != "dispatch_missing_envelope":
             raise
         record = graph_encrypted_content.check(state, node_id, attempt, wave_id, call_id, message)
+        opaque = True
     else:
+        opaque = False
         record = graph_contract.check_ownership(state, envelope, live=False)
         if not (graph_contract.dispatch_off() or record.get("authorized") == {"tool_use_id": None, "mode": "off"}):
             record = graph_contract.check_dispatch(state, envelope, message, live=False)
@@ -104,7 +106,7 @@ def _verify_dispatch(
     if not isinstance(agent_type, str):
         raise graph_contract.DispatchDeniedError("role_mismatch", "native spawn has an invalid agent type")
     graph_contract.assert_role(record["contract"], agent_type, "", None)
-    if record.get("authorized") not in ({"tool_use_id": None}, {"tool_use_id": call_id}):
+    if not opaque and record.get("authorized") not in ({"tool_use_id": None}, {"tool_use_id": call_id}):
         raise graph_contract.DispatchDeniedError(
             "dispatch_unauthorized", "native spawn has no consumed dispatch authorization"
         )
