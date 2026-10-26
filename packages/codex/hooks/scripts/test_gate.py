@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import select
 import subprocess
 import sys
@@ -14,9 +13,11 @@ from contextlib import suppress
 from pathlib import Path
 from typing import cast
 
+from lib.argv_match import git_invocation, git_prefix
+from lib.destructive_patterns import git_output
+from lib.shell_context import invocations, opaque_execution, payload_cwd
 from test_output import begin_run, finish_run
 
-COMMIT_COMMAND = re.compile(r"(^|[\s;&|])git\s+commit(\s|$)")
 TEMPFILE_ERROR = "Test gate could not create a temporary output file, so the commit is blocked."
 
 
@@ -54,41 +55,24 @@ def command_for(payload: dict[str, object]) -> str:
     """Return the requested Bash command, or an empty string."""
     tool_input = payload.get("tool_input")
     typed_tool_input = cast(dict[str, object], tool_input) if isinstance(tool_input, dict) else {}
-    command = typed_tool_input.get("command")
+    command = typed_tool_input.get("cmd", typed_tool_input.get("command"))
     return command if isinstance(command, str) else ""
 
 
-def repo_for(cwd: str) -> Path | None:
+def repo_for(cwd: str, prefix: list[str]) -> Path | None:
     """Return the Git root for cwd, or none when it is not a repository."""
-    try:
-        result = subprocess.run(
-            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            check=False,
-            text=True,
-        )
-    except OSError:
-        return None
-    root = result.stdout.strip()
-    return Path(root) if result.returncode == 0 and root else None
+    root = git_output(cwd, *prefix, "rev-parse", "--show-toplevel")
+    return Path(root) if root else None
 
 
-def configured_command(repo_root: Path) -> str:
+def configured_command(cwd: str, prefix: list[str], directory: str) -> str:
     """Read the first trusted Git-metadata test-command line, if configured."""
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "--git-path", "coderails/test_command"],
-            capture_output=True,
-            check=False,
-            text=True,
-        )
-    except OSError:
-        return ""
-    if result.returncode != 0 or not (raw_path := result.stdout.strip()):
+    raw_path = git_output(cwd, *prefix, "rev-parse", "--git-path", "coderails/test_command")
+    if not raw_path:
         return ""
     config_path = Path(raw_path)
     if not config_path.is_absolute():
-        config_path = repo_root / config_path
+        config_path = Path(directory) / config_path
     try:
         return config_path.read_text(encoding="utf-8").splitlines()[0]
     except (IndexError, OSError):
@@ -118,31 +102,41 @@ def main() -> int:
     """Run the trusted command for Git commits and deny a failed command."""
     payload = payload_object(read_input())
     command = command_for(payload)
-    if not COMMIT_COMMAND.search(command):
+    if opaque_execution(command, payload_cwd(payload)):
+        deny("Executable shell body exceeds the guarded parser depth.")
         return 0
-    raw_cwd = payload.get("cwd")
-    repo_root = repo_for(raw_cwd if isinstance(raw_cwd, str) and raw_cwd else os.getcwd())
-    if repo_root is None or not (test_command := configured_command(repo_root)):
-        return 0
-    try:
-        run = begin_run("codex", repo_root, test_command)
-    except OSError:
-        deny(TEMPFILE_ERROR)
-        return 0
-    try:
-        with (run / "output.log").open("wb") as output_file:
-            result = subprocess.run(
-                ["/bin/bash", "-c", test_command],
-                cwd=repo_root,
-                check=False,
-                stderr=subprocess.STDOUT,
-                stdout=output_file,
-            )
-        notice = finish_run(run, result.returncode)
-        if result.returncode != 0:
-            deny(f"Test gate failed for: {test_command}\n\n{notice}")
-    except (OSError, ValueError):
-        deny("Test output could not be captured or recorded; commit blocked.")
+    checked: set[tuple[Path, str]] = set()
+    for _, argv, cwd in invocations(command, payload_cwd(payload)):
+        call = git_invocation(argv, cwd)
+        if call is None or call[0] != "commit":
+            continue
+        prefix = git_prefix(argv, call[2])
+        repo_root = repo_for(cwd, prefix)
+        test_command = configured_command(cwd, prefix, call[1])
+        if repo_root is None or not test_command or (repo_root, test_command) in checked:
+            continue
+        checked.add((repo_root, test_command))
+        try:
+            run = begin_run("codex", repo_root, test_command)
+        except OSError:
+            deny(TEMPFILE_ERROR)
+            return 0
+        try:
+            with (run / "output.log").open("wb") as output_file:
+                result = subprocess.run(
+                    ["/bin/bash", "-c", test_command],
+                    cwd=repo_root,
+                    check=False,
+                    stderr=subprocess.STDOUT,
+                    stdout=output_file,
+                )
+            notice = finish_run(run, result.returncode)
+            if result.returncode != 0:
+                deny(f"Test gate failed for: {test_command}\n\n{notice}")
+                return 0
+        except (OSError, ValueError):
+            deny("Test output could not be captured or recorded; commit blocked.")
+            return 0
     return 0
 
 

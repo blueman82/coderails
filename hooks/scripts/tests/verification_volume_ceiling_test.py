@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import shlex
 import sys
 import unittest
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from hooks.scripts.tests.ceiling_source_test import key
 from hooks.scripts.tests.native_hook_test_support import HookCase
 
 
@@ -25,9 +27,9 @@ class CeilingTests(HookCase):
         """Build a native Bash request for the chosen branch."""
         return {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(repo or self.repo), **fields}
 
-    def count(self, target: str, branch: str = "unit-test") -> Path:
-        """Return the existing persistent counter filename."""
-        return self.loop / "verification-ceiling" / f"{branch}__{target}.count"
+    def count(self, target: str, repo: Path | None = None) -> Path:
+        """Return the worktree-keyed persistent counter filename."""
+        return self.loop / "verification-ceiling" / f"{key(repo or self.repo)}__{target}.count"
 
     def test_third_invocation_and_separate_targets(self) -> None:
         """The third call denies with one JSON response and always releases its lock."""
@@ -36,6 +38,30 @@ class CeilingTests(HookCase):
                 self.assertEqual(self.denied("verification_volume_ceiling", self.request(command)), expected)
             self.assertEqual(self.count(target).read_text(encoding="utf-8").strip(), "4")
             self.assertFalse(Path(f"{self.count(target)}.lock").exists())
+
+    def test_three_runs_in_one_command_are_denied(self) -> None:
+        """One tool call cannot hide the third run in later shell segments."""
+        command = "; ".join((self.full, self.full, self.full))
+        self.assertTrue(self.denied("verification_volume_ceiling", self.request(command)))
+        self.assertEqual(self.count("run_all").read_text(encoding="utf-8").strip(), "3")
+
+    def test_one_command_counts_each_worktree(self) -> None:
+        """A local cd changes the counter selected for the next run."""
+        other = self.repository("other", "unit-other")
+        command = f"{self.full}; cd {shlex.quote(str(other))}; {self.full}"
+        self.assertFalse(self.denied("verification_volume_ceiling", self.request(command)))
+        self.assertEqual(self.count("run_all").read_text(encoding="utf-8").strip(), "1")
+        self.assertEqual(self.count("run_all", other).read_text(encoding="utf-8").strip(), "1")
+
+    def test_denied_command_does_not_charge_other_worktree(self) -> None:
+        """A third run blocks the command before its other worktree can run."""
+        other = self.repository("other", "unit-other")
+        for _ in range(2):
+            self.assertFalse(self.denied("verification_volume_ceiling", self.request(self.full)))
+        command = f"{self.full}; cd {shlex.quote(str(other))}; {self.full}"
+        self.assertTrue(self.denied("verification_volume_ceiling", self.request(command)))
+        self.assertEqual(self.count("run_all").read_text(encoding="utf-8").strip(), "3")
+        self.assertFalse(self.count("run_all", other).exists())
 
     def test_existing_counter_survives_python_cutover(self) -> None:
         """A preexisting count blocks the first Python invocation without a reset."""
@@ -53,7 +79,7 @@ class CeilingTests(HookCase):
         self.assertFalse(self.denied("verification_volume_ceiling", self.request(self.full)))
         other = self.repository("other", "unit-other")
         self.assertFalse(self.denied("verification_volume_ceiling", self.request(self.full, repo=other)))
-        self.assertEqual(self.count("run_all", "unit-other").read_text(encoding="utf-8").strip(), "1")
+        self.assertEqual(self.count("run_all", other).read_text(encoding="utf-8").strip(), "1")
 
     def test_noninvocations_and_other_subcommands(self) -> None:
         """Mentions and unrelated post-eval subcommands are not invocations of a capped operation."""

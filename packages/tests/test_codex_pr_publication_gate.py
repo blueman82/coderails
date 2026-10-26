@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import stat
 import subprocess
 import sys
@@ -144,12 +145,41 @@ class CodexPublicationGateTests(unittest.TestCase):
         """Plain, bash -c wrapped and merge.py invocations are denied with the reason code first."""
         for command in (
             "gh pr merge 7 --merge",
+            "gh pr 'mer'ge 7",
+            r"gh pr m\erge 7",
             "bash -c 'gh pr merge 7'",
             "python3 scripts/merge.py 7",
             "gh api -X PUT repos/o/r/pulls/7/merge",
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.reason(command).startswith("diff_manifest:denied_path"), command)
+
+    def test_over_limit_shell_body_is_denied(self) -> None:
+        """An opaque sixth shell level cannot conceal a PR merge."""
+        for wrapper in ("bash -c", "eval"):
+            command = "gh pr merge 7"
+            for _ in range(6):
+                command = f"{wrapper} {shlex.quote(command)}"
+            with self.subTest(wrapper=wrapper):
+                self.assertIn("deny", str(self.hook(command)))
+                payload = json.dumps({"session_id": "s1", "cwd": str(self.dir), "tool_input": {"command": command}})
+                for hook in (
+                    "action_authority_gate",
+                    "destructive_bash_gate",
+                    "test_gate",
+                    "verification_volume_ceiling",
+                ):
+                    with self.subTest(hook=hook):
+                        result = subprocess.run(
+                            [sys.executable, str(HOOK.parent / f"{hook}.py")],
+                            input=payload,
+                            capture_output=True,
+                            text=True,
+                            env=self.env,
+                            check=False,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertIn('"deny"', result.stdout)
 
     def test_non_merge_commands_pass(self) -> None:
         """Negative control: ordinary commands are not touched."""

@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,14 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload_strict
 from hooks.scripts.lib.destructive_patterns import git_output
-from hooks.scripts.lib.pr_workflow_match import MERGE_SCRIPT, guarded_segments, state_mutated_before_guard
+from hooks.scripts.lib.pr_workflow_match import (
+    MERGE_SCRIPT,
+    Operation,
+    guarded_operations,
+    repository,
+    state_mutated_before_guard,
+)
+from hooks.scripts.lib.shell_context import opaque_execution
 from hooks.scripts.lib.trace_row import append_row
 from scripts.lib import advisory_merge, merge_budget
 from scripts.lib.action_binding import binding, merge_number
@@ -46,12 +54,15 @@ def mode(cwd: str) -> str:
     return resolve_mode(cwd)[0]
 
 
-def proposal(name: str, segment: str, where: str) -> tuple[str, dict[str, Any]]:
+def proposal(call: Operation) -> tuple[str, dict[str, Any]]:
     """The action as seen here, plus the PR number of a merge.py segment (merge.py matches on it)."""
-    branch = git_output(where, "branch", "--show-current")
-    proposed = proposed_action(name, segment, where, branch, binding(name, segment, where))
-    script = name == "merge" and bool(re.search(MERGE_SCRIPT, segment))
-    return name, proposed | {"script": script, "number": merge_number(segment, where) if name == "merge" else ""}
+    branch = git_output(call.git_cwd, *call.prefix, "branch", "--show-current")
+    proposed = proposed_action(call.name, call.segment, call.cwd, branch, binding(call.name, call.segment, call.cwd))
+    script = call.name == "merge" and bool(re.search(MERGE_SCRIPT, call.segment))
+    return call.name, proposed | {
+        "script": script,
+        "number": merge_number(call.segment, call.cwd) if call.name == "merge" else "",
+    }
 
 
 def how_to_proceed(code: str, session: str, name: str) -> str:
@@ -73,6 +84,54 @@ def how_to_proceed(code: str, session: str, name: str) -> str:
     )
 
 
+def check_action_modes(
+    session: str, active: list[tuple[Operation, str]], command: str, loop_id: str | None,
+    signers: Path | None, authority: bool, claimed: Callable[[str], None],
+) -> tuple[tuple[str, str] | None, bool]:  # fmt: skip
+    """Check the whole command before claiming enforce receipts; advisory receipts stay unused."""
+    proposals = [(mode, proposal(call)) for call, mode in active]
+    all_actions = [item for _, item in proposals]
+    stale = state_mutated_before_guard(command)
+    whole = check_and_consume(session, all_actions, None, loop_id, signers, consume=False, stale=stale)
+    hard = {"authority_denied", "max_prs_exceeded", "approval_requirement_missing", "budget_lock_unavailable"}
+    if whole is not None and whole[1] in hard:
+        return whole, True
+    advisory = [item for mode, item in proposals if mode == "advisory"]
+    enforce = [item for mode, item in proposals if mode == "enforce"]
+    advisory_missing = (
+        check_and_consume(session, advisory, None, loop_id, signers, consume=False, stale=stale) if advisory else None
+    )
+    if advisory_missing is not None and advisory_missing[1] in hard:
+        return advisory_missing, True
+    if enforce:
+        missing = check_and_consume(session, enforce, None, loop_id, signers, consume=False, stale=stale)
+        if missing is not None:
+            return missing, True
+    reserved: list[Path] = []
+    if authority:
+        for name, item in advisory:
+            if name != "merge" or item["script"]:
+                continue
+            bind = {"repository": item["repository"], "ref": item["ref"], "sha": item["artifact_sha"]}
+            code, path = advisory_merge.reserve(session, item["number"], bind)
+            if code != "ok":
+                for previous in reserved:
+                    try:
+                        merge_budget.settle(previous, False)
+                    except OSError:
+                        code = "budget_release_failed"
+                return (name, code), True
+            if path:
+                reserved.append(path)
+    if enforce:
+        missing = check_and_consume(session, enforce, None, loop_id, signers, stale=stale, on_claim=claimed)
+        if missing is not None:
+            for previous in reserved:
+                merge_budget.settle(previous, False)
+            return missing, True
+    return advisory_missing, False
+
+
 def main() -> int:
     """Check one Bash payload; deny unreadable input and errors under enforce or live authority."""
     try:
@@ -91,23 +150,35 @@ def main() -> int:
         if not isinstance(command, str) or not command:
             return 0
         cwd = str(payload.get("cwd") or os.getcwd())
-        mode_, _ = resolve_mode(cwd)
-        if not (segments := guarded_segments(command, cwd, implicit_push=True)):
+        if opaque_execution(command, cwd):
+            deny("Blocked: executable shell body exceeds the guarded parser depth.")
             return 0
-        config = config_path(cwd)
-        if config:
+        if not (calls := guarded_operations(command, cwd, implicit_push=True)):
+            return 0
+        source_mode, _ = resolve_mode(cwd)
+        priority = {"off": 0, "advisory": 1, "enforce": 2}
+        configured: list[tuple[Operation, str]] = []
+        for call in calls:
+            selected = repository(call)
+            config = config_path(selected)
+            selected_mode, _ = resolve_mode(selected)
+            selected_mode = max((source_mode, selected_mode), key=priority.__getitem__)
+            configured.append((call, selected_mode))
+            if not config:
+                continue
             try:
                 strict_settings(config, trace_id)
             except ConfigRejected as error:
                 append_row("action_authority", "denied", "config_rejected", trace_id, None)
                 deny(
-                    f"Blocked: {segments[0][0].replace('_', ' ')} while the workflow config is invalid. {error}. "
-                    "Fix .coderails/workflow.config.yaml (scripts/lib/config.py resolve-config --json lists "
-                    "the findings)."
+                    f"Blocked: {call.name.replace('_', ' ')} because workflow config is invalid: {error}. "
+                    "Fix .coderails/workflow.config.yaml; run resolve-config --json for details."
                 )
                 return 0
-        if mode_ == "off":
+        active = [(call, selected_mode) for call, selected_mode in configured if selected_mode != "off"]
+        if not active:
             return 0
+        mode_ = "enforce" if any(selected_mode == "enforce" for _, selected_mode in active) else "advisory"
         authority = read_authority(session)
         loop_id = authority["loop_id"] if authority else None
         signers, tier = resolve_trust_root()
@@ -117,40 +188,16 @@ def main() -> int:
                 append_row("action_authority", "allowed", USER_TIER, trace_id, loop_id)
             append_row("action_authority", "allowed", "receipt_consumed", trace_id, loop_id)
 
-        proposals = [proposal(*segment) for segment in segments]
-        missing = check_and_consume(
-            session, proposals, None, loop_id, signers,
-            consume=mode_ == "enforce", stale=state_mutated_before_guard(command), on_claim=claimed,
-        )  # fmt: skip
-        denied_by_authority = missing is not None and missing[1] in {"authority_denied", "max_prs_exceeded"}
-        reservation_failed = False
-        if mode_ == "advisory" and authority and not denied_by_authority:
-            reserved: list[Path] = []
-            for name, item in proposals:
-                if name != "merge" or item["script"]:
-                    continue
-                bind = {"repository": item["repository"], "ref": item["ref"], "sha": item["artifact_sha"]}
-                code, path = advisory_merge.reserve(session, item["number"], bind)
-                if code != "ok":
-                    for previous in reserved:
-                        try:
-                            merge_budget.settle(previous, False)
-                        except OSError:
-                            code = "budget_release_failed"
-                    missing = (name, code)
-                    reservation_failed = True
-                    break
-                if path:
-                    reserved.append(path)
+        missing, blocked = check_action_modes(session, active, command, loop_id, signers, bool(authority), claimed)
         if missing is None:
             return 0
         name, code = missing
-        if mode_ == "advisory" and not reservation_failed and code not in {"authority_denied", "max_prs_exceeded"}:
+        if not blocked:
             append_row("action_authority", "advisory", f"advisory_{code}", trace_id, loop_id)
             print(f"action_authority (advisory): no valid receipt for {name} ({code}); not blocked.", file=sys.stderr)
             return 0
         append_row("action_authority", "denied", f"denied_{code}", trace_id, loop_id)
-        need = "needs a bound PR and head under live authority" if reservation_failed else "needs an action receipt"
+        need = "needs a bound PR and head" if code.startswith("budget_") else "needs an action receipt"
         deny(f"Blocked: {name.replace('_', ' ')} {need} ({code}). {how_to_proceed(code, session, name)}")
     except Exception as error:  # noqa: BLE001 - enforce and live grants must refuse unexpected hook errors
         if mode_ == "enforce" or authority:

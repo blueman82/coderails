@@ -21,13 +21,29 @@ MERGE_SHA = "f" * 40
 
 MIRRORS = (
     "scripts/lib/action_receipt.py", "scripts/lib/receipt_signing.py", "scripts/lib/action_binding.py",
-    "scripts/action_receipt_cli.py", "scripts/authority_keys.py", "scripts/lib/authority_permits.py",
+    "scripts/authority_keys.py", "scripts/lib/authority_permits.py",
     "scripts/lib/receipt_gate.py", "scripts/lib/merge_budget.py",
 )  # fmt: skip
 
 
 class MirrorTests(unittest.TestCase):
     """The Codex copies of the receipt modules are the Claude files, byte for byte."""
+
+    def test_codex_env_split_string_push_is_guarded(self) -> None:
+        """The Codex matcher recognizes a protected ref inside a supported env -S wrapper."""
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            subprocess.run(["git", "-C", tmp, "symbolic-ref", "HEAD", "refs/heads/feature"], check=True)
+            found = codex_match.guarded_operations('env -S "git push origin HEAD:main"', tmp, implicit_push=True)
+            self.assertEqual([call.name for call in found], ["git_push"])
+
+    def test_codex_external_time_value_options_do_not_hide_push(self) -> None:
+        """GNU time option values precede the executable in the Codex matcher."""
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            subprocess.run(["git", "-C", tmp, "symbolic-ref", "HEAD", "refs/heads/feature"], check=True)
+            command = "/usr/bin/time -f %E -o report git push origin HEAD:main"
+            self.assertEqual([call.name for call in codex_match.guarded_operations(command, tmp)], ["git_push"])
 
     def test_mirrors_byte_identical(self) -> None:
         """Every mirrored file matches its Claude source."""
@@ -40,6 +56,59 @@ class MirrorTests(unittest.TestCase):
                 CODEX / "hooks/scripts/lib/headless_command.py",
                 shallow=False,
             )
+        )
+
+    def test_git_directory_selectors_bind_the_same_worktree_on_both_providers(self) -> None:
+        """A selected Git directory must resolve to the same physical worktree and Git dir."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            other = Path(tmp) / "other"
+            for path in (repo, other):
+                subprocess.run(["git", "init", "-q", str(path)], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=t@example.com",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    "init",
+                ],
+                check=True,
+            )
+            linked = Path(tmp) / "linked"
+            subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "--detach", str(linked)], check=True)
+            self.assertTrue((linked / ".git").is_file())
+            alias = Path(tmp) / "alias"
+            alias.symlink_to(repo)
+            for matcher in (claude_match, codex_match):
+                for cwd, target, expected in (
+                    (repo, alias, True),
+                    (linked, linked, True),
+                    (repo, other, False),
+                    (linked, repo, False),
+                ):
+                    call = matcher.operations(f'git -C "{target}" push origin main', str(cwd))[0]
+                    self.assertEqual(matcher.same_repository(call, str(cwd)), expected)
+
+    def test_receipt_cli_diff_is_provider_import(self) -> None:
+        """Receipt commands differ only in the provider-local command classifier import."""
+        claude = (ROOT / "scripts/action_receipt_cli.py").read_text()
+        codex = (CODEX / "scripts/action_receipt_cli.py").read_text()
+        self.assertEqual(
+            claude.replace(
+                "from hooks.scripts.lib.pr_workflow_match import operations",
+                "from hooks.scripts.lib.action_match import operations",
+            ).replace(
+                "from hooks.scripts.lib.action_match import operations\nfrom hooks.scripts.lib.trace_row",
+                "from hooks.scripts.lib.action_match import operations\n\nfrom hooks.scripts.lib.trace_row",
+            ),
+            codex,
         )
 
     def test_hook_common_has_no_vendored_receipt_code(self) -> None:

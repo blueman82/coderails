@@ -132,6 +132,13 @@ Fourth seam instance: `agentic-loop` Phase 13 teardown writes `retro.json` (`sch
 - **Bash blocklists are enumerated families, not exhaustive.** Obfuscated forms, variable filenames, quoted paths with spaces, here-docs, process substitution, `python -c open(...)` writes remain uncaught.
 - **Eval-gate coverage boundary.** Enforced only at `/coderails:merge` (config-independent) and `gh pr merge <N>` via `enforce_pr_workflow` (config-dependent, inactive under `NO_CONFIG`). NOT enforced on raw `git merge`/`git push` to main/master (no PR number to resolve an artifact against) or in any `NO_CONFIG` repo. Both enforced points then run `scripts.post_evals.smoke_verify` — three failure modes: `gh` fetch failure, `NO-GO`/missing artifact, failed re-execution.
 - **`no_edit_on_main` allowlist breadth is intentional (fail-safe).** `.sh` blocked on main, `.json`/`.yaml` config stays editable. Settings.json `Write`/`Edit` permission covers any legitimate override.
+- **Command parser limits.** The Claude and Codex plugins use the same literal command parser.
+  It finds supported Git, GitHub, and script commands in shell text. It tracks literal directory changes.
+  It guards a literal `eval` body but does not evaluate variables or build commands at run time.
+  It does not resolve aliases or shell functions. An incomplete quote can make a command unclear.
+  Some wrapper options can also make a command unclear. A receipt must not approve an unclear action.
+  The policy file protects plugin source paths. The trace uses the `argv/` prefix.
+  See the command parser entry in `docs/RUNBOOK.md` for checks and limits.
 - **Wiki/workflow sequence past merge is advisory.** `/wiki-ingest` + `/wiki-lint` after merge are slash commands; nothing enforces them.
 - **`check_verify_loop`, `check_confidence_labels`, both loop guards** all short-circuit on `stop_hook_active=true` (the two loop guards block at most once per turn; the two discipline lints are advisory and exit 0 either way) — intentional infinite-loop safety valve. `voice_announce` reads it too (via its shared loop helper), no observable effect (always exits 0).
 - **TDD is not enforced test-first.** `test_gate` only checks tests pass at commit time.

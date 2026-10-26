@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from hooks.scripts.lib.action_match import operations
+
 from hooks.scripts.lib.trace_row import append_row
 from scripts.lib import action_receipt as ar
 from scripts.lib import receipt_signing as rs
@@ -41,12 +43,18 @@ def approve(args: argparse.Namespace) -> int:
     """Write one new signed receipt for the exact command, cwd, branch and computed binding; never overwrites."""
     now = datetime.now(timezone.utc)
     cwd = args.cwd or str(Path.cwd())
+    calls = [call for call in operations(args.action_command, cwd) if call.name == args.kind]
+    if len(calls) != 1:
+        return refuse(
+            "receipt_refused_binding_unknown", "command must select one bound action", args.session, args.loop
+        )
+    call = calls[0]
     if len(args.scope) > ar.MAX_SCOPE:
         return refuse("receipt_refused_scope_too_long", f"scope over {ar.MAX_SCOPE} chars", args.session, args.loop)
-    bind = binding(args.kind, args.action_command, cwd)
+    bind = binding(args.kind, call.segment, call.cwd)
     if bind is None:
         return refuse("receipt_refused_binding_unknown", "cannot compute repository+ref+sha", args.session, args.loop)
-    branch = args.branch if args.branch is not None else git_out(cwd, "branch", "--show-current")
+    branch = args.branch if args.branch is not None else git_out(call.git_cwd, *call.prefix, "branch", "--show-current")
     try:
         hours = args.expires_in_hours
         if not math.isfinite(hours) or hours <= 0:
@@ -54,7 +62,7 @@ def approve(args: argparse.Namespace) -> int:
         expires = (now + timedelta(hours=hours)).isoformat(timespec="seconds")
     except (OverflowError, ValueError) as error:
         return refuse("receipt_refused_expiry_invalid", str(error), args.session, args.loop)
-    proposed = ar.proposed_action(args.kind, args.action_command, cwd, branch, bind)
+    proposed = ar.proposed_action(args.kind, call.segment, call.cwd, branch, bind)
     receipt_id = str(uuid.uuid4())
     live = read_authority(args.session)
     obj: dict[str, Any] = {

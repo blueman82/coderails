@@ -12,6 +12,7 @@ from typing import cast
 from hook_common import append_trace_row, deny, payload_object, read_input, text_field
 from lib.destructive_patterns import normalize_ifs, permanent_pattern, source_write, workflow_substitution
 from lib.destructive_routes import ROUTES
+from lib.shell_context import opaque_execution
 
 from scripts.lib.authority_permits import permits
 
@@ -36,6 +37,9 @@ def main() -> int:
     command = normalize_ifs(raw)
     cwd_value = payload.get("cwd")
     cwd = cwd_value if isinstance(cwd_value, str) and cwd_value else os.getcwd()
+    if opaque_execution(command, cwd):
+        deny("Blocked: executable shell body exceeds the guarded parser depth.")
+        return 0
     for token in re.findall(r"[a-zA-Z0-9_./-]+", command):
         normalized = os.path.abspath(os.path.join(cwd, token))
         if normalized.endswith(("/.codex/config.toml", "/.codex/requirements.toml")):

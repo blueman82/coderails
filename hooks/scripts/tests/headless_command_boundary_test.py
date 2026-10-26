@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -79,10 +81,10 @@ class HeadlessBoundaryTests(HookTestCase):
         from hooks.scripts.lib.pr_workflow_match import operation
 
         for prefix in ("git", "git -C /tmp", "git -c foo=bar", "git --git-dir .git", "git --work-tree ."):
-            for option in ("-o --help", "--push-option=--help"):
+            for option in ("-o --help", "--push-option --help", "--push-option=--help"):
                 command = f"{prefix} push {option} origin HEAD:main"
                 with self.subTest(command=command):
-                    expected_dir = "/tmp" if prefix == "git -C /tmp" else ""
+                    expected_dir = "/tmp" if prefix == "git -C /tmp" else os.getcwd()
                     self.assertEqual(operation(command), ("git_push", command, expected_dir))
 
     def test_headless_child_cwd_override_is_unbindable(self) -> None:
@@ -158,6 +160,62 @@ class HeadlessBoundaryTests(HookTestCase):
                     enforce_pr_workflow.main()
                 config.assert_not_called()
                 self.assertIn("working directory", deny.call_args.args[0])
+
+    def test_git_c_same_worktree_reaches_review_gate(self) -> None:
+        """A Git -C that selects this worktree must use its normal review evidence check."""
+        repo = self.git_repo("repo")
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=t@example.com",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "init",
+            ],
+            check=True,
+        )
+        linked = self.directory / "linked"
+        subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "--detach", str(linked)], check=True)
+        self.assertTrue((linked / ".git").is_file())
+        transcript = self.transcript()
+        for cwd in (repo, linked):
+            prefixes = [f'git -C "{cwd}"', f'git -c core.quotePath=false -C "{cwd}"']
+            if cwd == repo:
+                prefixes.append(f'git --git-dir="{repo / ".git"}" --work-tree="{repo}"')
+            for prefix in prefixes:
+                payload = {
+                    "cwd": str(cwd),
+                    "session_id": "test",
+                    "transcript_path": str(transcript),
+                    "tool_input": {"command": f"{prefix} push origin main"},
+                }
+                with (
+                    patch("hooks.scripts.enforce_pr_workflow.read_payload_strict", return_value=payload),
+                    patch("hooks.scripts.enforce_pr_workflow.config_path", return_value="config"),
+                    patch("hooks.scripts.enforce_pr_workflow.transcript_entries", return_value=[]),
+                    patch("hooks.scripts.enforce_pr_workflow.deny") as deny,
+                ):
+                    enforce_pr_workflow.main()
+                self.assertIn("requires /pr-review-toolkit:review-pr", deny.call_args.args[0])
+
+        other = self.git_repo("other")
+        for command in (
+            f'git -C "{other}" push origin main',
+            f'git --git-dir="{other / ".git"}" --work-tree="{repo}" push origin main',
+        ):
+            payload = {"cwd": str(repo), "session_id": "test", "tool_input": {"command": command}}
+            with (
+                patch("hooks.scripts.enforce_pr_workflow.read_payload_strict", return_value=payload),
+                patch("hooks.scripts.enforce_pr_workflow.deny") as deny,
+            ):
+                enforce_pr_workflow.main()
+            self.assertIn("working directory differs", deny.call_args.args[0])
 
     def test_plain_protected_push_and_feature_push_keep_their_boundary(self) -> None:
         """A direct main push needs session evidence; a feature push stays outside that gate."""

@@ -1,0 +1,12 @@
+{
+  "source_extensions": [".py", ".ts", ".tsx", ".js", ".jsx", ".go"],
+  "plugin_source_globs": ["skills/*/SKILL.md", "commands/*.md"],
+  "doc_extensions": [".md", ".txt", ".rst", ".yaml", ".yml", ".json", ".toml", ".ini", ".cfg"],
+  "doc_names": [".gitignore", "LICENSE"],
+  "settings_files": [
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".codex/config.toml",
+    ".codex/requirements.toml"
+  ]
+}
