@@ -97,8 +97,14 @@ class PushSessionTests(RepoCase):
                         text=True,
                     )
                     self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                    self.assertIn("publication graph owner is missing", result.stderr)
+                    self.assertIn("publication:graph_owner_missing", result.stderr)
                     self.assertEqual(git_cmd(bare, "for-each-ref", "refs/heads").strip(), "")
+                    trace = self.dir.parent / "inactive-graphs" / "s" / "trace.jsonl"
+                    row = json.loads(trace.read_text().splitlines()[-1])
+                    self.assertEqual(
+                        (row["command"], row["outcome"], row["reason_code"]),
+                        ("publication", "refused", "graph_owner_missing"),
+                    )
 
 
 if __name__ == "__main__":

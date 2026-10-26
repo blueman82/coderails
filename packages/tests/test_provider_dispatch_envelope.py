@@ -198,6 +198,21 @@ class DispatchEnvelopeTests(unittest.TestCase):
 
         self.each(case)
 
+    def test_stored_and_node_attempts_must_match_the_issued_dispatch(self) -> None:
+        """A changed record or node retry count cannot authorize the original native spawn."""
+        for name in ("claude", "codex"):
+            for target in ("record", "node"):
+                with self.subTest(provider=name, target=target):
+                    provider = self.opened(name)
+                    request = provider.request()
+                    state = provider.read()
+                    if target == "record":
+                        next(iter(state["graph"]["dispatches"].values()))["attempt"] = 2
+                    else:
+                        state["graph"]["nodes"]["U3[1]"]["retry"]["attempts"] = 1
+                    provider.write(state)
+                    self.refuse(provider, request, "dispatch_attempt_mismatch")
+
     def test_replayed_dispatch_id(self) -> None:
         """A second distinct tool use of an already authorized dispatch id is a replay."""
 

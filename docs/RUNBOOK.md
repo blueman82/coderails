@@ -449,6 +449,8 @@ before transport. A recorded worktree must match the current checkout.
   forms are supported; empty or repeated flag values refuse. A requested unit must exist and carry a string-list `manifest`
   and a nonblank absolute `worktree` whose real path equals the current Git repository root. The progress object must carry
   nonblank string `session_id` and `loop_id` fields. Missing, malformed or mismatched metadata refuses `manifest_unreadable`;
+  `push.py` reports `publication:graph_owner_missing` before transport when either owner field is blank or absent.
+  That refusal writes `publication/refused/graph_owner_missing` to the publication session trace.
   `manifest: []` refuses publication. A session that owns a graph unit in this worktree must supply both flags.
   Without a matching graph unit, standalone publication uses the policy alone. Unit and policy
   manifests both apply, so a unit cannot widen policy scope. Custom policies retain the default denylist. An unreadable config
@@ -812,7 +814,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   `prompt_prefix` from `plan` or `begin-wave`; on Codex this includes a spawn with any `task_name` and no envelope),
   `dispatch_unknown_id` (the id was never issued: run `begin-wave`), `dispatch_foreign` (session, loop, node, wave or Codex
   `task_name` is not the record's), `dispatch_stale_revision` (the envelope predates the graph's current revision:
-  re-run `begin-wave` after `recover-wave`), `dispatch_replayed` (the id was already used: one spawn per id; a retry needs a
+  re-run `begin-wave` after `recover-wave`), `dispatch_attempt_mismatch` (the stored attempt does not match its dispatch id
+  or the node's next attempt: inspect state and recover the wave), `dispatch_replayed` (the id was already used: one spawn per id; a retry needs a
   new wave), `dispatch_contract_altered` (the stored contract no longer matches its digest or lost a field: the state was
   edited, restart the wave via `recover-wave`), `dispatch_sections_missing` (the pasted contract block was edited or left
   out: paste `prompt_sections` verbatim), `role_mismatch` (dispatch a guarded scout as `coderails:<role>` / Codex

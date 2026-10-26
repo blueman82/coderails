@@ -48,7 +48,13 @@ def unit_manifest(unit: str | None, progress: str | None) -> tuple[list[str], st
         not isinstance(state_fields.get(key), str) or not str(state_fields[key]).strip()
         for key in ("session_id", "loop_id")
     ):
-        raise git.WorkflowError("publication graph owner is missing")
+        manifest_policy.trace(
+            manifest_policy.publication_session() or "publication",
+            "refused",
+            "graph_owner_missing",
+            command="publication",
+        )
+        raise git.WorkflowError("publication:graph_owner_missing: publication graph owner is missing")
     return cast(list[str], manifest), base if isinstance(base, str) else None
 
 

@@ -41,6 +41,7 @@ CODES = (
     "dispatch_unknown_id",
     "dispatch_foreign",
     "dispatch_stale_revision",
+    "dispatch_attempt_mismatch",
     "dispatch_replayed",
     "dispatch_contract_altered",
     "dispatch_sections_missing",
@@ -285,9 +286,20 @@ def check_ownership(state: dict[str, Any], env: dict[str, Any], live: bool) -> d
         raise DispatchDeniedError("dispatch_stale_revision", "dispatch envelope revision is not the record's")
     if any(env[key] != record.get(key) for key in ("node_id", "wave_id")):
         raise DispatchDeniedError("dispatch_foreign", "dispatch envelope does not own the recorded node and wave")
+    attempt = record.get("attempt")
+    if (
+        type(attempt) is not int
+        or attempt < 1
+        or env["dispatch_id"] != dispatch_id(state["loop_id"], record["wave_id"], record["node_id"], attempt)
+    ):
+        raise DispatchDeniedError("dispatch_attempt_mismatch", "dispatch id does not match its recorded attempt")
     active = state["graph"].get("active_wave")
     if live and not (active and active["wave_id"] == record["wave_id"] and record["node_id"] in active["nodes"]):
         raise DispatchDeniedError("dispatch_foreign", "dispatch envelope does not own an exact node in the active wave")
+    if live:
+        node = state["graph"]["nodes"][record["node_id"]]
+        if attempt != node["retry"]["attempts"] + node["respawn"]["generation"] + 1:
+            raise DispatchDeniedError("dispatch_attempt_mismatch", "dispatch attempt is not the node's next attempt")
     return record
 
 

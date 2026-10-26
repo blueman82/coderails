@@ -169,11 +169,15 @@ class ContractTests(unittest.TestCase):
             "session_id": "s",
             "loop_id": "l",
             "revision": 2,
-            "graph": {"active_wave": {"wave_id": "wave-2", "nodes": ["U3[1]"]}, "dispatches": {}},
+            "graph": {
+                "active_wave": {"wave_id": "wave-2", "nodes": ["U3[1]"]},
+                "nodes": {"U3[1]": {"retry": {"attempts": 0}, "respawn": {"generation": 0}}},
+                "dispatches": {},
+            },
         }
-        _, record = contract_module.make_record(state, "U3[1]", "wave-2", 1, value, None)
-        state["graph"]["dispatches"]["d1"] = record
-        prompt = envelope() + "\n" + contract_module.render_sections(value)
+        identifier, record = contract_module.make_record(state, "U3[1]", "wave-2", 1, value, None)
+        state["graph"]["dispatches"][identifier] = record
+        prompt = envelope(dispatch_id=identifier) + "\n" + contract_module.render_sections(value)
         env = contract_module.parse_envelope(prompt)
         contract_module.check_dispatch(state, env, prompt, True)
         cases: list[tuple[str, dict[str, Any], str]] = [
@@ -183,7 +187,7 @@ class ContractTests(unittest.TestCase):
             ("dispatch_stale_revision", {"revision": 1}, prompt),
             ("dispatch_foreign", {"node_id": "U3[2]"}, prompt),
             ("dispatch_foreign", {"wave_id": "wave-9"}, prompt),
-            ("dispatch_sections_missing", {}, envelope()),
+            ("dispatch_sections_missing", {}, envelope(dispatch_id=identifier)),
             ("dispatch_sections_missing", {}, prompt.replace("origin/main", "origin/dev")),
         ]
         for code, change, text in cases:
@@ -192,9 +196,9 @@ class ContractTests(unittest.TestCase):
                     contract_module.check_dispatch(state, {**env, **change}, text, True)
                 self.assertEqual(caught.exception.code, code)
         broken = copy.deepcopy(state)
-        del broken["graph"]["dispatches"]["d1"]["contract"]["write_scope"]
+        del broken["graph"]["dispatches"][identifier]["contract"]["write_scope"]
         retyped = copy.deepcopy(state)
-        retyped["graph"]["dispatches"]["d1"]["contract"]["scope"] = "other"
+        retyped["graph"]["dispatches"][identifier]["contract"]["scope"] = "other"
         for stored in (broken, retyped):
             with self.assertRaises(DispatchDeniedError) as caught:
                 contract_module.check_dispatch(stored, env, prompt, True)
