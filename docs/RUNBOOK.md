@@ -546,7 +546,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `post` in `validate-embed` does not count as a ceremony. Plain quoted text such as `echo "git commit"` matches
   nothing. Command substitutions inside double quotes are checked. If shlex cannot parse (unbalanced quote),
   whitespace splitting may over-match plain words, but a split `-c`
-  body is seen only as its first word.
+  body is seen only as its first word. Active Bash ANSI-C quotes and `-c` behind unsupported shell options are
+  refused as opaque execution by the hook consumers.
 - Ceiling key: `sha1(realpath(git common dir) + realpath(toplevel))` plus the target, in
   `<loop dir>/verification-ceiling/` (Codex `$PLUGIN_DATA/verification-ceiling/`). A renamed branch keeps its count; a
   linked worktree or a second clone starts at zero. To reset, delete the one count file (the digest is printed in no
@@ -571,7 +572,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Query: `trace.by_reason` for `argv/denied/ceiling_exceeded` and `argv/denied/protected_paths_unreadable`
   (`python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`).
   See `docs/workflow-gates-measurement.md`.
-- Limits: still no full shell parser. Literal `eval` bodies are checked. Aliases, shell functions, ANSI-C quoted or run-time-built command names,
+- Limits: still no full shell parser. Literal `eval` bodies are checked. Aliases, shell functions, run-time-built command names,
   and scripts that themselves run `git commit` or `run_all.py` are not seen. Wrapper
   options are only partly modelled; variable expansion and command-local `GIT_DIR`/`GIT_WORK_TREE` assignments are not
   evaluated. Merge-script matching retains its existing anchored source policy, including its interpreter-option

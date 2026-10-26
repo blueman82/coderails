@@ -48,6 +48,21 @@ class WorkflowGateTests(HookTestCase):
                         result = self.run_hook(hook, payload)
                         self.assertIn('"deny"', result.stdout)
 
+    def test_ansi_c_shell_body_is_denied(self) -> None:
+        """Opaque Bash quoting and value options cannot hide a protected push."""
+        repo = self.git_repo("ansi_shell", "feature")
+        for command in ("bash -c $'git push origin x:main'", "bash --rcfile /dev/null -c 'git push origin x:main'"):
+            payload = {
+                "session_id": "S1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+            }
+            for hook in ("enforce_pr_workflow", "action_authority_gate", "destructive_bash_gate", "test_gate"):
+                with self.subTest(command=command, hook=hook):
+                    result = self.run_hook(hook, payload)
+                    self.assertIn('"deny"', result.stdout)
+
     def test_guarded_action_denies_when_transcript_is_unavailable(self) -> None:
         """A missing review record cannot permit a configured protected action."""
         repo = self.git_repo("missing_transcript", "main")

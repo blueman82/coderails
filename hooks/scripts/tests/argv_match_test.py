@@ -187,6 +187,18 @@ class HardeningTests(unittest.TestCase):
             command = "bash -c " + shlex.quote(command)
         self.assertFalse(shell_context.opaque_execution(command))
 
+    def test_opaque_shell_forms_leave_literal_text_and_supported_options_alone(self) -> None:
+        """ANSI-C commands are refused; inert text and parseable shell options stay usable."""
+        for command in ("bash -c $'git push origin x:main'", "bash --rcfile /dev/null -c 'git push origin x:main'"):
+            self.assertTrue(shell_context.opaque_execution(command), command)
+        for command in (
+            "echo '$'",
+            'echo "$\'literal"',
+            "bash -o pipefail -c 'printf ready'",
+            "bash --rcfile=/dev/null -c 'printf ready'",
+        ):
+            self.assertFalse(shell_context.opaque_execution(command), command)
+
     def test_directories_are_invocation_local(self) -> None:
         """Git -C composes while wrapper, nested shell and subshell directories stay local."""
         commands = {

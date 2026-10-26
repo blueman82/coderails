@@ -67,6 +67,16 @@ class CeilingSourceTests(HookCase):
         self.assertEqual(self.counter(repo, "run_all").read_text().strip(), "4")
         self.assertEqual((self.loop / "s1/trace.jsonl").read_text().count("ceiling_legacy_migrated"), 1)
 
+    def test_ansi_c_shell_body_cannot_hide_full_suite(self) -> None:
+        """Opaque shell forms cannot hide a full suite before its counter."""
+        repo = self.repository("repo", "feature")
+        for command in (
+            "bash -c $'python3 hooks/scripts/tests/run_all.py'",
+            "bash --rcfile /dev/null -c 'python3 hooks/scripts/tests/run_all.py'",
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(self.denied("verification_volume_ceiling", self.request(command, repo)))
+
     def test_same_branch_name_in_two_repositories_counts_independently(self) -> None:
         """Two repositories sharing a branch name keep separate counters."""
         first, second = self.repository("one", "unit-1"), self.repository("two", "unit-1")

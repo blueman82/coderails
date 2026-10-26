@@ -62,6 +62,39 @@ class CeilingLockTests(unittest.TestCase):
             self.assertEqual((legacy.parent / f"{key}__full-suite.count").read_text(), "4\n")
             self.assertEqual((data.parent / "loops/s1/trace.jsonl").read_text().count("ceiling_legacy_migrated"), 1)
 
+    def test_ansi_c_shell_body_cannot_hide_full_suite(self) -> None:
+        """Opaque shell forms cannot hide a full suite before its counter."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, repo = Path(tmp) / "data", Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", "-b", "feature", str(repo)], check=True)
+            for command in (
+                "bash -c $'python3 packages/tests/test_codex_hooks.py'",
+                "bash --rcfile /dev/null -c 'python3 packages/tests/test_codex_hooks.py'",
+            ):
+                with self.subTest(command=command):
+                    self.assertIn('"deny"', run_hook(data, repo, command))
+
+    def test_opaque_shell_forms_cannot_hide_merge(self) -> None:
+        """Publication, receipt, destructive and test hooks refuse the same opaque Bash bodies."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, repo = Path(tmp) / "data", Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", "-b", "feature", str(repo)], check=True)
+            env = os.environ | {"PLUGIN_DATA": str(data), "CODERAILS_HOOK_TELEMETRY_DIR": tmp}
+            for command in ("bash -c $'gh pr merge 7'", "bash --rcfile /dev/null -c 'gh pr merge 7'"):
+                payload = json.dumps({"session_id": "s1", "cwd": str(repo), "tool_input": {"command": command}})
+                for hook in ("pr_publication_gate", "action_authority_gate", "destructive_bash_gate", "test_gate"):
+                    with self.subTest(command=command, hook=hook):
+                        result = subprocess.run(
+                            [sys.executable, str(HOOK.parent / f"{hook}.py")],
+                            input=payload,
+                            capture_output=True,
+                            text=True,
+                            env=env,
+                            check=False,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertIn('"deny"', result.stdout)
+
     def test_three_runs_in_one_command_are_denied(self) -> None:
         """One tool call cannot hide the third run in later shell segments."""
         with tempfile.TemporaryDirectory() as tmp:

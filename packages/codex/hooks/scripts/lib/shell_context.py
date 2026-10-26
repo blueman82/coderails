@@ -201,6 +201,31 @@ def shell_body(argv: list[str]) -> str | None:
     return None
 
 
+def ansi_c_quote(source: str) -> bool:
+    """Detect active Bash $'...' quoting without matching inert single-quoted text."""
+    quote = ""
+    index = 0
+    while index < len(source):
+        char = source[index]
+        if char == "\\" and quote != "'":
+            index += 2
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char == "$" and source[index + 1 : index + 2] == "'":
+            return True
+        elif char in "'\"":
+            quote = char
+        index += 1
+    return False
+
+
+def shell_c_requested(argv: list[str]) -> bool:
+    """Recognize a -c option whose body the bounded parser could not locate."""
+    return any(token.startswith("-") and not token.startswith("--") and "c" in token[1:] for token in argv[1:])
+
+
 def invocations(
     command: str, cwd: str = "", depth: int = 0, *, strict: bool = False
 ) -> list[tuple[str, list[str], str]]:
@@ -209,6 +234,8 @@ def invocations(
     directories: list[str] = []
     cursor = 0
     for segment, tokens in split_all(command):
+        if strict and ansi_c_quote(segment):
+            raise OpaqueShellError("ANSI-C quoted shell syntax is opaque")
         at = command.find(segment, cursor)
         if at < 0:
             at = cursor
@@ -241,6 +268,8 @@ def invocations(
             continue
         found.append((segment, argv, where))
         body = shell_body(argv)
+        if strict and body is None and argv[0] in SHELLS and shell_c_requested(argv):
+            raise OpaqueShellError("shell -c body follows unsupported options")
         if body is None and argv[0] == "eval" and len(argv) > 1:
             body = " ".join(argv[1:])
         if body is not None:
