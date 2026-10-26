@@ -69,6 +69,76 @@ def message_for(state: dict[str, Any]) -> str:
 class NativeDispatchCliTests(unittest.TestCase):
     """Require v3 ownership, a begin-wave record and frozen evals for every spawn in a graph-bound session."""
 
+    def test_native_hook_traces_invalid_identity_without_using_it_as_a_path(self) -> None:
+        """Malformed harness identity is denied with a stable code and a safe audit record."""
+        plugin = ROOT / "packages/codex"
+        with tempfile.TemporaryDirectory() as scratch:
+            directory = Path(scratch)
+            audit = directory / "discipline.log"
+            base: dict[str, object] = {
+                "tool_name": "collaborationspawn_agent",
+                "tool_input": {"task_name": "ordinary", "message": "ordinary task"},
+                "session_id": "parent",
+                "cwd": scratch,
+            }
+            env = os.environ | {
+                "PLUGIN_ROOT": str(plugin),
+                "PLUGIN_DATA": str(directory / "data"),
+                "CODERAILS_DISCIPLINE_LOG": str(audit),
+                "CODERAILS_AGENTIC_LOOP_DIR": str(directory / "loops"),
+            }
+            cases: list[tuple[dict[str, object], str]] = [
+                ({"session_id": ...}, "dispatch_session_required"),
+                ({"session_id": None}, "dispatch_session_required"),
+                ({"session_id": 7}, "dispatch_session_required"),
+                ({"session_id": []}, "dispatch_session_required"),
+                ({"session_id": "  "}, "dispatch_session_required"),
+                ({"cwd": ...}, "dispatch_cwd_required"),
+                ({"cwd": None}, "dispatch_cwd_required"),
+                ({"cwd": 7}, "dispatch_cwd_required"),
+                ({"cwd": []}, "dispatch_cwd_required"),
+                ({"cwd": "  "}, "dispatch_cwd_required"),
+                ({"session_id": ".."}, "dispatch_unsafe_session"),
+                ({"session_id": "a/b"}, "dispatch_unsafe_session"),
+                ({"session_id": "a..b"}, "dispatch_unsafe_session"),
+            ]
+            for graph_task in (False, True):
+                for mutation, code in cases:
+                    with self.subTest(graph_task=graph_task, mutation=mutation):
+                        payload = base | mutation
+                        for field, value in mutation.items():
+                            if value is ...:
+                                payload.pop(field)
+                        if graph_task:
+                            payload["tool_input"] = {"task_name": TASK, "message": "graph task"}
+                        before = audit.read_text() if audit.exists() else ""
+                        result = subprocess.run(
+                            [sys.executable, str(plugin / "hooks/scripts/loop_dispatch_guard.py")],
+                            input=json.dumps(payload),
+                            capture_output=True,
+                            text=True,
+                            env=env,
+                            check=False,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        decision = json.loads(result.stdout)["hookSpecificOutput"]
+                        self.assertEqual(decision["permissionDecision"], "deny")
+                        self.assertIn(code, decision["permissionDecisionReason"])
+                        added = audit.read_text()[len(before) :]
+                        self.assertIn(f"reason_code={code}", added)
+                        self.assertNotIn(str(mutation.get("session_id", "..")), added)
+            self.assertFalse((directory / "loops" / "a").exists())
+            ordinary = subprocess.run(
+                [sys.executable, str(plugin / "hooks/scripts/loop_dispatch_guard.py")],
+                input=json.dumps(base),
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(ordinary.returncode, 0, ordinary.stderr)
+            self.assertEqual(ordinary.stdout, "")
+
     def test_native_hook_denies_when_authorization_lock_is_held(self) -> None:
         """One blocked flock cannot outlive the host's ten-second hook budget without a denial."""
         plugin = ROOT / "packages/codex"
