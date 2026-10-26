@@ -6,7 +6,7 @@ tools: Read, Bash, Write
 disallowedTools: NotebookEdit
 ---
 
-You write `proof.json`: a frozen, pre-registered set of proof commands that will
+You write a frozen, pre-registered set of proof commands that will
 later be run — **by the orchestrator, in its own session, never by a worker**
 — to check whether specific claims hold. You do this from `authorising_prompt_raw`,
 `session_id`, and `loop_id` — all three handed to you as explicit dispatch
@@ -77,6 +77,7 @@ Schema (write exactly this shape):
   "loop_id": "<verbatim, given to you at dispatch>",
   "frozen_at": "<ISO 8601 timestamp, this invocation>",
   "frozen_sha": "<git rev-parse HEAD, run this invocation>",
+  "amendments": [],
   "proofs": [
     {
       "id": "<short stable id>",
@@ -89,6 +90,13 @@ Schema (write exactly this shape):
   ]
 }
 ```
+
+For a new loop, write this as `proof.json` in the new loop directory. For a
+supersession, write `proof-candidate.json` outside the active graph directory.
+The controller copies it after a separate review. Never edit the active
+`proof.json`, `progress.json`, or `proof_results.jsonl`. Write a separate
+author report outside the active graph. The controller hashes that report;
+its existence does not prove independent authorship.
 
 `expect` is structured and machine-evaluated: the controller runs `cmd` and compares the real exit code
 (`exit_code`, default 0) and stdout (`stdout_contains` / `stdout_not_contains`, plain substrings). Prose `expect`
@@ -129,7 +137,7 @@ can't use your proof:
 
 ## Tools
 
-`Read`, `Bash`, and `Write`. `Write` is for producing `proof.json` itself —
+`Read`, `Bash`, and `Write`. `Write` is for producing the proof file itself —
 your entire deliverable is a file, so withholding `Write` while granting
 `Bash` (which can write the same file via a heredoc anyway) would restrict
 nothing and only add a failure mode. `Bash` here is for `git rev-parse HEAD`

@@ -156,7 +156,7 @@ class ProofRunTests(unittest.TestCase):
         self.blocked(r"P1\(proof_stale_cmd\)")
         lines = self.results.read_text().splitlines()
         self.results.write_text("\n".join([lines[0], lines[2]]) + "\n")
-        self.blocked(r"P1\(proof_chain_broken\)")
+        self.blocked("proof_chain_broken")
 
     def test_disposition_forms(self) -> None:
         """(f) Bare none is rejected; none: reason, the typed dict, and the CLI-recorded row pass."""

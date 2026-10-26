@@ -12,6 +12,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import runpy
 import subprocess
 from pathlib import Path
@@ -47,6 +48,16 @@ _FIELDS = [
     *("seq", "kind", "proof_id", "cmd_sha256", "proof_json_sha256", "session_id", "loop_id", "head_sha", "cwd"),
     *("exit_code", "stdout_sha256", "stderr_sha256", "excerpt", "started", "ended", "expect_matched", "verdict"),
 ]
+_SUPERSEDE_FIELDS = (
+    "original_raw_sha256",
+    "original_canonical_sha256",
+    "candidate_raw_sha256",
+    "candidate_canonical_sha256",
+    "candidate_path",
+    "author_evidence_sha256",
+    "author_evidence_path",
+    "reason",
+)
 
 
 class ChainError(ValueError):
@@ -90,13 +101,24 @@ def read_rows(path: Path) -> list[dict[str, Any]]:
         if (
             not set(_FIELDS).issubset(row)
             or not isinstance(row["kind"], str)
-            or row["kind"] not in {"freeze", "run", "disposition"}
+            or row["kind"] not in {"freeze", "run", "disposition", "supersede"}
             or any(
                 row[key] is not None and not isinstance(row[key], str)
                 for key in ("proof_id", "session_id", "loop_id", "verdict")
             )
         ):
             raise ChainError(f"row {number} has missing or invalid fields")
+        if row["kind"] == "supersede" and (
+            not set(_SUPERSEDE_FIELDS).issubset(row)
+            or any(not isinstance(row[key], str) or not row[key].strip() for key in _SUPERSEDE_FIELDS)
+            or any(
+                not isinstance(row[key], str) or re.fullmatch(r"[0-9a-f]{64}", row[key]) is None
+                for key in (*_SUPERSEDE_FIELDS[:4], "author_evidence_sha256")
+            )
+            or not isinstance(row["head_sha"], str)
+            or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", row["head_sha"]) is None
+        ):
+            raise ChainError(f"row {number} has invalid supersession fields")
         previous = row["row_sha256"]
         rows.append(row)
     return rows
@@ -109,7 +131,11 @@ def append(path: Path, **fields: object) -> dict[str, Any]:
         fcntl.flock(stream, fcntl.LOCK_EX)
         stream.seek(0)
         rows = read_rows(path)
+        if fields.get("kind") == "supersede" and any(row["kind"] == "supersede" for row in rows):
+            raise ChainError("proof_supersession_duplicate")
         row: dict[str, Any] = {name: fields.get(name) for name in _FIELDS}
+        if fields.get("kind") == "supersede":
+            row.update({name: fields.get(name) for name in _SUPERSEDE_FIELDS})
         row["seq"] = len(rows) + 1
         row["prev_sha256"] = rows[-1]["row_sha256"] if rows else GENESIS
         row["row_sha256"] = _digest(row)
@@ -206,7 +232,9 @@ def _check(
     return "" if run["verdict"] == "satisfied" else VERDICT_REASON.get(run["verdict"], "proof_failed")
 
 
-def verify(proof_doc: dict[str, Any], results_path: Path, state: dict[str, Any]) -> tuple[list[str], list[str]]:
+def verify(
+    proof_doc: dict[str, Any], results_path: Path, state: dict[str, Any], after_seq: int = 0
+) -> tuple[list[str], list[str]]:
     """Return (offenders, disclosures): every frozen proof needs a latest satisfied run row on a valid chain."""
     proofs = [_item(p) for p in cast(list[object], proof_doc.get("proofs") or [])]
     withdrawn = [_item(p) for p in cast(list[object], proof_doc.get("withdrawn_proofs") or [])]
@@ -219,8 +247,12 @@ def verify(proof_doc: dict[str, Any], results_path: Path, state: dict[str, Any])
     except ChainError:
         trace("proof.gate", "blocked", "proof_chain_broken", session, loop)
         return [f"{name}(proof_chain_broken)" for name, _, _ in everything], []
-    freezes = [r for r in rows if r["kind"] == "freeze" and (r["session_id"], r["loop_id"]) == (session, loop)]
-    runs = {r["proof_id"]: r for r in rows if r["kind"] == "run"}
+    freezes = [
+        r
+        for r in rows
+        if r["seq"] > after_seq and r["kind"] == "freeze" and (r["session_id"], r["loop_id"]) == (session, loop)
+    ]
+    runs = {r["proof_id"]: r for r in rows if r["seq"] > after_seq and r["kind"] == "run"}
     current = _git_context(Path.cwd())
     offenders: list[str] = []
     disclosures: list[str] = []

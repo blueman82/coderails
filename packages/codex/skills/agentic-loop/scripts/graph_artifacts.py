@@ -12,7 +12,7 @@ from graph_data import array_value, load_evidence, nonempty, object_value
 from graph_identity import GraphError, is_frozen_loop_evals
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from scripts.lib import proof_results  # noqa: E402
+from scripts.lib import proof_results, proof_suite  # noqa: E402
 from scripts.lib.eval_integrity import IntegrityError, verify_suite  # noqa: E402
 
 
@@ -74,17 +74,18 @@ def validate_evals(state: dict[str, Any], revision: int | None, path: Path) -> N
 def _validate_proofs(state: dict[str, Any], proof_path: Path) -> None:
     """Require a valid no-proof disposition, or every frozen proof satisfied by a controller-recorded run row."""
     results = proof_path.with_name(proof_results.RESULTS_NAME)
-    if not proof_path.exists():
-        try:
-            rows = proof_results.read_rows(results)
-        except proof_results.ChainError:
-            rows = []
+    try:
+        proof, rows, cutoff = proof_suite.active_suite(proof_path, state)
+    except proof_results.ChainError as error:
+        raise GraphError(f"proof_chain_broken: {error}") from error
+    except proof_suite.SuiteError as error:
+        raise GraphError(str(error)) from error
+    if proof is None:
         code = proof_results.disposition_reason(state, rows)
         if code:
             proof_results.trace("proof.gate", "blocked", code, state["session_id"], state["loop_id"])
             raise GraphError(f"proof evidence is missing and has no valid disposition ({code})")
         return
-    proof = load_evidence(proof_path, "proof")
     _matching(proof, state, "proof")
     proofs = array_value(proof.get("proofs"), "proof.proofs")
     withdrawn = array_value(proof.get("withdrawn_proofs", []), "proof.withdrawn_proofs")
@@ -92,13 +93,9 @@ def _validate_proofs(state: dict[str, Any], proof_path: Path) -> None:
         raise GraphError("proofs+withdrawn_proofs exceeds cap of 100")
     if not proofs:
         if withdrawn:
-            offenders, _ = proof_results.verify(proof, results, state)
+            offenders, _ = proof_results.verify(proof, results, state, cutoff)
             if offenders:
                 raise GraphError("frozen proofs are not verified: " + ", ".join(offenders))
-        try:
-            rows = proof_results.read_rows(results)
-        except proof_results.ChainError:
-            rows = []
         if proof_results.disposition_reason(state, rows):
             raise GraphError("proof evidence is missing or not passing (proof_no_proofs)")
         return
@@ -106,7 +103,7 @@ def _validate_proofs(state: dict[str, Any], proof_path: Path) -> None:
         item = object_value(raw_proof, f"proof.proofs[{index}]")
         nonempty(item.get("id"), f"proof.proofs[{index}].id")
         nonempty(item.get("cmd"), f"proof.proofs[{index}].cmd")
-    offenders, _ = proof_results.verify(proof, results, state)
+    offenders, _ = proof_results.verify(proof, results, state, cutoff)
     if offenders:
         raise GraphError("frozen proofs are not verified: " + ", ".join(offenders))
 

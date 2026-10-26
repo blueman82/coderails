@@ -410,6 +410,26 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Proof gate blocked a `complete` declaration
 
+If one frozen proof suite must be replaced within the same graph, keep the original `proof.json` intact. Obtain a
+pending schema-2 candidate and a separate author report from an isolated proof author. Keep both input files outside
+the active graph. Review them, then run:
+
+```bash
+python3 scripts/lib/proof.py supersede <state-dir> --candidate <candidate-path> \
+  --reason "<why the original cannot run>" --original-sha256 <raw-proof-json-sha256> \
+  --author-evidence <report-path>
+python3 scripts/lib/proof.py freeze <state-dir>
+python3 scripts/lib/proof.py run <state-dir> --all
+python3 scripts/lib/proof.py status <state-dir>
+```
+
+The command stores one candidate by content hash and appends a chained `supersede` row. It binds the original and
+candidate raw and canonical hashes, loop identity, report bytes, reason, and issuance HEAD. Both providers use the
+same selected suite. Only freeze and run rows after that binding count. The run HEAD must match the current checkout.
+A second replacement, changed original or candidate, missing report, or invalid chain blocks. Keep the report at
+its recorded path. An orphan candidate
+file has no effect. The CLI checks report bytes, not the author's identity or independence; review that separately.
+
 - Symptom: `loop_stall_guard` (Claude) or `graph.py complete` / `verify-completion` (Codex) names frozen proofs as
   `P1(proof_...)`. The gate reads only `proof_results.jsonl` beside `proof.json`, written by the controller via
   `scripts/lib/proof.py`; the transcript and the `status` field are never consulted.

@@ -178,7 +178,7 @@ class ProofBoundaryTests(HookTestCase):
                     )
                 )
                 self.results.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-                with self.assertRaisesRegex(ValueError, r"P1\(proof_chain_broken\)"):
+                with self.assertRaisesRegex(ValueError, "proof_chain_broken"):
                     validate_proofs(self.proof, self.state)
 
     def test_independent_unit_shapes_reasons_and_compounded_diagnostics(self) -> None:
