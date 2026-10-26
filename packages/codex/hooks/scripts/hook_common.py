@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # Codex ships scripts/ beside hooks/
-from scripts.lib.authority_object import safe_session  # noqa: E402
+from scripts.lib.authority_object import safe_session as safe_session  # noqa: E402
 
 safe_id = safe_session
 
@@ -158,7 +158,9 @@ def session_dir(session_id: str) -> Path | None:
     return data_dir / "sessions" / safe_session
 
 
-def loop_state_path(cwd: str, session_id: str, *, strict: bool = False) -> Path | None:
+def loop_state_path(
+    cwd: str, session_id: str, *, strict: bool = False, timeout_seconds: float | None = None
+) -> Path | None:
     """Find session state; strict callers refuse uncertain discovery instead of treating it as absent."""
     safe_session = session_id.replace("/", "_").replace("..", "")
     if not safe_session:
@@ -170,6 +172,7 @@ def loop_state_path(cwd: str, session_id: str, *, strict: bool = False) -> Path 
             capture_output=True,
             check=False,
             text=True,
+            timeout=timeout_seconds,
         )
     except OSError:
         if strict:

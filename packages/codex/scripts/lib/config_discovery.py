@@ -7,11 +7,15 @@ import subprocess
 from pathlib import Path
 
 
-def strict_config_path(start_dir: str | Path | None = None) -> str:
+def strict_config_path(start_dir: str | Path | None = None, *, timeout_seconds: float | None = None) -> str:
     """Return a proven config path or proven absence; raise when Git or file checks are uncertain."""
     start = Path(start_dir or Path.cwd()).resolve()
     result = subprocess.run(
-        ["git", "-C", str(start), "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False
+        ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout_seconds,
     )
     if result.returncode:
         if "not a git repository" not in result.stderr.lower():

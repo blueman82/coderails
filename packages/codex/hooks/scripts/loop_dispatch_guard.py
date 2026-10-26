@@ -20,6 +20,7 @@ from hook_common import (
     loop_state_path,
     payload_object,
     read_input,
+    safe_session,
     text_field,
 )
 
@@ -51,12 +52,17 @@ def dispatch_id(message: str) -> str:
     return found if isinstance(found, str) else ""
 
 
-def _bounded_graph_output(graph: Path, deadline: float, *arguments: str) -> dict[str, object] | None:
-    """Spend one shared hook budget across inspection and authorization."""
+def _remaining_budget(deadline: float) -> float:
+    """Return time left for all graph discovery and authorization work."""
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("native graph check exceeded the hook budget")
-    return graph_output(graph, *arguments, timeout_seconds=remaining)
+    return remaining
+
+
+def _bounded_graph_output(graph: Path, deadline: float, *arguments: str) -> dict[str, object] | None:
+    """Spend the same hook budget on each graph command."""
+    return graph_output(graph, *arguments, timeout_seconds=_remaining_budget(deadline))
 
 
 def _check() -> int:
@@ -80,17 +86,18 @@ def _check() -> int:
         return 0
     session_id = text_field(payload, "session_id")
     cwd = text_field(payload, "cwd")
-    if not session_id.strip() or not cwd.strip():
+    if not safe_session(session_id) or not cwd.strip():
         deny("Graph worker dispatch requires a session id and working directory.")
         return 0
-    config = config_path(cwd, strict=True)
+    config = config_path(cwd, strict=True, timeout_seconds=_remaining_budget(deadline))
     if config:
         try:
             strict_settings(config, session_id)
         except ConfigRejected as error:
             deny(f"Graph worker dispatch requires valid workflow configuration: {error}")
             return 0
-    state = loop_state_path(cwd, session_id, strict=True)
+    state = loop_state_path(cwd, session_id, strict=True, timeout_seconds=_remaining_budget(deadline))
+    _remaining_budget(deadline)
     if state is None:
         if enveloped or graph_named:
             deny("Graph worker dispatch requires this session's progress.json. Start the native graph first.")
@@ -108,8 +115,7 @@ def _check() -> int:
         deny("Graph worker dispatch requires valid provider-local graph state.")
         return 0
     if inspection.get("status") == "complete":
-        if enveloped or graph_named:
-            deny("A completed graph cannot dispatch graph workers.")
+        deny("A completed graph cannot dispatch native workers.")
         return 0
     agent_type = tool_input.get("agent_type")
     try:

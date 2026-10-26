@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any
@@ -67,7 +68,9 @@ class DispatchGuardTests(unittest.TestCase):
             self.message_file_text = Path(arguments[arguments.index("--message-file") + 1]).read_text()
             return {"loop_id": "loop", "wave_id": "wave-2", "dispatch_id": "disp_1"} if authorized else None
 
-        def state_path(_cwd: str, _session: str, *, strict: bool = False) -> Path | None:
+        def state_path(
+            _cwd: str, _session: str, *, strict: bool = False, timeout_seconds: float | None = None
+        ) -> Path | None:
             return self.state if self.state.is_file() else None
 
         with (
@@ -258,12 +261,77 @@ class DispatchGuardTests(unittest.TestCase):
             self.assertEqual(guard.main(), 0)
             self.assertIn("dispatch_hook_error", denial.call_args.args[0])
 
-    def test_completed_graph_allows_ordinary_spawns_but_not_dispatches(self) -> None:
-        """A finished loop does not bind unrelated agents, and cannot dispatch graph workers."""
+    def test_completed_graph_denies_spawns_before_ownership_is_proven(self) -> None:
+        """An inspected complete state may belong to another session, so it cannot authorize a spawn."""
         self.tool_input.update(task_name="ordinary", message="Read documentation.")
-        self.assertEqual(self._run(status="complete"), (False, 0))
+        self.assertEqual(self._run(status="complete"), (True, 0))
         self.tool_input["message"] = ENVELOPE + "\nx"
         self.assertEqual(self._run(status="complete"), (True, 0))
+
+    def test_unsafe_session_id_denies_before_graph_discovery(self) -> None:
+        """The raw id must not be sanitized into a different graph owner."""
+        self.tool_input.update(task_name="ordinary", message="Read documentation.")
+        for value in ("..", "other/parent", "a..b"):
+            with self.subTest(value=value):
+                self.payload["session_id"] = value
+                self.sent.clear()
+                self.assertEqual(self._run(), (True, 0))
+                self.assertIn("session id", self.denial_reason)
+
+    def test_slow_git_discovery_denies_within_shared_budget(self) -> None:
+        """Both config and graph Git lookups must use the hook's one deadline."""
+        self.tool_input.update(task_name="ordinary", message="Read documentation.")
+        self.state.unlink()
+
+        def check_discovery(module: str, config: str | None) -> None:
+            seen: list[float | None] = []
+
+            def git_result(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+                timeout = kwargs.get("timeout")
+                seen.append(timeout if isinstance(timeout, float) else None)
+                if isinstance(timeout, float):
+                    raise subprocess.TimeoutExpired("git", timeout)
+                return subprocess.CompletedProcess("git", 1, "", "not a git repository")
+
+            patches = [
+                patch.object(guard, "read_input", return_value=json.dumps(self.payload)),
+                patch(f"{module}.subprocess.run", side_effect=git_result),
+                patch.object(guard, "deny"),
+                patch.object(guard, "log"),
+            ]
+            if config is not None:
+                patches.append(patch.object(guard, "config_path", return_value=config))
+            with patches[0], patches[1], patches[2] as denial, patches[3]:
+                if config is not None:
+                    with patches[4]:
+                        self.assertEqual(guard.main(), 0)
+                else:
+                    self.assertEqual(guard.main(), 0)
+            self.assertTrue(seen)
+            self.assertTrue(all(value is not None and 0 < value <= 7 for value in seen))
+            self.assertIn("dispatch_hook_error", denial.call_args.args[0])
+
+        for module, config in (("scripts.lib.config_discovery", None), ("hook_common", "")):
+            with self.subTest(module=module):
+                check_discovery(module, config)
+
+    def test_real_slow_git_discovery_denies_before_hook_timeout(self) -> None:
+        """A blocked Git child is killed soon enough for the hook to emit its denial."""
+        git = Path(self.scratch.name) / "git"
+        git.write_text("#!/usr/bin/env python3\nimport time\ntime.sleep(20)\n")
+        git.chmod(0o755)
+        self.tool_input.update(task_name="ordinary", message="Read documentation.")
+        with (
+            patch.dict("os.environ", {"PATH": f"{git.parent}:{os.environ['PATH']}"}),
+            patch.object(guard, "read_input", return_value=json.dumps(self.payload)),
+            patch.object(guard, "deny") as denial,
+            patch.object(guard, "log"),
+        ):
+            started = time.monotonic()
+            self.assertEqual(guard.main(), 0)
+            elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 9)
+        self.assertIn("dispatch_hook_error", denial.call_args.args[0])
 
     def test_missing_identity_denies_every_native_spawn(self) -> None:
         """No spawn can bypass graph discovery without a usable session and cwd."""

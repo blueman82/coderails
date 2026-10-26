@@ -86,16 +86,13 @@ class PushUnitBindingTests(unittest.TestCase):
         """A clean index cannot hide an earlier unscoped commit from the push."""
         with tempfile.TemporaryDirectory() as scratch:
             fixture = PushFixture(Path(scratch))
-            progress = fixture.root / "progress.json"
-            progress.write_text(
-                json.dumps({"work_units": {"1": {"manifest": ["base.txt"], "worktree": str(fixture.repo)}}})
-            )
+            progress = owned_progress(fixture, "1", {"manifest": ["base.txt"], "worktree": str(fixture.repo)})
             (fixture.repo / "outside.txt").write_text("foreign")
             fixture.git(fixture.repo, "add", "outside.txt")
             fixture.git(fixture.repo, "commit", "-m", "preexisting foreign commit")
             fixture.record_pushes()
             result = fixture.push("--unit", "1", "--progress", str(progress))
-            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("diff_manifest:out_of_manifest", result.stderr)
             self.assertEqual(
                 fixture.git(fixture.repo, "rev-parse", "origin/main"), fixture.git(fixture.repo, "rev-parse", "main")
             )
@@ -153,11 +150,10 @@ class PushUnitBindingTests(unittest.TestCase):
             (fixture.repo / "scope").mkdir()
             fixture.git(fixture.repo, "mv", "outside.txt", "scope/inside.txt")
             fixture.git(fixture.repo, "commit", "-m", "rename into unit")
-            progress = fixture.root / "progress.json"
-            progress.write_text(json.dumps({"work_units": {"1": {"manifest": ["scope/**"]}}}))
+            progress = owned_progress(fixture, "1", {"manifest": ["scope/**"], "worktree": str(fixture.repo)})
             fixture.record_pushes()
             result = fixture.push("--unit", "1", "--progress", str(progress))
-            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("diff_manifest:out_of_manifest", result.stderr)
             self.assertFalse(fixture.log.exists(), result.stdout + result.stderr)
 
     def test_preflight_out_of_manifest_has_a_publication_trace(self) -> None:

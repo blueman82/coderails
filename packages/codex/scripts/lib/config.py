@@ -22,10 +22,12 @@ if not __package__:
 from scripts.lib.config_discovery import strict_config_path
 
 
-def config_path(start_dir: str | Path | None = None, *, strict: bool = False) -> str:
+def config_path(
+    start_dir: str | Path | None = None, *, strict: bool = False, timeout_seconds: float | None = None
+) -> str:
     """Return the nearest config path, or empty text outside configured repositories."""
     if strict:
-        return strict_config_path(start_dir)
+        return strict_config_path(start_dir, timeout_seconds=timeout_seconds)
     start = Path(start_dir or Path.cwd()).resolve()
     try:
         result = subprocess.run(
