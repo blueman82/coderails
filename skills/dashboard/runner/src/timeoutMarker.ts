@@ -93,7 +93,12 @@ export function ensureTerminalRow(
     const mine = readRows(contents.subarray(boundary.length));
     const own = mine.filter((row) => row.run_id === ctx.runId && row.routine === routine.name);
     const terminal = own.filter((row) => TERMINAL_OUTCOMES.has(row.outcome)).pop();
-    if (terminal) return { passed: terminal.outcome === "run_ok", reason: `routine_terminal:${terminal.outcome}` };
+    if (terminal) {
+      if (terminal.outcome !== "run_ok") return { passed: false, reason: `routine_terminal:${terminal.outcome}` };
+      const marker = `run_id=${ctx.runId} run=ok`;
+      const humanHasOwnSuccess = readLog(human).toString("utf-8").split("\n").some((line) => line.endsWith(marker));
+      return { passed: humanHasOwnSuccess, reason: humanHasOwnSuccess ? "routine_terminal:run_ok" : "routine_human_marker_missing" };
+    }
     if (own.some((row) => row.outcome === "run_incomplete" && row.reason_code === "merged_incomplete")) {
       return { passed: false, reason: "routine_merged_incomplete" };
     }

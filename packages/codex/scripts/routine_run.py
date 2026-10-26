@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Run the headless state machine for docs-sync and loop-retro-promotion.
-
-Usage: routine_run.py [--log PATH] ROUTINE begin|stage NAME|run-gate STAGE -- ARGV...
-                                     |abort CODE|refuse GATE|finish ok|no_drift
-Stages follow the spec; manifest and gate commands can refuse a run.
-Abort/refusal cleans only an unmerged PR and local branch. Merge attempts are pinned before execution and checked live.
-Events go through routine_log.emit; exits are 0 success, 1 abort/refusal, 2 refusal.
-"""
+"""Run the headless state machine for docs-sync and loop-retro-promotion."""
 
 from __future__ import annotations
 
@@ -61,7 +54,7 @@ class Run:
         """The spec's gate stages mapped to the one script each may run."""
         return cast(dict[str, str], self.spec.get("gates", {}))
 
-    def load(self) -> bool:
+    def load(self, allow_foreign: bool = False) -> bool:
         """Load the active run's state; False (with a message) when there is none."""
         try:
             self.state = artifact_io.read_object(self.state_path)
@@ -71,6 +64,15 @@ class Run:
         if self.state.get("routine") != self.routine:
             print("routine_mismatch: use this routine's own log", file=sys.stderr)
             return False
+        if not allow_foreign:
+            token, run_id = os.environ.get("CODERAILS_ROUTINE_RUN_ID"), self.state.get("run_id")
+            if (
+                not isinstance(run_id, str)
+                or not re.fullmatch(r"[0-9a-f]{12}([0-9a-f]{4})?", run_id)
+                or token != (run_id if len(run_id) == 16 else None)
+            ):
+                print("run_id_mismatch: active run belongs to another invocation", file=sys.stderr)
+                return False
         if self.state.get("human"):  # the log paths pinned at begin
             self.human = Path(str(self.state["human"]))
             self.jsonl = self.human.with_suffix(".jsonl")
@@ -204,17 +206,14 @@ def manifest_check(run: Run, stage: str) -> int:
 
 
 def cmd_begin(run: Run, args: argparse.Namespace) -> int:
-    """Start a run: write the state and the provisional run_incomplete row; print the run id.
-
-    Refused while a run is open, or after a same-day abort/refusal, unless --new closes the previous run.
-    """
+    """Start a run with state and a provisional event; --new replaces an old run."""
     run_id = os.environ.get("CODERAILS_ROUTINE_RUN_ID")
     if run_id is not None and not re.fullmatch(r"[0-9a-f]{16}", run_id):
         print("run_id_invalid: expected 16 lowercase hex characters", file=sys.stderr)
         return 2
     human = run.human
     if run.state_path.exists():
-        if not run.load():
+        if not run.load(allow_foreign=True):
             return 2
         old = run.state
         failed = old.get("outcome") in ("run_abort", "run_refused")

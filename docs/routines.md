@@ -226,7 +226,10 @@ Promotion requires `--log <repo-key-dir>/promotion-runs.log`.
   at begin so a run crossing midnight keeps its log.
 - The runner passes its 16-character run ID to the child as
   `CODERAILS_ROUTINE_RUN_ID`. `begin` validates it; a manual run without it
-  generates an ID. The runner accepts terminal rows for its own ID only.
+  generates a 12-character ID. Later stage, gate and terminal calls require
+  that same child ID; manual calls keep the variable unset. Explicit
+  `begin --new` can replace an earlier run. The runner accepts terminal rows for its
+  own ID only.
 - After a merge attempt, a failed PR fetch or changed head keeps the run red
   and blocks cleanup. A confirmed merge cannot be aborted or cleaned up.
   If later state is incomplete, the row is `run_incomplete merged_incomplete`
@@ -245,8 +248,10 @@ under its log lock. Outcomes are `stage_ok`, `run_ok`, `run_abort`,
 `run_refused`, `run_incomplete`; reason codes are closed per routine. Unknown
 outcomes/codes exit 2 and append nothing. The human marker is `run=ok`,
 `abort=<code>`, `refused=<gate>`, `abort=incomplete-run`,
-`incomplete=merged`, `incomplete=merge-unknown` or `stage=<name>`. The runner reads JSONL for a merged
-incomplete run and keeps it red. Both files open before either
+`incomplete=merged`, `incomplete=merge-unknown` or `stage=<name>`. Human lines
+carry `run_id=<id>`; the runner requires a matching human `run=ok` before
+accepting a JSONL success. It reads JSONL for a merged incomplete run and
+keeps it red. Both files open before either
 append. A failed write returns `log_unwritable` without advancing/ending state.
 The files are **not a transaction**: write/close errors or a crash can leave
 partial output. Inspect both logs and persisted state after a write error.
@@ -262,6 +267,8 @@ only appended rows with that prefix intact. A changed prefix, read/write error,
 missing terminal, abort or refusal returns failed evidence and cannot pass via
 an old human `run=ok`. It pins the artifact date/context for that invocation.
 It checks only its own run ID; another child cannot make this invocation green.
+A direct human-log `last-marker` read does not bind JSONL or run ID; a failed
+human append can leave a prior green marker visible to that reader.
 A `merged_incomplete` row stays red without a fallback abort. Fallback
 appends do not take the Python log lock or
 perform branch/PR cleanup. Concurrent producers remain an integration limit.

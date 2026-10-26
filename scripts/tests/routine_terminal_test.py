@@ -30,12 +30,35 @@ class TerminalSaveTests(RoutineCase):
         self.assertEqual(self.rows(), [])
         with mock.patch.dict(os.environ, {"CODERAILS_ROUTINE_RUN_ID": "0123456789abcdef"}):
             self.assertEqual(self.run_tool("begin").returncode, 0)
+            self.assertEqual(self.run_tool("finish", "no_drift").returncode, 0)
         self.assertEqual(self.rows()[0]["run_id"], "0123456789abcdef")
-        self.assertEqual(self.run_tool("finish", "no_drift").returncode, 0)
         with mock.patch.dict(os.environ):
             os.environ.pop("CODERAILS_ROUTINE_RUN_ID", None)
             self.assertEqual(self.run_tool("begin").returncode, 0)
+            self.assertEqual(self.run_tool("finish", "no_drift").returncode, 0)
+            self.assertEqual(self.run_tool("begin").returncode, 0)
+            self.assertEqual(self.run_tool("stage", "fetch_branch").returncode, 0)
         self.assertEqual(len(self.rows()[-1]["run_id"]), 12)
+
+    def test_foreign_child_cannot_finish_or_abort_active_run(self) -> None:
+        """A different or missing child token cannot mutate a dashboard-owned run."""
+        owner = "0123456789abcdef"
+        with mock.patch.dict(os.environ, {"CODERAILS_ROUTINE_RUN_ID": owner}):
+            self.assertEqual(self.run_tool("begin").returncode, 0)
+        before = self.rows()
+        for foreign in ("fedcba9876543210", None):
+            with self.subTest(foreign=foreign), mock.patch.dict(os.environ):
+                if foreign is None:
+                    os.environ.pop("CODERAILS_ROUTINE_RUN_ID", None)
+                else:
+                    os.environ["CODERAILS_ROUTINE_RUN_ID"] = foreign
+                for command in (("finish", "no_drift"), ("abort", "incomplete-run"), ("stage", "fetch_branch")):
+                    result = self.run_tool(*command)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("run_id_mismatch", result.stderr)
+        self.assertEqual(self.rows(), before)
+        with mock.patch.dict(os.environ, {"CODERAILS_ROUTINE_RUN_ID": owner}):
+            self.assertEqual(self.run_tool("finish", "no_drift").returncode, 0)
 
     def test_merged_incomplete_row_survives_state_save_failure(self) -> None:
         """A save error after a remote merge still leaves a red non-abort row."""

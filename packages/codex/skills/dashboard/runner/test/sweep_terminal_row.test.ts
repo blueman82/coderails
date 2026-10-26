@@ -116,7 +116,7 @@ describe("runner terminal-row check after a routine child exits", () => {
       const terminal = JSON.parse(row(id, "run_ok"));
       terminal.ts = "2026-07-23T20:00:00Z";
       appendFileSync(jsonl(), row(id, "run_incomplete", "incomplete-run") + JSON.stringify(terminal) + "\n");
-      appendFileSync(human(), "2026-07-23T20:00:00Z run=ok\n");
+      appendFileSync(human(), `2026-07-23T20:00:00Z run_id=${id} run=ok\n`);
     });
     expect(result).toMatchObject({ succeeded: 1, failed: 0 });
     expect(rowsOf().map((r) => r.run_id)).toEqual(["previous", ownId, ownId]);
@@ -128,6 +128,13 @@ describe("runner terminal-row check after a routine child exits", () => {
     const { result, notifyImpl } = await sweepWith(() => writeFileSync(jsonl(), row("replacement", "run_ok")));
     expect(result).toMatchObject({ succeeded: 0, failed: 1 });
     expect(notifyImpl).toHaveBeenCalledWith(expect.any(String), expect.stringContaining("routine_log_changed"));
+  });
+
+  it("rejects run_ok JSONL when the human append failed after an earlier green marker", async () => {
+    writeFileSync(human(), "2026-07-23T20:00:00Z run_id=previous run=ok\n");
+    const { result, ownId } = await sweepWith((id) => appendFileSync(jsonl(), row(id, "run_ok")));
+    expect(result).toMatchObject({ succeeded: 0, failed: 1 });
+    expect(rowsOf().at(-1)).toMatchObject({ run_id: ownId, outcome: "run_ok" });
   });
 
   it("records a current abort after an early nonzero child exit", async () => {
@@ -165,7 +172,7 @@ describe("runner terminal-row check after a routine child exits", () => {
   it("writes nothing when the run already has a terminal row", async () => {
     const { result } = await sweepWith((id) => {
       appendFileSync(jsonl(), row(id, "run_incomplete", "incomplete-run") + row(id, "run_ok"));
-      appendFileSync(human(), "2026-07-23T20:00:00Z run=ok\n");
+      appendFileSync(human(), `2026-07-23T20:00:00Z run_id=${id} run=ok\n`);
     });
     expect(rowsOf().map((r) => r.outcome)).toEqual(["run_incomplete", "run_ok"]);
     expect(result.succeeded).toBe(1);
