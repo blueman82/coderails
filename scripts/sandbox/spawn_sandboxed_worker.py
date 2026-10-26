@@ -209,17 +209,23 @@ def import_and_push(
     found = committed_secret(clone, before.get(ref), after[ref], credential_value)
     if found:
         raise refuse("branch_import_refused", f"secret found in the worker's commits ({found}); nothing pushed")
+    if git(worktree, "rev-parse", "HEAD") != before[ref]:
+        raise refuse("branch_import_refused", f"{branch} moved after the worker clone; nothing pushed")
     private = f"refs/coderails/import/{branch}"
     try:
         git(worktree, "fetch", "--quiet", str(clone), f"+refs/heads/{branch}:{private}")
+        if git(worktree, "rev-parse", private) != after[ref]:
+            raise refuse("branch_import_refused", f"{branch} moved in the worker clone; nothing pushed")
         git(worktree, "merge", "--ff-only", "--quiet", private)
     except ValueError as error:
         raise refuse("branch_import_refused", f"{branch} is not a fast-forward import: {error}") from error
     finally:
         with contextlib.suppress(ValueError):
             git(worktree, "update-ref", "-d", private)
+    if git(worktree, "rev-parse", "HEAD") != after[ref]:
+        raise refuse("branch_import_refused", f"{branch} moved after import; nothing pushed")
     trace("imported", "branch_imported")
-    git(worktree, "push", "--quiet", "origin", branch)  # from outside the sandbox, with the operator's own git auth
+    git(worktree, "push", "--quiet", "origin", f"{after[ref]}:{ref}")  # push only the checked worker tip
     trace("pushed", "branch_pushed")
 
 
