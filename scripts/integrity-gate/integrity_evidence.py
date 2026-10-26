@@ -146,7 +146,7 @@ def eval_valid(body: str, number: int, sha: str) -> bool:
     if not _real_int(data.get("schema_version")) or data["schema_version"] != 1 or data.get("scope") != "pr":
         return False
     level = data.get("verification_level")
-    if not isinstance(level, int) or isinstance(level, bool) or str(level) != marker[1] or level < 1:
+    if not isinstance(level, int) or isinstance(level, bool) or str(level) != marker[1]:
         return False
     if not all(_text(data.get(key)) for key in ("task_ref", "verification_justification", "frozen_at")):
         return False

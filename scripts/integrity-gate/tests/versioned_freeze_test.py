@@ -58,6 +58,17 @@ class VersionedFreezeTests(unittest.TestCase):
             self.assertEqual(self.gate(client), 1)
             self.assertIn("eval_evidence_invalid", client.posts[-1][2])
 
+    def test_signed_level_zero_docs_eval_attests(self) -> None:
+        """A one-file docs result at level zero can satisfy the live status gate."""
+        client = EvidenceFixture()
+        client.document["verification_level"] = 0
+        client.marker = client.marker.replace("verification_level=1", "verification_level=0")
+        client.files = [{"filename": "docs/canary.txt"}]
+        client.diff = "diff --git a/docs/canary.txt b/docs/canary.txt\n+x\n"
+        client.resign()
+        self.assertEqual(self.gate(client), 0)
+        self.assertEqual(client.posts[-1][1], "success")
+
     def test_tampered_frozen_oracle_cannot_attest(self) -> None:
         """A changed oracle must fail its frozen hash check."""
         client = EvidenceFixture()
