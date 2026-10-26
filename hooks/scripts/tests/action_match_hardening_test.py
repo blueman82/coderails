@@ -49,6 +49,12 @@ class MatchHardeningTests(unittest.TestCase):
         self.assertTrue(match.targets_main(command, self.repo, "", "git_push"))
         self.assertEqual(self.names(command), ["git_push"])
 
+    def test_env_split_string_push_is_guarded(self) -> None:
+        """A supported env -S wrapper still exposes the literal push destination."""
+        command = 'env -S "git push origin HEAD:main"'
+        found = match.guarded_operations(command, self.repo, implicit_push=True)
+        self.assertEqual([call.name for call in found], ["git_push"])
+
     def test_async_merge_request_is_guarded_but_result_lookup_is_not(self) -> None:
         """The stacked-PR PUT endpoint is a merge; polling its UUID is a read."""
         sha = "f" * 40

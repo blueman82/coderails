@@ -143,7 +143,7 @@ def targets_main_call(call: Operation, *, implicit_push: bool = False) -> bool:
     if git_output(call.git_cwd, *call.prefix, "branch", "--show-current") in {"main", "master"}:
         return True
     if call.name == "git_push":
-        return _push_guarded(call.segment, implicit_push=implicit_push)
+        return _push_guarded(shlex.join(["git", "push", *call.git_args]), implicit_push=implicit_push)
     return False
 
 

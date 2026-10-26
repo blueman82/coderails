@@ -29,6 +29,14 @@ MIRRORS = (
 class MirrorTests(unittest.TestCase):
     """The Codex copies of the receipt modules are the Claude files, byte for byte."""
 
+    def test_codex_env_split_string_push_is_guarded(self) -> None:
+        """The Codex matcher recognizes a protected ref inside a supported env -S wrapper."""
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            subprocess.run(["git", "-C", tmp, "symbolic-ref", "HEAD", "refs/heads/feature"], check=True)
+            found = codex_match.guarded_operations('env -S "git push origin HEAD:main"', tmp, implicit_push=True)
+            self.assertEqual([call.name for call in found], ["git_push"])
+
     def test_mirrors_byte_identical(self) -> None:
         """Every mirrored file matches its Claude source."""
         for name in MIRRORS:
