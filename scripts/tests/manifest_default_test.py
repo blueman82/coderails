@@ -12,6 +12,7 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
+from packages.tests.graph_manifest_fixture import graph_progress  # noqa: E402
 from scripts.lib import config, manifest_policy  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
 from scripts.tests.manifest_policy_test import RepoCase, git_cmd  # noqa: E402
@@ -97,7 +98,15 @@ class DefaultGateTests(RepoCase):
         old = os.getcwd()
         os.chdir(self.dir)
         self.addCleanup(os.chdir, old)
-        env = mock.patch.dict(os.environ, {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)})
+        env = mock.patch.dict(
+            os.environ,
+            {
+                "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
+                "CODERAILS_PUBLICATION_SESSION_ID": "s",
+                "CODEX_SESSION_ID": "",
+                "CODEX_THREAD_ID": "",
+            },
+        )
         env.start()
         self.addCleanup(env.stop)
 
@@ -177,27 +186,21 @@ class DefaultGateTests(RepoCase):
         """A session-owned graph unit cannot publish without its manifest binding."""
         self.commit("docs/guide.md", "hello\n")
         session = "manifest-test-session"
-        common = git_cmd(self.dir, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
-        progress = self.loop / common.replace("/", "-") / session / "progress.json"
-        progress.parent.mkdir(parents=True)
-        progress.write_text(
-            json.dumps(
-                {
-                    "schema_version": 3,
-                    "session_id": session,
-                    "loop_id": "manifest-test-loop",
-                    "work_units": {"C1": {"worktree": str(self.dir), "manifest": ["docs/**"]}},
-                }
-            )
-        )
+        graph_progress(self.dir, self.loop, ["docs/**"], unit="1", session=session)
         with mock.patch.dict(
-            os.environ, {"CLAUDE_CODE_SESSION_ID": session, "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)}
+            os.environ,
+            {
+                "CLAUDE_CODE_SESSION_ID": session,
+                "CODERAILS_PUBLICATION_SESSION_ID": session,
+                "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
+            },
         ):
             self.assertEqual(self.refusal(), "diff_manifest:manifest_unreadable")
         with mock.patch.dict(
             os.environ,
             {
                 "CLAUDE_CODE_SESSION_ID": session,
+                "CODERAILS_PUBLICATION_SESSION_ID": session,
                 "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop / "other-root"),
                 "CODERAILS_AGENTIC_LOOP_DIR": str(self.loop),
             },
@@ -253,27 +256,11 @@ class DefaultGateTests(RepoCase):
     def test_unit_manifest_refuses_outside_file(self) -> None:
         """--unit/--progress: a file outside the unit's manifest is out_of_manifest."""
         self.commit("README.md", "changed\n")
-        progress = self.dir.parent / "progress.json"
-        progress.write_text(
-            json.dumps(
-                {
-                    "session_id": "s",
-                    "loop_id": "l",
-                    "work_units": {"2": {"manifest": ["src/**"], "worktree": str(self.dir)}},
-                }
-            )
-        )
+        progress = graph_progress(self.dir, self.loop, ["src/**"])
         self.assertEqual(self.refusal(unit="2", progress=str(progress)), "diff_manifest:out_of_manifest")
-        progress.write_text(
-            json.dumps(
-                {
-                    "session_id": "s",
-                    "loop_id": "l",
-                    "work_units": {"2": {"manifest": ["**/*.md"], "worktree": str(self.dir)}},
-                }
-            )
-        )
-        self.gate(unit="2", progress=str(progress))
+        progress = graph_progress(self.dir, self.loop, ["**/*.md"], session="s2")
+        with mock.patch.dict(os.environ, {"CODERAILS_PUBLICATION_SESSION_ID": "s2"}):
+            self.gate(unit="2", progress=str(progress))
 
     def test_retro_policy_refuses_second_path_and_added_file(self) -> None:
         """The shipped retro-promotion policy trips too_many_paths and status_not_allowed."""

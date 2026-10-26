@@ -15,6 +15,9 @@ from typing import cast
 # Not importing scripts.tests.*: that would bind the root `scripts` package and break the Codex tests that need
 # packages/codex/scripts under the same name.
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from packages.tests.graph_manifest_fixture import graph_progress  # noqa: E402
+
 HOOK = ROOT / "packages/codex/hooks/scripts/pr_publication_gate.py"
 SECRET = ".en" + "v"  # two parts so no source line spells the secret-file name
 GH_SHIM = """#!/bin/sh
@@ -80,9 +83,11 @@ class CodexPublicationGateTests(unittest.TestCase):
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
         }
 
-    def hook(self, command: str) -> dict[str, object]:
+    def hook(self, command: str, session: str | None = "s1") -> dict[str, object]:
         """Run the hook for one Bash command and return its JSON output ({} when it allows)."""
-        payload = {"session_id": "s1", "cwd": str(self.dir), "tool_name": "Bash", "tool_input": {"command": command}}
+        payload: dict[str, object] = {"cwd": str(self.dir), "tool_name": "Bash", "tool_input": {"command": command}}
+        if session is not None:
+            payload["session_id"] = session
         result = subprocess.run(
             [sys.executable, str(HOOK)], input=json.dumps(payload), text=True, capture_output=True, env=self.env
         )
@@ -93,6 +98,16 @@ class CodexPublicationGateTests(unittest.TestCase):
         """Return the permission-decision reason, or empty when the hook allowed."""
         output = cast(dict[str, str], self.hook(command).get("hookSpecificOutput") or {})
         return output.get("permissionDecisionReason", "")
+
+    def test_missing_session_refuses_real_graph_merge(self) -> None:
+        """A payload with no session cannot borrow an ambient session to publish."""
+        graph_progress(self.dir, self.loop, ["docs/**"], session="s1", provider="codex")
+        self.env["CODEX_SESSION_ID"] = "s1"
+        for session in (None, "", "  "):
+            with self.subTest(session=session):
+                result = self.hook("gh pr merge 7", session)
+                output = cast(dict[str, str], result.get("hookSpecificOutput") or {})
+                self.assertIn("session_missing", output.get("permissionDecisionReason", ""))
 
     def config(self, text: str) -> None:
         """Write the repo's workflow config."""
@@ -151,24 +166,25 @@ class CodexPublicationGateTests(unittest.TestCase):
 
     def test_owned_graph_unit_needs_manifest_binding(self) -> None:
         """The direct hook uses its session ID to refuse an unbound graph publication."""
-        common = git_cmd(self.dir, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
-        progress = self.loop / common.replace("/", "-") / "s1" / "progress.json"
-        progress.parent.mkdir(parents=True)
-        progress.write_text(
-            json.dumps(
-                {
-                    "schema_version": 3,
-                    "session_id": "s1",
-                    "loop_id": "test-loop",
-                    "work_units": {"C1": {"worktree": str(self.dir), "manifest": ["docs/**"]}},
-                }
-            )
-        )
+        graph_progress(self.dir, self.loop, ["docs/**"], unit="1", session="s1", provider="codex")
         self.env["CLAUDE_AGENTIC_LOOP_DIR"] = str(self.loop / "other-root")
         self.assertTrue(self.reason("gh pr merge 1").startswith("diff_manifest:manifest_unreadable"))
         self.env["CLAUDE_AGENTIC_LOOP_DIR"] = str(self.loop)
         self.env["CODERAILS_AGENTIC_LOOP_DIR"] = str(self.loop / "other-root")
         self.assertEqual(self.reason("gh pr merge 1"), "")
+
+    def test_same_session_fallback_graph_blocks_unbound_merge(self) -> None:
+        """A Codex graph under an old repo slug still stops an unbound publication."""
+        git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
+        (self.dir / "docs.md").write_text("clean\n")
+        git_cmd(self.dir, "add", "-A")
+        git_cmd(self.dir, "commit", "-qm", "docs")
+        self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        other = self.dir.parent / "old-repo"
+        other.mkdir()
+        git_cmd(other, "init", "-q", "-b", "main")
+        graph_progress(other, self.loop, ["docs/**"], session="s1", provider="codex")
+        self.assertTrue(self.reason("gh pr merge 7").startswith("diff_manifest:manifest_unreadable"))
 
     def test_gh_repo_retarget_refuses_even_clean_diff(self) -> None:
         """A same-number PR in another repository cannot borrow this repository's clean result."""
@@ -233,19 +249,10 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
-        progress = self.dir.parent / "progress.json"
-        progress.write_text(
-            json.dumps(
-                {
-                    "session_id": "s",
-                    "loop_id": "l",
-                    "work_units": {"2": {"manifest": ["src/**"], "worktree": str(self.dir)}},
-                }
-            )
-        )
+        progress = graph_progress(self.dir, self.loop, ["src/**"], session="s1", provider="codex")
         flags = f"--unit 2 --progress {progress}"
         self.assertTrue(self.reason(f"python3 scripts/merge.py {flags} 7").startswith("diff_manifest:out_of_manifest"))
-        self.assertEqual(self.reason("python3 scripts/merge.py 7"), "")  # control: no unit, clean docs diff passes
+        self.assertTrue(self.reason("python3 scripts/merge.py 7").startswith("diff_manifest:manifest_unreadable"))
 
     def test_unresolvable_head_fails_closed(self) -> None:
         """No head SHA from gh means the diff cannot be read: deny, not allow."""
@@ -253,7 +260,7 @@ class CodexPublicationGateTests(unittest.TestCase):
         self.assertTrue(self.reason("gh pr merge 7").startswith("diff_manifest:manifest_unreadable"))
 
     def test_outer_cd_before_shell_wrapper_binds_the_intended_worktree(self) -> None:
-        """A nested merge uses its preceding cd; the same unit from the starting cwd is refused."""
+        """Linked worktrees share a graph state, while another repository cannot borrow it."""
         git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
         (self.dir / "docs.md").write_text("canary\n")
         git_cmd(self.dir, "add", "-A")
@@ -261,19 +268,23 @@ class CodexPublicationGateTests(unittest.TestCase):
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
         other = self.dir.parent / "other-worktree"
         git_cmd(self.dir, "worktree", "add", "-qb", "feature/intended", str(other), "HEAD")
-        progress = self.dir.parent / "progress.json"
-        progress.write_text(
-            json.dumps(
-                {"session_id": "s", "loop_id": "l", "work_units": {"2": {"manifest": ["*.md"], "worktree": str(other)}}}
-            )
-        )
+        progress = graph_progress(self.dir, self.loop, ["*.md"], session="s1", provider="codex")
         command = f"python3 scripts/merge.py 7 --unit 2 --progress {progress}"
-        self.assertTrue(self.reason(command).startswith("diff_manifest:manifest_unreadable"))
+        self.assertEqual(self.reason(command), "")
         self.assertEqual(self.reason(f"cd {other} && {command}"), "")
         self.assertEqual(self.reason(f"cd {other} && bash -c '{command}'"), "")
+        foreign = self.dir.parent / "foreign-repo"
+        foreign.mkdir()
+        git_cmd(foreign, "init", "-q", "-b", "main")
+        foreign_progress = graph_progress(foreign, self.loop / "foreign", ["*.md"], session="s1", provider="codex")
+        self.assertTrue(
+            self.reason(f"python3 scripts/merge.py 7 --unit 2 --progress {foreign_progress}").startswith(
+                "diff_manifest:manifest_unreadable"
+            )
+        )
 
     def test_subshell_and_brace_groups_bind_the_trailing_unit_to_their_actual_cwd(self) -> None:
-        """A subshell restores the starting worktree; a brace group retains its cd."""
+        """A group may change linked worktrees; a foreign graph path still refuses."""
         git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
         (self.dir / "docs.md").write_text("canary\n")
         git_cmd(self.dir, "add", "-A")
@@ -281,21 +292,16 @@ class CodexPublicationGateTests(unittest.TestCase):
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
         other = self.dir.parent / "other-worktree"
         git_cmd(self.dir, "worktree", "add", "-qb", "feature/intended", str(other), "HEAD")
-        paths = [self.dir.parent / "own-progress.json", self.dir.parent / "other-progress.json"]
-        for path, worktree in zip(paths, (self.dir, other)):
-            path.write_text(
-                json.dumps(
-                    {
-                        "session_id": "s",
-                        "loop_id": "l",
-                        "work_units": {"2": {"manifest": ["*.md"], "worktree": str(worktree)}},
-                    }
-                )
-            )
-        own, intended = (f"python3 scripts/merge.py 7 --unit 2 --progress {path}" for path in paths)
+        progress = graph_progress(self.dir, self.loop, ["*.md"], session="s1", provider="codex")
+        own = intended = f"python3 scripts/merge.py 7 --unit 2 --progress {progress}"
+        foreign = self.dir.parent / "foreign-repo"
+        foreign.mkdir()
+        git_cmd(foreign, "init", "-q", "-b", "main")
+        foreign_progress = graph_progress(foreign, self.loop / "foreign", ["*.md"], session="s1", provider="codex")
+        foreign_command = f"python3 scripts/merge.py 7 --unit 2 --progress {foreign_progress}"
         for command, denied in (
             (f"(cd {other} && {intended}); {own}", False),
-            (f"(cd {other} && {intended}); {intended}", True),
+            (f"(cd {other} && {intended}); {foreign_command}", True),
             (f"{{ cd {other} && {intended}; }}; {intended}", False),
         ):
             with self.subTest(command=command):

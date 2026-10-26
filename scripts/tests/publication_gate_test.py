@@ -13,6 +13,7 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
+from packages.tests.graph_manifest_fixture import graph_progress  # noqa: E402
 from scripts import merge  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
 from scripts.lib import manifest_policy, publication_gate  # noqa: E402
@@ -67,6 +68,22 @@ def fixed_check(found: list[dict[str, str]], calls: list[str] | None = None, nam
 
 class EvaluateTests(unittest.TestCase):
     """evaluate collects check results; enforce raises with the reason code first."""
+
+    def setUp(self) -> None:
+        """The usual test call has a native session."""
+        session = mock.patch.dict(os.environ, {"CODERAILS_PUBLICATION_SESSION_ID": "test-session"})
+        session.start()
+        self.addCleanup(session.stop)
+
+    def test_missing_session_refuses_publication_before_checks(self) -> None:
+        """A clean policy cannot authorize a merge without a native session."""
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(publication_gate, "CHECKS", [fixed_check([])]),
+        ):
+            self.assertEqual(publication_gate.evaluate("7", "abc")[0]["code"], "publication:session_missing")
+            with self.assertRaisesRegex(git.WorkflowError, "publication:session_missing"):
+                publication_gate.enforce("7", "abc")
 
     def test_violation_shape_and_enforce_text(self) -> None:
         """A registered check's violations come back as {code, detail}; enforce text starts with the code."""
@@ -198,6 +215,9 @@ class HeadlessTests(RepoCase):
             "PATH": f"{install_gh_shim(self.dir.parent)}{os.pathsep}{os.environ['PATH']}",
             "CODERAILS_HEADLESS_RUN": "1",
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
+            "CODERAILS_PUBLICATION_SESSION_ID": "s",
+            "CODEX_SESSION_ID": "",
+            "CODEX_THREAD_ID": "",
             "FAKE_GH_LOG": str(self.ghlog),
             "FAKE_SHA": "",
             "BASE_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
@@ -221,11 +241,25 @@ class HeadlessTests(RepoCase):
         lines = [json.loads(x) for f in self.loop.rglob("trace.jsonl") for x in f.read_text().splitlines()]
         return [f"{r['command']}/{r['outcome']}/{r['reason_code']}" for r in lines]
 
-    def merge(self, sha: str) -> subprocess.CompletedProcess[str]:
+    def merge(self, sha: str, arguments: list[str] | None = None) -> subprocess.CompletedProcess[str]:
         """Run merge.main for PR 7 in a subprocess with the evidence gates stubbed."""
         env = {**self.env, "FAKE_SHA": sha}
         code = MERGE_DRIVER % str(REPO)
+        if arguments is not None:
+            code = code.replace("merge.main(['7'])", f"merge.main({arguments!r})")
         return subprocess.run([sys.executable, "-c", code], cwd=self.dir, env=env, capture_output=True, text=True)
+
+    def test_merge_without_session_refuses_real_graph_with_or_without_flags(self) -> None:
+        """The merge script cannot publish a real graph from a sessionless process."""
+        progress = graph_progress(self.dir, self.loop, ["**"])
+        self.config("diff_manifest: off\n")
+        self.env["CODERAILS_PUBLICATION_SESSION_ID"] = ""
+        for arguments in (["7"], ["7", "--unit", "2", "--progress", str(progress)]):
+            with self.subTest(arguments=arguments):
+                result = self.merge(git_cmd(self.dir, "rev-parse", "HEAD").strip(), arguments)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("publication:session_missing", result.stderr)
+                self.assertFalse(self.ghlog.exists())
 
     def test_merge_refused_without_any_config(self) -> None:
         """Headless merge of an out-of-policy diff exits non-zero and writes the refused trace rows."""
@@ -269,16 +303,7 @@ class HeadlessTests(RepoCase):
         """push.py --unit 2 --progress P refuses a file outside the unit's manifest (out_of_manifest)."""
         (self.dir / "README.md").write_text("changed\n")
         git_cmd(self.dir, "commit", "-qam", "doc")
-        progress = self.dir.parent / "progress.json"
-        progress.write_text(
-            json.dumps(
-                {
-                    "session_id": "s",
-                    "loop_id": "l",
-                    "work_units": {"2": {"manifest": ["src/**"], "worktree": str(self.dir)}},
-                }
-            )
-        )
+        progress = graph_progress(self.dir, self.loop, ["src/**"])
         result = subprocess.run(
             [sys.executable, str(REPO / "scripts/push.py"), "--unit", "2", "--progress", str(progress)],
             cwd=self.dir,
@@ -293,16 +318,7 @@ class HeadlessTests(RepoCase):
         """Inline flags enforce unit scope, and an explicitly empty flag cannot disappear."""
         (self.dir / "README.md").write_text("changed\n")
         git_cmd(self.dir, "commit", "-qam", "doc")
-        progress = self.dir.parent / "progress.json"
-        progress.write_text(
-            json.dumps(
-                {
-                    "session_id": "s",
-                    "loop_id": "l",
-                    "work_units": {"2": {"manifest": ["src/**"], "worktree": str(self.dir)}},
-                }
-            )
-        )
+        progress = graph_progress(self.dir, self.loop, ["src/**"])
         for flags, reason in (
             (["--unit=2", f"--progress={progress}"], "out_of_manifest"),
             (["--unit"], "manifest_unreadable"),

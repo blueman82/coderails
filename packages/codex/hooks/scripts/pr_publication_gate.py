@@ -34,8 +34,7 @@ def main() -> int:
     if not isinstance(command, str) or "merge" not in command:
         return 0
     session = payload.get("session_id")
-    if isinstance(session, str) and session:
-        os.environ["CODERAILS_PUBLICATION_SESSION_ID"] = session
+    os.environ["CODERAILS_PUBLICATION_SESSION_ID"] = session if isinstance(session, str) else ""
     cwd = text_field(payload, "cwd") or os.getcwd()
     try:
         for name, segment, where in guarded_segments(command, cwd):

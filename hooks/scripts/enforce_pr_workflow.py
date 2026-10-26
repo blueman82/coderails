@@ -6,6 +6,8 @@ from __future__ import annotations
 import os
 import shlex
 import sys
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -30,6 +32,38 @@ from scripts.lib.authority_permits import permits
 from scripts.lib.config import config_path
 
 
+@contextmanager
+def _publication_session(session: str) -> Generator[None, None, None]:
+    """Bind publication checks to the hook payload without leaking it to later test calls."""
+    previous = os.environ.get("CODERAILS_PUBLICATION_SESSION_ID")
+    os.environ["CODERAILS_PUBLICATION_SESSION_ID"] = session
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("CODERAILS_PUBLICATION_SESSION_ID", None)
+        else:
+            os.environ["CODERAILS_PUBLICATION_SESSION_ID"] = previous
+
+
+def _push_changes_repository(guarded: list[tuple[str, str, str]]) -> bool:
+    """Reject protected pushes that select a different Git root inside the command."""
+    for kind, part, _ in guarded:
+        if kind != "git_push":
+            continue
+        try:
+            tokens = shlex.split(part)
+        except ValueError:
+            tokens = []
+        options = tokens[: tokens.index("push")] if "push" in tokens else tokens
+        if any(
+            token in {"-C", "--git-dir", "--work-tree"} or token.startswith(("--git-dir=", "--work-tree="))
+            for token in options
+        ):
+            return True
+    return False
+
+
 def main() -> int:
     """Redirect missing workflow steps and fail closed on live merge evidence failure."""
     try:
@@ -43,7 +77,8 @@ def main() -> int:
         return 0
     name, segment, target = operation(command)
     cwd = str(payload.get("cwd") or os.getcwd())
-    session = str(payload.get("session_id") or "")
+    session = payload.get("session_id")
+    session = session if isinstance(session, str) else ""
     guarded = guarded_segments(command, cwd)
     merges = [(part, where) for kind, part, where in guarded if kind == "merge"]
     if len(guarded) > 1:
@@ -52,24 +87,16 @@ def main() -> int:
     if guarded and guarded[0][1].startswith(UNBINDABLE):
         deny("Blocked: child working directory or command target cannot be bound to this repository.")
         return 0
-    for kind, part, _ in guarded:
-        if kind != "git_push":
-            continue
-        try:
-            tokens = shlex.split(part)
-        except ValueError:
-            tokens = []
-        options = tokens[: tokens.index("push")] if "push" in tokens else tokens
-        if any(
-            token in {"-C", "--git-dir", "--work-tree"} or token.startswith(("--git-dir=", "--work-tree="))
-            for token in options
-        ):
-            deny("Blocked: Git working directory differs from this repository; run that action separately.")
-            return 0
+    if _push_changes_repository(guarded):
+        deny("Blocked: Git working directory differs from this repository; run that action separately.")
+        return 0
     if guarded and not merges:
         name, segment, cwd = guarded[0]
     if merges:
         name, segment, cwd = "merge", merges[0][0], merges[0][1]
+    if merges and not session.strip():
+        deny("Blocked: merge publication requires a valid session ID.")
+        return 0
     if merges and not (verdict := permits(session, "merge"))["allow"]:  # early; nothing is consumed
         append_row("action_authority", "denied", f"denied_{verdict['reason']}", session)
         deny(f"Blocked: gh pr merge — this session's authority refuses it ({verdict['reason']}); authority.py inspect.")
@@ -100,7 +127,8 @@ def main() -> int:
             sha = git.pr_field(number, "headRefOid") if number else ""
             if not sha:
                 raise ValueError("PR head unavailable")
-            publication_gate.enforce(number, sha, unit=unit, progress=progress)
+            with _publication_session(session):
+                publication_gate.enforce(number, sha, unit=unit, progress=progress)
         except git.WorkflowError as error:
             deny(str(error))
             return 0
@@ -124,7 +152,8 @@ def main() -> int:
     if name == "merge":
         try:
             _, unit, progress = merge_target.parse(segment)
-            reason = merge_reason(number, cwd, session, unit=unit, progress=progress)
+            with _publication_session(session):
+                reason = merge_reason(number, cwd, session, unit=unit, progress=progress)
         except (OSError, ValueError, RuntimeError) as error:
             reason = f"Blocked: gh pr merge — eval artifact verification failed: {error}. Do not bypass."
         if reason:

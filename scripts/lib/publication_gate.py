@@ -33,12 +33,15 @@ def trace_preflight(code: str) -> None:
 def evaluate(number: str, sha: str, unit: str = "", progress: str = "") -> list[Violation]:
     """Run every registered check; a check that raises is a refusal, never a pass."""
     found: list[Violation] = []
-    for check in CHECKS:
-        try:
-            found += check(number, sha, unit, progress)
-        except Exception as error:  # noqa: BLE001 - fail closed: an erroring check must not publish
-            code = "diff_manifest:manifest_internal_error" if check is manifest_check else f"{check.__name__}_error"
-            found.append({"code": code, "detail": type(error).__name__})
+    if not manifest_policy.publication_session():
+        found.append({"code": "publication:session_missing", "detail": "valid session ID required"})
+    else:
+        for check in CHECKS:
+            try:
+                found += check(number, sha, unit, progress)
+            except Exception as error:  # noqa: BLE001 - fail closed: an erroring check must not publish
+                code = "diff_manifest:manifest_internal_error" if check is manifest_check else f"{check.__name__}_error"
+                found.append({"code": code, "detail": type(error).__name__})
     try:
         label = f"{git.repo()}@pr-{number}"
     except Exception:  # noqa: BLE001 - trace metadata must never change the verdict
