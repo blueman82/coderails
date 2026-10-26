@@ -1,6 +1,7 @@
 """Preserve Git executable modes and isolated Claude install behavior in fixture trees."""
 
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -55,9 +56,10 @@ class InstallModeSweepTests(unittest.TestCase):
             self.assertTrue(untracked.stat().st_mode & 0o111)
 
     def test_actual_no_git_install_mutates_only_fixture_home(self) -> None:
-        """Run the actual Python CLI in a minimal release tree with synthetic HOME."""
+        """Run the CLI from a spaced path with a synthetic HOME."""
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory) / "coderails with space"
+            root.mkdir()
             for folder in ("scripts/installer", "scripts/lib"):
                 shutil.copytree(ROOT / folder, root / folder, ignore=shutil.ignore_patterns("*.sh", "__pycache__"))
             shutil.copyfile(ROOT / "install.py", root / "install.py")
@@ -96,7 +98,9 @@ class InstallModeSweepTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            install_plugin = f"Run in terminal: claude plugin install coderails --marketplace {root.resolve()}"
+            install_plugin = (
+                f"Run in terminal: claude plugin install coderails --marketplace {shlex.quote(str(root.resolve()))}"
+            )
             self.assertIn(install_plugin, result.stdout)
             registry = json.loads(settings.read_text())["extraKnownMarketplaces"]
             self.assertNotIn("workflow-tools", registry)
