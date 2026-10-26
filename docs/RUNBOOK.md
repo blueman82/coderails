@@ -482,6 +482,17 @@ file has no effect. The CLI checks report bytes, not the author's identity or in
 
 ## Diff-manifest check warned or refused
 
+For a graph unit's exact `push.py --unit N --progress PATH` command, the unit
+record needs a nonempty manifest. Register `--base-branch <parent>` with
+`graph.py add-unit` before the first push of a stacked branch; once a PR exists,
+its live base must match that recorded branch. The command checks staged files
+and the complete PR diff, including both rename paths, against the unit manifest
+before transport. Register an absolute worktree path with `add-unit --worktree`, or use
+`assign-worktree --session S --loop-id L --unit N --worktree ABS_PATH` after checkout setup.
+The latter fills an unassigned existing unit under the graph lock, even during an active wave;
+it preserves the revision and refuses a different assignment. The recorded path must match the Git checkout root at push time.
+Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their literal manifest names.
+
 - Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)
   refuses with `diff_manifest:<code>` and prints `! diff_manifest <code>: <path>` on stderr. The check is ON by default
   (`diff_manifest: enforce`, no config file needed, shipped policy `policy/diff-policy.default.json`); `off` and
@@ -514,7 +525,13 @@ file has no effect. The CLI checks report bytes, not the author's identity or in
   forms are supported; empty or repeated flag values refuse. A requested unit must exist and carry a string-list `manifest`
   and a nonblank absolute `worktree` whose real path equals the current Git repository root. The progress object must carry
   nonblank string `session_id` and `loop_id` fields. Missing, malformed or mismatched metadata refuses `manifest_unreadable`;
-  `manifest: []` allows no changed paths. A session that owns a graph unit in this worktree must supply both flags.
+  `push.py` reports `publication:graph_owner_missing` before transport when either owner field is blank or absent.
+  That refusal writes `publication/refused/graph_owner_missing` to the publication session trace.
+  A missing, relative or foreign checkout reports `publication:worktree_invalid` with a matching refusal trace.
+  A PR base that differs from the recorded base reports `publication:base_mismatch`. Staged or branch paths outside
+  the unit manifest report `diff_manifest:out_of_manifest`. These preflight refusals write `publication/refused/<code>`
+  before the later policy gate runs; `trace.by_reason` can count them.
+  `manifest: []` refuses publication. A session that owns a graph unit in this worktree must supply both flags.
   Without a matching graph unit, standalone publication uses the policy alone. Unit and policy
   manifests both apply, so a unit cannot widen policy scope. Custom policies retain the default denylist. An unreadable config
   refuses `manifest_internal_error` and emits its refusal trace. Direct-merge hooks parse
@@ -864,3 +881,77 @@ file has no effect. The CLI checks report bytes, not the author's identity or in
   The Codex adapter runs built-in checks only; `external_ok: true` means no external tools were attempted.
 - Limits: skills choose these helpers; verification writes a trace. Same-user `gh`/clone/dates/sources/config are trusted.
   Wiki lint is advisory; presence on base and absence at the first parent do not prove PR authorship.
+
+See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
+
+## Dispatch refused: `dispatch_*` or `role_mismatch`
+
+- Symptom: `loop_dispatch_guard` (Claude `Agent`, Codex `spawn_agent`, which this Codex host reports to hooks as
+  `collaborationspawn_agent`) denies a spawn in a graph-bound session, or
+  `begin-wave` / `graph.py authorize-dispatch` fails. The hook message names the failure; the reason code is a row in the
+  loop's `recovery-trace.jsonl` (`authorize-dispatch/refused/<code>`, allowed spawns are `authorized/dispatch_authorized`).
+- Query: `python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]` counts `dispatch_authorized` and every refusal code.
+- If the Codex hook cannot create or write its temporary message file, it denies the spawn with
+  `dispatch_message_unavailable` and records that code in `discipline.log`. Repair local scratch storage and retry.
+- If the hook input or its local check raises unexpectedly, the hook denies the spawn with `dispatch_hook_error`
+  and records that code in `discipline.log`. Plaintext envelope first lines over 8192 characters get the same denial.
+  Codex config discovery, graph discovery, and graph commands share a seven-second budget so a stalled Git lookup or
+  held graph lock cannot outlive the ten-second hook limit.
+  Config and graph discovery use strict reads for this hook. An ordinary spawn is free when config is valid or absent
+  and graph state is absent. Unsafe session IDs, completed graph state, lookup errors, and multiple fallback graphs deny
+  the spawn.
+  Inspect the hook input and local runtime; do not treat the spawn as authorized.
+- Codes and fixes: `dispatch_missing_envelope` (no/old/garbled first-line `CODERAILS_GRAPH_DISPATCH` envelope: paste the
+  `prompt_prefix` from `plan` or `begin-wave`; a plaintext Codex spawn needs it, while an opaque native hook message uses the exact issued `task_name` and call id),
+  `dispatch_unknown_id` (the id was never issued: run `begin-wave`), `dispatch_foreign` (session, loop, node, wave or Codex
+  `task_name` is not the record's), `dispatch_stale_revision` (the envelope predates the graph's current revision:
+  re-run `begin-wave` after `recover-wave`), `dispatch_attempt_mismatch` (the stored attempt does not match its dispatch id
+  or the node's next attempt: inspect state and recover the wave), `dispatch_replayed` (the id was already used: one spawn per id; a retry needs a
+  new wave), `dispatch_call_id_missing` (the opaque native hook message has no usable call id: check the native hook payload), `dispatch_contract_altered` (the stored contract no longer matches its digest or lost a field: the state was
+  edited, restart the wave via `recover-wave`), `dispatch_sections_missing` (the pasted contract block was edited or left
+  out: paste `prompt_sections` verbatim), `role_mismatch` (dispatch a guarded scout as `coderails:<role>` / Codex
+  `agent_type: <role>`; other roles accept their own type or `general-purpose` on Claude, and their own type or omitted
+  `agent_type` on Codex; a different named native role such as `explorer` is refused),
+  `dispatch_state_unconverted` (`state_minor` < 2 or a malformed current-minor contract cutoff: run
+  `graph.py convert --check` then `convert` for old state; inspect malformed current state without editing frozen evidence;
+  conversion refuses while a wave is open, `convert_refused_active_wave_in_flight`),
+  `dispatch_publication_mismatch` (the stored unit worker command names a different unit, push script or progress path:
+  use the exact `publication_command` returned by `begin-wave`), `dispatch_unauthorized` (Claude
+  `record-wave` / completion found a bound spawn whose record the PreToolUse guard never consumed, i.e. a spawn the hook did
+  not see: re-dispatch it through the guard via `recover-wave`). A Claude graph-bound `Agent` call with no
+  `subagent_type` is refused as `role_mismatch` before native dispatch.
+- Off-switch: `CODERAILS_GRAPH_DISPATCH=off` (also `0` or `false`) in the hooks and graph CLI bypasses the contract hash,
+  rendered sections, role and single-use checks. A graph-bound spawn still needs the current v2 envelope issued by
+  `begin-wave`, the recorded task name on Codex, and frozen evals; native evidence still binds its node, wave and attempt.
+  An absent or v1 envelope is refused. Claude graph-bound Agent calls must include a nonblank `subagent_type`, including
+  `general-purpose` for unguarded roles; a missing type cannot be bound to native evidence. An ordinary Agent outside a
+  graph is unaffected. Each allowed spawn leaves an
+  `authorize-dispatch/reported/dispatch_check_off` trace row. Default ON; unset to re-enable. Use it only to rescue a
+  loop wedged by a bad contract or an uninstalled plugin agent.
+- Bad `add-unit --model-role` is `add_unit_refused_bad_field` (allowed: `fast-mechanical`, `default`, `frontier`).
+- Limits: a plugin agent that is not installed in the session cannot run a guarded scout (refused, never downgraded); the
+  sandboxed Bash launcher carries no agent type, so the role is asserted on the `Agent` and `spawn_agent` routes only
+  (handoff H3); single use is keyed on the PreToolUse `tool_use_id` when the payload has one (unverified) and otherwise on
+  a consumed flag, so a hook retried without an id reads as a replay; Codex role containment (no shell, per-role MCP) is
+  not asserted, only `agent_type == role`; `progress.json` and the sections are plain same-user data, so this is drift and
+  substitution detection for a cooperating agent, not tamper evidence.
+- Limits, coverage: (1) the contract is advisory to the worker: the envelope proves the dispatch was authorized and the
+  rendered block is present as a substring, not that the rest of the prompt is faithful; text before, after or around the
+  block is unconstrained and `write_scope` is prompt text only, not enforced. (2) Only the six capability-guarded roles
+  (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `security-reviewer`, `source-auditor`) are role-contained;
+  `spec-reviewer` (empty capability list), the `shell.raw` roles (`docs-auditor`, `wiki-writer`, `proof-author`) and nodes
+  with no `agent_role` (default `loop-worker`) may run as explicit `general-purpose` on Claude, or with omitted or exact
+  role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent`, `spawn_agent`, and
+  `collaborationspawn_agent` only, so `SendMessage` on
+  Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
+  (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
+  `spawn_agent` function-call message with its v2 record, role and consumed authorization.
+  Current Codex native calls give the hook an encrypted worker prompt.
+  The hook refuses them with `dispatch_prompt_unverifiable` before a worker starts.
+  Do not retry a native graph spawn.
+  Use the checked local Codex OAuth graph driver after it is installed.
+  Until then, stop graph dispatch. A task-name-only legacy event
+  cannot bind a contract-era wave. Claude matches a non-null hook `tool_use_id` to the native Agent call; when the hook
+  supplies no id, it retains the consumed flag and one-spawn-per-id check without claiming call-id proof. Historical
+  pre-contract attempts retain their original evidence rules. Claude hooks can still fail open if the hook times out
+  (10 s in `hooks.json`) before it denies.

@@ -11,9 +11,9 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from .graph_executor import graph_semantics, graph_spec, transition
+from .graph_executor import graph_contract, graph_semantics, graph_spec, transition
 from .graph_recovery import RecoveryRefusedError, trace
 from .loop_state_common import atomic_progress_update
 
@@ -57,6 +57,8 @@ def _stub(session: str, loop_id: str, prompt: str, marker: object) -> dict[str, 
             "active_wave": None,
             "hard_stop": None,
             "wave_history": {},
+            "dispatches": {},
+            "contract_from_revision": 1,
         },
     }
 
@@ -119,7 +121,12 @@ def start(path: Path, session: str, loop_id: str, prompt_file: Path) -> dict[str
 
 
 def register_unit(
-    state: dict[str, Any], unit: str, deps: list[str], join: bool, manifest: list[str] | None = None
+    state: dict[str, Any],
+    unit: str,
+    deps: list[str],
+    join: bool,
+    manifest: list[str] | None = None,
+    fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a copy of `state` with the unit's spec lane, dependency edges and unit-join inputs added."""
     spec, policy = graph_spec.load_spec(), graph_spec.load_policy()
@@ -138,7 +145,8 @@ def register_unit(
     proposed = copy.deepcopy(state)
     proposed["revision"] += 1  # the graph changed: evals frozen at the old revision must go STALE
     graph = proposed["graph"]
-    proposed["work_units"][unit] = {"status": "pending", **({"manifest": manifest} if manifest else {})}
+    stored = {"status": "pending", **({"manifest": manifest} if manifest else {}), **(fields or {})}
+    proposed["work_units"][unit] = stored
     graph["nodes"].update(added["nodes"])
     graph["edges"].extend({"from": graph_spec.unit_root_id(spec, d), "to": node_id} for d in dict.fromkeys(deps))
     graph["edges"].extend({"from": source, "to": target} for source, target in added["edges"])
@@ -158,14 +166,37 @@ def register_unit(
 
 
 def add_unit(
-    path: Path, session: str, loop_id: str, unit: str, deps: list[str], join: bool, manifest: list[str] | None = None
+    path: Path,
+    session: str,
+    loop_id: str,
+    unit: str,
+    deps: list[str],
+    join: bool,
+    manifest: list[str] | None = None,
+    contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Register one work unit and its graph wiring in one locked, kernel-validated save."""
+    """Register one work unit and its graph wiring in one locked, kernel-validated save.
+
+    `contract` holds optional dispatch inputs and the publication base branch.
+    """
     inputs: dict[str, Any] = {"session": session, "loop_id": loop_id, "unit": unit, "deps": deps, "join": join}
     ident = {"session_id": session, "loop_id": loop_id}
     spec = graph_spec.load_spec()
     refusal: list[RecoveryRefusedError] = []
     revision: list[int] = []
+    given = contract or {}
+    try:
+        fields = graph_contract.unit_fields(
+            given.get("model_role"),
+            given.get("write_scope", []),
+            given.get("lessons", []),
+            given.get("scope"),
+            given.get("base_branch"),
+            given.get("worktree"),
+        )
+    except ValueError as error:
+        coded = RecoveryRefusedError("add_unit_refused_bad_field", str(error))
+        raise _refused("add-unit", path, ident, coded, inputs) from error
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -174,7 +205,7 @@ def add_unit(
             if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
                 message = "add-unit needs an in-progress loop with no active wave"
                 raise RecoveryRefusedError("add_unit_refused_state", message)
-            proposed = register_unit(state, unit, deps, join, manifest)
+            proposed = register_unit(state, unit, deps, join, manifest, fields)
             try:
                 graph_semantics.validate(proposed)
             except graph_semantics.GraphSemanticError as error:
@@ -209,6 +240,42 @@ def add_unit(
         "revision": revision[0],
         "reason_code": "add_unit_registered",
     }
+
+
+def assign_worktree(path: Path, session: str, loop_id: str, unit: str, worktree: str) -> dict[str, Any]:
+    """Assign a checkout to an existing unit without changing graph revision or active dispatches."""
+    ident = {"session_id": session, "loop_id": loop_id}
+    inputs = {"unit": unit, "worktree": worktree}
+    try:
+        assigned = graph_contract.unit_fields(None, [], [], None, worktree=worktree)["worktree"]
+    except ValueError as error:
+        coded = RecoveryRefusedError("assign_worktree_refused", str(error))
+        raise _refused("assign-worktree", path, ident, coded, inputs) from error
+    refusal: list[RecoveryRefusedError] = []
+
+    def update(state: dict[str, Any]) -> dict[str, Any]:
+        units: object = state.get("work_units")
+        raw: object = cast(dict[str, object], units).get(unit) if isinstance(units, dict) else None
+        record = cast(dict[str, Any], raw) if isinstance(raw, dict) else None
+        if state["session_id"] != session or state["loop_id"] != loop_id or state["status"] != "in-progress":
+            refusal.append(RecoveryRefusedError("assign_worktree_refused", "loop ownership or status mismatch"))
+            raise refusal[0]
+        if record is None or record.get("status") != "pending":
+            refusal.append(RecoveryRefusedError("assign_worktree_refused", "unit is not pending"))
+            raise refusal[0]
+        if record.get("worktree") not in (None, assigned):
+            refusal.append(RecoveryRefusedError("assign_worktree_refused", "unit already has another worktree"))
+            raise refusal[0]
+        record["worktree"] = assigned
+        return state
+
+    try:
+        transition(path, update)
+    except ValueError as error:
+        coded = refusal[0] if refusal else RecoveryRefusedError("assign_worktree_refused", str(error))
+        raise _refused("assign-worktree", path, ident, coded, inputs) from error
+    trace(path, ident, "assigned", "worktree_assigned", inputs, [], "assign-worktree")
+    return {"unit": unit, "worktree": assigned, "reason_code": "worktree_assigned"}
 
 
 def instantiate(path: Path, session: str, loop_id: str, profile: str | None, units: list[str]) -> dict[str, Any]:

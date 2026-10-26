@@ -380,3 +380,7 @@ python3 scripts/lib/spec_counters.py
 python3 scripts/gen_graph_docs.py --check && python3 scripts/tests/gen_graph_docs_test.py
 PYTHONPATH=. python3 -m unittest packages.tests.test_graph_spec
 ```
+
+## Structured dispatch envelope and role assertion (measurement note)
+
+See [dispatch envelope measurements](graph-dispatch-measurement.md).

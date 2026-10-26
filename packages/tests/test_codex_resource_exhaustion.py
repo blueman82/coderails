@@ -49,7 +49,7 @@ class ResourceExhaustionTests(unittest.TestCase):
     def collaborators(self) -> dict[str, Any]:
         """Patch values pointing the hooks at the fake state and helper."""
 
-        def state_path(*_: object) -> Path:
+        def state_path(*_: object, **__: object) -> Path:
             return self.state
 
         def graph_path() -> Path:
@@ -99,8 +99,11 @@ class ResourceExhaustionTests(unittest.TestCase):
             "tool_input": {"task_name": marker, "message": f"CODERAILS_GRAPH_TASK={marker}\nwork"},
         }
         base = self.collaborators()
-        with patch.object(
-            loop_dispatch_guard, "graph_output", side_effect=hook_common.HostResourceError(errno.EMFILE, "x")
+        with (
+            patch.object(
+                loop_dispatch_guard, "graph_output", side_effect=hook_common.HostResourceError(errno.EMFILE, "x")
+            ),
+            patch.object(loop_dispatch_guard, "config_path", return_value=""),
         ):
             reason = run_hook(loop_dispatch_guard, payload, **base)
         self.assertIn("not known to be invalid", reason)
