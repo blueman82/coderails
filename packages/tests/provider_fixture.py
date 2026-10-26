@@ -107,7 +107,7 @@ class Provider:
             if self.name == "claude":
                 claude.spawn(self.parent, state, identifier, completed=outcome == "done")
             else:
-                codex.spawn(self.parent, state, identifier, terminal=outcome != "stale")
+                codex.spawn(self.parent, state, identifier, terminal=outcome != "stale", state_path=self.path)
         return claude.report(state, outcome)
 
     def finish_wave(self, outcome: str = "done") -> dict[str, Any]:
