@@ -84,15 +84,15 @@ def _check() -> int:
         if enveloped or graph_named:
             deny("Graph worker dispatch requires a session id and working directory.")
         return 0
-    config = config_path(cwd)
+    config = config_path(cwd, strict=True)
     if config:
         try:
             strict_settings(config, session_id)
         except ConfigRejected as error:
             deny(f"Graph worker dispatch requires valid workflow configuration: {error}")
             return 0
-    state = loop_state_path(cwd, session_id)
-    if state is None or not state.is_file():
+    state = loop_state_path(cwd, session_id, strict=True)
+    if state is None:
         if enveloped or graph_named:
             deny("Graph worker dispatch requires this session's progress.json. Start the native graph first.")
         return 0  # no loop owns this session: nothing to bind the spawn to

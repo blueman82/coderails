@@ -70,6 +70,18 @@ class PushUnitBindingTests(unittest.TestCase):
                 fixture.git(fixture.repo, "rev-parse", "HEAD"), fixture.git(fixture.repo, "rev-parse", "origin/feature")
             )
 
+    def test_utf8_staged_path_uses_literal_manifest_name(self) -> None:
+        """Git's display quoting cannot turn an allowed UTF-8 path into a false refusal."""
+        with tempfile.TemporaryDirectory() as scratch:
+            fixture = PushFixture(Path(scratch))
+            progress = owned_progress(fixture, "1", {"manifest": ["café.txt"], "worktree": str(fixture.repo)})
+            (fixture.repo / "café.txt").write_text("source")
+            result = fixture.push("--unit", "1", "--progress", str(progress), "--add", "café.txt")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(
+                fixture.git(fixture.repo, "rev-parse", "HEAD"), fixture.git(fixture.repo, "rev-parse", "origin/feature")
+            )
+
     def test_prior_out_of_manifest_commit_cannot_be_published(self) -> None:
         """A clean index cannot hide an earlier unscoped commit from the push."""
         with tempfile.TemporaryDirectory() as scratch:

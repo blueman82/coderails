@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -13,6 +16,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 import loop_dispatch_guard as guard
+from hook_common import loop_state_path
+
+from scripts.lib.config import config_path
 
 ENVELOPE = "CODERAILS_GRAPH_DISPATCH=" + json.dumps(
     {
@@ -61,10 +67,13 @@ class DispatchGuardTests(unittest.TestCase):
             self.message_file_text = Path(arguments[arguments.index("--message-file") + 1]).read_text()
             return {"loop_id": "loop", "wave_id": "wave-2", "dispatch_id": "disp_1"} if authorized else None
 
+        def state_path(_cwd: str, _session: str, *, strict: bool = False) -> Path | None:
+            return self.state if self.state.is_file() else None
+
         with (
             patch.object(guard, "read_input", return_value=json.dumps(self.payload)),
             patch.object(guard, "config_path", return_value=str(config) if config else "", create=True),
-            patch.object(guard, "loop_state_path", return_value=self.state),
+            patch.object(guard, "loop_state_path", side_effect=state_path),
             patch.object(guard, "graph_path", return_value=Path(guard.__file__)),
             patch.object(guard, "graph_output", side_effect=graph_output),
             patch.object(guard, "deny") as denial,
@@ -180,6 +189,74 @@ class DispatchGuardTests(unittest.TestCase):
         self.assertEqual(self._run(), (False, 0))
         self.tool_input["message"] = ENVELOPE + "\nx"
         self.assertEqual(self._run(), (True, 0))
+
+    def test_strict_discovery_propagates_host_resource_errors(self) -> None:
+        """ENFILE cannot make a graph or workflow config look absent to the dispatch hook."""
+        failure = OSError(errno.ENFILE, "file table full")
+        with patch("hook_common.subprocess.run", side_effect=failure), self.assertRaises(OSError):
+            loop_state_path(str(self.state.parent), "parent", strict=True)
+        with patch("scripts.lib.config.subprocess.run", side_effect=failure), self.assertRaises(OSError):
+            config_path(self.state.parent, strict=True)
+
+    def test_strict_graph_discovery_rejects_ambiguous_fallback(self) -> None:
+        """Two sibling graphs for one session are not a proven no-graph state."""
+        root = Path(self.scratch.name) / "loops"
+        for name in ("a", "b"):
+            path = root / name / "parent/progress.json"
+            path.parent.mkdir(parents=True)
+            path.write_text("{}")
+        with patch.dict("os.environ", {"CODERAILS_AGENTIC_LOOP_DIR": str(root)}), self.assertRaises(OSError):
+            loop_state_path(str(self.state.parent), "parent", strict=True)
+
+    def test_strict_discovery_propagates_list_and_stat_errors(self) -> None:
+        """Directory and candidate-file failures cannot look like proven absence."""
+        root = Path(self.scratch.name) / "loops"
+        with (
+            patch.dict("os.environ", {"CODERAILS_AGENTIC_LOOP_DIR": str(root)}),
+            patch.object(Path, "iterdir", side_effect=OSError(errno.ENFILE, "file table full")),
+            self.assertRaises(OSError),
+        ):
+            loop_state_path(str(self.state.parent), "parent", strict=True)
+        subprocess.run(["git", "init", "-q", str(self.state.parent)], check=True)
+        original_stat = Path.stat
+
+        def stat_candidate(path: Path) -> os.stat_result:
+            if path.name == "workflow.config.yaml":
+                raise OSError(errno.ENFILE, "file table full")
+            return original_stat(path)
+
+        with patch.object(Path, "stat", stat_candidate), self.assertRaises(OSError):
+            config_path(self.state.parent, strict=True)
+
+    def test_hook_denies_discovery_error_but_allows_proven_absence(self) -> None:
+        """An ordinary spawn is free only after both discovery paths finish without error."""
+        self.tool_input.update(task_name="ordinary", message="Read documentation.")
+        root = Path(self.scratch.name) / "absent-loops"
+        with (
+            patch.dict("os.environ", {"CODERAILS_AGENTIC_LOOP_DIR": str(root)}),
+            patch.object(guard, "read_input", return_value=json.dumps(self.payload)),
+            patch.object(guard, "deny") as denial,
+        ):
+            self.assertEqual(guard.main(), 0)
+            denial.assert_not_called()
+        failure = OSError(errno.ENFILE, "file table full")
+        with (
+            patch.object(guard, "read_input", return_value=json.dumps(self.payload)),
+            patch("scripts.lib.config.subprocess.run", side_effect=failure),
+            patch.object(guard, "deny") as denial,
+            patch.object(guard, "log"),
+        ):
+            self.assertEqual(guard.main(), 0)
+            self.assertIn("dispatch_hook_error", denial.call_args.args[0])
+        with (
+            patch.object(guard, "read_input", return_value=json.dumps(self.payload)),
+            patch.object(guard, "config_path", return_value=""),
+            patch("hook_common.subprocess.run", side_effect=failure),
+            patch.object(guard, "deny") as denial,
+            patch.object(guard, "log"),
+        ):
+            self.assertEqual(guard.main(), 0)
+            self.assertIn("dispatch_hook_error", denial.call_args.args[0])
 
     def test_completed_graph_allows_ordinary_spawns_but_not_dispatches(self) -> None:
         """A finished loop does not bind unrelated agents, and cannot dispatch graph workers."""

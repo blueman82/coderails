@@ -80,7 +80,9 @@ def commit(message: str, jira_key: str, paths: list[str], manifest: list[str] | 
         print("! Untracked files not staged (run 'git add' explicitly to include them):")
         for path in untracked:
             print(f"!   {path}")
-    staged = git.output("git", "diff", "--cached", "--name-only").splitlines()
+    staged = [
+        path for path in git.run("git", "diff", "--cached", "--name-only", "-z", check=True).stdout.split("\0") if path
+    ]
     if manifest is not None and any(not manifest_policy.matches(path, manifest) for path in staged):
         refuse_publication("diff_manifest:out_of_manifest", "publication staged paths exceed the unit manifest")
     if not staged:

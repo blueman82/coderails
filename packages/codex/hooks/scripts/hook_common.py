@@ -8,6 +8,7 @@ import json
 import os
 import re
 import select
+import stat
 import subprocess
 import sys
 import time
@@ -157,8 +158,8 @@ def session_dir(session_id: str) -> Path | None:
     return data_dir / "sessions" / safe_session
 
 
-def loop_state_path(cwd: str, session_id: str) -> Path | None:
-    """Return the session-owned graph state path using the established fallback order."""
+def loop_state_path(cwd: str, session_id: str, *, strict: bool = False) -> Path | None:
+    """Find session state; strict callers refuse uncertain discovery instead of treating it as absent."""
     safe_session = session_id.replace("/", "_").replace("..", "")
     if not safe_session:
         return None
@@ -171,19 +172,53 @@ def loop_state_path(cwd: str, session_id: str) -> Path | None:
             text=True,
         )
     except OSError:
+        if strict:
+            raise
         result = None
+    if strict and result is not None and result.returncode:
+        if "not a git repository" not in result.stderr.lower():
+            raise OSError("cannot determine graph repository")
+        start = Path(cwd).resolve()
+        for directory in (start, *start.parents):
+            try:
+                (directory / ".git").stat()
+            except FileNotFoundError:
+                continue
+            raise OSError("Git metadata exists but graph repository discovery failed")
+    if strict and result is not None and result.returncode == 0 and not result.stdout.strip():
+        raise OSError("graph repository path is empty")
     source = result.stdout.strip() if result is not None and result.returncode == 0 else cwd
     canonical = root / source.replace("/", "-") / safe_session / "progress.json"
-    if canonical.exists():
+
+    def present(path: Path) -> bool:
+        if not strict:
+            return path.exists()
+        try:
+            mode = path.stat().st_mode
+        except FileNotFoundError:
+            return False
+        if not stat.S_ISREG(mode):
+            raise OSError("graph state path is not a regular file")
+        return True
+
+    if present(canonical):
         return canonical
     try:
         matches = sorted(
             candidate / safe_session / "progress.json"
             for candidate in root.iterdir()
-            if (candidate / safe_session / "progress.json").exists()
+            if present(candidate / safe_session / "progress.json")
         )
-    except OSError:
+    except FileNotFoundError:
         matches = []
+    except OSError:
+        if strict:
+            raise
+        matches = []
+    if strict and len(matches) > 1:
+        raise OSError("more than one graph state matches this session")
+    if strict:
+        return matches[0] if matches else None
     return matches[0] if matches else canonical
 
 
