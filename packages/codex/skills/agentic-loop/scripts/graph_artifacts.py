@@ -124,9 +124,13 @@ def validate_completion_evidence(
     (`retro_check`).
     """
     del transcript_path
-    if len({evals_path.resolve().parent, proof_path.resolve().parent, retro_path.resolve().parent}) != 1:
-        # the retro binds the hashes of the files in ITS directory; evals and proof must be those very files
-        raise GraphError("evals, proof and retro must live in one state directory")
+    state_dir = retro_path.resolve().parent
+    paths = ((evals_path, "evals.json"), (proof_path, "proof.json"), (retro_path, "retro.json"))
+    for path, name in paths:
+        if path.resolve() != (state_dir / name).resolve():
+            raise GraphError(f"{name} path is not canonical; evals, proof and retro must live in one state directory")
+    # Use the same files that retro_check hashes, even when the caller used a symlink alias.
+    evals_path, proof_path, retro_path = (state_dir / name for _, name in paths)
     retro = load_evidence(retro_path, "retro")
     _matching(retro, state, "retro")
     validate_evals(state, revision, evals_path)
@@ -137,6 +141,6 @@ def validate_completion_evidence(
     if retro.get("status") != "complete":
         raise GraphError("retro evidence is incomplete")
     try:
-        return retro_check.check(state, retro, retro_path.parent)
+        return retro_check.check(state, retro, state_dir)
     except retro_check.RetroError as error:
         raise GraphError(str(error)) from error
