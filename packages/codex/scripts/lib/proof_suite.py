@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from scripts.lib import proof_results as pr
+from scripts.lib.proof_runtime import git_environment, trusted_executable
 
 MAX_TIMEOUT_S = 3600
 STORE = "proof_candidates"
@@ -183,7 +184,17 @@ def supersede(
     evidence = _regular_bytes(author_evidence_path, "proof_author_evidence_missing")
     if not evidence:
         raise SuiteError("proof_author_evidence_missing")
-    head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+    try:
+        head = subprocess.run(
+            [trusted_executable("git", Path.cwd()), "rev-parse", "HEAD"],
+            env=git_environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise SuiteError("proof_supersession_head_missing") from error
     if head.returncode or len(head.stdout.strip()) not in (40, 64):
         raise SuiteError("proof_supersession_head_missing")
     digest = _sha(candidate_raw)

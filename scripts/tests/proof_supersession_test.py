@@ -142,6 +142,23 @@ class SupersessionTests(unittest.TestCase):
                 (self.state / "proof_results.jsonl").unlink()
                 shutil.rmtree(self.state / "proof_candidates")
 
+    def test_supersede_ignores_git_from_inherited_path(self) -> None:
+        """Both controllers must use trusted Git before they bind a replacement."""
+        bin_dir = self.state.parent / "bin"
+        bin_dir.mkdir()
+        marker = self.state.parent / "git-canary"
+        fake = bin_dir / "git"
+        fake.write_text(f"#!/bin/sh\nprintf attacked > {marker}\nexit 92\n")
+        fake.chmod(0o755)
+        with patch.dict(os.environ, {"PATH": str(bin_dir) + os.pathsep + os.environ["PATH"]}):
+            for runner in RUNNERS:
+                with self.subTest(runner=runner):
+                    result = self.supersede(runner)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertFalse(marker.exists())
+                    (self.state / pr.RESULTS_NAME).unlink()
+                    shutil.rmtree(self.state / "proof_candidates")
+
     def test_old_rows_cannot_satisfy_replacement_and_new_head_rows_can(self) -> None:
         """Old rows and stale-HEAD rows fail both provider gates."""
         candidate = json.loads(self.candidate.read_text())

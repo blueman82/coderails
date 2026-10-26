@@ -8,8 +8,7 @@ Usage:
   proof.py disposition <state-dir> --none --reason-code CODE --reason TEXT
   proof.py supersede <state-dir> --candidate PATH --reason TEXT --original-sha256 SHA --author-evidence PATH
 
-<state-dir> holds proof.json (and progress.json); rows go to proof_results.jsonl beside it. The frozen cmd runs
-through pinned sandbox-runtime with read-only host paths and no network. Exit 0 ok, 1 unsatisfied, 2 refused.
+<state-dir> holds proof.json and progress.json; rows go to proof_results.jsonl. Exit 0 ok, 1 unsatisfied, 2 refused.
 """
 
 from __future__ import annotations

@@ -241,6 +241,8 @@ def _check(
         return "proof_withdrawn_unobserved" if withdrawn else "proof_unexecuted"
     if run["cmd_sha256"] != sha(cmd.strip()) or run["proof_json_sha256"] != freeze["proof_json_sha256"]:
         return "proof_stale_cmd"
+    if run["verdict"] == "refused":
+        return "proof_cmd_destructive"
     recorded_cwd = run.get("cwd")
     recorded = git_context(Path(recorded_cwd)) if isinstance(recorded_cwd, str) and recorded_cwd else None
     if (
