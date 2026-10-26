@@ -58,3 +58,20 @@ class TeardownReceiptSafety(unittest.TestCase):
             self.assertFalse(teardown_steps.record(alias / "state", "proof_run", "s1", "L1", "a"))
             self.assertFalse(receipt.exists())
             self.assertTrue(teardown_steps.record(state, "proof_run", "s1", "L1", "a"))
+
+    def test_valid_unterminated_row_gets_separator_before_append(self) -> None:
+        """Keep a valid final row readable when the next step is recorded."""
+        with tempfile.TemporaryDirectory() as scratch:
+            state = Path(scratch) / "state"
+            state.mkdir()
+            (state / "progress.json").write_text('{"loop_id":"L1"}', encoding="utf-8")
+            self.assertTrue(teardown_steps.record(state, "proof_run", "s1", "L1", "a"))
+            receipt = state / teardown_steps.NAME
+            receipt.write_bytes(receipt.read_bytes().rstrip(b"\n"))
+            self.assertTrue(teardown_steps.record(state, "decisions_flushed", "s1", "L1", "b"))
+            self.assertEqual(
+                [row["step"] for row in teardown_steps.read_rows(state)], ["proof_run", "decisions_flushed"]
+            )
+            receipt.write_bytes(b'{"step":')
+            self.assertFalse(teardown_steps.record(state, "orders_prepared", "s1", "L1", "c"))
+            self.assertEqual(receipt.read_bytes(), b'{"step":')

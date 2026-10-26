@@ -100,6 +100,20 @@ def read_rows(state_dir: Path) -> list[dict[str, Any]]:
     return _parse_rows(lines)
 
 
+def read_rows_fd(state_fd: int) -> list[dict[str, Any]]:
+    """Read receipt rows without following a path outside the held state directory."""
+    try:
+        data = _read_member(state_fd, NAME)
+    except FileNotFoundError:
+        return []
+    except OSError as error:
+        raise ValueError("teardown_unreadable") from error
+    try:
+        return _parse_rows(data.decode("utf-8").splitlines())
+    except UnicodeError as error:
+        raise ValueError("teardown_unreadable") from error
+
+
 def _parse_rows(lines: list[str]) -> list[dict[str, Any]]:
     """Parse receipt lines from either a path read or an opened state directory."""
     rows: list[dict[str, Any]] = []
@@ -114,7 +128,7 @@ def _parse_rows(lines: list[str]) -> list[dict[str, Any]]:
     return rows
 
 
-def _open_state_dir(state_dir: Path) -> int:
+def open_state_dir(state_dir: Path) -> int:
     """Open each directory component; allow only fixed root-owned system aliases."""
     if ".." in state_dir.parts:
         raise OSError("state directory traversal")
@@ -223,7 +237,7 @@ def record(state_dir: Path, step: str, session_id: str, loop_id: str | None, evi
     try:
         if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
             return False
-        state_fd = _open_state_dir(state_dir)
+        state_fd = open_state_dir(state_dir)
         try:
             progress = _read_member(state_fd, "progress.json")
             lock_fd = os.open(
@@ -259,7 +273,9 @@ def record(state_dir: Path, step: str, session_id: str, loop_id: str | None, evi
                         "loop_id": loop_id,
                         "evidence_sha256": evidence_sha256,
                     }
-                    _replace_receipt(state_fd, prior + (json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
+                    separator = b"\n" if prior and not prior.endswith(b"\n") else b""
+                    row_bytes = (json.dumps(row, sort_keys=True) + "\n").encode("utf-8")
+                    _replace_receipt(state_fd, prior + separator + row_bytes)
                 finally:
                     fcntl.flock(lock_fd, fcntl.LOCK_UN)
             finally:

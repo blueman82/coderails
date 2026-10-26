@@ -26,7 +26,7 @@ import json
 import os
 import runpy
 import sys
-import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, cast
 
@@ -141,7 +141,35 @@ def _flush(state_dir: Path, state: dict[str, Any], session: str) -> dict[str, An
 
 
 def assemble(state_dir: Path, session: str, free: dict[str, Any] | None = None) -> tuple[dict[str, Any], int]:
-    """Write <state-dir>/retro.json; return ({retro, degraded[], missing_steps}, exit code)."""
+    """Write retro.json only through a verified state-directory descriptor."""
+    try:
+        state_fd = teardown_steps.open_state_dir(state_dir)
+    except OSError:
+        return {"reason_code": "retro_state_error"}, 2
+    try:
+        return _assemble(state_dir, state_fd, session, free)
+    finally:
+        os.close(state_fd)
+
+
+def _write_retro(state_fd: int, retro: dict[str, Any]) -> None:
+    """Replace retro.json relative to the held state directory."""
+    temporary = f".retro.json.{uuid.uuid4().hex}.tmp"
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=state_fd)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(retro, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, "retro.json", src_dir_fd=state_fd, dst_dir_fd=state_fd)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temporary, dir_fd=state_fd)
+
+
+def _assemble(state_dir: Path, state_fd: int, session: str, free: dict[str, Any] | None) -> tuple[dict[str, Any], int]:
+    """Assemble source-bound fields after the directory has passed the path check."""
     try:
         state = _load(state_dir / "progress.json")
     except ValueError:
@@ -156,7 +184,21 @@ def assemble(state_dir: Path, session: str, free: dict[str, Any] | None = None) 
     state = _load(state_dir / "progress.json")
     loop_id = state.get("loop_id")
     pre = retro_check.retro_step_hashes(state, state_dir)
-    teardown_steps.record(state_dir, "retro_assembled", session, loop_id, teardown_steps.sha_json(pre))
+    receipt_sha = teardown_steps.sha_json(pre)
+    recorded = teardown_steps.record(state_dir, "retro_assembled", session, loop_id, receipt_sha)
+    if not recorded:
+        try:
+            rows = teardown_steps.read_rows_fd(state_fd)
+        except ValueError:
+            return {"reason_code": "retro_steps_missing"}, 2
+        latest = next((row for row in reversed(rows) if row["step"] == "retro_assembled"), None)
+        if (
+            latest is None
+            or latest.get("evidence_sha256") != receipt_sha
+            or latest.get("session_id") != session
+            or latest.get("loop_id") != loop_id
+        ):
+            return {"reason_code": "retro_steps_missing"}, 2
     hashes = retro_check.source_hashes(state, state_dir)
     cost: Any = _mine("loop_cost", "mine_token_usage", session)
     cost = cast("dict[str, Any]", cost) if isinstance(cost, dict) else {}
@@ -186,11 +228,14 @@ def assemble(state_dir: Path, session: str, free: dict[str, Any] | None = None) 
         "source_hashes": hashes,
         "free": free or {},
     }
-    handle, temp = tempfile.mkstemp(dir=str(state_dir), prefix="retro.json.tmp")
-    with os.fdopen(handle, "w", encoding="utf-8") as stream:
-        json.dump(retro, stream, indent=2, sort_keys=True)
-        stream.write("\n")
-    os.replace(temp, state_dir / "retro.json")
+    try:
+        held = os.fstat(state_fd)
+        named = os.stat(state_dir, follow_symlinks=False)
+        if (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+            return {"reason_code": "retro_state_error"}, 2
+        _write_retro(state_fd, retro)
+    except OSError:
+        return {"reason_code": "retro_state_error"}, 2
     degraded = [
         {"seq": s["seq"], "reason_code": s["muninn"]["reason_code"]}
         for s in flushed.get("synced", []) if s["muninn"]["state"] == "degraded"
