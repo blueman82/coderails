@@ -765,3 +765,30 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `no PR` units) stay prose: `skip_when_met` is only the machine predicate and is a hint, not a recorded skip. Same-user
   boundary: the spec, policy and `progress.json` are plain files the session user can edit; this is drift detection for a
   cooperating agent, not tamper evidence.
+
+## A procedure script (wiki_lint, verify_merged, merge --describe, memory_dir, detect_test_command, check --json) answered unexpectedly
+
+- `wiki_lint.py stale --repo R --vault V`: typed `wiki_stale_days` (default 30; zero valid) sets candidate age.
+  A source commit more than 7 days after the page date proves potential drift. With no comparable repo source, an old
+  page is stale with `basis: date_only`; this weaker result also keeps a `no_repo_sources` gap. `data_gaps` names unresolvable sources,
+  missing commit dates, missing `last_updated` and `no_repo_sources`. Missing directories exit 2 (`repo_unavailable`, `vault_unavailable`);
+  bad thresholds report `wiki_stale_days_invalid`. Repair and rerun. Point-in-time/structural directories are excluded.
+- `verify_merged.py <PR> [--grep STR --path P]` exits 0 only when confirmed (`content` or `merge-commit-ancestry`).
+  Refusals: `pr_number_invalid` (PR is not a positive decimal number), `origin_repo_unresolved` (origin is not a supported
+  GitHub URL), `repo_mismatch` (`GH_REPO` names another host or repository), `gh_failed`, `not_merged`,
+  `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`, `content_preexisting` (needle predates
+  merge), `content_check_failed` (Git error or missing parent), and `content_check_required` (no needle and no true
+  two-parent ancestry). A squash needs `--grep`. Choose a new needle or restore missing history. For a parsed PR request,
+  the script attempts a `verify-merged/<ok|refused>/<reason>` trace row. An option-shaped PR such as `--comments` returns
+  a JSON `pr_number_invalid` refusal before parsing and does not write a trace row. Trace rows feed `trace.by_reason` and
+  the `verify-merged` counter.
+- `merge.py --describe` prints JSON from `VERIFY_STAGES` then `publication_gate.CHECKS`, without remote contact.
+  Conditional stages may skip; earlier refusals stop execution. Target/auth/state/approval checks precede those stages.
+- `memory_dir.py [--provider claude|codex]` prints a path even if absent: realpath, every non-alphanumeric becomes `-`.
+  `detect_test_command.py` returns null for zero/several candidates; callers ask before writing configuration. Missing
+  projects exit 2 (`directory_unavailable`); malformed/blank npm test scripts are not candidates. Repair input and rerun.
+- `scripts/quality/check.py --json` emits `{scanned, findings[{path,line,message}], external_ok}` with tools on stderr.
+  Both feedback hooks disclose findings, unusable JSON, nonzero checker exits and external failures, with bounded diagnostics.
+  The Codex adapter runs built-in checks only; `external_ok: true` means no external tools were attempted.
+- Limits: skills choose these helpers; verification writes a trace. Same-user `gh`/clone/dates/sources/config are trusted.
+  Wiki lint is advisory; presence on base and absence at the first parent do not prove PR authorship.

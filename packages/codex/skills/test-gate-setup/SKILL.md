@@ -10,15 +10,9 @@ Configure the current project's opt-in commit test gate. The Coderails Codex `Pr
 Work from the project's root directory.
 
 1. Resolve the configuration path with `git rev-parse --git-path coderails/test_command`. If that file exists, read and report its current command. Use `request_user_input` to ask whether to keep or replace it. Stop without changing the file if the user keeps it.
-2. Otherwise, detect available test commands:
-   - `package.json` with a `test` script: `npm test`
-   - `Cargo.toml`: `cargo test`
-   - `pyproject.toml`, `setup.py`, or `setup.cfg`: `pytest -x`
-   - `go.mod`: `go test ./...`
-   - `Makefile` with a `test` target: `make test`
-   - `mix.exs`: `mix test`
-   - `Gemfile`: `bundle exec rspec`
-3. If exactly one command is detected, propose it. If several are detected, use `request_user_input` to select one. If none are detected, ask for a test command.
+2. Otherwise, detect available test commands with `scripts/detect_test_command.py`, resolved relative to this `SKILL.md` (`../../scripts/detect_test_command.py`) and run from the project root. It owns the ordered marker list and prints JSON `{"command": ..., "candidates": [...]}`.
+   A missing directory exits 2 with `directory_unavailable`; resolve the project root and rerun before selecting or writing a command.
+3. If `command` is set, propose it. If `command` is null and `candidates` has several entries, use `request_user_input` to select one. If `candidates` is empty, ask for a test command.
 4. Run the selected command once from the project root. If it fails, report the failure and do not activate the gate unless the user explicitly chooses to keep that failing command.
 5. Create the resolved path's parent directory if needed and write the selected command as its single line.
 6. Confirm the configured command and explain that deleting the resolved Git-internal file disables the gate.

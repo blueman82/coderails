@@ -24,6 +24,8 @@ tallied by `measure_graph_alignment.py` into `trace.by_reason` keyed
 | `eval-level/refused/<code>` | `<code>` is `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`, `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, `integrity_stripped`, `not_frozen`, `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed`, `eval_head_mismatch`, `eval_result_mismatch` or `eval_level_diff_unavailable` |
 | `publication/refused/<code>` | the gate refused; `<code>` is `diff_manifest:<code>`, a review or eval-level code, `pr_repo_override`, `pr_base_mutation`, or a later unit's code |
 | `routine/<outcome>/<code>` | a routine event from `scripts/routine_log.py`: `<outcome>` is `stage_ok`, `run_ok`, `run_abort`, `run_refused` or `run_incomplete`; `<code>` is the closed per-routine reason code (`none` for `stage_ok`/`run_ok`), e.g. `routine/run_abort/docs_sync_deny`, `routine/run_refused/merge`, `routine/run_incomplete/incomplete-run`; keyed by the routine name as session id |
+| `verify-merged/ok/verified` | `scripts/verify_merged.py` confirmed a PR landed (by content, or by merge-commit ancestry) |
+| `verify-merged/refused/<code>` | `<code>` is the first reason: `pr_number_invalid`, `origin_repo_unresolved`, `repo_mismatch`, `gh_failed`, `not_merged`, `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`, `content_preexisting`, `content_check_failed`, or `content_check_required` (keyed `<repo>@pr-<N>`). An option-shaped PR argument returns JSON before parsing and writes no trace row. |
 | `argv/denied/ceiling_exceeded` | the verification-volume ceiling denied a 3rd+ full suite or `post_evals.py post\|validate-structure` in one worktree (keyed by the session that ran it) |
 | `argv/denied/protected_paths_unreadable` | `policy/protected_paths.json` was missing or ill-shaped and an edit on main was refused (fail closed) |
 
@@ -43,7 +45,7 @@ transactional or authoritative counter evidence; inspect JSONL, human log and st
 
     python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py
 
-prints `{command: {outcome/reason_code: count}}` for `diff-manifest`, `review-passes`, `eval-level`, `publication`, `argv` and `routine`. Add a command name to
+prints `{command: {outcome/reason_code: count}}` for `diff-manifest`, `review-passes`, `eval-level`, `publication`, `argv`, `routine` and `verify-merged`. Add a command name to
 `COMMANDS` in that file when a unit adds a new row family; `measure_graph_alignment.py` is at its line limit and is not
 edited.
 
@@ -73,6 +75,19 @@ edited.
 - Any `argv/denied/protected_paths_unreadable` means `policy/protected_paths.json` is broken in the installed plugin:
   edits on main are refused until it is repaired. Commit, push and merge recognition rows are not written; a drop in
   gated commits after the classifier shipped cannot be told apart from fewer commits.
+
+### Procedure scripts
+
+`verify_merged.py` is the only one of the prose-to-script helpers that writes rows. `wiki_lint.py stale`, `memory_dir.py`,
+`detect_test_command.py`, `merge.py --describe` and `check.py --json` are read-only and print their result (`memory_dir.py`
+prints a path; the others print JSON); they
+write no trace rows, so there is no count of how often a skill ran them. A rising `verify-merged/refused/content_absent`
+or `content_check_required` means claims of "merged" are not being backed by content (or the skill is called without
+`--grep` on squash merges), not that merges are failing.
+`content_preexisting` means the needle predates the merge; `content_check_failed` means Git could not establish presence
+or absence (for example, a shallow clone lacks the first parent). Neither is a merge-failure count. Restore history or
+choose a new needle before retrying. Wiki candidate/data-gap counts and quality feedback are advisory output, not
+installed-call or enforcement measurements; the Codex quality adapter attempts no external tools.
 
 ## Limits
 

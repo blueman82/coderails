@@ -23,10 +23,16 @@ sessions.
 
 ### Step 1: Locate the memory directory
 
-The target is `~/.claude/projects/<project-slug>/memory/`, where
-`<project-slug>` is the sanitized form of the project's working directory
-path (matching the directory this skill itself is invoked from). Read
-`MEMORY.md` in that directory first — it is the index of every memory file.
+The target is `~/.claude/projects/<project-slug>/memory/`. Derive it with the
+script rather than by hand (it takes the realpath of the working directory
+this skill is invoked from and sanitizes it into the slug):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/memory_dir.py"
+```
+
+Read `MEMORY.md` in the printed directory first — it is the index of every
+memory file.
 
 ### Step 2: Read every memory file
 
