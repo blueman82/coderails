@@ -11,7 +11,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .graph_executor import graph_contract, graph_semantics, graph_spec, transition
 from .graph_recovery import RecoveryRefusedError, trace
@@ -249,6 +249,42 @@ def add_unit(
         "revision": revision[0],
         "reason_code": "add_unit_registered",
     }
+
+
+def assign_worktree(path: Path, session: str, loop_id: str, unit: str, worktree: str) -> dict[str, Any]:
+    """Assign a checkout to an existing unit without changing graph revision or active dispatches."""
+    ident = {"session_id": session, "loop_id": loop_id}
+    inputs = {"unit": unit, "worktree": worktree}
+    try:
+        assigned = graph_contract.unit_fields(None, [], [], None, worktree=worktree)["worktree"]
+    except ValueError as error:
+        coded = RecoveryRefusedError("assign_worktree_refused", str(error))
+        raise _refused("assign-worktree", path, ident, coded, inputs) from error
+    refusal: list[RecoveryRefusedError] = []
+
+    def update(state: dict[str, Any]) -> dict[str, Any]:
+        units: object = state.get("work_units")
+        raw: object = cast(dict[str, object], units).get(unit) if isinstance(units, dict) else None
+        record = cast(dict[str, Any], raw) if isinstance(raw, dict) else None
+        if state["session_id"] != session or state["loop_id"] != loop_id or state["status"] != "in-progress":
+            refusal.append(RecoveryRefusedError("assign_worktree_refused", "loop ownership or status mismatch"))
+            raise refusal[0]
+        if record is None or record.get("status") != "pending":
+            refusal.append(RecoveryRefusedError("assign_worktree_refused", "unit is not pending"))
+            raise refusal[0]
+        if record.get("worktree") not in (None, assigned):
+            refusal.append(RecoveryRefusedError("assign_worktree_refused", "unit already has another worktree"))
+            raise refusal[0]
+        record["worktree"] = assigned
+        return state
+
+    try:
+        transition(path, update)
+    except ValueError as error:
+        coded = refusal[0] if refusal else RecoveryRefusedError("assign_worktree_refused", str(error))
+        raise _refused("assign-worktree", path, ident, coded, inputs) from error
+    trace(path, ident, "assigned", "worktree_assigned", inputs, [], "assign-worktree")
+    return {"unit": unit, "worktree": assigned, "reason_code": "worktree_assigned"}
 
 
 def instantiate(path: Path, session: str, loop_id: str, profile: str | None, units: list[str]) -> dict[str, Any]:

@@ -27,6 +27,10 @@ from scripts.lib import decision_record
 
 def add_unit_options(command: argparse.ArgumentParser) -> None:
     """Add worker contract and compatibility fields to the unit command."""
+    command.add_argument("--unit", required=True)
+    command.add_argument("--depends-on", action="append", default=[])
+    command.add_argument("--join", action="store_true")
+    command.add_argument("--manifest", action="append", default=[])
     command.add_argument("--base-branch", help="remote branch used for first stacked publication")
     command.add_argument("--worktree", help="absolute path of this unit's checkout")
     command.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
@@ -50,7 +54,7 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
     for name in (  # noqa: SIM905
-        "start add-unit instantiate inspect summarize collection recover-wave plan "
+        "start add-unit assign-worktree instantiate inspect summarize collection recover-wave plan "
         "begin-wave record-wave record-unit record-decision flush-decisions "
         "record-repair record-proof-disposition respawn-stale hard-stop stop "
         "authorize-dispatch complete verify-completion convert disposition-audit"
@@ -83,7 +87,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--revision", required=True, type=int)
             command.add_argument("--disposition", required=True)
             command.add_argument("--reason", required=True)
-        if name in {"start", "add-unit", "instantiate"}:
+        if name in {"start", "add-unit", "assign-worktree", "instantiate"}:
             command.add_argument("--session", required=True)
             command.add_argument("--loop-id", required=True)
         if name == "instantiate":
@@ -92,11 +96,10 @@ def parser() -> argparse.ArgumentParser:
         if name == "start":
             command.add_argument("--prompt-file", required=True, type=Path)
         if name == "add-unit":
-            command.add_argument("--unit", required=True)
-            command.add_argument("--depends-on", action="append", default=[])
-            command.add_argument("--join", action="store_true")
-            command.add_argument("--manifest", action="append", default=[])
             add_unit_options(command)
+        if name == "assign-worktree":
+            command.add_argument("--unit", required=True)
+            command.add_argument("--worktree", required=True)
         if name == "recover-wave":
             command.add_argument("--lease-seconds", type=int, default=900)
             command.add_argument("--report-only", action="store_true")
@@ -287,16 +290,11 @@ def main() -> int:
         elif args.command == "add-unit":
             fields: dict[str, Any] = {"model_role": args.model_role, "write_scope": args.write_scope}
             fields.update(lessons=args.lesson, disposition=(args.disposition, args.named_blocker, args.removal_ticket))
-            output = graph_controller.add_unit(
-                args.state,
-                args.session,
-                args.loop_id,
-                args.unit,
-                args.depends_on,
-                args.join,
-                args.manifest,
-                {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
-            )
+            unit_args = (args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest)
+            contract = {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree}
+            output = graph_controller.add_unit(*unit_args, contract)
+        elif args.command == "assign-worktree":
+            output = graph_controller.assign_worktree(args.state, args.session, args.loop_id, args.unit, args.worktree)
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "inspect":
