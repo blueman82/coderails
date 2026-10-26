@@ -31,6 +31,8 @@ Before ending any turn that pauses an active loop, run `graph.py stop`: `python3
 
 ## Run one wave
 
+When a unit has an assigned worktree, `record-wave` and later evidence checks require the native child's `session_meta.cwd` to resolve to that checkout. A foreign or missing cwd cannot credit the worker. A dispatch authorization failure at `record-wave` returns a coded refusal and leaves graph state unchanged.
+
 Every dispatch wave follows this order:
 
 When composing each worker prompt, place the printed one-word `job_name` and `lane_code` after its machine ownership marker as a human-readable line with the stable node ID (for example, `Builder · A-1 [U3[1]]`). This display is descriptive only; use the stable node ID for task identity, authorization, and evidence.

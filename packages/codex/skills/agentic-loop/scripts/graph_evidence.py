@@ -28,6 +28,7 @@ from graph_identity import (
 )
 from graph_recovery import RecoveryRefusedError
 from graph_transcript import (
+    assigned_worktree,
     child_read_records,
     child_terminal,
     native_dispatch_requests,
@@ -42,7 +43,6 @@ LEGACY_REFUSED = "legacy_task_identity_refused"
 
 
 def _legacy_refusal(node_id: str, attempt: object) -> RecoveryRefusedError:
-    """Return the stable refusal for a node-only (pre-loop-scoped) task name; it is never bound or skipped."""
     message = (
         f"node {node_id} attempt {attempt} carries a pre-loop-scoped task name; re-dispatch under the loop-scoped name"
     )
@@ -70,7 +70,6 @@ def _reference(value: object, label: str) -> dict[str, Any]:
 def _verify_dispatch(
     state: dict[str, Any], node_id: str, attempt: int, wave_id: str, call_id: str, requests: Requests
 ) -> None:
-    """Recheck the native message and consumed v2 record for a contract-era Codex spawn."""
     if not is_contract_wave(state, wave_id):
         return
     calls = requests.get(call_id, [])
@@ -165,6 +164,7 @@ def verify_reference(
         expected_path,
         expected_role,
         reference["task_complete_turn_id"],
+        assigned_worktree(state, node_id),
     )
     return spawn_line
 
@@ -239,7 +239,8 @@ def _validate_missing_attempts(
                     )
             else:
                 _verify_dispatch(state, node_id, attempt, issued[0]["wave_id"], call, requests)
-            child_read_records(state["session_id"], child, nickname, path, role)
+            worktree = assigned_worktree(state, node_id)
+            child_read_records(state["session_id"], child, nickname, path, role, worktree)
             used.update({call, child})
         if line <= previous_line:
             raise GraphError(f"node {node_id} native attempts are stale or out of order")
@@ -309,7 +310,6 @@ def stored_references(
         last_wave = revision - (2 if state["graph"]["active_wave"] is not None else 1)
         generations = sum(node["respawn"]["generation"] for node in state["graph"]["nodes"].values())
         ordered = sorted(waves)
-        # Respawn transitions advance revisions without dispatching a wave.
         gaps = sum(right - left - 2 for left, right in zip(ordered, ordered[1:]))
         if max(waves) > last_wave or any(right - left < 2 for left, right in zip(ordered, ordered[1:])):
             raise GraphError("stored worker wave evidence does not match graph revisions")
@@ -365,10 +365,12 @@ def bind_worker_evidence(
             raise GraphError(f"node {node_id} must have exactly one current-wave spawn")
         call_id, (_, _, agent_thread_id, nickname, expected_path, expected_role) = matching[0]
         _verify_dispatch(state, node_id, attempt, active_wave["wave_id"], call_id, requests)
+        child_args = (state["session_id"], agent_thread_id, nickname, expected_path, expected_role)
+        worktree = assigned_worktree(state, node_id)
         if node_id in stale_nodes:
-            child_read_records(state["session_id"], agent_thread_id, nickname, expected_path, expected_role)
+            child_read_records(*child_args, worktree)
             continue
-        terminal = child_terminal(state["session_id"], agent_thread_id, nickname, expected_path, expected_role)
+        terminal = child_terminal(*child_args, expected_cwd=worktree)
         reference = {
             "kind": "codex_agent",
             "attempt": attempt,

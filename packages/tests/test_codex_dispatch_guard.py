@@ -21,16 +21,9 @@ from hook_common import loop_state_path
 
 from scripts.lib.config import config_path
 
-ENVELOPE = "CODERAILS_GRAPH_DISPATCH=" + json.dumps(
-    {
-        "envelope_version": 2,
-        "dispatch_id": "disp_1",
-        "session_id": "parent",
-        "loop_id": "loop",
-        "revision": 2,
-        "wave_id": "wave-2",
-        "node_id": "U3[1]",
-    }
+ENVELOPE = (
+    'CODERAILS_GRAPH_DISPATCH={"envelope_version":2,"dispatch_id":"disp_1","session_id":"parent",'
+    '"loop_id":"loop","revision":2,"wave_id":"wave-2","node_id":"U3[1]"}'
 )
 
 
@@ -41,6 +34,9 @@ class DispatchGuardTests(unittest.TestCase):
         """Create a graph-bound session with one enveloped dispatch."""
         self.scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self.scratch.cleanup)
+        graph_root = patch.dict(os.environ, {"CODERAILS_AGENTIC_LOOP_DIR": str(Path(self.scratch.name) / "loops")})
+        graph_root.start()
+        self.addCleanup(graph_root.stop)
         self.state = Path(self.scratch.name) / "progress.json"
         self.state.touch()
         self.tool_input: dict[str, Any] = {
@@ -167,7 +163,7 @@ class DispatchGuardTests(unittest.TestCase):
         """Malformed nested JSON must yield an explicit hook denial before graph authorization."""
         self.tool_input["message"] = "CODERAILS_GRAPH_DISPATCH=" + "[" * 2000 + "0" + "]" * 2000
         self.assertEqual(self._run(), (True, 0))
-        self.assertIn("reason_code=dispatch_hook_error", self.denial_reason)
+        self.assertIn("reason_code=dispatch_input_invalid", self.denial_reason)
 
     def test_deep_hook_payload_denies_without_unhandled_recursion(self) -> None:
         """The same input limit applies when the outer hook payload is deeply nested."""
@@ -177,13 +173,13 @@ class DispatchGuardTests(unittest.TestCase):
             patch.object(guard, "log"),
         ):
             self.assertEqual(guard.main(), 0)
-        self.assertIn("reason_code=dispatch_hook_error", denial.call_args.args[0])
+        self.assertIn("reason_code=dispatch_input_invalid", denial.call_args.args[0])
 
     def test_oversized_plaintext_envelope_denies_before_authority(self) -> None:
         """A huge first line cannot consume unbounded work in the envelope parser."""
         self.tool_input["message"] = 'CODERAILS_GRAPH_DISPATCH={"padding":"' + "x" * 9000 + '"}'
         self.assertEqual(self._run(), (True, 0))
-        self.assertIn("reason_code=dispatch_hook_error", self.denial_reason)
+        self.assertIn("reason_code=dispatch_input_invalid", self.denial_reason)
 
     def test_blank_or_malformed_native_role_denied_before_authority(self) -> None:
         """A supplied agent_type must be a nonblank string."""
@@ -286,7 +282,7 @@ class DispatchGuardTests(unittest.TestCase):
             patch.object(guard, "log"),
         ):
             self.assertEqual(guard.main(), 0)
-            self.assertIn("dispatch_hook_error", denial.call_args.args[0])
+            self.assertIn("dispatch_discovery_error", denial.call_args.args[0])
         with (
             patch.object(guard, "read_input", return_value=json.dumps(self.payload)),
             patch.object(guard, "config_path", return_value=""),
@@ -295,7 +291,7 @@ class DispatchGuardTests(unittest.TestCase):
             patch.object(guard, "log"),
         ):
             self.assertEqual(guard.main(), 0)
-            self.assertIn("dispatch_hook_error", denial.call_args.args[0])
+            self.assertIn("dispatch_discovery_error", denial.call_args.args[0])
 
     def test_completed_graph_denies_spawns_before_ownership_is_proven(self) -> None:
         """An inspected complete state may belong to another session, so it cannot authorize a spawn."""
@@ -345,7 +341,7 @@ class DispatchGuardTests(unittest.TestCase):
                     self.assertEqual(guard.main(), 0)
             self.assertTrue(seen)
             self.assertTrue(all(value is not None and 0 < value <= 7 for value in seen))
-            self.assertIn("dispatch_hook_error", denial.call_args.args[0])
+            self.assertIn("dispatch_discovery_timeout", denial.call_args.args[0])
 
         for module, config in (("scripts.lib.config_discovery", None), ("hook_common", "")):
             with self.subTest(module=module):
@@ -367,7 +363,7 @@ class DispatchGuardTests(unittest.TestCase):
             self.assertEqual(guard.main(), 0)
             elapsed = time.monotonic() - started
         self.assertLess(elapsed, 9)
-        self.assertIn("dispatch_hook_error", denial.call_args.args[0])
+        self.assertIn("dispatch_discovery_timeout", denial.call_args.args[0])
 
     def test_missing_identity_denies_every_native_spawn(self) -> None:
         """No spawn can bypass graph discovery without a usable session and cwd."""

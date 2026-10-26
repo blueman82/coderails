@@ -173,7 +173,10 @@ def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
     with _locked(path):
         state = _load(path)
         with traced_refusal(path, state, "record-wave"):
-            proposed, transition = apply_record(state, raw_results, typed=True)
+            try:
+                proposed, transition = apply_record(state, raw_results, typed=True)
+            except graph_contract.DispatchDeniedError as error:
+                raise RecoveryRefusedError(error.code, error.message) from error
         statuses = transition["statuses"]
         if statuses:  # one typed stop row on the post-record state, in the same locked write
             category, code, reason = worker_status.stop_for(statuses)
