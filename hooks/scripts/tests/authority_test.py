@@ -19,7 +19,7 @@ from scripts.lib import authority_object as ao
 
 REPO = Path(__file__).resolve().parents[3]
 CLI = REPO / "scripts" / "authority.py"
-CRACK_ON = REPO / "hooks" / "scripts" / "autonomous_gate.py"
+AUTONOMOUS_GATE = REPO / "hooks" / "scripts" / "autonomous_gate.py"
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
@@ -283,7 +283,7 @@ class CliTests(unittest.TestCase):
         payload = {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "please be autonomous"}
         env = {**self.env, "CLAUDE_DISCIPLINE_LOG": str(self.base / "d.log")}
         result = subprocess.run(
-            [sys.executable, str(CRACK_ON)], input=json.dumps(payload), capture_output=True, text=True, env=env
+            [sys.executable, str(AUTONOMOUS_GATE)], input=json.dumps(payload), capture_output=True, text=True, env=env
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.base / "s1" / "authority.json").exists())
