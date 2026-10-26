@@ -80,9 +80,8 @@ def _check() -> int:
         return 0
     session_id = text_field(payload, "session_id")
     cwd = text_field(payload, "cwd")
-    if not session_id or not cwd:
-        if enveloped or graph_named:
-            deny("Graph worker dispatch requires a session id and working directory.")
+    if not session_id.strip() or not cwd.strip():
+        deny("Graph worker dispatch requires a session id and working directory.")
         return 0
     config = config_path(cwd, strict=True)
     if config:

@@ -265,14 +265,21 @@ class DispatchGuardTests(unittest.TestCase):
         self.tool_input["message"] = ENVELOPE + "\nx"
         self.assertEqual(self._run(status="complete"), (True, 0))
 
-    def test_missing_identity_denies_graph_named_dispatch(self) -> None:
-        """Without a session id the hook cannot bind a graph name, even if its prompt is opaque."""
-        self.payload["session_id"] = ""
-        self.assertEqual(self._run(), (True, 0))
-        self.tool_input["message"] = "Read documentation."
-        self.assertEqual(self._run(), (True, 0))
-        self.tool_input["task_name"] = "ordinary"
-        self.assertEqual(self._run(), (False, 0))
+    def test_missing_identity_denies_every_native_spawn(self) -> None:
+        """No spawn can bypass graph discovery without a usable session and cwd."""
+        for field in ("session_id", "cwd"):
+            for value in (None, "", "  ", 123):
+                for task, message in (
+                    ("ordinary", "Read documentation."),
+                    ("loop_worker_6c6f6f70_55335b315d", "gAAAAopaque"),
+                ):
+                    with self.subTest(field=field, value=value, task=task):
+                        self.payload[field] = value
+                        self.tool_input.update(task_name=task, message=message)
+                        self.sent.clear()
+                        self.assertEqual(self._run(), (True, 0))
+                        self.assertIn("session id and working directory", self.denial_reason)
+            self.payload[field] = "parent" if field == "session_id" else str(self.state.parent)
 
     def test_other_tools_denied(self) -> None:
         """Codex graph workers use native spawn_agent only."""
