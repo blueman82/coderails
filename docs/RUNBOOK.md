@@ -446,7 +446,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   refuses (`review_policy_unreadable`), it does not allow.
 - Artifact: line 1 is the unchanged v1 marker; line 2 is `<!-- coderails-review-passes v1 {"head_sha":...,"passes":[...]} -->`
   with `{name, verdict, blocking, summary_sha256}` per pass. `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]`
-  validates each summary, derives each verdict from the text (a bullet under `## Critical` is `fail`) and posts it. A v1
+  validates each summary, derives each verdict from the text (a bullet under `## Critical` is `fail`) and posts it. A
+  present passes line must include `review-pr` with a verdict bound to its summary. A v1
   artifact with no passes line counts as no passes: `review-pr` is satisfied by the marker, but a `hooks/` PR is refused
   until it is re-posted. A passes line naming another `head_sha` is refused as malformed (`review_passes_malformed`).
 - Query: `trace.by_reason` for `review-passes/ok/review_passes_ok` and `review-passes/refused/<code>`, plus

@@ -136,6 +136,11 @@ class LineTests(unittest.TestCase):
         """A v1 artifact without a passes line counts as passes=[]."""
         self.assertEqual(review_passes.parse(body(None), "7", SHA), [])
 
+    def test_present_line_must_bind_review_pr_verdict(self) -> None:
+        """A specialist pass cannot hide a Critical finding in the main review summary."""
+        text = body([entry("security-review")], texts={"review-pr": CRITICAL})
+        self.assertIsNone(review_passes.parse(text, "7", SHA))
+
     def test_line_bound_to_other_head_is_malformed(self) -> None:
         """A stale passes line cannot become an absent legacy line."""
         text = "\n".join([review_artifact.marker("7", SHA), review_passes.render(OTHER, [entry("security-review")])])

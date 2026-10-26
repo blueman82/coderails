@@ -128,7 +128,7 @@ def _bound(rest: str, passes: Passes) -> bool:
     parts = re.split(r"^<!-- coderails-review-pass ([a-z][a-z0-9-]*) -->\r?\n", rest, flags=re.MULTILINE)
     names = ["review-pr", *parts[1::2]]
     declared = [p["name"] for p in passes]
-    if len(names) != len(set(names)) or len(declared) != len(set(declared)):
+    if "review-pr" not in declared or len(names) != len(set(names)) or len(declared) != len(set(declared)):
         return False
     texts = dict(zip(names, [parts[0], *parts[2::2]]))
     if set(texts) != {"review-pr", *declared}:
