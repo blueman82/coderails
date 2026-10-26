@@ -22,11 +22,11 @@ from graph_completion import validate_work_units
 from graph_evidence import validate_worker_evidence
 from graph_identity import GraphError, task_name, task_node
 
-from packages.tests.codex_fixture import frozen_evals, read_json, spawn, state, transcripts, write_json
+from packages.tests.codex_fixture import done_result, frozen_evals, read_json, spawn, state, transcripts, write_json
 
 
-class GraphRuntimeTests(unittest.TestCase):
-    """Verify atomic transitions against real isolated native transcript fixtures."""
+class RuntimeFixture(unittest.TestCase):
+    """Build a native graph and provide shared real-adapter test helpers."""
 
     def setUp(self) -> None:
         """Prepare an independent graph, eval suite, and native session."""
@@ -48,7 +48,14 @@ class GraphRuntimeTests(unittest.TestCase):
             json.dumps(
                 {
                     "wave_id": current["graph"]["active_wave"]["wave_id"],
-                    "results": {"U3[1]": {"outcome": outcome, "evidence": "checked", **extra}},
+                    "results": {
+                        "U3[1]": {
+                            **(done_result() if outcome == "done" else {}),
+                            "outcome": outcome,
+                            "evidence": "checked",
+                            **extra,
+                        }
+                    },
                 }
             ),
         )
@@ -59,6 +66,10 @@ class GraphRuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             operation(*arguments, **keywords)
         self.assertEqual(self.path.read_bytes(), before)
+
+
+class GraphRuntimeTests(RuntimeFixture):
+    """Verify atomic transitions against native transcript fixtures."""
 
     def test_legacy_schema_rejected(self) -> None:
         """Reject historical state without migration or fallback."""

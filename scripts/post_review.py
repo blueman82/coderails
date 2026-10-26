@@ -110,7 +110,9 @@ def post_body(repo: str, number: int, body: str) -> dict[str, str]:
     return cast(dict[str, str], json.loads(reply.stdout))
 
 
-def post(number: int, summary: Path, extra: list[str]) -> int:
+def post(
+    number: int, summary: Path, extra: list[str], compat_count: int | None = None, disposition: str | None = None
+) -> int:
     """Post (or reuse) the artifact for the PR's current head; a head that moves mid-post is refused as stale."""
     texts = sections(summary, extra)
     head = git.pr_field(str(number), "headRefOid")
@@ -122,6 +124,8 @@ def post(number: int, summary: Path, extra: list[str]) -> int:
         for n, t in texts
     ]  # fmt: skip
     top = [review_artifact.marker(str(number), head), review_passes.render(head, passes)]
+    if compat_count is not None and disposition is not None:
+        top.append(review_artifact.compat_line(str(number), head, compat_count, disposition))
     repo = git.repo()
     login = git.output("gh", "api", "user", "-q", ".login", check=True)
     pass_body = "\n".join(top + [review_passes.tail(texts)])
@@ -160,12 +164,16 @@ def post_main(arguments: list[str]) -> int:
     parser.add_argument("pr", type=pr_number)
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--pass", dest="passes", action="append", default=[], metavar="NAME=FILE")
+    parser.add_argument("--compat-count", type=int)
+    parser.add_argument("--disposition", choices=review_artifact.COMPAT_DISPOSITIONS)
     try:
         args = parser.parse_args(arguments)
     except SystemExit as error:
         return int(bool(error.code))
     try:
-        return post(args.pr, args.summary, args.passes)
+        if (args.compat_count is None) != (args.disposition is None):
+            raise ValueError("--compat-count and --disposition must be supplied together")
+        return post(args.pr, args.summary, args.passes, args.compat_count, args.disposition)
     except (OSError, ValueError, KeyError, git.WorkflowError) as error:
         print(f"post: {error}", file=sys.stderr)
         return 1
@@ -177,9 +185,11 @@ def main(arguments: list[str] | None = None) -> int:
     if arguments[:1] == ["post"]:
         return post_main(arguments[1:])
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("validate", "write-cache"))
-    parser.add_argument("path")
+    parser.add_argument("operation", choices=("validate", "write-cache", "compat-line"))
+    parser.add_argument("path", help="summary or progress.json path; the PR number for compat-line")
     parser.add_argument("arguments", nargs="*")
+    parser.add_argument("--count", type=int, help="compat-line: compat findings the reviewer reported")
+    parser.add_argument("--disposition", help="compat-line: clean-break | preserve-compat")
     try:
         args = parser.parse_args(arguments)
     except SystemExit as error:
@@ -187,6 +197,11 @@ def main(arguments: list[str] | None = None) -> int:
     try:
         if args.operation == "validate":
             validate_summary(args.path)
+            return 0
+        if args.operation == "compat-line":
+            if len(args.arguments) != 1 or args.count is None or args.disposition is None:
+                raise ValueError("compat-line requires <pr> <sha> --count K --disposition D")
+            print(review_artifact.compat_line(args.path, args.arguments[0], args.count, args.disposition))
             return 0
         if len(args.arguments) != 5:
             raise ValueError("write-cache requires <path> <pr> <sha> <url> <author> <iso8601>")

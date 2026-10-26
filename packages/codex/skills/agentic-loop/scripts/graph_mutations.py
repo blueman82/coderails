@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import graph_convert
 import graph_semantics
+import worker_status
 from graph_identity import GraphError
 from graph_io import load, locked, write
 from graph_recovery import trace
@@ -65,6 +66,10 @@ def record_decision(args: Any) -> dict[str, Any]:  # noqa: ANN401
         flip_condition=args.flip_condition,
         unit=args.unit,
         cite_quote=args.cite_quote,
+        chosen=args.chosen,
+        worker_status_seq=args.worker_status_seq,
+        human_answer=args.human_answer,
+        status_resolver=worker_status.resolve_pending,
     )
 
 

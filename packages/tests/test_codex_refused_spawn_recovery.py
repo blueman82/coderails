@@ -19,6 +19,7 @@ from graph_identity import GraphError, task_name
 
 from packages.tests.codex_fixture import (
     append,
+    done_result,
     frozen_evals,
     node,
     read_json,
@@ -53,7 +54,7 @@ class RefusedSpawnTests(unittest.TestCase):
     def _record(self, second: str = "failed", **extra: dict[str, object]) -> dict[str, Any]:
         wave = read_json(self.path)["graph"]["active_wave"]["wave_id"]
         results: dict[str, Any] = {
-            "U3[1]": {"outcome": "done", "evidence": "checked"},
+            "U3[1]": done_result(),
             "U3[2]": {"outcome": second, "evidence": "checked", **extra},
         }
         return graph.record_wave(self.path, json.dumps({"wave_id": wave, "results": results}))
@@ -80,7 +81,7 @@ class RefusedSpawnTests(unittest.TestCase):
         spawn(self.parent, read_json(self.path), "U3[2]")
         graph.record_wave(
             self.path,
-            json.dumps({"wave_id": wave["wave_id"], "results": {"U3[2]": {"outcome": "done", "evidence": "checked"}}}),
+            json.dumps({"wave_id": wave["wave_id"], "results": {"U3[2]": done_result()}}),
         )
         validate_worker_evidence(read_json(self.path))
 
@@ -174,7 +175,7 @@ class RefusedSpawnTests(unittest.TestCase):
         self._record()
         wave = graph.begin_wave(self.path)
         spawn(self.parent, read_json(self.path), "U3[2]")
-        results = {"U3[2]": {"outcome": "done", "evidence": "checked"}}
+        results = {"U3[2]": done_result()}
         graph.record_wave(self.path, json.dumps({"wave_id": wave["wave_id"], "results": results}))
         validate_worker_evidence(read_json(self.path))
         stored = read_json(self.path)

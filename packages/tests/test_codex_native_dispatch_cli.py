@@ -119,6 +119,7 @@ class NativeDispatchCliTests(unittest.TestCase):
             base = seed()
             payload: dict[str, Any] = {
                 "tool_name": "spawn_agent",
+                "tool_use_id": "call-native-dispatch",
                 "session_id": "parent",
                 "cwd": scratch,
                 "tool_input": {"task_name": TASK, "message": message_for(base)},

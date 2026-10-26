@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+import graph_invalid_dispatch
+import graph_ledger
 import graph_mutations
 import graph_repair
 import graph_semantics
@@ -25,6 +27,11 @@ from graph_io import locked as _locked
 from graph_io import write as _write
 from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace, traced_refusal
 from graph_recovery import collection as collect
+from graph_summary import budget_spent as _budget_spent
+from graph_summary import summarize as summarize
+from graph_vocab import DISPOSITION_KINDS
+
+reject_invalid_dispatch = graph_invalid_dispatch.reject_invalid_dispatch
 
 __all__ = ["authorize_dispatch", "begin_wave", "record_wave"]
 
@@ -183,44 +190,21 @@ def recover_wave(
     return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
 
 
-def _budget_spent(node: dict[str, Any]) -> bool:
-    """True when the node's respawn generation has reached its retry max."""
-    return bool(node["respawn"]["generation"] >= node["retry"]["max"])
-
-
-def summarize(path: Path) -> dict[str, Any]:
-    """Plain-language status from graph state alone: done, active, ready, blocked and the human dependency."""
-    state = _load(path)
-    graph = state["graph"]
-    statuses = {node_id: node["status"] for node_id, node in graph["nodes"].items()}
-    pending = sorted(n for n, s in statuses.items() if s not in {"done", "skipped"})
-    ready = [] if graph["active_wave"] or graph["hard_stop"] else graph_semantics.ready(state)
-    if graph["hard_stop"] is not None:
-        stopped = graph_semantics.describe_node(graph["hard_stop"]["node"])["display"]
-        phase, detail = (
-            "waiting for human",
-            f"hard stop on {stopped}: {graph['hard_stop']['reason']}",
-        )
-    elif graph["active_wave"] is not None:
-        phase, detail = "waiting for worker", f"wave {graph['active_wave']['wave_id']} dispatched"
-        spent = [n for n in graph["active_wave"]["nodes"] if _budget_spent(graph["nodes"][n])]
-        if spent:
-            detail += f"; recovery budget exhausted for {', '.join(spent)}: recover-wave will refuse, a human decides"
-    elif ready:
-        phase, detail = "ready to dispatch", "begin-wave then spawn the ready nodes"
-    elif not pending:
-        phase, detail = "ready to complete", "run verify-completion"
-    else:
-        phase, detail = "waiting for evidence", "no node is ready; check pending dependencies"
-    return {
-        "phase": phase,
-        "detail": detail,
-        "node_names": graph_semantics.node_names(graph["nodes"]),
-        "done": sorted(n for n in statuses if n not in pending),
-        "active": list(graph["active_wave"]["nodes"]) if graph["active_wave"] else [],
-        "ready": ready,
-        "pending": pending,
-    }
+def _add_unit_args(controller: argparse.ArgumentParser) -> None:
+    """Register work-unit ownership and disposition fields."""
+    controller.add_argument("--unit", required=True)
+    controller.add_argument("--depends-on", action="append", default=[])
+    controller.add_argument("--join", action="store_true")
+    controller.add_argument("--manifest", action="append", default=[])
+    controller.add_argument("--base-branch", help="remote branch used for first stacked publication")
+    controller.add_argument("--worktree", help="absolute path of this unit's checkout")
+    controller.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
+    controller.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
+    controller.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
+    controller.add_argument("--scope", help="one-line scope statement for the worker")
+    controller.add_argument("--disposition", choices=DISPOSITION_KINDS, help="clean-break | preserve-compat")
+    controller.add_argument("--named-blocker", help="what blocks removal (preserve-compat only)")
+    controller.add_argument("--removal-ticket", help="ticket that removes it (preserve-compat only)")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -237,15 +221,8 @@ def _parser() -> argparse.ArgumentParser:
         if name == "start":
             controller.add_argument("--prompt-file", required=True, type=Path)
         else:
-            controller.add_argument("--unit", required=True)
-            controller.add_argument("--depends-on", action="append", default=[])
-            controller.add_argument("--join", action="store_true")
-            controller.add_argument("--manifest", action="append", default=[])
-            controller.add_argument("--base-branch", help="remote branch used for first stacked publication")
-            controller.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
-            controller.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
-            controller.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
-            controller.add_argument("--scope", help="one-line scope statement for the worker")
+            _add_unit_args(controller)
+    graph_ledger.add_parsers(commands.add_parser)
     spec = commands.add_parser("instantiate")
     spec.add_argument("state", type=Path)
     spec.add_argument("--session", required=True)
@@ -263,6 +240,12 @@ def _parser() -> argparse.ArgumentParser:
     recover.add_argument("--session", required=True)
     recover.add_argument("--lease-seconds", type=int, default=900)
     recover.add_argument("--report-only", action="store_true")
+    reject = commands.add_parser("reject-invalid-dispatch")
+    reject.add_argument("state", type=Path)
+    reject.add_argument("--session", required=True)
+    reject.add_argument("--node", required=True)
+    reject.add_argument("--wave-id", required=True)
+    reject.add_argument("--report-only", action="store_true")
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
@@ -278,6 +261,9 @@ def _parser() -> argparse.ArgumentParser:
             decision.add_argument("--decision", required=True)
             decision.add_argument("--flip-condition")
             decision.add_argument("--unit")
+            decision.add_argument("--chosen", help="answer to a recorded worker status")
+            decision.add_argument("--worker-status-seq", type=int, help="resolve this worker status with the decision")
+            decision.add_argument("--human-answer", action="store_true", help="human answered an approval gate")
     unit = commands.add_parser("record-unit")
     unit.add_argument("state", type=Path)
     unit.add_argument("--session", required=True)
@@ -310,6 +296,7 @@ def _parser() -> argparse.ArgumentParser:
         dispatch.add_argument(f"--{option}", required=True)
     dispatch.add_argument("--message-file", required=True, type=Path)
     dispatch.add_argument("--agent-type", default="", help="the spawn_agent agent_type; empty when none was given")
+    dispatch.add_argument("--tool-use-id", default="", help="native tool-call id from PreToolUse")
     dispatch.add_argument("--evals", type=Path, help="default: evals.json beside the state")
     for name in ("complete", "verify-completion"):
         complete = commands.add_parser(name)
@@ -328,7 +315,8 @@ def main() -> int:
         if args.command == "start":
             output = start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
-            fields = {"model_role": args.model_role, "write_scope": args.write_scope, "lessons": args.lesson}
+            fields: dict[str, Any] = {"model_role": args.model_role, "write_scope": args.write_scope}
+            fields.update(lessons=args.lesson, disposition=(args.disposition, args.named_blocker, args.removal_ticket))
             output = add_unit(
                 args.state,
                 args.session,
@@ -337,7 +325,7 @@ def main() -> int:
                 args.depends_on,
                 args.join,
                 args.manifest,
-                {**fields, "scope": args.scope, "base_branch": args.base_branch},
+                {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
             )
         elif args.command == "instantiate":
             output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
@@ -365,14 +353,25 @@ def main() -> int:
             )
         elif args.command in {"stop", "consume-stop"}:
             output = graph_stops.run(args)
+        elif args.command in graph_ledger.COMMANDS:
+            output, code = graph_ledger.run(args)
+            if code:
+                print(json.dumps(output, sort_keys=True))
+                return code
         elif args.command in {"respawn-stale", "hard-stop"}:
             output = transition(args.state, args.session, args.command.replace("-", "_"), args.node, args.reason)
         elif args.command == "convert":
             output = graph_mutations.convert_state(args.state, args.session, args.check)
         elif args.command == "recover-wave":
             output = recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
-        elif args.command in {"summarize", "collection"}:
-            output = summarize(args.state) if args.command == "summarize" else collect(args.root)
+        elif args.command == "reject-invalid-dispatch":
+            output = reject_invalid_dispatch(
+                args.state, args.session, args.node, args.wave_id, apply=not args.report_only
+            )
+        elif args.command == "summarize":
+            output = summarize(args.state)
+        elif args.command == "collection":
+            output = collect(args.root)
         elif args.command == "inspect":
             output = inspect(args.state)
         elif args.command == "authorize-dispatch":
@@ -384,6 +383,7 @@ def main() -> int:
                 args.agent_type,
                 args.task_name,
                 args.evals or args.state.with_name("evals.json"),
+                args.tool_use_id,
             )
         elif args.command == "complete":
             output = complete(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)

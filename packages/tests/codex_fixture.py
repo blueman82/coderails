@@ -12,6 +12,16 @@ from typing import Any, cast
 import graph_contract
 from graph_identity import GraphError, next_attempt, task_name
 
+FINAL_REPORT: dict[str, Any] = {
+    "claims": [{"text": "unit checks ran", "label": "verified", "source": "fixture command: OK"}],
+    "did_not_verify": [],
+}
+
+
+def done_result(evidence: object = "checked") -> dict[str, Any]:
+    """A `done` wave result carrying the final_report every begin-wave dispatch record requires."""
+    return {"outcome": "done", "evidence": evidence, "final_report": FINAL_REPORT}
+
 
 def node(number: int = 1, status: str = "pending") -> dict[str, Any]:
     """Return a canonical build-unit node."""
@@ -134,7 +144,9 @@ def transcripts(home: Path) -> Path:
     return parent
 
 
-def dispatch_message(parent: Path, graph: dict[str, Any], node_id: str, task: str) -> str:
+def dispatch_message(
+    parent: Path, graph: dict[str, Any], node_id: str, task: str, state_path: Path | None = None
+) -> str:
     """Render a fixture v2 message and consume its isolated begin-wave authorization."""
     records = graph["graph"].get("dispatches", {})
     issued = next(
@@ -155,11 +167,15 @@ def dispatch_message(parent: Path, graph: dict[str, Any], node_id: str, task: st
             + "\nWorker instructions."
         )
         home = parent.parents[2]
-        candidates = (
-            home / "progress.json",
-            home / "loops/project/parent/progress.json",
-            home / "state/fixture" / graph["session_id"] / "progress.json",
-        )
+        candidates: tuple[Path, ...]
+        if state_path is not None:
+            candidates = (state_path,)
+        else:
+            candidates = (
+                home / "progress.json",
+                home / "loops/project/parent/progress.json",
+                home / "state/fixture" / graph["session_id"] / "progress.json",
+            )
         matches: list[tuple[Path, dict[str, Any]]] = []
         for candidate in candidates:
             if not candidate.is_file():
@@ -174,19 +190,21 @@ def dispatch_message(parent: Path, graph: dict[str, Any], node_id: str, task: st
         if len(matches) != 1:
             raise AssertionError("fixture spawn requires one owned progress.json")
         state_path, saved = matches[0]
-        saved["graph"]["dispatches"][identifier]["authorized"] = {"tool_use_id": None}
+        saved["graph"]["dispatches"][identifier]["authorized"] = {"tool_use_id": f"call-{task}"}
         write_json(state_path, saved)
     return message
 
 
-def spawn(parent: Path, graph: dict[str, Any], node_id: str = "U3[1]", terminal: bool = True) -> Path:
+def spawn(
+    parent: Path, graph: dict[str, Any], node_id: str = "U3[1]", terminal: bool = True, state_path: Path | None = None
+) -> Path:
     """Append a native spawn and simulate the hook's prior consumption in the isolated fixture."""
     attempt = next_attempt(graph["graph"]["nodes"][node_id])
     task = task_name(graph["loop_id"], node_id, attempt)
     child_id = f"child-{task}"
     call_id = f"call-{task}"
     path = f"/root/{task}"
-    message = dispatch_message(parent, graph, node_id, task)
+    message = dispatch_message(parent, graph, node_id, task, state_path)
     append(
         parent,
         {

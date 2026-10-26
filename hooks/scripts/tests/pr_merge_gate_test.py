@@ -84,6 +84,7 @@ class MergeEvidenceTests(HookTestCase):
         with (
             patch(MODULE + ".pr_field", return_value="head"),
             patch(MODULE + ".integrity_reason", return_value=""),
+            patch(MODULE + ".gate_review_summary_for_pr", return_value=(0, "")),
             patch(MODULE + ".publication_gate.evaluate", return_value=[]),
         ):
             for summary in (
@@ -349,6 +350,7 @@ class MergeEvidenceTests(HookTestCase):
         violation = [{"code": "diff_manifest:denied_path", "detail": "secret"}]
         with (
             patch(MODULE + ".pr_field", return_value="head"),
+            patch(MODULE + ".gate_review_summary_for_pr", return_value=(0, "")),
             patch(MODULE + ".gate_eval_summary_for_pr", return_value=summary),
             patch(MODULE + ".smoke_verify", return_value=0),
             patch(MODULE + ".integrity_reason", return_value=""),
@@ -368,6 +370,7 @@ class MergeEvidenceTests(HookTestCase):
         summary = EvalSummary(0, "1", '{"head_sha":"head","evals":[]}', "")
         with (
             patch(MODULE + ".pr_field", return_value="head"),
+            patch(MODULE + ".gate_review_summary_for_pr", return_value=(0, "")),
             patch(MODULE + ".gate_eval_summary_for_pr", return_value=summary),
             patch(MODULE + ".publication_gate.git.gate_eval_summary_for_pr", return_value=summary),
             patch(MODULE + ".smoke_verify", return_value=0),
