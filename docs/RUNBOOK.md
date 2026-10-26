@@ -499,6 +499,10 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `eval_artifact_unreadable` is a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
   `not_frozen` also rejects a missing, abbreviated or symbolic `frozen_sha` at level 1 or 2 on every merge route;
   stamping it late does not satisfy the full 40-hex commit requirement.
+  If the full freeze SHA no longer resolves, work on a copy of the frozen suite. Set `CODERAILS_KEYS_DIR` to its
+  preserved signing directory. Run `post_evals.py amend <copy> <eval_id> <reason> <actor>`. The reason must name the
+  exact `frozen_sha` and state that the freeze is late or its timing is unverifiable. The gate checks that signed
+  amendment. A plain `freeze_disclosure` note does not clear this refusal. Regrade and post the copy.
   `eval_head_mismatch` means the selected suite's head is absent or stale; `eval_result_mismatch` means its P0
   statuses contradict GO. Correct the head/evidence, rerun and regrade the evals, then re-post with
   `post_evals.py post <PR> <evals.json>`; the existing eval-level and publication trace rows/counters expose both codes.
@@ -510,7 +514,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   caught. `late_freeze` is attestation, not evidence: an empty, abbreviated or rev-expression `frozen_sha` counts as late
   (a level-0 suite may omit it) and level >= 1 needs a full 40-hex sha, but an honest-looking real sha cannot be proven to
   be the freeze commit, and the
-  disclosure requirement is a substring match for "freeze"/"frozen" in the justification or an amendment `why`. The surface
+  disclosure requirement for a resolvable SHA accepts "freeze"/"frozen" in the justification or an amendment `why`.
+  For an unresolved SHA, the reason must be in a verified signed amendment and name that exact SHA. The surface
   classes are globs: irreversible wins, then the anchored docs and test directories (`none`), and every other path is
   outward (level 1), so a new control directory needs no entry to be covered, only an irreversible one does. The policy and
   `eval_level.py`/`publication_gate.py` are themselves irreversible (editing them forces level 2), but they are read from the
