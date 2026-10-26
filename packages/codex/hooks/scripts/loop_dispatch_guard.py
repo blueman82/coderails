@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from pathlib import Path
 from typing import cast
@@ -25,6 +26,7 @@ from scripts.lib.config import config_path
 from scripts.lib.config_strict import ConfigRejected, strict_settings
 
 ENVELOPE_KEY = "CODERAILS_GRAPH_DISPATCH"
+GRAPH_TASK = re.compile(r"^loop_worker_[0-9a-f]+_[0-9a-f]+(?:_a[1-9][0-9]*)?$")
 
 
 def object_field(payload: dict[str, object], name: str) -> dict[str, object]:
@@ -57,6 +59,7 @@ def main() -> int:
     task = tool_input.get("task_name")
     task = task if isinstance(task, str) else ""
     enveloped = message.startswith(ENVELOPE_KEY + "=")
+    graph_named = bool(GRAPH_TASK.fullmatch(task))
     if "agent_type" in tool_input and (
         not isinstance(tool_input["agent_type"], str) or not tool_input["agent_type"].strip()
     ):
@@ -65,7 +68,7 @@ def main() -> int:
     session_id = text_field(payload, "session_id")
     cwd = text_field(payload, "cwd")
     if not session_id or not cwd:
-        if enveloped:
+        if enveloped or graph_named:
             deny("Graph worker dispatch requires a session id and working directory.")
         return 0
     config = config_path(cwd)
@@ -77,7 +80,7 @@ def main() -> int:
             return 0
     state = loop_state_path(cwd, session_id)
     if state is None or not state.is_file():
-        if enveloped:
+        if enveloped or graph_named:
             deny("Graph worker dispatch requires this session's progress.json. Start the native graph first.")
         return 0  # no loop owns this session: nothing to bind the spawn to
     tool_use_id = text_field(payload, "tool_use_id")
@@ -97,7 +100,7 @@ def main() -> int:
         deny("Graph worker dispatch requires valid provider-local graph state.")
         return 0
     if inspection.get("status") == "complete":
-        if enveloped:
+        if enveloped or graph_named:
             deny("A completed graph cannot dispatch graph workers.")
         return 0
     agent_type = tool_input.get("agent_type")

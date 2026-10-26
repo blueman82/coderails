@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,6 +24,51 @@ from graph_io import write as _write
 from graph_recovery import RecoveryRefusedError, trace, traced_refusal
 from graph_transcript import transcript_cursor
 from json_types import JsonValue
+
+
+def _opaque_ciphertext(message: str) -> bool:
+    """Recognize only the observed single-line Fernet wire shape; do not claim to decrypt it."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]+={0,2}", message):
+        return False
+    try:
+        raw = base64.b64decode(message, altchars=b"-_", validate=True)
+    except (ValueError, binascii.Error):
+        return False
+    return len(raw) >= 73 and raw[0] == 0x80 and (len(raw) - 57) % 16 == 0
+
+
+def _opaque_request(state: dict[str, Any], task: str, dispatch_id: str, tool_use_id: str) -> dict[str, Any]:
+    """Resolve one clear native task to its already issued dispatch without reading opaque prompt text."""
+    if not tool_use_id or not re.fullmatch(r"[A-Za-z0-9_-]+", tool_use_id):
+        raise graph_contract.DispatchDeniedError("dispatch_call_id_missing", "opaque spawn needs a native call id")
+    matches = [(key, value) for key, value in state["graph"]["dispatches"].items() if value.get("task_name") == task]
+    if len(matches) != 1:
+        raise graph_contract.DispatchDeniedError("dispatch_foreign", "task name must resolve one dispatch")
+    found_id, record = matches[0]
+    if dispatch_id and dispatch_id != found_id:
+        raise graph_contract.DispatchDeniedError("dispatch_unknown_id", "dispatch id differs from task")
+    return {
+        "dispatch_id": found_id,
+        "session_id": state["session_id"],
+        "loop_id": state["loop_id"],
+        "revision": record["revision"],
+        "wave_id": record["wave_id"],
+        "node_id": record["node_id"],
+    }
+
+
+def _check_opaque_contract(state: dict[str, Any], record: dict[str, Any], task: str) -> None:
+    """Check the stored contract and canonical attempt when the prompt body cannot be read."""
+    try:
+        contract = graph_contract.validate_contract(record.get("contract"))
+    except (ValueError, TypeError) as error:
+        raise graph_contract.DispatchDeniedError("dispatch_contract_altered", str(error)) from error
+    if (
+        record.get("envelope_version") != graph_contract.ENVELOPE_VERSION
+        or graph_contract.sections_sha256(contract) != record.get("prompt_sections_sha256")
+        or task != task_name(state["loop_id"], record["node_id"], record["attempt"])
+    ):
+        raise graph_contract.DispatchDeniedError("dispatch_contract_altered", "stored native contract differs")
 
 
 def begin_wave(path: Path) -> dict[str, Any]:
@@ -151,11 +200,7 @@ def authorize_dispatch(
     evals_path: Path,
     tool_use_id: str = "",
 ) -> dict[str, Any]:
-    """Check a spawn_agent message against its begin-wave record, assert agent_type == role, consume the id.
-
-    Every check runs under the state lock before anything is written; a refusal leaves progress.json untouched and
-    leaves one coded trace row. The task name stays the evidence identity and must equal the record's.
-    """
+    """Authorize one native spawn under the graph lock; refusal leaves state unchanged and writes a coded trace."""
     with _locked(path):
         state = _load(path)
         if state["session_id"] != session:
@@ -203,11 +248,21 @@ def authorize_dispatch(
         try:
             graph_contract.require_converted(state)
             message = message_file.read_text(encoding="utf-8")
-            request = graph_contract.parse_envelope(message)
+            opaque = _opaque_ciphertext(message)
+            request = (
+                _opaque_request(state, task, dispatch_id, tool_use_id)
+                if opaque
+                else graph_contract.parse_envelope(message)
+            )
             named = request["node_id"]
-            if request["dispatch_id"] != dispatch_id:
+            if not opaque and request["dispatch_id"] != dispatch_id:
                 raise graph_contract.DispatchDeniedError("dispatch_unknown_id", "--dispatch-id is not the envelope's")
-            record = graph_contract.check_dispatch(state, request, message, live=True)
+            if opaque:
+                record = graph_contract.check_ownership(state, request, live=True)
+            else:
+                record = graph_contract.check_dispatch(state, request, message, live=True)
+            if opaque:
+                _check_opaque_contract(state, record, task)
             graph_contract.require_publication(record, path, Path(__file__).resolve().parents[3] / "scripts/push.py")
             if record.get("task_name") != task:
                 raise graph_contract.DispatchDeniedError("dispatch_foreign", "task_name is not the record's task name")
@@ -220,7 +275,11 @@ def authorize_dispatch(
             raise GraphError(str(error)) from error
         except OSError as error:
             raise GraphError(f"cannot read the message file: {error}") from error
-        record["authorized"] = {"tool_use_id": (tool_use_id or None) if new_evidence_writes_enabled() else None}
+        record["authorized"] = (
+            {"tool_use_id": tool_use_id, "ciphertext_sha256": hashlib.sha256(message.encode()).hexdigest()}
+            if opaque
+            else {"tool_use_id": (tool_use_id or None) if new_evidence_writes_enabled() else None}
+        )
         _write(path, state)
         trace(path, state, "authorized", "dispatch_authorized", inputs, [(named, None, None)], "authorize-dispatch")
         return {
@@ -229,5 +288,5 @@ def authorize_dispatch(
             "task_name": task,
             "wave_id": record["wave_id"],
             "revision": state["revision"],
-            "dispatch_id": dispatch_id,
+            "dispatch_id": request["dispatch_id"],
         }

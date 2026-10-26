@@ -165,11 +165,13 @@ class DispatchGuardTests(unittest.TestCase):
         self.tool_input["message"] = ENVELOPE + "\nx"
         self.assertEqual(self._run(status="complete"), (True, 0))
 
-    def test_missing_identity_denies_only_enveloped_dispatch(self) -> None:
-        """Without a session id the hook cannot bind a spawn, but it will not authorize an envelope blind."""
+    def test_missing_identity_denies_graph_named_dispatch(self) -> None:
+        """Without a session id the hook cannot bind a graph name, even if its prompt is opaque."""
         self.payload["session_id"] = ""
         self.assertEqual(self._run(), (True, 0))
         self.tool_input["message"] = "Read documentation."
+        self.assertEqual(self._run(), (True, 0))
+        self.tool_input["task_name"] = "ordinary"
         self.assertEqual(self._run(), (False, 0))
 
     def test_other_tools_denied(self) -> None:
