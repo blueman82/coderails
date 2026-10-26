@@ -17,9 +17,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.lib.config_discovery import strict_config_path
 
-def config_path(start_dir: str | Path | None = None) -> str:
+
+def config_path(
+    start_dir: str | Path | None = None, *, strict: bool = False, timeout_seconds: float | None = None
+) -> str:
     """Return the nearest config path, or empty text outside configured repositories."""
+    if strict:
+        return strict_config_path(start_dir, timeout_seconds=timeout_seconds)
     start = Path(start_dir or Path.cwd()).resolve()
     try:
         result = subprocess.run(
@@ -119,11 +127,7 @@ def _schema() -> dict[str, Any]:
 
 
 def _entries(text: str, findings: list[dict[str, str]] | None = None) -> dict[str, dict[str, Any]]:
-    """Parse the single-level grammar plus one nested level: {key: {raw, items, children}}.
-
-    A line that fits no branch or repeats a key at its level is reported (config_unparseable_line,
-    config_duplicate_key; key "line N") so malformed syntax cannot silently drop a setting.
-    """
+    """Parse one nested level and report duplicate or malformed keys with line numbers."""
     found = findings if findings is not None else []
     top: dict[str, dict[str, Any]] = {}
     current: dict[str, Any] | None = None

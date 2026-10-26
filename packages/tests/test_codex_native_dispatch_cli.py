@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any
@@ -120,6 +121,63 @@ class NativeDispatchCliTests(unittest.TestCase):
                     "call_native_1",
                     {"call_native_1": [{"task_name": "foreign", "message": token}]},
                 )
+
+    def test_native_hook_denies_when_authorization_lock_is_held(self) -> None:
+        """One blocked flock cannot outlive the host's ten-second hook budget without a denial."""
+        plugin = ROOT / "packages/codex"
+        with tempfile.TemporaryDirectory() as scratch:
+            directory = Path(scratch)
+            state_path = directory / "loops/project/parent/progress.json"
+            state_path.parent.mkdir(parents=True)
+            state = seeded_state(state_path)
+            state_path.write_text(json.dumps(state))
+            lock = Path(f"{state_path}.lock")
+            holder = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "import fcntl,sys,time; f=open(sys.argv[1],'a+'); "
+                    "fcntl.flock(f,fcntl.LOCK_EX); print('ready',flush=True); time.sleep(12)",
+                    str(lock),
+                ],
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                assert holder.stdout is not None
+                self.assertEqual(holder.stdout.readline().strip(), "ready")
+                payload = {
+                    "tool_name": "collaborationspawn_agent",
+                    "tool_use_id": "call_lock_probe",
+                    "session_id": "parent",
+                    "cwd": scratch,
+                    "tool_input": {"task_name": TASK, "message": message_for(state)},
+                }
+                start = time.monotonic()
+                result = subprocess.run(
+                    [sys.executable, str(plugin / "hooks/scripts/loop_dispatch_guard.py")],
+                    input=json.dumps(payload),
+                    capture_output=True,
+                    text=True,
+                    env=os.environ
+                    | {
+                        "CODERAILS_AGENTIC_LOOP_DIR": str(directory / "loops"),
+                        "PLUGIN_ROOT": str(plugin),
+                        "PLUGIN_DATA": str(directory / "data"),
+                    },
+                    timeout=9.5,
+                    check=False,
+                )
+                self.assertLess(time.monotonic() - start, 9.5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                denial = json.loads(result.stdout)["hookSpecificOutput"]
+                self.assertEqual(denial["permissionDecision"], "deny")
+                self.assertIn("dispatch_hook_error", denial["permissionDecisionReason"])
+            finally:
+                holder.terminate()
+                holder.wait(timeout=3)
+                assert holder.stdout is not None
+                holder.stdout.close()
 
     def test_opaque_native_message_binds_clear_task_and_call_identity(self) -> None:
         """An opaque hook message needs one current dispatch; replay and altered clear fields fail."""

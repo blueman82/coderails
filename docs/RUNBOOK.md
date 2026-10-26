@@ -419,6 +419,7 @@ before transport. Register an absolute worktree path with `add-unit --worktree`,
 `assign-worktree --session S --loop-id L --unit N --worktree ABS_PATH` after checkout setup.
 The latter fills an unassigned existing unit under the graph lock, even during an active wave;
 it preserves the revision and refuses a different assignment. The recorded path must match the Git checkout root at push time.
+Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their literal manifest names.
 
 - Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)
   refuses with `diff_manifest:<code>` and prints `! diff_manifest <code>: <path>` on stderr. The check is ON by default
@@ -820,6 +821,14 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
 - Query: `python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]` counts `dispatch_authorized` and every refusal code.
 - If the Codex hook cannot create or write its temporary message file, it denies the spawn with
   `dispatch_message_unavailable` and records that code in `discipline.log`. Repair local scratch storage and retry.
+- If the hook input or its local check raises unexpectedly, the hook denies the spawn with `dispatch_hook_error`
+  and records that code in `discipline.log`. Plaintext envelope first lines over 8192 characters get the same denial.
+  Codex config discovery, graph discovery, and graph commands share a seven-second budget so a stalled Git lookup or
+  held graph lock cannot outlive the ten-second hook limit.
+  Config and graph discovery use strict reads for this hook. An ordinary spawn is free when config is valid or absent
+  and graph state is absent. Unsafe session IDs, completed graph state, lookup errors, and multiple fallback graphs deny
+  the spawn.
+  Inspect the hook input and local runtime; do not treat the spawn as authorized.
 - Codes and fixes: `dispatch_missing_envelope` (no/old/garbled first-line `CODERAILS_GRAPH_DISPATCH` envelope: paste the
   `prompt_prefix` from `plan` or `begin-wave`; a plaintext Codex spawn needs it, while an opaque native hook message uses the exact issued `task_name` and call id),
   `dispatch_unknown_id` (the id was never issued: run `begin-wave`), `dispatch_foreign` (session, loop, node, wave or Codex
