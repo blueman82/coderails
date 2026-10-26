@@ -193,7 +193,7 @@ def graph_path() -> Path:
     return root / "skills" / "agentic-loop" / "scripts" / "graph.py"
 
 
-def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
+def graph_output(graph: Path, *arguments: str, timeout_seconds: float | None = None) -> dict[str, object] | None:
     """Run one graph command and return its object output when valid."""
     try:
         result = subprocess.run(
@@ -202,6 +202,7 @@ def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
             check=False,
             stderr=subprocess.DEVNULL,
             text=True,
+            timeout=timeout_seconds,
         )
     except OSError as error:
         if error.errno in RESOURCE_ERRNOS:

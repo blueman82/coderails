@@ -822,6 +822,7 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   `dispatch_message_unavailable` and records that code in `discipline.log`. Repair local scratch storage and retry.
 - If the hook input or its local check raises unexpectedly, the hook denies the spawn with `dispatch_hook_error`
   and records that code in `discipline.log`. Plaintext envelope first lines over 8192 characters get the same denial.
+  The Codex graph commands share a seven-second budget so a held graph lock cannot outlive the ten-second hook limit.
   Inspect the hook input and local runtime; do not treat the spawn as authorized.
 - Codes and fixes: `dispatch_missing_envelope` (no/old/garbled first-line `CODERAILS_GRAPH_DISPATCH` envelope: paste the
   `prompt_prefix` from `plan` or `begin-wave`; a plaintext Codex spawn needs it, while an opaque native hook message uses the exact issued `task_name` and call id),

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import tempfile
+import time
 from pathlib import Path
 from typing import cast
 
@@ -50,8 +51,17 @@ def dispatch_id(message: str) -> str:
     return found if isinstance(found, str) else ""
 
 
+def _bounded_graph_output(graph: Path, deadline: float, *arguments: str) -> dict[str, object] | None:
+    """Spend one shared hook budget across inspection and authorization."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("native graph check exceeded the hook budget")
+    return graph_output(graph, *arguments, timeout_seconds=remaining)
+
+
 def _check() -> int:
     """Check one native spawn against graph ownership and its single-use dispatch record."""
+    deadline = time.monotonic() + 7.0
     payload = payload_object(read_input())
     if text_field(payload, "tool_name") not in ("spawn_agent", "collaborationspawn_agent"):
         deny("Codex graph workers must use native spawn_agent.")
@@ -91,7 +101,7 @@ def _check() -> int:
         deny("Graph worker dispatch requires the provider-local graph helper.")
         return 0
     try:
-        inspection = graph_output(graph, "inspect", str(state))
+        inspection = _bounded_graph_output(graph, deadline, "inspect", str(state))
     except HostResourceError:
         deny(RESOURCE_MESSAGE)
         return 0
@@ -107,8 +117,9 @@ def _check() -> int:
         with tempfile.TemporaryDirectory() as scratch:
             message_file = Path(scratch) / "message.txt"
             message_file.write_text(message, encoding="utf-8")
-            authorization = graph_output(
+            authorization = _bounded_graph_output(
                 graph,
+                deadline,
                 "authorize-dispatch",
                 str(state),
                 "--session",

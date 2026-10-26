@@ -54,7 +54,7 @@ class DispatchGuardTests(unittest.TestCase):
     ) -> tuple[bool, int]:
         """Run the hook; return (denied, authorize calls)."""
 
-        def graph_output(_graph: Path, *arguments: str) -> dict[str, Any] | None:
+        def graph_output(_graph: Path, *arguments: str, timeout_seconds: float | None = None) -> dict[str, Any] | None:
             if arguments[0] == "inspect":
                 return {"status": status}
             self.sent.append(arguments)
