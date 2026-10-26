@@ -12,9 +12,11 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from scripts import verify_merged
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts/verify_merged.py"
-GH_SHIM = '#!/bin/sh\n[ "$1 $2" = "pr view" ] && cat "$FAKE_PR_JSON"\nexit 0\n'
+GH_SHIM = '#!/bin/sh\n[ "$1 $2 $3 $4 $5" = "pr view 7 --repo testowner/testrepo" ] || exit 1\ncat "$FAKE_PR_JSON"\n'
 OLD_RULE_ON_SQUASH = 1  # `git merge-base --is-ancestor <pr head> origin/main` on a squash merge: not an ancestor
 
 
@@ -36,6 +38,8 @@ class VerifyMergedCase(unittest.TestCase):
         git(root, "init", "-q", "--bare", "-b", "main", "origin.git")
         git(root, "clone", "-q", "origin.git", "work")
         self.work = root / "work"
+        git(self.work, "config", f"url.{root / 'origin.git'}.insteadOf", "https://github.com/testowner/testrepo.git")
+        git(self.work, "remote", "set-url", "origin", "https://github.com/testowner/testrepo.git")
         (self.work / "a.txt").write_text("base\n")
         git(self.work, "add", ".")
         git(self.work, "commit", "-q", "-m", "base")
@@ -102,6 +106,13 @@ class VerifyMergedTests(VerifyMergedCase):
         shallow = self.work.parent / "shallow"
         git(self.work.parent, "clone", "-q", "--depth", "1", (self.work.parent / "origin.git").as_uri(), str(shallow))
         self.work = shallow
+        git(
+            self.work,
+            "config",
+            f"url.{self.work.parent / 'origin.git'}.insteadOf",
+            "https://github.com/testowner/testrepo.git",
+        )
+        git(self.work, "remote", "set-url", "origin", "https://github.com/testowner/testrepo.git")
         code, verdict = self.verify(
             commit, "MERGED", "2026-10-01T00:00:00Z", "--grep", "unique-change-token", "--path", "feat.txt"
         )
@@ -211,6 +222,46 @@ class VerifyMergedTests(VerifyMergedCase):
                 )
                 self.assertEqual((code, verdict["confirmed"]), (1, False))
                 self.assertIn(reason, verdict["reasons"])
+
+    def test_pr_flag_is_refused_before_gh(self) -> None:
+        """A gh option is not a PR number, even if gh would select a current-branch PR."""
+        commit = self.land(squash=False)
+        self.pr_json.write_text(json.dumps({"state": "MERGED", "mergedAt": "now", "mergeCommit": {"oid": commit}}))
+        env = {
+            **os.environ,
+            "PATH": f"{self.pr_json.parent / 'bin'}:{os.environ['PATH']}",
+            "FAKE_PR_JSON": str(self.pr_json),
+        }
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "7x", "--repo", str(self.work)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("pr_number_invalid", result.stdout)
+        self.assertEqual(verify_merged.verify(self.work, "--comments", "", "")["reasons"], ["pr_number_invalid"])
+
+    def test_gh_repo_override_cannot_select_another_repository(self) -> None:
+        """The GitHub PR and the fetched origin must refer to the same repository."""
+        commit = self.land(squash=False)
+        self.pr_json.write_text(json.dumps({"state": "MERGED", "mergedAt": "now", "mergeCommit": {"oid": commit}}))
+        env = {
+            **os.environ,
+            "PATH": f"{self.pr_json.parent / 'bin'}:{os.environ['PATH']}",
+            "FAKE_PR_JSON": str(self.pr_json),
+            "GH_REPO": "other/otherrepo",
+        }
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "7", "--repo", str(self.work)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("repo_mismatch", result.stdout)
 
 
 class SkillPairTests(unittest.TestCase):
