@@ -774,10 +774,14 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   missing commit dates, missing `last_updated` and `no_repo_sources`. Missing directories exit 2 (`repo_unavailable`, `vault_unavailable`);
   bad thresholds report `wiki_stale_days_invalid`. Repair and rerun. Point-in-time/structural directories are excluded.
 - `verify_merged.py <PR> [--grep STR --path P]` exits 0 only when confirmed (`content` or `merge-commit-ancestry`).
-  Refusals: `gh_failed`, `not_merged`, `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`,
-  `content_preexisting` (needle predates merge), `content_check_failed` (Git error/missing parent), `content_check_required`
-  (no needle and no true two-parent ancestry). A squash needs `--grep`. Choose a new needle or restore missing history.
-  Rows `verify-merged/<ok|refused>/<reason>` feed `trace.by_reason` and the `verify-merged` counter.
+  Refusals: `pr_number_invalid` (PR is not a positive decimal number), `origin_repo_unresolved` (origin is not a supported
+  GitHub URL), `repo_mismatch` (`GH_REPO` names another host or repository), `gh_failed`, `not_merged`,
+  `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`, `content_preexisting` (needle predates
+  merge), `content_check_failed` (Git error or missing parent), and `content_check_required` (no needle and no true
+  two-parent ancestry). A squash needs `--grep`. Choose a new needle or restore missing history. For a parsed PR request,
+  the script attempts a `verify-merged/<ok|refused>/<reason>` trace row. An option-shaped PR such as `--comments` returns
+  a JSON `pr_number_invalid` refusal before parsing and does not write a trace row. Trace rows feed `trace.by_reason` and
+  the `verify-merged` counter.
 - `merge.py --describe` prints JSON from `VERIFY_STAGES` then `publication_gate.CHECKS`, without remote contact.
   Conditional stages may skip; earlier refusals stop execution. Target/auth/state/approval checks precede those stages.
 - `memory_dir.py [--provider claude|codex]` prints a path even if absent: realpath, every non-alphanumeric becomes `-`.

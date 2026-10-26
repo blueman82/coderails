@@ -25,7 +25,7 @@ tallied by `measure_graph_alignment.py` into `trace.by_reason` keyed
 | `publication/refused/<code>` | the gate refused; `<code>` is `diff_manifest:<code>`, a review or eval-level code, `pr_repo_override`, `pr_base_mutation`, or a later unit's code |
 | `routine/<outcome>/<code>` | a routine event from `scripts/routine_log.py`: `<outcome>` is `stage_ok`, `run_ok`, `run_abort`, `run_refused` or `run_incomplete`; `<code>` is the closed per-routine reason code (`none` for `stage_ok`/`run_ok`), e.g. `routine/run_abort/docs_sync_deny`, `routine/run_refused/merge`, `routine/run_incomplete/incomplete-run`; keyed by the routine name as session id |
 | `verify-merged/ok/verified` | `scripts/verify_merged.py` confirmed a PR landed (by content, or by merge-commit ancestry) |
-| `verify-merged/refused/<code>` | `<code>` is the first reason: `gh_failed`, `not_merged`, `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent` or `content_check_required` (keyed `<repo>@pr-<N>`) |
+| `verify-merged/refused/<code>` | `<code>` is the first reason: `pr_number_invalid`, `origin_repo_unresolved`, `repo_mismatch`, `gh_failed`, `not_merged`, `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`, `content_preexisting`, `content_check_failed`, or `content_check_required` (keyed `<repo>@pr-<N>`). An option-shaped PR argument returns JSON before parsing and writes no trace row. |
 | `argv/denied/ceiling_exceeded` | the verification-volume ceiling denied a 3rd+ full suite or `post_evals.py post\|validate-structure` in one worktree (keyed by the session that ran it) |
 | `argv/denied/protected_paths_unreadable` | `policy/protected_paths.json` was missing or ill-shaped and an edit on main was refused (fail closed) |
 
