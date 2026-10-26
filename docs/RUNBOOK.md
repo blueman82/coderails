@@ -843,8 +843,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   substitution detection for a cooperating agent, not tamper evidence.
 - Limits, coverage: (1) the contract is advisory to the worker: the envelope proves the dispatch was authorized and the
   rendered block is present as a substring, not that the rest of the prompt is faithful; text before, after or around the
-  block is unconstrained and `write_scope` is prompt text only, not enforced. (2) Only the five capability-guarded roles
-  (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `source-auditor`) are role-contained;
+  block is unconstrained and `write_scope` is prompt text only, not enforced. (2) Only the six capability-guarded roles
+  (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `security-reviewer`, `source-auditor`) are role-contained;
   `spec-reviewer` (empty capability list), the `shell.raw` roles (`docs-auditor`, `wiki-writer`, `proof-author`) and nodes
   with no `agent_role` (default `loop-worker`) may run as explicit `general-purpose` on Claude, or with omitted or exact
   role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent` and `spawn_agent` only, so `SendMessage` on

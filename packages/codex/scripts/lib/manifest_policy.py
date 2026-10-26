@@ -288,11 +288,13 @@ def settings() -> tuple[str, str, bool]:
     return (mode if mode in MODES else "enforce"), policy, mode not in MODES
 
 
-def _evaluate(pr: str, head: str, policy_file: str, unit: str, progress: str, label: str) -> list[dict[str, str]]:
+def _evaluate(
+    pr: str, head: str, policy_file: str, unit: str, progress: str, label: str, base: str = ""
+) -> list[dict[str, str]]:
     """Check the diff against the policy; unusable inputs yield one manifest_unreadable violation."""
     policy = load_json(policy_file)
     default = load_json(DEFAULT_POLICY)
-    base = git.pr_field(pr, "baseRefOid") if pr else ""
+    base = git.pr_field(pr, "baseRefOid") if pr else base
     changes = (
         diff_changes(head or (git.pr_field(pr, "headRefOid") if pr else "HEAD"), f"pull/{pr}/head" if pr else "", base)
         if not pr or base
@@ -321,7 +323,9 @@ def _evaluate(pr: str, head: str, policy_file: str, unit: str, progress: str, la
     return found
 
 
-def violations(pr: str = "", unit: str = "", progress: str = "", head: str = "") -> list[dict[str, str]]:
+def violations(
+    pr: str = "", unit: str = "", progress: str = "", head: str = "", base: str = ""
+) -> list[dict[str, str]]:
     """Refusals as {code: "diff_manifest:<code>", detail}; off and advisory return none (advisory warns and traces).
 
     With a PR number the diff is the PR's own head (fetched if absent); otherwise it is the local HEAD. An internal
@@ -342,7 +346,7 @@ def violations(pr: str = "", unit: str = "", progress: str = "", head: str = "")
     label = f"pr-{pr}" if pr else "local"
     try:
         label = f"{git.repo()}@pr-{pr}" if pr else f"{git.repo()}@{git.branch()}"
-        found = _evaluate(pr, head, policy_file, unit, progress, label)
+        found = _evaluate(pr, head, policy_file, unit, progress, label, base)
     except Exception:  # noqa: BLE001 - metadata and diff errors share the manifest mode
         found = [{"code": "manifest_internal_error", "path": "internal error"}]
     if invalid:
@@ -362,11 +366,11 @@ def violations(pr: str = "", unit: str = "", progress: str = "", head: str = "")
     return [{"code": f"diff_manifest:{v['code']}", "detail": v["path"]} for v in found]
 
 
-def gate(pr: str = "", unit: str = "", progress: str = "") -> None:
+def gate(pr: str = "", unit: str = "", progress: str = "", base: str = "") -> None:
     """Raise WorkflowError("diff_manifest:<code>") for the first refusal; push.py calls this before pushing."""
     if not publication_session():
         trace("publication", "refused", "session_missing", command="publication")
         raise git.WorkflowError("publication:session_missing")
-    found = violations(pr, unit, progress)
+    found = violations(pr, unit, progress, base=base)
     if found:
         raise git.WorkflowError(found[0]["code"])

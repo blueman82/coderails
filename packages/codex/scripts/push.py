@@ -13,7 +13,7 @@ from scripts.lib import git_common as git
 from scripts.lib import manifest_policy
 
 
-def unit_manifest(unit: str | None, progress: str | None) -> tuple[list[str], str | None, bool] | None:
+def unit_manifest(unit: str | None, progress: str | None) -> tuple[list[str], str | None] | None:
     """Bind an optional publication request to a registered unit and its assigned checkout."""
     if (unit is None) != (progress is None):
         raise git.WorkflowError("--unit and --progress must be provided together")
@@ -44,10 +44,12 @@ def unit_manifest(unit: str | None, progress: str | None) -> tuple[list[str], st
     if base is not None and (not isinstance(base, str) or not base or base.startswith("-")):
         raise git.WorkflowError("publication base branch is invalid")
     state_fields = cast(dict[str, Any], state)
-    owned_graph = all(
-        isinstance(state_fields.get(key), str) and bool(state_fields[key]) for key in ("session_id", "loop_id")
-    )
-    return cast(list[str], manifest), base if isinstance(base, str) else None, owned_graph
+    if any(
+        not isinstance(state_fields.get(key), str) or not str(state_fields[key]).strip()
+        for key in ("session_id", "loop_id")
+    ):
+        raise git.WorkflowError("publication graph owner is missing")
+    return cast(list[str], manifest), base if isinstance(base, str) else None
 
 
 def commit(message: str, jira_key: str, paths: list[str], manifest: list[str] | None = None) -> None:
@@ -146,8 +148,9 @@ def main(arguments: list[str] | None = None) -> int:
             number = git.pr_num()
             print(f"✓ Up to date │ {git.pr_field(number, 'url')}" if number else "• Nothing to push")
             return 0
-        if publication is not None and publication[2]:
-            manifest_policy.gate(unit=unit or "", progress=progress or "")
+        if publication is not None:
+            base = git.output("git", "rev-parse", f"origin/{publication[1]}", check=True) if publication[1] else ""
+            manifest_policy.gate(unit=unit or "", progress=progress or "", base=base)
         else:
             manifest_policy.gate()
         arguments = ["git", "push"] + (["--force-with-lease"] if force else []) + ["-u", "origin", current]

@@ -12,6 +12,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.tests.workflow_push_fixture import PushFixture
 
 
+def owned_progress(fixture: PushFixture, unit: str, entry: dict[str, object]) -> Path:
+    """Create a session-owned progress fixture at the supported repository path."""
+    root = fixture.root / "loops"
+    fixture.environment["CLAUDE_AGENTIC_LOOP_DIR"] = str(root)
+    fixture.environment["CODERAILS_PUBLICATION_SESSION_ID"] = "s"
+    common = fixture.git(fixture.repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    progress = root / common.replace("/", "-") / "s" / "progress.json"
+    progress.parent.mkdir(parents=True)
+    progress.write_text(json.dumps({"session_id": "s", "loop_id": "l", "work_units": {unit: entry}}))
+    return progress
+
+
 class PushUnitBindingTests(unittest.TestCase):
     """Use an isolated local bare origin; invalid bindings cannot commit or push."""
 
@@ -37,10 +49,7 @@ class PushUnitBindingTests(unittest.TestCase):
         """A registered unit in its assigned checkout can use the exact command."""
         with tempfile.TemporaryDirectory() as scratch:
             fixture = PushFixture(Path(scratch))
-            progress = fixture.root / "progress.json"
-            progress.write_text(
-                json.dumps({"work_units": {"1": {"manifest": ["base.txt"], "worktree": str(fixture.repo)}}})
-            )
+            progress = owned_progress(fixture, "1", {"manifest": ["base.txt"], "worktree": str(fixture.repo)})
             (fixture.repo / "base.txt").write_text("changed")
             result = fixture.push("--unit", "1", "--progress", str(progress))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -85,8 +94,7 @@ class PushUnitBindingTests(unittest.TestCase):
                 f"    Path({str(pr_log)!r}).write_text(' '.join(sys.argv[1:]))\n"
                 "    print('https://github.com/fixture/repo/pull/1')\n",
             )
-            progress = fixture.root / "progress.json"
-            progress.write_text(json.dumps({"work_units": {"2": {"manifest": ["child.txt"], "base_branch": "parent"}}}))
+            progress = owned_progress(fixture, "2", {"manifest": ["child.txt"], "base_branch": "parent"})
             (fixture.repo / "child.txt").write_text("child unit")
             result = fixture.push("--unit", "2", "--progress", str(progress), "--add", "child.txt")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
