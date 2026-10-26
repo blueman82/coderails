@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, cast
 
 import graph_driver_control
+import graph_driver_prepublication
 import graph_semantics
 import graph_spec
 from graph_driver_publication import head as _head
@@ -66,6 +67,58 @@ def _artifact(state_path: Path, dispatch_id: str) -> Path:
     return state_path.parent / "driver-evidence" / dispatch_id
 
 
+def _prepublication_claim(
+    state_path: Path,
+    state: dict[str, Any],
+    node_id: str,
+    dispatch_id: str,
+    checkout: Path,
+    provider: str,
+    exit_code: int,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind one finished worker result before root publication can proceed."""
+    record = _record(state, node_id, dispatch_id)
+    artifact = _artifact(state_path, dispatch_id)
+    prompt_sha256 = _digest(artifact / "prompt.txt")
+    if prompt_sha256 != record["authorized"]["prompt_sha256"]:
+        raise ValueError("driver prompt differs from its authorization")
+    if provider not in {"codex", "claude"} or type(exit_code) is not int:
+        raise ValueError("invalid worker result metadata")
+    return {
+        "session_id": state.get("session_id"),
+        "loop_id": state.get("loop_id"),
+        "node_id": node_id,
+        "dispatch_id": dispatch_id,
+        "wave_id": record["wave_id"],
+        "attempt": record["attempt"],
+        "driver_run_id": record["authorized"]["driver_run_id"],
+        "provider": provider,
+        "checkout": str(checkout.resolve(strict=True)),
+        "prompt_sha256": prompt_sha256,
+        "output_sha256": _digest(artifact / "output.jsonl"),
+        "final_sha256": _digest(artifact / "final.json") if provider == "codex" else None,
+        "exit_code": exit_code,
+        "result": result,
+    }
+
+
+def seal_pending(
+    state_path: Path,
+    state: dict[str, Any],
+    node_id: str,
+    dispatch_id: str,
+    checkout: Path,
+    provider: str,
+    exit_code: int,
+    result: dict[str, Any],
+) -> None:
+    """Write once, then recheck, the attempt paused for its root-owned PR."""
+    claim = _prepublication_claim(state_path, state, node_id, dispatch_id, checkout, provider, exit_code, result)
+    path = _artifact(state_path, dispatch_id) / "prepublication.json"
+    graph_driver_prepublication.seal(path, claim, _head(checkout))
+
+
 def seal(
     state_path: Path,
     state: dict[str, Any],
@@ -113,6 +166,10 @@ def seal(
             raise ValueError("successful Codex result lacks final.json")
     if needs_publication(node_id, result):
         manifest["publication"] = publication(checkout, require_merged=node_id == "S9-wiki")
+    pending = artifact / "prepublication.json"
+    if pending.exists() or pending.is_symlink():
+        claim = _prepublication_claim(state_path, state, node_id, dispatch_id, checkout, provider, exit_code, result)
+        manifest["prepublication_sha256"] = graph_driver_prepublication.validate(pending, claim)
     data = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
     with manifest_path.open("xb") as stream:
         stream.write(data)
@@ -170,6 +227,20 @@ def validate(
         raise ValueError("driver prompt changed")
     if _digest(artifact / "output.jsonl") != manifest.get("output_sha256"):
         raise ValueError("driver output changed")
+    if "prepublication_sha256" in manifest:
+        claim = _prepublication_claim(
+            state_path,
+            state,
+            node_id,
+            dispatch_id,
+            Path(manifest["checkout"]),
+            manifest["provider"],
+            manifest["exit_code"],
+            manifest["result"],
+        )
+        pending_sha = graph_driver_prepublication.validate(artifact / "prepublication.json", claim)
+        if pending_sha != manifest["prepublication_sha256"]:
+            raise ValueError("prepublication evidence changed")
     if manifest.get("provider") == "codex":
         final = artifact / "final.json"
         if "final_sha256" in manifest:

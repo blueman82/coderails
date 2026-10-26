@@ -15,7 +15,7 @@ from typing import Any, Callable, Optional, Union, cast
 
 import graph_contract
 import graph_driver_control
-import graph_driver_evidence
+import graph_driver_evidence as evidence
 import graph_driver_process
 import graph_semantics
 import graph_spec
@@ -67,8 +67,8 @@ def _load(path: Path, session: str) -> dict[str, Any]:
     graph_semantics.validate(state)
     if state["session_id"] != session or state["graph"].get("dispatch_mode") != "driver":
         raise ValueError("driver graph belongs to another session or mode")
-    graph_driver_evidence.validate_backup(path, state)
-    graph_driver_evidence.validate_history(path, state)
+    evidence.validate_backup(path, state)
+    evidence.validate_history(path, state)
     return state
 
 
@@ -161,7 +161,7 @@ def _checkout_problem(state: dict[str, Any], nodes: list[str], checkouts: Checko
             if isinstance(item, dict):
                 reference = cast(dict[str, Any], item)
                 if reference.get("kind") == "driver_worker":
-                    manifest = graph_driver_evidence.validate(path, state, node_id, reference, historical=True)
+                    manifest = evidence.validate(path, state, node_id, reference, historical=True)
                     if Path(manifest["checkout"]) in paths:
                         return "checkout_already_used"
     return None
@@ -241,18 +241,8 @@ def _reference(
         "attempt": record["attempt"],
         "manifest_sha256": digest,
     }
-    manifest = graph_driver_evidence.validate(path, state, node_id, reference)
+    manifest = evidence.validate(path, state, node_id, reference)
     return reference, manifest
-
-
-def _publication_pause(checkout: Path, node_id: str, result: dict[str, Any]) -> dict[str, Any] | None:
-    """Leave a successful source worker open until root publication."""
-    if graph_driver_evidence.needs_publication(node_id, result):
-        try:
-            graph_driver_evidence.publication(checkout, require_merged=node_id == "S9-wiki")
-        except ValueError as error:
-            return {"status": "paused", "reason": "publication_required", "node": node_id, "detail": str(error)}
-    return None
 
 
 def _admit_result(state: dict[str, Any], node_id: str, parsed: dict[str, Any]) -> dict[str, Any]:
@@ -262,6 +252,19 @@ def _admit_result(state: dict[str, Any], node_id: str, parsed: dict[str, Any]) -
     except worker_status.WorkerResultError as error:
         return {"outcome": "failed", "evidence": f"invalid_worker_result:{error.code}", "final_report": None}
     return parsed
+
+
+def _record_wave(
+    script: Path, path: Path, active: dict[str, Any], results: dict[str, Any], references: dict[str, Any]
+) -> dict[str, Any]:
+    """Record only after every result and evidence reference is ready."""
+    _graph(
+        script,
+        "record-driver-wave",
+        path,
+        json.dumps({"wave_id": active["wave_id"], "results": results, "references": references}),
+    )
+    return {"status": "recorded", "wave_id": active["wave_id"], "nodes": sorted(results)}
 
 
 def drive_once(
@@ -346,24 +349,21 @@ def drive_once(
                 observation = graph_driver_process.observe(prompt.parent, 0.05)
                 if observation["status"] != "finished":
                     return {**observation, "node": node_id, "dispatch_id": identifier, "attempt": str(prompt.parent)}
-                parsed = _admit_result(state, node_id, result(prompt.parent / "output.jsonl", observation["exit_code"]))
-                if pause := _publication_pause(worker_checkout, node_id, parsed):
-                    return pause
-                reference = graph_driver_evidence.seal(
-                    path, state, node_id, identifier, worker_checkout, provider, observation["exit_code"], parsed
-                )
-                manifest = graph_driver_evidence.validate(path, state, node_id, reference)
+                code = observation["exit_code"]
+                parsed = _admit_result(state, node_id, result(prompt.parent / "output.jsonl", code))
+                if evidence.needs_publication(node_id, parsed):
+                    try:
+                        evidence.publication(worker_checkout, require_merged=node_id == "S9-wiki")
+                    except ValueError as error:
+                        evidence.seal_pending(path, state, node_id, identifier, worker_checkout, provider, code, parsed)
+                        detail = str(error)
+                        return {"status": "paused", "reason": "publication_required", "node": node_id, "detail": detail}
+                reference = evidence.seal(path, state, node_id, identifier, worker_checkout, provider, code, parsed)
+                manifest = evidence.validate(path, state, node_id, reference)
             if Path(manifest["checkout"]) != worker_checkout:
                 return {"status": "unresolved", "reason": "checkout_changed", "node": node_id}
-            results[node_id] = manifest["result"]
-            references[node_id] = reference
-        _graph(
-            script,
-            "record-driver-wave",
-            path,
-            json.dumps({"wave_id": active["wave_id"], "results": results, "references": references}),
-        )
-        return {"status": "recorded", "wave_id": active["wave_id"], "nodes": sorted(results)}
+            results[node_id], references[node_id] = manifest["result"], reference
+        return _record_wave(script, path, active, results, references)
 
 
 def drive_wave(

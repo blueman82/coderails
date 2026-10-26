@@ -55,14 +55,6 @@ class DriverControllerTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
-    def test_unpublished_source_pauses_before_seal(self) -> None:
-        """A completed worker cannot become graph evidence before publication."""
-        with patch.object(graph_driver_evidence, "publication", side_effect=ValueError("no open PR")):
-            report = graph_driver_controller._publication_pause(  # pyright: ignore[reportPrivateUsage]
-                Path("/unused"), "U3[1]", {"outcome": "done"}
-            )
-        self.assertEqual((report or {}).get("reason"), "publication_required")
-
     @staticmethod
     def scoped(case: Case) -> None:
         """Give the disposable worker a real, narrow assignment."""
