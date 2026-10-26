@@ -8,6 +8,7 @@ import platform
 import shutil
 import subprocess
 import sys
+from contextlib import suppress
 from pathlib import Path
 
 from hooks.scripts.tests.lib.post_evals_fixture import ROOT, ArtifactCase
@@ -32,7 +33,7 @@ class SandboxCase(ArtifactCase):
     temporary_parent = "/private/tmp"
 
     def setUp(self) -> None:
-        """Create a linked worktree, isolated home and narrow scratch directory."""
+        """Create a primary repo, a linked worktree, a scratch clone, an isolated owner home and a credential."""
         super().setUp()
         self.directory = self.directory / "primary"
         self.directory.mkdir()
@@ -44,11 +45,17 @@ class SandboxCase(ArtifactCase):
         self.worktree = self.directory / "worktree"
         self.git("worktree", "add", "-b", "worker", str(self.worktree))
         self.home = self.directory / "home"
-        self.scratch = self.directory / "scratch"
+        self.scratch = self.directory / "s"  # short: srt's unix socket path under TMPDIR is limited to ~103 chars
         self.bin = self.directory / "bin"
-        for path in (self.home, self.home / ".claude/hooks", self.home / ".claude/plugins", self.scratch, self.bin):
+        for path in (self.home, self.home / ".coderails", self.scratch, self.bin):
             path.mkdir(parents=True, exist_ok=True)
+        credential = self.home / ".coderails/worker_credential"
+        credential.write_text("ANTHROPIC_API_KEY=sk-fixture\n")
+        credential.chmod(0o600)
+        (self.home / ".claude.json").write_text("{}")
         self.primary = self.directory / ".git"
+        self.clone = self.scratch / "clone"
+        subprocess.run(["git", "clone", "-q", "--no-hardlinks", str(self.worktree), str(self.clone)], check=True)
         self.settings = self.scratch / "settings.json"
         self.environment = {
             key: value
@@ -56,32 +63,39 @@ class SandboxCase(ArtifactCase):
             if key not in ("CLAUDE_CODE_SESSION_ID", "GH_TOKEN", "GITHUB_TOKEN", "ANTHROPIC_API_KEY")
         }
         self.environment.update(HOME=str(self.home), TMPDIR=str(self.scratch), PATH=f"{self.bin}:{os.environ['PATH']}")
-        self.environment.update(SANDBOX_FIXTURE_NODE=str(self.node), SANDBOX_FIXTURE_CLI=str(self.runtime))
         source = Path(__file__).with_name("sandbox_worker_fixture.py").read_text().split("\n", 1)[1]
-        for name in ("npx", "gh", "claude"):
+        for placeholder, value in (
+            ("@REAL_HOME@", str(self.home)),
+            ("@NODE@", str(self.node)),
+            ("@CLI@", str(self.runtime)),
+        ):
+            source = source.replace(placeholder, value)
+        for name in ("npx", "claude"):
             executable = self.bin / name
             executable.write_text(f"#!{sys.executable}\n{source}")
             executable.chmod(0o755)
-        self.project_state = Path(f"/private/tmp/claude-{os.getuid()}") / str(self.worktree).replace("/", "-")
+        self.project_state = Path(f"/private/tmp/claude-{os.getuid()}") / str(self.clone).replace("/", "-")
         self.addCleanup(self.cleanup_project_state)
 
     def cleanup_project_state(self) -> None:
-        """Remove only this fixture's empty provider state directory."""
-        if self.project_state.is_dir():
-            self.project_state.rmdir()
+        """Remove only this fixture's empty provider state directories."""
+        slug = str(self.scratch).replace("/", "-")
+        for path in Path(f"/private/tmp/claude-{os.getuid()}").glob(f"{slug}*"):
+            with suppress(OSError):
+                path.rmdir()
 
     def render(self) -> None:
-        """Render the production policy under the fixture environment."""
+        """Render the production policy for the scratch clone under the fixture environment."""
         from unittest.mock import patch
 
         with patch.dict(os.environ, self.environment, clear=True):
-            render_settings(str(self.worktree), str(self.scratch), str(self.primary), str(self.settings))
+            render_settings(str(self.clone), str(self.scratch), str(self.settings))
 
     def sandbox(self, *arguments: str) -> subprocess.CompletedProcess[str]:
-        """Run actual srt with no package-manager network or provider calls."""
+        """Run actual srt from the clone with no package-manager network or provider calls."""
         return subprocess.run(
             [str(self.node), str(self.runtime), "--settings", str(self.settings), "--", *arguments],
-            cwd=self.worktree,
+            cwd=self.clone,
             env=self.environment,
             capture_output=True,
             text=True,
@@ -90,10 +104,10 @@ class SandboxCase(ArtifactCase):
         )
 
     def spawn(self, mode: str) -> subprocess.CompletedProcess[str]:
-        """Exercise the production launcher with real srt and an inert worker."""
+        """Exercise the production launcher with real srt and an inert worker; the prompt names the mode."""
         prompt = self.directory / "prompt.txt"
-        prompt.write_text("fixture worker prompt\n")
-        environment = {**self.environment, "SANDBOX_FIXTURE_MODE": mode, "CODERAILS_HEADLESS_RUN": "1"}
+        prompt.write_text(f"{mode}\n")
+        environment = {**self.environment, "CODERAILS_HEADLESS_RUN": "1", "GH_TOKEN": "parent-token"}
         return subprocess.run(
             [
                 sys.executable,
@@ -105,6 +119,6 @@ class SandboxCase(ArtifactCase):
             env=environment,
             capture_output=True,
             text=True,
-            timeout=45,
+            timeout=60,
             check=False,
         )

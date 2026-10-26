@@ -29,7 +29,8 @@ class Provider:
         subprocess.run(["git", "init", "-q", str(self.home)], check=True)
         config = self.home / ".coderails/workflow.config.yaml"
         config.parent.mkdir()
-        config.write_text("memory:\n  backend: off\n")
+        # These cases verify native graph dispatch, not worker containment.
+        config.write_text("memory:\n  backend: off\nsandbox_workers: false\n")
         self.plugin = ROOT if name == "claude" else ROOT / "packages/codex"
         self.session = "fixture-session" if name == "claude" else "parent"
         self.parent = claude.parent(self.home) if name == "claude" else codex.transcripts(self.home)

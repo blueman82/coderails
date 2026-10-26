@@ -22,7 +22,7 @@ ENVELOPE = "CODERAILS_GRAPH_DISPATCH=" + json.dumps(
         "loop_id": "loop",
         "revision": 2,
         "wave_id": "wave-2",
-        "node_id": "U3[1]",
+        "node_id": "S2",
     }
 )
 
@@ -70,6 +70,7 @@ class DispatchGuardTests(unittest.TestCase):
             patch.object(guard, "graph_output", side_effect=graph_output),
             patch.object(guard, "deny") as denial,
             patch.object(guard, "log"),
+            patch.object(guard, "append_trace_row"),
         ):
             self.assertEqual(guard.main(), 0)
         return denial.called, len(self.sent)
@@ -80,10 +81,22 @@ class DispatchGuardTests(unittest.TestCase):
         config.write_text("sandbox_workerz: true\n", encoding="utf-8")
         self.assertEqual(self._run(config=config), (True, 0))
 
-    def test_valid_default_sandbox_setting_does_not_claim_a_codex_override(self) -> None:
-        """The existing Codex API continues dispatch; its sandbox is inherited from the parent session."""
+    def test_valid_default_sandbox_setting_preserves_scout_dispatch(self) -> None:
+        """The containment rule applies to implementation work, not scout dispatch."""
         config = Path(self.scratch.name) / "workflow.config.yaml"
         config.write_text("sandbox_workers: true\n", encoding="utf-8")
+        self.assertEqual(self._run(config=config), (False, 1))
+
+    def test_default_containment_refuses_native_implementation(self) -> None:
+        """Native implementation inherits the parent sandbox and must not bypass the separate process."""
+        self.tool_input["message"] = self.tool_input["message"].replace('"S2"', '"U3[1]"')
+        self.assertEqual(self._run(), (True, 0))
+
+    def test_explicit_containment_off_allows_native_implementation(self) -> None:
+        """The owner can make the documented opt-out in the workflow config."""
+        self.tool_input["message"] = self.tool_input["message"].replace('"S2"', '"U3[1]"')
+        config = Path(self.scratch.name) / "workflow.config.yaml"
+        config.write_text("sandbox_workers: false\n", encoding="utf-8")
         self.assertEqual(self._run(config=config), (False, 1))
 
     def test_roleless_dispatch_reaches_authority(self) -> None:
