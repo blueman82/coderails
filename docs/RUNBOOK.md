@@ -491,8 +491,9 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
   enforces; `diff_manifest: off` does not touch it). The policy file is the control, and deleting or corrupting it
   refuses (`review_policy_unreadable`), it does not allow.
 - Artifact: `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]` posts two comments for one head.
-  The first has the v1 marker, a passes line, and the review text. The passes line gives the name, verdict, blocking
-  value, and summary hash for each pass. The second has the same v1 marker and the same general review text. It lets
+  The first has the v1 marker, a passes line, an optional compat-findings line, and the review text. The passes line
+  gives the name, verdict, blocking value, and summary hash for each pass. The second has the same v1 marker, the
+  same optional compat-findings line, and the same general review text. It lets
   the current server integrity check read the review. The local gate accepts the pair only when the comments are
   adjacent and the general review text is identical. The script derives each verdict from the text. A Critical finding
   fails the pass. A present passes line must include `review-pr` with a verdict bound to its summary. An old single

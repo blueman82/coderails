@@ -129,7 +129,7 @@ def post(
     repo = git.repo()
     login = git.output("gh", "api", "user", "-q", ".login", check=True)
     pass_body = "\n".join(top + [review_passes.tail(texts)])
-    companion_body = top[0] + "\n" + texts[0][1]
+    companion_body = "\n".join([top[0], *top[2:], texts[0][1]])
     comments = comments_for(repo, number, login)
     positions = [
         index

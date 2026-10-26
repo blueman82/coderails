@@ -233,15 +233,20 @@ def review_passes_for_pr(number: str, sha: str) -> ReviewPasses:
     previous = bodies[last - 1]
     if not previous.startswith(marker + "\n" + review_passes.PREFIX):
         return ReviewPasses(0, None)
-    parsed = review_passes.parse(previous, number, sha)
+    _, _, remainder = previous.partition("\n")
+    passes_line, _, summary = remainder.partition("\n")
+    compat = ""
+    if summary.startswith(review_artifact.COMPAT_PREFIX):
+        compat, _, summary = summary.partition("\n")
+        if review_artifact.parse_compat_line(compat, number, sha) is None:
+            return ReviewPasses(0, None)
+    parsed = review_passes.parse("\n".join([marker, passes_line, summary]), number, sha)
     if parsed is None or not parsed:
         return ReviewPasses(0, None)
-    _, _, remainder = previous.partition("\n")
-    _, _, summary = remainder.partition("\n")
     general, separator, _ = summary.partition("\n<!-- coderails-review-pass ")
     if separator:
         summary = general
-    if companion != marker + "\n" + summary:
+    if companion != "\n".join([marker, *([compat] if compat else []), summary]):
         return ReviewPasses(0, None)
     return ReviewPasses(0, tuple(parsed))
 
