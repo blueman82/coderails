@@ -187,6 +187,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `memory-adapter-nosession`. A muninn refusal keeps its original code in the reason (`refused_<code>`).
 - Remediation (reason code: one-line fix, single source `scripts/lib/memory_reasons.py`):
 
+The active decision and order paths request a Muninn review of an indexed source window. Their old `--quote` and
+`--cite-quote` inputs are ignored. Quote and citation codes below apply to the older direct-write adapter CLI only.
+
 | Code | Remediation |
 |------|-------------|
 | `memory_backend_off` | memory.backend is off in the workflow config; set it to muninn (or remove the key) to write typed memory. |
@@ -272,7 +275,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Query: `python3 -c "import json;[print(r['seq'],r['muninn']) for r in json.load(open('progress.json'))['decisions_absorbed']]"`,
   or `grep '"command": "decision\.' <agentic-loop dir>/<session_id>/trace.jsonl`. Chain check:
   `python3 -c "import json,sys;sys.path.insert(0,'.');from scripts.lib import decision_record as d;print(d.verify_chain(json.load(open('progress.json'))['decisions_absorbed']))"`.
-- Fix: inspect the saved R_ ID with `muninn learn show <R_ID>`. A pending request stays pending. An unknown submission
+- Fix: inspect the saved R_ ID with `muninn learn show <R_ID>`. A decision row with an R_ ID but no saved project and
+  source window stays unknown. A pending request stays pending. An unknown submission
   must be reconciled against Muninn's request list before any new submission. A completed receipt must contain one
   active note with the exact project, task, kind and text before the row becomes written. The old `cite_quote` input
   is ignored by the request path. Rows are never deleted to clear a failure.
@@ -347,7 +351,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   are accepted recurrences; conflicts and foreign/malformed stored bindings refuse before superseding a store claim.
 - Current citation: explicit `record` alone may replace lesson text. `cite` reconciles the current tagged claim even
   when the ledger holds older text, without a knowledge write. A formerly cited id without a current replacement
-  refuses; a genuinely uncited first attachment still validates the owner's quote. Distinct simultaneous current
+  refuses; a first attachment with no saved request stays unverified. Distinct simultaneous current
   claims refuse as `lesson_not_current`. Tick performs current reads without knowledge writes; outages retain saved
   K-ids over stale preparation metadata and return explicit degradation. Idempotent tick retry may refresh metadata
   without repeating lifecycle effects. Promotion uses the current cited join, independent of cached write state.

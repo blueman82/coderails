@@ -18,14 +18,15 @@ def _claim(order: dict[str, Any]) -> str:
     return " ".join(str(order["lesson"]).split())
 
 
-def needs_submit(order: dict[str, Any]) -> bool:
-    """An unknown marker or saved request forbids a second submission for the same text."""
+def needs_submit(order: dict[str, Any], task: str, session: str) -> bool:
+    """Reuse a request only in its original task and source session."""
     previous = order.get("muninn", {})
     digest = hashlib.sha256(_claim(order).encode()).hexdigest()
-    return not (
-        previous.get("claim_sha256") == digest
-        and (previous.get("state") == "unknown" or isinstance(previous.get("request_id"), str))
-    )
+    if previous.get("claim_sha256") != digest or previous.get("task") not in (None, task):
+        return True
+    if previous.get("source_session") not in (None, session):
+        return True
+    return previous.get("state") != "unknown" and not isinstance(previous.get("request_id"), str)
 
 
 def _journal(repo_dir: Path, order: dict[str, Any], session: str, task: str) -> tuple[Path, dict[str, str]]:
@@ -63,6 +64,7 @@ def recover(order: dict[str, Any], repo_dir: Path, session: str, task: str) -> d
         "state": "pending",
         "id": None,
         "request_id": rid,
+        "source_session": session,
         "request_window": window,
         "project_id": project,
         "task": task,
@@ -101,7 +103,17 @@ def sync_order(
     previous = cast("dict[str, Any]", order.get("muninn", {}))
     claim = _claim(order)
     digest = hashlib.sha256(claim.encode()).hexdigest()
-    same_claim = previous.get("claim_sha256") == digest
+    same_claim = (
+        previous.get("claim_sha256") == digest
+        and previous.get("task") == task
+        and previous.get("source_session") == session
+    )
+    legacy_unknown = (
+        previous.get("claim_sha256") == digest
+        and previous.get("state") == "unknown"
+        and previous.get("task") in (None, task)
+        and previous.get("source_session") is None
+    )
     request_id = previous.get("request_id")
     if same_claim and isinstance(request_id, str):
         window, project = previous.get("request_window"), previous.get("project_id")
@@ -115,29 +127,42 @@ def sync_order(
                 expected_project=project,
             )
         else:
-            result = mr.inspect(request_id, previous.get("task", task), "lesson", claim)
-    elif same_claim and previous.get("state") == "unknown" and not issue:
+            result = ma.Degraded("learning_request_unknown")
+    elif (same_claim and previous.get("state") == "unknown" or legacy_unknown) and not issue:
         return dict(previous)
+    elif (
+        previous.get("claim_sha256") == digest
+        and isinstance(request_id, str)
+        and previous.get("task") in (None, task)
+        and previous.get("source_session") is None
+    ):
+        return {**previous, "state": "unknown", "reason_code": "learning_request_unknown"}
     elif not issue:
         return {
             "state": "unknown",
             "id": previous.get("id"),
             "request_id": None,
             "task": task,
+            "source_session": session,
             "claim_sha256": digest,
             "reason_code": "learning_request_unknown",
         }
     else:
         result = mr.submit(session, task)
     field = lessons.metadata(result, previous.get("id"))
-    field.update(task=previous.get("task", task) if same_claim else task, claim_sha256=digest)
+    field.update(task=task, source_session=session, claim_sha256=digest)
     if isinstance(result, mr.Pending):
         field["request_id"] = result.request_id
         if result.window is not None and result.project_id is not None:
             field.update(request_window=result.window, project_id=result.project_id)
-    elif isinstance(request_id, str) and same_claim:
+    if isinstance(request_id, str) and same_claim:
         field["request_id"] = request_id
-    elif isinstance(result, ma.Degraded) and result.reason in {"muninn_error", "muninn_timeout", "muninn_bad_output"}:
+    if isinstance(result, ma.Degraded) and result.reason in {
+        "learning_request_unknown",
+        "muninn_error",
+        "muninn_timeout",
+        "muninn_bad_output",
+    }:
         field["state"] = "unknown"
     if same_claim:
         field.update({key: previous[key] for key in ("request_window", "project_id") if key in previous})

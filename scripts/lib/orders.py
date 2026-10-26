@@ -117,7 +117,7 @@ def cmd_record(a: argparse.Namespace, repo_dir: Path) -> Result:
         if any((e["session_id"], e["loop_id"]) == (a.session, a.loop) for e in old.get("evidence", [])):
             row["replaces_source"] = old.get("lesson_source")
         source = request_sync.recover({**old, **row}, repo_dir, a.session, a.loop)
-        issue = request_sync.needs_submit(source)
+        issue = request_sync.needs_submit(source, a.loop, a.session)
         row["muninn"] = sync_order(source, a.session, repo_dir, ledger, a.loop)
         prepared["records"] = [r for r in prepared["records"] if r["id"] != order_id] + [row]
         _prepare(state_dir, prepared)
@@ -194,7 +194,7 @@ def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
                 )
                 field = lessons.metadata(observed, prior)
             field.update({key: previous[key] for key in (
-                "request_id", "task", "claim_sha256", "request_window", "project_id"
+                "request_id", "task", "source_session", "claim_sha256", "request_window", "project_id"
             ) if key in previous})  # fmt: skip
             ledger = ol.set_muninn(ledger, row["id"], field)
             if field["state"] in {"degraded", "pending", "unknown"}:
@@ -310,9 +310,9 @@ def cmd_cite(a: argparse.Namespace, repo_dir: Path) -> Result:
         order = ol.find(ledger, a.order_id)
         if order is None:
             raise ValueError("order_not_found")
-        task = order.get("muninn", {}).get("task") or order["evidence"][-1]["loop_id"]
+        task = order["evidence"][-1]["loop_id"]
         order = request_sync.recover(order, repo_dir, a.session, task)
-        issue = request_sync.needs_submit(order)
+        issue = request_sync.needs_submit(order, task, a.session)
         field = sync_order(order, a.session, repo_dir, ledger, task)
         if issue:
             ledger = ol.set_muninn(ledger, a.order_id, field)

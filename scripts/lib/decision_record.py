@@ -7,7 +7,7 @@ dashboard's `{phase, decision}` keys are unchanged. `row_sha256` covers every fi
 unhashed row is named by `verify_chain`. Cooperating-agent safeguard: a same-user agent can rewrite the file and
 recompute the whole chain; this is tamper-evidence, not a security boundary, and dropping the LAST row is undetectable.
 The `muninn` field is OUTSIDE the hash: a same-user agent can set `{state: written}` by hand and `flush_pending`
-will not retry it, so "synced to Muninn" is unauthenticated here; check the id against Muninn `list_records`.
+will not retry it, so "synced to Muninn" is unauthenticated here; check the saved R_ receipt and active K_ note.
 
 Entry point for both graph CLIs (`graph.py record-decision`), `transition(path, fn)` being the provider's lock wrapper
 (Claude `hooks.scripts.lib.graph_executor.transition`; Codex `graph_io.locked/load/write` wrapped to the same shape):
@@ -21,10 +21,9 @@ Entry point for both graph CLIs (`graph.py record-decision`), `transition(path, 
 Muninn outside the lock, then patches `muninn` under the lock again. exit_code: 0 written or disabled, 3 degraded
 or unknown (reason code printed, local row kept), 2 refused (nothing written). `flush_pending` claims only pending
 or safely degraded rows under the lock before retry. A crash or ambiguous external result leaves `syncing`/`unknown`;
-automatic retry stops with `decision_sync_unknown` until a human reconciles the Muninn store. Muninn refuses an
-approval-only citation and an
-agent cannot cite itself, so the cite is a quote of `authorising_prompt_raw` unless the caller passes a substantive
-user `cite_quote`; a short prompt such as "yes" stays a visible degrade. Never falls back to Markdown.
+automatic retry stops with `decision_sync_unknown` until the saved request is reconciled. The request reads a
+Muninn source window and its task scope. `authorising_prompt_raw` and `cite_quote` remain accepted compatibility
+inputs; they do not supply evidence to this request. Never falls back to Markdown.
 """
 
 from __future__ import annotations
@@ -178,12 +177,22 @@ def sync_row(
 ) -> dict[str, Any]:
     """Queue or inspect task review; prompt and quote inputs are old, ignored inputs."""
     claim = _collapse(f"{row['phase']}: {row['decision']}")
-    request_id = _as_row(row.get("muninn")).get("request_id")
-    res = (
-        mr.inspect(request_id, loop_id, "decision", claim)
-        if isinstance(request_id, str)
-        else mr.submit(session_id, loop_id)
-    )
+    previous = _as_row(row.get("muninn"))
+    request_id = previous.get("request_id")
+    window, project = previous.get("request_window"), previous.get("project_id")
+    if isinstance(request_id, str) and isinstance(window, dict) and isinstance(project, str):
+        res = mr.inspect(
+            request_id,
+            loop_id,
+            "decision",
+            claim,
+            expected_window=cast("dict[str, Any]", window),
+            expected_project=project,
+        )
+    elif isinstance(request_id, str):
+        res = ma.Degraded("learning_request_unknown")
+    else:
+        res = mr.submit(session_id, loop_id)
     field: dict[str, Any]
     if isinstance(res, ma.Record):
         field = {"state": "written", "id": res.id, "request_id": request_id, "reason_code": "ok"}
@@ -191,13 +200,27 @@ def sync_row(
         field = {"state": "pending", "id": None, "request_id": res.request_id, "reason_code": "learning_pending"}
     else:
         off = res.reason == "memory_backend_off"
-        uncertain = request_id is None and res.reason in {"muninn_error", "muninn_timeout", "muninn_bad_output"}
+        uncertain = (
+            res.reason == "learning_request_unknown"
+            or request_id is None
+            and res.reason
+            in {
+                "muninn_error",
+                "muninn_timeout",
+                "muninn_bad_output",
+            }
+        )
         field = {
             "state": "disabled" if off else "unknown" if uncertain else "degraded",
             "id": None,
             "request_id": request_id,
             "reason_code": res.reason,
         }
+    for key in ("request_window", "project_id"):
+        if key in previous:
+            field[key] = previous[key]
+    if isinstance(res, mr.Pending) and res.window is not None and res.project_id is not None:
+        field.update(request_window=res.window, project_id=res.project_id)
     _trace("decision.sync", field["state"], field["reason_code"], session_id, loop_id)
     return field
 
@@ -235,8 +258,14 @@ def claim_sync(state: dict[str, Any], session: str, loop_id: str, row_sha256: st
     row = _owned_row(new, session, loop_id, row_sha256)
     if _as_row(row.get("muninn")).get("state") not in {"pending", "degraded"}:
         raise ValueError("sync_unavailable")
-    request_id = _as_row(row.get("muninn")).get("request_id")
-    row["muninn"] = {"state": "syncing", "id": None, "request_id": request_id, "reason_code": "sync_in_flight"}
+    previous = _as_row(row.get("muninn"))
+    row["muninn"] = {
+        "state": "syncing",
+        "id": None,
+        "request_id": previous.get("request_id"),
+        "reason_code": "sync_in_flight",
+    }
+    row["muninn"].update({key: previous[key] for key in ("request_window", "project_id") if key in previous})
     return new
 
 
@@ -250,7 +279,8 @@ def _sync_safely(
         return sync_row(row, loop_id, session, str(raw or ""), cite)
     except Exception:  # noqa: BLE001
         _trace("decision.sync", "degraded", "muninn_error", session, loop_id)
-        return {"state": "unknown", "id": None, "reason_code": "muninn_error"}
+        previous = _as_row(row.get("muninn"))
+        return {**previous, "state": "unknown", "id": None, "reason_code": "muninn_error"}
 
 
 def record(

@@ -114,7 +114,7 @@ class RequestTest(unittest.TestCase):
         with mock.patch.object(ma, "_run", side_effect=map(json.dumps, (detail, listed))):
             self.assertEqual(mr.inspect(RID, "loop-1", "decision", CLAIM), ma.Degraded("learning_no_matching_record"))
 
-    def test_decision_uses_saved_request_and_does_not_resubmit(self) -> None:
+    def test_decision_without_saved_window_stays_unknown(self) -> None:
         row = {
             "phase": "2.5",
             "decision": "Use the current request API.",
@@ -122,13 +122,26 @@ class RequestTest(unittest.TestCase):
         }
         with (
             mock.patch.object(mr, "submit") as submit,
-            mock.patch.object(mr, "inspect", return_value=mr.Pending(RID)) as inspect,
+            mock.patch.object(mr, "inspect") as inspect,
         ):
             field = decisions.sync_row(row, "loop-1", "session-1", "")
-        self.assertEqual(field["state"], "pending")
+        self.assertEqual(field["state"], "unknown")
         self.assertEqual(field["request_id"], RID)
         submit.assert_not_called()
-        inspect.assert_called_once_with(RID, "loop-1", "decision", CLAIM)
+        inspect.assert_not_called()
+
+    def test_decision_keeps_source_window_for_saved_request(self) -> None:
+        row = {
+            "phase": "2.5",
+            "decision": "Use the current request API.",
+            "muninn": {"request_id": RID, "state": "pending", "request_window": WINDOW, "project_id": PROJECT},
+        }
+        with mock.patch.object(mr, "inspect", return_value=mr.Pending(RID, WINDOW, PROJECT)) as inspect:
+            field = decisions.sync_row(row, "loop-1", "session-1", "")
+        inspect.assert_called_once_with(
+            RID, "loop-1", "decision", CLAIM, expected_window=WINDOW, expected_project=PROJECT
+        )
+        self.assertEqual((field["request_window"], field["project_id"]), (WINDOW, PROJECT))
 
     def test_ambiguous_decision_submit_stays_unknown(self) -> None:
         row = {"phase": "2.5", "decision": "Use the current request API.", "muninn": {"state": "syncing"}}
@@ -149,6 +162,59 @@ class RequestTest(unittest.TestCase):
         with mock.patch.object(lifecycle, "check_staged_identity"), mock.patch.object(mr, "submit") as submit:
             field = request_sync.sync_order(order, "session-1", Path("/tmp"), {}, "loop-1")
         self.assertEqual(field, previous)
+        submit.assert_not_called()
+
+    def test_same_text_in_a_later_task_needs_its_own_request(self) -> None:
+        claim = "Run a bounded review before closing the loop."
+        previous = {
+            "state": "written",
+            "id": KID,
+            "request_id": RID,
+            "task": "loop-1",
+            "claim_sha256": hashlib.sha256(claim.encode()).hexdigest(),
+            "reason_code": "ok",
+        }
+        order = {"id": "order-1", "lesson": claim, "muninn": previous}
+        self.assertTrue(request_sync.needs_submit(order, "loop-2", "session-2"))
+        with mock.patch.object(lifecycle, "check_staged_identity"):
+            marker = request_sync.sync_order(order, "session-2", Path("/tmp"), {}, "loop-2")
+        self.assertEqual((marker["state"], marker["task"], marker["request_id"]), ("unknown", "loop-2", None))
+
+    def test_same_text_from_another_session_needs_its_own_request(self) -> None:
+        claim = "Run a bounded review before closing the loop."
+        previous = {
+            "state": "pending",
+            "request_id": RID,
+            "task": "loop-1",
+            "source_session": "session-1",
+            "claim_sha256": hashlib.sha256(claim.encode()).hexdigest(),
+        }
+        order = {"id": "order-1", "lesson": claim, "muninn": previous}
+        self.assertTrue(request_sync.needs_submit(order, "loop-1", "session-2"))
+        with mock.patch.object(lifecycle, "check_staged_identity"):
+            marker = request_sync.sync_order(order, "session-2", Path("/tmp"), {}, "loop-1")
+        self.assertEqual(
+            (marker["state"], marker["source_session"], marker["request_id"]), ("unknown", "session-2", None)
+        )
+
+    def test_order_without_saved_window_stays_unknown(self) -> None:
+        claim = "Run a bounded review before closing the loop."
+        previous = {
+            "state": "pending",
+            "request_id": RID,
+            "task": "loop-1",
+            "source_session": "session-1",
+            "claim_sha256": hashlib.sha256(claim.encode()).hexdigest(),
+        }
+        order = {"id": "order-1", "lesson": claim, "muninn": previous}
+        with (
+            mock.patch.object(lifecycle, "check_staged_identity"),
+            mock.patch.object(mr, "inspect") as inspect,
+            mock.patch.object(mr, "submit") as submit,
+        ):
+            field = request_sync.sync_order(order, "session-1", Path("/tmp"), {}, "loop-1")
+        self.assertEqual((field["state"], field["request_id"]), ("unknown", RID))
+        inspect.assert_not_called()
         submit.assert_not_called()
 
 
