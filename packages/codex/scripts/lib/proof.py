@@ -21,6 +21,7 @@ import json
 import os
 import secrets
 import selectors
+import shlex
 import signal
 import subprocess
 import sys
@@ -33,12 +34,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.lib.destructive_patterns import permanent_pattern, secret_path  # noqa: E402
 from scripts.lib import proof_results as pr  # noqa: E402
 from scripts.lib import proof_suite as suite  # noqa: E402
+from scripts.lib.proof_runtime import runtime_argv, source_snapshot  # noqa: E402
 from scripts.lib.proof_suite import items, validate  # noqa: E402
 
 DEFAULT_TIMEOUT_S = 600
 EXCERPT_CAP = 2000
 MAX_OUTPUT_BYTES = 1_048_576
-SRT_VERSION = "0.0.65"
 
 
 def _now() -> str:
@@ -102,18 +103,24 @@ def _capture(process: subprocess.Popen[bytes], timeout: float) -> tuple[bytes, b
     return bytes(output[0]), bytes(output[1]), timed_out, overflow
 
 
-def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool, bool, bool]:
+def _execute(cmd: str, timeout: float, head: str | None) -> tuple[int | None, str, str, bool, bool, bool, str | None]:
     """Return exit, stdout, stderr, timeout, and proof that the sandbox started."""
     with tempfile.TemporaryDirectory(prefix="coderails-proof.", dir="/tmp") as temporary:
         scratch = Path(temporary)
-        settings = scratch / "settings.json"
+        runner = scratch / "runner"
+        runner.mkdir()
+        runtime = runtime_argv(Path.cwd().resolve())
+        if not head:
+            raise OSError("proof source HEAD is unavailable")
+        source_cwd, source_root, source_tree = source_snapshot(Path.cwd(), head, scratch)
+        settings = runner / "settings.json"
         home = Path.home()
         settings.write_text(
             json.dumps(
                 {
                     "filesystem": {
-                        "denyRead": [],
-                        "allowWrite": [temporary],
+                        "denyRead": [str(source_root)],
+                        "allowWrite": [str(runner)],
                         "denyWrite": [
                             str(settings),
                             "/tmp/claude",
@@ -127,22 +134,20 @@ def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool, bool
             )
         )
         marker = f"CODERAILS_PROOF_SANDBOX_{secrets.token_hex(16)}"
-        wrapped = f"printf '%s\\n' '{marker}'\n{cmd}"
+        wrapped = f"cd {shlex.quote(str(source_cwd))} || exit 1\nprintf '%s\\n' '{marker}'\n{cmd}"
         environment = os.environ.copy()
         environment.update(
-            TMPDIR=temporary,
-            CLAUDE_CODE_TMPDIR=temporary,
-            XDG_CACHE_HOME=temporary,
+            TMPDIR=str(runner),
+            CLAUDE_CODE_TMPDIR=str(runner),
+            XDG_CACHE_HOME=str(runner),
             PYTHONDONTWRITEBYTECODE="1",
         )
-        environment.pop("CLAUDE_TMPDIR", None)
+        for key in ("CLAUDE_TMPDIR", "NODE_OPTIONS", "NODE_PATH"):
+            environment.pop(key, None)
         try:
             process = subprocess.Popen(
                 [
-                    "npx",
-                    "--offline",
-                    "--yes",
-                    f"@anthropic-ai/sandbox-runtime@{SRT_VERSION}",
+                    *runtime,
                     "--settings",
                     str(settings),
                     "-c",
@@ -152,10 +157,32 @@ def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool, bool
                 stderr=subprocess.PIPE,
                 start_new_session=True,
                 env=environment,
+                cwd=runner,
             )
         except OSError as error:
-            return None, "", str(error), False, False, False
+            return None, "", str(error), False, False, False, None
         stdout, stderr, timed_out, overflow = _capture(process, timeout)
+        unchanged = subprocess.run(
+            ["git", "-C", str(source_cwd), "status", "--porcelain=v1", "--untracked-files=all"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        identity = subprocess.run(
+            ["git", "-C", str(source_cwd), "rev-parse", "HEAD", "HEAD^{tree}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if (
+            unchanged.returncode
+            or unchanged.stdout
+            or identity.returncode
+            or identity.stdout.splitlines() != [head, source_tree]
+        ):
+            return None, "", "proof source snapshot changed", False, False, False, None
         out, err = stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace")
         prefix = marker + "\n"
         started = out.startswith(prefix)
@@ -166,6 +193,7 @@ def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool, bool
             timed_out,
             started,
             overflow,
+            source_tree,
         )
 
 
@@ -204,9 +232,11 @@ def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path:
         pr.trace("proof.run", "refused", "proof_cmd_destructive", who[0], who[1])
         return "refused"
     try:
-        code, out, err, timed_out, started, overflow = _execute(cmd, float(entry.get("timeout_s") or DEFAULT_TIMEOUT_S))
-    except OSError as error:
-        code, out, err, timed_out, started, overflow = None, "", str(error), False, False, False
+        code, out, err, timed_out, started, overflow, source_tree = _execute(
+            cmd, float(entry.get("timeout_s") or DEFAULT_TIMEOUT_S), cast(str | None, base["head_sha"])
+        )
+    except (OSError, subprocess.TimeoutExpired, ValueError) as error:
+        code, out, err, timed_out, started, overflow, source_tree = None, "", str(error), False, False, False, None
     if overflow:
         verdict, matched = "output_limit", False
     elif timed_out:
@@ -221,6 +251,7 @@ def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path:
         exit_code=code,
         stdout_sha256=pr.sha(out),
         stderr_sha256=pr.sha(err),
+        source_tree_sha=source_tree,
         excerpt=note + (out + err)[: EXCERPT_CAP - len(note)],
         expect_matched=matched,
         verdict=verdict,

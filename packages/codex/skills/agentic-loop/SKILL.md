@@ -104,6 +104,8 @@ The controller runs the proofs. With `P="python3 $SKILL_DIR/../../scripts/lib/pr
 
 If one same-graph replacement is necessary, have an isolated proof author write a pending schema-2 candidate and report outside the active graph. After review, run `$P supersede "$D" --candidate <path> --reason "<text>" --original-sha256 <raw-sha> --author-evidence <report-path>`. The controller leaves `proof.json` unchanged and records one chained binding to the candidate and report bytes. Then freeze and run the selected candidate at the current HEAD. Old run rows cannot satisfy it. A second replacement, changed file, missing report, or broken chain blocks. The report hash binds bytes only; a reviewer must check author independence separately.
 
+The proof command starts in a private copy of committed `HEAD`. Use relative paths for repository files. The original checkout is not readable. The result records the source tree hash. The gate checks that hash against the current commit.
+
 Apply `superpowers:verification-before-completion` to the orchestrator's completion claim. Then run:
 
 ```bash

@@ -423,6 +423,8 @@ python3 scripts/lib/proof.py run <state-dir> --all
 python3 scripts/lib/proof.py status <state-dir>
 ```
 
+For each proof, the controller makes a private copy of committed `HEAD`. The proof runs there. It cannot read the original checkout. The controller starts the pinned sandbox from its cached absolute path. A missing or changed cached runtime records `sandbox_unavailable`.
+
 The command stores one candidate by content hash and appends a chained `supersede` row. It binds the original and
 candidate raw and canonical hashes, loop identity, report bytes, reason, and issuance HEAD. Both providers use the
 same selected suite. Only freeze and run rows after that binding count. The run HEAD must match the current checkout.
@@ -440,7 +442,7 @@ file has no effect. The CLI checks report bytes, not the author's identity or in
   `proof_unexecuted`: run `proof.py run <state-dir> --all`. `proof_failed`: the latest run exited nonzero or timed
   out; fix the cause, re-run. `proof_expect_mismatch`: exit code or stdout did not match the frozen `expect`.
   `proof_stale_cmd`: proof.json changed after the freeze row, or the run row hashes a different cmd; run
-  `proof.py freeze` then `run`. `proof_stale_head`: the run belongs to another checkout or an earlier HEAD; run it
+  `proof.py freeze` then `run`. `proof_stale_head`: the run repository, HEAD, or source tree differs; run it
   again from the current repository checkout. `proof_chain_broken`: a retained row was edited or a nonfinal row was
   lost. Preserve `proof_results.jsonl` and start a new session and loop. `proof_cmd_destructive`: the cmd matches the
   destructive classifier and was never executed; reword the proof. `proof_output_limit`: combined stdout and stderr

@@ -367,15 +367,15 @@ class StallGuardTests(HookTestCase):
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)
         results = path.with_name(pr.RESULTS_NAME)
         identity = {"session_id": self.session, "loop_id": "loop-test"}
-        digest = pr.doc_sha(document)
-        pr.append(results, kind="freeze", proof_json_sha256=digest, **identity)
+        pr.append(results, kind="freeze", proof_json_sha256=pr.doc_sha(document), **identity)
         run = {
             "proof_id": "P1",
             "cmd_sha256": pr.sha(cmd),
-            "proof_json_sha256": digest,
+            "proof_json_sha256": pr.doc_sha(document),
             "verdict": "satisfied",
             "cwd": str(Path.cwd()),
             "head_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            "source_tree_sha": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
         }
         pr.append(results, kind="run", **run, **identity)
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)

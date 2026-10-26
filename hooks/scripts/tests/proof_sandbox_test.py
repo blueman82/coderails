@@ -39,6 +39,7 @@ class ProofSandboxTests(unittest.TestCase):
         cmd: str,
         *,
         path: str | None = None,
+        cwd: Path = ROOT,
         expected_code: int = 0,
         stdout_contains: tuple[str, ...] = ("ok",),
     ) -> subprocess.CompletedProcess[str]:
@@ -64,7 +65,7 @@ class ProofSandboxTests(unittest.TestCase):
             )
         )
         freeze = subprocess.run(
-            [sys.executable, str(runner), "freeze", str(state)], cwd=ROOT, capture_output=True, text=True, check=False
+            [sys.executable, str(runner), "freeze", str(state)], cwd=cwd, capture_output=True, text=True, check=False
         )
         self.assertEqual(freeze.returncode, 0, freeze.stderr)
         env = os.environ.copy()
@@ -72,13 +73,98 @@ class ProofSandboxTests(unittest.TestCase):
             env["PATH"] = path
         return subprocess.run(
             [sys.executable, str(runner), "run", str(state), "--all"],
-            cwd=ROOT,
+            cwd=cwd,
             env=env,
             capture_output=True,
             text=True,
             timeout=45,
             check=False,
         )
+
+    def source_repo(self) -> Path:
+        """Make one committed checkout for hostile local-package and dirty-source controls."""
+        repo = self.directory / f"repo-{uuid.uuid4().hex}"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        (repo / "claim.txt").write_text("bad\n")
+        subprocess.run(["git", "-C", str(repo), "add", "claim.txt"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "-qm",
+                "base",
+            ],
+            check=True,
+        )
+        return repo
+
+    def test_repository_package_cannot_run_before_proof_sandbox(self) -> None:
+        """A matching local npm package must not execute with controller permissions."""
+        if not cached_runtime() or not shutil.which("npx"):
+            self.skipTest("the pinned runtime is not cached")
+        for runner in (ROOT / "scripts/lib/proof.py", ROOT / "packages/codex/scripts/lib/proof.py"):
+            with self.subTest(runner=runner):
+                repo = self.source_repo()
+                package = repo / "node_modules/@anthropic-ai/sandbox-runtime"
+                package.mkdir(parents=True)
+                (package / "package.json").write_text(
+                    json.dumps({"name": "@anthropic-ai/sandbox-runtime", "version": "0.0.65", "bin": {"srt": "cli.js"}})
+                )
+                cli = package / "cli.js"
+                cli.write_text("#!/usr/bin/env node\nrequire('fs').writeFileSync('canary', 'escaped');\n")
+                cli.chmod(0o755)
+                bin_dir = repo / "node_modules/.bin"
+                bin_dir.mkdir()
+                (bin_dir / "srt").symlink_to("../@anthropic-ai/sandbox-runtime/cli.js")
+                result = self.run_proof(runner, "printf ok", cwd=repo)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse((repo / "canary").exists())
+
+    def test_proof_cannot_pass_on_uncommitted_source_then_restore_it(self) -> None:
+        """A passing row must cover committed source bytes rather than a temporary file edit."""
+        if not cached_runtime() or not shutil.which("npx"):
+            self.skipTest("the pinned runtime is not cached")
+        for runner in (ROOT / "scripts/lib/proof.py", ROOT / "packages/codex/scripts/lib/proof.py"):
+            with self.subTest(runner=runner):
+                repo = self.source_repo()
+                (repo / "claim.txt").write_text("good\n")
+                result = self.run_proof(runner, "cat claim.txt", cwd=repo, stdout_contains=("good",))
+                self.assertIn("expect_mismatch", result.stdout + result.stderr)
+                (repo / "claim.txt").write_text("bad\n")
+                document = json.loads((self.last_state / "proof.json").read_text())
+                previous = Path.cwd()
+                try:
+                    os.chdir(repo)
+                    offenders, _ = proof_results.verify(
+                        document,
+                        self.last_state / proof_results.RESULTS_NAME,
+                        {"session_id": "test", "loop_id": "test"},
+                    )
+                finally:
+                    os.chdir(previous)
+                self.assertTrue(offenders, "restored code must not inherit a proof pass from edited bytes")
+
+    def test_proof_cannot_read_mutable_checkout_by_absolute_path(self) -> None:
+        """An absolute path cannot bypass the committed source snapshot."""
+        if not cached_runtime() or not shutil.which("npx"):
+            self.skipTest("the pinned runtime is not cached")
+        for runner in (ROOT / "scripts/lib/proof.py", ROOT / "packages/codex/scripts/lib/proof.py"):
+            with self.subTest(runner=runner):
+                repo = self.source_repo()
+                (repo / "claim.txt").write_text("good\n")
+                result = self.run_proof(
+                    runner, f"cat {shlex.quote(str(repo / 'claim.txt'))}", cwd=repo, stdout_contains=("good",)
+                )
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                row = proof_results.read_rows(self.last_state / proof_results.RESULTS_NAME)[-1]
+                self.assertEqual(row["verdict"], "failed")
 
     def test_nested_write_is_denied_by_both_provider_runners(self) -> None:
         """An interpreter cannot change a file outside the sandbox scratch."""

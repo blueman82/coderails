@@ -51,6 +51,7 @@ class ProofBoundaryTests(HookTestCase):
                     verdict=verdict,
                     cwd=str(Path.cwd()),
                     head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+                    source_tree_sha=subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
                 )
 
     def test_missing_failed_and_untrusted_rows_do_not_pass(self) -> None:
@@ -143,8 +144,30 @@ class ProofBoundaryTests(HookTestCase):
             verdict="failed",
             cwd=str(Path.cwd()),
             head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            source_tree_sha=subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
         )
         self.assertIn("W1: unsupported", validate_proofs(self.proof, state))
+
+    def test_proof_run_tree_must_match_current_source(self) -> None:
+        """A run for another committed tree cannot release this checkout."""
+        document = {"schema_version": 2, "proofs": [{"id": "P1", "cmd": "true"}]}
+        self.freeze(document)
+        self.assertEqual(validate_proofs(self.proof, self.state), "")
+        pr.append(
+            self.results,
+            kind="run",
+            proof_id="P1",
+            cmd_sha256=pr.sha("true"),
+            proof_json_sha256=pr.doc_sha(document),
+            session_id="s",
+            loop_id="l",
+            verdict="satisfied",
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            source_tree_sha="0" * 40,
+        )
+        with self.assertRaisesRegex(ValueError, "P1\\(proof_stale_head\\)"):
+            validate_proofs(self.proof, self.state)
 
     def test_present_proof_needs_nonblank_matching_identity(self) -> None:
         """Claude proof validation requires the same nonblank loop identity as the graph."""

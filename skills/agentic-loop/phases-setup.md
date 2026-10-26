@@ -270,7 +270,7 @@ Past failure (loop 0d3fb487, 2026-07-16): this sub-step was a trailing sentence 
 
 **Preserve the blind-input contract explicitly.** Include the proof-author instructions in the native worker prompt, with only the authorized inputs above. A custom label does not establish independence.
 
-Each `cmd` must be a self-contained shell command. The controller runs it unchanged through `proof.py run` in the foreground. The command can read host files, write only below its fresh `TMPDIR`, and use no network. Use absolute paths for inputs. Put any needed temporary files below `TMPDIR`. Keep command substitution out of gated script invocation lines and exclude destructive patterns. This applies to every loop with an executable surface, even when 2.7a/2.7b's `design_doc_min_units` threshold does not apply.
+Each `cmd` must be a self-contained shell command. The controller runs it unchanged through `proof.py run`. The command starts in a private copy of committed `HEAD`. Use relative paths for repository files. It cannot read the original checkout. It can read other host files, write only below its fresh `TMPDIR`, and use no network. Put temporary files below `TMPDIR`. Keep command substitution out of gated script invocation lines. Exclude destructive patterns. This applies to every loop with an executable surface, even when the design document threshold does not apply.
 
 For a loop with no executable surface, leave `proof.json` absent. First record the reason with `record-decision` in `decisions_absorbed`. Get the current revision from `inspect`. Then run:
 

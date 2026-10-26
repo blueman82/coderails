@@ -23,7 +23,7 @@ REASONS: dict[str, str] = {
     "proof_failed": "the latest run exited nonzero or timed out; fix the cause and re-run the same proof.",
     "proof_expect_mismatch": "the run's exit code or stdout did not match the frozen expect; fix and re-run.",
     "proof_stale_cmd": "proof.json changed after the freeze row, or the run row hashes a different cmd; re-freeze.",
-    "proof_stale_head": "the proof ran outside this repository or before HEAD changed; run it again at current HEAD.",
+    "proof_stale_head": "the proof repository, HEAD or source tree does not match; run it again at current HEAD.",
     "proof_chain_broken": "proof_results.jsonl is torn, edited or missing rows; never edit it by hand.",
     "proof_cmd_destructive": "the frozen cmd matches the destructive-command classifier and was never run.",
     "proof_sandbox_unavailable": "the pinned proof sandbox did not start; install its runtime and run the proof again.",
@@ -45,7 +45,18 @@ VERDICT_REASON = {
     "output_limit": "proof_output_limit",
 }
 _FIELDS = [
-    *("seq", "kind", "proof_id", "cmd_sha256", "proof_json_sha256", "session_id", "loop_id", "head_sha", "cwd"),
+    *(
+        "seq",
+        "kind",
+        "proof_id",
+        "cmd_sha256",
+        "proof_json_sha256",
+        "session_id",
+        "loop_id",
+        "head_sha",
+        "source_tree_sha",
+        "cwd",
+    ),
     *("exit_code", "stdout_sha256", "stderr_sha256", "excerpt", "started", "ended", "expect_matched", "verdict"),
 ]
 _SUPERSEDE_FIELDS = (
@@ -190,18 +201,22 @@ def _item(entry: object) -> dict[str, Any]:
     return cast(dict[str, Any], entry) if isinstance(entry, dict) else {}
 
 
-def _git_context(cwd: Path) -> tuple[Path, str] | None:
+def _git_context(cwd: Path) -> tuple[Path, str, str] | None:
     """Resolve the repository and HEAD through Git, without trusting a recorded row's cwd as authority."""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel", "HEAD"], cwd=cwd, capture_output=True, text=True, check=False
+            ["git", "rev-parse", "--show-toplevel", "HEAD", "HEAD^{tree}"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except (OSError, ValueError):
         return None
     lines = result.stdout.splitlines()
-    if result.returncode or len(lines) != 2 or not lines[1].strip():
+    if result.returncode or len(lines) != 3 or not lines[1].strip() or not lines[2].strip():
         return None
-    return Path(lines[0]).resolve(), lines[1].strip()
+    return Path(lines[0]).resolve(), lines[1].strip(), lines[2].strip()
 
 
 def _check(
@@ -210,7 +225,7 @@ def _check(
     freeze: dict[str, Any],
     runs: dict[str, Any],
     state: dict[str, Any],
-    current: tuple[Path, str] | None,
+    current: tuple[Path, str, str] | None,
 ) -> str:
     """Return the reason code a single proof fails with, or '' when its latest run row satisfies it."""
     cmd, run = item.get("cmd"), runs.get(_label(item, ""))
@@ -225,7 +240,13 @@ def _check(
         return "proof_stale_cmd"
     recorded_cwd = run.get("cwd")
     recorded = _git_context(Path(recorded_cwd)) if isinstance(recorded_cwd, str) and recorded_cwd else None
-    if current is None or recorded is None or recorded[0] != current[0] or run.get("head_sha") != current[1]:
+    if (
+        current is None
+        or recorded is None
+        or recorded[0] != current[0]
+        or run.get("head_sha") != current[1]
+        or run.get("source_tree_sha") != current[2]
+    ):
         return "proof_stale_head"
     if withdrawn:
         return "" if run["verdict"] in {"failed", "timeout"} else "proof_withdrawn_unobserved"
