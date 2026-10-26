@@ -16,7 +16,7 @@ import graph_semantics
 import graph_spec
 import graph_stops
 from graph_completion import complete, verify_completion
-from graph_controller import add_unit, instantiate, start
+from graph_controller import add_unit, assign_worktree, instantiate, start
 from graph_dispatch import apply_record as _apply_record
 from graph_dispatch import authorize_dispatch, begin_wave, record_wave
 from graph_identity import GraphError, next_attempt, task_name
@@ -229,7 +229,7 @@ def _parser() -> argparse.ArgumentParser:
     for name in ("begin-wave", "inspect", "summarize", "collection"):
         command = commands.add_parser(name)
         command.add_argument("root" if name == "collection" else "state", type=Path)
-    for name in ("start", "add-unit"):
+    for name in ("start", "add-unit", "assign-worktree"):
         controller = commands.add_parser(name)
         controller.add_argument("state", type=Path)
         controller.add_argument("--session", required=True)
@@ -238,6 +238,8 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--prompt-file", required=True, type=Path)
         else:
             controller.add_argument("--unit", required=True)
+            controller.add_argument("--worktree", required=name == "assign-worktree")
+        if name == "add-unit":
             controller.add_argument("--depends-on", action="append", default=[])
             controller.add_argument("--join", action="store_true")
             controller.add_argument("--manifest", action="append", default=[])
@@ -328,17 +330,13 @@ def main() -> int:
         if args.command == "start":
             output = start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
-            fields = {"model_role": args.model_role, "write_scope": args.write_scope, "lessons": args.lesson}
+            contract = vars(args).copy()
+            contract["lessons"] = args.lesson
             output = add_unit(
-                args.state,
-                args.session,
-                args.loop_id,
-                args.unit,
-                args.depends_on,
-                args.join,
-                args.manifest,
-                {**fields, "scope": args.scope, "base_branch": args.base_branch},
+                args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest, contract
             )
+        elif args.command == "assign-worktree":
+            output = assign_worktree(args.state, args.session, args.loop_id, args.unit, args.worktree)
         elif args.command == "instantiate":
             output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "begin-wave":

@@ -185,6 +185,7 @@ def add_unit(
             given.get("lessons", []),
             given.get("scope"),
             given.get("base_branch"),
+            given.get("worktree"),
         )
     except ValueError as error:
         coded = RecoveryRefusedError("add_unit_refused_bad_field", str(error))
@@ -219,6 +220,33 @@ def add_unit(
         "revision": proposed["revision"],
         "reason_code": "add_unit_registered",
     }
+
+
+def assign_worktree(path: Path, session: str, loop_id: str, unit: str, worktree: str) -> dict[str, Any]:
+    """Assign a checkout to an existing unit under the Codex graph lock."""
+    ident = {"session_id": session, "loop_id": loop_id}
+    inputs = {"unit": unit, "worktree": worktree}
+    try:
+        assigned = graph_contract.unit_fields(None, [], [], None, worktree=worktree)["worktree"]
+        with _locked(path):
+            state = _load(path)
+            units: object = state.get("work_units")
+            raw: object = cast(dict[str, object], units).get(unit) if isinstance(units, dict) else None
+            record = cast(dict[str, Any], raw) if isinstance(raw, dict) else None
+            if state["session_id"] != session or state["loop_id"] != loop_id or state["status"] != "in-progress":
+                raise ValueError("loop ownership or status mismatch")
+            if record is None or record.get("status") != "pending":
+                raise ValueError("unit is not pending")
+            if record.get("worktree") not in (None, assigned):
+                raise ValueError("unit already has another worktree")
+            record["worktree"] = assigned
+            graph_semantics.validate(state)
+            _write(path, state)
+    except (OSError, ValueError) as error:
+        coded = RecoveryRefusedError("assign_worktree_refused", str(error))
+        raise _refused("assign-worktree", path, ident, coded, inputs) from error
+    trace(path, ident, "assigned", "worktree_assigned", inputs, [], "assign-worktree")
+    return {"unit": unit, "worktree": assigned, "reason_code": "worktree_assigned"}
 
 
 def instantiate(path: Path, session: str, loop_id: str, profile: str | None, units: list[str]) -> dict[str, Any]:

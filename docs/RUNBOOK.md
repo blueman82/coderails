@@ -415,7 +415,10 @@ record needs a nonempty manifest. Register `--base-branch <parent>` with
 `graph.py add-unit` before the first push of a stacked branch; once a PR exists,
 its live base must match that recorded branch. The command checks staged files
 and the complete PR diff, including both rename paths, against the unit manifest
-before transport. A recorded worktree must match the current checkout.
+before transport. Register an absolute worktree path with `add-unit --worktree`, or use
+`assign-worktree --session S --loop-id L --unit N --worktree ABS_PATH` after checkout setup.
+The latter fills an unassigned existing unit under the graph lock, even during an active wave;
+it preserves the revision and refuses a different assignment. The recorded path must match the Git checkout root at push time.
 
 - Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)
   refuses with `diff_manifest:<code>` and prints `! diff_manifest <code>: <path>` on stderr. The check is ON by default
@@ -451,6 +454,10 @@ before transport. A recorded worktree must match the current checkout.
   nonblank string `session_id` and `loop_id` fields. Missing, malformed or mismatched metadata refuses `manifest_unreadable`;
   `push.py` reports `publication:graph_owner_missing` before transport when either owner field is blank or absent.
   That refusal writes `publication/refused/graph_owner_missing` to the publication session trace.
+  A missing, relative or foreign checkout reports `publication:worktree_invalid` with a matching refusal trace.
+  A PR base that differs from the recorded base reports `publication:base_mismatch`. Staged or branch paths outside
+  the unit manifest report `diff_manifest:out_of_manifest`. These preflight refusals write `publication/refused/<code>`
+  before the later policy gate runs; `trace.by_reason` can count them.
   `manifest: []` refuses publication. A session that owns a graph unit in this worktree must supply both flags.
   Without a matching graph unit, standalone publication uses the policy alone. Unit and policy
   manifests both apply, so a unit cannot widen policy scope. Custom policies retain the default denylist. An unreadable config

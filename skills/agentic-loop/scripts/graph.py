@@ -26,6 +26,11 @@ from scripts.lib import decision_record
 
 def add_unit_options(command: argparse.ArgumentParser) -> None:
     """Add worker contract fields to the unit command."""
+    command.add_argument("--unit", required=True)
+    command.add_argument("--depends-on", action="append", default=[])
+    command.add_argument("--join", action="store_true")
+    command.add_argument("--manifest", action="append", default=[])
+    command.add_argument("--worktree")
     command.add_argument("--base-branch", help="remote branch used for first stacked publication")
     command.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
     command.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
@@ -47,6 +52,7 @@ def parser() -> argparse.ArgumentParser:
     for name in (
         "start",
         "add-unit",
+        "assign-worktree",
         "instantiate",
         "inspect",
         "summarize",
@@ -96,7 +102,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--revision", required=True, type=int)
             command.add_argument("--disposition", required=True)
             command.add_argument("--reason", required=True)
-        if name in {"start", "add-unit", "instantiate"}:
+        if name in {"start", "add-unit", "assign-worktree", "instantiate"}:
             command.add_argument("--session", required=True)
             command.add_argument("--loop-id", required=True)
         if name == "instantiate":
@@ -105,11 +111,10 @@ def parser() -> argparse.ArgumentParser:
         if name == "start":
             command.add_argument("--prompt-file", required=True, type=Path)
         if name == "add-unit":
-            command.add_argument("--unit", required=True)
-            command.add_argument("--depends-on", action="append", default=[])
-            command.add_argument("--join", action="store_true")
-            command.add_argument("--manifest", action="append", default=[])
             add_unit_options(command)
+        if name == "assign-worktree":
+            command.add_argument("--unit", required=True)
+            command.add_argument("--worktree", required=True)
         if name == "recover-wave":
             command.add_argument("--lease-seconds", type=int, default=900)
             command.add_argument("--report-only", action="store_true")
@@ -303,8 +308,10 @@ def main() -> int:
                 args.depends_on,
                 args.join,
                 args.manifest,
-                {**fields, "scope": args.scope, "base_branch": args.base_branch},
+                {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
             )
+        elif args.command == "assign-worktree":
+            output = graph_controller.assign_worktree(args.state, args.session, args.loop_id, args.unit, args.worktree)
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "inspect":

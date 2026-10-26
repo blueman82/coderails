@@ -279,7 +279,8 @@ class GateTests(RepoCase):
                     if progress.exists():
                         progress.unlink()
                     start = ["--session", session, "--loop-id", "manifest-test", "--prompt-file", str(prompt)]
-                    add = ["--session", session, "--loop-id", "manifest-test", "--unit", "1", "--manifest", "src/**"]
+                    add = ["--session", session, "--loop-id", "manifest-test", "--unit", "1"]
+                    add += ["--manifest", "src/**", "--worktree", str(self.dir)]
                     for command, flags in (("start", start), ("add-unit", add)):
                         subprocess.run(
                             [sys.executable, str(graph), command, str(progress), *flags],
