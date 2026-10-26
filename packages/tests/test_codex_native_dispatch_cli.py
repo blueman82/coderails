@@ -112,6 +112,9 @@ class NativeDispatchCliTests(unittest.TestCase):
                         if graph_task:
                             payload["tool_input"] = {"task_name": TASK, "message": "graph task"}
                         before = audit.read_text() if audit.exists() else ""
+                        trace_owner = "parent" if payload.get("session_id") == "parent" else "invalid-dispatch"
+                        trace = directory / "loops" / trace_owner / "trace.jsonl"
+                        trace_before = len(trace.read_text().splitlines()) if trace.exists() else 0
                         result = subprocess.run(
                             [sys.executable, str(plugin / "hooks/scripts/loop_dispatch_guard.py")],
                             input=json.dumps(payload),
@@ -127,6 +130,11 @@ class NativeDispatchCliTests(unittest.TestCase):
                         added = audit.read_text()[len(before) :]
                         self.assertIn(f"reason_code={code}", added)
                         self.assertNotIn(str(mutation.get("session_id", "..")), added)
+                        rows = trace.read_text().splitlines()
+                        self.assertEqual(len(rows), trace_before + 1)
+                        self.assertEqual(json.loads(rows[-1])["reason_code"], code)
+                        if code == "dispatch_unsafe_session":
+                            self.assertNotIn(str(payload["session_id"]), rows[-1])
             self.assertFalse((directory / "loops" / "a").exists())
             ordinary = subprocess.run(
                 [sys.executable, str(plugin / "hooks/scripts/loop_dispatch_guard.py")],
@@ -189,7 +197,11 @@ class NativeDispatchCliTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 denial = json.loads(result.stdout)["hookSpecificOutput"]
                 self.assertEqual(denial["permissionDecision"], "deny")
-                self.assertIn("dispatch_hook_error", denial["permissionDecisionReason"])
+                self.assertIn("dispatch_graph_timeout", denial["permissionDecisionReason"])
+                trace = directory / "loops/parent/trace.jsonl"
+                self.assertEqual(
+                    json.loads(trace.read_text().splitlines()[-1])["reason_code"], "dispatch_graph_timeout"
+                )
             finally:
                 holder.terminate()
                 holder.wait(timeout=3)

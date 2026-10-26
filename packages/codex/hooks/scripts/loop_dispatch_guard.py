@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import cast
 from hook_common import (
     RESOURCE_MESSAGE,
     HostResourceError,
+    append_trace_row,
     deny,
     graph_output,
     graph_path,
@@ -65,6 +67,49 @@ def _bounded_graph_output(graph: Path, deadline: float, *arguments: str) -> dict
     return graph_output(graph, *arguments, timeout_seconds=_remaining_budget(deadline))
 
 
+def _refuse(code: str, message: str, session_id: object = None) -> None:
+    """Deny and trace without using an unsafe native id as a path."""
+    owner = session_id if isinstance(session_id, str) and safe_session(session_id) else "invalid-dispatch"
+    inputs = {"session_id": session_id} if isinstance(session_id, str) else {}
+    append_trace_row("loop_dispatch_guard", "refused", code, owner, {"inputs": inputs})
+    log(f"hook=loop_dispatch_guard outcome=refused reason_code={code}")
+    deny(f"{message} [reason_code={code}].")
+
+
+def _discover(cwd: str, session_id: str, deadline: float) -> tuple[bool, Path | None]:
+    """Separate proven graph absence from discovery errors."""
+    try:
+        config = config_path(cwd, strict=True, timeout_seconds=_remaining_budget(deadline))
+        if config:
+            strict_settings(config, session_id)
+        state = loop_state_path(cwd, session_id, strict=True, timeout_seconds=_remaining_budget(deadline))
+        _remaining_budget(deadline)
+        return True, state
+    except ConfigRejected:
+        _refuse("dispatch_config_invalid", "Graph worker dispatch requires valid workflow configuration", session_id)
+    except (subprocess.TimeoutExpired, TimeoutError):
+        _refuse("dispatch_discovery_timeout", "Graph worker dispatch discovery timed out", session_id)
+    except OSError as error:
+        code = (
+            "dispatch_discovery_ambiguous" if "more than one graph state" in str(error) else "dispatch_discovery_error"
+        )
+        _refuse(code, "Graph worker dispatch could not verify graph or config discovery", session_id)
+    return False, None
+
+
+def _graph_call(
+    graph: Path, deadline: float, session_id: str, *arguments: str
+) -> tuple[bool, dict[str, object] | None]:
+    """Bound each graph command and report a timeout separately from invalid state."""
+    try:
+        return True, _bounded_graph_output(graph, deadline, *arguments)
+    except (subprocess.TimeoutExpired, TimeoutError):
+        _refuse("dispatch_graph_timeout", "Graph worker dispatch graph check timed out", session_id)
+    except HostResourceError:
+        _refuse("dispatch_graph_resource_error", RESOURCE_MESSAGE, session_id)
+    return False, None
+
+
 def _identity(payload: dict[str, object]) -> tuple[str, str] | None:
     """Refuse malformed or unsafe native identity before any path lookup."""
     session_id = payload.get("session_id")
@@ -77,8 +122,7 @@ def _identity(payload: dict[str, object]) -> tuple[str, str] | None:
         code = "dispatch_cwd_required"
     else:
         return session_id, cwd
-    log(f"hook=loop_dispatch_guard outcome=refused reason_code={code}")
-    deny(f"Graph worker dispatch requires a safe session id and working directory [reason_code={code}].")
+    _refuse(code, "Graph worker dispatch requires a safe session id and working directory", session_id)
     return None
 
 
@@ -105,42 +149,43 @@ def _check() -> int:
     if identity is None:
         return 0
     session_id, cwd = identity
-    config = config_path(cwd, strict=True, timeout_seconds=_remaining_budget(deadline))
-    if config:
-        try:
-            strict_settings(config, session_id)
-        except ConfigRejected as error:
-            deny(f"Graph worker dispatch requires valid workflow configuration: {error}")
-            return 0
-    state = loop_state_path(cwd, session_id, strict=True, timeout_seconds=_remaining_budget(deadline))
-    _remaining_budget(deadline)
+    discovered, state = _discover(cwd, session_id, deadline)
+    if not discovered:
+        return 0
     if state is None:
         if enveloped or graph_named:
-            deny("Graph worker dispatch requires this session's progress.json. Start the native graph first.")
+            _refuse("dispatch_graph_missing", "Graph worker dispatch requires this session's progress.json", session_id)
         return 0  # no loop owns this session: nothing to bind the spawn to
     graph = graph_path()
     if not graph.is_file():
-        deny("Graph worker dispatch requires the provider-local graph helper.")
+        _refuse(
+            "dispatch_graph_helper_missing",
+            "Graph worker dispatch requires the provider-local graph helper",
+            session_id,
+        )
         return 0
-    try:
-        inspection = _bounded_graph_output(graph, deadline, "inspect", str(state))
-    except HostResourceError:
-        deny(RESOURCE_MESSAGE)
+    checked, inspection = _graph_call(graph, deadline, session_id, "inspect", str(state))
+    if not checked:
         return 0
     if inspection is None:
-        deny("Graph worker dispatch requires valid provider-local graph state.")
+        _refuse(
+            "dispatch_graph_state_invalid",
+            "Graph worker dispatch requires valid provider-local graph state",
+            session_id,
+        )
         return 0
     if inspection.get("status") == "complete":
-        deny("A completed graph cannot dispatch native workers.")
+        _refuse("dispatch_graph_complete", "A completed graph cannot dispatch native workers", session_id)
         return 0
     agent_type = tool_input.get("agent_type")
     try:
         with tempfile.TemporaryDirectory() as scratch:
             message_file = Path(scratch) / "message.txt"
             message_file.write_text(message, encoding="utf-8")
-            authorization = _bounded_graph_output(
+            checked, authorization = _graph_call(
                 graph,
                 deadline,
+                session_id,
                 "authorize-dispatch",
                 str(state),
                 "--session",
@@ -156,18 +201,19 @@ def _check() -> int:
                 "--tool-use-id",
                 text_field(payload, "tool_use_id"),
             )
-    except HostResourceError:
-        deny(RESOURCE_MESSAGE)
-        return 0
     except OSError:
         log(f"hook=loop_dispatch_guard session={session_id} blocked=1 reason_code=dispatch_message_unavailable")
         deny("Graph worker dispatch could not stage its message [reason_code=dispatch_message_unavailable].")
         return 0
+    if not checked:
+        return 0
     if authorization is None:
-        deny(
+        _refuse(
+            "dispatch_authorization_refused",
             "Graph worker dispatch needs the begin-wave envelope and contract sections pasted verbatim, "
             "the recorded task_name, an unused dispatch id and the role's own agent_type "
-            "(reason code: recovery-trace.jsonl beside progress.json)."
+            "(see recovery-trace.jsonl beside progress.json)",
+            session_id,
         )
         return 0
     log(
@@ -182,10 +228,11 @@ def main() -> int:
     """Treat any hook input or local runtime error as a denied spawn."""
     try:
         return _check()
+    except (RecursionError, ValueError):
+        _refuse("dispatch_input_invalid", "Graph worker dispatch input is malformed")
     except Exception:
-        log("hook=loop_dispatch_guard blocked=1 reason_code=dispatch_hook_error")
-        deny("Graph worker dispatch could not complete its check [reason_code=dispatch_hook_error].")
-        return 0
+        _refuse("dispatch_hook_error", "Graph worker dispatch could not complete its check")
+    return 0
 
 
 if __name__ == "__main__":
