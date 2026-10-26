@@ -54,8 +54,10 @@ def _validate_completion(
     retro_path: Path,
     transcript_path: Path | None,
 ) -> list[str]:
-    if state.get("proof_disposition") is not None and proof_path.absolute() != path.with_name("proof.json").absolute():
-        raise GraphError("proof path must be beside progress.json for a no-proof decision")
+    state_dir = path.resolve().parent
+    for artifact, name in ((evals_path, "evals.json"), (proof_path, "proof.json"), (retro_path, "retro.json")):
+        if artifact.resolve() != (state_dir / name).resolve():
+            raise GraphError(f"{name} path is not canonical beside progress.json")
     if state["session_id"] != session:
         raise GraphError("session does not own this loop")
     eligibility = graph_semantics.can_complete(state)

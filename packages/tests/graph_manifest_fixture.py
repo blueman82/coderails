@@ -39,7 +39,10 @@ def graph_progress(
     )
     for command, flags in (
         ("start", ["--prompt-file", str(prompt)]),
-        ("add-unit", ["--unit", unit, *[item for glob in manifest for item in ("--manifest", glob)]]),
+        (
+            "add-unit",
+            ["--unit", unit, "--worktree", str(repo), *[item for glob in manifest for item in ("--manifest", glob)]],
+        ),
     ):
         subprocess.run(
             [

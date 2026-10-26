@@ -16,7 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
 import graph
+import graph_convert
 import graph_semantics
+import loop_dispatch_guard as guard
 from graph_completion import validate_work_units
 from graph_evidence import validate_worker_evidence
 from graph_identity import GraphError, task_name, task_node
@@ -116,6 +118,67 @@ class GraphRuntimeTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             validate_worker_evidence(read_json(self.path))
 
+    def test_converted_stale_attempt_requires_its_native_v2_message(self) -> None:
+        """A missing stale-attempt message after conversion cannot survive completion validation."""
+        converted = read_json(self.path)
+        converted["revision"] = 3
+        converted["graph"]["contract_from_revision"] = 3
+        write_json(self.path, converted)
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path), terminal=False)
+        self.record("stale", stale_check={"checked": True, "method": "native status", "result": "stalled"})
+        graph.transition(self.path, "parent", "respawn_stale", "U3[1]", "checked stale child")
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path))
+        self.record()
+        validate_worker_evidence(read_json(self.path))
+        lines = self.parent.read_text().splitlines()
+        native = json.loads(lines[1])
+        arguments = json.loads(native["payload"]["arguments"])
+        arguments["message"] = "No v2 envelope"
+        native["payload"]["arguments"] = json.dumps(arguments)
+        lines[1] = json.dumps(native)
+        self.parent.write_text("\n".join(lines) + "\n")
+        with self.assertRaisesRegex(ValueError, "dispatch_missing_envelope"):
+            validate_worker_evidence(read_json(self.path))
+        missing_record = read_json(self.path)
+        first = min(missing_record["graph"]["dispatches"].values(), key=lambda row: row["attempt"])
+        missing_record["graph"]["dispatches"] = {
+            key: row for key, row in missing_record["graph"]["dispatches"].items() if row is not first
+        }
+        with self.assertRaisesRegex(ValueError, "dispatch_missing_envelope"):
+            validate_worker_evidence(missing_record)
+
+    def test_converted_historical_stale_attempt_survives_without_dispatch_record(self) -> None:
+        """A pre-contract retry stays valid after conversion and a new verified wave."""
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path), terminal=False)
+        self.record("stale", stale_check={"checked": True, "method": "native status", "result": "stalled"})
+        graph.transition(self.path, "parent", "respawn_stale", "U3[1]", "checked stale child")
+        old = read_json(self.path)
+        old["state_minor"] = 1
+        old["graph"].pop("dispatches")
+        old["graph"].pop("contract_from_revision")
+        lines = self.parent.read_text(encoding="utf-8").splitlines()
+        old_call = json.loads(lines[1])
+        arguments = json.loads(old_call["payload"]["arguments"])
+        arguments["message"] = "CODERAILS_GRAPH_TASK=" + task_name("loop", "U3[1]", 1)
+        old_call["payload"]["arguments"] = json.dumps(arguments)
+        lines[1] = json.dumps(old_call)
+        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        converted, report = graph_convert.convert(old, "parent")
+        self.assertEqual(converted["graph"]["contract_from_revision"], old["revision"])
+        self.assertTrue(report["changed"])
+        write_json(self.path, converted)
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path))
+        self.record()
+        validate_worker_evidence(read_json(self.path))
+        post_contract = read_json(self.path)
+        post_contract["graph"]["dispatches"] = {}
+        with self.assertRaisesRegex(ValueError, "dispatch_unknown_id"):
+            validate_worker_evidence(post_contract)
+
     def test_fabricated_generation_rejected(self) -> None:
         """An inflated generation cannot substitute for a real prior native spawn."""
         current = state()
@@ -159,10 +222,69 @@ class GraphRuntimeTests(unittest.TestCase):
 
     def test_dispatch_rejects_foreign_loop_task_identity(self) -> None:
         """A valid task identity from another loop cannot authorize this graph's dispatch."""
-        graph.begin_wave(self.path)
+        opened = graph.begin_wave(self.path)["dispatches"][0]
+        message = self.path.with_name("message.txt")
+        message.write_text(opened["prompt_prefix"] + "\n" + opened["prompt_sections"] + "\nwork", encoding="utf-8")
+        evals, identifier = self.path.with_name("evals.json"), opened["dispatch_id"]
         foreign_task = task_name("foreign-loop", "U3[1]")
         with self.assertRaises(GraphError):
-            graph.authorize_dispatch(self.path, "parent", foreign_task, self.path.with_name("evals.json"))
+            graph.authorize_dispatch(self.path, "parent", identifier, message, "", foreign_task, evals)
+        graph.authorize_dispatch(self.path, "parent", identifier, message, "", opened["task_name"], evals)
+
+    def test_foreign_graph_owner_has_recovery_trace(self) -> None:
+        """An owner mismatch cannot consume dispatch or omit its refusal from the graph trace."""
+        opened = graph.begin_wave(self.path)["dispatches"][0]
+        message = self.path.with_name("message.txt")
+        message.write_text(opened["prompt_prefix"] + "\n" + opened["prompt_sections"])
+        before = self.path.read_bytes()
+        with self.assertRaises(GraphError):
+            graph.authorize_dispatch(
+                self.path,
+                "other",
+                opened["dispatch_id"],
+                message,
+                "",
+                opened["task_name"],
+                self.path.with_name("evals.json"),
+            )
+        self.assertEqual(self.path.read_bytes(), before)
+        row = self.path.with_name("recovery-trace.jsonl").read_text().splitlines()[-1]
+        self.assertEqual(json.loads(row)["reason_code"], "dispatch_foreign_owner")
+        self.assertNotIn('"other"', row)
+
+    def test_staging_fault_has_recovery_trace_and_fresh_retry(self) -> None:
+        """The hook traces a temporary-message failure before a valid retry consumes the dispatch."""
+        opened = graph.begin_wave(self.path)["dispatches"][0]
+        payload = {
+            "tool_name": "collaborationspawn_agent",
+            "tool_use_id": "call_stage_probe",
+            "session_id": "parent",
+            "cwd": str(self.directory),
+            "tool_input": {
+                "task_name": opened["task_name"],
+                "message": opened["prompt_prefix"] + "\n" + opened["prompt_sections"],
+            },
+        }
+        with (
+            patch.object(guard, "read_input", return_value=json.dumps(payload)),
+            patch.object(guard, "config_path", return_value=""),
+            patch.object(guard, "loop_state_path", return_value=self.path),
+            patch("loop_dispatch_guard.tempfile.TemporaryDirectory", side_effect=OSError("scratch unavailable")),
+            patch.object(guard, "deny") as denial,
+        ):
+            self.assertEqual(guard.main(), 0)
+            self.assertIn("dispatch_message_unavailable", denial.call_args.args[0])
+        row = json.loads(self.path.with_name("recovery-trace.jsonl").read_text().splitlines()[-1])
+        self.assertEqual(row["reason_code"], "dispatch_message_unavailable")
+        self.assertIsNone(next(iter(read_json(self.path)["graph"]["dispatches"].values()))["authorized"])
+        with (
+            patch.object(guard, "read_input", return_value=json.dumps(payload)),
+            patch.object(guard, "config_path", return_value=""),
+            patch.object(guard, "loop_state_path", return_value=self.path),
+            patch.object(guard, "deny") as denial,
+        ):
+            self.assertEqual(guard.main(), 0)
+            denial.assert_not_called()
 
     def test_exact_result_envelope(self) -> None:
         """Reject wrong wave, partial results, and malformed stale evidence atomically."""

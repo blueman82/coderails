@@ -276,7 +276,7 @@ class ProofSandboxTests(unittest.TestCase):
         """Both controllers stop high output and mark recorded output hashes as partial."""
         if not cached_runtime() or not shutil.which("npx"):
             self.skipTest("the pinned runtime is not cached")
-        cmd = f"{shlex.quote(sys.executable)} -c " + shlex.quote("print('x' * 2000000)")
+        cmd = f"{shlex.quote(str(Path(sys.executable).resolve()))} -c " + shlex.quote("print('x' * 2000000)")
         for runner in (ROOT / "scripts/lib/proof.py", ROOT / "packages/codex/scripts/lib/proof.py"):
             with self.subTest(runner=runner):
                 result = self.run_proof(runner, cmd, stdout_contains=())

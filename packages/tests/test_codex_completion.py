@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -153,17 +154,24 @@ class CompletionTests(CompletionFixture):
         with self.assertRaisesRegex(GraphError, "retro_steps_missing"):
             verify_completion(*self.arguments)
 
-    def test_retro_in_a_scratch_directory_is_refused_and_control(self) -> None:
-        """A retro from another directory (decoy sources) is refused; the same retro beside the real files passes."""
+    def test_completion_files_must_share_progress_directory(self) -> None:
+        """A complete second state directory cannot hide a NO-GO eval beside progress.json."""
         self.decide()
-        scratch = self.directory / "scratch"
-        scratch.mkdir()
+        scratch = self.directory / "alternate" / "parent"
+        shutil.copytree(self.path.parent, scratch)
+        assemble_test_retro(scratch, "parent")
         real = self.arguments
-        decoy = scratch / "retro.json"
-        decoy.write_text(self.retro.read_text())
-        with self.assertRaisesRegex(GraphError, "one state directory"):
-            complete(real[0], real[1], real[2], real[3], decoy, real[5])
-        complete(*real)  # control: the genuine layout is accepted
+        original = read_json(self.evals)
+        write_json(self.evals, original | {"result": "NO-GO"})
+        assemble_test_retro(self.path.parent, "parent")
+        alternate = (real[0], real[1], scratch / "evals.json", scratch / "proof.json", scratch / "retro.json", real[5])
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(GraphError, "progress.json"):
+            complete(*alternate)
+        self.assertEqual(before, self.path.read_bytes())
+        write_json(self.evals, original)
+        assemble_test_retro(self.path.parent, "parent")
+        complete(*real)
         verify_completion(*real)
 
     def test_broken_decision_chain_is_refused_on_the_codex_gate(self) -> None:

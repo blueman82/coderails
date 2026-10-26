@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agent
 from graph_identity import GraphError
 
 from packages.tests.codex_completion_fixture import CompletionFixture, assemble_test_retro
-from packages.tests.codex_fixture import complete, read_json, write_json
+from packages.tests.codex_fixture import complete, read_json, verify_completion, write_json
 
 
 class RetroPathBindingTests(CompletionFixture):
@@ -36,3 +36,11 @@ class RetroPathBindingTests(CompletionFixture):
             complete(self.path, "parent", self.evals, alternate_proof, self.retro, self.transcript)
         self.assertEqual(self.path.read_bytes(), before)
         complete(*self.arguments)
+        aliases = [self.path.with_name(f"alias-{name}") for name in ("evals.json", "proof.json", "retro.json")]
+        for alias, source in zip(aliases, (self.evals, self.proof, self.retro), strict=True):
+            alias.symlink_to(source)
+        verify_completion(self.path, "parent", aliases[0], aliases[1], aliases[2], self.transcript)
+        wrong_alias = self.path.with_name("wrong-evals.json")
+        wrong_alias.symlink_to(alternate)
+        with self.assertRaisesRegex(GraphError, "evals.json path is not canonical"):
+            verify_completion(self.path, "parent", wrong_alias, self.proof, self.retro, self.transcript)

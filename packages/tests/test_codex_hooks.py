@@ -69,7 +69,7 @@ class HookTests(unittest.TestCase):
         data = json.loads((PACKAGE / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
         self.assertEqual(
             [group["matcher"] for group in data["PreToolUse"]],
-            ["^Bash$", "^request_user_input$", "^spawn_agent$", "^apply_patch$"],
+            ["^Bash$", "^request_user_input$", "^(?:spawn_agent|collaborationspawn_agent)$", "^apply_patch$"],
         )
         bash_hooks = [hook["command"] for hook in data["PreToolUse"][0]["hooks"]]
         self.assertIn('"${PLUGIN_ROOT}/hooks/scripts/pr_publication_gate.py"', bash_hooks)
