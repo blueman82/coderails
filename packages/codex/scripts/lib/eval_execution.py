@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime
 import os
 import signal
 import subprocess
@@ -121,6 +122,10 @@ def record_smoke(path: str | Path) -> None:
     # Stamp only a never-frozen, never-graded suite: re-stamping would launder an edited oracle. An edit after
     # the first freeze was refused above; record it with post_evals.py amend.
     if not data.get("frozen_hash") and not data.get("grading") and not data.get("amendment_chain"):
+        if str(data.get("verification_level")) != "0":
+            data["integrity_version"] = 2
+            if not isinstance(data.get("frozen_at"), str) or not str(data["frozen_at"]).strip():
+                data["frozen_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         data["frozen_hash"] = suite_hash(data)
         signed = sign_suite(data)  # raises when evals.require_signatures is set and signing is impossible
         write_object(path, data)

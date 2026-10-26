@@ -87,28 +87,41 @@ def sign(text: str) -> dict[str, str]:
 
 def check(block: object, text: str) -> str:
     """Return VERIFIED or KEY_MISSING (verifier has no ssh-keygen or no allowed_signers); else raise SigningError."""
+    try:
+        check_untrusted(block, text)
+    except SigningError as error:
+        if error.code == KEY_MISSING:
+            return KEY_MISSING
+        raise
+    allowed = keys_dir() / "allowed_signers"
+    if not allowed.is_file():
+        return KEY_MISSING
+    fields = cast(dict[str, Any], block)
+    with tempfile.TemporaryDirectory() as scratch:
+        sig = Path(scratch) / "payload.sig"
+        sig.write_text(cast(str, fields["sig"]))
+        trusted = _run(
+            ["ssh-keygen", "-Y", "verify", "-f", str(allowed), "-I", PRINCIPAL, "-n", NAMESPACE, "-s", str(sig)],
+            text,
+        )
+        if trusted.returncode:
+            raise SigningError(SIGNER_UNKNOWN, "signature is valid but its key is not in allowed_signers")
+    return VERIFIED
+
+
+def check_untrusted(block: object, text: str) -> str:
+    """Check signature bytes without claiming that the signer is trusted."""
     fields = cast(dict[str, Any], block) if isinstance(block, dict) else {}
     armored = fields.get("sig")
     if fields.get("payload") != text or not isinstance(armored, str):
         raise SigningError(SIGNATURE_INVALID, "signature block is malformed or signs a different payload")
     _check_perms(keys_dir() / "evals_ed25519")
-    allowed = keys_dir() / "allowed_signers"
     with tempfile.TemporaryDirectory() as scratch:
         sig = Path(scratch) / "payload.sig"
         sig.write_text(armored)
-        try:
-            plain = _run(["ssh-keygen", "-Y", "check-novalidate", "-n", NAMESPACE, "-s", str(sig)], text)
-        except SigningError:
-            return KEY_MISSING
+        plain = _run(["ssh-keygen", "-Y", "check-novalidate", "-n", NAMESPACE, "-s", str(sig)], text)
         if plain.returncode:
             raise SigningError(SIGNATURE_INVALID, "signature does not verify")
-        if not allowed.is_file():
-            return KEY_MISSING
-        trusted = _run(
-            ["ssh-keygen", "-Y", "verify", "-f", str(allowed), "-I", PRINCIPAL, "-n", NAMESPACE, "-s", str(sig)], text
-        )
-        if trusted.returncode:
-            raise SigningError(SIGNER_UNKNOWN, "signature is valid but its key is not in allowed_signers")
     return VERIFIED
 
 

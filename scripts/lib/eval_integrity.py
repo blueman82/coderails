@@ -52,17 +52,29 @@ def _sha(value: object) -> str:
 
 
 def suite_hash(data: JsonObject) -> str:
-    """Hash the oracle: per-eval oracle keys plus task_ref, scope and verification_level.
+    """Hash the oracle; v2 also binds freeze SHA and timestamp.
 
     status, smoke, result, grading and the amendment arrays are excluded: they change after freeze.
     """
+    version = integrity_version(data)
     raw = data.get("evals")
     entries: list[JsonObject] = []
     for item in cast(list[object], raw) if isinstance(raw, list) else []:
         if isinstance(item, dict):
             e = cast(JsonObject, item)
             entries.append({k: e[k] for k in ORACLE_KEYS if k in e})
-    return _sha({**{k: data.get(k) for k in ("task_ref", "scope", "verification_level")}, "evals": entries})
+    body = {**{k: data.get(k) for k in ("task_ref", "scope", "verification_level")}, "evals": entries}
+    if version == 2:
+        body.update({k: data.get(k) for k in ("integrity_version", "frozen_sha", "frozen_at")})
+    return _sha(body)
+
+
+def integrity_version(data: JsonObject) -> int:
+    """Treat absent version as the original byte-for-byte v1 hash format."""
+    version = data.get("integrity_version", 1)
+    if type(version) is not int or version not in (1, 2):
+        raise IntegrityError("integrity_version_invalid")
+    return version
 
 
 def _chain(data: JsonObject) -> list[JsonObject]:
@@ -116,13 +128,14 @@ def sign_suite(data: JsonObject, strict: bool = False) -> str:
     return "signed"
 
 
-def _check_signature(data: JsonObject, head: str, length: int, path: object = None) -> str:
+def _check_signature(data: JsonObject, head: str, length: int, path: object = None, trust_signer: bool = True) -> str:
     if "signature" not in data:
         if _signed_before(data, path):
             raise IntegrityError(SIGNATURE_MISSING, "signature removed from a suite that was signed or must be")
         return LEGACY_UNSIGNED
     try:
-        result = eval_signing.check(data["signature"], _payload(data, head, length))
+        check = eval_signing.check if trust_signer else eval_signing.check_untrusted
+        result = check(data["signature"], _payload(data, head, length))
     except SigningError as error:
         raise IntegrityError(error.code, str(error)) from error
     if result == KEY_MISSING and eval_signing.required():
@@ -136,7 +149,7 @@ def require_verified(data: JsonObject, head: str, length: int) -> None:
         raise IntegrityError(KEY_MISSING, "existing signature is unverifiable here; refusing to re-sign it")
 
 
-def verify_suite(data: JsonObject, stamped: bool = False, path: object = None) -> str:
+def verify_suite(data: JsonObject, stamped: bool = False, path: object = None, trust_signer: bool = True) -> str:
     """Return "verified", LEGACY_UNHASHED, LEGACY_UNSIGNED or KEY_MISSING (degraded), or raise IntegrityError.
 
     stamped=True (merge/completion readers) also requires grading.suite_hash to equal the current hash,
@@ -164,7 +177,15 @@ def verify_suite(data: JsonObject, stamped: bool = False, path: object = None) -
     expected = chain[-1]["suite_hash_after"] if chain else data["frozen_hash"]
     if current != expected or (stamped and grading.get("suite_hash") not in (None, current)):
         raise IntegrityError(SUITE_HASH_MISMATCH, "oracle differs from the frozen/amended hash")
-    return _check_signature(data, head, len(chain), path)
+    return _check_signature(data, head, len(chain), path, trust_signer)
+
+
+def signed_freeze_timing(data: JsonObject, frozen: str, frozen_at: str, timing: str, trust_signer: bool = True) -> bool:
+    """Require an exact SHA/time/timing token in a cryptographically verified amendment chain."""
+    if not data.get("signature") or verify_suite(data, trust_signer=trust_signer) != eval_signing.VERIFIED:
+        return False
+    token = f"frozen_sha {frozen} frozen_at {frozen_at} timing={timing}"
+    return any(entry.get("reason") == token for entry in _chain(data))
 
 
 def append_amendment(

@@ -499,9 +499,11 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `eval_artifact_unreadable` is a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
   `not_frozen` also rejects a missing, abbreviated or symbolic `frozen_sha` at level 1 or 2 on every merge route;
   stamping it late does not satisfy the full 40-hex commit requirement.
-  If the freeze SHA is late or no longer resolves, work on a copy of the frozen suite. Set `CODERAILS_KEYS_DIR` to
-  its preserved signing directory. Run `post_evals.py amend <copy> <eval_id> 'frozen_sha <40-hex SHA> timing=late'
-  <actor>` or use `timing=unverifiable` when ancestry cannot be checked. The reason must match that token exactly.
+  A retained version 1 suite has unverifiable freeze timing, even if its SHA resolves before the branch base. A new
+  version 2 suite binds `frozen_sha` and `frozen_at` in its signed hash. If its freeze SHA is late or missing, work on
+  a copy. Set `CODERAILS_KEYS_DIR` to the preserved signing directory. Run `post_evals.py amend <copy> <eval_id>
+  'frozen_sha <40-hex SHA> frozen_at <ISO8601> timing=late' <actor>`. For version 1, use `timing=unverifiable`.
+  The reason must match that token exactly and bind both fields.
   The posting and merge gates check the signed amendment. A plain `freeze_disclosure` or justification does not
   clear this refusal. Regrade and post the copy.
   `eval_head_mismatch` means the selected suite's head is absent or stale; `eval_result_mismatch` means its P0
@@ -515,8 +517,8 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   caught. `late_freeze` is attestation, not evidence: an empty, abbreviated or rev-expression `frozen_sha` counts as late
   (a level-0 suite may omit it) and level >= 1 needs a full 40-hex sha, but an honest-looking real sha cannot be proven to
   be the freeze commit, and the
-  timing requirement for a late or unresolved SHA accepts only a verified signed amendment with the exact SHA and
-  `timing=late` or `timing=unverifiable`. The surface
+  timing requirement for any version 1 suite, or a late or unresolved version 2 SHA, accepts only a verified signed
+  amendment with the exact SHA, timestamp and timing token. The surface
   classes are globs: irreversible wins, then the anchored docs and test directories (`none`), and every other path is
   outward (level 1), so a new control directory needs no entry to be covered, only an irreversible one does. The policy and
   `eval_level.py`/`publication_gate.py` are themselves irreversible (editing them forces level 2), but they are read from the

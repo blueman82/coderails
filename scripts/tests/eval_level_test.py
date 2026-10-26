@@ -128,7 +128,8 @@ class RepoCase(unittest.TestCase):
     ) -> tuple[EvalSummary, dict[str, object]]:
         """The newest trusted artifact as post would have written it (marker level, facts line, embed)."""
         data: dict[str, object] = {
-            "verification_level": level, "head_sha": head or self.git("rev-parse", "HEAD"),
+            "verification_level": level, "integrity_version": 2, "frozen_at": "2026-10-07T00:00:00Z",
+            "head_sha": head or self.git("rev-parse", "HEAD"),
             "task_ref": "1", "evals": [entry()], **over,
         }  # fmt: skip
         data.setdefault("frozen_sha", self.base)
@@ -165,12 +166,11 @@ class LateFreezeTests(RepoCase):
         """A mutable justification cannot authorize a late freeze."""
         later = self.commit("a.txt")
         path = self.dir / "evals.json"
-        path.write_text(json.dumps({"frozen_sha": later, "verification_justification": "x"}))
-        with self.assertRaisesRegex(ValueError, "disclose the late freeze"):
-            eval_validation.validate_freeze(path)
-        path.write_text(json.dumps({"frozen_sha": later, "verification_justification": "late freeze: see PR"}))
-        with self.assertRaisesRegex(ValueError, "freeze_timing_unverified"):
-            eval_validation.validate_freeze(path)
+        for justification in ("x", "late freeze: see PR"):
+            data = {"frozen_sha": later, "frozen_at": "2026-10-25T00:00:00Z"}
+            path.write_text(json.dumps({**data, "verification_justification": justification}))
+            with self.assertRaisesRegex(ValueError, "freeze_timing_unverified"):
+                eval_validation.validate_freeze(path)
 
 
 class SuiteIntegrityTests(unittest.TestCase):
@@ -393,7 +393,3 @@ class PolicyDriftTests(unittest.TestCase):
             bad.write_text('{"none": [], "irreversible": "x", "outward": [], "level_2_work_units": 3}')
             with self.assertRaisesRegex(ValueError, "surface_policy_unreadable"):
                 eval_level.load_policy(bad)
-
-
-if __name__ == "__main__":
-    unittest.main()

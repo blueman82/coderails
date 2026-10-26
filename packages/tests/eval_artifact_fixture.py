@@ -11,9 +11,11 @@ import json
 from pathlib import Path
 
 
-def suite_hash(level: int, evals: list[object]) -> str:
-    """sha256 over {task_ref, scope, verification_level, evals} with sorted keys and compact separators."""
+def suite_hash(level: int, evals: list[object], frozen_sha: str = "", frozen_at: str = "") -> str:
+    """Hash the independent wire-format fixture, with v2 freeze metadata when supplied."""
     body = {"task_ref": "1", "scope": None, "verification_level": level, "evals": evals}
+    if frozen_at:
+        body.update(integrity_version=2, frozen_sha=frozen_sha or None, frozen_at=frozen_at)
     text = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -33,7 +35,10 @@ def eval_comment(
         ]  # fmt: skip
     if frozen_sha:
         data["frozen_sha"] = frozen_sha
-    digest = suite_hash(level, [])
+    frozen_at = "2026-10-07T00:00:00Z" if level else ""
+    if level:
+        data.update(integrity_version=2, frozen_at=frozen_at)
+    digest = suite_hash(level, [], frozen_sha, frozen_at)
     if level:
         data["frozen_hash"] = digest
     marker = f"<!-- coderails-eval-summary v1 pr={pr} head_sha={sha} result=GO verification_level={level} -->"

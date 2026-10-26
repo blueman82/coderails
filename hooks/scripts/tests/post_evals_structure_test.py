@@ -100,12 +100,14 @@ class StructureTests(ArtifactCase):
         self.git("commit", "--allow-empty", "-m", "implementation")
         later = self.git("rev-parse", "HEAD")
         self.data["head_sha"] = later
+        self.data["integrity_version"] = 2
+        self.data["frozen_at"] = "2026-10-25T00:00:00Z"
         self.data["frozen_sha"] = base
         self.save()
         validate_structure(self.path, "192", later)
         self.data["frozen_sha"] = later
         self.save()
-        with self.assertRaisesRegex(ValueError, "late freeze"):
+        with self.assertRaisesRegex(ValueError, "is late"):
             validate_structure(self.path, "192", later)
         validate_structure(self.path, scope="loop")
         self.data["verification_justification"] = "Explicit late freeze after implementation"

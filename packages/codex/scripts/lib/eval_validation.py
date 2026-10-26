@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import re
 import subprocess
@@ -11,9 +12,8 @@ from typing import cast
 from .artifact_io import JsonObject, array_value, object_value, read_object
 from .eval_artifact import parse_verification_level
 from .eval_execution import is_environmental_rc, run_recorded, scripted_evals, validate_smoke, verify_execution
-from .eval_integrity import FIXTURE_FORMULA_NOT_IN_CMD, IntegrityError, verify_suite
+from .eval_integrity import FIXTURE_FORMULA_NOT_IN_CMD, IntegrityError, integrity_version, signed_freeze_timing
 from .eval_level import branch_base, check_suite, derive, late_freeze, load_policy, pr_changes, progress_units
-from .eval_signing import VERIFIED
 
 
 def git_output(directory: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -21,38 +21,33 @@ def git_output(directory: Path, *arguments: str) -> subprocess.CompletedProcess[
     return subprocess.run(["git", "-C", str(directory), *arguments], capture_output=True, text=True, check=False)
 
 
-def signed_late_disclosure(data: JsonObject, frozen: str) -> bool:
-    """Accept only a verified signed timing token for this exact freeze SHA."""
-    chain: object = data.get("amendment_chain")
-    if not data.get("signature") or not isinstance(chain, list) or not chain:
-        return False
-    if verify_suite(data) != VERIFIED:
-        return False
-    for item in cast(list[object], chain):
-        reason = str(object_value(item).get("reason", ""))
-        if re.fullmatch(rf"frozen_sha {re.escape(frozen)} timing=(late|unverifiable)", reason):
-            return True
-    return False
-
-
 def require_freeze_timing(data: JsonObject, base: str, directory: Path) -> None:
-    """Require a signed timing token when the freeze commit is late or unavailable."""
+    """Require signed provenance for v1 and for any late or unavailable v2 freeze."""
     frozen = str(data.get("frozen_sha") or "").strip()
-    if str(data.get("verification_level", "")) != "0" and not re.fullmatch(r"[0-9a-f]{40}", frozen):
+    level = str(data.get("verification_level", ""))
+    if level != "0" and not re.fullmatch(r"[0-9a-f]{40}", frozen):
         raise ValueError("verification_level >= 1 requires a full 40-hex frozen_sha (the freeze commit)")
-    if not frozen:
+    if level == "0" or not frozen:
         return
+    version = integrity_version(data)
+    frozen_at = str(data.get("frozen_at") or "")
+    try:
+        datetime.datetime.fromisoformat(frozen_at.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise IntegrityError("freeze_time_invalid") from error
     missing = git_output(directory, "cat-file", "-e", f"{frozen}^{{commit}}").returncode != 0
-    if not missing and (not base or not late_freeze(frozen, base, str(directory))):
+    late = bool(base) and late_freeze(frozen, base, str(directory))
+    if version == 2 and not missing and not late:
         return
-    if not signed_late_disclosure(data, frozen):
+    timings = ("unverifiable",) if version == 1 else ("late", "unverifiable")
+    if not any(signed_freeze_timing(data, frozen, frozen_at, timing) for timing in timings):
         detail = (
-            f"frozen_sha {frozen} does not resolve to a commit in this repository"
-            if missing
-            else f"frozen_sha {frozen} is not an ancestor of the branch base {base}"
+            f"v1 frozen_sha {frozen} has unverifiable timing"
+            if version == 1
+            else f"frozen_sha {frozen} does not resolve" if missing else f"frozen_sha {frozen} is late"
         )
         raise IntegrityError(
-            "freeze_timing_unverified", detail + " — disclose the late freeze with a signed timing token"
+            "freeze_timing_unverified", detail + " — disclose timing with a signed SHA and frozen_at token"
         )
 
 

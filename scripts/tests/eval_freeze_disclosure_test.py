@@ -10,12 +10,20 @@ from unittest import mock
 
 from scripts.lib import eval_artifact, eval_level, eval_validation, publication_gate
 from scripts.lib import git_common as git
-from scripts.lib.eval_integrity import suite_hash
+from scripts.lib.eval_integrity import sign_suite, suite_hash
 from scripts.tests.post_evals_post_test import FakeGh, PostCase
 
 
 class SignedFreezeDisclosureTests(PostCase):
     """Test the real post command with a signed suite and an isolated Git repository."""
+
+    def as_v1(self) -> None:
+        """Re-create the original signed hash format without changing any retained suite."""
+        self.data = self.reload()
+        self.data.pop("integrity_version", None)
+        self.data["frozen_hash"] = suite_hash(self.data)
+        sign_suite(self.data, strict=True)
+        self.save()
 
     def late_fact(self, fake: FakeGh) -> bool | None:
         """Read the computed late-freeze fact from the posted body."""
@@ -39,20 +47,40 @@ class SignedFreezeDisclosureTests(PostCase):
         """A signed GO comment and late fact do not replace the signed timing amendment."""
         head = self.commit("install.py")
         self.suite(head, 2, freeze_disclosure="Original work predates this freeze")
+        self.as_v1()
         self.data = self.reload()
         self.data["frozen_sha"] = "e8d4a0103ad70f14171e905a5e0f567b3073337f"
         self.save()
         self.assertIn("freeze_timing_unverified", self.merge_codes(head, True))
 
+    def test_v1_signed_suite_cannot_change_freeze_metadata(self) -> None:
+        """Changing only v1 SHA or time must not turn an old freeze into an early one."""
+        head = self.commit("install.py")
+        frozen = "e8d4a0103ad70f14171e905a5e0f567b3073337f"
+        self.suite(head, 2, frozen_at="2026-10-07T00:00:00Z")
+        self.as_v1()
+        self.data = self.reload()
+        self.data["frozen_sha"] = frozen
+        self.save()
+        token = f"frozen_sha {frozen} frozen_at 2026-10-07T00:00:00Z timing=unverifiable"
+        self.assertEqual(self.cli("amend", "E1", token, "author").returncode, 0)
+        self.data = self.reload()
+        self.data["frozen_sha"] = self.base
+        self.save()
+        self.assertEqual(self.post(FakeGh([head]))[0], 1)
+        self.assertIn("freeze_timing_unverified", self.merge_codes(head, False))
+        self.data["frozen_sha"] = frozen
+        self.data["frozen_at"] = "2026-10-08T00:00:00Z"
+        self.save()
+        self.assertEqual(self.post(FakeGh([head]))[0], 1)
+
     def test_negated_timing_text_is_not_an_assertion(self) -> None:
         """The words 'not late' and 'verifiable' cannot clear the timing check."""
         head = self.commit("install.py")
         frozen = "e8d4a0103ad70f14171e905a5e0f567b3073337f"
-        self.suite(head, 2)
-        self.data = self.reload()
-        self.data["frozen_sha"] = frozen
-        self.save()
-        reason = f"frozen_sha {frozen}: freeze is not late and timing is verifiable"
+        self.suite(head, 2, frozen_sha=frozen)
+        frozen_at = str(self.reload()["frozen_at"])
+        reason = f"frozen_sha {frozen} frozen_at {frozen_at}: freeze is not late and timing is verifiable"
         self.assertEqual(self.cli("amend", "E1", reason, "eval-author").returncode, 0)
         self.assertEqual(self.post(FakeGh([head]))[0], 1)
         self.assertIn("freeze_timing_unverified", self.merge_codes(head, True))
@@ -61,6 +89,7 @@ class SignedFreezeDisclosureTests(PostCase):
         """A late justification and legacy amendment do not replace the signed token."""
         head = self.commit("install.py")
         self.suite(head, 2, verification_justification="late freeze")
+        self.as_v1()
         self.data = self.reload()
         self.data["frozen_sha"] = head
         self.data["amendments"] = [{"eval": "E1", "why": "late freeze"}]
@@ -93,6 +122,7 @@ class SignedFreezeDisclosureTests(PostCase):
         frozen = "e8d4a0103ad70f14171e905a5e0f567b3073337f"
         disclosure = "Original builds precede this freeze; it is not a before-original-build claim."
         self.suite(head, 2, freeze_disclosure=disclosure)
+        self.as_v1()
         self.data = self.reload()
         self.data["frozen_sha"] = frozen
         self.save()
@@ -101,13 +131,16 @@ class SignedFreezeDisclosureTests(PostCase):
         self.data["freeze_disclosure"] = "late; " + disclosure
         self.save()
         self.assertEqual(self.post(FakeGh([head]))[0], 1)
-        wrong = self.cli("amend", "E1", f"frozen_sha {'f' * 40} timing=unverifiable", "eval-author")
+        frozen_at = str(self.data["frozen_at"])
+        wrong = self.cli(
+            "amend", "E1", f"frozen_sha {'f' * 40} frozen_at {frozen_at} timing=unverifiable", "eval-author"
+        )
         self.assertEqual(wrong.returncode, 0, wrong.stderr)
         self.assertEqual(self.post(FakeGh([head]))[0], 1)
-        vague = self.cli("amend", "E1", f"frozen_sha {frozen} timing=checked", "eval-author")
+        vague = self.cli("amend", "E1", f"frozen_sha {frozen} frozen_at {frozen_at} timing=checked", "eval-author")
         self.assertEqual(vague.returncode, 0, vague.stderr)
         self.assertEqual(self.post(FakeGh([head]))[0], 1)
-        reason = f"frozen_sha {frozen} timing=unverifiable"
+        reason = f"frozen_sha {frozen} frozen_at {frozen_at} timing=unverifiable"
         amended = self.cli("amend", "E1", reason, "eval-author")
         self.assertEqual(amended.returncode, 0, amended.stderr)
         with mock.patch.dict(os.environ, {"CODERAILS_KEYS_DIR": str(self.directory / "missing-signers")}):
@@ -125,12 +158,11 @@ class SignedFreezeDisclosureTests(PostCase):
     def test_resolved_late_freeze_accepts_signed_timing_amendment(self) -> None:
         """A branch commit is late even when Git can resolve it; the signed reason can disclose it."""
         head = self.commit("install.py")
-        self.suite(head, 2, verification_justification="irreversible surface")
+        self.suite(head, 2, frozen_sha=head, verification_justification="irreversible surface")
         self.data = self.reload()
-        self.data["frozen_sha"] = head
-        self.save()
         self.assertEqual(self.post(FakeGh([head]))[0], 1)
-        amended = self.cli("amend", "E1", f"frozen_sha {head} timing=late", "eval-author")
+        frozen_at = str(self.data["frozen_at"])
+        amended = self.cli("amend", "E1", f"frozen_sha {head} frozen_at {frozen_at} timing=late", "eval-author")
         self.assertEqual(amended.returncode, 0, amended.stderr)
         fake = FakeGh([head])
         code, _, error = self.post(fake)
