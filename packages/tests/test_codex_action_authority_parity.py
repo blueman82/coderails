@@ -34,6 +34,13 @@ class MirrorTests(unittest.TestCase):
         for name in MIRRORS:
             with self.subTest(name):
                 self.assertTrue(filecmp.cmp(ROOT / name, CODEX / name, shallow=False), name)
+        self.assertTrue(
+            filecmp.cmp(
+                ROOT / "hooks/scripts/lib/headless_command.py",
+                CODEX / "hooks/scripts/lib/headless_command.py",
+                shallow=False,
+            )
+        )
 
     def test_hook_common_has_no_vendored_receipt_code(self) -> None:
         """The vendored receipt_* functions are gone and the file is under its 400-line ceiling."""

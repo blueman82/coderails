@@ -52,6 +52,12 @@ def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list
         return refused("review_policy_unreadable")
     if changes is None:
         return refused("review_policy_unreadable", "diff unavailable")
+    if any(
+        not status.startswith("A") and manifest_policy.matches(path, manifest_policy.REVIEW_POLICY_PATHS)
+        for status, paths in changes
+        for path in paths
+    ):
+        return refused("review_policy_modified", "policy changes need a separate trusted release")
     verdicts = {p["name"]: p["verdict"] for p in found.passes}
     needed = review_passes.required(changes, policy)
     # a failed pass that marks itself blocking refuses even when the policy did not ask for it
@@ -93,12 +99,15 @@ def trace_preflight(code: str) -> None:
 def evaluate(number: str, sha: str, unit: str = "", progress: str = "") -> list[Violation]:
     """Run every registered check; a check that raises is a refusal, never a pass."""
     found: list[Violation] = []
-    for check in CHECKS:
-        try:
-            found += check(number, sha, unit, progress)
-        except Exception as error:  # noqa: BLE001 - fail closed: an erroring check must not publish
-            code = "diff_manifest:manifest_internal_error" if check is manifest_check else f"{check.__name__}_error"
-            found.append({"code": code, "detail": type(error).__name__})
+    if not manifest_policy.publication_session():
+        found.append({"code": "publication:session_missing", "detail": "valid session ID required"})
+    else:
+        for check in CHECKS:
+            try:
+                found += check(number, sha, unit, progress)
+            except Exception as error:  # noqa: BLE001 - fail closed: an erroring check must not publish
+                code = "diff_manifest:manifest_internal_error" if check is manifest_check else f"{check.__name__}_error"
+                found.append({"code": code, "detail": type(error).__name__})
     try:
         label = f"{git.repo()}@pr-{number}"
     except Exception:  # noqa: BLE001 - trace metadata must never change the verdict

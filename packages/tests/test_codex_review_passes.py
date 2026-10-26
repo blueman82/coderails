@@ -201,10 +201,10 @@ class HookTests(Repo):
         self.assertTrue(self.reason(FAKE_NO_ARTIFACT="1").startswith("review_artifact_missing"))
         self.assertTrue(self.reason(FAKE_PASSES='"nope"').startswith("review_passes_malformed"))
 
-    def test_passes_line_for_another_head_is_ignored(self) -> None:
-        """A passes line carrying a different head_sha does not satisfy the policy."""
+    def test_passes_line_for_another_head_is_malformed(self) -> None:
+        """A stale line cannot be treated as a legacy artifact without a passes line."""
         reason = self.reason(**artifact(entry("review-pr"), entry("security-review")), FAKE_PASSES_SHA="stale")
-        self.assertTrue(reason.startswith("required_review_missing:security-review"), reason)
+        self.assertTrue(reason.startswith("review_passes_malformed"), reason)
 
     def test_conflicting_summary_and_section_markers_are_refused(self) -> None:
         """The actual hook refuses ambiguous grammar even when every declared hash matches."""

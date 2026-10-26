@@ -29,3 +29,21 @@ class ReviewTraceTests(unittest.TestCase):
             result = publication_gate.review_passes_check("517", "head", "", "")
             self.assertEqual(result[0]["code"], "review_artifact_missing")
             trace.assert_called_with("owner/repo@pr-517", "refused", "review_artifact_missing", command="review-passes")
+
+    def test_modified_policy_cannot_remove_its_own_passes(self) -> None:
+        """An empty PR policy does not waive reviews when the PR changes that policy."""
+        with (
+            patch("scripts.lib.publication_gate.config_path", return_value="config"),
+            patch("scripts.lib.publication_gate.load_config", return_value=({}, "")),
+            patch("scripts.lib.publication_gate.git.review_passes_for_pr", return_value=ReviewPasses(0, (), "")),
+            patch("scripts.lib.publication_gate.git.pr_field", return_value="base"),
+            patch(
+                "scripts.lib.publication_gate.manifest_policy.diff_changes",
+                return_value=[("M", ["policy/review_policy.json"])],
+            ),
+            patch("scripts.lib.publication_gate.review_passes.load_policy", return_value={"always": [], "rules": []}),
+            patch("scripts.lib.publication_gate.git.repo", return_value="owner/repo"),
+            patch("scripts.lib.publication_gate.manifest_policy.trace"),
+        ):
+            result = publication_gate.review_passes_check("518", "head", "", "")
+            self.assertEqual(result[0]["code"], "review_policy_modified")

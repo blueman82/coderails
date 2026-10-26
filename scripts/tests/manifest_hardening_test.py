@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -11,6 +12,7 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
+from packages.tests.graph_manifest_fixture import graph_progress  # noqa: E402
 from scripts import merge  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
 from scripts.lib import manifest_policy, publication_gate  # noqa: E402
@@ -64,52 +66,34 @@ class UnitMismatchTests(base.DefaultGateTests):
             with self.subTest(kwargs=kwargs):
                 self.assertEqual(self.refusal(**kwargs), "diff_manifest:manifest_unreadable")
         self.gate("diff_manifest: advisory\n", unit="2")
-        progress = self.dir.parent / "progress.json"
-        progress.write_text(
-            json.dumps(
-                {
-                    "session_id": "s",
-                    "loop_id": "l",
-                    "work_units": {"2": {"manifest": ["**/*.md"], "worktree": str(self.dir)}},
-                }
-            )
-        )
+        progress = graph_progress(self.dir, self.loop, ["**/*.md"])
         self.gate(unit="2", progress=str(progress))
 
     def test_requested_unit_requires_manifest(self) -> None:
-        """An explicitly requested unit cannot discard its manifest bound."""
+        """A supported unit without --manifest has no binding and cannot publish."""
         self.commit("docs/guide.md")
-        progress = self.dir.parent / "progress.json"
-        progress.write_text(
-            json.dumps(
-                {
-                    "session_id": "s",
-                    "loop_id": "l",
-                    "work_units": {"2": {"status": "pending", "worktree": str(self.dir)}},
-                }
-            )
-        )
+        progress = graph_progress(self.dir, self.loop, [])
         self.assertEqual(self.refusal(unit="2", progress=str(progress)), "diff_manifest:manifest_unreadable")
 
-    def test_unit_binding_requires_owner_shape_and_matching_worktree(self) -> None:
-        """Missing owner metadata or a foreign worktree refuses; an empty manifest permits no paths."""
+    def test_unit_binding_requires_owner_shape_and_repository_path(self) -> None:
+        """Missing owner metadata or a foreign state path refuses; missing manifest refuses too."""
         self.commit("docs/guide.md")
-        progress = self.dir.parent / "progress.json"
-        entry: dict[str, object] = {"manifest": ["docs/**"], "worktree": str(self.dir)}
-        valid = {"session_id": "s", "loop_id": "l", "work_units": {"2": entry}}
+        progress = graph_progress(self.dir, self.loop, ["docs/**"])
+        valid = json.loads(progress.read_text())
         for state in (
             {**valid, "session_id": ""},
             {**valid, "loop_id": None},
-            {**valid, "work_units": {"2": {"manifest": ["docs/**"], "worktree": str(self.dir.parent)}}},
         ):
             with self.subTest(state=state):
                 progress.write_text(json.dumps(state))
                 self.assertEqual(self.refusal(unit="2", progress=str(progress)), "diff_manifest:manifest_unreadable")
         progress.write_text(json.dumps(valid))
         self.gate(unit="2", progress=str(progress))
-        entry["manifest"] = []
-        progress.write_text(json.dumps(valid))
-        self.assertEqual(self.refusal(unit="2", progress=str(progress)), "diff_manifest:out_of_manifest")
+        foreign = self.dir.parent / "foreign-progress.json"
+        foreign.write_bytes(progress.read_bytes())
+        self.assertEqual(self.refusal(unit="2", progress=str(foreign)), "diff_manifest:manifest_unreadable")
+        progress = graph_progress(self.dir, self.loop, [], session="s-empty")
+        self.assertEqual(self.refusal(unit="2", progress=str(progress)), "diff_manifest:manifest_unreadable")
 
     def test_config_load_error_is_internal_error(self) -> None:
         """A config that cannot be loaded refuses with manifest_internal_error instead of a raw exception."""
@@ -146,30 +130,20 @@ class UnitMismatchTests(base.DefaultGateTests):
         self.commit("docs/guide.md")
         policy = self.dir.parent / "bounded.json"
         policy.write_text(json.dumps({"manifest": ["a.md"]}))
-        progress = self.dir.parent / "progress.json"
+        progress = graph_progress(self.dir, self.loop, ["**"])
         config = f"diff_manifest_policy: {policy}\n"
-        for entry in ({"manifest": ["**"]}, None, {"manifest": "**"}):
-            units = {} if entry is None else {"2": {**entry, "worktree": str(self.dir)}}
-            progress.write_text(json.dumps({"session_id": "s", "loop_id": "l", "work_units": units}))
-            self.assertEqual(
-                self.refusal(config, unit="2", progress=str(progress)),
-                (
-                    "diff_manifest:out_of_manifest"
-                    if entry == {"manifest": ["**"]}
-                    else "diff_manifest:manifest_unreadable"
-                ),
-            )
-        policy.write_text(json.dumps({"manifest": ["docs/**"]}))
-        progress.write_text(
-            json.dumps(
-                {
-                    "session_id": "s",
-                    "loop_id": "l",
-                    "work_units": {"2": {"manifest": ["**"], "worktree": str(self.dir)}},
-                }
-            )
+        self.assertEqual(self.refusal(config, unit="2", progress=str(progress)), "diff_manifest:out_of_manifest")
+        self.assertEqual(
+            self.refusal(config, unit="missing", progress=str(progress)), "diff_manifest:manifest_unreadable"
         )
-        self.gate(config, unit="2", progress=str(progress))
+        state = json.loads(progress.read_text())
+        state["work_units"]["2"]["manifest"] = "**"
+        progress.write_text(json.dumps(state))
+        self.assertEqual(self.refusal(config, unit="2", progress=str(progress)), "diff_manifest:manifest_unreadable")
+        policy.write_text(json.dumps({"manifest": ["docs/**"]}))
+        progress = graph_progress(self.dir, self.loop, ["**"], session="s-bounded")
+        with mock.patch.dict(os.environ, {"CODERAILS_PUBLICATION_SESSION_ID": "s-bounded"}):
+            self.gate(config, unit="2", progress=str(progress))
 
     def test_custom_policy_keeps_default_denials(self) -> None:
         """A custom manifest cannot allow a default-denied path."""

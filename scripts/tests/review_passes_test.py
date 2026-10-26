@@ -136,10 +136,10 @@ class LineTests(unittest.TestCase):
         """A v1 artifact without a passes line counts as passes=[]."""
         self.assertEqual(review_passes.parse(body(None), "7", SHA), [])
 
-    def test_line_bound_to_other_head_is_ignored(self) -> None:
-        """A passes line carrying a different head_sha is ignored, not trusted."""
+    def test_line_bound_to_other_head_is_malformed(self) -> None:
+        """A stale passes line cannot become an absent legacy line."""
         text = "\n".join([review_artifact.marker("7", SHA), review_passes.render(OTHER, [entry("security-review")])])
-        self.assertEqual(review_passes.parse(text, "7", SHA), [])
+        self.assertIsNone(review_passes.parse(text, "7", SHA))
 
     def test_malformed_line_is_none(self) -> None:
         """A passes line that does not parse or validate is malformed (None), never silently empty."""

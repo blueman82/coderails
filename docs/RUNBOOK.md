@@ -41,16 +41,16 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `python3 scripts/lib/config_counters.py` (`config_rejected`, `config_bad_value`, `wiki_schema_fail_closed`).
 - Remediation: run `python3 scripts/lib/config.py resolve-config --json`, fix each finding (typo'd key, wrong type, value
   outside the enum), or restore `wiki.schema.json` (`page_types` non-empty list of directory names). Only the guarded
-  action is denied; every other command and tool passes. With NO config file nothing is read and every gate stays inert
-  (repos not using coderails), and an ambiguous wiki identity (no `wiki_path`, other repository, vault not a directory)
-  still allows.
-- Limit: the controls are only as strong as the config file. A same-user agent can `mv` it away (every gate goes inert)
-  or edit a control to `off` in place; no hook guards `.coderails/workflow.config.yaml`. Review config diffs like code
-  (the diff-manifest policy can list it as a protected path). `evals.require_signatures` fails closed: only an
-  explicit `false` turns it off. Malformed lines and duplicate keys are `config_unparseable_line` /
-  `config_duplicate_key` findings.
-- Defaults: an existing config with no other keys enables `sandbox_workers: true`,
-  `evals.require_signatures: true`, and `diff_manifest: enforce` (inert until `diff_manifest_policy` names a file).
+  action is denied; other commands and tools can continue. Without a config file, config-dependent gates do not run.
+  The diff-manifest check still uses its shipped policy. An ambiguous wiki identity (no `wiki_path`, another repository,
+  or a path that is not a vault) does not block a write.
+- Limit: a same-user agent can remove the config file or set a control to `off`; no hook guards
+  `.coderails/workflow.config.yaml`. Removing the file does not disable the default diff-manifest check. Review config
+  diffs like code. The diff-manifest policy can list the config file as a protected path. `evals.require_signatures`
+  fails closed: only an explicit `false` turns it off. Malformed lines and duplicate keys are
+  `config_unparseable_line` / `config_duplicate_key` findings.
+- Defaults: the diff-manifest check uses `enforce` mode and `policy/diff-policy.default.json` even without a config file.
+  An existing config with no other keys enables `sandbox_workers: true` and `evals.require_signatures: true`.
   `action_authority` defaults to `off`. The shipped config sets it to `advisory`, which warns about missing receipts
   without a passphrase. Set `enforce` only when signed receipts are required.
 

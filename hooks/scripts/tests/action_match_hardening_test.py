@@ -89,6 +89,27 @@ class MatchHardeningTests(unittest.TestCase):
                 self.assertEqual(self.names(command), ["merge"])
         self.assertEqual(self.names("/bin/bash /x/y/merge.py 5"), ["merge"])
 
+    def test_headless_agent_prompt_guards_only_executable_text(self) -> None:
+        """A headless child can run a merge, but option values and printed examples cannot."""
+        for command in (
+            'claude -p --dangerously-skip-permissions "gh pr merge 42"',
+            'claude --print --permission-mode bypassPermissions "gh pr merge 42"',
+            'codex exec --dangerously-bypass-approvals-and-sandbox "gh pr merge 42"',
+            "bash -c 'codex exec \"gh pr merge 42\"'",
+            'claude -p "gh pr merge 42 && echo done"',
+            'echo ready && claude -p "gh pr merge 42 && echo done"',
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.names(command), ["merge"])
+        for command in (
+            "echo 'claude -p \"gh pr merge 42\"'",
+            'claude -p --system-prompt "gh pr merge 42" "explain the code"',
+            'codex exec --cd "gh pr merge 42" "explain the code"',
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.names(command), [])
+        self.assertTrue(match.state_mutated_before_guard('git branch -f feature HEAD^ && claude -p "gh pr merge 42"'))
+
     def test_every_non_read_only_step_before_a_guard_is_refused(self) -> None:
         """Allowlist: unknown movers (push ., worktree -B, filter-branch, redirects into .git) taint the guard."""
         push = "git push origin feature:main"

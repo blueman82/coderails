@@ -167,7 +167,7 @@ def _valid(item: object) -> bool:
 
 
 def parse(body: str, pr: str, head_sha: str) -> Passes | None:
-    """Passes of the artifact for this PR head: [] when there is no line or it names another head, None if malformed."""
+    """Passes for this PR head: [] only when the passes line is absent, None when present but invalid."""
     lines = body.splitlines()
     marker = next((i for i, line in enumerate(lines) if review_artifact.matches_marker(line, pr, head_sha)), -1)
     line = lines[marker + 1] if 0 <= marker < len(lines) - 1 else ""
@@ -180,7 +180,7 @@ def parse(body: str, pr: str, head_sha: str) -> Passes | None:
     if not isinstance(data, dict) or not isinstance(cast(dict[str, Any], data).get("passes"), list):
         return None
     if cast(dict[str, Any], data).get("head_sha") != head_sha:
-        return []
+        return None
     passes = cast(Passes, cast(dict[str, Any], data)["passes"])
     rest = "\n".join(lines[marker + 2 :])
     return passes if all(_valid(item) for item in passes) and _bound(rest, passes) else None
