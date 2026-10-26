@@ -312,6 +312,7 @@ def _parser() -> argparse.ArgumentParser:
         dispatch.add_argument(f"--{option}", required=True)
     dispatch.add_argument("--message-file", required=True, type=Path)
     dispatch.add_argument("--agent-type", default="", help="the spawn_agent agent_type; empty when none was given")
+    dispatch.add_argument("--tool-use-id", default="", help="the native hook call identity for opaque messages")
     dispatch.add_argument("--evals", type=Path, help="default: evals.json beside the state")
     for name in ("complete", "verify-completion"):
         complete = commands.add_parser(name)
@@ -382,6 +383,7 @@ def main() -> int:
                 args.agent_type,
                 args.task_name,
                 args.evals or args.state.with_name("evals.json"),
+                args.tool_use_id,
             )
         elif args.command == "complete":
             output = complete(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)
