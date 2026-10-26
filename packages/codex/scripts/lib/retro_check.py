@@ -300,8 +300,17 @@ def memory_disclosure(state: dict[str, Any], retro: dict[str, Any]) -> list[str]
         )
     memory: object = retro.get("memory")
     degraded: object = cast("dict[str, Any]", memory).get("degraded") if isinstance(memory, dict) else None
-    for command, counts in sorted(cast("dict[str, Any]", degraded).items()) if isinstance(degraded, dict) else []:
-        if command.startswith("order.") and isinstance(counts, dict):
+    if degraded is None:
+        return out
+    if not isinstance(degraded, dict):
+        raise RetroError("retro_memory_invalid", "retro.memory.degraded must be an object")
+    for command, counts in sorted(cast("dict[str, object]", degraded).items()):
+        if not isinstance(counts, dict) or any(
+            isinstance(count, bool) or not isinstance(count, int) or count < 0
+            for count in cast("dict[str, object]", counts).values()
+        ):
+            raise RetroError("retro_memory_invalid", "retro.memory.degraded needs nonnegative integer counts")
+        if command.startswith("order."):
             c = cast("dict[str, int]", counts)
             out.append(
                 f"Memory degraded: {sum(c.values())} {command} event(s) ("

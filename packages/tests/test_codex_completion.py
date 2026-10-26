@@ -338,6 +338,39 @@ class CompletionTests(CompletionFixture):
         )
         self.assertEqual(result.stdout, "")
 
+    def test_malformed_retro_memory_blocks_native_stop(self) -> None:
+        """The Codex Stop hook denies a malformed memory count with a reason code."""
+        retro = read_json(self.retro)
+        retro["memory"]["degraded"] = {"order.record": {"x": "bad"}}
+        write_json(self.retro, retro)
+        package = Path(__file__).resolve().parents[1] / "codex"
+        environment = os.environ | {
+            "HOME": str(self.directory),
+            "PLUGIN_ROOT": str(package),
+            "PLUGIN_DATA": str(self.directory / "data"),
+            "CODERAILS_AGENTIC_LOOP_DIR": str(self.directory / "loops"),
+        }
+        payload = {
+            "session_id": "parent",
+            "cwd": str(self.directory),
+            "hook_event_name": "Stop",
+            "last_assistant_message": "done",
+            "transcript_path": str(self.transcript),
+        }
+        result = subprocess.run(
+            [sys.executable, str(package / "hooks/scripts/graph_completion_guard.py")],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            env=environment,
+            check=True,
+        )
+        output: dict[str, Any] = json.loads(result.stdout)
+        self.assertEqual(output.get("decision"), "block")
+        self.assertNotIn("Traceback", result.stderr)
+        with self.assertRaisesRegex(GraphError, "retro_memory_invalid"):
+            validate_completion_evidence(read_json(self.path), 3, self.evals, self.proof, self.retro, self.transcript)
+
 
 if __name__ == "__main__":
     unittest.main()
