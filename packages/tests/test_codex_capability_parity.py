@@ -109,7 +109,7 @@ class CodexCapabilityTests(unittest.TestCase):
         """Every guarded role TOML carries [features] shell_tool = false AND keeps sandbox_mode = read-only."""
         profiles = json.loads((CODEX / "capabilities/profiles.json").read_text(encoding="utf-8"))["agents"]
         guarded = [n for n, c in profiles.items() if "shell.raw" not in c and "worktree.write" not in c and c]
-        self.assertEqual(len(guarded), 5)
+        self.assertEqual(len(guarded), 6)
         for name in guarded:
             text = (CODEX / "agents" / f"{name}.toml").read_text(encoding="utf-8")
             with self.subTest(name=name):

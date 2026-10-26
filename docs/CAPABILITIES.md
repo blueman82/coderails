@@ -1,8 +1,11 @@
 # Capability profiles
 
-`capabilities/profiles.json` is the single source for what each agent type may reach. `scripts/capability_profiles_validate.py`
+`capabilities/profiles.json` declares what each agent type may reach. `scripts/capability_profiles_validate.py`
 (run by `scripts/tests/capability_profiles_test.py`) fails when it disagrees with `agents/*.md` frontmatter or
 `packages/codex/agents/*.toml`.
+
+The `security-reviewer` holds exactly `repo.inspect` and `diff.read`. The Codex role launcher and both provider MCP
+servers refuse to start that role if its profile grants another capability. These checks use the installed source.
 
 Capabilities: `repo.inspect`, `diff.read`, `tests.run`, `pr.comment` (reached through `scripts/capability.py <tool>`),
 plus `worktree.write` (Write/Edit, or a non-read-only Codex sandbox) and `shell.raw` (unrestricted Bash). An agent with
