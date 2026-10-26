@@ -423,8 +423,10 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `proof.py freeze` then `run`. `proof_stale_head`: the run belongs to another checkout or an earlier HEAD; run it
   again from the current repository checkout. `proof_chain_broken`: a retained row was edited or a nonfinal row was
   lost. Preserve `proof_results.jsonl` and start a new session and loop. `proof_cmd_destructive`: the cmd matches the
-  destructive classifier and was never executed; reword the proof. `proof_sandbox_unavailable`: the pinned sandbox did
-  not start. Prepare and check the pinned runtime, then run the proof again:
+  destructive classifier and was never executed; reword the proof. `proof_output_limit`: combined stdout and stderr
+  exceeded 1 MiB. The controller stopped the process group and recorded an `output_limit` row. Its output hashes cover
+  captured bytes only; the excerpt starts with `partial output`. Reduce output and run the proof again.
+  `proof_sandbox_unavailable`: the pinned sandbox did not start. Prepare and check the pinned runtime, then retry:
 
   ```bash
   npx --yes @anthropic-ai/sandbox-runtime@0.0.65 --help

@@ -233,7 +233,7 @@ class ProofRunTests(unittest.TestCase):
             session_id=SESSION,
             loop_id=LOOP,
         )
-        self.blocked("proof_no_proofs")
+        self.blocked("proof_withdrawn_unobserved")
 
     def test_empty_proofs_block_unless_a_disposition_exists(self) -> None:
         """An empty proofs array no longer passes the Claude gate; a valid disposition row releases it."""
@@ -279,7 +279,7 @@ class ProofRunTests(unittest.TestCase):
         self.freeze_run()
         self.assertEqual(self.gate(), "")
         self.state["loop_id"] = "other"
-        self.blocked(r"P1\((proof_stale_cmd|proof_unexecuted)\)")
+        self.blocked("proof.json loop_id")
 
     def test_every_reason_code_is_in_the_runbook(self) -> None:
         """Each proof reason code is named in docs/RUNBOOK.md."""

@@ -159,6 +159,20 @@ class ProofSandboxTests(unittest.TestCase):
                 self.assertEqual(rows[-1]["cmd_sha256"], proof_results.sha(cmd))
                 self.assertEqual(rows[-1]["stdout_sha256"], proof_results.sha("first ok\n"))
 
+    def test_large_output_records_refusal_without_unbounded_capture(self) -> None:
+        """Both controllers stop high output and mark recorded output hashes as partial."""
+        if not cached_runtime() or not shutil.which("npx"):
+            self.skipTest("the pinned runtime is not cached")
+        cmd = f"{shlex.quote(sys.executable)} -c " + shlex.quote("print('x' * 2000000)")
+        for runner in (ROOT / "scripts/lib/proof.py", ROOT / "packages/codex/scripts/lib/proof.py"):
+            with self.subTest(runner=runner):
+                result = self.run_proof(runner, cmd, stdout_contains=())
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                row = proof_results.read_rows(self.last_state / proof_results.RESULTS_NAME)[-1]
+                self.assertEqual(row["verdict"], "output_limit")
+                self.assertIn("partial output", row["excerpt"])
+                self.assertLessEqual(len(row["excerpt"]), controller.EXCERPT_CAP)
+
     def test_missing_runtime_fails_closed(self) -> None:
         """A matching nonzero exit cannot hide a missing sandbox."""
         bin_dir = self.directory / "bin"

@@ -159,6 +159,28 @@ class ProofBoundaryTests(HookTestCase):
         with self.assertRaisesRegex(ValueError, "loop_id"):
             validate_proofs(self.proof, self.state)
 
+    def test_hash_correct_missing_row_field_blocks_as_broken_chain(self) -> None:
+        """A valid hash cannot make a row with no kind into usable evidence."""
+        cases: tuple[tuple[str, object], ...] = (("kind", None), ("kind", []), ("proof_id", []))
+        for field, value in cases:
+            with self.subTest(field=field, value=value):
+                self.freeze({"schema_version": 2, "proofs": [{"id": "P1", "cmd": "true"}]})
+                rows = [json.loads(line) for line in self.results.read_text().splitlines()]
+                if value is None:
+                    rows[-1].pop(field)
+                else:
+                    rows[-1][field] = value
+                rows[-1]["row_sha256"] = pr.sha(
+                    json.dumps(
+                        {key: item for key, item in rows[-1].items() if key != "row_sha256"},
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                )
+                self.results.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+                with self.assertRaisesRegex(ValueError, r"P1\(proof_chain_broken\)"):
+                    validate_proofs(self.proof, self.state)
+
     def test_independent_unit_shapes_reasons_and_compounded_diagnostics(self) -> None:
         """Malformed siblings cannot hide unfinished units; completed siblings stay out of diagnostics."""
         invalid: list[object] = [42, True, [], {}, None, " "]

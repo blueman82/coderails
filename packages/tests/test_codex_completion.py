@@ -253,6 +253,21 @@ class CompletionTests(unittest.TestCase):
                 with self.assertRaisesRegex(GraphError, reason):
                     complete(*self.arguments)
 
+    def test_hash_correct_missing_row_field_blocks_as_broken_chain(self) -> None:
+        """Codex completion gives the named refusal for a malformed hash-correct row."""
+        rows = [json.loads(line) for line in self.results.read_text().splitlines()]
+        rows[-1].pop("session_id")
+        rows[-1]["row_sha256"] = pr.sha(
+            json.dumps(
+                {key: value for key, value in rows[-1].items() if key != "row_sha256"},
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        )
+        self.results.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        with self.assertRaisesRegex(GraphError, "proof_chain_broken"):
+            complete(*self.arguments)
+
     def test_eval_stamp_revision_and_identity(self) -> None:
         """Bind completion to the current suite, checksum, amendments, and loop."""
         suite = read_json(self.evals)

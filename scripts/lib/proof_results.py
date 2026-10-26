@@ -26,6 +26,7 @@ REASONS: dict[str, str] = {
     "proof_chain_broken": "proof_results.jsonl is torn, edited or missing rows; never edit it by hand.",
     "proof_cmd_destructive": "the frozen cmd matches the destructive-command classifier and was never run.",
     "proof_sandbox_unavailable": "the pinned proof sandbox did not start; install its runtime and run the proof again.",
+    "proof_output_limit": "proof output exceeded the byte limit; reduce output and run the proof again.",
     "proof_no_proofs": "proof.json holds no non-withdrawn proof and no valid disposition; add a proof or record one.",
     "proof_disposition_no_reason": "a bare 'none' or unknown reason code is rejected; record an enum code + reason.",
     "proof_disposition_legacy": "string disposition 'none: <reason>' accepted; prefer `proof.py disposition`.",
@@ -40,6 +41,7 @@ VERDICT_REASON = {
     "expect_mismatch": "proof_expect_mismatch",
     "refused": "proof_cmd_destructive",
     "sandbox_unavailable": "proof_sandbox_unavailable",
+    "output_limit": "proof_output_limit",
 }
 _FIELDS = [
     *("seq", "kind", "proof_id", "cmd_sha256", "proof_json_sha256", "session_id", "loop_id", "head_sha", "cwd"),
@@ -85,6 +87,16 @@ def read_rows(path: Path) -> list[dict[str, Any]]:
         row = cast(dict[str, Any], value)
         if row.get("seq") != number or row.get("prev_sha256") != previous or row.get("row_sha256") != _digest(row):
             raise ChainError(f"row {number} breaks the hash chain")
+        if (
+            not set(_FIELDS).issubset(row)
+            or not isinstance(row["kind"], str)
+            or row["kind"] not in {"freeze", "run", "disposition"}
+            or any(
+                row[key] is not None and not isinstance(row[key], str)
+                for key in ("proof_id", "session_id", "loop_id", "verdict")
+            )
+        ):
+            raise ChainError(f"row {number} has missing or invalid fields")
         previous = row["row_sha256"]
         rows.append(row)
     return rows

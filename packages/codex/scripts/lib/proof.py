@@ -20,10 +20,12 @@ import json
 import math
 import os
 import secrets
+import selectors
 import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -34,6 +36,7 @@ from scripts.lib import proof_results as pr  # noqa: E402
 DEFAULT_TIMEOUT_S = 600
 MAX_TIMEOUT_S = 3600
 EXCERPT_CAP = 2000
+MAX_OUTPUT_BYTES = 1_048_576
 SRT_VERSION = "0.0.65"
 
 
@@ -111,11 +114,49 @@ def validate(doc: dict[str, Any]) -> list[str]:
     return errors + (["no non-withdrawn proofs (record `proof.py disposition` instead)"] if not has_live else [])
 
 
-def _destructive(cmd: str, cwd: str) -> bool:
-    return bool(permanent_pattern(cmd, cwd)[0]) or secret_path(cmd)
+def _capture(process: subprocess.Popen[bytes], timeout: float) -> tuple[bytes, bytes, bool, bool]:
+    """Read both pipes up to a shared byte cap; stop the process group on overflow or timeout."""
+    output = [bytearray(), bytearray()]
+    deadline = time.monotonic() + timeout
+    timed_out = overflow = False
+    try:
+        with selectors.DefaultSelector() as selector:
+            for index, stream in enumerate((process.stdout, process.stderr)):
+                if stream is not None:
+                    selector.register(stream, selectors.EVENT_READ, index)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                for key, _ in selector.select(min(remaining, 0.1)):
+                    budget = MAX_OUTPUT_BYTES - sum(map(len, output))
+                    chunk = os.read(key.fd, min(65536, budget + 1))
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    output[cast(int, key.data)].extend(chunk[:budget])
+                    if len(chunk) > budget:
+                        overflow = True
+                        break
+                if overflow:
+                    break
+    finally:
+        if timed_out or overflow or process.poll() is None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+        try:
+            process.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=0.5)
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+    return bytes(output[0]), bytes(output[1]), timed_out, overflow
 
 
-def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool, bool]:
+def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool, bool, bool]:
     """Return exit, stdout, stderr, timeout, and proof that the sandbox started."""
     with tempfile.TemporaryDirectory(prefix="coderails-proof.", dir="/tmp") as temporary:
         scratch = Path(temporary)
@@ -163,39 +204,23 @@ def _execute(cmd: str, timeout: float) -> tuple[int | None, str, str, bool, bool
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                errors="replace",
                 start_new_session=True,
                 env=environment,
             )
         except OSError as error:
-            return None, "", str(error), False, False
-        try:
-            out, err = process.communicate(timeout=timeout)
-            prefix = marker + "\n"
-            return (
-                process.returncode,
-                out[len(prefix) :] if out.startswith(prefix) else out,
-                err,
-                False,
-                out.startswith(prefix),
-            )
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-            try:
-                out, err = process.communicate(timeout=0.5)
-            except subprocess.TimeoutExpired:
-                if process.stdout:
-                    process.stdout.close()
-                if process.stderr:
-                    process.stderr.close()
-                try:
-                    process.wait(timeout=0.5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                out, err = "", ""
-            return None, out or "", err or "", True, False
+            return None, "", str(error), False, False, False
+        stdout, stderr, timed_out, overflow = _capture(process, timeout)
+        out, err = stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace")
+        prefix = marker + "\n"
+        started = out.startswith(prefix)
+        return (
+            None if timed_out or overflow else process.returncode,
+            out[len(prefix) :] if started else out,
+            err,
+            timed_out,
+            started,
+            overflow,
+        )
 
 
 def _judge(entry: dict[str, Any], code: int | None, out: str, timed_out: bool) -> tuple[str, bool]:
@@ -228,18 +253,21 @@ def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path:
         or None,
         "started": _now(),
     }
-    if _destructive(cmd, cwd):
+    if permanent_pattern(cmd, cwd)[0] or secret_path(cmd):
         pr.append(path, **base, ended=_now(), verdict="refused", expect_matched=False)
         pr.trace("proof.run", "refused", "proof_cmd_destructive", who[0], who[1])
         return "refused"
     try:
-        code, out, err, timed_out, started = _execute(cmd, float(entry.get("timeout_s") or DEFAULT_TIMEOUT_S))
+        code, out, err, timed_out, started, overflow = _execute(cmd, float(entry.get("timeout_s") or DEFAULT_TIMEOUT_S))
     except OSError as error:
-        code, out, err, timed_out, started = None, "", str(error), False, False
-    if timed_out:
+        code, out, err, timed_out, started, overflow = None, "", str(error), False, False, False
+    if overflow:
+        verdict, matched = "output_limit", False
+    elif timed_out:
         verdict, matched = "timeout", False
     else:
         verdict, matched = _judge(entry, code, out, False) if started else ("sandbox_unavailable", False)
+    note = f"[partial output: exceeded {MAX_OUTPUT_BYTES}-byte limit]\n" if overflow else ""
     pr.append(
         path,
         **base,
@@ -247,7 +275,7 @@ def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path:
         exit_code=code,
         stdout_sha256=pr.sha(out),
         stderr_sha256=pr.sha(err),
-        excerpt=(out + err)[:EXCERPT_CAP],
+        excerpt=note + (out + err)[: EXCERPT_CAP - len(note)],
         expect_matched=matched,
         verdict=verdict,
     )
