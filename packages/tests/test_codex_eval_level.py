@@ -157,7 +157,7 @@ class HookTests(HookRepo):
     def test_late_freeze_must_be_stamped(self) -> None:
         """Acceptance 3: a freeze on the branch whose facts line says late_freeze=0 is denied; stamped 1 proceeds."""
         self.assertTrue(self.reason(level=2, frozen_sha=self.sha).startswith("late_freeze_unstamped"))
-        self.assertEqual(self.reason(level=2, frozen_sha=self.sha, late=True), "")
+        self.assertTrue(self.reason(level=2, frozen_sha=self.sha, late=True).startswith("freeze_timing_unverified"))
         self.assertEqual(self.reason(level=2, frozen_sha=self.base), "")  # on-time freeze, stamped 0
 
     def test_oracle_edit_is_denied(self) -> None:

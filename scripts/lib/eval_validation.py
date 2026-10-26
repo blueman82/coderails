@@ -22,7 +22,7 @@ def git_output(directory: Path, *arguments: str) -> subprocess.CompletedProcess[
 
 
 def signed_late_disclosure(data: JsonObject, frozen: str) -> bool:
-    """Accept timing evidence only when a verified amendment names this exact freeze SHA."""
+    """Accept only a verified signed timing token for this exact freeze SHA."""
     chain: object = data.get("amendment_chain")
     if not data.get("signature") or not isinstance(chain, list) or not chain:
         return False
@@ -30,34 +30,42 @@ def signed_late_disclosure(data: JsonObject, frozen: str) -> bool:
         return False
     for item in cast(list[object], chain):
         reason = str(object_value(item).get("reason", ""))
-        named = re.search(rf"\bfrozen_sha\s+{re.escape(frozen)}\b", reason, re.IGNORECASE)
-        if named and re.search(r"\b(late|unverifiable)\b", reason, re.IGNORECASE):
+        if re.fullmatch(rf"frozen_sha {re.escape(frozen)} timing=(late|unverifiable)", reason):
             return True
     return False
 
 
-def validate_freeze(path: str | Path, head: str = "HEAD", pr: str = "") -> None:
-    """Require a pre-branch freeze for the operation's target head or an explicit late-freeze disclosure."""
-    data = read_object(path)
+def require_freeze_timing(data: JsonObject, base: str, directory: Path) -> None:
+    """Require a signed timing token when the freeze commit is late or unavailable."""
     frozen = str(data.get("frozen_sha") or "").strip()
-    directory = Path.cwd()
     if str(data.get("verification_level", "")) != "0" and not re.fullmatch(r"[0-9a-f]{40}", frozen):
         raise ValueError("verification_level >= 1 requires a full 40-hex frozen_sha (the freeze commit)")
-    if not frozen or git_output(directory, "rev-parse", "--is-inside-work-tree").returncode:
+    if not frozen:
         return
-    if git_output(directory, "cat-file", "-e", f"{frozen}^{{commit}}").returncode:
-        if signed_late_disclosure(data, frozen):
-            return
-        raise ValueError(f"frozen_sha {frozen} does not resolve to a commit in this repository")
-    base = branch_base(head, str(directory), pr)
-    if not base or not late_freeze(frozen, base, str(directory)):
+    missing = git_output(directory, "cat-file", "-e", f"{frozen}^{{commit}}").returncode != 0
+    if not missing and (not base or not late_freeze(frozen, base, str(directory))):
         return
-    disclosure = " ".join(
-        [str(data.get("verification_justification", ""))]
-        + [str(item.get("why", "")) for item in data.get("amendments", [])]
-    ).lower()
-    if "freeze" not in disclosure and "frozen" not in disclosure and not signed_late_disclosure(data, frozen):
-        raise ValueError(f"frozen_sha {frozen} is not an ancestor of the branch base {base} — disclose the late freeze")
+    if not signed_late_disclosure(data, frozen):
+        detail = (
+            f"frozen_sha {frozen} does not resolve to a commit in this repository"
+            if missing
+            else f"frozen_sha {frozen} is not an ancestor of the branch base {base}"
+        )
+        raise IntegrityError(
+            "freeze_timing_unverified", detail + " — disclose the late freeze with a signed timing token"
+        )
+
+
+def validate_freeze(path: str | Path, head: str = "HEAD", pr: str = "") -> None:
+    """Check freeze timing in the operation's repository using the same rule as publication."""
+    data = read_object(path)
+    frozen = str(data.get("frozen_sha") or "").strip()
+    if str(data.get("verification_level", "")) != "0" and not re.fullmatch(r"[0-9a-f]{40}", frozen):
+        raise ValueError("verification_level >= 1 requires a full 40-hex frozen_sha (the freeze commit)")
+    directory = Path.cwd()
+    if git_output(directory, "rev-parse", "--is-inside-work-tree").returncode:
+        return
+    require_freeze_timing(data, branch_base(head, str(directory), pr), directory)
 
 
 def validate_level(data: JsonObject, level: str, pr: str, head: str, progress: str = "") -> None:

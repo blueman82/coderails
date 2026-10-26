@@ -244,12 +244,15 @@ class PostFreshnessTests(PostCase):
         self.assertNotEqual(self.path.parent, self.directory)
         for frozen, justification, late, expected in (
             (self.base, "irreversible surface", False, 0),
-            (head, "irreversible surface; late freeze", True, 0),
             (head, "irreversible surface", None, 1),
+            (head, "irreversible surface; late freeze", True, 0),
         ):
             with self.subTest(frozen=frozen, justification=justification):
                 self.data.update(frozen_sha=frozen, verification_justification=justification)
                 self.save()
+                if late:
+                    amended = self.cli("amend", "E1", f"frozen_sha {frozen} timing=late", "eval-author")
+                    self.assertEqual(amended.returncode, 0, amended.stderr)
                 fake = FakeGh([head])
                 code, _, error = self.post(fake)
                 self.assertEqual(code, expected, error)

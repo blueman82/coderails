@@ -161,15 +161,16 @@ class LateFreezeTests(RepoCase):
         self.assertEqual(eval_level.branch_base(head), self.base)
         self.assertEqual(eval_level.pr_changes("", head), [("A", ["install.py"])])
 
-    def test_validate_freeze_still_requires_disclosure(self) -> None:
-        """The refactor keeps validate_freeze's behaviour: late and undisclosed is refused, disclosed accepted."""
+    def test_validate_freeze_ignores_mutable_disclosure(self) -> None:
+        """A mutable justification cannot authorize a late freeze."""
         later = self.commit("a.txt")
         path = self.dir / "evals.json"
         path.write_text(json.dumps({"frozen_sha": later, "verification_justification": "x"}))
         with self.assertRaisesRegex(ValueError, "disclose the late freeze"):
             eval_validation.validate_freeze(path)
         path.write_text(json.dumps({"frozen_sha": later, "verification_justification": "late freeze: see PR"}))
-        eval_validation.validate_freeze(path)
+        with self.assertRaisesRegex(ValueError, "freeze_timing_unverified"):
+            eval_validation.validate_freeze(path)
 
 
 class SuiteIntegrityTests(unittest.TestCase):
@@ -321,7 +322,7 @@ class MergeCheckTests(RepoCase):
         """Acceptance 3: a branch frozen_sha with a facts line claiming late_freeze=0 is late_freeze_unstamped."""
         late = self.commit("install.py")
         self.assertIn("late_freeze_unstamped", self.check(self.posted(2, "", frozen_sha=late)[0]))
-        self.assertEqual(self.check(self.posted(2, "", late=True, frozen_sha=late)[0]), [])
+        self.assertIn("freeze_timing_unverified", self.check(self.posted(2, "", late=True, frozen_sha=late)[0]))
         self.assertIn("late_freeze_unstamped", self.check(self.posted(2, "", late=True)[0]))  # claims late, is not
 
     def test_missing_facts_line(self) -> None:

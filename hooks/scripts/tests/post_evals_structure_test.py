@@ -89,8 +89,8 @@ class StructureTests(ArtifactCase):
 
         self.assertEqual(main([]), 1)
 
-    def test_freeze_ancestry_and_explicit_disclosure(self) -> None:
-        """Use real Git history to distinguish the branch base from a late freeze."""
+    def test_freeze_ancestry_and_mutable_disclosure(self) -> None:
+        """Use real Git history and reject a mutable late-freeze justification."""
         base = self.repository()
         base_reply = patch("scripts.lib.git_common.pr_field", return_value=base)
         base_reply.start()
@@ -110,7 +110,8 @@ class StructureTests(ArtifactCase):
         validate_structure(self.path, scope="loop")
         self.data["verification_justification"] = "Explicit late freeze after implementation"
         self.save()
-        validate_structure(self.path, "192", later)
+        with self.assertRaisesRegex(ValueError, "freeze_timing_unverified"):
+            validate_structure(self.path, "192", later)
         self.data["frozen_sha"] = "f" * 40
         self.save()
         with self.assertRaisesRegex(ValueError, "does not resolve"):

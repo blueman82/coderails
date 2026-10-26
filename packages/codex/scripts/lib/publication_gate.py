@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from pathlib import Path
 
-from . import eval_artifact, eval_level, manifest_policy, review_passes
+from . import eval_artifact, eval_level, eval_validation, manifest_policy, review_passes
 from . import git_common as git
 from .artifact_io import object_value
 from .config import config_path, load_config
@@ -96,7 +97,8 @@ def eval_level_check(number: str, sha: str, unit: str, progress: str) -> list[Vi
     if changes is None:
         return [{"code": "eval_level_diff_unavailable", "detail": ""}]
     _, minimum = eval_level.derive(changes, eval_level.progress_units(progress), data, eval_level.load_policy())
-    late = eval_level.suite_late(data, eval_level.branch_base(sha, pr=number))
+    base = eval_level.branch_base(sha, pr=number)
+    late = eval_level.suite_late(data, base)
     codes: list[str] = []
     if data.get("head_sha") != sha:
         codes.append("eval_head_mismatch")
@@ -114,8 +116,11 @@ def eval_level_check(number: str, sha: str, unit: str, progress: str) -> list[Vi
             codes.append("late_freeze_unstamped")
     try:
         eval_level.check_suite(data, found.verification_level, stamped=True)
+        eval_validation.require_freeze_timing(data, base, Path.cwd())
     except IntegrityError as error:
         codes.append(error.code)
+    except ValueError:
+        codes.append("not_frozen")
     if stamped is not None and stamped[2] != suite_hash(data)[:16]:
         codes.append("suite_hash_marker_mismatch")
     label = f"{git.repo()}@pr-{number}"
