@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+import graph_dispatch
+import graph_driver_cutover
 import graph_invalid_dispatch
 import graph_ledger
 import graph_mutations
@@ -184,7 +186,7 @@ def _recover_locked(path: Path, session: str, lease: int, clock: float, apply: b
 def recover_wave(
     path: Path, session: str, lease_seconds: int, now: float | None = None, apply: bool = True
 ) -> dict[str, Any]:
-    """Recover silent active waves atomically; leave unspawned or exhausted nodes for the human."""
+    """Recover silent workers under one lock; report unspawned nodes and refuse exhausted retries."""
     if lease_seconds <= 0:  # a non-positive lease marks every live worker stalled
         raise RecoveryRefusedError("invalid_lease", "lease_seconds must be positive")
     return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
@@ -222,6 +224,7 @@ def _parser() -> argparse.ArgumentParser:
             controller.add_argument("--prompt-file", required=True, type=Path)
         else:
             _add_unit_args(controller)
+    graph_dispatch.add_scope_arguments(commands)
     graph_ledger.add_parsers(commands.add_parser)
     spec = commands.add_parser("instantiate")
     spec.add_argument("state", type=Path)
@@ -249,21 +252,7 @@ def _parser() -> argparse.ArgumentParser:
     record = commands.add_parser("record-wave")
     record.add_argument("state", type=Path)
     record.add_argument("results_json")
-    for name in ("record-decision", "flush-decisions"):
-        decision = commands.add_parser(name)
-        decision.add_argument("state", type=Path)
-        decision.add_argument("--session", required=True)
-        decision.add_argument("--cite-quote")
-        if name == "record-decision":
-            decision.add_argument("--loop-id", required=True)
-            decision.add_argument("--revision", required=True, type=int)
-            decision.add_argument("--phase", required=True)
-            decision.add_argument("--decision", required=True)
-            decision.add_argument("--flip-condition")
-            decision.add_argument("--unit")
-            decision.add_argument("--chosen", help="answer to a recorded worker status")
-            decision.add_argument("--worker-status-seq", type=int, help="resolve this worker status with the decision")
-            decision.add_argument("--human-answer", action="store_true", help="human answered an approval gate")
+    graph_driver_cutover.add_parsers(commands.add_parser)
     unit = commands.add_parser("record-unit")
     unit.add_argument("state", type=Path)
     unit.add_argument("--session", required=True)
@@ -327,12 +316,16 @@ def main() -> int:
                 args.manifest,
                 {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
             )
+        elif args.command in {"assign-unit-scope", "append-unit-scope-note"}:
+            output = graph_dispatch.run_scope_command(args)
         elif args.command == "instantiate":
             output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "begin-wave":
-            output = begin_wave(args.state)
+            output = graph_dispatch.begin_wave(args.state)
         elif args.command == "record-wave":
-            output = record_wave(args.state, args.results_json)
+            output = graph_dispatch.record_wave(args.state, args.results_json)
+        elif args.command in graph_driver_cutover.COMMANDS:
+            output = graph_driver_cutover.run(args)
         elif args.command == "record-unit":
             if (args.status == "done") != (args.evidence is not None):
                 raise GraphError("done requires --evidence; dropped requires --reason")
@@ -375,7 +368,7 @@ def main() -> int:
         elif args.command == "inspect":
             output = inspect(args.state)
         elif args.command == "authorize-dispatch":
-            output = authorize_dispatch(
+            output = graph_dispatch.authorize_dispatch(
                 args.state,
                 args.session,
                 args.dispatch_id,
