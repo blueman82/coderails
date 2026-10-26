@@ -227,7 +227,7 @@ def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path:
         "head_sha": context[1] if context else None,
         "started": _now(),
     }
-    if permanent_pattern(cmd, cwd)[0] or secret_path(cmd):
+    if permanent_pattern(cmd, cwd, proof_only=True)[0] or secret_path(cmd):
         pr.append(path, **base, ended=_now(), verdict="refused", expect_matched=False)
         pr.trace("proof.run", "refused", "proof_cmd_destructive", who[0], who[1])
         return "refused"
