@@ -207,17 +207,29 @@ def loop_state_path(
     if present(canonical):
         return canonical
     try:
-        matches = sorted(
-            candidate / safe_session / "progress.json"
-            for candidate in root.iterdir()
-            if present(candidate / safe_session / "progress.json")
-        )
+        candidates = list(root.iterdir())
     except FileNotFoundError:
-        matches = []
+        candidates = []
+    except OSError:
+        if strict:
+            raise
+        candidates = []
+    matches: list[Path] = []
+    try:
+        for candidate in candidates:
+            mode = candidate.stat().st_mode
+            if stat.S_ISREG(mode):
+                continue
+            if not stat.S_ISDIR(mode):
+                raise OSError("graph root entry is not a directory")
+            path = candidate / safe_session / "progress.json"
+            if present(path):
+                matches.append(path)
     except OSError:
         if strict:
             raise
         matches = []
+    matches.sort()
     if strict and len(matches) > 1:
         raise OSError("more than one graph state matches this session")
     if strict:

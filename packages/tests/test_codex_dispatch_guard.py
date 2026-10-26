@@ -218,6 +218,21 @@ class DispatchGuardTests(unittest.TestCase):
         with patch.dict("os.environ", {"CODERAILS_AGENTIC_LOOP_DIR": str(root)}), self.assertRaises(OSError):
             loop_state_path(str(self.state.parent), "parent", strict=True)
 
+    def test_regular_root_file_does_not_block_ordinary_no_graph_spawn(self) -> None:
+        """A macOS metadata file is not a graph candidate."""
+        root = Path(self.scratch.name) / "loops"
+        root.mkdir()
+        (root / ".DS_Store").write_bytes(b"metadata")
+        self.tool_input.update(task_name="ordinary", message="Read documentation.")
+        with (
+            patch.dict("os.environ", {"CODERAILS_AGENTIC_LOOP_DIR": str(root)}),
+            patch.object(guard, "read_input", return_value=json.dumps(self.payload)),
+            patch.object(guard, "deny") as denial,
+        ):
+            self.assertIsNone(loop_state_path(str(self.state.parent), "parent", strict=True))
+            self.assertEqual(guard.main(), 0)
+            denial.assert_not_called()
+
     def test_strict_discovery_propagates_list_and_stat_errors(self) -> None:
         """Directory and candidate-file failures cannot look like proven absence."""
         root = Path(self.scratch.name) / "loops"
@@ -227,8 +242,22 @@ class DispatchGuardTests(unittest.TestCase):
             self.assertRaises(OSError),
         ):
             loop_state_path(str(self.state.parent), "parent", strict=True)
-        subprocess.run(["git", "init", "-q", str(self.state.parent)], check=True)
+        root.mkdir()
+        (root / "blocked").mkdir()
         original_stat = Path.stat
+
+        def graph_stat(path: Path) -> os.stat_result:
+            if path.name == "blocked":
+                raise OSError(errno.EACCES, "candidate unreadable")
+            return original_stat(path)
+
+        with (
+            patch.dict("os.environ", {"CODERAILS_AGENTIC_LOOP_DIR": str(root)}),
+            patch.object(Path, "stat", graph_stat),
+            self.assertRaises(OSError),
+        ):
+            loop_state_path(str(self.state.parent), "parent", strict=True)
+        subprocess.run(["git", "init", "-q", str(self.state.parent)], check=True)
 
         def stat_candidate(path: Path) -> os.stat_result:
             if path.name == "workflow.config.yaml":
