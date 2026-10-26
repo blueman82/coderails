@@ -345,7 +345,7 @@ def drive_once(
                     )
                 observation = graph_driver_process.observe(prompt.parent, 0.05)
                 if observation["status"] != "finished":
-                    return {**observation, "node": node_id}
+                    return {**observation, "node": node_id, "dispatch_id": identifier, "attempt": str(prompt.parent)}
                 parsed = _admit_result(state, node_id, result(prompt.parent / "output.jsonl", observation["exit_code"]))
                 if pause := _publication_pause(worker_checkout, node_id, parsed):
                     return pause
@@ -374,11 +374,18 @@ def drive_wave(
     provider: str,
     command: Command,
     result: Result,
+    wait_seconds: float = 30,
 ) -> dict[str, Any]:
-    """Hold one foreground lease until the current complete wave is recorded or paused."""
+    """Wait briefly for a wave; leave a running attempt intact for the next call."""
+    if not 0 <= wait_seconds <= 3600:
+        raise ValueError("wait-seconds must be between 0 and 3600")
+    deadline = time.monotonic() + wait_seconds
     with graph_driver_process.lease(path, ".controller.lock"):
         while True:
             report = drive_once(path, session, script, checkout, provider, command, result)
             if report["status"] != "running":
                 return report
-            time.sleep(0.5)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return {**report, "reason": "wait_limit"}
+            time.sleep(min(0.5, remaining))

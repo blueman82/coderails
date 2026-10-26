@@ -416,13 +416,20 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Run `graph.py drive <progress.json> --session <id> --checkout <worker-checkout>` in the foreground. Use
   `--checkout-map <json-file>` when workers need separate retained checkouts. Codex uses the current Codex OAuth login
   through `codex exec`; no API key is needed. The driver does not add a separate worker sandbox to a native Codex child.
+- `drive` waits at most 30 seconds by default. Set `--wait-seconds <0..3600>` to change that wait. A `running` result
+  with `reason: wait_limit` names the retained `attempt` directory and `dispatch_id`; it does not stop the worker.
+  Inspect `launch.json`, `heartbeat.json`, `stderr.log`, `output.jsonl`, and, when present, `terminal.json` there.
+  For a Claude worker, its sandbox launcher also names a separate `worker.stderr.log` in its scratch directory.
+  Keep JSONL output separate from stderr. Run the same `drive` command again to observe a finished attempt.
 - `active_missing_task` means a pending unit needs a task. Use `graph.py assign-unit-scope` while no wave is active, then
   run `drive` again. A root-owned step pauses for `graph.py record-driver-control` with a retained result file.
 - `publication_required` means the worker left source changes for the root to review and publish. The controller checks
   that the checkout is clean and its exact HEAD belongs to an open PR before it records the work as done. Review, tests,
   evaluation and the integrity check still govern merge.
 - After an interruption, run `drive` again with the retained checkout. A missing or stale worker heartbeat is
-  `unresolved`; inspect the saved attempt files before any retry. Do not start a second worker for that attempt.
+  `unresolved`; inspect the saved attempt files and wrapper PID before any recovery. The launch reservation blocks a
+  second worker for that attempt. If the wrapper died, keep the attempt and report the unresolved graph state for
+  operator review. The driver has no automatic kill, retry, or replacement operation for that attempt.
 
 ## Diff-manifest check warned or refused
 

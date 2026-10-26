@@ -29,6 +29,7 @@ def add_arguments(name: str, command: argparse.ArgumentParser) -> None:
         command.add_argument("--unit", required=True)
         command.add_argument("--scope", required=True)
     elif name == "drive":
+        command.add_argument("--wait-seconds", type=float, default=30)
         checkout = command.add_mutually_exclusive_group()
         checkout.add_argument("--checkout", type=Path)
         checkout.add_argument("--checkout-map", type=Path)

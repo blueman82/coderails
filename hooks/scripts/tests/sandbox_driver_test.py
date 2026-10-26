@@ -33,6 +33,7 @@ class SandboxDriverTests(unittest.TestCase):
                 "#!/usr/bin/env python3\n"
                 "import json, os, sys\nfrom pathlib import Path\n"
                 "Path(os.environ['DRIVER_ARGV_CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n"
+                "print('sandbox-diagnostic-marker', file=sys.stderr)\n"
                 "print(json.dumps({'type':'system','subtype':'init','session_id':'fake'}))\n"
                 "print(json.dumps({'type':'result','subtype':'success','is_error':False,"
                 "'structured_output':{'outcome':'done','evidence':'fake'}}))\n"
@@ -45,6 +46,7 @@ class SandboxDriverTests(unittest.TestCase):
                 **os.environ,
                 "PATH": str(bindir) + os.pathsep + os.environ["PATH"],
                 "DRIVER_ARGV_CAPTURE": str(capture),
+                "TMPDIR": str(base),
                 "CLAUDE_CODE_SESSION_ID": "",
             }
             launcher = ROOT / "scripts/sandbox/spawn_sandboxed_worker.py"
@@ -58,6 +60,11 @@ class SandboxDriverTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertNotIn("sandbox-diagnostic-marker", run.stdout)
+            self.assertIn("worker.stderr.log", run.stderr)
+            logs = list(base.glob("sandbox-worker.*/worker.stderr.log"))
+            self.assertEqual(len(logs), 1)
+            self.assertIn("sandbox-diagnostic-marker", logs[0].read_text())
             self.assertEqual(json.loads(run.stdout.splitlines()[0])["type"], "system")
             argv = json.loads(capture.read_text())
             self.assertIn("@anthropic-ai/sandbox-runtime@0.0.65", argv)

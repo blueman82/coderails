@@ -86,6 +86,7 @@ def run_wave(
     checkout: graph_driver_controller.Checkouts,
     script: Path,
     runner: Callable[..., dict[str, Any]],
+    wait_seconds: float = 30,
 ) -> dict[str, Any]:
     """Select Claude's role model and call the shared foreground controller."""
     models = {"fast-mechanical": "haiku", "default": "sonnet", "frontier": "opus"}
@@ -103,4 +104,5 @@ def run_wave(
         "claude",
         select,
         result,
+        wait_seconds=wait_seconds,
     )

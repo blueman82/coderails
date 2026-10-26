@@ -286,6 +286,13 @@ def _record_unit(args: argparse.Namespace) -> dict[str, Any]:
     return graph_controller.record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
 
 
+def _drive(args: argparse.Namespace) -> dict[str, Any]:
+    checkouts = graph_driver_controller.select_checkouts(args.checkout, args.checkout_map)
+    return graph_driver_claude.run_wave(
+        args.state, args.session, checkouts, Path(__file__), graph_driver_controller.drive_wave, args.wait_seconds
+    )
+
+
 def main() -> int:
     """Run one explicit graph operation with fail-closed CLI status."""
     args = parser().parse_args()
@@ -344,10 +351,7 @@ def main() -> int:
         elif args.command == "begin-driver-wave":
             output = graph_driver_adapter.begin_wave(args.state)
         elif args.command == "drive":
-            checkouts = graph_driver_controller.select_checkouts(args.checkout, args.checkout_map)
-            output = graph_driver_claude.run_wave(
-                args.state, args.session, checkouts, Path(__file__), graph_driver_controller.drive_wave
-            )
+            output = _drive(args)
         elif args.command == "authorize-driver":
             output = graph_driver_adapter.authorize(
                 args.state, args.session, args.dispatch_id, args.prompt_file, args.role, args.driver_run_id

@@ -74,6 +74,7 @@ def add_parsers(add_parser: Callable[[str], argparse.ArgumentParser]) -> None:
     drive = add_parser("drive")
     drive.add_argument("state", type=Path)
     drive.add_argument("--session", required=True)
+    drive.add_argument("--wait-seconds", type=float, default=30)
     checkout = drive.add_mutually_exclusive_group()
     checkout.add_argument("--checkout", type=Path)
     checkout.add_argument("--checkout-map", type=Path)
@@ -101,6 +102,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     model_role=record["contract"]["model_role"],
                 ),
                 graph_driver_codex.result,
+                wait_seconds=args.wait_seconds,
             )
         except (ValueError, OSError, TypeError, KeyError) as error:
             raise GraphError(str(error)) from error

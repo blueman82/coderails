@@ -165,7 +165,7 @@ def launch(worktree: str, prompt_file: str, model: str, *, driver: bool = False,
         f"spawn-sandboxed-worker: npx --yes @anthropic-ai/sandbox-runtime@{SRT_VERSION} "
         f"--settings {settings} claude -p <{prompt_file}> --model {model} --dangerously-skip-permissions\n"
     )
-    with (scratch / "worker.log").open("wb") as log:
+    with (scratch / "worker.log").open("wb") as log, (scratch / "worker.stderr.log").open("wb") as errors:
         if not driver:
             log.write(header.encode())
             log.flush()
@@ -177,7 +177,7 @@ def launch(worktree: str, prompt_file: str, model: str, *, driver: bool = False,
                 env=environment,
                 stdin=worker_input,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL if driver else subprocess.STDOUT,
+                stderr=errors if driver else subprocess.STDOUT,
             )
             if child.stdout is None:
                 raise RuntimeError("sandbox stdout pipe was not created")
@@ -190,6 +190,8 @@ def launch(worktree: str, prompt_file: str, model: str, *, driver: bool = False,
                 sys.stdout.buffer.write(chunk)
                 sys.stdout.buffer.flush()
             code = child.wait()
+    if driver and (scratch / "worker.stderr.log").stat().st_size:
+        print(f"sandbox worker stderr: {scratch / 'worker.stderr.log'}", file=sys.stderr)
     return code if code >= 0 else 128 - code
 
 
