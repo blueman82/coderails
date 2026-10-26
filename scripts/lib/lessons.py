@@ -69,13 +69,15 @@ def current(
     request_id: str | None = None,
     task: str | None = None,
     claim: str | None = None,
+    request_window: dict[str, Any] | None = None,
+    project_id: str | None = None,
 ) -> ma.Record | ma.Degraded | None:
     """Read the exact saved task request and its current note."""
     if ma.backend() == "off":
         return ma.Degraded("memory_backend_off")
     if not request_id or not task or claim is None:
         return ma.Degraded("muninn_old_ledger") if prior else None
-    result = mr.inspect(request_id, task, "lesson", claim)
+    result = mr.inspect(request_id, task, "lesson", claim, expected_window=request_window, expected_project=project_id)
     if isinstance(result, mr.Pending):
         return ma.Degraded("learning_pending")
     return result
@@ -118,6 +120,8 @@ def joined(ledger: ol.Ledger, include_decayed: bool = False, session: str = "") 
             request_id=field.get("request_id"),
             task=field.get("task"),
             claim=order["lesson"],
+            request_window=field.get("request_window"),
+            project_id=field.get("project_id"),
         )
         if isinstance(observed, ma.Degraded):
             if field.get("state") == "pending" and observed.reason == "learning_pending":

@@ -128,7 +128,7 @@ Never write those files by hand (`render` refuses an unmarked file with `handwri
 orchestrator session (`O="python3 ${CLAUDE_PLUGIN_ROOT}/scripts/lib/orders.py --dir <repo-key dir> --session <session_id>"`).
 Pass the separate logical `loop_id` copied from owned `progress.json`; it is not the session directory name.
 
-1. For each failure mode in this loop's retro, `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop <loop_id> --quote "<verbatim words of the owner's own prompt, 12-300 chars>"`. Add `--scope agnostic` for a lesson that applies
+1. For each failure mode in this loop's retro, `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop <loop_id>`. Add `--scope agnostic` for a lesson that applies
    to any repo. Before completion this stages the observation and any cited sync; it changes no lifecycle counters.
    An id must name the same failure mode and scope. A claim over 500 collapsed characters is refused, never truncated.
 2. After final progress updates, the native completion command runs `$O prepare --loop <loop_id>`. It validates the
@@ -158,12 +158,13 @@ It does not age orders. New loops cannot use it.
 The graduation predicate and the promotion selection are `$O predicate` and `lessons.py predicate`. This step is
 additive-or-recurrence-only: no metric-based removal anywhere.
 
-**Typed lessons (Muninn authoritative).** The cited claim of each order lives in Muninn as a `lesson` tagged `order` and
-`ord-<id>`; the one orders lock covers currentness lookup, tagged-claim reconciliation, bounded sync and local save.
-Current claims are reconciled even for degraded/pending local rows; a failed lookup retains a prior K-id and reports
-degradation. The cite must anchor in a user prompt (`--quote`): with none, the staged or completed local row has
-`muninn.state=degraded` and reason `no_user_cite`, exit 3, and
-`$O cite <id> --quote "<owner's words>"` attaches it later. Exit 3 prints `{"muninn": {... "reason_code": ...}}`:
+**Typed lessons (Muninn authoritative).** Each order requests a task-scoped Muninn review of the source session.
+The one orders lock covers local staging, request submission and later inspection. An unknown marker is saved before
+submission. A bound `order-request-*.json` journal saves a returned R_ ID before the final order save. If the reply
+is lost and no journal exists, do not submit again; inspect `muninn learn list` and the source window.
+A saved R_ ID stays pending until its completed receipt yields one exact active K_ note. The old `--quote` option is
+accepted for compatibility, ignored, and reported as `quote_ignored`; it does not supply evidence to this request.
+Exit 3 prints `{"muninn": {... "reason_code": ...}}`:
 **report that reason code in the retro; never skip it silently and never write the lesson to Markdown instead.**
 `memory.backend: off` (reason `memory_backend_off`, exit 0) is the only explicit opt-out. A first-time adoption of an old
 hand-written file is `$O import-legacy` (it archives a byte copy and retains the original). Verify the archive and

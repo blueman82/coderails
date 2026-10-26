@@ -48,7 +48,12 @@ def request(home: Path, args: list[str]) -> tuple[int, dict[str, Any]]:
             "id": rid,
             "state": "pending",
             "scope": {"project_id": project, "task": task},
-            "window": {"source": {"provider": "claude", "thread_id": session}, "from_line": 1, "through_line": 4},
+            "window": {
+                "source": {"provider": "claude", "thread_id": session},
+                "from_line": 1,
+                "through_line": 4,
+                "boundary_hash": "a" * 64,
+            },
             "receipt": None,
         },
     )

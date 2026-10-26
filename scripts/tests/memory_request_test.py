@@ -16,13 +16,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import decision_record as decisions  # noqa: E402
 from scripts.lib import memory_adapter as ma  # noqa: E402
 from scripts.lib import memory_request as mr  # noqa: E402
-from scripts.lib import orders  # noqa: E402
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
+from scripts.lib import orders_request as request_sync  # noqa: E402
 
 RID = "R_" + "a" * 32
 KID = "K_" + "b" * 32
 PROJECT = "coderails-project"
 SCOPE = {"project_id": PROJECT, "task": "loop-1"}
+WINDOW = {
+    "source": {"provider": "codex", "thread_id": "session-1"},
+    "from_line": 1,
+    "through_line": 4,
+    "boundary_hash": "a" * 64,
+}
 CLAIM = "2.5: Use the current request API."
 
 
@@ -30,16 +36,29 @@ class RequestTest(unittest.TestCase):
     def test_submit_is_pending_and_task_bound(self) -> None:
         with (
             mock.patch.object(mr, "probe", return_value=None),
-            mock.patch.object(ma, "_run", return_value=json.dumps({"id": RID, "scope": SCOPE})) as run,
+            mock.patch.object(
+                ma, "_run", return_value=json.dumps({"id": RID, "scope": SCOPE, "window": WINDOW})
+            ) as run,
         ):
-            self.assertEqual(mr.submit("session-1", "loop-1"), mr.Pending(RID))
+            self.assertEqual(mr.submit("session-1", "loop-1"), mr.Pending(RID, WINDOW, PROJECT))
         run.assert_called_once_with(["learn", "request", "--session", "session-1", "--task", "loop-1"])
 
     def test_pending_receipt_is_never_written(self) -> None:
-        detail = {"request": {"id": RID, "scope": SCOPE, "state": "running"}, "receipt": None}
+        detail = {"request": {"id": RID, "scope": SCOPE, "window": WINDOW, "state": "running"}, "receipt": None}
         with mock.patch.object(ma, "_run", return_value=json.dumps(detail)) as run:
-            self.assertEqual(mr.inspect(RID, "loop-1", "decision", CLAIM), mr.Pending(RID))
+            self.assertEqual(mr.inspect(RID, "loop-1", "decision", CLAIM), mr.Pending(RID, WINDOW, PROJECT))
         run.assert_called_once_with(["learn", "show", RID])
+
+    def test_recovered_request_rejects_a_changed_source_window(self) -> None:
+        detail = {
+            "request": {"id": RID, "scope": SCOPE, "window": {**WINDOW, "through_line": 5}, "state": "running"},
+            "receipt": None,
+        }
+        with mock.patch.object(ma, "_run", return_value=json.dumps(detail)):
+            self.assertEqual(
+                mr.inspect(RID, "loop-1", "decision", CLAIM, expected_window=WINDOW, expected_project=PROJECT),
+                ma.Degraded("muninn_bad_output"),
+            )
 
     def test_completed_receipt_needs_exact_current_note(self) -> None:
         detail = {
@@ -128,7 +147,7 @@ class RequestTest(unittest.TestCase):
         }
         order = {"id": "order-1", "lesson": claim, "muninn": previous}
         with mock.patch.object(lifecycle, "check_staged_identity"), mock.patch.object(mr, "submit") as submit:
-            field = orders.sync_order(order, "session-1", Path("/tmp"), {}, "loop-1")
+            field = request_sync.sync_order(order, "session-1", Path("/tmp"), {}, "loop-1")
         self.assertEqual(field, previous)
         submit.assert_not_called()
 

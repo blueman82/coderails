@@ -252,14 +252,14 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `order_pending_teardown` | completion saved but local apply or observation failed; retry tick with the same bound source. |
 | `order_retro_validator_unavailable` | schema3 retros need the matching retro_check.py validator; reconcile that source dependency before graduation. |
 | `order_already_ticked` | this session and logical loop were already counted; the tick was skipped (informational). |
-| `no_user_cite` | the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner prompt text>`. |
-| `legacy_uncited` | an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`. |
+| `no_user_cite` | Old direct-write adapter reason only. Current task requests read the source session and do not use `--quote`. |
+| `legacy_uncited` | An imported hand-written order has no Muninn request. Review the source session before any new request. |
 | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
 | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
 | `lesson_not_current` | no unambiguous current cited claim exists; inspect conflicting current evidence, or explicitly re-record a retracted/expired lesson with a fresh quote. |
 
-- Limits: only the orchestrator session can write (subagent threads are not citable); cites must anchor in a user
-  prompt; the hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Measurement note: compare
+- Limits: only the orchestrator session can request learning. Muninn reviews its source window; the old `--quote`
+  option is ignored. The hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Compare
   `by_reason_code` before and after a change; a rising `muninn_absent` or `refused_approval_needs_reply` is the signal.
   See `docs/decisions/2026-10-05-memory-authoritative.md`.
 
@@ -272,17 +272,19 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 - Query: `python3 -c "import json;[print(r['seq'],r['muninn']) for r in json.load(open('progress.json'))['decisions_absorbed']]"`,
   or `grep '"command": "decision\.' <agentic-loop dir>/<session_id>/trace.jsonl`. Chain check:
   `python3 -c "import json,sys;sys.path.insert(0,'.');from scripts.lib import decision_record as d;print(d.verify_chain(json.load(open('progress.json'))['decisions_absorbed']))"`.
-- Fix: read the reason in the table above. An authorising prompt of "yes" (`cite_too_short`) is expected to degrade: at
-  teardown run `flush_pending(path, session, transition=..., cite_quote="<a substantive sentence the owner typed>")`;
-  the same `seq` is patched to `written`. Rows are never deleted or rewritten to clear a degrade.
+- Fix: inspect the saved R_ ID with `muninn learn show <R_ID>`. A pending request stays pending. An unknown submission
+  must be reconciled against Muninn's request list before any new submission. A completed receipt must contain one
+  active note with the exact project, task, kind and text before the row becomes written. The old `cite_quote` input
+  is ignored by the request path. Rows are never deleted to clear a failure.
 - Limits: the chain is a cooperating-agent safeguard (a same-user agent can rewrite file and chain), and dropping the
   last row is detected only by the in-file head anchor, which the same agent can also rewrite. Measurement note: `docs/typed-records-measurement.md`.
 
-## Standing order stored without a cite, or a lesson missing from dispatch
+## Standing order request pending or unknown
 
-- Symptom: `orders.py record` exited 3 with `muninn.reason_code` (`no_user_cite`, `muninn_absent`, `cite_*`), or
+- Symptom: `orders.py record` exited 3 with `muninn.reason_code` (`learning_pending`,
+  `learning_request_unknown`, `muninn_absent`), or
   `lessons.py query` / `orders.py lessons` exited 3 with `{"degraded": ...}`, or an order you recorded is absent from the
-  list. Before completion, `record` stages bound inputs and syncs the cited claim without lifecycle effects. After
+  list. Before completion, `record` stages bound inputs and requests source review without lifecycle effects. After
   owned progress is durably complete, local apply records recurrence and aging in `orders.json`. A degraded store
   result retains any prior K-id. `lessons` never prints ledger text when Muninn is down (`memory.backend: off` is the
   explicit switch). Trace rows: `order.record|prepare|tick|render|import|cite`, `lesson.query|predicate`.
@@ -291,9 +293,11 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   is retracted, expired or superseded, reason `lesson_not_current`), or
   `grep -E '"command": "(order|lesson)\.' <agentic-loop dir>/<session_id>/trace.jsonl`. A hand edit of `orders.json` is
   refused with `order_chain_broken` naming the order.
-- Fix: read the reason in the table above. For `no_user_cite` / `legacy_uncited` run
-  `orders.py --dir <repo-key dir> cite <id> --quote "<verbatim words the owner typed>"` from the owning session. To
-  adopt the old hand-written file run `orders.py import-legacy`. It archives an exact byte copy under the next free
+- Fix: read the reason in the table above. For a saved R_ ID, inspect the same request. An `order-request-*.json`
+  journal can restore the exact returned ID after a failed final order save. For an unknown submission without that
+  journal, inspect `muninn learn list` and its exact source window, project and task; do not submit again when the ID is not
+  proven. `orders.py cite <id>` inspects a saved request. Its old `--quote` option is accepted, ignored and reported
+  as `quote_ignored`. To adopt the old hand-written file run `orders.py import-legacy`. It archives an exact byte copy under the next free
   `standing-orders.legacy*.md` name and retains the source (`archived_to`, `source_retained: true`). Check the ledger
   and archive; retire the hand-written `standing-orders.md` before `orders.py render`. Use typed orders thereafter.
 - Apply contract: use `--dir <repo-key dir> --session <provider session>` with the separate logical `--loop` copied

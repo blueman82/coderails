@@ -771,6 +771,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `scripts/lib/git_common.py` | GitHub repository/PR operations and newest trusted exact-head artifact selection. Requires a `github.com` remote. |
 | `scripts/lib/{config,review_artifact,eval_artifact,artifact_io}.py` | Shared root-provider config and structured artifact operations. |
 | `scripts/lib/memory_request.py`, `memory_adapter.py` and Codex mirrors | Decisions and orders call `memory_request.py`. It submits `muninn learn request --task` and saves the R_ ID. It checks `learn show`, the completed receipt, `know list --task`, and `know show` before it marks an exact active K_ note as written. A pending request stays pending. An uncertain submission stays unknown and is not sent again. `memory_adapter.py` still holds shared result types and generated-view writing; its old `add/list` CLI remains for compatibility and must not be used by new decision or order work. `memory.backend: off` is the only mode without Muninn. Reason codes are in `memory_reasons.py` and the runbook. |
+| `scripts/lib/orders_request.py` and Codex mirror | Builds an unknown marker for a new order claim. `orders.py` saves that marker before it calls Muninn. It saves a returned R_ ID in an atomic `order-request-*.json` journal bound to the repository, session, task, claim, project and source window before the final order save. A retry checks that exact ID and window. A marker without a valid journal stops automatic resubmission. |
 | `scripts/lib/decision_record.py` (+ Codex mirror) | Appends hash-chained loop decisions before it contacts Muninn. It saves the R_ request ID outside the row hash. `flush_pending` checks that same request. It marks the row written only after an exact current note exists. A missing or changed note keeps teardown pending. |
 | `scripts/lib/{eval_validation,eval_execution}.py` | Eval criteria and command/control verification. Gate smoke runs in a detached worktree at the trusted SHA. |
 | `scripts/sandbox/spawn_sandboxed_worker.py` | Guard dispatch before scratch allocation; run a separate Claude process through pinned srt and retain its exit status. |
@@ -809,8 +810,8 @@ The loop's `spec.md`, `plan.md`, and `progress.json` live in `~/.coderails/agent
 Both provider graph CLIs call `decision_record.record` through their native state locks:
 
 ```text
-graph.py record-decision <progress.json> --session <id> --loop-id <loop-id> --revision <revision> --phase <phase> --decision <text> [--flip-condition <text>] [--unit <id>] [--cite-quote <verbatim user quote>]
-graph.py flush-decisions <progress.json> --session <id> [--cite-quote <verbatim user quote>]
+graph.py record-decision <progress.json> --session <id> --loop-id <loop-id> --revision <revision> --phase <phase> --decision <text> [--flip-condition <text>] [--unit <id>]
+graph.py flush-decisions <progress.json> --session <id>
 ```
 
 Read the current `loop_id` and `revision` from `progress.json` before each call. Use these commands for decisions;

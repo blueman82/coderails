@@ -22,6 +22,8 @@ class Pending:
     """A saved Muninn request that has no verified current note yet."""
 
     request_id: str
+    window: dict[str, Any] | None = None
+    project_id: str | None = None
 
 
 def _json(value: str | ma.Degraded) -> dict[str, Any] | ma.Degraded:
@@ -70,15 +72,35 @@ def submit(session: str, task: str) -> Pending | ma.Degraded:
     if isinstance(response, ma.Degraded):
         return response
     scope = _object(response.get("scope"))
+    window = _object(response.get("window"))
     ident = response.get("id")
     if not isinstance(ident, str) or REQUEST_ID.fullmatch(ident) is None or scope is None:
         return ma.Degraded("muninn_bad_output")
-    if scope.get("project_id") is None or scope.get("task") != task:
+    source = _object(window.get("source")) if window is not None else None
+    if (
+        not isinstance(scope.get("project_id"), str)
+        or scope.get("task") != task
+        or window is None
+        or source is None
+        or not isinstance(source.get("provider"), str)
+        or not isinstance(source.get("thread_id"), str)
+        or type(window.get("from_line")) is not int
+        or type(window.get("through_line")) is not int
+        or not isinstance(window.get("boundary_hash"), str)
+    ):
         return ma.Degraded("muninn_bad_output")
-    return Pending(ident)
+    return Pending(ident, window, scope["project_id"])
 
 
-def inspect(request_id: str, task: str, kind: str, claim: str) -> ma.Record | Pending | ma.Degraded:
+def inspect(
+    request_id: str,
+    task: str,
+    kind: str,
+    claim: str,
+    *,
+    expected_window: dict[str, Any] | None = None,
+    expected_project: str | None = None,
+) -> ma.Record | Pending | ma.Degraded:
     """Accept only a completed receipt and one eligible, exact current note."""
     if REQUEST_ID.fullmatch(request_id) is None or TASK.fullmatch(task) is None:
         return ma.Degraded("bad_record")
@@ -91,8 +113,12 @@ def inspect(request_id: str, task: str, kind: str, claim: str) -> ma.Record | Pe
     scope = _object(request.get("scope"))
     if scope is None or not isinstance(scope.get("project_id"), str) or scope.get("task") != task:
         return ma.Degraded("muninn_bad_output")
+    if expected_project is not None and scope["project_id"] != expected_project:
+        return ma.Degraded("muninn_bad_output")
+    if expected_window is not None and request.get("window") != expected_window:
+        return ma.Degraded("muninn_bad_output")
     if request.get("state") in {"pending", "running", "waiting"}:
-        return Pending(request_id)
+        return Pending(request_id, _object(request.get("window")), scope["project_id"])
     if request.get("state") != "completed":
         return ma.Degraded("learning_request_failed")
     receipt = _object(detail.get("receipt"))

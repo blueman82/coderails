@@ -58,7 +58,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("results_json")
         if name in {"record-decision", "flush-decisions"}:
             command.add_argument("--session", required=True)
-            command.add_argument("--cite-quote")
+            command.add_argument("--cite-quote", help="deprecated compatibility input; ignored by task review")
         if name == "record-decision":
             command.add_argument("--loop-id", required=True)
             command.add_argument("--revision", required=True, type=int)

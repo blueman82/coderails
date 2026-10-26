@@ -176,7 +176,7 @@ def _trace(command: str, outcome: str, reason: str, session: str, loop_id: str |
 def sync_row(
     row: dict[str, Any], loop_id: str, session_id: str, prompt_raw: str, cite_quote: str | None = None
 ) -> dict[str, Any]:
-    """Queue one task review, or inspect its saved request. A request is not a write."""
+    """Queue or inspect task review; prompt and quote inputs are old, ignored inputs."""
     claim = _collapse(f"{row['phase']}: {row['decision']}")
     request_id = _as_row(row.get("muninn")).get("request_id")
     res = (
