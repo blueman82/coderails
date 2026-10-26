@@ -415,7 +415,10 @@ record needs a nonempty manifest. Register `--base-branch <parent>` with
 `graph.py add-unit` before the first push of a stacked branch; once a PR exists,
 its live base must match that recorded branch. The command checks staged files
 and the complete PR diff, including both rename paths, against the unit manifest
-before transport. A recorded worktree must match the current checkout.
+before transport. Register an absolute worktree path with `add-unit --worktree`, or use
+`assign-worktree --session S --loop-id L --unit N --worktree ABS_PATH` after checkout setup.
+The latter fills an unassigned existing unit under the graph lock, even during an active wave;
+it preserves the revision and refuses a different assignment. The recorded path must match the Git checkout root at push time.
 
 - Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)
   refuses with `diff_manifest:<code>` and prints `! diff_manifest <code>: <path>` on stderr. The check is ON by default
@@ -451,6 +454,10 @@ before transport. A recorded worktree must match the current checkout.
   nonblank string `session_id` and `loop_id` fields. Missing, malformed or mismatched metadata refuses `manifest_unreadable`;
   `push.py` reports `publication:graph_owner_missing` before transport when either owner field is blank or absent.
   That refusal writes `publication/refused/graph_owner_missing` to the publication session trace.
+  A missing, relative or foreign checkout reports `publication:worktree_invalid` with a matching refusal trace.
+  A PR base that differs from the recorded base reports `publication:base_mismatch`. Staged or branch paths outside
+  the unit manifest report `diff_manifest:out_of_manifest`. These preflight refusals write `publication/refused/<code>`
+  before the later policy gate runs; `trace.by_reason` can count them.
   `manifest: []` refuses publication. A session that owns a graph unit in this worktree must supply both flags.
   Without a matching graph unit, standalone publication uses the policy alone. Unit and policy
   manifests both apply, so a unit cannot widen policy scope. Custom policies retain the default denylist. An unreadable config
@@ -806,7 +813,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
 
 ## Dispatch refused: `dispatch_*` or `role_mismatch`
 
-- Symptom: `loop_dispatch_guard` (Claude `Agent`, Codex `spawn_agent`) denies a spawn in a graph-bound session, or
+- Symptom: `loop_dispatch_guard` (Claude `Agent`, Codex `spawn_agent`, which this Codex host reports to hooks as
+  `collaborationspawn_agent`) denies a spawn in a graph-bound session, or
   `begin-wave` / `graph.py authorize-dispatch` fails. The hook message names the failure; the reason code is a row in the
   loop's `recovery-trace.jsonl` (`authorize-dispatch/refused/<code>`, allowed spawns are `authorized/dispatch_authorized`).
 - Query: `python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]` counts `dispatch_authorized` and every refusal code.
@@ -859,7 +867,8 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `security-reviewer`, `source-auditor`) are role-contained;
   `spec-reviewer` (empty capability list), the `shell.raw` roles (`docs-auditor`, `wiki-writer`, `proof-author`) and nodes
   with no `agent_role` (default `loop-worker`) may run as explicit `general-purpose` on Claude, or with omitted or exact
-  role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent` and `spawn_agent` only, so `SendMessage` on
+  role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent`, `spawn_agent`, and
+  `collaborationspawn_agent` only, so `SendMessage` on
   Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
   (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
   `spawn_agent` function-call message with its v2 record, role and consumed authorization; encrypted messages also require

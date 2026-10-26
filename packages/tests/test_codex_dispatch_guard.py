@@ -137,6 +137,12 @@ class DispatchGuardTests(unittest.TestCase):
         del self.payload["tool_use_id"]
         self.assertEqual(self._run(), (True, 0))
 
+    def test_native_collaboration_tool_name_reaches_authority(self) -> None:
+        """Codex's automatic hook name routes the same native spawn to graph authorization."""
+        self.payload["tool_name"] = "collaborationspawn_agent"
+        self.payload["tool_use_id"] = "call_501f6560969348d29d04eeef99cb2650"
+        self.assertEqual(self._run(), (False, 1))
+
     def test_arbitrary_task_name_without_an_envelope_is_denied(self) -> None:
         """The old regex let any non-graph-looking spawn through; in a graph-bound session it is now denied."""
         self.tool_input.update(task_name="ordinary", message="Read documentation.")

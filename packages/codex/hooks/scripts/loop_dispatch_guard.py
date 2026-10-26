@@ -80,7 +80,7 @@ def refuse_uncontained_worker(message: str, settings: dict[str, object], session
 def main() -> int:
     """Deny any spawn in a graph-bound session that does not carry a valid, unused, role-correct envelope."""
     payload = payload_object(read_input())
-    if text_field(payload, "tool_name") != "spawn_agent":
+    if text_field(payload, "tool_name") not in ("spawn_agent", "collaborationspawn_agent"):
         deny("Codex graph workers must use native spawn_agent.")
         return 0
     tool_input = object_field(payload, "tool_input")

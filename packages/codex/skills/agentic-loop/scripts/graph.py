@@ -18,7 +18,7 @@ import graph_semantics
 import graph_spec
 import graph_stops
 from graph_completion import complete, verify_completion
-from graph_controller import add_unit, instantiate, start
+from graph_controller import add_unit, assign_worktree, instantiate, start
 from graph_dispatch import apply_record as _apply_record
 from graph_dispatch import authorize_dispatch, begin_wave, record_wave
 from graph_identity import GraphError, next_attempt, task_name
@@ -190,9 +190,12 @@ def recover_wave(
     return _recover_locked(path, session, lease_seconds, time.time() if now is None else now, apply)
 
 
-def _add_unit_args(controller: argparse.ArgumentParser) -> None:
+def _add_unit_args(controller: argparse.ArgumentParser, *, assign_only: bool = False) -> None:
     """Register work-unit ownership and disposition fields."""
     controller.add_argument("--unit", required=True)
+    if assign_only:
+        controller.add_argument("--worktree", required=True)
+        return
     controller.add_argument("--depends-on", action="append", default=[])
     controller.add_argument("--join", action="store_true")
     controller.add_argument("--manifest", action="append", default=[])
@@ -213,7 +216,7 @@ def _parser() -> argparse.ArgumentParser:
     for name in ("begin-wave", "inspect", "summarize", "collection"):
         command = commands.add_parser(name)
         command.add_argument("root" if name == "collection" else "state", type=Path)
-    for name in ("start", "add-unit"):
+    for name in ("start", "add-unit", "assign-worktree"):
         controller = commands.add_parser(name)
         controller.add_argument("state", type=Path)
         controller.add_argument("--session", required=True)
@@ -221,7 +224,7 @@ def _parser() -> argparse.ArgumentParser:
         if name == "start":
             controller.add_argument("--prompt-file", required=True, type=Path)
         else:
-            _add_unit_args(controller)
+            _add_unit_args(controller, assign_only=name == "assign-worktree")
     graph_ledger.add_parsers(commands.add_parser)
     spec = commands.add_parser("instantiate")
     spec.add_argument("state", type=Path)
@@ -317,16 +320,11 @@ def main() -> int:
         elif args.command == "add-unit":
             fields: dict[str, Any] = {"model_role": args.model_role, "write_scope": args.write_scope}
             fields.update(lessons=args.lesson, disposition=(args.disposition, args.named_blocker, args.removal_ticket))
-            output = add_unit(
-                args.state,
-                args.session,
-                args.loop_id,
-                args.unit,
-                args.depends_on,
-                args.join,
-                args.manifest,
-                {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
-            )
+            unit_args = (args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest)
+            contract = {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree}
+            output = add_unit(*unit_args, contract)
+        elif args.command == "assign-worktree":
+            output = assign_worktree(args.state, args.session, args.loop_id, args.unit, args.worktree)
         elif args.command == "instantiate":
             output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "begin-wave":
