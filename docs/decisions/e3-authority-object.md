@@ -144,3 +144,12 @@ The phrase heuristics (`invoked()`, negation, question and quote handling, about
   `authority_refused_unsafe_session` and nothing written (`scripts/tests/authority_session_guard_test.py`). A failed substitution
   therefore fails loudly instead of reporting a grant no hook can see. Human action to close: run `/coderails:authorize` once in a
   live session and confirm the printed result names the real session id.
+
+## Follow-up: retire old authority readers, 26 October 2026
+
+This source change removes the one-release readers. A valid authority object now needs `granted_by: command`.
+Objects without that field, or with `legacy_phrase`, grant nothing. The `create` alias no longer runs.
+The Claude and Codex `autonomous_gate.py` hooks ignore old `crack_on_active` flags. Grant and revoke leave those files on disk.
+The file check before this source change found 255 loop session directories, no authority objects, and two old flags.
+The Codex plugin data directory had no sessions. This check does not prove that installed plugins use this source.
+Check retained state again before the release. Then install both providers and test `authorise` and revoke in live sessions.

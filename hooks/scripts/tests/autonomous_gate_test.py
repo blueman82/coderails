@@ -203,14 +203,15 @@ class AutonomousTests(HookCase):
         self.assertEqual(self.authority("narrow")["scope"], [])
         self.assertFalse(self.ask("narrow"))
 
-    def test_legacy_phrase_and_fieldless_objects_are_honoured(self) -> None:
-        """Objects the old hook wrote (no granted_by, or legacy_phrase) keep denying until expiry."""
+    def test_legacy_phrase_and_fieldless_objects_are_ignored(self) -> None:
+        """Objects from the old hook grant nothing and remain on disk."""
         for session, extra in (("lp1", {}), ("lp2", {"granted_by": "legacy_phrase"})):
             self.grant(session)
             obj = self.authority(session)
             del obj["granted_by"]
             (self.loop / session / "authority.json").write_text(json.dumps(obj | extra), encoding="utf-8")
-            self.assertTrue(self.ask(session), session)
+            self.assertFalse(self.ask(session), session)
+            self.assertTrue((self.loop / session / "authority.json").exists())
 
     def test_authorise_command_is_user_only_and_runs_the_typed_grant(self) -> None:
         """/coderails:authorise cannot be model-invoked and its body pre-executes authority.py grant."""
@@ -285,8 +286,8 @@ class AutonomousTests(HookCase):
         self.grant("t1")
         self.assertTrue(self.ask("t1"))
 
-    def test_corrupt_authority_is_traced_and_legacy_flag_still_honoured(self) -> None:
-        """Corrupt authority = no valid authority: allowed without a flag, legacy-denied with one; traced, no crash."""
+    def test_corrupt_authority_and_legacy_flag_allow_input(self) -> None:
+        """A corrupt object grants nothing even when an old flag exists."""
         (self.loop / "c1").mkdir(parents=True)
         (self.loop / "c1/authority.json").write_text("{not json", encoding="utf-8")
         self.assertFalse(self.ask("c1"))
@@ -294,26 +295,26 @@ class AutonomousTests(HookCase):
         (self.loop / "c2").mkdir(parents=True)
         (self.loop / "c2/authority.json").write_text("[1]", encoding="utf-8")
         (self.loop / "c2/crack_on_active").write_text("\n", encoding="utf-8")
-        self.assertTrue(self.ask("c2"))
-        self.assertEqual(self.reasons("c2"), ["authority_corrupt_ignored", "crack_on_legacy_flag"])
+        self.assertFalse(self.ask("c2"))
+        self.assertEqual(self.reasons("c2"), ["authority_corrupt_ignored"])
 
-    def test_legacy_flag_denies_with_traced_migration_code(self) -> None:
-        """A legacy-stamped session stays denied with a traced code and a clear-it message, never silently."""
+    def test_legacy_flag_is_ignored_and_retained(self) -> None:
+        """An old flag grants nothing and stays on disk."""
         (self.loop / "old").mkdir(parents=True)
         (self.loop / "old/crack_on_active").write_text("\n", encoding="utf-8")
         result = self.invoke("autonomous_gate", self.ask_payload("old"))
         self.assertEqual(result.returncode, 0, result.stderr)
-        reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
-        self.assertIn("rm ", reason)
-        self.assertIn("crack_on_active", reason)
-        self.assertEqual(self.reasons("old"), ["crack_on_legacy_flag"])
+        self.assertFalse(result.stdout.strip())
+        self.assertEqual(self.reasons("old"), [])
+        self.assertTrue((self.loop / "old/crack_on_active").exists())
         self.assertFalse((self.loop / "old/authority.json").exists())
 
-    def test_live_authority_wins_over_legacy_flag(self) -> None:
-        """When both exist the object decides, so the legacy flag is only a fallback."""
+    def test_live_authority_works_with_old_flag(self) -> None:
+        """A typed object denies while the old flag stays on disk."""
         (self.loop / "both").mkdir(parents=True)
         (self.loop / "both/crack_on_active").write_text("\n", encoding="utf-8")
         self.grant("both")
+        self.assertTrue((self.loop / "both/crack_on_active").exists())
         self.assertTrue(self.ask("both"))
         self.assertEqual(self.reasons("both")[-1], "authority_deny")
 
@@ -337,15 +338,14 @@ class AutonomousTests(HookCase):
         """Grant through the mirrored Codex authority.py with only the Claude loop-dir variable set."""
         self.grant(session, cli=CODEX_AUTHORITY_CLI, env={"PLUGIN_DATA": str(self.directory / "plugin")})
 
-    def test_revoke_ends_denial_even_with_legacy_flag(self) -> None:
-        """A legacy flag present before or created after the grant must not outlive revoke."""
+    def test_revoke_ends_denial_and_retains_old_flag(self) -> None:
+        """Grant and revoke leave an old flag unchanged."""
         (self.loop / "lg").mkdir(parents=True)
         (self.loop / "lg/crack_on_active").write_text("\n", encoding="utf-8")
         self.grant("lg")
-        self.assertFalse((self.loop / "lg/crack_on_active").exists())
-        (self.loop / "lg/crack_on_active").write_text("\n", encoding="utf-8")
+        self.assertTrue((self.loop / "lg/crack_on_active").exists())
         self.revoke("lg")
-        self.assertFalse((self.loop / "lg/crack_on_active").exists())
+        self.assertTrue((self.loop / "lg/crack_on_active").exists())
         self.assertFalse(self.ask("lg"))
 
     def test_codex_gate_shares_claude_loop_root_so_one_cli_revokes(self) -> None:
@@ -355,16 +355,15 @@ class AutonomousTests(HookCase):
         self.revoke("cx")
         self.assertFalse((self.loop / "cx/authority.json").exists())
 
-    def test_codex_legacy_flag_cleared_by_grant_and_revoke(self) -> None:
-        """The Codex legacy flag (under PLUGIN_DATA) is removed on grant and on CLI revoke."""
+    def test_codex_legacy_flag_retained_by_grant_and_revoke(self) -> None:
+        """The Codex old flag remains unchanged during grant and revoke."""
         flag = self.directory / "plugin/sessions/cl/crack_on_active"
         flag.parent.mkdir(parents=True)
         flag.write_text("\n", encoding="utf-8")
         self.codex_grant("cl")
-        self.assertFalse(flag.exists())
-        flag.write_text("\n", encoding="utf-8")
+        self.assertTrue(flag.exists())
         self.revoke("cl", PLUGIN_DATA=str(self.directory / "plugin"))
-        self.assertFalse(flag.exists())
+        self.assertTrue(flag.exists())
 
 
 if __name__ == "__main__":
