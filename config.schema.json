@@ -27,7 +27,7 @@
       ],
       "default": 30,
       "status": "enforced_by_code",
-      "description": "Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Age alone never makes a page stale (a source must also have moved)."
+      "description": "Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Without comparable repo sources, an old candidate is stale on a date-only basis."
     },
     "wiki_supervision": {
       "type": [

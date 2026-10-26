@@ -24,7 +24,14 @@ The orchestrator handles both ends: Phase 2 (plan-level wiki read before coding 
 
 **Delivery is repo-specific.** If `main` is ruleset-protected, the wiki agent must deliver via a branch + PR off freshly-fetched `origin/main`, merged like any other change. Only where a repo *deliberately* permits direct wiki commits (e.g. a wiki dir gated behind a bypass env var) is a direct push acceptable — and even then it must be verified to have landed.
 
-**Then verify with `python3 scripts/verify_merged.py <wiki PR#> --grep <string unique to the page> --path <wiki-file>`** (it fetches, checks `mergedAt` and that the merge commit is reachable from `origin/<base>`, and greps the content at `origin/<base>`). Ancestry of the agent's own commit is not proof: a squash merge rewrites the SHA, so that commit is never an ancestor even when its content landed. The script trusts ancestry only for true two-parent merge commits, the same rule as `verify-merged-pr`; `git merge-base --is-ancestor` remains the right probe only for *detecting* an unpushed commit before merge. A committed-but-unpushed SHA is a textbook false-success; the "committed" ping is a claim, not evidence (Phase 12).
+**Then verify in the wiki repository.** Set `wiki_repo` to the absolute wiki repo or worktree path reported by the wiki writer. Replace the PR number, unique text and wiki file path in this command:
+
+```bash
+wiki_repo="<absolute wiki repo or worktree path>"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/verify_merged.py" <wiki-PR-number> --repo "$wiki_repo" --grep '<text unique to the page>' --path '<wiki page path>'
+```
+
+The script fetches the wiki PR's base, checks `mergedAt` and merge-commit reachability, and checks the page content on that base. Ancestry of the agent's own commit is not proof: a squash merge rewrites the SHA. The script trusts ancestry only for a true two-parent merge commit, the same rule as `verify-merged-pr`. Use `git merge-base --is-ancestor` only to detect an unpushed commit before merge. A committed-but-unpushed SHA is not delivery evidence (Phase 12).
 
 **Docs-drift check — run `/sync-docs` at the loop boundary**
 

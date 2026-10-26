@@ -225,6 +225,9 @@ class SkillPairTests(unittest.TestCase):
             self.assertIn("scripts/verify_merged.py", text)
             self.assertNotIn('&& echo "on origin', text)
         self.assertIn("scripts/verify_merged.py", phase9)
+        self.assertIn('python3 "${CLAUDE_PLUGIN_ROOT}/scripts/verify_merged.py"', phase9)
+        self.assertIn("wiki_repo=", phase9)
+        self.assertIn('--repo "$wiki_repo"', phase9)
         self.assertNotIn("Do **not** confirm a merge with `git merge-base --is-ancestor", phase9)
 
 

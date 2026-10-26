@@ -737,7 +737,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 |---|---|---|---|---|---|
 | `project` | string/null | `null` | - | read_by_prose_only | Project name written by /coderails:init; read by command prose only. |
 | `wiki_path` | string/null | `null` | - | enforced_by_code | LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate. |
-| `wiki_stale_days` | integer | `30` | - | enforced_by_code | Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Age alone never makes a page stale (a source must also have moved). |
+| `wiki_stale_days` | integer | `30` | - | enforced_by_code | Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Without comparable repo sources, an old candidate is stale on a date-only basis. |
 | `wiki_supervision` | string/null | `"discuss"` | - | read_by_prose_only | wiki-ingest mode: discuss (pause before writing) or autonomous. |
 | `wiki_git_worktree` | boolean/null | `true` | - | read_by_prose_only | true = PR flow for wiki commits; false = commit directly to the vault. |
 | `wiki_git_bypass_flag` | string/null | `null` | - | read_by_prose_only | Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1. |

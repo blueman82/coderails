@@ -66,7 +66,7 @@ python3 <path to scripts/wiki_lint.py, relative to this SKILL.md: ../../scripts/
 
 It prints JSON `{stale_days, candidates, stale, data_gaps}`. `stale_days` is `wiki_stale_days`, read through the
 typed config loader (default 30). A page is a **candidate** when `last_updated` is more than `stale_days` old; it is
-**stale** only when a source also moved. Date alone is not staleness, and `sources/`, `investigations/` and the other
+**stale** when a source moved, or when no repo source can be compared and the date-only fallback applies. `sources/`, `investigations/` and the other
 point-in-time or structural directories are excluded by the script.
 
 How the script decides, so the report can cite it: each `sources:` entry resolves in this order and stops at the first
@@ -92,11 +92,13 @@ Classify each entry of `stale`:
   does not cover, it is not drift. If it changed something the page states, report a **source-drift** finding naming
   every moved source and its exact commit, so the follow-up is a real `/wiki-ingest` rather than a date edit. Count it
   under **missing cross-references** in Step 5's total; say "source drift" in the prose.
+- `basis: date_only` — report the page as stale because it has no comparable repo source and is older than
+  `wiki_stale_days`. Name the weaker evidence. Do not claim source drift or bump `last_updated` to close the finding.
 - A candidate absent from `stale` is not a finding: do not report it and do not bump `last_updated`; a blind bump
   turns "unverified" into "verified" with no verification.
 - Every `data_gaps` entry (unresolvable source, empty commit date, missing `last_updated`, `no_repo_sources`) is a **data gap**: name the
   page and entry. Never treat it as unchanged, and never let it clear a page other sources already flagged.
-  Pages without any comparable repo source remain data gaps. This lint is advisory and trusts the supplied page dates,
+  Pages without any comparable repo source also use the date-only stale fallback. This lint is advisory and trusts the supplied page dates,
   sources and configuration. A missing repo or vault is reported unavailable with exit 2; repair the input and rerun.
 
 **Orphan pages**: Zero inbound links (exclude index.md, log.md, AGENTS.md).
