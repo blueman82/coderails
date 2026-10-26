@@ -76,6 +76,23 @@ def _native_payload() -> dict[str, object]:
     return payload
 
 
+def _identity(payload: dict[str, object]) -> tuple[str, str] | None:
+    """Refuse malformed or unsafe native identity before any path lookup."""
+    session_id = payload.get("session_id")
+    cwd = payload.get("cwd")
+    if not isinstance(session_id, str) or not session_id.strip():
+        code = "dispatch_session_required"
+    elif not safe_session(session_id):
+        code = "dispatch_unsafe_session"
+    elif not isinstance(cwd, str) or not cwd.strip():
+        code = "dispatch_cwd_required"
+    else:
+        return session_id, cwd
+    log(f"hook=loop_dispatch_guard outcome=refused reason_code={code}")
+    deny(f"Graph worker dispatch requires a safe session id and working directory [reason_code={code}].")
+    return None
+
+
 def _check() -> int:
     """Check one native spawn against graph ownership and its single-use dispatch record."""
     deadline = time.monotonic() + 7.0
@@ -95,11 +112,10 @@ def _check() -> int:
     ):
         deny("Graph worker dispatch requires a nonblank native role when agent_type is supplied.")
         return 0
-    session_id = text_field(payload, "session_id")
-    cwd = text_field(payload, "cwd")
-    if not safe_session(session_id) or not cwd.strip():
-        deny("Graph worker dispatch requires a session id and working directory.")
+    identity = _identity(payload)
+    if identity is None:
         return 0
+    session_id, cwd = identity
     config = config_path(cwd, strict=True, timeout_seconds=_remaining_budget(deadline))
     if config:
         try:
