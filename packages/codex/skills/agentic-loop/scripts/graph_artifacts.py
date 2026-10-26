@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from graph_data import array_value, event_payload, load_evidence, nonempty, object_value, read_records
+from graph_data import array_value, load_evidence, nonempty, object_value
 from graph_identity import GraphError, is_frozen_loop_evals
-from json_types import JsonValue
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from scripts.lib import proof_results, proof_suite  # noqa: E402
 from scripts.lib.eval_integrity import IntegrityError, verify_suite  # noqa: E402
 
 
@@ -72,6 +71,43 @@ def validate_evals(state: dict[str, Any], revision: int | None, path: Path) -> N
         raise GraphError(f"evals oracle integrity: {error}") from error
 
 
+def _validate_proofs(state: dict[str, Any], proof_path: Path) -> None:
+    """Require a valid no-proof disposition, or every frozen proof satisfied by a controller-recorded run row."""
+    results = proof_path.with_name(proof_results.RESULTS_NAME)
+    try:
+        proof, rows, cutoff = proof_suite.active_suite(proof_path, state)
+    except proof_results.ChainError as error:
+        raise GraphError(f"proof_chain_broken: {error}") from error
+    except proof_suite.SuiteError as error:
+        raise GraphError(str(error)) from error
+    if proof is None:
+        code = proof_results.disposition_reason(state, rows)
+        if code:
+            proof_results.trace("proof.gate", "blocked", code, state["session_id"], state["loop_id"])
+            raise GraphError(f"proof evidence is missing and has no valid disposition ({code})")
+        return
+    _matching(proof, state, "proof")
+    proofs = array_value(proof.get("proofs"), "proof.proofs")
+    withdrawn = array_value(proof.get("withdrawn_proofs", []), "proof.withdrawn_proofs")
+    if len(proofs) + len(withdrawn) > 100:
+        raise GraphError("proofs+withdrawn_proofs exceeds cap of 100")
+    if not proofs:
+        if withdrawn:
+            offenders, _ = proof_results.verify(proof, results, state, cutoff)
+            if offenders:
+                raise GraphError("frozen proofs are not verified: " + ", ".join(offenders))
+        if proof_results.disposition_reason(state, rows):
+            raise GraphError("proof evidence is missing or not passing (proof_no_proofs)")
+        return
+    for index, raw_proof in enumerate(proofs):
+        item = object_value(raw_proof, f"proof.proofs[{index}]")
+        nonempty(item.get("id"), f"proof.proofs[{index}].id")
+        nonempty(item.get("cmd"), f"proof.proofs[{index}].cmd")
+    offenders, _ = proof_results.verify(proof, results, state, cutoff)
+    if offenders:
+        raise GraphError("frozen proofs are not verified: " + ", ".join(offenders))
+
+
 def validate_completion_evidence(
     state: dict[str, Any],
     revision: int,
@@ -80,135 +116,18 @@ def validate_completion_evidence(
     retro_path: Path,
     transcript_path: Path | None,
 ) -> None:
-    """Validate proof, retrospective, eval, and transcript completion evidence."""
-    disposition = state.get("proof_disposition")
-    no_proof = isinstance(disposition, str) and disposition.startswith("none: ") and bool(disposition[6:].strip())
-    if disposition is not None and not no_proof:
-        raise GraphError("proof disposition is invalid")
-    if no_proof and proof_path.exists():
-        raise GraphError("proof.json conflicts with no-proof disposition")
-    proof = None if no_proof else load_evidence(proof_path, "proof")
+    """Validate proof, retrospective, and eval completion evidence.
+
+    Proofs are verified from proof_results.jsonl beside proof.json (written by `scripts/lib/proof.py run`), never
+    from the transcript or a `status` field. transcript_path is retained for CLI compatibility and ignored.
+    """
+    del transcript_path
     retro = load_evidence(retro_path, "retro")
-    for label, evidence in (("proof", proof), ("retro", retro)):
-        if evidence is None:
-            continue
-        _matching(evidence, state, label)
+    _matching(retro, state, "retro")
     validate_evals(state, revision, evals_path)
-    if proof is not None:
-        proofs = array_value(proof.get("proofs"), "proof.proofs")
-        if not proofs:
-            raise GraphError("proof evidence is missing or not passing")
-        for index, raw_proof in enumerate(proofs):
-            item = object_value(raw_proof, f"proof.proofs[{index}]")
-            if item.get("status") != "pass":
-                raise GraphError("proof evidence is missing or not passing")
-            nonempty(item.get("id"), f"proof.proofs[{index}].id")
-            nonempty(item.get("cmd"), f"proof.proofs[{index}].cmd")
-            nonempty(item.get("evidence"), f"proof.proofs[{index}].evidence")
-        _validate_observed_proofs(proofs, transcript_path, state["loop_id"])
+    _validate_proofs(state, proof_path)
     schema_version = retro.get("schema_version")
     if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version < 1:
         raise GraphError("retro evidence is incomplete")
     if retro.get("status") != "complete":
         raise GraphError("retro evidence is incomplete")
-
-
-def _exec_command(payload: dict[str, Any]) -> tuple[str, str] | None:
-    if payload.get("type") == "function_call" and payload.get("name") == "exec_command":
-        arguments = payload.get("arguments")
-        try:
-            parsed: object = (
-                cast(object, cast(JsonValue, json.loads(arguments))) if isinstance(arguments, str) else arguments
-            )
-        except json.JSONDecodeError:
-            return None
-        if isinstance(parsed, dict):
-            parsed = cast(dict[str, Any], parsed)
-            command = parsed.get("cmd")
-            if isinstance(command, str):
-                return str(payload.get("call_id", "")), command.strip()
-    if payload.get("type") == "custom_tool_call" and payload.get("name") == "exec":
-        source = payload.get("input")
-        if not isinstance(source, str) or "tools.exec_command" not in source:
-            return None
-        match = re.search(r'\bcmd\s*:\s*("(?:\\.|[^"\\])*")', source)
-        if match:
-            return str(payload.get("call_id", "")), cast(str, json.loads(match.group(1))).strip()
-    return None
-
-
-def _result_text(output: object) -> str | None:
-    """Separate native desktop completion metadata from one unambiguous JSON result."""
-    if isinstance(output, str):
-        return output
-    if not isinstance(output, list):
-        return None
-    texts: list[str] = []
-    for raw in cast(list[object], output):
-        if not isinstance(raw, dict):
-            return None
-        frame = cast(dict[str, object], raw)
-        text = frame.get("text")
-        if frame.get("type") not in ("input_text", "text") or not isinstance(text, str):
-            return None
-        texts.append(text)
-    if len(texts) == 2 and re.fullmatch(r"Script completed\nWall time \d+(?:\.\d+)? seconds\nOutput:\n", texts[0]):
-        return texts[1]
-    return texts[0] if len(texts) == 1 else None
-
-
-def parse_exec_result(payload: dict[str, Any]) -> tuple[str, bool, str | None] | None:
-    """Read the native tool result associated with one foreground proof call."""
-    if payload.get("type") not in {"function_call_output", "custom_tool_call_output"}:
-        return None
-    call_id = payload.get("call_id")
-    if not isinstance(call_id, str) or not call_id:
-        return None
-    output = _result_text(payload.get("output"))
-    if output is None:
-        return call_id, False, None
-    try:
-        parsed: object = cast(JsonValue, json.loads(output))
-    except json.JSONDecodeError:
-        return call_id, False, None
-    if not isinstance(parsed, dict):
-        return call_id, False, None
-    parsed = cast(dict[str, Any], parsed)
-    exit_code = parsed.get("exit_code")
-    passed = isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code == 0
-    result_loop = parsed.get("loop_id")
-    if "loop_id" in parsed and not isinstance(result_loop, str):
-        passed = False
-    return call_id, passed, result_loop if isinstance(result_loop, str) else None
-
-
-def _validate_observed_proofs(proofs: list[Any], transcript_path: Path | None, loop_id: str) -> None:
-    if transcript_path is None:
-        raise GraphError("proof commands were not observed in this session")
-    calls: list[tuple[str, str, str | None]] = []
-    results: dict[str, tuple[bool, str | None]] = {}
-    transcript_loop: str | None = None
-    for _, record in read_records(transcript_path, "proof transcript"):
-        if record.get("type") == "turn_context":
-            context = record.get("payload")
-            if isinstance(context, dict) and "loop_id" in context:
-                context = cast(dict[str, Any], context)
-                observed_loop = context["loop_id"]
-                transcript_loop = observed_loop if isinstance(observed_loop, str) else ""
-            continue
-        payload = event_payload(record)
-        if call := _exec_command(payload):
-            calls.append((*call, transcript_loop))
-        if result := parse_exec_result(payload):
-            results[result[0]] = (result[1], result[2])
-    for raw_proof in proofs:
-        raw_proof = object_value(raw_proof, "proof")
-        command = raw_proof["cmd"].strip()
-        matching = [
-            call_id
-            for call_id, observed, observed_loop in calls
-            if observed == command and observed_loop in {None, loop_id}
-        ]
-        proof_result = results.get(matching[-1]) if matching else None
-        if proof_result is None or proof_result[0] is not True or proof_result[1] not in {None, loop_id}:
-            raise GraphError(f"proof command was unexecuted or last-failed: {command}")

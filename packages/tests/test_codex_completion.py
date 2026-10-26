@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import os
@@ -17,8 +16,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
-import graph
-from graph_artifacts import validate_evals
+import graph_dispatch
+from graph_artifacts import validate_completion_evidence, validate_evals
 from graph_identity import GraphError
 
 from packages.tests.codex_fixture import (
@@ -33,6 +32,9 @@ from packages.tests.codex_fixture import (
     verify_completion,
     write_json,
 )
+from scripts.lib import proof_results as pr
+
+IDENTITY = {"session_id": "parent", "loop_id": "loop"}
 
 
 class CompletionTests(unittest.TestCase):
@@ -45,6 +47,23 @@ class CompletionTests(unittest.TestCase):
         self.directory = Path(temporary.name)
         previous = Path.cwd()
         subprocess.run(["git", "init", "-q", str(self.directory)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.directory),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
+            check=True,
+        )
         config = self.directory / ".coderails/workflow.config.yaml"
         config.parent.mkdir()
         config.write_text("memory:\n  backend: off\n")
@@ -57,10 +76,10 @@ class CompletionTests(unittest.TestCase):
         write_json(self.path, state())
         self.evals = self.path.with_name("evals.json")
         write_json(self.evals, frozen_evals())
-        self.parent = transcripts(self.directory)
-        graph.begin_wave(self.path)
-        self.child = spawn(self.parent, read_json(self.path))
-        graph.record_wave(
+        parent = transcripts(self.directory)
+        graph_dispatch.begin_wave(self.path)
+        self.child = spawn(parent, read_json(self.path))
+        graph_dispatch.record_wave(
             self.path,
             json.dumps({"wave_id": "wave-2", "results": {"U3[1]": done_result()}}),
         )
@@ -78,106 +97,178 @@ class CompletionTests(unittest.TestCase):
         }
         write_json(self.evals, suite)
         self.proof, self.retro = self.path.with_name("proof.json"), self.path.with_name("retro.json")
-        write_json(
-            self.proof,
-            {
-                "session_id": "parent",
-                "loop_id": "loop",
-                "proofs": [{"id": "P1", "cmd": "true", "status": "pass", "evidence": "observed"}],
-            },
-        )
+        self.document: dict[str, Any] = {
+            "schema_version": 2,
+            "session_id": "parent",
+            "loop_id": "loop",
+            "proofs": [{"id": "P1", "cmd": "true", "expect": {"exit_code": 0}}],
+        }
+        write_json(self.proof, self.document)
+        self.results = self.path.with_name(pr.RESULTS_NAME)
+        pr.append(self.results, kind="freeze", proof_json_sha256=pr.doc_sha(self.document), **IDENTITY)
+        self.proof_result("satisfied")
         write_json(self.retro, {"schema_version": 2, "session_id": "parent", "loop_id": "loop", "status": "complete"})
         self.transcript = self.path.with_name("proof.jsonl")
         append(self.transcript, {"type": "turn_context", "payload": {"loop_id": "loop"}})
-        self.proof_result("proof", 0)
         self.arguments = (self.path, "parent", self.evals, self.proof, self.retro, self.transcript)
 
-    def proof_result(self, call: str, code: int | None, loop: str = "loop") -> None:
-        """Append a native proof call and its inner command result."""
-        append(
-            self.transcript,
-            {
-                "type": "response_item",
-                "payload": {
-                    "type": "custom_tool_call",
-                    "name": "exec",
-                    "call_id": call,
-                    "input": 'const r = await tools.exec_command({cmd:"true"}); text(r);',
-                },
-            },
-        )
-        output = (
-            json.dumps({"loop_id": loop, "exit_code": code})
-            if code is not None
-            else "Script completed\nProcess exited with code 1"
-        )
-        append(
-            self.transcript,
-            {
-                "type": "response_item",
-                "payload": {
-                    "type": "custom_tool_call_output",
-                    "call_id": call,
-                    "output": [{"type": "input_text", "text": output}],
-                },
-            },
+    def proof_result(self, verdict: str, cmd: str = "true", **identity: str) -> None:
+        """Append one controller run row for proof P1."""
+        pr.append(
+            self.results,
+            kind="run",
+            proof_id="P1",
+            cmd_sha256=pr.sha(cmd),
+            proof_json_sha256=pr.doc_sha(self.document),
+            verdict=verdict,
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            source_tree_sha=subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
+            **(IDENTITY | identity),
         )
 
     def test_success_and_revalidation(self) -> None:
-        """A completed graph is revalidated against the latest proof outcome."""
+        """A completed graph is revalidated against the latest run row."""
         complete(*self.arguments)
         verify_completion(*self.arguments)
-        self.proof_result("later", 1)
+        self.proof_result("failed")
         with self.assertRaises(GraphError):
             verify_completion(*self.arguments)
 
-    def test_new_evidence_writer_can_turn_off_without_losing_reader(self) -> None:
-        """The reader verifies encoded A6 evidence after its writer is turned off."""
-        graded = read_json(self.evals)
-        write_json(self.path, state())
-        write_json(self.evals, frozen_evals())
-        self.parent.write_text(json.dumps({"type": "session_meta", "payload": {"id": "parent"}}) + "\n")
-        self.child.unlink()
-        graph.begin_wave(self.path)
-        spawn(self.parent, read_json(self.path))
-        lines = self.parent.read_text().splitlines()
-        call = json.loads(lines[1])
-        arguments = json.loads(call["payload"]["arguments"])
-        arguments["message"] = "encrypted_content"
-        call["payload"]["arguments"] = json.dumps(arguments)
-        lines[1] = json.dumps(call)
-        self.parent.write_text("\n".join(lines) + "\n")
-        current = read_json(self.path)
-        next(iter(current["graph"]["dispatches"].values()))["authorized"] = None
-        write_json(self.path, current)
+    def test_changed_head_invalidates_codex_completion(self) -> None:
+        """Revalidation refuses a proof that passed before this worktree advanced."""
+        subprocess.run(["git", "-C", str(self.directory), "init", "-q"], check=True)
 
-        with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": "on"}):
-            graph.reject_invalid_dispatch(self.path, "parent", "U3[1]", "wave-2")
-            graph.begin_wave(self.path)
-            spawn(self.parent, read_json(self.path))
-            lines = self.parent.read_text().splitlines()
-            call = json.loads(lines[3])
-            arguments = json.loads(call["payload"]["arguments"])
-            arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x00" * 72).decode("ascii")
-            call["payload"]["arguments"] = json.dumps(arguments)
-            lines[3] = json.dumps(call)
-            self.parent.write_text("\n".join(lines) + "\n")
-            graph.record_wave(self.path, json.dumps({"wave_id": "wave-4", "results": {"U3[1]": done_result()}}))
+        def commit(message: str) -> None:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(self.directory),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    message,
+                ],
+                check=True,
+            )
 
-        graded["revision"] = read_json(self.path)["revision"]
-        write_json(self.evals, graded)
-        with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": ""}):
+        commit("first")
+        before = Path.cwd()
+        try:
+            os.chdir(self.directory)
+            self.proof_result("satisfied")
             complete(*self.arguments)
-            verify_completion(*self.arguments)
+            commit("second")
+            with self.assertRaisesRegex(GraphError, r"P1\(proof_stale_head\)"):
+                verify_completion(*self.arguments)
+        finally:
+            os.chdir(before)
 
-    def test_outer_result_and_foreign_loop_cannot_pass(self) -> None:
-        """Outer tool success never overrides an inner failed or foreign-loop command."""
-        for code, loop in ((None, "loop"), (1, "loop"), (0, "foreign")):
-            self.proof_result(f"next-{code}-{loop}", code, loop)
+    def test_unsatisfied_foreign_or_stale_rows_cannot_pass(self) -> None:
+        """Failed, mismatched, foreign-loop, wrong-cmd and status-only proofs never complete the graph."""
+        for verdict, cmd, identity in (
+            ("failed", "true", {}),
+            ("expect_mismatch", "true", {}),
+            ("timeout", "true", {}),
+            ("satisfied", "other", {}),
+            ("satisfied", "true", {"loop_id": "foreign"}),
+        ):
+            self.proof_result(verdict, cmd, **identity)
             before = self.path.read_bytes()
-            with self.assertRaises(GraphError):
+            with self.assertRaisesRegex(GraphError, r"P1\(proof_"):
                 complete(*self.arguments)
             self.assertEqual(before, self.path.read_bytes())
+            self.results.unlink()
+            pr.append(self.results, kind="freeze", proof_json_sha256=pr.doc_sha(self.document), **IDENTITY)
+        self.document["proofs"][0]["status"] = "pass"
+        write_json(self.proof, self.document)
+        with self.assertRaisesRegex(GraphError, r"P1\(proof_stale_cmd\)"):
+            complete(*self.arguments)
+
+    def test_no_proof_needs_a_typed_disposition(self) -> None:
+        """With no proof.json a bare none is rejected and none-with-reason or the typed form completes."""
+        self.proof.unlink()
+        current = read_json(self.path)
+        rejected: tuple[object, ...] = (None, "none", "none: ")
+        for disposition in rejected:
+            write_json(self.path, current | {"proof_disposition": disposition})
+            with self.assertRaisesRegex(GraphError, "proof_disposition_no_reason"):
+                complete(*self.arguments)
+        typed = {"kind": "none", "reason_code": "docs_only", "reason": "documentation only"}
+        accepted: tuple[object, ...] = ("none: no executable surface", typed)
+        for disposition in accepted:
+            write_json(self.path, current | {"proof_disposition": disposition})
+            validate_completion_evidence(
+                read_json(self.path), current["revision"], self.evals, self.proof, self.retro, self.transcript
+            )
+        complete(*self.arguments)
+
+    def test_empty_proof_file_uses_a_valid_disposition(self) -> None:
+        """An owned empty proof document follows the same disposition rule as Claude."""
+        self.document["proofs"] = []
+        write_json(self.proof, self.document)
+        current = read_json(self.path)
+        write_json(
+            self.path,
+            current
+            | {"proof_disposition": {"kind": "none", "reason_code": "docs_only", "reason": "no executable proof"}},
+        )
+        complete(*self.arguments)
+
+    def test_disposition_does_not_hide_unobserved_withdrawal(self) -> None:
+        """Codex completion requires an observed failed run for a withdrawn proof."""
+        self.document["withdrawn_proofs"] = [
+            {"id": "P1", "cmd": "true", "withdrawn_reason": "cannot satisfy the requirement"}
+        ]
+        self.document["proofs"] = []
+        write_json(self.proof, self.document)
+        self.results.unlink()
+        pr.append(self.results, kind="freeze", proof_json_sha256=pr.doc_sha(self.document), **IDENTITY)
+        current = read_json(self.path)
+        write_json(self.path, current | {"proof_disposition": "none: no executable surface"})
+        with self.assertRaisesRegex(GraphError, r"P1\(proof_withdrawn_unobserved\)"):
+            complete(*self.arguments)
+        self.proof_result("failed")
+        complete(*self.arguments)
+
+    def test_proof_array_shape_and_combined_cap(self) -> None:
+        """Codex completion enforces both proof arrays and the shared count cap."""
+        cases: tuple[tuple[dict[str, Any], str], ...] = (
+            ({"withdrawn_proofs": {}}, "withdrawn_proofs"),
+            (
+                {
+                    "withdrawn_proofs": [
+                        {"id": f"W{i}", "cmd": "false", "withdrawn_reason": "failed"} for i in range(100)
+                    ]
+                },
+                "100",
+            ),
+        )
+        for change, reason in cases:
+            with self.subTest(change=reason):
+                write_json(self.proof, self.document | change)
+                with self.assertRaisesRegex(GraphError, reason):
+                    complete(*self.arguments)
+
+    def test_hash_correct_missing_row_field_blocks_as_broken_chain(self) -> None:
+        """Codex completion gives the named refusal for a malformed hash-correct row."""
+        rows = [json.loads(line) for line in self.results.read_text().splitlines()]
+        rows[-1].pop("session_id")
+        rows[-1]["row_sha256"] = pr.sha(
+            json.dumps(
+                {key: value for key, value in rows[-1].items() if key != "row_sha256"},
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        )
+        self.results.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        with self.assertRaisesRegex(GraphError, "proof_chain_broken"):
+            complete(*self.arguments)
 
     def test_eval_stamp_revision_and_identity(self) -> None:
         """Bind completion to the current suite, checksum, amendments, and loop."""
@@ -211,7 +302,7 @@ class CompletionTests(unittest.TestCase):
         replacements: tuple[dict[str, Any], ...] = (
             {"loop_id": "foreign"},
             {"proofs": []},
-            {"proofs": [{"status": "fail"}]},
+            {"proofs": [{"id": "", "cmd": "true"}]},
         )
         for replacement in replacements:
             write_json(self.proof, proof | replacement)
@@ -237,7 +328,7 @@ class CompletionTests(unittest.TestCase):
         }
         for failed in (False, True):
             if failed:
-                self.proof_result("failure", 1)
+                self.proof_result("failed")
             result = subprocess.run(
                 [sys.executable, str(package / "hooks/scripts/graph_completion_guard.py")],
                 input=json.dumps(payload),
