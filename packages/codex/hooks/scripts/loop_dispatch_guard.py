@@ -104,10 +104,10 @@ def main() -> int:
             deny("A completed graph cannot dispatch graph workers.")
         return 0
     agent_type = tool_input.get("agent_type")
-    with tempfile.TemporaryDirectory() as scratch:
-        message_file = Path(scratch) / "message.txt"
-        message_file.write_text(message, encoding="utf-8")
-        try:
+    try:
+        with tempfile.TemporaryDirectory() as scratch:
+            message_file = Path(scratch) / "message.txt"
+            message_file.write_text(message, encoding="utf-8")
             authorization = graph_output(
                 graph,
                 "authorize-dispatch",
@@ -125,9 +125,13 @@ def main() -> int:
                 "--tool-use-id",
                 tool_use_id,
             )
-        except HostResourceError:
-            deny(RESOURCE_MESSAGE)
-            return 0
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)
+        return 0
+    except OSError:
+        log(f"hook=loop_dispatch_guard session={session_id} blocked=1 reason_code=dispatch_message_unavailable")
+        deny("Graph worker dispatch could not stage its message [reason_code=dispatch_message_unavailable].")
+        return 0
     if authorization is None:
         deny(
             "Graph worker dispatch needs the begin-wave envelope and contract sections pasted verbatim, "
