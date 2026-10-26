@@ -184,7 +184,8 @@ class AggregateRunnerTests(unittest.TestCase):
                 directory = Path(temporary)
                 pid_file = directory / "pid"
                 (directory / "wait_test.py").write_text(
-                    f"import os, pathlib, time\npathlib.Path({str(pid_file)!r}).write_text(str(os.getpid()))\n"
+                    "import os, pathlib, time\nprint('CHILD_EVIDENCE', flush=True)\n"
+                    f"pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid()))\n"
                     "time.sleep(10)\n",
                     encoding="utf-8",
                 )
@@ -209,6 +210,7 @@ class AggregateRunnerTests(unittest.TestCase):
                     runner.send_signal(kind)
                     output, _ = runner.communicate(timeout=5)
                     self.assertEqual(runner.returncode, 130, output.decode(errors="replace"))
+                    self.assertIn("CHILD_EVIDENCE", output.decode(errors="replace"))
                     with self.assertRaises(ProcessLookupError):
                         os.kill(int(pid_file.read_text()), 0)
                 finally:

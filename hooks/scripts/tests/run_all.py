@@ -213,6 +213,11 @@ def run_suites(directory: Path, *, jobs: int | None = None, suite_timeout: float
                 time.sleep(0.2)
                 for process in running:
                     _signal_group(process, signal.SIGKILL)
+                pool.shutdown(wait=True, cancel_futures=True)
+                for suite, output_path in futures.values():
+                    if suite not in outcomes and output_path.exists():
+                        print(f"\n=== {suite.name} ===", flush=True)
+                        _print_output(output_path)
                 print("run_all: interrupted; active suites stopped", file=sys.stderr, flush=True)
                 return 130
     finally:
