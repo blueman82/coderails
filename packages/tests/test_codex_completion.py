@@ -340,9 +340,8 @@ class CompletionTests(CompletionFixture):
 
     def test_malformed_retro_memory_blocks_native_stop(self) -> None:
         """The Codex Stop hook denies a malformed memory count with a reason code."""
+        complete(*self.arguments)
         retro = read_json(self.retro)
-        retro["memory"]["degraded"] = {"order.record": {"x": "bad"}}
-        write_json(self.retro, retro)
         package = Path(__file__).resolve().parents[1] / "codex"
         environment = os.environ | {
             "HOME": str(self.directory),
@@ -357,19 +356,26 @@ class CompletionTests(CompletionFixture):
             "last_assistant_message": "done",
             "transcript_path": str(self.transcript),
         }
-        result = subprocess.run(
-            [sys.executable, str(package / "hooks/scripts/graph_completion_guard.py")],
-            input=json.dumps(payload),
-            text=True,
-            capture_output=True,
-            env=environment,
-            check=True,
-        )
-        output: dict[str, Any] = json.loads(result.stdout)
-        self.assertEqual(output.get("decision"), "block")
-        self.assertNotIn("Traceback", result.stderr)
-        with self.assertRaisesRegex(GraphError, "retro_memory_invalid"):
-            validate_completion_evidence(read_json(self.path), 3, self.evals, self.proof, self.retro, self.transcript)
+        for invalid in ({"order.record": "bad"}, {"order.record": True}, {"order.record": -1}, ["bad"]):
+            with self.subTest(invalid=invalid):
+                retro["memory"]["degraded"] = invalid
+                write_json(self.retro, retro)
+                result = subprocess.run(
+                    [sys.executable, str(package / "hooks/scripts/graph_completion_guard.py")],
+                    input=json.dumps(payload),
+                    text=True,
+                    capture_output=True,
+                    env=environment,
+                    check=True,
+                )
+                output: dict[str, Any] = json.loads(result.stdout)
+                self.assertEqual(output.get("decision"), "block")
+                self.assertIn("retro_memory_invalid", output.get("reason", ""))
+                self.assertNotIn("Traceback", result.stderr)
+                with self.assertRaisesRegex(GraphError, "retro_memory_invalid"):
+                    validate_completion_evidence(
+                        read_json(self.path), 3, self.evals, self.proof, self.retro, self.transcript
+                    )
 
 
 if __name__ == "__main__":

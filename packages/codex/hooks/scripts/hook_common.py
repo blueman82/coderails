@@ -193,14 +193,15 @@ def graph_path() -> Path:
     return root / "skills" / "agentic-loop" / "scripts" / "graph.py"
 
 
-def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
+def graph_output(graph: Path, *arguments: str, failure_code: list[str] | None = None) -> dict[str, object] | None:
     """Run one graph command and return its object output when valid."""
+    capture_failure = failure_code is not None and arguments[:1] == ("verify-completion",)
     try:
         result = subprocess.run(
             ["python3", str(graph), *arguments],
             stdout=subprocess.PIPE,
             check=False,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE if capture_failure else subprocess.DEVNULL,
             text=True,
         )
     except OSError as error:
@@ -208,6 +209,13 @@ def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
             raise HostResourceError(error.errno, str(error)) from error
         return None
     if result.returncode != 0:
+        if (
+            failure_code is not None
+            and capture_failure
+            and result.stderr
+            and result.stderr[:128].startswith("graph: retro_memory_invalid:")
+        ):
+            failure_code.append("retro_memory_invalid")
         return None
     try:
         decoded: object = json.loads(result.stdout)
