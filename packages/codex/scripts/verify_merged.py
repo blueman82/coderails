@@ -66,7 +66,8 @@ def verify(repo: Path, number: str, needle: str, path: str) -> dict[str, object]
     if not origin_repo:
         reasons.append("origin_repo_unresolved")
         return verdict
-    if os.environ.get("GH_REPO") and os.environ["GH_REPO"] != origin_repo:
+    override = os.environ.get("GH_REPO", "").casefold()
+    if override and override not in (origin_repo.casefold(), f"github.com/{origin_repo}".casefold()):
         reasons.append("repo_mismatch")
         return verdict
     facts = pr_facts(repo, number, origin_repo)

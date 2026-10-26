@@ -70,7 +70,12 @@ class VerifyMergedCase(unittest.TestCase):
         return git(self.work, "rev-parse", "HEAD")
 
     def verify(
-        self, merge_commit: str, state: str = "MERGED", merged_at: str | None = "2026-10-01T00:00:00Z", *extra: str
+        self,
+        merge_commit: str,
+        state: str = "MERGED",
+        merged_at: str | None = "2026-10-01T00:00:00Z",
+        *extra: str,
+        gh_repo: str | None = None,
     ) -> tuple[int, dict[str, Any]]:
         """Run the CLI against the fake PR and return (exit code, verdict)."""
         self.pr_json.write_text(
@@ -90,6 +95,8 @@ class VerifyMergedCase(unittest.TestCase):
             "FAKE_PR_JSON": str(self.pr_json),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.pr_json.parent / "loops"),
         }
+        if gh_repo is not None:
+            env["GH_REPO"] = gh_repo
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "7", "--repo", str(self.work), *extra],
             env=env,
@@ -263,21 +270,23 @@ class VerifyMergedTests(VerifyMergedCase):
         """The GitHub PR and the fetched origin must refer to the same repository."""
         commit = self.land(squash=False)
         self.pr_json.write_text(json.dumps({"state": "MERGED", "mergedAt": "now", "mergeCommit": {"oid": commit}}))
-        env = {
-            **os.environ,
-            "PATH": f"{self.pr_json.parent / 'bin'}:{os.environ['PATH']}",
-            "FAKE_PR_JSON": str(self.pr_json),
-            "GH_REPO": "other/otherrepo",
-        }
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "7", "--repo", str(self.work)],
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("repo_mismatch", result.stdout)
+        for override in ("other/otherrepo", "example.invalid/testowner/testrepo"):
+            with self.subTest(override=override):
+                code, verdict = self.verify(commit, gh_repo=override)
+                self.assertEqual(code, 1)
+                self.assertIn("repo_mismatch", verdict["reasons"])
+
+    def test_gh_repo_override_accepts_same_repository(self) -> None:
+        """Both documented GH_REPO forms can name the same origin, regardless of case."""
+        commit = self.land(squash=False)
+        for override in (
+            "testowner/testrepo",
+            "github.com/testowner/testrepo",
+            "GITHUB.COM/TESTOWNER/TESTREPO",
+        ):
+            with self.subTest(override=override):
+                code, verdict = self.verify(commit, gh_repo=override)
+                self.assertEqual((code, verdict["confirmed"]), (0, True))
 
     def test_gh_host_override_cannot_select_another_host(self) -> None:
         """The gh repository argument pins github.com even when GH_HOST names another host."""
