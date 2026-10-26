@@ -129,8 +129,9 @@ def sign_suite(data: JsonObject, strict: bool = False) -> str:
 
 
 def _check_signature(data: JsonObject, head: str, length: int, path: object = None, trust_signer: bool = True) -> str:
+    v2_required = integrity_version(data) == 2 and str(data.get("verification_level")) != "0"
     if "signature" not in data:
-        if _signed_before(data, path):
+        if v2_required or _signed_before(data, path):
             raise IntegrityError(SIGNATURE_MISSING, "signature removed from a suite that was signed or must be")
         return LEGACY_UNSIGNED
     try:
@@ -138,8 +139,8 @@ def _check_signature(data: JsonObject, head: str, length: int, path: object = No
         result = check(data["signature"], _payload(data, head, length))
     except SigningError as error:
         raise IntegrityError(error.code, str(error)) from error
-    if result == KEY_MISSING and eval_signing.required():
-        raise IntegrityError(KEY_MISSING, "no ssh-keygen/allowed_signers here and evals.require_signatures is set")
+    if result == KEY_MISSING and (v2_required or eval_signing.required()):
+        raise IntegrityError(KEY_MISSING, "a required signature cannot be verified here")
     return result
 
 

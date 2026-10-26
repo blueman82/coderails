@@ -30,6 +30,8 @@ def require_freeze_timing(data: JsonObject, base: str, directory: Path) -> None:
     if level == "0" or not frozen:
         return
     version = integrity_version(data)
+    if version == 2:
+        check_suite(data, level)
     frozen_at = str(data.get("frozen_at") or "")
     try:
         datetime.datetime.fromisoformat(frozen_at.replace("Z", "+00:00"))

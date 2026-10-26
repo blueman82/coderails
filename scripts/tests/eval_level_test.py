@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest import mock
 
@@ -18,7 +19,7 @@ sys.path.insert(0, str(REPO))
 from hooks.scripts.tests.lib.post_evals_fixture import command, entry  # noqa: E402
 from scripts.lib import eval_artifact, eval_level, eval_validation, publication_gate  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
-from scripts.lib.eval_integrity import IntegrityError, suite_hash  # noqa: E402
+from scripts.lib.eval_integrity import IntegrityError, sign_suite, suite_hash  # noqa: E402
 from scripts.lib.git_common import EvalSummary  # noqa: E402
 
 POLICY = eval_level.load_policy()
@@ -98,9 +99,11 @@ class RepoCase(unittest.TestCase):
 
     def setUp(self) -> None:
         """Commit a base, publish it as origin/main, then branch."""
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.dir = Path(tmp.name)
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        self.dir = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        keys = stack.enter_context(tempfile.TemporaryDirectory())
+        stack.enter_context(mock.patch.dict(os.environ, {"CODERAILS_KEYS_DIR": keys}))
         self.git("init", "-q", "-b", "main")
         (self.dir / "README.md").write_text("base\n")
         self.git("add", "-A")
@@ -134,6 +137,8 @@ class RepoCase(unittest.TestCase):
         }  # fmt: skip
         data.setdefault("frozen_sha", self.base)
         data["frozen_hash"] = suite_hash(data)
+        if level:
+            sign_suite(data, strict=True)
         digest = suite_hash(data)
         stamp = eval_artifact.facts_line(level if derived is None else derived, late, digest[:16])
         return EvalSummary(0, str(level), json.dumps(data), facts=stamp), data
@@ -311,12 +316,12 @@ class MergeCheckTests(RepoCase):
         self.assertIn("suite_hash_marker_mismatch", codes)
 
     def test_stripped_frozen_hash(self) -> None:
-        """Acceptance 2: a level >= 1 embed without frozen_hash is not_frozen."""
+        """A signed level-2 embed refuses a removed frozen hash as stripped integrity."""
         self.commit("install.py")
         summary, _ = self.posted(2, "")
         stripped = json.loads(summary.embed)
         del stripped["frozen_hash"]
-        self.assertIn("not_frozen", self.check(EvalSummary(0, "2", json.dumps(stripped), facts=summary.facts)))
+        self.assertIn("integrity_stripped", self.check(EvalSummary(0, "2", json.dumps(stripped), facts=summary.facts)))
 
     def test_late_freeze_must_be_stamped(self) -> None:
         """Acceptance 3: a branch frozen_sha with a facts line claiming late_freeze=0 is late_freeze_unstamped."""

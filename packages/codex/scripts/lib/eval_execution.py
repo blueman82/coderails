@@ -127,7 +127,7 @@ def record_smoke(path: str | Path) -> None:
             if not isinstance(data.get("frozen_at"), str) or not str(data["frozen_at"]).strip():
                 data["frozen_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         data["frozen_hash"] = suite_hash(data)
-        signed = sign_suite(data)  # raises when evals.require_signatures is set and signing is impossible
+        signed = sign_suite(data, strict=str(data.get("verification_level")) != "0")
         write_object(path, data)
         emit(path, "smoke-run", "ok", "frozen")
         if signed == "signed":

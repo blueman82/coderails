@@ -96,7 +96,8 @@ class LateFreezeEvidenceTests(RepoCase):
             json.dumps({"verification_level": "1", "integrity_version": 2, "frozen_sha": self.base,
                         "frozen_at": "2026-10-07T00:00:00Z"})
         )  # fmt: skip
-        eval_validation.validate_freeze(path)
+        with self.assertRaisesRegex(ValueError, "not_frozen"):
+            eval_validation.validate_freeze(path)
         path.write_text(json.dumps({"verification_level": "0"}))
         eval_validation.validate_freeze(path)
 

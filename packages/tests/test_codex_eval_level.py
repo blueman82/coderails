@@ -18,7 +18,7 @@ from typing import cast
 ROOT = Path(__file__).resolve().parents[2]
 CODEX = ROOT / "packages/codex"
 sys.path.insert(0, str(ROOT))
-from packages.tests.eval_artifact_fixture import suite_hash, write_comment  # noqa: E402
+from packages.tests.eval_artifact_fixture import sign_comment, suite_hash, write_comment  # noqa: E402
 
 HOOK = CODEX / "hooks/scripts/pr_publication_gate.py"
 POST = CODEX / "scripts/post_evals.py"
@@ -119,6 +119,7 @@ class HookRepo(Repo):
         )  # this test isolates eval-level behavior
         comment.setdefault("frozen_sha", self.base)
         eval_file = write_comment(self.tmp, self.sha, **comment)  # type: ignore[arg-type]
+        sign_comment(eval_file, self.tmp / "keys")
         env = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
         env |= {
             "FAKE_SHA": self.sha,
@@ -126,6 +127,7 @@ class HookRepo(Repo):
             "FAKE_EVAL_FILE": str(eval_file),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.tmp),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp),
+            "CODERAILS_KEYS_DIR": str(self.tmp / "keys"),
         }
         payload = {"session_id": "s", "cwd": str(self.dir), "tool_name": "Bash"}
         payload["tool_input"] = {"command": "gh pr merge 7"}  # type: ignore[assignment]
