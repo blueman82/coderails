@@ -17,6 +17,7 @@ import json
 import math
 import os
 import runpy
+import stat
 from pathlib import Path
 from typing import Any, cast
 
@@ -145,6 +146,9 @@ def record(state_dir: Path, step: str, session_id: str, loop_id: str | None, evi
     if step not in STEPS or not (state_dir / "progress.json").is_file():
         return False
     try:
+        path = state_dir / NAME
+        if state_dir.is_symlink() or path.is_symlink() or (path.exists() and not path.is_file()):
+            return False
         if loop_id is None:
             loaded: object = json.loads((state_dir / "progress.json").read_text(encoding="utf-8"))
             loop_id = str(cast("dict[str, Any]", loaded).get("loop_id")) if isinstance(loaded, dict) else None
@@ -163,11 +167,22 @@ def record(state_dir: Path, step: str, session_id: str, loop_id: str | None, evi
             "loop_id": loop_id,
             "evidence_sha256": evidence_sha256,
         }
-        descriptor = os.open(str(state_dir / NAME), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        directory = getattr(os, "O_DIRECTORY", None)
+        if no_follow is None or directory is None:
+            return False
+        state_fd = os.open(state_dir, os.O_RDONLY | directory | no_follow)
         try:
-            os.write(descriptor, (json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
+            flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK | no_follow
+            descriptor = os.open(NAME, flags, 0o644, dir_fd=state_fd)
+            try:
+                if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                    return False
+                os.write(descriptor, (json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
+            finally:
+                os.close(descriptor)
         finally:
-            os.close(descriptor)
+            os.close(state_fd)
     except (OSError, ValueError):
         return False
     _trace(step, session_id, loop_id)

@@ -37,7 +37,7 @@ class RetroPathBindingTests(CompletionFixture):
         self.assertEqual(self.path.read_bytes(), before)
         complete(*self.arguments)
         aliases = [self.path.with_name(f"alias-{name}") for name in ("evals.json", "proof.json", "retro.json")]
-        for alias, source in zip(aliases, (self.evals, self.proof, self.retro), strict=True):
+        for alias, source in zip(aliases, (self.evals, self.proof, self.retro)):
             alias.symlink_to(source)
         verify_completion(self.path, "parent", aliases[0], aliases[1], aliases[2], self.transcript)
         wrong_alias = self.path.with_name("wrong-evals.json")
