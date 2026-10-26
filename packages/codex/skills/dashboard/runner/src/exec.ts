@@ -20,7 +20,7 @@ export interface ExecResult {
 type ExecFileFn = (
   command: string,
   args: readonly string[],
-  options: { cwd: string; timeout: number; killSignal: NodeJS.Signals },
+  options: { cwd: string; timeout: number; killSignal: NodeJS.Signals; env?: NodeJS.ProcessEnv },
   callback: (error: Error | null, stdout: string, stderr: string) => void
 ) => unknown;
 
@@ -31,6 +31,7 @@ type ExecFileFn = (
 export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 
 export interface ExecOptions {
+  routineRunId?: string;
   codexPath?: string;
   execFileImpl?: ExecFileFn;
   timeoutMs?: number;
@@ -96,7 +97,10 @@ export function runCodex(argv: string[], cwd: string, opts?: ExecOptions): Promi
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return new Promise((resolve) => {
-    const options = { cwd, timeout: timeoutMs, killSignal: "SIGKILL" as NodeJS.Signals };
+    const options = {
+      cwd, timeout: timeoutMs, killSignal: "SIGKILL" as NodeJS.Signals,
+      ...(opts?.routineRunId ? { env: { ...process.env, CODERAILS_ROUTINE_RUN_ID: opts.routineRunId } } : {}),
+    };
     const child = execFileImpl(codexPath, withExecSubcommand(argv), options, (error, stdout, stderr) => {
       // Persist first, before any branch returns: whatever the outcome
       // (timeout, spawn-failed, non-zero exit, or success), the stdout/stderr

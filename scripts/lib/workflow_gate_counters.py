@@ -2,7 +2,8 @@
 
 Usage: python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py
 Keys in the input are `command/outcome/reason_code`; output is {command: {outcome/reason_code: count}} for the
-commands in COMMANDS. Later units add their own command names here, so no other file needs editing.
+commands in COMMANDS. Later units add their own command names here, so no other file needs editing. `routine/` rows
+come from scripts/routine_log.py (outcome is the closed routine outcome enum, reason code the closed per-routine list).
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import json
 import sys
 
-COMMANDS = ("diff-manifest", "review-passes", "eval-level", "publication", "argv")
+COMMANDS = ("diff-manifest", "review-passes", "eval-level", "publication", "argv", "routine")
 
 
 def counts(by_reason: dict[str, int]) -> dict[str, dict[str, int]]:
