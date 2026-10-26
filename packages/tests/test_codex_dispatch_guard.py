@@ -71,6 +71,7 @@ class DispatchGuardTests(unittest.TestCase):
             patch.object(guard, "log"),
         ):
             self.assertEqual(guard.main(), 0)
+            self.denial_reason = str(denial.call_args.args[0]) if denial.call_args else ""
         return denial.called, len(self.sent)
 
     def test_invalid_typed_config_blocks_native_worker_dispatch(self) -> None:
@@ -142,6 +143,28 @@ class DispatchGuardTests(unittest.TestCase):
             self.assertEqual(self._run(), (True, 0))
         with patch("loop_dispatch_guard.Path.write_text", side_effect=OSError("disk full")):
             self.assertEqual(self._run(), (True, 0))
+
+    def test_deep_envelope_denies_without_unhandled_recursion(self) -> None:
+        """Malformed nested JSON must yield an explicit hook denial before graph authorization."""
+        self.tool_input["message"] = "CODERAILS_GRAPH_DISPATCH=" + "[" * 2000 + "0" + "]" * 2000
+        self.assertEqual(self._run(), (True, 0))
+        self.assertIn("reason_code=dispatch_hook_error", self.denial_reason)
+
+    def test_deep_hook_payload_denies_without_unhandled_recursion(self) -> None:
+        """The same input limit applies when the outer hook payload is deeply nested."""
+        with (
+            patch.object(guard, "read_input", return_value="[" * 2000 + "0" + "]" * 2000),
+            patch.object(guard, "deny") as denial,
+            patch.object(guard, "log"),
+        ):
+            self.assertEqual(guard.main(), 0)
+        self.assertIn("reason_code=dispatch_hook_error", denial.call_args.args[0])
+
+    def test_oversized_plaintext_envelope_denies_before_authority(self) -> None:
+        """A huge first line cannot consume unbounded work in the envelope parser."""
+        self.tool_input["message"] = 'CODERAILS_GRAPH_DISPATCH={"padding":"' + "x" * 9000 + '"}'
+        self.assertEqual(self._run(), (True, 0))
+        self.assertIn("reason_code=dispatch_hook_error", self.denial_reason)
 
     def test_blank_or_malformed_native_role_denied_before_authority(self) -> None:
         """A supplied agent_type must be a nonblank string."""

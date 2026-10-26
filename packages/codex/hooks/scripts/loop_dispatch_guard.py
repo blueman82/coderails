@@ -26,6 +26,7 @@ from scripts.lib.config import config_path
 from scripts.lib.config_strict import ConfigRejected, strict_settings
 
 ENVELOPE_KEY = "CODERAILS_GRAPH_DISPATCH"
+MAX_ENVELOPE_LINE = 8192
 GRAPH_TASK = re.compile(r"^loop_worker_[0-9a-f]+_[0-9a-f]+(?:_a[1-9][0-9]*)?$")
 
 
@@ -36,10 +37,12 @@ def object_field(payload: dict[str, object], name: str) -> dict[str, object]:
 
 
 def dispatch_id(message: str) -> str:
-    """The dispatch id on the first line, or empty when the envelope is absent or unreadable (the CLI then refuses)."""
+    """Read a bounded first-line id; return empty for unreadable JSON and refuse oversized headers."""
     first = message.split("\n", 1)[0]
     if not first.startswith(ENVELOPE_KEY + "="):
         return ""
+    if len(first) > MAX_ENVELOPE_LINE:
+        raise ValueError("graph dispatch envelope line exceeds its limit")
     try:
         found = json.loads(first.split("=", 1)[1]).get("dispatch_id")
     except (ValueError, AttributeError):
@@ -47,8 +50,8 @@ def dispatch_id(message: str) -> str:
     return found if isinstance(found, str) else ""
 
 
-def main() -> int:
-    """Deny any spawn in a graph-bound session that does not carry a valid, unused, role-correct envelope."""
+def _check() -> int:
+    """Check one native spawn against graph ownership and its single-use dispatch record."""
     payload = payload_object(read_input())
     if text_field(payload, "tool_name") not in ("spawn_agent", "collaborationspawn_agent"):
         deny("Codex graph workers must use native spawn_agent.")
@@ -141,6 +144,16 @@ def main() -> int:
         f"wave={text_field(authorization, 'wave_id')} task={task} blocked=0"
     )
     return 0
+
+
+def main() -> int:
+    """Treat any hook input or local runtime error as a denied spawn."""
+    try:
+        return _check()
+    except Exception:
+        log("hook=loop_dispatch_guard blocked=1 reason_code=dispatch_hook_error")
+        deny("Graph worker dispatch could not complete its check [reason_code=dispatch_hook_error].")
+        return 0
 
 
 if __name__ == "__main__":

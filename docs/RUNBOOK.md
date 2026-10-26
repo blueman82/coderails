@@ -820,6 +820,9 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
 - Query: `python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]` counts `dispatch_authorized` and every refusal code.
 - If the Codex hook cannot create or write its temporary message file, it denies the spawn with
   `dispatch_message_unavailable` and records that code in `discipline.log`. Repair local scratch storage and retry.
+- If the hook input or its local check raises unexpectedly, the hook denies the spawn with `dispatch_hook_error`
+  and records that code in `discipline.log`. Plaintext envelope first lines over 8192 characters get the same denial.
+  Inspect the hook input and local runtime; do not treat the spawn as authorized.
 - Codes and fixes: `dispatch_missing_envelope` (no/old/garbled first-line `CODERAILS_GRAPH_DISPATCH` envelope: paste the
   `prompt_prefix` from `plan` or `begin-wave`; a plaintext Codex spawn needs it, while an opaque native hook message uses the exact issued `task_name` and call id),
   `dispatch_unknown_id` (the id was never issued: run `begin-wave`), `dispatch_foreign` (session, loop, node, wave or Codex
