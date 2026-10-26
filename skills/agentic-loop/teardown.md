@@ -3,18 +3,17 @@
 Detail-carrier for Phase 13's teardown. Prepare and assemble before the durable completion save;
 apply standing orders afterward. Use the source-writing commands below.
 
-`loop_stall_guard` blocks a `complete` declaration when `retro.json` is absent, malformed, or
-below `schema_version` 1 (the hook accepts `schema_version >= 1`, forward-compatible with the cost
-fields added at 2) — so the retro must be written before the declaration. It separately blocks
-when a sibling `proof.json` exists but any of its frozen proofs has no satisfied controller-recorded
-run row in `proof_results.jsonl` — so `proof.py run` must have executed every proof before the
-declaration too (Step 1 below).
+`loop_stall_guard` blocks a `complete` declaration if `retro.json` is absent or fails the
+schema 3 source check. The check rejects a hand-written retro, stale source hashes, a broken
+decision chain, or missing teardown steps. Run `retro.py assemble` before completion.
+The guard also blocks when a frozen proof lacks a satisfied controller-recorded run row in
+`proof_results.jsonl`. Run every proof before assembly (Step 1 below).
 
 Before assembling the retro, run `graph.py flush-decisions <progress.json> --session <id>` through the
 current provider's graph CLI. If it returns 3, record the named Muninn degradation or uncertain
 sync and preserve the local decision rows; reconcile `decision_sync_unknown` against the store
-before any manual retry. If it returns 2, stop and inspect the chain. Copy the resulting
-`decisions_absorbed` rows verbatim into the retro.
+before any manual retry. If it returns 2, stop and inspect the chain. The assembler reads the
+`decisions_absorbed` rows from `progress.json`; do not copy or edit them by hand.
 
 **Graph dispatch boundary.** `S13-proof`, `S13-retro`, and `S13-complete` deliberately have no
 entry in the Claude role map, so the native graph CLI `plan` command reports them as `unresolved:true`. These are orchestrator actions. Keep them in the phase/artifact record; do not create fake worker-completed graph nodes for them. An actual graph dispatch requires a resolved instruction source and native worker evidence.
@@ -40,7 +39,7 @@ than an honest unscored list because it is more likely to be trusted uncriticall
 **The two core facts:**
 
 - **`LOOP-STOP` category counts, broken down by type** — the per-category counts of this loop's recorded stops (`progress.json` `loop_stop_counts`: `hard-stop`, `approval-gate`, `awaiting-input`, `complete`). HOOK-OWNED — the `loop_stall_guard` hook increments it when it consumes a valid `progress.json` `stops[]` row. Read it as-is; do not compute or edit it. Report the raw breakdown with no verdict attached.
-- **Decisions absorbed** — a flat, unscored list of in-scope decisions the loop made autonomously without asking (e.g. a Phase 2.5 design-fork auto-adopted, a Phase 2.6 disposition defaulted to clean-break, a Phase 2.8 routing assignment set, a Phase 5 disconfirm-skip, a Phase 6 in-scope action taken without a check-in). No self-justification text per entry, no automated "this looks calibrated" stamp — just what was decided and where (phase/work-unit). COPIED VERBATIM from `progress.json`'s `decisions_absorbed` array, chronological (oldest first) — never reconstructed from conversation memory, which is exactly the kind of after-the-fact self-report this phase exists to avoid.
+- **Decisions absorbed** — a flat, unscored list of in-scope decisions the loop made autonomously without asking (e.g. a Phase 2.5 design-fork auto-adopted, a Phase 2.6 disposition defaulted to clean-break, a Phase 2.8 routing assignment set, a Phase 5 disconfirm-skip, a Phase 6 in-scope action taken without a check-in). No self-justification text per entry, no automated "this looks calibrated" stamp — just what was decided and where (phase/work-unit). The assembler reads `progress.json`'s `decisions_absorbed` array in chronological order. Report those rows verbatim; never reconstruct them from conversation memory.
 
 **Also report, unscored:**
 
@@ -101,8 +100,8 @@ nested `schema_version` 1, independent of the retro's), then lifts its `models_u
 
 **Fail-open.** The miner never blocks teardown — on any environmental error (missing/invalid
 price file) it returns `{}`, so both `retro.cost` and `retro.models_used` end up empty and a
-`complete` declaration proceeds exactly as it would with populated values. `loop_stall_guard`
-checks the retro's presence and `schema_version`, never the cost field's correctness, so a miner
+`complete` declaration proceeds exactly as it would with populated values. The completion gate
+checks the assembled retro's sources and steps, but does not rederive the cost field, so a miner
 failure cannot stall a loop. There are two CALLER-error paths — invoking the miner with no session
 id, or with a session id that resolves to no transcript anywhere under the projects dir — each
 returning a self-describing `{"error":...,"hint":...}` object on stdout instead of `{}` (see the
