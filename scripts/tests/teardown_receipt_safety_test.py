@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -36,3 +37,24 @@ class TeardownReceiptSafety(unittest.TestCase):
             self.assertFalse(teardown_steps.record(alias, "proof_run", "s1", "L1", "a"))
             self.assertTrue(teardown_steps.record(state, "proof_run", "s1", "L1", "a"))
             self.assertEqual([row["step"] for row in teardown_steps.read_rows(state)], ["proof_run"])
+
+    def test_hardlink_and_linked_ancestor_are_refused(self) -> None:
+        """A receipt must not write through another name for an outside path."""
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            state = root / "real" / "state"
+            state.mkdir(parents=True)
+            (state / "progress.json").write_text('{"loop_id":"L1"}', encoding="utf-8")
+            outside = root / "outside.jsonl"
+            outside.write_bytes(b"")
+            receipt = state / teardown_steps.NAME
+            os.link(outside, receipt)
+            self.assertFalse(teardown_steps.record(state, "proof_run", "s1", "L1", "a"))
+            self.assertEqual(outside.read_bytes(), b"")
+            receipt.unlink()
+
+            alias = root / "alias"
+            alias.symlink_to(root / "real", target_is_directory=True)
+            self.assertFalse(teardown_steps.record(alias / "state", "proof_run", "s1", "L1", "a"))
+            self.assertFalse(receipt.exists())
+            self.assertTrue(teardown_steps.record(state, "proof_run", "s1", "L1", "a"))
