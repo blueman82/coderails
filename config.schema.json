@@ -26,8 +26,8 @@
         "integer"
       ],
       "default": 30,
-      "status": "read_by_prose_only",
-      "description": "Page age in days before wiki-lint considers staleness; age alone does not mark a page stale."
+      "status": "enforced_by_code",
+      "description": "Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Age alone never makes a page stale (a source must also have moved)."
     },
     "wiki_supervision": {
       "type": [

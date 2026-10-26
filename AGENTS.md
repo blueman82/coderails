@@ -174,6 +174,8 @@ Two interactive pauses: the code/iterate loop, and final ship-it authorization. 
 
 **`scripts/` vs `commands/`** — `push.py`/`merge.py` hold deterministic git plumbing (commit, push, `gh pr create`, merge); `.md` commands hold prose/decision logic and shell out to those scripts. Shared git/gh helpers live in `scripts/lib/git_common.py` — add reusable primitives there, not inline.
 
+**Procedures that moved out of prose:** `scripts/wiki_lint.py stale` checks the typed `wiki_stale_days` setting (default 30). `scripts/verify_merged.py <PR> [--grep S --path P]` checks content, or ancestry for a true merge commit; the `verify-merged-pr` skill and agentic-loop phase 9 call it. `scripts/merge.py --describe` prints the gate list from `VERIFY_STAGES` and `publication_gate.CHECKS` without remote contact. `scripts/memory_dir.py` and `scripts/detect_test_command.py` serve memory-consolidation and test-gate-setup. These four helpers have byte-identical provider copies. The two `merge.py` copies also differ in provider command names and Codex-only strict config validation. `scripts/quality/check.py --json` supplies both `quality_feedback.py` hooks. A skill must still choose to call its script; see the RUNBOOK procedure entry for limits and reason codes.
+
 ## Project-specific assumptions (change when generalising)
 
 - **Auth host**: `push.py` requires a `github.com` remote (`scripts.lib.git_common.require_repo`).

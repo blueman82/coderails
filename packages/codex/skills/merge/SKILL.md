@@ -24,14 +24,6 @@ Resolve [merge.py](../../scripts/merge.py) relative to this `SKILL.md`. Run `pyt
 
 For a graph work unit, add `--unit <id> --progress <absolute progress.json>`. The default-on diff manifest gate checks the PR head and the frozen unit manifest. The Codex `pr_publication_gate` hook checks direct merges.
 
-The package-local helper must:
-
-- resolve the pull request and reject an unmerged closed request;
-- verify required approval and trusted current-head review and eval artifacts;
-- re-run scripted eval smoke checks against the trusted head;
-- verify any configured integrity attestation and wiki-debt gate;
-- merge remotely only after every gate passes;
-- synchronize the repository's main branch;
-- remove the merged branch where safe, without reporting an already successful merge as failed when another worktree still holds the local branch.
+Run `merge.py --describe` to read the gate list the helper enforces. It prints JSON generated from the registries the script actually runs (the verify stages, then the publication gate checks), contacts no remote, and exits 0, so the list cannot drift from the code. After every gate passes the helper merges remotely, synchronizes the repository's main branch and removes the merged branch where safe, without reporting an already successful merge as failed when another worktree still holds the local branch.
 
 Report the pull request number, merged head SHA, final branch state, and any branch cleanup warning.

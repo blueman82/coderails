@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 SOURCE_SUFFIXES = {
     ".bash",
@@ -45,6 +45,41 @@ def patch_paths(command: object) -> list[str]:
     return [next(value for value in match.groups() if value is not None) for match in PATCH_PATH.finditer(command)]
 
 
+def finding_lines(result: subprocess.CompletedProcess[str]) -> list[str]:
+    """Validate structured findings and disclose external or checker failures."""
+    try:
+        raw: object = json.loads(result.stdout)
+        if not isinstance(raw, dict):
+            raise ValueError("invalid quality result")
+        data = cast("dict[str, Any]", raw)
+        if (
+            type(data.get("scanned")) is not int
+            or data["scanned"] < 0
+            or not isinstance(data.get("findings"), list)
+            or type(data.get("external_ok")) is not bool
+        ):
+            raise ValueError("invalid quality result")
+        lines: list[str] = []
+        for raw_issue in cast("list[object]", data["findings"]):
+            if not isinstance(raw_issue, dict):
+                raise ValueError("invalid finding")
+            issue = cast("dict[str, Any]", raw_issue)
+            if (
+                not isinstance(issue.get("path"), str)
+                or not isinstance(issue.get("message"), str)
+                or not (issue.get("line") is None or type(issue["line"]) is int and issue["line"] > 0)
+            ):
+                raise ValueError("invalid finding")
+            lines.append(f"{issue['path']}:{issue['line'] or ''}: {issue['message']}")
+        if not data["external_ok"]:
+            lines.append(f"external quality checks failed: {result.stderr.strip()[:500]}")
+        elif result.returncode:
+            lines.append(f"quality checker failed (exit {result.returncode}): {result.stderr.strip()[:500]}")
+        return lines
+    except (ValueError, KeyError, TypeError):
+        return [f"quality check produced unusable JSON: {result.stderr.strip()[:500]}"]
+
+
 def repo_for(path: Path) -> Path | None:
     """Find the Git root containing a changed file, if one exists."""
     probe = path.parent
@@ -78,14 +113,12 @@ def main() -> int:
         if repo is None:
             continue
         result = subprocess.run(
-            [sys.executable, str(checker), "--root", str(repo), "--paths", str(changed)],
+            [sys.executable, str(checker), "--json", "--root", str(repo), "--paths", str(changed)],
             text=True,
             capture_output=True,
             check=False,
         )
-        output = result.stdout + result.stderr
-        if "0 finding(s)" not in output:
-            feedback.append(output)
+        feedback.extend(finding_lines(result))
     if not feedback:
         return 0
     context = "coderails quality feedback (warn-only):\n" + "\n".join(feedback)
