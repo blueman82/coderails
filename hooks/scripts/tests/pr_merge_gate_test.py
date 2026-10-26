@@ -127,6 +127,7 @@ class MergeEvidenceTests(HookTestCase):
         for target in ("feature", "https://github.com/o/r/pull/42"):
             payload = {
                 "cwd": str(self.directory),
+                "session_id": "test-session",
                 "transcript_path": __file__,
                 "tool_input": {"command": f"gh pr merge {target}"},
             }
@@ -158,7 +159,12 @@ class MergeEvidenceTests(HookTestCase):
             (f"cd {directory} && {command}", str(self.directory.parent)),
             (f"cd {directory} && bash -c '{command}'", str(self.directory.parent)),
         ):
-            payload = {"cwd": cwd, "transcript_path": __file__, "tool_input": {"command": text}}
+            payload = {
+                "cwd": cwd,
+                "session_id": "test-session",
+                "transcript_path": __file__,
+                "tool_input": {"command": text},
+            }
             with (
                 self.subTest(command=text),
                 patch(module + ".read_payload_strict", return_value=payload),
@@ -170,13 +176,14 @@ class MergeEvidenceTests(HookTestCase):
                 patch(module + ".merge_reason", return_value="") as gate,
             ):
                 enforce_pr_workflow.main()
-                gate.assert_called_once_with("42", directory, "", unit="2", progress="p.json")
+                gate.assert_called_once_with("42", directory, "test-session", unit="2", progress="p.json")
 
     def test_gh_repo_retarget_denies_before_evidence_lookup(self) -> None:
         """A merge retargeted by GH_REPO cannot borrow this repository's review and eval evidence."""
         module = "hooks.scripts.enforce_pr_workflow"
         payload = {
             "cwd": str(self.directory),
+            "session_id": "test-session",
             "transcript_path": __file__,
             "tool_input": {"command": "GH_REPO=other/repo gh pr merge 42"},
         }
@@ -197,7 +204,11 @@ class MergeEvidenceTests(HookTestCase):
         before = Path.cwd()
         self.addCleanup(os.chdir, before)
         module = "hooks.scripts.enforce_pr_workflow"
-        payload = {"cwd": str(self.directory), "tool_input": {"command": "gh pr merge 42"}}
+        payload = {
+            "cwd": str(self.directory),
+            "session_id": "test-session",
+            "tool_input": {"command": "gh pr merge 42"},
+        }
         with (
             patch(module + ".read_payload_strict", return_value=payload),
             patch(module + ".config_path", return_value=""),
@@ -220,6 +231,7 @@ class MergeEvidenceTests(HookTestCase):
         module = "hooks.scripts.enforce_pr_workflow"
         payload = {
             "cwd": str(self.directory),
+            "session_id": "test-session",
             "tool_input": {"command": "gh pr edit 42 --base old-release && gh pr merge 42"},
         }
         with (
@@ -233,6 +245,7 @@ class MergeEvidenceTests(HookTestCase):
 
         payload = {
             "cwd": str(self.directory),
+            "session_id": "test-session",
             "tool_input": {
                 "command": 'gh api "repos/o/r/pulls/42" -X PATCH --input /tmp/base-change.json && gh pr merge 42'
             },
@@ -248,6 +261,7 @@ class MergeEvidenceTests(HookTestCase):
 
         payload = {
             "cwd": str(self.directory),
+            "session_id": "test-session",
             "tool_input": {
                 "command": "gh api -X PATCH repos/o/r/pulls/42 --input /tmp/base-change.json && gh pr merge 42"
             },
@@ -263,6 +277,7 @@ class MergeEvidenceTests(HookTestCase):
 
         payload = {
             "cwd": str(self.directory),
+            "session_id": "test-session",
             "tool_input": {"command": "gh api -X PATCH repos/o/r/pulls/42 -f base=old-release && gh pr merge 42"},
         }
         with (

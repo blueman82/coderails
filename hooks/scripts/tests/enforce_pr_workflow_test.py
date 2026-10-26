@@ -127,6 +127,7 @@ class WorkflowGateTests(HookTestCase):
             case = json.loads(
                 json.dumps(original).replace("{sandbox}", str(self.directory)).replace("{head_sha}", fixture_sha)
             )
+            case["request"]["session_id"] = "S1"  # corpus predates the required hook session field
             for path in previous:
                 path.unlink(missing_ok=True)
             previous = set()

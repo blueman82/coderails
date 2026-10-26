@@ -18,7 +18,14 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts import codex_role_session as crs  # noqa: E402
 
-GUARDED = ("deploy-safety-reviewer", "design-scout", "disposition-scout", "preflight-scout", "source-auditor")
+GUARDED = (
+    "deploy-safety-reviewer",
+    "design-scout",
+    "disposition-scout",
+    "preflight-scout",
+    "security-reviewer",
+    "source-auditor",
+)
 
 
 class IsolatedTrace(unittest.TestCase):
@@ -35,6 +42,22 @@ class IsolatedTrace(unittest.TestCase):
 
 class ArgvTests(IsolatedTrace):
     """The launched command must carry every containment flag and exactly one MCP server."""
+
+    def test_security_reviewer_rejects_added_execution_grant(self) -> None:
+        """A changed profile cannot add execution or shell access to the reviewer."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "capabilities").mkdir()
+            role_file = root / "packages/codex/agents/security-reviewer.toml"
+            role_file.parent.mkdir(parents=True)
+            role_file.write_text((REPO / "packages/codex/agents/security-reviewer.toml").read_text())
+            for added in ("tests.run", "shell.raw"):
+                with self.subTest(added=added):
+                    (root / "capabilities/profiles.json").write_text(
+                        json.dumps({"agents": {"security-reviewer": ["repo.inspect", "diff.read", added]}})
+                    )
+                    with self.assertRaisesRegex(ValueError, "security-reviewer"):
+                        crs.build_argv("security-reviewer", root)
 
     def test_exact_argv_for_source_auditor(self) -> None:
         """--ignore-user-config, read-only sandbox, shell tool off, one mcp_servers entry for the role."""

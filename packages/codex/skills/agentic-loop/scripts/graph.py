@@ -26,8 +26,6 @@ from graph_io import write as _write
 from graph_recovery import NODE_CODES, RecoveryRefusedError, node_lease, trace, traced_refusal
 from graph_recovery import collection as collect
 
-__all__ = ["authorize_dispatch", "begin_wave", "record_wave"]
-
 
 def transition(path: Path, session: str, operation: str, node: str, reason: str) -> dict[str, Any]:
     """Apply one v3-only core transition while retaining Codex file ownership."""

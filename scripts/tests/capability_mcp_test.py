@@ -23,6 +23,7 @@ EXPECTED = {
     "design-scout": READ_ONLY,
     "disposition-scout": READ_ONLY,
     "preflight-scout": READ_ONLY,
+    "security-reviewer": READ_ONLY,
     "source-auditor": ["cmd_run", "diff_read", "repo_inspect", "tests_run"],
 }
 
@@ -251,6 +252,27 @@ class McpCase(unittest.TestCase):
                 )
                 self.assertEqual(done.returncode, 2, done.stdout)
                 self.assertIn("malformed", done.stderr)
+
+    def test_security_reviewer_rejects_added_execution_grant_at_startup(self) -> None:
+        """The live MCP server refuses execution or shell grants for the reviewer."""
+        path = self.tree / "capabilities/profiles.json"
+        original = json.loads(path.read_text(encoding="utf-8"))
+        for added in ("tests.run", "shell.raw"):
+            with self.subTest(added=added):
+                profile = dict(original)
+                profile["agents"] = {**original["agents"], "security-reviewer": ["repo.inspect", "diff.read", added]}
+                path.write_text(json.dumps(profile), encoding="utf-8")
+                done = subprocess.run(
+                    [sys.executable, str(self.tree / "scripts/capability_mcp.py"), "--role", "security-reviewer"],
+                    cwd=self.repo,
+                    env={"PATH": os.environ["PATH"], "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop)},
+                    input="",
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(done.returncode, 2, done.stdout)
+                self.assertIn("security-reviewer", done.stderr)
 
     def test_negative_control_hard_coded_tools_ignore_profile_edit(self) -> None:
         """Control: a server with a hard-coded tool set fails the drift assertion above."""

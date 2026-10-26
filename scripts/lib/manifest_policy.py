@@ -14,7 +14,6 @@ import json
 import os
 import re
 import sys
-from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
@@ -24,10 +23,13 @@ from .config_strict import ConfigRejected, strict_settings
 
 DEFAULT_POLICY = Path(__file__).resolve().parents[2] / "policy" / "diff-policy.default.json"
 MODES = ("off", "advisory", "enforce")
+REVIEW_POLICY_PATHS = ["policy/review_policy.json", "packages/codex/policy/review_policy.json"]
 PROTECTED_POLICY_PATHS = [
     ".coderails/workflow.config.yaml",
     "policy/diff-policy*.json",
+    "policy/review_policy.json",
     "packages/codex/policy/diff-policy*.json",
+    "packages/codex/policy/review_policy.json",
 ]
 Changes = list[tuple[str, list[str]]]
 
@@ -112,7 +114,10 @@ def check(
         if statuses and status[0] not in statuses:
             add("status_not_allowed", paths[-1])
         for path in paths:
-            if matches(path, deny) and (not status.startswith("D") or matches(path, PROTECTED_POLICY_PATHS)):
+            review_policy = matches(path, REVIEW_POLICY_PATHS)
+            if (review_policy and not status.startswith("A")) or (
+                matches(path, deny) and (not status.startswith("D") or matches(path, PROTECTED_POLICY_PATHS))
+            ):
                 add("denied_path", path)
             if (manifest is not None and not matches(path, manifest)) or (allow and not matches(path, allow)):
                 add("out_of_manifest", path)
@@ -173,69 +178,85 @@ def diff_changes(head: str, fetch: str = "", base: str = "") -> Changes | None:
     return None if result.returncode else parse_raw_z(result.stdout)
 
 
+def publication_session() -> str:
+    """Session identity supplied by the active provider or publication hook."""
+    session = os.environ.get("CODERAILS_PUBLICATION_SESSION_ID")
+    if session is None:
+        session = (
+            os.environ.get("CLAUDE_CODE_SESSION_ID")
+            or os.environ.get("CODEX_SESSION_ID")
+            or os.environ.get("CODEX_THREAD_ID")
+            or ""
+        )
+    if not session or session != session.strip() or "/" in session or ".." in session:
+        return ""
+    return session
+
+
+def _graph_path(session: str) -> Path | None:
+    """Return the current repository's supported graph-state path."""
+    plugin = Path(__file__).resolve().parents[2]
+    root_key = (
+        "CODERAILS_AGENTIC_LOOP_DIR" if (plugin / ".codex-plugin/plugin.json").is_file() else "CLAUDE_AGENTIC_LOOP_DIR"
+    )
+    root = Path(os.environ.get(root_key) or Path.home() / ".coderails/agentic-loop")
+    common = git.output("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
+    current = git.output("git", "rev-parse", "--show-toplevel")
+    return root / common.replace("/", "-") / session / "progress.json" if common and current and session else None
+
+
 def unit_manifest(progress: str, unit: str) -> list[str]:
-    """The explicitly requested unit's bound manifest; ValueError for unusable metadata or a different worktree."""
+    """Read a unit manifest from this repository's supported, session-owned graph state."""
     state = load_json(progress)
     units = (state or {}).get("work_units")
     if state is None or not isinstance(units, dict):
         raise ValueError("progress unreadable")
     if any(not isinstance(state.get(key), str) or not str(state[key]).strip() for key in ("session_id", "loop_id")):
         raise ValueError("progress ownership missing")
+    owner = str(state["session_id"]).replace("/", "_").replace("..", "")
+    expected = _graph_path(owner)
+    session = publication_session()
+    if not session:
+        raise ValueError("publication session missing")
+    if not expected or not Path(progress).is_absolute() or Path(progress).resolve() != expected.resolve():
+        raise ValueError("progress repository mismatch")
+    if session != owner:
+        raise ValueError("progress session mismatch")
     entry = cast(dict[str, Any], units).get(unit)
     if not isinstance(entry, dict):
         raise ValueError("unit missing")
-    fields = cast(dict[str, Any], entry)
-    worktree, current = fields.get("worktree"), git.output("git", "rev-parse", "--show-toplevel")
-    if not isinstance(worktree, str) or not worktree.strip() or not Path(worktree).is_absolute():
-        raise ValueError("unit worktree missing")
-    if not current or Path(worktree).resolve() != Path(current).resolve():
-        raise ValueError("unit worktree mismatch")
-    manifest = fields.get("manifest")
+    manifest = cast(dict[str, Any], entry).get("manifest")
     if not isinstance(manifest, list) or not all(isinstance(path, str) for path in cast(list[object], manifest)):
         raise ValueError("unit manifest invalid")
     return strings(cast(list[object], manifest))
 
 
 def active_graph_unit() -> bool:
-    """True when this session owns a graph unit in the current worktree."""
-    session = (
-        os.environ.get("CODERAILS_PUBLICATION_SESSION_ID")
-        or os.environ.get("CLAUDE_CODE_SESSION_ID")
-        or os.environ.get("CODEX_SESSION_ID")
-        or os.environ.get("CODEX_THREAD_ID")
-        or ""
-    )
+    """True when the current repository has graph units for this session."""
+    session = publication_session()
     if not session:
         return False
-    session = session.replace("/", "_").replace("..", "")
-    plugin = Path(__file__).resolve().parents[2]
-    root_key = "CLAUDE_AGENTIC_LOOP_DIR"
-    if (plugin / ".codex-plugin/plugin.json").is_file():
-        root_key = "CODERAILS_AGENTIC_LOOP_DIR"
-    root = Path(os.environ.get(root_key) or Path.home() / ".coderails/agentic-loop")
-    common = git.output("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
-    current = git.output("git", "rev-parse", "--show-toplevel")
-    if not common or not current:
+    path = _graph_path(session)
+    if not path:
         return False
-    paths = [root / common.replace("/", "-") / session / "progress.json"]
-    with suppress(OSError):
-        paths += [directory / session / "progress.json" for directory in root.iterdir() if directory.is_dir()]
-    for path in paths:
-        if not path.is_file():
-            continue
-        state = load_json(path)
-        if state is None:
-            return True
-        if state.get("session_id") != session or not isinstance(state.get("work_units"), dict):
-            continue
-        units = cast(dict[str, Any], state["work_units"])
-        for entry in units.values():
-            if not isinstance(entry, dict):
-                continue
-            worktree = cast(dict[str, Any], entry).get("worktree")
-            if isinstance(worktree, str) and Path(worktree).resolve() == Path(current).resolve():
-                return True
-    return False
+    if not path.is_file():
+        root = path.parents[2]
+        try:
+            candidates = sorted(
+                directory / session / "progress.json" for directory in root.iterdir() if directory.is_dir()
+            )
+        except OSError:
+            return False
+        existing = [candidate for candidate in candidates if candidate.is_file()]
+        if len(existing) > 1:
+            return True  # multiple same-session fallbacks cannot identify this repository's graph
+        if not existing:
+            return False
+        path = existing[0]
+    state = load_json(path)
+    if state is None or state.get("session_id") != session or not isinstance(state.get("work_units"), dict):
+        return True
+    return bool(state["work_units"])
 
 
 def unit_flags(arguments: list[str]) -> tuple[list[str], str, str]:
@@ -343,6 +364,9 @@ def violations(pr: str = "", unit: str = "", progress: str = "", head: str = "")
 
 def gate(pr: str = "", unit: str = "", progress: str = "") -> None:
     """Raise WorkflowError("diff_manifest:<code>") for the first refusal; push.py calls this before pushing."""
+    if not publication_session():
+        trace("publication", "refused", "session_missing", command="publication")
+        raise git.WorkflowError("publication:session_missing")
     found = violations(pr, unit, progress)
     if found:
         raise git.WorkflowError(found[0]["code"])

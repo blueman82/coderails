@@ -57,7 +57,7 @@ Write the summary files with the file-writing tool (not a shell heredoc), then r
 python3 <resolved post_review.py> post <PR> --summary <review-summary-file> --pass security-review=<security-summary-file>
 ```
 
-Omit `--pass NAME=FILE` for passes the diff does not need. The script validates every file, resolves the head, builds the marker and the passes line, reuses an identical existing artifact, refuses if the head moved before or after posting (`stale`), and posts with `gh api`. A non-zero exit means nothing usable was posted; fix the cause and re-run.
+Omit `--pass NAME=FILE` for passes the diff does not need. The script validates every file, resolves the head, and posts two comments with `gh api`: one with the passes and one with the server compatible review summary. It reuses an identical pair and checks the head before and after each post. A failed second post can leave the first comment; a retry completes the pair. For `stale`, review the new head before you post again.
 
 The GitHub PR comment is authoritative. Do not read or write local review caches.
 

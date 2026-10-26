@@ -1,8 +1,11 @@
 # Capability profiles
 
-`capabilities/profiles.json` is the single source for what each agent type may reach. `scripts/capability_profiles_validate.py`
+`capabilities/profiles.json` declares what each agent type may reach. `scripts/capability_profiles_validate.py`
 (run by `scripts/tests/capability_profiles_test.py`) fails when it disagrees with `agents/*.md` frontmatter or
 `packages/codex/agents/*.toml`.
+
+The `security-reviewer` holds exactly `repo.inspect` and `diff.read`. The Codex role launcher and both provider MCP
+servers refuse to start that role if its profile grants another capability. These checks use the installed source.
 
 Capabilities: `repo.inspect`, `diff.read`, `tests.run`, `pr.comment` (reached through `scripts/capability.py <tool>`),
 plus `worktree.write` (Write/Edit, or a non-read-only Codex sandbox) and `shell.raw` (unrestricted Bash). An agent with
@@ -13,7 +16,7 @@ a capability tool but no `shell.raw` is "guarded": the Bash allowlist hook deriv
 | Property | Claude Code | Codex |
 |---|---|---|
 | Write/Edit withheld | frontmatter `tools`/`disallowedTools` (harness-enforced) | `sandbox_mode = "read-only"` (sandbox-enforced) |
-| Bash narrowed to capability tools | **Bash removed**: the five guarded agent files list no `Bash` (probe-observed, see below). `reviewer_bash_allowlist.py` stays as defence in depth for an install whose agent file still lists Bash; `subagent_identity_gate.py` denies Bash from a subagent with no `agent_type` in a graph-bound session | **shell switched off**: each guarded role TOML carries `[features] shell_tool = false` (plus `sandbox_mode = "read-only"`, which alone does NOT bind a child). No per-agent Bash hook exists: Codex PreToolUse carries no `agent_type`/`agent_id`, so there is no Codex counterpart of the identity gate |
+| Bash narrowed to capability tools | **Bash removed**: the six guarded source agent files list no `Bash`. The earlier live probe covered five roles; the new `security-reviewer` still needs an installed probe. `reviewer_bash_allowlist.py` stays as defence in depth for an install whose agent file still lists Bash; `subagent_identity_gate.py` denies Bash from a subagent with no `agent_type` in a graph-bound session | **shell switched off**: each guarded role TOML carries `[features] shell_tool = false` (plus `sandbox_mode = "read-only"`, which alone does NOT bind a child). No per-agent Bash hook exists: Codex PreToolUse carries no `agent_type`/`agent_id`, so there is no Codex counterpart of the identity gate |
 | Typed first-class tools | agent `tools:` are exactly `mcp__plugin_coderails_cap-<role>__<tool>` (+`Skill` for preflight-scout); servers declared by `.claude-plugin/plugin.json` `mcpServers` -> generated `capabilities/mcp.json` | `scripts/codex_role_session.py` launches a role as its own `codex exec` with exactly that role's server; native children inherit the parent's MCP servers, so no per-role server is registered in the Codex plugin manifest |
 | `tests.run` | allowed for `source-auditor` only; bounded execution of declared argv lists, NOT read-only | same script; the read-only sandbox may block its cache writes (inferred) |
 
@@ -38,7 +41,7 @@ byte-identical copies of `capability.py`, `capability_mcp.py`, `lib/capability_e
 
 - **Tool names.** MCP tool names cannot contain dots, so `repo.inspect`, `diff.read`, `tests.run`, `pr.comment`, `cmd.run`
   are served as `repo_inspect`, `diff_read`, `tests_run`, `pr_comment`, `cmd_run`. Guarded read-only roles
-  (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`) get `repo_inspect`, `diff_read`;
+  (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `security-reviewer`) get `repo_inspect`, `diff_read`;
   `source-auditor` additionally gets `tests_run` and `cmd_run`. The two read tools advertise `readOnlyHint: true`.
   The execution tools advertise `readOnlyHint: false`; they can run repo code.
 - **Per-role instance; role is not an argument.** The role is fixed at launch. No `inputSchema` has a `role` property and
@@ -60,7 +63,7 @@ byte-identical copies of `capability.py`, `capability_mcp.py`, `lib/capability_e
   hashes). A missing trace library or failed write leaves no row. A recognized tool's response sets `traced: false` in
   that case; startup and wrong-role errors have no `traced` field. Counters include only stored rows:
   `python3 scripts/lib/capability_counters.py [--since <ISO ts>]` (reads `CLAUDE_AGENTIC_LOOP_DIR`).
-- **Cost.** Plugin MCP servers all launch at session start: one python process per role, five per session.
+- **Cost.** Plugin MCP servers all launch at session start: one Python process per role, six per session after installation.
 
 Limits (stated, not hidden): `cmd.run` and `pr.comment` offer no network command: `gh pr view` is
 deliberately NOT offered, so reviewers work from `diff.read` and dispatcher-supplied PR metadata. `tests.run` and
@@ -88,7 +91,8 @@ stays. The validator names an error for: any `Bash`/`Write`/`Edit`/`NotebookEdit
 **Observed, not just configured.** `hooks/scripts/tests/reviewer_tools_probe_test.py` runs the real `claude` CLI against a
 loopback API fixture (no billing), both as `--agent coderails:<role>` and as an Agent-tool dispatch with
 `subagent_type`, and asserts the `tools` array of the request the model receives: exactly the profile-derived names for
-all five roles, none of Bash, Write, Edit, NotebookEdit, Agent, Read. design-scout's list holds none of source-auditor's
+the five roles that were installed then, none of Bash, Write, Edit, NotebookEdit, Agent, Read. Source now defines a sixth
+role, `security-reviewer`; its installed request and tool list need a new probe. design-scout's list holds none of source-auditor's
 server tools, and the live per-role servers refuse `tests_run` (design-scout) and any `cmd_run` name not in `profiles.json`.
 A control agent that does list Bash shows Bash in the same request, so the probe can fail.
 
@@ -158,7 +162,8 @@ tools after a Skill call). If it did, the remaining controls are `reviewer_bash_
 **Codex observation.** `scripts/tests/codex_role_session_live_test.py` runs the real `codex exec` with the launcher's
 argv against a loopback Responses fixture that answers with an `exec_command` call. With the launcher's argv the request's
 `tools` array holds no `exec_command`/`write_stdin`, the call returns `unsupported call: exec_command`, and only the
-requested role's server tools are present. All five guarded roles offer no `spawn_agent` tool. Without
+requested role's server tools are present. The recorded test covered five guarded roles. Source now has six; an installed
+`security-reviewer` run must confirm its tool list. Without
 `features.multi_agent=false`, the control run offers `spawn_agent`. Without `features.shell_tool=false`, the control
 run offers the shell and executes the command. The tests observe the launcher's argv. They do not test the `[features]`
 block in the role TOML files by spawning a native child.

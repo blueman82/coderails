@@ -41,16 +41,16 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `python3 scripts/lib/config_counters.py` (`config_rejected`, `config_bad_value`, `wiki_schema_fail_closed`).
 - Remediation: run `python3 scripts/lib/config.py resolve-config --json`, fix each finding (typo'd key, wrong type, value
   outside the enum), or restore `wiki.schema.json` (`page_types` non-empty list of directory names). Only the guarded
-  action is denied; every other command and tool passes. With NO config file nothing is read and every gate stays inert
-  (repos not using coderails), and an ambiguous wiki identity (no `wiki_path`, other repository, vault not a directory)
-  still allows.
-- Limit: the controls are only as strong as the config file. A same-user agent can `mv` it away (every gate goes inert)
-  or edit a control to `off` in place; no hook guards `.coderails/workflow.config.yaml`. Review config diffs like code
-  (the diff-manifest policy can list it as a protected path). `evals.require_signatures` fails closed: only an
-  explicit `false` turns it off. Malformed lines and duplicate keys are `config_unparseable_line` /
-  `config_duplicate_key` findings.
-- Defaults: an existing config with no other keys enables `sandbox_workers: true`,
-  `evals.require_signatures: true`, and `diff_manifest: enforce` (inert until `diff_manifest_policy` names a file).
+  action is denied; other commands and tools can continue. Without a config file, config-dependent gates do not run.
+  The diff-manifest check still uses its shipped policy. An ambiguous wiki identity (no `wiki_path`, another repository,
+  or a path that is not a vault) does not block a write.
+- Limit: a same-user agent can remove the config file or set a control to `off`; no hook guards
+  `.coderails/workflow.config.yaml`. Removing the file does not disable the default diff-manifest check. Review config
+  diffs like code. The diff-manifest policy can list the config file as a protected path. `evals.require_signatures`
+  fails closed: only an explicit `false` turns it off. Malformed lines and duplicate keys are
+  `config_unparseable_line` / `config_duplicate_key` findings.
+- Defaults: the diff-manifest check uses `enforce` mode and `policy/diff-policy.default.json` even without a config file.
+  An existing config with no other keys enables `sandbox_workers: true` and `evals.require_signatures: true`.
   `action_authority` defaults to `off`. The shipped config sets it to `advisory`, which warns about missing receipts
   without a passphrase. Set `enforce` only when signed receipts are required.
 
@@ -444,11 +444,15 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   the PR diff from its live `baseRefOid` to the checked head (renames count both sides). Config `review_passes: off` skips the check (absent or any other value
   enforces; `diff_manifest: off` does not touch it). The policy file is the control, and deleting or corrupting it
   refuses (`review_policy_unreadable`), it does not allow.
-- Artifact: line 1 is the unchanged v1 marker; line 2 is `<!-- coderails-review-passes v1 {"head_sha":...,"passes":[...]} -->`
-  with `{name, verdict, blocking, summary_sha256}` per pass. `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]`
-  validates each summary, derives each verdict from the text (a bullet under `## Critical` is `fail`) and posts it. A v1
-  artifact with no passes line counts as no passes: `review-pr` is satisfied by the marker, but a `hooks/` PR is refused
-  until it is re-posted. A passes line naming another `head_sha` is ignored.
+- Artifact: `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]` posts two comments for one head.
+  The first has the v1 marker, a passes line, and the review text. The passes line gives the name, verdict, blocking
+  value, and summary hash for each pass. The second has the same v1 marker and the same general review text. It lets
+  the current server integrity check read the review. The local gate accepts the pair only when the comments are
+  adjacent and the general review text is identical. The script derives each verdict from the text. A Critical finding
+  fails the pass. A present passes line must include `review-pr` with a verdict bound to its summary. An old single
+  comment with no passes line can satisfy `review-pr` for a docs-only diff when its Critical section is clean. Once a
+  passes comment exists for that head,
+  a missing, malformed, or stale companion refuses the pair (`review_passes_malformed`).
 - Query: `trace.by_reason` for `review-passes/ok/review_passes_ok` and `review-passes/refused/<code>`, plus
   `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
 - Remediation: spawn the missing reviewer (`security-reviewer`, `deploy-safety-reviewer`; both providers ship them),
