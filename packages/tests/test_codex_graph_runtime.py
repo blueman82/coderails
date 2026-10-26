@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/script
 import graph
 import graph_convert
 import graph_semantics
+import loop_dispatch_guard as guard
 from graph_completion import validate_work_units
 from graph_evidence import validate_worker_evidence
 from graph_identity import GraphError, task_name, task_node
@@ -229,6 +230,61 @@ class GraphRuntimeTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             graph.authorize_dispatch(self.path, "parent", identifier, message, "", foreign_task, evals)
         graph.authorize_dispatch(self.path, "parent", identifier, message, "", opened["task_name"], evals)
+
+    def test_foreign_graph_owner_has_recovery_trace(self) -> None:
+        """An owner mismatch cannot consume dispatch or omit its refusal from the graph trace."""
+        opened = graph.begin_wave(self.path)["dispatches"][0]
+        message = self.path.with_name("message.txt")
+        message.write_text(opened["prompt_prefix"] + "\n" + opened["prompt_sections"])
+        before = self.path.read_bytes()
+        with self.assertRaises(GraphError):
+            graph.authorize_dispatch(
+                self.path,
+                "other",
+                opened["dispatch_id"],
+                message,
+                "",
+                opened["task_name"],
+                self.path.with_name("evals.json"),
+            )
+        self.assertEqual(self.path.read_bytes(), before)
+        row = self.path.with_name("recovery-trace.jsonl").read_text().splitlines()[-1]
+        self.assertEqual(json.loads(row)["reason_code"], "dispatch_foreign_owner")
+        self.assertNotIn('"other"', row)
+
+    def test_staging_fault_has_recovery_trace_and_fresh_retry(self) -> None:
+        """The hook traces a temporary-message failure before a valid retry consumes the dispatch."""
+        opened = graph.begin_wave(self.path)["dispatches"][0]
+        payload = {
+            "tool_name": "collaborationspawn_agent",
+            "tool_use_id": "call_stage_probe",
+            "session_id": "parent",
+            "cwd": str(self.directory),
+            "tool_input": {
+                "task_name": opened["task_name"],
+                "message": opened["prompt_prefix"] + "\n" + opened["prompt_sections"],
+            },
+        }
+        with (
+            patch.object(guard, "read_input", return_value=json.dumps(payload)),
+            patch.object(guard, "config_path", return_value=""),
+            patch.object(guard, "loop_state_path", return_value=self.path),
+            patch("loop_dispatch_guard.tempfile.TemporaryDirectory", side_effect=OSError("scratch unavailable")),
+            patch.object(guard, "deny") as denial,
+        ):
+            self.assertEqual(guard.main(), 0)
+            self.assertIn("dispatch_message_unavailable", denial.call_args.args[0])
+        row = json.loads(self.path.with_name("recovery-trace.jsonl").read_text().splitlines()[-1])
+        self.assertEqual(row["reason_code"], "dispatch_message_unavailable")
+        self.assertIsNone(next(iter(read_json(self.path)["graph"]["dispatches"].values()))["authorized"])
+        with (
+            patch.object(guard, "read_input", return_value=json.dumps(payload)),
+            patch.object(guard, "config_path", return_value=""),
+            patch.object(guard, "loop_state_path", return_value=self.path),
+            patch.object(guard, "deny") as denial,
+        ):
+            self.assertEqual(guard.main(), 0)
+            denial.assert_not_called()
 
     def test_exact_result_envelope(self) -> None:
         """Reject wrong wave, partial results, and malformed stale evidence atomically."""

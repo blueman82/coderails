@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -28,6 +29,9 @@ from hook_common import (
 
 from scripts.lib.config import config_path
 from scripts.lib.config_strict import ConfigRejected, strict_settings
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/agentic-loop/scripts"))
+from graph_recovery import trace as recovery_trace  # noqa: E402
 
 ENVELOPE_KEY = "CODERAILS_GRAPH_DISPATCH"
 MAX_ENVELOPE_LINE = 8192
@@ -108,6 +112,19 @@ def _graph_call(
     except HostResourceError:
         _refuse("dispatch_graph_resource_error", RESOURCE_MESSAGE, session_id)
     return False, None
+
+
+def _trace_staging_refusal(path: Path, inspection: dict[str, object]) -> None:
+    """Record a hook-side staging failure in the graph's recovery sidecar."""
+    state = {
+        "session_id": inspection.get("session_id"),
+        "loop_id": inspection.get("loop_id"),
+        "revision": inspection.get("revision"),
+        "graph": {"active_wave": inspection.get("active_wave")},
+    }
+    recovery_trace(
+        path, state, "refused", "dispatch_message_unavailable", {}, [(None, None, None)], "authorize-dispatch"
+    )
 
 
 def _identity(payload: dict[str, object]) -> tuple[str, str] | None:
@@ -202,6 +219,7 @@ def _check() -> int:
                 text_field(payload, "tool_use_id"),
             )
     except OSError:
+        _trace_staging_refusal(state, inspection)
         log(f"hook=loop_dispatch_guard session={session_id} blocked=1 reason_code=dispatch_message_unavailable")
         deny("Graph worker dispatch could not stage its message [reason_code=dispatch_message_unavailable].")
         return 0

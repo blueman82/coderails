@@ -6,6 +6,7 @@ import re
 from typing import Any, Optional, cast
 
 import graph_contract
+import graph_encrypted_content
 from graph_artifacts import validate_completion_evidence as validate_completion_evidence
 from graph_artifacts import validate_evals as validate_evals
 from graph_data import nonempty, object_value, read_records
@@ -69,16 +70,24 @@ def _verify_dispatch(
         raise graph_contract.DispatchDeniedError("dispatch_missing_envelope", "native spawn has no unique request")
     request = calls[0]
     message = request.get("message")
-    envelope = graph_contract.parse_envelope(message)
     if not isinstance(message, str):
         raise graph_contract.DispatchDeniedError("dispatch_missing_envelope", "native spawn has no message")
     if request.get("task_name") != task_name(state["loop_id"], node_id, attempt):
         raise graph_contract.DispatchDeniedError("dispatch_foreign", "native spawn task name differs from its attempt")
-    record = (
-        graph_contract.check_ownership(state, envelope, live=False)
-        if graph_contract.dispatch_off()
-        else graph_contract.check_dispatch(state, envelope, message, live=False)
-    )
+    try:
+        envelope = graph_contract.parse_envelope(message)
+    except graph_contract.DispatchDeniedError as error:
+        if error.code != "dispatch_missing_envelope":
+            raise
+        record = graph_encrypted_content.check(state, node_id, attempt, wave_id, call_id, message)
+        encrypted = True
+    else:
+        record = (
+            graph_contract.check_ownership(state, envelope, live=False)
+            if graph_contract.dispatch_off()
+            else graph_contract.check_dispatch(state, envelope, message, live=False)
+        )
+        encrypted = False
     if (
         record.get("task_name") != request["task_name"]
         or record.get("attempt") != attempt
@@ -91,7 +100,7 @@ def _verify_dispatch(
     if not isinstance(agent_type, str):
         raise graph_contract.DispatchDeniedError("role_mismatch", "native spawn has an invalid agent type")
     graph_contract.assert_role(record["contract"], agent_type, "", None)
-    if record.get("authorized") != {"tool_use_id": None}:
+    if not encrypted and record.get("authorized") != {"tool_use_id": None}:
         raise graph_contract.DispatchDeniedError(
             "dispatch_unauthorized", "native spawn has no consumed dispatch authorization"
         )
