@@ -25,12 +25,11 @@ Generate two artefacts that allow a fresh Claude Code session to continue the cu
 If a native loop graph exists for this session, first run
 `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" summarize <state>` (JSON: `phase`, `detail`, `done`,
 `active`, `ready`, `pending`) and `... graph.py inspect <state>` (JSON: `revision`, `active_wave`, `running`, `ready`,
-`hard_stop`), plus `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" list --type decision --scope loop --loop <session_id>`
-(JSON records with `cite`). Use them for Goal, Decisions, Done and Next steps. If the adapter exits nonzero it prints
-`{"degraded": "<reason_code>"}`: put that reason code in the handoff under a "Memory degraded" line (see `docs/RUNBOOK.md`,
-"Memory degraded (Muninn authoritative)"); never skip the read silently and never substitute hand-written Markdown for
-the typed decisions. A missing loop graph (`graph.py` unavailable) only drops the graph commands; Step 1 still supplies
-the rest.
+`hard_stop`). For each decision row with `muninn.request_id`, run `muninn learn show <R_ID>`.
+If that request has a completed receipt and the row has `muninn.id`, run `muninn know show <K_ID>`.
+Use an active note only when its project, task, kind, and text match the row. Report pending, failed, or missing
+matches under "Memory degraded" with the saved request ID. Do not treat a request as a written note.
+A missing loop graph drops only the graph commands; Step 1 still supplies the rest.
 
 When reporting graph work, use `inspect`/`summarize`'s `node_names` entry to show each node's one-word job name and lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.
 

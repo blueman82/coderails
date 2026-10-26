@@ -192,10 +192,14 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `memory_backend_off` | memory.backend is off in the workflow config; set it to muninn (or remove the key) to write typed memory. |
 | `memory_backend_invalid` | memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml. |
 | `muninn_absent` | muninn is not on PATH; install it (the Markdown path is not a fallback). |
-| `muninn_old_ledger` | the D4 adapter expects retired Muninn flags. Keep the result degraded until a current request-bound adapter is designed. |
+| `muninn_old_ledger` | The installed Muninn command lacks task requests, or this record has only an old K-id. Upgrade Muninn and reconcile old records before reuse. |
 | `muninn_timeout` | muninn hung past 10s; run `muninn know list` by hand and check store locks. |
 | `muninn_error` | muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and read stderr. |
-| `muninn_bad_output` | the retired D4 write protocol returned no numeric K-id. Inspect current Muninn records without a legacy scope flag. |
+| `muninn_bad_output` | Muninn returned a reply that does not match the task request or current-note contract. Inspect its output. |
+| `learning_pending` | Muninn accepted the task request. Keep its R_ ID and check the same request later. |
+| `learning_request_unknown` | Muninn may have accepted a request without returning its R_ ID. Inspect `muninn learn list`; do not submit again. |
+| `learning_request_failed` | The saved Muninn request failed or was cancelled. Inspect it with `muninn learn show R_ID`. |
+| `learning_no_matching_record` | The completed request produced no active note with this exact task and text. Inspect its receipt and notes. |
 | `muninn_store_missing` | no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once. |
 | `muninn_schema_old` | the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2. |
 | `muninn_schema_incomplete` | the D4 adapter expects retired v2 columns or tables. Inspect the current store with `muninn doctor`, then redesign the adapter. |

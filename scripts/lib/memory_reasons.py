@@ -13,8 +13,8 @@ REASONS: dict[str, str] = {
     "memory_backend_invalid": "memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml.",
     "muninn_absent": "muninn is not on PATH; install it (the Markdown path is not a fallback).",
     "muninn_old_ledger": (
-        "the D4 adapter expects retired Muninn flags; keep this degraded until a current request-bound adapter "
-        "is designed."
+        "the installed Muninn command lacks task requests, or this record has only an old K-id; upgrade Muninn and "
+        "reconcile old records before reuse."
     ),
     "muninn_timeout": "muninn hung past 10s; run `muninn know list` by hand and check store locks.",
     "muninn_error": (
@@ -22,8 +22,18 @@ REASONS: dict[str, str] = {
         "read stderr."
     ),
     "muninn_bad_output": (
-        "the retired D4 write protocol returned no numeric K-id; inspect current Muninn records without a legacy "
-        "scope flag."
+        "Muninn returned a reply that does not match the task request or current-note contract; inspect its output."
+    ),
+    "learning_pending": "Muninn has accepted the task request. Keep its R_ ID and check the same request later.",
+    "learning_request_unknown": (
+        "Muninn may have accepted a request without returning its R_ ID. "
+        "Inspect `muninn learn list`; do not submit again."
+    ),
+    "learning_request_failed": (
+        "The saved Muninn request failed or was cancelled. Inspect it with `muninn learn show R_ID`."
+    ),
+    "learning_no_matching_record": (
+        "The completed request produced no active note with this exact task and text. Inspect its receipt and notes."
     ),
     "muninn_store_missing": "no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once.",
     "muninn_schema_old": (

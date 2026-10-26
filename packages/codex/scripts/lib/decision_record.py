@@ -43,6 +43,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
 from scripts.lib import memory_adapter as ma  # noqa: E402
+from scripts.lib import memory_request as mr  # noqa: E402
 
 GENESIS = "0" * 64
 HASH_EXCLUDED = ("row_sha256", "muninn")
@@ -175,22 +176,26 @@ def _trace(command: str, outcome: str, reason: str, session: str, loop_id: str |
 def sync_row(
     row: dict[str, Any], loop_id: str, session_id: str, prompt_raw: str, cite_quote: str | None = None
 ) -> dict[str, Any]:
-    """Write one decision to Muninn; return the muninn field {state: written|degraded|disabled, id, reason_code}."""
-    quote = _collapse(cite_quote) if cite_quote and cite_quote.strip() else pick_quote(prompt_raw or "")
-    tag = "run-" + re.sub(r"[^a-z0-9_-]", "-", loop_id.lower())[:28]
+    """Queue one task review, or inspect its saved request. A request is not a write."""
     claim = _collapse(f"{row['phase']}: {row['decision']}")
-    rec = ma.Record("loop", "decision", claim[:CLAIM_MAX], "", quote, [tag], loop_id, "inferred")
-    refused = ma.resolve_cite(rec, False, session_id)
-    res: ma.Degraded | ma.Written = refused or ma.add(rec, session_id)
+    request_id = _as_row(row.get("muninn")).get("request_id")
+    res = (
+        mr.inspect(request_id, loop_id, "decision", claim)
+        if isinstance(request_id, str)
+        else mr.submit(session_id, loop_id)
+    )
     field: dict[str, Any]
-    if isinstance(res, ma.Written):
-        field = {"state": "written", "id": res.id, "reason_code": "ok"}
+    if isinstance(res, ma.Record):
+        field = {"state": "written", "id": res.id, "request_id": request_id, "reason_code": "ok"}
+    elif isinstance(res, mr.Pending):
+        field = {"state": "pending", "id": None, "request_id": res.request_id, "reason_code": "learning_pending"}
     else:
         off = res.reason == "memory_backend_off"
-        uncertain = refused is None and res.reason in {"muninn_error", "muninn_timeout", "muninn_bad_output"}
+        uncertain = request_id is None and res.reason in {"muninn_error", "muninn_timeout", "muninn_bad_output"}
         field = {
             "state": "disabled" if off else "unknown" if uncertain else "degraded",
             "id": None,
+            "request_id": request_id,
             "reason_code": res.reason,
         }
     _trace("decision.sync", field["state"], field["reason_code"], session_id, loop_id)
@@ -230,7 +235,8 @@ def claim_sync(state: dict[str, Any], session: str, loop_id: str, row_sha256: st
     row = _owned_row(new, session, loop_id, row_sha256)
     if _as_row(row.get("muninn")).get("state") not in {"pending", "degraded"}:
         raise ValueError("sync_unavailable")
-    row["muninn"] = {"state": "syncing", "id": None, "reason_code": "sync_in_flight"}
+    request_id = _as_row(row.get("muninn")).get("request_id")
+    row["muninn"] = {"state": "syncing", "id": None, "request_id": request_id, "reason_code": "sync_in_flight"}
     return new
 
 

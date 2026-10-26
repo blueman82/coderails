@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so 
 from hooks.scripts.lib import dir_lock  # noqa: E402
 from scripts.lib import lessons  # noqa: E402
 from scripts.lib import memory_adapter as ma  # noqa: E402
+from scripts.lib import memory_request as mr  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
 from scripts.lib import orders_legacy_import as legacy_import  # noqa: E402
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
@@ -65,30 +66,38 @@ def update(repo_dir: Path, change: Callable[[ol.Ledger], tuple[ol.Ledger | None,
 
 
 def sync_order(
-    order: dict[str, Any], session: str, quote: str, repo_dir: Path, ledger: ol.Ledger, replace: bool = False
+    order: dict[str, Any],
+    session: str,
+    repo_dir: Path,
+    ledger: ol.Ledger,
+    task: str,
 ) -> dict[str, Any]:
-    """Reconcile current tagged claims before add; the caller holds the one orders lock throughout."""
+    """Inspect the saved request or submit one review for this order."""
     lifecycle.check_staged_identity(repo_dir, ledger, order)
-    prior = order.get("muninn", {}).get("id")
+    previous = order.get("muninn", {})
     claim = _collapse(str(order["lesson"]))
-    current = lessons.current(order["id"], session, prior)
-    if isinstance(current, ma.Degraded) or current and (not replace or current.claim == claim or not quote.strip()):
-        return lessons.metadata(current, prior)
-    if not replace and prior:
-        return lessons.metadata(None, prior)
-    if not quote.strip():
-        return lessons.metadata(ma.Degraded("no_user_cite"), prior)
-    try:
-        rec = ma.Record("repository", "lesson", claim, "", _collapse(quote), ["order", lessons.tag_for(order["id"])])
-        rec.confidence, rec.supersedes = "inferred", current.id if current else None
-        res: ma.Degraded | ma.Written = ma.resolve_cite(rec, False, session) or ma.add(rec, session)
-    except Exception:  # noqa: BLE001  a failed sync retains the prior K-id and reports explicit degradation
-        res = ma.Degraded("muninn_error")
-    return lessons.metadata(res, prior)
+    digest = hashlib.sha256(claim.encode()).hexdigest()
+    if previous.get("state") == "unknown" and previous.get("claim_sha256") == digest:
+        return dict(previous)
+    request_id = previous.get("request_id")
+    same_claim = previous.get("claim_sha256") == digest
+    if isinstance(request_id, str) and same_claim:
+        result = mr.inspect(request_id, previous.get("task", task), "lesson", claim)
+    else:
+        result = mr.submit(session, task)
+    field = lessons.metadata(result, previous.get("id"))
+    field.update(task=previous.get("task", task) if same_claim else task, claim_sha256=digest)
+    if isinstance(result, mr.Pending):
+        field["request_id"] = result.request_id
+    elif isinstance(request_id, str) and same_claim:
+        field["request_id"] = request_id
+    elif isinstance(result, ma.Degraded) and result.reason in {"muninn_error", "muninn_timeout", "muninn_bad_output"}:
+        field["state"] = "unknown"
+    return field
 
 
 def _exit(field: dict[str, Any]) -> int:
-    return 3 if field["state"] == "degraded" else 0
+    return 3 if field["state"] in {"degraded", "pending", "unknown"} else 0
 
 
 def _prepare(state_dir: Path, prepared: dict[str, Any]) -> None:
@@ -136,7 +145,7 @@ def cmd_record(a: argparse.Namespace, repo_dir: Path) -> Result:
         }
         if any((e["session_id"], e["loop_id"]) == (a.session, a.loop) for e in old.get("evidence", [])):
             row["replaces_source"] = old.get("lesson_source")
-        row["muninn"] = sync_order({**old, **row}, a.session, a.quote, repo_dir, ledger, replace=True)
+        row["muninn"] = sync_order({**old, **row}, a.session, repo_dir, ledger, a.loop)
         prepared["records"] = [r for r in prepared["records"] if r["id"] != order_id] + [row]
         _prepare(state_dir, prepared)
         new = None
@@ -188,9 +197,18 @@ def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
             prior = known["muninn"].get("id") or row["muninn"].get("id")
             if ol.needs_record(known, row, binding, acknowledged is True):
                 ledger = _record_row(ledger, row, binding)
-            field = lessons.metadata(lessons.current(row["id"], a.session, prior), prior)
+            previous = row["muninn"]
+            if not previous.get("request_id") and previous.get("state") != "unknown":
+                previous = known["muninn"]
+            if previous.get("state") == "unknown":
+                field = dict(previous)
+            else:
+                observed = lessons.current(row["id"], a.session, prior, request_id=previous.get("request_id"),
+                                           task=previous.get("task"), claim=row["lesson"])  # fmt: skip
+                field = lessons.metadata(observed, prior)
+            field.update({key: previous[key] for key in ("request_id", "task", "claim_sha256") if key in previous})
             ledger = ol.set_muninn(ledger, row["id"], field)
-            if field["state"] == "degraded":
+            if field["state"] in {"degraded", "pending", "unknown"}:
                 degraded = field["reason_code"]
         out = ol.tick(ledger, a.loop, ol.now_iso(), session_id=a.session)
         if out["ticked"] or out["ledger"] != original:
@@ -303,7 +321,8 @@ def cmd_cite(a: argparse.Namespace, repo_dir: Path) -> Result:
         order = ol.find(ledger, a.order_id)
         if order is None:
             raise ValueError("order_not_found")
-        field = sync_order(order, a.session, a.quote, repo_dir, ledger)
+        task = order.get("muninn", {}).get("task") or order["evidence"][-1]["loop_id"]
+        field = sync_order(order, a.session, repo_dir, ledger, task)
         return ol.set_muninn(ledger, a.order_id, field), {"id": a.order_id, "muninn": field}
 
     payload, rc = update(repo_dir, change)

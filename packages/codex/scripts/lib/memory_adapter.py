@@ -153,6 +153,11 @@ def _run(args: list[str], help_probe: bool = False) -> str | Degraded:
     return (_refusal(p.stdout) if p.returncode == 2 else None) or Degraded("muninn_error")
 
 
+def run_cli(args: list[str], help_probe: bool = False) -> str | Degraded:
+    """Run Muninn with this adapter's bounded timeout and refusal handling."""
+    return _run(args, True) if help_probe else _run(args)
+
+
 def probe() -> Degraded | None:
     """Backend switch, muninn on PATH, the Part A help flags, the store schema, then one read smoke."""
     mode = backend()

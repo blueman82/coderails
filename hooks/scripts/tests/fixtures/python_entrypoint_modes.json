@@ -122,6 +122,7 @@
   "scripts/lib/memory_counters.py": "100644",
   "scripts/lib/memory_read.py": "100644",
   "scripts/lib/memory_reasons.py": "100644",
+  "scripts/lib/memory_request.py": "100644",
   "scripts/lib/memory_schema.py": "100755",
   "scripts/lib/merge_budget.py": "100644",
   "scripts/lib/merge_hook_note.py": "100644",

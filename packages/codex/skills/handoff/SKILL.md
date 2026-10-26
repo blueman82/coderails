@@ -25,13 +25,13 @@ If a native loop graph exists for this session, take `$STATE` (the `<session>/pr
 the SessionStart bootstrap text (it reports the active state path), then run
 `python3 "$SKILL_DIR/../agentic-loop/scripts/graph.py" summarize "$STATE"` (JSON: `phase`, `detail`, `done`, `active`,
 `ready`, `pending`), `... graph.py collection <state-root>` (JSON graph list with each node's stable ID, readable name and status), `... graph.py inspect "$STATE"` (JSON: `revision`, `active_wave`, `running`, `ready`, `hard_stop`),
-and `python3 "$SKILL_DIR/../../scripts/lib/memory_adapter.py" list --type decision --scope loop --loop "<loop id from inspect>" --session "$SESSION"`
-(JSON records with `cite`). `$SKILL_DIR` is the absolute directory containing this `SKILL.md`.
-Use successful results for Goal, Decisions, Done, and Next steps. If a graph command fails, omit only its result.
-Keep current-graph results when collection fails on another graph. A missing loop graph drops only the graph commands.
-If the adapter exits nonzero, it prints `{"degraded": "<reason_code>"}`. Put that code under a "Memory degraded" line
-in the handoff (see `docs/RUNBOOK.md`, "Memory degraded (Muninn authoritative)"). Do not skip the read silently or
-replace typed decisions with hand-written Markdown. Then run Step 1.
+and inspect each decision row's `muninn` field. If it has `request_id`, run `muninn learn show <R_ID>`.
+If that request has a completed receipt and the row has an `id`, run `muninn know show <K_ID>`.
+Use an active note only when its project, task, kind, and text match the row. Report pending, failed, or missing
+matches under "Memory degraded" with the saved request ID. Do not treat a request as a written note.
+`$SKILL_DIR` is the absolute directory containing this `SKILL.md`. Use successful results for Goal, Decisions,
+Done, and Next steps. If a graph command fails, omit only its result. Keep current-graph results when collection
+fails on another graph. A missing loop graph drops only the graph commands. Then run Step 1.
 
 When reporting graph work, use the `node_names` entry from `inspect` or `summarize`. Show each node's job name and
 lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.

@@ -109,7 +109,8 @@ class LocalFirstAndChain(Base):
                 self.assertEqual(rows[1]["unit"], "U1")
                 self.assertEqual(rows[0]["prev_sha256"], dr.GENESIS)
                 self.assertEqual(rows[1]["prev_sha256"], rows[0]["row_sha256"])
-                self.assertEqual(rows[0]["muninn"]["state"], "written")
+                self.assertEqual(rows[0]["muninn"]["state"], "pending")
+                self.assertTrue(rows[0]["muninn"]["request_id"].startswith("R_"))
                 self.assertEqual(dr.verify_chain(rows), [])
 
     def test_control_unchained_row_would_fail_the_link_assert(self) -> None:
@@ -157,16 +158,19 @@ class MuninnSync(Base):
     """(b) written, (c) absent, (d) approval prompt then retry, (e) off, and local-first under a crash."""
 
     def test_written_matches_store_and_survives_restart(self) -> None:
-        """The row's muninn.id is the K-id in the store, citing the authorising prompt; a fresh process sees it."""
+        """Only a completed exact note changes a pending decision to written."""
         out = self.rec()
-        got = self.listed()
-        self.assertEqual((out["exit_code"], out["muninn"]["state"]), (0, "written"))
-        self.assertEqual([r.id for r in got], [out["muninn"]["id"]])
-        self.assertEqual((got[0].quote, got[0].type, got[0].confidence), (PROMPT, "decision", "inferred"))
-        self.assertIn("run-l1", got[0].tags)
-        rc, listing = self.muninn("know", "list", "--scope-loop", "L1", extra_env={"CLAUDE_CODE_SESSION_ID": SESSION})
-        entry = listing["entries"][0]
-        self.assertEqual((rc, entry["id"], entry["cites"][0]["quote"]), (0, out["muninn"]["id"], PROMPT))
+        self.assertEqual((out["exit_code"], out["muninn"]["state"]), (3, "pending"))
+        request_id = out["muninn"]["request_id"]
+        self.assertEqual(
+            self.muninn("learn", "complete", request_id, "--kind", "decision", "--content", "2.5: adopt shape A")[0], 0
+        )
+        done = dr.flush_pending(self.path, SESSION, transition=claude_transition)
+        self.assertEqual(done["exit_code"], 0)
+        row = self.decisions()[0]
+        self.assertEqual((row["muninn"]["state"], row["muninn"]["request_id"]), ("written", request_id))
+        rc, note = self.muninn("know", "show", row["muninn"]["id"])
+        self.assertEqual((rc, note["body"]["content"], note["body"]["scope"]["task"]), (0, "2.5: adopt shape A", "L1"))
 
     def test_absent_muninn_is_loud_local_row_kept_no_markdown(self) -> None:
         """(c) degraded/muninn_absent, exit 3, a trace row, the local row exists, no .md file anywhere new."""
@@ -185,13 +189,15 @@ class MuninnSync(Base):
         self.assertEqual(md(), before)
 
     def test_approval_prompt_degrades_then_flush_writes_the_same_seq(self) -> None:
-        """(d) 'yes' degrades visibly; a substantive cite_quote at flush patches the SAME seq to written."""
+        """A short prompt cannot turn a queued request into a written claim."""
         self.put({**self.state(), "authorising_prompt_raw": "yes"})
         out = self.rec()
-        self.assertEqual((out["exit_code"], out["muninn"]["state"]), (3, "degraded"))
-        self.assertIn(out["muninn"]["reason_code"], ("refused_approval_needs_reply", "cite_too_short"))
+        self.assertEqual((out["exit_code"], out["muninn"]["state"]), (3, "pending"))
         stuck = dr.flush_pending(self.path, SESSION, transition=claude_transition)
-        self.assertEqual(stuck["exit_code"], 3)  # control: no new cite, still degraded
+        self.assertEqual(stuck["exit_code"], 3)
+        self.muninn(
+            "learn", "complete", out["muninn"]["request_id"], "--kind", "decision", "--content", "2.5: adopt shape A"
+        )
         done = dr.flush_pending(self.path, SESSION, transition=claude_transition, cite_quote=LATER)
         self.assertEqual((done["exit_code"], [x["seq"] for x in done["synced"]]), (0, [1]))
         row = self.decisions()[0]
@@ -228,10 +234,15 @@ class MuninnSync(Base):
         self.assertEqual(self.decisions()[:2], rows[:2])
 
     def test_quote_must_come_from_a_user_prompt(self) -> None:
-        """(6) an authorising prompt that is not in the session transcript cannot be cited: refused, row kept."""
+        """A request with no matching reviewed note stays unwritten."""
         self.put({**self.state(), "authorising_prompt_raw": "Words the owner never typed anywhere in this session."})
         out = self.rec()
-        self.assertEqual((out["exit_code"], out["muninn"]["reason_code"]), (3, "cite_not_user"))
+        self.assertEqual((out["exit_code"], out["muninn"]["reason_code"]), (3, "learning_pending"))
+        self.muninn("learn", "complete", out["muninn"]["request_id"])
+        flushed = dr.flush_pending(self.path, SESSION, transition=claude_transition)
+        self.assertEqual(
+            (flushed["exit_code"], flushed["synced"][0]["muninn"]["reason_code"]), (3, "learning_no_matching_record")
+        )
         self.assertEqual(len(self.decisions()), 1)
         self.assertEqual(self.listed(), [])
 

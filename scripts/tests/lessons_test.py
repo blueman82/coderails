@@ -17,6 +17,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts.lib import lessons, memory_read  # noqa: E402
 from scripts.lib import memory_adapter as ma  # noqa: E402
+from scripts.lib import memory_request as mr  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
 from scripts.tests import orders_recovery_test as recovery  # noqa: E402
@@ -45,13 +46,20 @@ class LessonsCli(StoreCase):
         return p.returncode, json.loads(p.stdout) if p.stdout.strip() else {}
 
     def add(self, mode: str, scope: str = "repo", sessions: tuple[str, ...] = ("s1",)) -> None:
-        """Record an order, once per session (so a later session is a recurrence)."""
+        """Record an order and complete its first bounded review."""
         for n, sid in enumerate(sessions):
             (self.tmp / "projects" / "p" / f"{sid}.jsonl").write_text("\n".join(json.dumps(x) for x in LINES) + "\n")
             args = ["--session", sid, "record", "--failure-mode", mode, "--lesson", f"Lesson for {mode}.", "--loop"]
             args += [f"{mode}{n}", "--scope", scope, "--quote", PROMPT]
             progress(self.dir, sid, f"{mode}{n}")
-            self.assertIn(self.call(ORDERS, *args)[0], (0, 3))
+            rc, out = self.call(ORDERS, *args)
+            self.assertIn(rc, (0, 3), out)
+            if n == 0:
+                rid = out["muninn"]["request_id"]
+                self.assertEqual(
+                    self.muninn("learn", "complete", rid, "--kind", "lesson", "--content", f"Lesson for {mode}.")[0], 0
+                )
+                self.assertEqual(self.call(ORDERS, "--session", sid, "cite", mode, "--quote", PROMPT)[0], 0)
 
     def test_contract_list_is_stable_sorted_and_verbatim(self) -> None:
         """(i) two runs give the same bytes and hash; entries are sorted by order id; text is Muninn's."""
@@ -96,11 +104,13 @@ class LessonsCli(StoreCase):
         self.assertEqual(self.call(LESSONS, "predicate")[1]["graduation"]["retro_count"], 10)
 
     def test_retracted_or_non_user_citation_is_never_authoritative(self) -> None:
-        """Non-user anchors and no-longer-current citations cannot supply dispatch text."""
+        """A withdrawn note cannot supply dispatch text."""
         self.add("alpha-mode")
-        self.sql("UPDATE citation SET role = 'assistant'")
-        self.assertEqual(self.call(LESSONS, "query")[1]["lessons"], [])
-        self.sql("UPDATE citation SET role = 'user', state = 'erased'")
+        path = self.home / "requests.json"
+        data = json.loads(path.read_text())
+        kid = next(iter(data["knowledge"]))
+        data["knowledge"][kid]["state"] = "retracted"
+        path.write_text(json.dumps(data))
         self.assertEqual(self.call(LESSONS, "query")[1]["lessons"], [])
 
     def test_current_selection_excludes_uncited_lifecycle_eligible_orders(self) -> None:
@@ -209,14 +219,14 @@ class ReadBoundary(unittest.TestCase):
 
 
 class SessionAttribution(recovery.RecoveryCase):
-    """Real provider callers bind default/explicit sessions to successful and degraded read observations."""
+    """Real provider callers bind default/explicit sessions to degraded observations."""
 
     def unavailable_list(self: recovery.RecoveryCase) -> None:
-        """Fail only the actual typed read; the separate capability/schema probe genuinely succeeds."""
+        """Make the request API probe fail without changing other fake commands."""
         exe = self.tmp / "bin/muninn"
         exe.write_text(
             f"#!{sys.executable}\nimport runpy, sys\n"
-            "if sys.argv[1:3] == ['know', 'list'] and '--kind' in sys.argv: raise SystemExit(1)\n"
+            "if sys.argv[1:3] == ['learn','request'] and '--help' in sys.argv: print('unavailable'); exit()\n"
             f"sys.argv[0] = {str(FAKE)!r}\nrunpy.run_path(sys.argv[0], run_name='__main__')\n"
         )
 
@@ -248,9 +258,16 @@ class SessionAttribution(recovery.RecoveryCase):
                 with self.subTest(codex=codex, script=script, command=command):
                     self.configure(codex, script + command)
                     rc, out = self.cli(command, script=script, session="explicit-caller")
-                    self.assertEqual((rc, out.get("degraded")), (3, "muninn_error"), out)
+                    self.assertEqual((rc, out.get("degraded")), (3, "muninn_old_ledger"), out)
                     rows = self.trace_rows()
-                    self.assertIn("memory.list", [r["command"] for r in rows])
+                    self.assertIn(
+                        (
+                            "lesson.query"
+                            if command in ("query", "lessons")
+                            else "lesson.predicate" if command == "predicate" else "order.render"
+                        ),
+                        [r["command"] for r in rows],
+                    )
                     self.assertEqual({r["session_id"] for r in rows}, {"explicit-caller"})
                     self.assertTrue(all(r["outcome"] == "degraded" for r in rows))
 
@@ -265,19 +282,15 @@ class SessionAttribution(recovery.RecoveryCase):
                     env["CODEX_THREAD_ID"] = "codex-current"
                     self.assertEqual(self.cli(command, script="lessons.py", explicit=False, env=env)[0], 3)
                     rows = self.trace_rows()
-                    self.assertIn("memory.list", [r["command"] for r in rows])
+                    self.assertIn("lesson." + command, [r["command"] for r in rows])
                     self.assertEqual({r["session_id"] for r in rows}, {"codex-current"})
 
     def test_function_serve_propagates_session_to_real_failure_trace(self) -> None:
         """A library caller's supplied session survives the joined/list boundary without a mocked trace."""
-        with (
-            mock.patch.object(ma, "probe", return_value=None),
-            mock.patch.object(ma, "_run", return_value=ma.Degraded("muninn_error")),
-            mock.patch.object(ma, "list_records", wraps=ma.list_records) as listed,
-        ):
+        with mock.patch.object(mr, "probe", return_value=ma.Degraded("muninn_error")) as probe:
             payload, rc = lessons.serve(ol.empty(), "library-caller")
         self.assertEqual((rc, payload), (3, {"degraded": "muninn_error"}))
-        self.assertEqual(listed.call_args.kwargs.get("session_id"), "library-caller")
+        probe.assert_called_once_with()
         rows = [
             json.loads(line)
             for path in (self.tmp / "loops").glob("*/trace.jsonl")
@@ -300,7 +313,14 @@ class SessionAttribution(recovery.RecoveryCase):
                     rc, out = self.cli(command, script=script, session="early-caller", env=env)
                     self.assertEqual((rc, out.get("degraded")), (3, "muninn_absent"), out)
                     rows = self.trace_rows()
-                    self.assertIn("memory.list", [r["command"] for r in rows])
+                    self.assertIn(
+                        (
+                            "lesson.query"
+                            if command in ("query", "lessons")
+                            else "lesson.predicate" if command == "predicate" else "order.render"
+                        ),
+                        [r["command"] for r in rows],
+                    )
                     self.assertEqual({r["session_id"] for r in rows}, {"early-caller"})
 
 
