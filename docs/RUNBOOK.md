@@ -550,8 +550,14 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   refused as opaque execution by the hook consumers.
 - Ceiling key: `sha1(realpath(git common dir) + realpath(toplevel))` plus the target, in
   `<loop dir>/verification-ceiling/` (Codex `$PLUGIN_DATA/verification-ceiling/`). A renamed branch keeps its count; a
-  linked worktree or a second clone starts at zero. To reset, delete the one count file (the digest is printed in no
-  message; compute it, or list the directory by mtime). The count is mirrored into `progress.json`
+  linked worktree or a second clone starts at zero. To reset, delete the worktree count file and any existing current
+  branch legacy count file (the digest is printed in no message; compute it, or list the directory by mtime). Each
+  charge raises an existing legacy branch-keyed count under both file locks, so a rollback retains an upgraded count.
+  New legacy files are not created, preserving independent new worktree counters. The worktree key remains
+  authoritative for the current hook; branch renames retain its count. A crash between the two writes can leave a
+  conservative legacy overcount. A fresh worktree or renamed branch with no matching legacy file has no rollback
+  continuity to an older branch-keyed hook.
+  The count is mirrored into `progress.json`
   `work_units[u].verification{run_all,post_evals}` only when the actual payload session and existing `CLAUDE_LOOP_ID`
   exactly own a schema-3 in-progress loop, exactly one physical worktree unit matches, and that unit has a running
   `U3[<id>]` node registered in `active_wave.nodes`. Unknown, foreign or ambiguous input is left unchanged. Codex

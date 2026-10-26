@@ -32,7 +32,7 @@ def main() -> int:
     payload = payload_object(read_input())
     data = payload.get("tool_input")
     command = cast(dict[str, object], data).get("command") if isinstance(data, dict) else None
-    if not isinstance(command, str) or "merge" not in command:
+    if not isinstance(command, str):
         return 0
     session = payload.get("session_id")
     os.environ["CODERAILS_PUBLICATION_SESSION_ID"] = session if isinstance(session, str) else ""

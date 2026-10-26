@@ -82,9 +82,10 @@ def main() -> int:
         deny("Verification-volume ceiling: could not create its state directory; failing closed.")
         return 0
     paths = {key: state / f"{key[0]}__{key[1]}.count" for key in amounts}
+    legacy_paths = {key: state / legacy_key(contexts[key][1], key[1]) for key in amounts}
     locked: list[Path] = []
     try:
-        for path in sorted(paths.values()):
+        for path in sorted(set(paths.values()) | set(legacy_paths.values())):
             lock = Path(f"{path}.lock")
             if not acquire_dir_lock(lock, 15, 0.1)[0]:
                 deny("Verification-volume ceiling: could not acquire its per-target lock; failing closed.")
@@ -95,7 +96,7 @@ def main() -> int:
         for key, path in paths.items():
             source = path
             if not path.exists():
-                source = state / legacy_key(contexts[key][1], key[1])
+                source = legacy_paths[key]
                 if source.exists():
                     migrated.add(key)
             try:
@@ -109,6 +110,12 @@ def main() -> int:
             if exceeded and totals[key] < 3:
                 continue
             try:
+                legacy = legacy_paths[key]
+                if legacy.exists():
+                    previous = legacy.read_text().strip()
+                    legacy.write_text(
+                        str(max(int(previous) if previous.isdigit() else 0, totals[key])), encoding="utf-8"
+                    )
                 path.write_text(str(totals[key]), encoding="utf-8")
             except OSError:
                 deny("Verification-volume ceiling: could not write its count file; failing closed.")

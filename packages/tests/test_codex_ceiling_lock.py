@@ -62,6 +62,39 @@ class CeilingLockTests(unittest.TestCase):
             self.assertEqual((legacy.parent / f"{key}__full-suite.count").read_text(), "4\n")
             self.assertEqual((data.parent / "loops/s1/trace.jsonl").read_text().count("ceiling_legacy_migrated"), 1)
 
+    def test_rollback_reads_continued_legacy_count(self) -> None:
+        """A prior hook version must see runs charged after an upgrade."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, repo = Path(tmp) / "data", Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", "-b", "feature/old", str(repo)], check=True)
+            legacy = data / "verification-ceiling/feature-old__full-suite.count"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("1\n")
+            self.assertEqual(run_hook(data, repo), "")
+            self.assertEqual(legacy.read_text(), "2\n")
+            self.assertIn('"deny"', run_hook(data, repo))
+            self.assertEqual(legacy.read_text(), "3\n")
+
+    def test_quoted_merge_subcommand_reaches_publication_gate(self) -> None:
+        """Raw command spelling cannot bypass the parsed merge operation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, repo = Path(tmp) / "data", Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", "-b", "feature", str(repo)], check=True)
+            env = os.environ | {"PLUGIN_DATA": str(data), "CODERAILS_HOOK_TELEMETRY_DIR": tmp}
+            for command in ("gh pr 'mer'ge 519", r"gh pr m\erge 519", r"gh pr $'\x6derge' 519"):
+                payload = json.dumps({"session_id": "s1", "cwd": str(repo), "tool_input": {"command": command}})
+                result = subprocess.run(
+                    [sys.executable, str(HOOK.parent / "pr_publication_gate.py")],
+                    input=payload,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    check=False,
+                )
+                with self.subTest(command=command):
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn('"deny"', result.stdout)
+
     def test_ansi_c_shell_body_cannot_hide_full_suite(self) -> None:
         """Opaque shell forms cannot hide a full suite before its counter."""
         with tempfile.TemporaryDirectory() as tmp:

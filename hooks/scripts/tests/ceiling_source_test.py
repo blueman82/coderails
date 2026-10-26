@@ -67,6 +67,17 @@ class CeilingSourceTests(HookCase):
         self.assertEqual(self.counter(repo, "run_all").read_text().strip(), "4")
         self.assertEqual((self.loop / "s1/trace.jsonl").read_text().count("ceiling_legacy_migrated"), 1)
 
+    def test_rollback_reads_continued_legacy_count(self) -> None:
+        """A prior hook version must see runs charged after an upgrade."""
+        repo = self.repository("repo", "feature/old")
+        legacy = self.loop / "verification-ceiling/feature-old__run_all.count"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("1", encoding="utf-8")
+        self.assertEqual(self.run_times(RUN_ALL, repo, 1), [False])
+        self.assertEqual(legacy.read_text().strip(), "2")
+        self.assertEqual(self.run_times(RUN_ALL, repo, 1), [True])
+        self.assertEqual(legacy.read_text().strip(), "3")
+
     def test_ansi_c_shell_body_cannot_hide_full_suite(self) -> None:
         """Opaque shell forms cannot hide a full suite before its counter."""
         repo = self.repository("repo", "feature")

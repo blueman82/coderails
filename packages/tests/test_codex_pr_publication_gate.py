@@ -145,6 +145,8 @@ class CodexPublicationGateTests(unittest.TestCase):
         """Plain, bash -c wrapped and merge.py invocations are denied with the reason code first."""
         for command in (
             "gh pr merge 7 --merge",
+            "gh pr 'mer'ge 7",
+            r"gh pr m\erge 7",
             "bash -c 'gh pr merge 7'",
             "python3 scripts/merge.py 7",
             "gh api -X PUT repos/o/r/pulls/7/merge",

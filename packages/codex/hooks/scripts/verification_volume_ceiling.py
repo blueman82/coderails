@@ -138,10 +138,11 @@ def main() -> int:
         return 0
 
     paths = {key: state_dir / f"{key[0]}__{key[1]}.count" for key in amounts}
+    legacy_paths = {key: state_dir / legacy_key(contexts[key][1], key[1], codex=True) for key in amounts}
     locked: list[Path] = []
     session = payload.get("session_id")
     try:
-        for path in sorted(paths.values()):
+        for path in sorted(set(paths.values()) | set(legacy_paths.values())):
             lock = Path(f"{path}.lock")
             if not acquire_dir_lock(lock, 15, 0.1)[0]:
                 deny(LOCK_ERROR)
@@ -152,7 +153,7 @@ def main() -> int:
         for key, path in paths.items():
             source = path
             if not path.exists():
-                source = state_dir / legacy_key(contexts[key][1], key[1], codex=True)
+                source = legacy_paths[key]
                 if source.exists():
                     migrated.add(key)
             totals[key] = count_for(source) + amounts[key]
@@ -161,6 +162,9 @@ def main() -> int:
             if exceeded and totals[key] < 3:
                 continue
             try:
+                legacy = legacy_paths[key]
+                if legacy.exists():
+                    legacy.write_text(f"{max(count_for(legacy), totals[key])}\n", encoding="utf-8")
                 path.write_text(f"{totals[key]}\n", encoding="utf-8")
             except OSError:
                 deny(WRITE_ERROR)
