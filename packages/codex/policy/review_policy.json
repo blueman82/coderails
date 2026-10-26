@@ -1,0 +1,39 @@
+{
+  "always": ["review-pr"],
+  "rules": [
+    {
+      "pass": "security-review",
+      "paths": [
+        "hooks/**",
+        "scripts/**",
+        "install.py",
+        "uninstall.py",
+        ".claude-plugin/**",
+        "packages/codex/hooks/**",
+        "packages/codex/scripts/**",
+        "policy/**",
+        "packages/codex/policy/**",
+        "capabilities/**",
+        "packages/codex/capabilities/**",
+        "agents/**",
+        "packages/codex/agents/**",
+        "commands/**",
+        "packages/codex/skills/post-review/**",
+        "packages/codex/skills/merge/**",
+        "AGENTS.md",
+        "workflow.config.yaml",
+        ".coderails/**"
+      ]
+    },
+    {
+      "pass": "deploy-safety",
+      "paths": [
+        "launchd/**",
+        "scripts/integrity-gate/**",
+        "scripts/installer/**",
+        ".github/workflows/**",
+        "skills/dashboard/runner/**"
+      ]
+    }
+  ]
+}

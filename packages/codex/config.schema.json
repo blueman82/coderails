@@ -175,6 +175,14 @@
       "on_value": "enforce",
       "description": "Diff-manifest publication gate for push.py, merge.py and direct-merge hooks. Default enforce uses the shipped policy; invalid values are rejected by strict config consumers."
     },
+    "review_passes": {
+      "type": [
+        "string"
+      ],
+      "default": "enforce",
+      "status": "enforced_by_code",
+      "description": "Required-reviewer check in the publication gate (policy/review_policy.json): off skips it; enforce (default) and any other value apply it."
+    },
     "diff_manifest_policy": {
       "type": [
         "string",
@@ -194,11 +202,21 @@
       "description": "Integrity attestation settings.",
       "properties": {
         "enabled": {
-          "type": ["boolean", "null"], "default": false, "status": "enforced_by_code",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": false,
+          "status": "enforced_by_code",
           "description": "true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live."
         },
         "machine_user": {
-          "type": ["string", "null"], "default": null, "status": "enforced_by_code",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "status": "enforced_by_code",
           "description": "Deprecated. A non-empty legacy login remains the required local status author until enabled is true."
         }
       }
@@ -228,11 +246,21 @@
       }
     },
     "memory": {
-      "type": ["object", "null"], "default": null, "status": "enforced_by_code",
+      "type": [
+        "object",
+        "null"
+      ],
+      "default": null,
+      "status": "enforced_by_code",
       "description": "Typed-memory settings.",
       "properties": {
         "backend": {
-          "type": ["string", "null"], "default": "muninn", "status": "enforced_by_code",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": "muninn",
+          "status": "enforced_by_code",
           "description": "muninn (default) = Muninn is the authoritative typed-memory store and a missing or refusing Muninn fails with a reason code; off = no typed memory at all (reason memory_backend_off, traced, Markdown is never read or written). Any other value fails with memory_backend_invalid."
         }
       }

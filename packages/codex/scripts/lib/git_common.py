@@ -9,8 +9,9 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from typing import Any
 
-from . import eval_artifact, review_artifact
+from . import eval_artifact, review_artifact, review_passes
 from .eval_validation import extract_json_block
 
 
@@ -173,6 +174,67 @@ def gate_review_summary_for_pr(number: str, sha: str) -> tuple[int, str]:
         return 2, str(error)
     matched = any(review_artifact.matches_marker(line, number, sha) for body in bodies for line in body.splitlines())
     return (0 if matched else 1), ""
+
+
+@dataclass(frozen=True)
+class ReviewPasses:
+    """Newest trusted review artifact for a head: status 0 found, 1 absent, 2 fetch failed; passes None: malformed."""
+
+    status: int
+    passes: tuple[dict[str, Any], ...] | None = ()
+    failure_reason: str = ""
+
+
+def review_passes_for_pr(number: str, sha: str) -> ReviewPasses:
+    """Accept a server-compatible summary only when it exactly follows its bound pass record."""
+    try:
+        bodies = trusted_comment_bodies(number)
+    except (TrustFetchError, OSError) as error:
+        return ReviewPasses(2, None, str(error))
+    positions = [
+        index
+        for index, body in enumerate(bodies)
+        if body.splitlines() and review_artifact.matches_marker(body.splitlines()[0], number, sha)
+    ]
+    if not positions:
+        return ReviewPasses(1)
+    last = positions[-1]
+    companion = bodies[last]
+    marker = review_artifact.marker(number, sha)
+    if companion.splitlines()[1:2] and companion.splitlines()[1].startswith("<!-- coderails-review-passes"):
+        return ReviewPasses(0, None)
+    earlier_pass = any(body.startswith(marker + "\n<!-- coderails-review-passes") for body in bodies[:last])
+    if not earlier_pass:
+        lines = companion.splitlines()[1:]
+        if lines and lines[0].startswith("<!-- coderails-compat-findings"):
+            lines = lines[1:]
+        summary = "\n".join(lines)
+        try:
+            review_passes.validate_summary_text(summary)
+        except ValueError:
+            return ReviewPasses(0, None)
+        verdict = review_passes.verdict_from_summary(summary)
+        entry = {
+            "name": "review-pr",
+            "verdict": verdict,
+            "blocking": verdict == "fail",
+            "summary_sha256": review_passes.summary_sha256(summary),
+        }
+        return ReviewPasses(0, (entry,))
+    previous = bodies[last - 1]
+    if not previous.startswith(marker + "\n" + review_passes.PREFIX):
+        return ReviewPasses(0, None)
+    parsed = review_passes.parse(previous, number, sha)
+    if parsed is None or not parsed:
+        return ReviewPasses(0, None)
+    _, _, remainder = previous.partition("\n")
+    _, _, summary = remainder.partition("\n")
+    general, separator, _ = summary.partition("\n<!-- coderails-review-pass ")
+    if separator:
+        summary = general
+    if companion != marker + "\n" + summary:
+        return ReviewPasses(0, None)
+    return ReviewPasses(0, tuple(parsed))
 
 
 def has_coderails_review_for_head(number: str, sha: str) -> int:

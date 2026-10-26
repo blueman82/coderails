@@ -24,6 +24,7 @@ from scripts import capability as cap  # noqa: E402
 ROOT = cap.ROOT
 PROTOCOL = "2024-11-05"
 ALL_TOOLS = {name.replace(".", "_"): name for name in cap.TOOLS}
+SECURITY_REVIEW_GRANTS = ["repo.inspect", "diff.read"]
 STR, INT = {"type": "string"}, {"type": "integer"}
 OPS = ["read", "list", "grep", "status", "log", "show", "blame", "wc", "sha256", "glob"]
 
@@ -164,6 +165,8 @@ def main(argv: list[str]) -> int:
         granted = cast("list[object]", profile["agents"][role])
         if type(granted) is not list or any(type(tool) is not str for tool in granted):
             return refuse_start(role, "capabilities/profiles.json has malformed role grants")
+        if role == "security-reviewer" and granted != SECURITY_REVIEW_GRANTS:
+            return refuse_start(role, "security-reviewer has unapproved capability grants")
     except (OSError, ValueError, KeyError, TypeError):
         return refuse_start(role, "capabilities/profiles.json unreadable or malformed")
     allowed = {name: tool for name, tool in ALL_TOOLS.items() if tool in granted}

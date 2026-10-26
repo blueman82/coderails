@@ -21,6 +21,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 TOOLS = {"repo.inspect", "diff.read", "tests.run", "pr.comment", "cmd.run"}
+SECURITY_REVIEW_GRANTS = ["repo.inspect", "diff.read"]
 ENV_ALLOW = ("PATH", "HOME", "CODEX_HOME", "LANG", "LC_ALL", "TERM", "TMPDIR")
 ROLE = re.compile(r"^[a-z][a-z0-9-]{0,60}$")
 OPTIONS = {"--role", "--prompt-file", "--cwd"}
@@ -35,6 +36,8 @@ def guarded_roles(root: Path) -> set[str]:
     try:
         text = (root / "capabilities" / "profiles.json").read_text(encoding="utf-8")
         agents: dict[str, Any] = json.loads(text)["agents"]
+        if "security-reviewer" in agents and agents["security-reviewer"] != SECURITY_REVIEW_GRANTS:
+            raise ValueError("security-reviewer has unapproved capability grants")
         return {
             name
             for name, caps in agents.items()

@@ -13,6 +13,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts import merge
 from scripts.lib import git_common as git
+from scripts.lib import manifest_policy
 
 
 class MergeContractTests(unittest.TestCase):
@@ -29,6 +30,8 @@ class MergeContractTests(unittest.TestCase):
         smoke: int = 0,
         state: str = "OPEN",
         temporary_failure: bool = False,
+        passes: git.ReviewPasses | None = None,
+        changes: list[tuple[str, list[str]]] | None = None,
     ) -> tuple[int, str, bool, bool]:
         """Run the real merge entrypoint over controlled provider and evidence replies."""
         if summary is None:
@@ -46,7 +49,13 @@ class MergeContractTests(unittest.TestCase):
         def field(number: str, name: str, fallback: str = "") -> str:
             """Return exact-head fields without using a provider CLI."""
             del number
-            return {"headRefOid": sha, "state": state, "title": "fixture", "headRefName": "feature"}.get(name, fallback)
+            return {
+                "headRefOid": sha,
+                "baseRefOid": "base-sha",
+                "state": state,
+                "title": "fixture",
+                "headRefName": "feature",
+            }.get(name, fallback)
 
         stream = io.StringIO()
         with ExitStack() as stack:
@@ -63,9 +72,14 @@ class MergeContractTests(unittest.TestCase):
             stack.enter_context(patch.object(git, "pr_field", side_effect=field))
             stack.enter_context(patch.object(git, "run", side_effect=command))
             stack.enter_context(patch.object(git, "gate_review_summary_for_pr", return_value=review))
+            # the publication gate reads the passes line itself; a bare v1 artifact on an empty diff by default
+            stack.enter_context(
+                patch.object(git, "review_passes_for_pr", return_value=passes or git.ReviewPasses(0, ()))
+            )
+            stack.enter_context(patch.object(manifest_policy, "diff_changes", return_value=changes or []))
             eval_reader = stack.enter_context(patch.object(git, "gate_eval_summary_for_pr", return_value=summary))
             stack.enter_context(patch.object(merge, "smoke_verify", return_value=smoke))
-            stack.enter_context(patch("scripts.merge.publication_gate.enforce"))
+            stack.enter_context(patch.object(manifest_policy, "violations", return_value=[]))
             stack.enter_context(patch.object(merge, "config_path", return_value=""))
             stack.enter_context(patch.object(merge, "has_wiki_ingest_for_merged_prs"))
             stack.enter_context(patch.object(merge, "require_merge_receipt", return_value=None))
@@ -91,6 +105,22 @@ class MergeContractTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(merged)
         self.assertTrue(eval_called)
+
+    def test_required_review_pass_gates_the_wrapper(self) -> None:
+        """merge.py refuses a hooks/ diff with only a review-pr pass and merges once security-review is present."""
+        hooks_diff = [("M", ["hooks/x.py"])]
+        review_pr = {"name": "review-pr", "verdict": "pass", "blocking": False, "summary_sha256": "0" * 64}
+        security = {**review_pr, "name": "security-review"}
+        code, text, merged, _ = self.invoke(passes=git.ReviewPasses(0, (review_pr,)), changes=hooks_diff)
+        self.assertEqual(code, 1)
+        self.assertIn("required_review_missing:security-review", text)
+        self.assertFalse(merged)
+        code, _, merged, _ = self.invoke(passes=git.ReviewPasses(0, (review_pr, security)), changes=hooks_diff)
+        self.assertEqual((code, merged), (0, True))
+        failed = {**security, "verdict": "fail", "blocking": False}
+        code, text, merged, _ = self.invoke(passes=git.ReviewPasses(0, (review_pr, failed)), changes=hooks_diff)
+        self.assertIn("required_review_failed:security-review", text)
+        self.assertFalse(merged)
 
     def test_merge_pins_the_head_sha_the_gates_verified(self) -> None:
         """The remote merge carries --match-head-commit <verified sha>, so a head that moved later is refused."""

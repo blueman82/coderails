@@ -20,7 +20,14 @@ ROOT = Path(__file__).resolve().parents[2]
 # Fallback when profiles.json is missing or malformed: keep the original guarded set so the allowlist stays on
 # (a crash here would exit 1, which Claude hooks treat as non-blocking, i.e. fail open).
 FALLBACK_GUARDED = frozenset(
-    {"deploy-safety-reviewer", "design-scout", "disposition-scout", "preflight-scout", "source-auditor"}
+    {
+        "deploy-safety-reviewer",
+        "design-scout",
+        "disposition-scout",
+        "preflight-scout",
+        "security-reviewer",
+        "source-auditor",
+    }
 )
 
 

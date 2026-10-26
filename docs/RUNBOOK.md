@@ -86,7 +86,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 ## Guarded role has no tools or no shell
 
 - Symptom: a reviewer/scout reports it cannot run a command or read a file, or a skill step is UNSUPPORTED.
-- Cause: by design the five guarded agents hold only `mcp__plugin_coderails_cap-<role>__*` tools (+`Skill` for
+- Cause: by design the six guarded agents hold only `mcp__plugin_coderails_cap-<role>__*` tools (+`Skill` for
   preflight-scout). If the tools are missing entirely, `.claude-plugin/plugin.json` lacks `mcpServers` or
   `capabilities/mcp.json` is stale: run `python3 scripts/capability_profiles_validate.py --check`, and `--write-mcp` to
   regenerate. Codex: launch the role with `scripts/codex_role_session.py`; a native Codex child of a guarded role has no
@@ -429,6 +429,43 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   is a shape and worktree check, not publisher authentication: a same-user actor can forge owner fields for the same
   worktree. It does not compare a worker's session with its parent's. Raw Git operations and unseen aliases remain
   outside this manifest arm.
+
+## Required review passes refused a merge
+
+- Symptom: `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`) refuses with
+  `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`,
+  `review_artifact_missing` or `review_policy_unreadable`. The check is the second entry of the single publication gate
+  (`scripts/lib/publication_gate.py`), ON by default with no config. The required names come only from
+  `policy/review_policy.json` (`review-pr` always; `security-review` for `hooks/`, `scripts/`, `install.py`,
+  `uninstall.py`, `.claude-plugin/`, `packages/codex/hooks/`, `packages/codex/scripts/`, and the control files
+  `policy/`, `capabilities/`, `agents/`, `commands/`, `AGENTS.md`, `workflow.config.yaml`, `.coderails/`, their Codex
+  copies and the Codex post-review/merge skills; `deploy-safety` for `launchd/`,
+  `scripts/integrity-gate/`, `scripts/installer/`, `.github/workflows/`, `skills/dashboard/runner/`), matched against
+  the PR diff from its live `baseRefOid` to the checked head (renames count both sides). Config `review_passes: off` skips the check (absent or any other value
+  enforces; `diff_manifest: off` does not touch it). The policy file is the control, and deleting or corrupting it
+  refuses (`review_policy_unreadable`), it does not allow.
+- Artifact: `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]` posts two comments for one head.
+  The first has the v1 marker, a passes line, and the review text. The passes line gives the name, verdict, blocking
+  value, and summary hash for each pass. The second has the same v1 marker and the same general review text. It lets
+  the current server integrity check read the review. The local gate accepts the pair only when the comments are
+  adjacent and the general review text is identical. The script derives each verdict from the text. A Critical finding
+  fails the pass. A present passes line must include `review-pr` with a verdict bound to its summary. An old single
+  comment with no passes line can satisfy `review-pr` for a docs-only diff when its Critical section is clean. Once a
+  passes comment exists for that head,
+  a missing, malformed, or stale companion refuses the pair (`review_passes_malformed`).
+- Query: `trace.by_reason` for `review-passes/ok/review_passes_ok` and `review-passes/refused/<code>`, plus
+  `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
+- Remediation: spawn the missing reviewer (`security-reviewer`, `deploy-safety-reviewer`; both providers ship them),
+  write its findings to a file in the post-review grammar, re-run `post_review.py post` with `--pass NAME=FILE`. A
+  `failed` pass needs the Critical finding fixed and the artifact re-posted for the new head. `review_artifact_missing`
+  also covers a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
+- Limits: the gate re-derives each pass from the posted sections (hash and verdict; a mismatch is
+  `review_passes_malformed`), so a hand-posted passes line without its text is refused. A pass still proves only that a
+  summary was posted for that name, not that a reviewer wrote it or that the review was substantive: `post_review.py`
+  takes any file for any pass, so the PR author can self-issue a `## No findings` security-review or deploy-safety
+  pass. The same user can write any summary, so this is a cooperating-agent safeguard. `blocking` is derived and never waives a
+  required pass. The Codex hook only sees merges `guarded_segments` can match and needs `/hooks` trust. Row-9 wording in
+  the closure matrix (`.json` policy file) is not recorded in this repo: the matrix lives outside it.
 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 

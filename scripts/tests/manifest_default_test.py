@@ -73,6 +73,13 @@ class CheckKeyTests(unittest.TestCase):
 
     policy: dict[str, Any] = {"manifest": ["a.md"], "statuses": ["M"], "max_paths": 1}
 
+    def test_custom_deny_still_blocks_first_review_policy_addition(self) -> None:
+        """The first-install exception cannot override an explicit custom deny rule."""
+        for path in ("policy/review_policy.json", "packages/codex/policy/review_policy.json"):
+            with self.subTest(path=path):
+                result = manifest_policy.check([("A", [path])], {"deny": ["**"]})
+                self.assertEqual(result["violations"], [{"code": "denied_path", "path": path}])
+
     def test_added_status_refused(self) -> None:
         """An A where only M is allowed reports status_not_allowed."""
         result = manifest_policy.check([("A", ["a.md"])], self.policy, ["a.md"])
@@ -136,6 +143,20 @@ class DefaultGateTests(RepoCase):
         """No config at all: a secret-shaped file is refused with denied_path."""
         self.commit(SECRET, "k=v\n")
         self.assertEqual(self.refusal(), "diff_manifest:denied_path")
+
+    def test_review_policy_cannot_remove_required_passes_in_its_own_pr(self) -> None:
+        """A PR cannot replace the required-review policy with an empty one."""
+        git_cmd(self.dir, "checkout", "-q", "main")
+        self.commit("policy/review_policy.json", '{"always":["review-pr"],"rules":[]}\n')
+        git_cmd(self.dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git_cmd(self.dir, "checkout", "-qB", "feature/x", "origin/main")
+        self.commit("policy/review_policy.json", '{"always":[],"rules":[]}\n')
+        self.assertEqual(self.refusal(), "diff_manifest:denied_path")
+
+    def test_first_review_policy_install_is_allowed(self) -> None:
+        """The release that first adds the policy can pass the diff gate."""
+        self.commit("policy/review_policy.json", '{"always":["review-pr"],"rules":[]}\n')
+        self.gate()
 
     def test_protected_policy_deletion_refused_by_default(self) -> None:
         """Deleting a policy file from the real diff is still denied."""

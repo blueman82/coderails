@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts import enforce_pr_workflow
 from hooks.scripts.lib.pr_merge_gate import integrity_reason, merge_reason
 from hooks.scripts.tests.lib.hook_test_support import HookTestCase
-from scripts.lib.git_common import EvalSummary
+from scripts.lib.git_common import EvalSummary, ReviewPasses
 
 MODULE = "hooks.scripts.lib.pr_merge_gate"
 
@@ -360,6 +360,31 @@ class MergeEvidenceTests(HookTestCase):
             self.assertEqual(evaluate.call_args.args[:2], ("1", "head"))
             with patch(MODULE + ".publication_gate.evaluate", return_value=[]):
                 self.assertEqual(merge_reason("1", str(self.directory)), "")
+
+    def test_policy_and_internal_refusals_do_not_prescribe_reposting(self) -> None:
+        """The actual consumer gives a remedy for the failed check, rather than prescribing another artifact."""
+        before = Path.cwd()
+        self.addCleanup(os.chdir, before)
+        summary = EvalSummary(0, "1", '{"head_sha":"head","evals":[]}', "")
+        with (
+            patch(MODULE + ".pr_field", return_value="head"),
+            patch(MODULE + ".gate_eval_summary_for_pr", return_value=summary),
+            patch(MODULE + ".smoke_verify", return_value=0),
+            patch(MODULE + ".publication_gate.manifest_policy.violations", return_value=[]),
+            patch(MODULE + ".publication_gate.git.review_passes_for_pr", return_value=ReviewPasses(0, (), "")),
+        ):
+            for error, code in (
+                (ValueError("review_policy_unreadable"), "review_policy_unreadable"),
+                (RuntimeError("probe"), "review_passes_check_error"),
+            ):
+                with (
+                    patch(MODULE + ".publication_gate.review_passes.load_policy", side_effect=error),
+                    self.subTest(code=code),
+                ):
+                    reason = merge_reason("1", str(self.directory))
+                    self.assertTrue(reason.startswith(code), reason)
+                    self.assertNotIn("re-post", reason)
+                    self.assertNotIn("post_review.py post", reason)
 
 
 if __name__ == "__main__":
