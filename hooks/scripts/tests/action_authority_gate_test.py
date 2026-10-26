@@ -111,15 +111,13 @@ class GateTests(ReceiptHookCase):
         self.assertTrue(self.denied("action_authority_gate", self.payload(PUSH)))
         self.assertEqual(self.reasons(), ["denied_binding_unknown"])
 
-    def test_stale_sha_and_wrong_ref_are_denied(self) -> None:
-        """(c) HEAD moving after the mint is sha_mismatch; a receipt for main does not authorise release/x."""
+    def test_stale_sha_is_denied(self) -> None:
+        """A moved source ref makes the protected-push receipt stale."""
         self.configure("enforce")
         self.mint(PUSH, "git_push")
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "moved")
         self.assertTrue(self.denied("action_authority_gate", self.payload(PUSH)))
         self.assertEqual(self.reasons(), ["denied_sha_mismatch"])
-        self.mint(PUSH, "git_push", rid="r2")
-        self.assertTrue(self.denied("action_authority_gate", self.payload("git push origin main:release/x")))
 
     def test_refspec_source_is_bound_not_head(self) -> None:
         """(h) `git push origin feature:main` from main binds feature's sha: a HEAD-bound receipt is refused."""
@@ -157,6 +155,25 @@ class GateTests(ReceiptHookCase):
         self.mint(PUSH, "git_push")
         self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))
 
+    def test_feature_destination_from_main_needs_no_receipt(self) -> None:
+        """A named feature destination stays outside the protected-push gate."""
+        self.configure("enforce")
+        for command in (
+            "git push origin feature/default-learning-policy",
+            "git push origin feature/actionable-recovery-guidance",
+            "git push origin HEAD:refs/heads/feature/default-learning-policy",
+            "git push origin main:release/x",
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(self.denied("action_authority_gate", self.payload(command)))
+        self.assertTrue(self.denied("action_authority_gate", self.payload("git push origin main")))
+        self.assertTrue(self.denied("action_authority_gate", self.payload("git push origin feature:main")))
+        self.assertTrue(self.denied("action_authority_gate", self.payload("git push origin HEAD")))
+        self.assertTrue(self.denied("action_authority_gate", self.payload("git push origin :")))
+        self.assertTrue(self.denied("action_authority_gate", self.payload("git push")))
+        git(self.repo, "switch", "-q", "-c", "feature/x")
+        self.assertTrue(self.denied("action_authority_gate", self.payload("git push origin feature/x:HEAD")))
+
     def test_hook_error_denies_under_enforce(self) -> None:
         """An unexpected error after enforce scope is known emits a denial."""
         self.configure("enforce")
@@ -185,10 +202,10 @@ class GateTests(ReceiptHookCase):
         return make_repo(self.directory / "other")
 
     def test_chained_second_guarded_op_needs_its_own_receipt(self) -> None:
-        """A receipt for the first segment never authorises a chained second guarded operation."""
+        """A named feature push cannot authorise a later protected push."""
         self.configure("enforce")
-        self.mint("git push origin feature", "git_push")
         git(self.repo, "branch", "feature")
+        self.assertFalse(self.denied("action_authority_gate", self.payload("git push origin feature")))
         self.assertTrue(
             self.denied("action_authority_gate", self.payload("git push origin feature && git push origin main"))
         )

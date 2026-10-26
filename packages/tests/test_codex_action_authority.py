@@ -350,19 +350,19 @@ class HookTests(unittest.TestCase):
             ],
         )
 
-    def test_enforce_guards_push_on_main_only(self) -> None:
-        """A push on main is guarded; on a feature branch it is not."""
+    def test_enforce_checks_push_destination(self) -> None:
+        """A named feature push from main does not need a receipt."""
         self.configure("enforce")
         self.assertTrue(self.denied("git push origin main"))
-        subprocess.run(["git", "-C", str(self.repo), "symbolic-ref", "HEAD", "refs/heads/feature/x"], check=True)
-        self.assertFalse(self.denied("git push origin feature/x"))
+        self.assertFalse(self.denied("git push origin feature/default-learning-policy"))
+        self.assertTrue(self.denied("git push origin feature/x:HEAD"))
 
     def test_chain_cd_and_dash_c_are_guarded(self) -> None:
         """Chained second op, `cd other && git push` and `git -C . push origin main` all need their own receipt."""
         self.configure("enforce")
         other = make_repo(self.directory / "other")
         git(self.repo, "branch", "feature")
-        self.mint("git push origin feature", "git_push")
+        self.assertFalse(self.denied("git push origin feature"))
         self.assertTrue(self.denied("git push origin feature && git push origin main"))
         self.mint("git push origin main", "git_push", rid="r2")
         self.assertTrue(self.denied(f"cd {other} && git push origin main"))

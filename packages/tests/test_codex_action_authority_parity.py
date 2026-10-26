@@ -102,3 +102,11 @@ class MatchParityTests(unittest.TestCase):
                         found = matcher.guarded_segments(command, tmp)
                         self.assertEqual(len(found), 1)
                         self.assertTrue(found[0][1].startswith(matcher.UNBINDABLE), found)
+
+    def test_symbolic_push_destination_is_guarded_from_feature(self) -> None:
+        """HEAD as a destination is ambiguous even when the checkout is on a feature branch."""
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", "-b", "feature/x", tmp], check=True)
+            for matcher in (claude_match, codex_match):
+                self.assertEqual(len(matcher.guarded_segments("git push origin feature/x:HEAD", tmp)), 1)
+                self.assertEqual(matcher.guarded_segments("git push origin feature/x:refs/heads/HEAD", tmp), [])

@@ -122,11 +122,10 @@ def targets_main_call(call: Operation, *, implicit_push: bool = False) -> bool:
         return True
     if call.segment.startswith(UNBINDABLE):
         return True
-    if git_output(call.git_cwd, *call.prefix, "branch", "--show-current") in {"main", "master"}:
-        return True
+    on_main = git_output(call.git_cwd, *call.prefix, "branch", "--show-current") in {"main", "master"}
     if call.name == "git_push":
-        return _push_guarded(call.segment, implicit_push=implicit_push)
-    return False
+        return _push_guarded(call.segment, implicit_push=implicit_push or on_main)
+    return on_main
 
 
 def guarded_operations(command: str, cwd: str, *, implicit_push: bool = False) -> list[Operation]:
@@ -160,20 +159,23 @@ def targets_main(command: str, cwd: str, target: str, name: str, *, implicit_pus
     target = target or (match[1] if match else "")
     directory = str(Path(cwd) / target) if target and not target.startswith("/") else target or cwd
     branch = git_output(directory, "branch", "--show-current") or git_output(cwd, "branch", "--show-current")
-    if branch in {"main", "master"}:
-        return True
+    on_main = branch in {"main", "master"}
     if name != "git_push":
-        return False
+        return on_main
+    parsed_push = False
     for raw in _SEP.split(command)[::2]:
         segment = canonical(unwrap(raw))
-        if (git := _GIT.match(segment)) and git[2] == "push" and _push_guarded(segment, implicit_push=implicit_push):
-            return True
+        if (git := _GIT.match(segment)) and git[2] == "push":
+            parsed_push = True
+            if _push_guarded(segment, implicit_push=implicit_push or on_main):
+                return True
     if re.search(r":(refs/heads/)?(main|master)([\s;&|)]|$)", command):
         return True
-    return any(
+    explicit_main = any(
         subcommand == "push" and any(re.fullmatch(r"\+?(refs/heads/)?(main|master)", token) for token in rest)
         for subcommand, _, rest in argv_match.git_calls(command)
     )
+    return explicit_main or (on_main and not parsed_push)
 
 
 _PUSH_VALUE_OPTS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
@@ -200,7 +202,12 @@ def _push_guarded(segment: str, *, implicit_push: bool = False) -> bool:
         return implicit_push  # Config can select main; the receipt binding refuses an implicit refspec.
     for spec in refs[1:]:  # refs[0] is the remote
         dest = spec.lstrip("+").rpartition(":")[2]
-        if re.search(r"[$`*?\[\]{}()\\]", dest) or dest.removeprefix("refs/heads/") in {"main", "master"}:
+        if (
+            not dest
+            or dest in {"HEAD", "@"}
+            or re.search(r"[$`*?\[\]{}()\\]", dest)
+            or dest.removeprefix("refs/heads/") in {"main", "master"}
+        ):
             return True
     return False
 
