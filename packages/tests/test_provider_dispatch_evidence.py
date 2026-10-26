@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import tempfile
 import unittest
@@ -64,6 +66,35 @@ class DispatchEvidenceTests(unittest.TestCase):
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn("dispatch_contract_altered", failed.stderr)
         self.assertEqual(provider.path.read_bytes(), before)
+
+    def test_codex_record_wave_binds_consumed_ciphertext_to_native_call(self) -> None:
+        """The encrypted native message must match the one hook-authorized call."""
+        provider = self.opened("codex")
+        report = provider.launch()
+        lines = provider.parent.read_text().splitlines()
+        native = json.loads(lines[1])
+        call_id = native["payload"]["call_id"]
+        arguments = json.loads(native["payload"]["arguments"])
+        token = base64.urlsafe_b64encode(bytes([128]) + bytes(72)).decode()
+        arguments["message"] = token
+        native["payload"]["arguments"] = json.dumps(arguments)
+        lines[1] = json.dumps(native)
+        provider.parent.write_text("\n".join(lines) + "\n")
+        state = provider.read()
+        record = next(iter(state["graph"]["dispatches"].values()))
+        record["authorized"] = {"tool_use_id": call_id, "ciphertext_sha256": hashlib.sha256(token.encode()).hexdigest()}
+        provider.write(state)
+        provider.environment["CODERAILS_A6_EVIDENCE_WRITE"] = "on"
+        provider.success("record-wave", json.dumps(report))
+        state = provider.read()
+        self.assertEqual(state["graph"]["nodes"]["U3[1]"]["status"], "done")
+        record = next(iter(state["graph"]["dispatches"].values()))
+        record["authorized"]["ciphertext_sha256"] = "0" * 64
+        provider.write(state)
+        provider.artifacts()
+        failed = provider.complete()
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("dispatch_missing_envelope", failed.stderr)
 
     def test_codex_evidence_rejects_native_message_and_role_changes(self) -> None:
         """Binding checks the actual native spawn arguments after the hook's decision."""

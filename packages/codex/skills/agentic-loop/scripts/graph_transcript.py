@@ -22,6 +22,48 @@ def assigned_worktree(state: dict[str, Any], node_id: str) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def validate_wave_revisions(state: dict[str, Any], waves: set[int]) -> None:
+    """Account for supported unit registrations between native worker waves."""
+    if not waves:
+        return
+    graph = state["graph"]
+    completion = state.get("completion") if state.get("status") == "complete" else None
+    revision: object = (
+        cast(dict[str, Any], completion).get("revision") if isinstance(completion, dict) else state["revision"]
+    )
+    if type(revision) is not int:
+        raise GraphError("graph revision must be an integer")
+    last_wave = revision - (2 if graph["active_wave"] is not None else 1)
+    ordered = sorted(waves)
+    gaps = sum(right - left - 2 for left, right in zip(ordered, ordered[1:]))
+    if max(waves) > last_wave or any(right - left < 2 for left, right in zip(ordered, ordered[1:])):
+        raise GraphError("stored worker wave evidence does not match graph revisions")
+    registrations: set[int] = set()
+    units = state.get("work_units")
+    spec = graph_spec.load_spec()
+    for unit, row in cast(dict[str, Any], units).items() if isinstance(units, dict) else ():
+        if not isinstance(row, dict) or "registered_revision" not in row:
+            continue
+        registered: object = cast(dict[str, Any], row)["registered_revision"]
+        if (
+            type(registered) is not int
+            or registered < 2
+            or registered > revision
+            or registered in registrations
+            or registered in waves
+            or registered - 1 in waves
+            or (graph["active_wave"] is not None and registered >= state["revision"])
+            or graph_spec.unit_root_id(spec, unit) not in graph["nodes"]
+        ):
+            raise GraphError("stored unit registration does not match graph revisions")
+        registrations.add(registered)
+    generations = sum(node["respawn"]["generation"] for node in graph["nodes"].values())
+    stale = 2 if any(node["status"] == "stale" for node in graph["nodes"].values()) else 0
+    additions = sum(registered > min(waves) for registered in registrations)
+    if gaps < 0 or gaps + last_wave - max(waves) > 3 * generations + stale + additions:
+        raise GraphError("stored worker wave evidence does not match graph revisions")
+
+
 def thread_transcript(thread_id: str) -> Path:
     """Locate a unique transcript for one native thread identity."""
     root = Path.home() / ".codex" / "sessions"

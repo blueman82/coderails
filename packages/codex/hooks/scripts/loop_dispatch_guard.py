@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -28,6 +29,9 @@ from hook_common import (
 
 from scripts.lib.config import config_path
 from scripts.lib.config_strict import ConfigRejected, strict_settings
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/agentic-loop/scripts"))
+from graph_recovery import trace as recovery_trace  # noqa: E402
 
 ENVELOPE_KEY = "CODERAILS_GRAPH_DISPATCH"
 MAX_ENVELOPE_LINE = 8192
@@ -121,6 +125,19 @@ def _graph_call(
     return False, None
 
 
+def _trace_staging_refusal(path: Path, inspection: dict[str, object]) -> None:
+    """Record a hook-side staging failure in the graph's recovery sidecar."""
+    state = {
+        "session_id": inspection.get("session_id"),
+        "loop_id": inspection.get("loop_id"),
+        "revision": inspection.get("revision"),
+        "graph": {"active_wave": inspection.get("active_wave")},
+    }
+    recovery_trace(
+        path, state, "refused", "dispatch_message_unavailable", {}, [(None, None, None)], "authorize-dispatch"
+    )
+
+
 def _identity(payload: dict[str, object]) -> tuple[str, str] | None:
     """Refuse malformed or unsafe native identity before any path lookup."""
     session_id = payload.get("session_id")
@@ -138,7 +155,6 @@ def _identity(payload: dict[str, object]) -> tuple[str, str] | None:
 
 
 def _check() -> int:
-    """Check one native spawn against graph ownership and its single-use dispatch record."""
     deadline = time.monotonic() + 7.0
     payload = _native_payload()
     if text_field(payload, "tool_name") not in ("spawn_agent", "collaborationspawn_agent"):
@@ -217,6 +233,7 @@ def _check() -> int:
                 tool_use_id,
             )
     except OSError:
+        _trace_staging_refusal(state, inspection)
         log(f"hook=loop_dispatch_guard session={session_id} blocked=1 reason_code=dispatch_message_unavailable")
         deny("Graph worker dispatch could not stage its message [reason_code=dispatch_message_unavailable].")
         return 0

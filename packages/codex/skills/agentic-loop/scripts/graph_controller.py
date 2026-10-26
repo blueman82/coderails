@@ -141,7 +141,12 @@ def register_unit(
     proposed = copy.deepcopy(state)
     proposed["revision"] += 1  # the graph changed: evals frozen at the old revision must go STALE
     graph = proposed["graph"]
-    stored = {"status": "pending", **({"manifest": manifest} if manifest else {}), **(fields or {})}
+    stored = {
+        "status": "pending",
+        "registered_revision": proposed["revision"],
+        **({"manifest": manifest} if manifest else {}),
+        **(fields or {}),
+    }
     proposed["work_units"][unit] = stored
     graph["nodes"].update(added["nodes"])
     graph["edges"].extend({"from": graph_spec.unit_root_id(spec, d), "to": node_id} for d in dict.fromkeys(deps))

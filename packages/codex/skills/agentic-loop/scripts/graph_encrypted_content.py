@@ -1,4 +1,4 @@
-"""Bind an encrypted Codex transcript message to a consumed plaintext hook authorization."""
+"""Bind an encrypted Codex transcript message to a consumed hook authorization."""
 
 from __future__ import annotations
 
@@ -13,11 +13,9 @@ import graph_contract
 def check(
     state: dict[str, Any], node_id: str, attempt: int, wave_id: str, call_id: str, message: object
 ) -> dict[str, Any]:
-    """Accept only native encrypted content for an exact hook-authorized dispatch."""
+    """Accept only encrypted content for the exact hook-authorized native call."""
     if not isinstance(message, str):
-        raise graph_contract.DispatchDeniedError(
-            "dispatch_missing_envelope", "native spawn lacks an attested plaintext envelope"
-        )
+        raise graph_contract.DispatchDeniedError("dispatch_missing_envelope", "native spawn has no encrypted message")
     try:
         raw = base64.b64decode(message, altchars=b"-_", validate=True)
     except (ValueError, binascii.Error) as error:

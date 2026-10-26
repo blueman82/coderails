@@ -35,6 +35,7 @@ from graph_transcript import (
     parent_indexes,
     refused_launches,
     thread_transcript,
+    validate_wave_revisions,
 )
 
 Refusals = dict[str, tuple[int, str]]
@@ -301,22 +302,7 @@ def stored_references(
                 raise GraphError(f"node {node_id} transcript attempts are stale or out of order")
             previous_line = spawn_line
         _validate_missing_attempts(state, node_id, maximum, references, indexes, refusals, requests, used)
-    if waves:
-        completion = state.get("completion") if state.get("status") == "complete" else None
-        completion = cast(dict[str, Any], completion) if isinstance(completion, dict) else None
-        revision = completion.get("revision") if completion is not None else state["revision"]
-        if isinstance(revision, bool) or not isinstance(revision, int):
-            raise GraphError("graph revision must be an integer")
-        last_wave = revision - (2 if state["graph"]["active_wave"] is not None else 1)
-        generations = sum(node["respawn"]["generation"] for node in state["graph"]["nodes"].values())
-        ordered = sorted(waves)
-        gaps = sum(right - left - 2 for left, right in zip(ordered, ordered[1:]))
-        if max(waves) > last_wave or any(right - left < 2 for left, right in zip(ordered, ordered[1:])):
-            raise GraphError("stored worker wave evidence does not match graph revisions")
-        if gaps < 0 or gaps + last_wave - max(waves) > 3 * generations + (
-            2 if any(node["status"] == "stale" for node in state["graph"]["nodes"].values()) else 0
-        ):
-            raise GraphError("stored worker wave evidence does not match graph revisions")
+    validate_wave_revisions(state, waves)
     if any(classify_worker_evidence(item, used)[0] for item in ordinary):
         raise GraphError("stored evidence contains noncanonical worker evidence")
     return used

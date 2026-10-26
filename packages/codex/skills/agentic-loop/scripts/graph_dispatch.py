@@ -193,6 +193,21 @@ def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
         }
 
 
+def _require_owner(path: Path, state: dict[str, Any], session: str) -> None:
+    """Trace a foreign owner before refusing to consume an issued dispatch."""
+    if state["session_id"] != session:
+        trace(
+            path,
+            state,
+            "refused",
+            "dispatch_foreign_owner",
+            {"owner_match": False},
+            [(None, None, None)],
+            "authorize-dispatch",
+        )
+        raise GraphError("session does not own this loop")
+
+
 def authorize_dispatch(
     path: Path,
     session: str,
@@ -206,8 +221,7 @@ def authorize_dispatch(
     """Authorize one native spawn under the graph lock; refusal leaves state unchanged and writes a coded trace."""
     with _locked(path):
         state = _load(path)
-        if state["session_id"] != session:
-            raise GraphError("session does not own this loop")
+        _require_owner(path, state, session)
         if state["status"] == "complete":
             raise GraphError("completed graph does not own worker dispatch")
         named: str | None = None
