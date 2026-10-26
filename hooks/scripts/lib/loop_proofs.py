@@ -54,6 +54,13 @@ def validate_proofs(path: Path, state: dict[str, Any], transcript: str = "") -> 
     if count > 100:
         raise ValueError(f"proof.json has {count} proofs+withdrawn_proofs; cap is 100")
     if not proofs:
+        if withdrawn:
+            offenders, disclosures = proof_results.verify(value, results, state)
+            if offenders:
+                raise ValueError("these frozen proofs are not verified: " + ", ".join(offenders))
+            return _disposition(state, results, "proof_no_proofs", "proof.json has no non-withdrawn proof") + (
+                "; Withdrawn proofs: " + "; ".join(disclosures)
+            )
         return _disposition(state, results, "proof_no_proofs", "proof.json has no non-withdrawn proof")
     offenders, disclosures = proof_results.verify(value, results, state)
     if offenders:

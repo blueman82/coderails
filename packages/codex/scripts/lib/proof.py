@@ -17,6 +17,7 @@ import argparse
 import contextlib
 import datetime
 import json
+import math
 import os
 import secrets
 import signal
@@ -31,6 +32,7 @@ from hooks.scripts.lib.destructive_patterns import permanent_pattern, secret_pat
 from scripts.lib import proof_results as pr  # noqa: E402
 
 DEFAULT_TIMEOUT_S = 600
+MAX_TIMEOUT_S = 3600
 EXCERPT_CAP = 2000
 SRT_VERSION = "0.0.65"
 
@@ -87,8 +89,12 @@ def validate(doc: dict[str, Any]) -> list[str]:
         if not isinstance(cmd, str) or not cmd.strip():
             errors.append(f"{identifier}: cmd is blank")
         timeout = entry.get("timeout_s")
-        if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0):
-            errors.append(f"{identifier}: timeout_s must be a positive number")
+        if timeout is not None and (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not (0 < timeout <= MAX_TIMEOUT_S and math.isfinite(timeout))
+        ):
+            errors.append(f"{identifier}: timeout_s must be finite, greater than 0, and at most {MAX_TIMEOUT_S}")
         expect = entry.get("expect")
         shaped = isinstance(expect, dict)
         spec = cast(dict[str, Any], expect) if shaped else {}

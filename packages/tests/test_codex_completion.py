@@ -218,6 +218,22 @@ class CompletionTests(unittest.TestCase):
         )
         complete(*self.arguments)
 
+    def test_disposition_does_not_hide_unobserved_withdrawal(self) -> None:
+        """Codex completion requires an observed failed run for a withdrawn proof."""
+        self.document["withdrawn_proofs"] = [
+            {"id": "P1", "cmd": "true", "withdrawn_reason": "cannot satisfy the requirement"}
+        ]
+        self.document["proofs"] = []
+        write_json(self.proof, self.document)
+        self.results.unlink()
+        pr.append(self.results, kind="freeze", proof_json_sha256=pr.doc_sha(self.document), **IDENTITY)
+        current = read_json(self.path)
+        write_json(self.path, current | {"proof_disposition": "none: no executable surface"})
+        with self.assertRaisesRegex(GraphError, r"P1\(proof_withdrawn_unobserved\)"):
+            complete(*self.arguments)
+        self.proof_result("failed")
+        complete(*self.arguments)
+
     def test_eval_stamp_revision_and_identity(self) -> None:
         """Bind completion to the current suite, checksum, amendments, and loop."""
         suite = read_json(self.evals)

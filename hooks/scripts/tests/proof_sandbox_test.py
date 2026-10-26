@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shlex
 import shutil
@@ -174,6 +175,34 @@ class ProofSandboxTests(unittest.TestCase):
                 self.assertIn("sandbox_unavailable", result.stdout + result.stderr)
                 rows = proof_results.read_rows(self.last_state / proof_results.RESULTS_NAME)
                 self.assertEqual(rows[-1]["verdict"], "sandbox_unavailable")
+
+    def test_freeze_refuses_unsafe_timeout_before_start(self) -> None:
+        """Both providers reject timeouts that could fail after child creation."""
+        for runner in (ROOT / "scripts/lib/proof.py", ROOT / "packages/codex/scripts/lib/proof.py"):
+            for timeout in (math.nan, math.inf, -math.inf, 3601, 1e308):
+                with self.subTest(runner=runner, timeout=timeout):
+                    state = self.directory / f"timeout-{uuid.uuid4().hex}"
+                    state.mkdir()
+                    (state / "proof.json").write_text(
+                        json.dumps(
+                            {
+                                "schema_version": 2,
+                                "proofs": [
+                                    {"id": "P", "cmd": "true", "timeout_s": timeout, "expect": {"exit_code": 0}}
+                                ],
+                            }
+                        )
+                    )
+                    result = subprocess.run(
+                        [sys.executable, str(runner), "freeze", str(state)],
+                        cwd=ROOT,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertIn("timeout_s", result.stderr)
+                    self.assertFalse((state / proof_results.RESULTS_NAME).exists())
 
     def test_scratch_preparation_failure_replaces_prior_pass(self) -> None:
         """A scratch creation error must append a refusal after an earlier pass."""

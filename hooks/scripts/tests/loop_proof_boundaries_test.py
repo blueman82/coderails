@@ -109,6 +109,31 @@ class ProofBoundaryTests(HookTestCase):
         self.assertIn("BAD", str(error.exception))
         self.assertNotIn("GOOD", str(error.exception))
 
+    def test_disposition_does_not_hide_unobserved_withdrawal(self) -> None:
+        """Even with no live proofs, a withdrawn proof needs a failed controller run."""
+        document = {
+            "schema_version": 2,
+            "proofs": [],
+            "withdrawn_proofs": [{"id": "W1", "cmd": "false", "withdrawn_reason": "unsupported"}],
+        }
+        self.freeze(document)
+        state = self.state | {"proof_disposition": "none: no executable surface"}
+        with self.assertRaisesRegex(ValueError, r"W1\(proof_withdrawn_unobserved\)"):
+            validate_proofs(self.proof, state)
+        pr.append(
+            self.results,
+            kind="run",
+            proof_id="W1",
+            cmd_sha256=pr.sha("false"),
+            proof_json_sha256=pr.doc_sha(document),
+            session_id="s",
+            loop_id="l",
+            verdict="failed",
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+        )
+        self.assertIn("W1: unsupported", validate_proofs(self.proof, state))
+
     def test_independent_unit_shapes_reasons_and_compounded_diagnostics(self) -> None:
         """Malformed siblings cannot hide unfinished units; completed siblings stay out of diagnostics."""
         invalid: list[object] = [42, True, [], {}, None, " "]

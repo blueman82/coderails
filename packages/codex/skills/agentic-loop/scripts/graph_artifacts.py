@@ -88,6 +88,10 @@ def _validate_proofs(state: dict[str, Any], proof_path: Path) -> None:
     _matching(proof, state, "proof")
     proofs = array_value(proof.get("proofs"), "proof.proofs")
     if not proofs:
+        if proof.get("withdrawn_proofs"):
+            offenders, _ = proof_results.verify(proof, results, state)
+            if offenders:
+                raise GraphError("frozen proofs are not verified: " + ", ".join(offenders))
         try:
             rows = proof_results.read_rows(results)
         except proof_results.ChainError:
