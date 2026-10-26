@@ -87,8 +87,11 @@ def _validate_proofs(state: dict[str, Any], proof_path: Path) -> None:
     proof = load_evidence(proof_path, "proof")
     _matching(proof, state, "proof")
     proofs = array_value(proof.get("proofs"), "proof.proofs")
+    withdrawn = array_value(proof.get("withdrawn_proofs", []), "proof.withdrawn_proofs")
+    if len(proofs) + len(withdrawn) > 100:
+        raise GraphError("proofs+withdrawn_proofs exceeds cap of 100")
     if not proofs:
-        if proof.get("withdrawn_proofs"):
+        if withdrawn:
             offenders, _ = proof_results.verify(proof, results, state)
             if offenders:
                 raise GraphError("frozen proofs are not verified: " + ", ".join(offenders))

@@ -14,6 +14,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -50,6 +51,8 @@ class ProofSandboxTests(unittest.TestCase):
             json.dumps(
                 {
                     "schema_version": 2,
+                    "session_id": "test",
+                    "loop_id": "test",
                     "proofs": [
                         {
                             "id": "P",
@@ -187,6 +190,8 @@ class ProofSandboxTests(unittest.TestCase):
                         json.dumps(
                             {
                                 "schema_version": 2,
+                                "session_id": "test",
+                                "loop_id": "test",
                                 "proofs": [
                                     {"id": "P", "cmd": "true", "timeout_s": timeout, "expect": {"exit_code": 0}}
                                 ],
@@ -202,6 +207,40 @@ class ProofSandboxTests(unittest.TestCase):
                     )
                     self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                     self.assertIn("timeout_s", result.stderr)
+                    self.assertFalse((state / proof_results.RESULTS_NAME).exists())
+
+    def test_freeze_refuses_excess_malformed_withdrawals_and_blank_identity(self) -> None:
+        """Both controllers reject 101 entries, an object array, and missing loop identity."""
+        entry = {"id": "P", "cmd": "true", "expect": {"exit_code": 0}}
+        valid = {"schema_version": 2, "session_id": "test", "loop_id": "test", "proofs": [entry]}
+        invalid: tuple[dict[str, Any], ...] = (
+            valid | {"proofs": [{**entry, "id": f"P{i}"} for i in range(101)]},
+            valid
+            | {
+                "withdrawn_proofs": [
+                    {"id": f"W{i}", "cmd": "false", "expect": {"exit_code": 0}, "withdrawn_reason": "failed"}
+                    for i in range(100)
+                ]
+            },
+            valid | {"withdrawn_proofs": {}},
+            valid | {"session_id": ""},
+            valid | {"loop_id": " "},
+            {key: value for key, value in valid.items() if key != "session_id"},
+        )
+        for runner in (ROOT / "scripts/lib/proof.py", ROOT / "packages/codex/scripts/lib/proof.py"):
+            for document in invalid:
+                with self.subTest(runner=runner, case=list(document)):
+                    state = self.directory / f"invalid-{uuid.uuid4().hex}"
+                    state.mkdir()
+                    (state / "proof.json").write_text(json.dumps(document))
+                    result = subprocess.run(
+                        [sys.executable, str(runner), "freeze", str(state)],
+                        cwd=ROOT,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                     self.assertFalse((state / proof_results.RESULTS_NAME).exists())
 
     def test_scratch_preparation_failure_replaces_prior_pass(self) -> None:

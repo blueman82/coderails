@@ -29,6 +29,8 @@ class ProofBoundaryTests(HookTestCase):
 
     def freeze(self, document: dict[str, Any], run: bool = True, verdict: str = "satisfied") -> None:
         """Write the document, a freeze row, and (optionally) a run row for each well-formed proof."""
+        document.setdefault("session_id", "s")
+        document.setdefault("loop_id", "l")
         self.proof.write_text(json.dumps(document))
         self.results.unlink(missing_ok=True)
         digest = pr.doc_sha(document)
@@ -86,7 +88,17 @@ class ProofBoundaryTests(HookTestCase):
         proofs = [{"id": f"P{index}", "cmd": "run proof"} for index in range(100)]
         self.freeze({"schema_version": 2, "proofs": proofs})
         self.assertEqual(validate_proofs(self.proof, self.state, ""), "")
-        self.proof.write_text(json.dumps({"schema_version": 1, "proofs": proofs, "withdrawn_proofs": [{}]}))
+        self.proof.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "session_id": "s",
+                    "loop_id": "l",
+                    "proofs": proofs,
+                    "withdrawn_proofs": [{}],
+                }
+            )
+        )
         with self.assertRaisesRegex(ValueError, "101.*100"):
             validate_proofs(self.proof, self.state, "")
         document = {
@@ -133,6 +145,19 @@ class ProofBoundaryTests(HookTestCase):
             head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
         )
         self.assertIn("W1: unsupported", validate_proofs(self.proof, state))
+
+    def test_present_proof_needs_nonblank_matching_identity(self) -> None:
+        """Claude proof validation requires the same nonblank loop identity as the graph."""
+        document = {"schema_version": 2, "proofs": [{"id": "P1", "cmd": "true"}]}
+        for field, value in (("session_id", ""), ("loop_id", " "), ("session_id", "other")):
+            with self.subTest(field=field, value=value):
+                self.freeze(document | {"session_id": "s", "loop_id": "l", field: value})
+                with self.assertRaisesRegex(ValueError, "identity|session_id|loop_id"):
+                    validate_proofs(self.proof, self.state)
+        self.freeze(document | {"session_id": "s"})
+        self.proof.write_text(json.dumps(document | {"session_id": "s"}))
+        with self.assertRaisesRegex(ValueError, "loop_id"):
+            validate_proofs(self.proof, self.state)
 
     def test_independent_unit_shapes_reasons_and_compounded_diagnostics(self) -> None:
         """Malformed siblings cannot hide unfinished units; completed siblings stay out of diagnostics."""

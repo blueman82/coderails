@@ -43,11 +43,15 @@ def validate_proofs(path: Path, state: dict[str, Any], transcript: str = "") -> 
     if not isinstance(document, dict):
         raise ValueError("proof.json is malformed (not an object)")
     value = cast(dict[str, Any], document)
+    for key in ("session_id", "loop_id"):
+        identity = value.get(key)
+        if not isinstance(identity, str) or not identity.strip() or identity != state.get(key):
+            raise ValueError(f"proof.json {key} must match the nonblank loop identity")
     version = value.get("schema_version")
     if not isinstance(version, (int, float)) or isinstance(version, bool) or version < 1:
         raise ValueError("proof.json has no valid schema_version (>= 1 required)")
-    proofs: object = value.get("proofs") if value.get("proofs") is not None else []
-    withdrawn: object = value.get("withdrawn_proofs") if value.get("withdrawn_proofs") is not None else []
+    proofs: object = value.get("proofs")
+    withdrawn: object = value.get("withdrawn_proofs", [])
     if not isinstance(proofs, list) or not isinstance(withdrawn, list):
         raise ValueError("proof.json .proofs and .withdrawn_proofs must be arrays")
     count = len(cast(list[object], proofs)) + len(cast(list[object], withdrawn))

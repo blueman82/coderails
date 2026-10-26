@@ -75,11 +75,16 @@ def validate(doc: dict[str, Any]) -> list[str]:
         return ["schema_version must be 2 (schema 1 ignores structured expect and is refused)"]
     errors: list[str] = []
     seen: set[str] = set()
+    for key in ("session_id", "loop_id"):
+        if not isinstance(doc.get(key), str) or not doc[key].strip():
+            errors.append(f"{key} must be a nonblank string")
     for key in ("proofs", "withdrawn_proofs"):
-        if not isinstance(doc.get(key) or [], list):
+        if not isinstance(doc.get(key, []), list):
             errors.append(f"{key} must be an array")
     if errors:
         return errors
+    if len(doc.get("proofs", [])) + len(doc.get("withdrawn_proofs", [])) > 100:
+        errors.append("proofs+withdrawn_proofs exceeds cap of 100")
     has_live = any(not withdrawn for _, withdrawn in items(doc))
     for entry, _ in items(doc):
         identifier, cmd = entry.get("id"), entry.get("cmd")
@@ -257,6 +262,8 @@ def cmd_freeze(state_dir: Path) -> int:
     doc = _load(state_dir / "proof.json")
     errors = validate(doc)
     who = _identity(state_dir, doc)
+    if who != (doc.get("session_id"), doc.get("loop_id")):
+        errors.append("proof identity does not match progress.json")
     if errors:
         print("proof.py freeze refused: " + "; ".join(errors), file=sys.stderr)
         pr.trace("proof.freeze", "refused", "proof_stale_cmd", *who)

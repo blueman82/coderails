@@ -234,6 +234,25 @@ class CompletionTests(unittest.TestCase):
         self.proof_result("failed")
         complete(*self.arguments)
 
+    def test_proof_array_shape_and_combined_cap(self) -> None:
+        """Codex completion enforces both proof arrays and the shared count cap."""
+        cases: tuple[tuple[dict[str, Any], str], ...] = (
+            ({"withdrawn_proofs": {}}, "withdrawn_proofs"),
+            (
+                {
+                    "withdrawn_proofs": [
+                        {"id": f"W{i}", "cmd": "false", "withdrawn_reason": "failed"} for i in range(100)
+                    ]
+                },
+                "100",
+            ),
+        )
+        for change, reason in cases:
+            with self.subTest(change=reason):
+                write_json(self.proof, self.document | change)
+                with self.assertRaisesRegex(GraphError, reason):
+                    complete(*self.arguments)
+
     def test_eval_stamp_revision_and_identity(self) -> None:
         """Bind completion to the current suite, checksum, amendments, and loop."""
         suite = read_json(self.evals)

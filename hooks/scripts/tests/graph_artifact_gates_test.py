@@ -219,8 +219,8 @@ class ArtifactGateTests(GraphCase):
                 {**original, "session_id": "foreign"},
                 None,
                 2,
-                "proof_stale_cmd",
-            ),  # the foreign doc no longer hashes to the freeze row
+                "proof.json session_id",
+            ),
             (None, None, 2, "no proof_disposition"),
             (None, "none: no executable surface", 0, ""),
         )
