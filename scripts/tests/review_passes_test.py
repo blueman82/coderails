@@ -266,17 +266,41 @@ class CheckTests(unittest.TestCase):
         """No passes line counts as passes=[]; a hooks/ PR is refused until re-posted (old behaviour: accepted)."""
         with mock.patch.object(git, "trusted_comment_bodies", return_value=[body(None)]):
             self.assertEqual(git.gate_review_summary_for_pr("7", SHA), (0, ""))  # the pre-change gate: accepted
-            self.assertEqual(git.review_passes_for_pr("7", SHA), found([]))
+            self.assertEqual(git.review_passes_for_pr("7", SHA), found([entry("review-pr")]))
         self.assertEqual(OLD_BEHAVIOUR_REQUIRED_NAMES, [])
         self.assertEqual(self.codes(found([])), ["required_review_missing:security-review"])
 
+    def test_legacy_critical_review_fails_docs_only(self) -> None:
+        """An old marker cannot hide a Critical general review finding."""
+        with mock.patch.object(git, "trusted_comment_bodies", return_value=[body(None, texts={"review-pr": CRITICAL})]):
+            result = git.review_passes_for_pr("7", SHA)
+        self.assertEqual(result.passes, (entry("review-pr", CRITICAL),))
+        self.assertEqual(self.codes(result, DOCS), ["required_review_failed:review-pr"])
+
     def test_newest_matching_artifact_wins_and_stale_head_is_not_accepted(self) -> None:
         """A newer artifact replaces an older one; a body for another head is not an artifact at all."""
-        bodies = [body([entry("review-pr"), entry("security-review")]), body([entry("review-pr")])]
+        bodies = [body([entry("review-pr"), entry("security-review")]), body([entry("review-pr")]), body(None)]
         with mock.patch.object(git, "trusted_comment_bodies", return_value=bodies):
             self.assertEqual(git.review_passes_for_pr("7", SHA).passes, (entry("review-pr"),))
         with mock.patch.object(git, "trusted_comment_bodies", return_value=[body([entry("review-pr")], sha=OTHER)]):
             self.assertEqual(git.review_passes_for_pr("7", SHA).status, 1)
+
+    def test_legacy_companion_must_match_preceding_pass_artifact(self) -> None:
+        """The server-compatible last comment cannot replace or hide a different review."""
+        passing = body([entry("review-pr"), entry("security-review")])
+        companion = body(None)
+        for bodies, expected in (
+            ([passing, companion], (entry("review-pr"), entry("security-review"))),
+            (
+                [passing, companion, "<!-- coderails-eval-summary v1 -->"],
+                (entry("review-pr"), entry("security-review")),
+            ),
+            ([passing, body(None, texts={"review-pr": CRITICAL})], None),
+            ([passing, body([entry("review-pr", CRITICAL)])], None),
+            ([companion], (entry("review-pr"),)),
+        ):
+            with self.subTest(bodies=bodies), mock.patch.object(git, "trusted_comment_bodies", return_value=bodies):
+                self.assertEqual(git.review_passes_for_pr("7", SHA).passes, expected)
 
     def test_artifact_missing_fetch_failure_and_malformed(self) -> None:
         """Absent artifact, a failed fetch and a malformed line each refuse with their own code."""

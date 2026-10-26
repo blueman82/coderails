@@ -444,12 +444,15 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   the PR diff from its live `baseRefOid` to the checked head (renames count both sides). Config `review_passes: off` skips the check (absent or any other value
   enforces; `diff_manifest: off` does not touch it). The policy file is the control, and deleting or corrupting it
   refuses (`review_policy_unreadable`), it does not allow.
-- Artifact: line 1 is the unchanged v1 marker; line 2 is `<!-- coderails-review-passes v1 {"head_sha":...,"passes":[...]} -->`
-  with `{name, verdict, blocking, summary_sha256}` per pass. `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]`
-  validates each summary, derives each verdict from the text (a bullet under `## Critical` is `fail`) and posts it. A
-  present passes line must include `review-pr` with a verdict bound to its summary. A v1
-  artifact with no passes line counts as no passes: `review-pr` is satisfied by the marker, but a `hooks/` PR is refused
-  until it is re-posted. A passes line naming another `head_sha` is refused as malformed (`review_passes_malformed`).
+- Artifact: `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]` posts two comments for one head.
+  The first has the v1 marker, a passes line, and the review text. The passes line gives the name, verdict, blocking
+  value, and summary hash for each pass. The second has the same v1 marker and the same general review text. It lets
+  the current server integrity check read the review. The local gate accepts the pair only when the comments are
+  adjacent and the general review text is identical. The script derives each verdict from the text. A Critical finding
+  fails the pass. A present passes line must include `review-pr` with a verdict bound to its summary. An old single
+  comment with no passes line can satisfy `review-pr` for a docs-only diff when its Critical section is clean. Once a
+  passes comment exists for that head,
+  a missing, malformed, or stale companion refuses the pair (`review_passes_malformed`).
 - Query: `trace.by_reason` for `review-passes/ok/review_passes_ok` and `review-passes/refused/<code>`, plus
   `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
 - Remediation: spawn the missing reviewer (`security-reviewer`, `deploy-safety-reviewer`; both providers ship them),

@@ -82,27 +82,32 @@ def sections(summary: Path, extra: list[str]) -> list[tuple[str, str]]:
     return texts
 
 
-def comment_for(repo: str, number: int, login: str, head: str, top: list[str]) -> dict[str, str] | None:
-    """Reuse only the author's newest recognized artifact for this head when its whole body is valid."""
+def comments_for(repo: str, number: int, login: str) -> list[dict[str, str]]:
+    """Return this author's comments in posted order so an intervening comment breaks a pair."""
     listing = git.run(
         "gh", "api", f"repos/{repo}/issues/{number}/comments", "--paginate",
         "--jq", ".[] | {url:.html_url,author:.user.login,created:.created_at,body:.body}",
         check=True,
     )  # fmt: skip
-    newest = None
+    found: list[dict[str, str]] = []
     for line in filter(None, listing.stdout.splitlines()):
         comment = cast(dict[str, str], json.loads(line))
-        if comment["author"] == login and any(
-            review_artifact.matches_marker(line, str(number), head) for line in comment["body"].splitlines()
-        ):
-            newest = comment
-    if (
-        newest is not None
-        and newest["body"].splitlines()[:2] == top
-        and review_passes.parse(newest["body"], str(number), head) is not None
-    ):
-        return newest
-    return None
+        if comment["author"] == login:
+            found.append(comment)
+    return found
+
+
+def post_body(repo: str, number: int, body: str) -> dict[str, str]:
+    """Post one review comment and return its GitHub identity."""
+    with tempfile.TemporaryDirectory(prefix="coderails-review-") as directory:
+        path = Path(directory) / "body.md"
+        path.write_text(body)
+        reply = git.run(
+            "gh", "api", f"repos/{repo}/issues/{number}/comments", "-F", f"body=@{path}",
+            "--jq", "{url:.html_url,author:.user.login,created:.created_at}",
+            check=True,
+        )  # fmt: skip
+    return cast(dict[str, str], json.loads(reply.stdout))
 
 
 def post(number: int, summary: Path, extra: list[str]) -> int:
@@ -119,25 +124,31 @@ def post(number: int, summary: Path, extra: list[str]) -> int:
     top = [review_artifact.marker(str(number), head), review_passes.render(head, passes)]
     repo = git.repo()
     login = git.output("gh", "api", "user", "-q", ".login", check=True)
-    comment = comment_for(repo, number, login, head, top)
-    if git.pr_field(str(number), "headRefOid") != head:
-        raise ValueError(f"stale: PR head moved from {head} before posting; review the new head")
-    if comment:
-        print(f"Artifact already posted for SHA {head} — skipping duplicate post.\nExisting: {comment['url']}")
+    pass_body = "\n".join(top + [review_passes.tail(texts)])
+    companion_body = top[0] + "\n" + texts[0][1]
+    comments = comments_for(repo, number, login)
+    positions = [
+        index
+        for index, item in enumerate(comments)
+        if item["body"].splitlines() and review_artifact.matches_marker(item["body"].splitlines()[0], str(number), head)
+    ]
+    last = positions[-1] if positions else -1
+    paired = last > 0 and comments[last - 1]["body"] == pass_body and comments[last]["body"] == companion_body
+    pending = last == len(comments) - 1 and last >= 0 and comments[last]["body"] == pass_body
+    comment = comments[last] if paired else None
+    if paired:
+        print(f"Artifact already posted for SHA {head} — skipping duplicate post.\nExisting: {comments[last]['url']}")
     else:
-        body = "\n".join(top + [review_passes.tail(texts)])
-        with tempfile.TemporaryDirectory(prefix="coderails-review-") as directory:
-            path = Path(directory) / "body.md"
-            path.write_text(body)
-            reply = git.run(
-                "gh", "api", f"repos/{repo}/issues/{number}/comments", "-F", f"body=@{path}",
-                "--jq", "{url:.html_url,author:.user.login,created:.created_at}",
-                check=True,
-            )  # fmt: skip
-        comment = json.loads(reply.stdout)
-        print(f"Posted: {comment['url']}")
+        for body in ([companion_body] if pending else [pass_body, companion_body]):
+            if git.pr_field(str(number), "headRefOid") != head:
+                raise ValueError(f"stale: PR head moved from {head} before posting; review the new head")
+            comment = post_body(repo, number, body)
+            print(f"Posted: {comment['url']}")
+            if git.pr_field(str(number), "headRefOid") != head:
+                raise ValueError(f"stale: PR head moved from {head} during posting; this artifact must not be used")
     if git.pr_field(str(number), "headRefOid") != head:
         raise ValueError(f"stale: PR head moved from {head} during posting; this artifact must not be used")
+    assert comment is not None
     if destination := cache_path():
         write_cache(destination, str(number), head, comment["url"], comment["author"], comment["created"])
     return 0

@@ -5,17 +5,23 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import runpy
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import cast
+from typing import Callable, cast
 
 # Subprocesses keep the root and Codex scripts packages isolated.
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/integrity-gate"))
 CODEX = ROOT / "packages/codex"
+review_valid = cast(
+    Callable[[str, int, str], bool],
+    runpy.run_path(str(ROOT / "scripts/integrity-gate/integrity_evidence.py"))["review_valid"],
+)
 HOOK = CODEX / "hooks/scripts/pr_publication_gate.py"
 POST = CODEX / "scripts/post_review.py"
 CLEAN = "## No findings\n"
@@ -31,9 +37,12 @@ case "$1 $2" in
   "api repos/"*)
     [ -n "$FAKE_NO_ARTIFACT" ] && exit 0
     { printf '<!-- coderails-review-summary v1 pr=7 head_sha=%s -->\\n' "$FAKE_SHA"
-      [ -n "$FAKE_PASSES" ] && printf '<!-- coderails-review-passes v1 {"head_sha": "%s", "passes": %s} -->\\n' \\
+      printf '<!-- coderails-review-passes v1 {"head_sha": "%s", "passes": %s} -->\\n' \\
         "${FAKE_PASSES_SHA:-$FAKE_SHA}" "$FAKE_PASSES"
-      printf '%s\\n' "${FAKE_TAIL:-## No findings}"; } | base64 | tr -d '\\n'
+      printf '%s' "${FAKE_TAIL:-## No findings}"; } | base64 | tr -d '\\n'
+    echo
+    { printf '<!-- coderails-review-summary v1 pr=7 head_sha=%s -->\\n' "$FAKE_SHA"
+      printf '%s' "${FAKE_GENERAL:-## No findings}"; } | base64 | tr -d '\\n'
     echo ;;
 esac
 exit 0
@@ -52,7 +61,10 @@ if a[:2] == ["pr", "view"]:
 elif a[:2] == ["api", "user"]:
     print("me")
 elif a[0] == "api" and "-F" in a:
-    open(os.environ["FAKE_POSTED"], "w").write(open(a[a.index("-F") + 1].removeprefix("body=@")).read())
+    path = os.environ["FAKE_POSTED"]
+    if os.path.exists(path):
+        path += ".companion"
+    open(path, "w").write(open(a[a.index("-F") + 1].removeprefix("body=@")).read())
     print(json.dumps({"url": "https://github.com/o/r/pull/12#c1", "author": "me", "created": "t"}))
 elif a[0] == "api":
     for row in json.loads(os.environ["FAKE_COMMENTS"]):
@@ -88,12 +100,12 @@ def entry(name: str, verdict: str = "pass", digest: str = "") -> dict[str, objec
 
 def artifact(*passes: dict[str, object]) -> dict[str, str]:
     """Env for the fake gh: the passes line plus the posted sections each pass was derived from."""
-    parts = [CLEAN.strip()]  # the review-pr summary comes first
+    parts = [CLEAN]  # the review-pr summary comes first, with its original final newline
     for item in passes:
         if item["name"] != "review-pr":
             parts.append(f"<!-- coderails-review-pass {item['name']} -->")
-            parts.append((CLEAN if item["verdict"] == "pass" else CRITICAL).strip())
-    return {"FAKE_PASSES": json.dumps(list(passes)), "FAKE_TAIL": "\n".join(parts)}
+            parts.append(CLEAN if item["verdict"] == "pass" else CRITICAL)
+    return {"FAKE_PASSES": json.dumps(list(passes)), "FAKE_TAIL": "\n".join(parts), "FAKE_GENERAL": CLEAN}
 
 
 def git_cmd(cwd: Path, *args: str) -> str:
@@ -151,6 +163,7 @@ class HookTests(Repo):
             "FAKE_SHA": self.sha,
             "FAKE_BASE_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
+            **artifact(entry("review-pr")),
             **env,
         }
         command = {"command": "gh pr merge 7"}
@@ -241,27 +254,6 @@ class HookTests(Repo):
                 self.assertNotIn("post_review.py post", reason)
 
 
-class DocsOnlyTests(Repo):
-    """A docs-only PR needs only review-pr."""
-
-    touched = "docs/a.md"
-
-    def test_docs_only_needs_review_pr_only(self) -> None:
-        """The bare v1 artifact is enough for docs."""
-        environment = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
-        environment |= {
-            "FAKE_SHA": self.sha,
-            "FAKE_BASE_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
-            "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
-        }
-        command = {"command": "gh pr merge 7"}
-        payload = {"session_id": "s", "cwd": str(self.dir), "tool_name": "Bash", "tool_input": command}
-        result = subprocess.run(
-            [sys.executable, str(HOOK)], input=json.dumps(payload), text=True, capture_output=True, env=environment
-        )
-        self.assertEqual((result.returncode, result.stdout.strip()), (0, ""))
-
-
 class PostTests(Repo):
     """The Codex post_review.py: argument gate, derived passes line, no progress cache."""
 
@@ -304,6 +296,9 @@ class PostTests(Repo):
         self.assertEqual(data["head_sha"], self.sha)
         verdicts = {p["name"]: (p["verdict"], p["blocking"]) for p in data["passes"]}
         self.assertEqual(verdicts, {"review-pr": ("pass", False), "security-review": ("fail", True)})
+        self.assertEqual(posted.with_name(posted.name + ".companion").read_text(), lines[0] + "\n" + CLEAN)
+        self.assertFalse(review_valid(posted.read_text(), 12, self.sha))
+        self.assertTrue(review_valid(posted.with_name(posted.name + ".companion").read_text(), 12, self.sha))
 
     def test_invalid_number_makes_no_gh_call(self) -> None:
         """Negative control: injection-shaped numbers fail with pr_number_invalid and the gh shim is never run."""
@@ -333,12 +328,13 @@ class PostTests(Repo):
             result, _, posted = self.post("12", "--summary", str(clean), provider=provider)
             self.assertEqual(result.returncode, 0, result.stderr)
             good = {"url": "old", "author": "me", "created": "t", "body": posted.read_text()}
+            companion = {**good, "body": posted.with_name(posted.name + ".companion").read_text()}
             corrupt = {**good, "url": "corrupt", "body": "\n".join(good["body"].splitlines()[:2]) + "\n" + CRITICAL}
             for comments, reused in (
                 ([good, corrupt], ""),
                 ([corrupt], ""),
-                ([good, {**good, "url": "new"}], "new"),
-                ([good, {**corrupt, "author": "other"}], "old"),
+                ([good, {**companion, "url": "new"}], "new"),
+                ([good, companion, {**corrupt, "author": "other"}], "old"),
             ):
                 with self.subTest(provider=provider, reused=reused, count=len(comments)):
                     result, log, _ = self.post("12", "--summary", str(clean), provider=provider, comments=comments)

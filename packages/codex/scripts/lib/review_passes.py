@@ -91,9 +91,11 @@ def validate_summary_text(text: str) -> None:
     if any(line.startswith("<!-- coderails-review-") for line in lines):
         raise ValueError("review marker inside summary")
     if "## No findings" in lines:
-        if any(heading in lines for heading in headings):
-            raise ValueError('ambiguous — "## No findings" present alongside structured headings')
+        if [line for line in lines if line.strip()] != ["## No findings"]:
+            raise ValueError('"## No findings" must be the only non-blank line')
         return
+    if [line for line in lines if line.startswith("## ")] != list(headings):
+        raise ValueError("summary headings must be Critical, Important, Suggestions in order")
     missing = [heading for heading in headings if heading not in lines]
     if missing:
         raise ValueError(f"missing required headings: {' '.join(missing)}")

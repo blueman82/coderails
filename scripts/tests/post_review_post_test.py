@@ -5,21 +5,27 @@ from __future__ import annotations
 import io
 import json
 import re
+import runpy
 import subprocess
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, cast
 from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "scripts/integrity-gate"))
 from scripts import post_review  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
 from scripts.lib import review_artifact, review_passes  # noqa: E402
 
+review_valid = cast(
+    Callable[[str, int, str], bool],
+    runpy.run_path(str(REPO / "scripts/integrity-gate/integrity_evidence.py"))["review_valid"],
+)
 SHA, OTHER = "a" * 40, "b" * 40
 CLEAN = "## No findings\n"
 CRITICAL = "## Critical\n- injection\n\n## Important\nNone\n\n## Suggestions\nNone\n"
@@ -97,6 +103,47 @@ class PostTests(unittest.TestCase):
         self.assertEqual(passes[1]["summary_sha256"], review_passes.summary_sha256(CRITICAL))  # type: ignore[index]
         self.assertIn(CRITICAL, fake.posted[0])
 
+    def test_posts_server_compatible_companion_after_passes(self) -> None:
+        """The final comment has only the v1 marker and the same general summary."""
+        fake = FakeGh([SHA])
+        code, _, err = self.run_post(fake, "post", "12", "--summary", str(self.clean))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(fake.posted), 2)
+        self.assertEqual(fake.posted[1], review_artifact.marker("12", SHA) + "\n" + CLEAN)
+        self.assertFalse(review_valid(fake.posted[0], 12, SHA))
+        self.assertTrue(review_valid(fake.posted[1], 12, SHA))
+
+    def test_partial_post_adds_only_the_companion(self) -> None:
+        """A failed second post can resume without publishing a second pass record."""
+        first = FakeGh([SHA])
+        self.run_post(first, "post", "12", "--summary", str(self.clean))
+        existing = [{"url": URL, "author": "me", "created": "t", "body": first.posted[0]}]
+        fake = FakeGh([SHA], existing)
+        code, _, err = self.run_post(fake, "post", "12", "--summary", str(self.clean))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(fake.posted, [first.posted[1]])
+
+    def test_eval_after_review_does_not_repost_pair(self) -> None:
+        """The usual GO eval comment may follow the review pair."""
+        first = FakeGh([SHA])
+        self.run_post(first, "post", "12", "--summary", str(self.clean))
+        existing = [{"url": URL, "author": "me", "created": "t", "body": body} for body in first.posted]
+        existing.append(
+            {"url": URL + "-eval", "author": "me", "created": "t", "body": "<!-- coderails-eval-summary -->"}
+        )
+        fake = FakeGh([SHA], existing)
+        code, _, err = self.run_post(fake, "post", "12", "--summary", str(self.clean))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(fake.posted, [])
+
+    def test_head_change_between_posts_stops_before_companion(self) -> None:
+        """The server companion is never written after the PR head changes."""
+        fake = FakeGh([SHA, SHA, OTHER])
+        code, _, err = self.run_post(fake, "post", "12", "--summary", str(self.clean))
+        self.assertNotEqual(code, 0)
+        self.assertEqual(len(fake.posted), 1)
+        self.assertIn("stale", err)
+
     def test_posted_body_still_parses_for_dashboard_and_integrity_gate(self) -> None:
         """Compat: the dashboard prGates regex and the integrity gate's line test match the unchanged first line."""
         fake = FakeGh([SHA])
@@ -111,7 +158,7 @@ class PostTests(unittest.TestCase):
         """Negative control for posting: an identical first-two-lines comment by me means no second post."""
         first = FakeGh([SHA])
         self.run_post(first, "post", "12", "--summary", str(self.clean))
-        existing = [{"url": URL, "author": "me", "created": "t", "body": first.posted[0]}]
+        existing = [{"url": URL, "author": "me", "created": "t", "body": body} for body in first.posted]
         fake = FakeGh([SHA], existing)
         code, out, _ = self.run_post(fake, "post", "12", "--summary", str(self.clean))
         self.assertEqual((code, fake.posted), (0, []))
@@ -125,13 +172,14 @@ class PostTests(unittest.TestCase):
         existing = [{"url": URL, "author": "mallory", "created": "t", "body": first.posted[0]}]
         fake = FakeGh([SHA], existing)
         self.run_post(fake, "post", "12", "--summary", str(self.clean))
-        self.assertEqual(len(fake.posted), 1)
+        self.assertEqual(len(fake.posted), 2)
 
     def test_dedupe_uses_the_newest_valid_same_head_artifact(self) -> None:
         """An older matching marker or a corrupt matching tail must not suppress a repairing post."""
         first = FakeGh([SHA])
         self.run_post(first, "post", "12", "--summary", str(self.clean))
         good = {"url": URL, "author": "me", "created": "t", "body": first.posted[0]}
+        companion = {**good, "body": first.posted[1]}
         failed = FakeGh([SHA])
         self.run_post(failed, "post", "12", "--summary", str(self.critical))
         corrupt = "\n".join(first.posted[0].splitlines()[:2]) + "\n" + CRITICAL
@@ -140,12 +188,12 @@ class PostTests(unittest.TestCase):
                 fake = FakeGh([SHA], existing)
                 code, _, err = self.run_post(fake, "post", "12", "--summary", str(self.clean))
                 self.assertEqual(code, 0, err)
-                self.assertEqual(len(fake.posted), 1)
-        fake = FakeGh([SHA], [good, {**good, "url": URL + "-new"}])
+                self.assertEqual(len(fake.posted), 2)
+        fake = FakeGh([SHA], [good, {**companion, "url": URL + "-new"}])
         code, out, _ = self.run_post(fake, "post", "12", "--summary", str(self.clean))
         self.assertEqual((code, fake.posted), (0, []))
         self.assertIn(URL + "-new", out)
-        fake = FakeGh([SHA], [good, {**good, "author": "mallory", "body": corrupt}])
+        fake = FakeGh([SHA], [good, companion, {**good, "author": "mallory", "body": corrupt}])
         code, out, _ = self.run_post(fake, "post", "12", "--summary", str(self.clean))
         self.assertEqual((code, fake.posted), (0, []))
         self.assertIn(URL, out)
@@ -193,6 +241,24 @@ class PostTests(unittest.TestCase):
             code, _, _ = self.run_post(fake, "post", "12", *arguments)
             self.assertNotEqual(code, 0)
             self.assertEqual(fake.calls, [])
+
+    def test_server_rejected_heading_forms_never_post(self) -> None:
+        """The local validator rejects summary forms the existing server parser rejects."""
+        variants = (
+            "## Important\nNone\n## Critical\nNone\n## Suggestions\nNone\n",
+            "## Critical\nNone\n## Extra\nNone\n## Important\nNone\n## Suggestions\nNone\n",
+            "## No findings\n## Extra\nNone\n",
+            "## No findings\nexplanation\n",
+        )
+        for text in variants:
+            with self.subTest(text=text):
+                self.assertFalse(review_valid(review_artifact.marker("12", SHA) + "\n" + text, 12, SHA))
+                invalid = self.dir / "invalid.md"
+                invalid.write_text(text)
+                fake = FakeGh([SHA])
+                code, _, _ = self.run_post(fake, "post", "12", "--summary", str(invalid))
+                self.assertNotEqual(code, 0)
+                self.assertEqual(fake.calls, [])
 
     def test_none_mixed_with_findings_is_rejected(self) -> None:
         """A Critical section that says None and also lists a finding is ambiguous and not postable."""
