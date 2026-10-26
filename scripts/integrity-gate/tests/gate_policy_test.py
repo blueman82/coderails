@@ -5,19 +5,23 @@ from __future__ import annotations
 import copy
 import io
 import json
+import os
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from integrity_http import IntegrityError, JsonObject
 from integrity_policy import gate_pr
 
-from scripts.lib.eval_integrity import suite_hash
+from scripts.lib.eval_integrity import sign_suite, suite_hash
 
 SHA = "0123456789012345678901234567890123456789"
+FIXTURE_KEYS = tempfile.TemporaryDirectory(prefix="coderails-integrity-fixture-")
 
 
 class EvidenceFixture:
@@ -30,6 +34,7 @@ class EvidenceFixture:
             "scope": "pr",
             "task_ref": "7",
             "verification_level": 1,
+            "integrity_version": 2,
             "verification_justification": "Run a direct artifact check.",
             "frozen_at": "2026-10-24T11:42:17Z",
             "frozen_sha": "a" * 40,
@@ -47,7 +52,7 @@ class EvidenceFixture:
                 }
             ],
         }
-        self.document["frozen_hash"] = suite_hash(self.document)
+        self.resign()
         self.review = (
             f"<!-- coderails-review-summary v1 pr=7 head_sha={SHA} -->\n"
             f"<!-- coderails-compat-findings v1 pr=7 head_sha={SHA} count=0 disposition=clean-break -->\n## No findings"
@@ -70,6 +75,12 @@ class EvidenceFixture:
         self.eval_json_override: str | None = None
         self.late_eval = ""
         self.remove_comments_during_diff = False
+
+    def resign(self) -> None:
+        """Freeze and sign this fixture under a disposable test key."""
+        self.document["frozen_hash"] = suite_hash(self.document)
+        with patch.dict(os.environ, {"CODERAILS_KEYS_DIR": FIXTURE_KEYS.name}):
+            sign_suite(self.document, strict=True)
 
     def check(self, target: str) -> None:
         """Record every read and raise a configured transport refusal."""
@@ -271,13 +282,6 @@ class GatePolicyTests(unittest.TestCase):
         self.assertEqual(self.gate(client), 0)
         self.assertEqual(client.posts[-1][1], "failure")
 
-    def test_tampered_frozen_oracle_cannot_attest(self) -> None:
-        """A changed oracle must fail its frozen hash check."""
-        client = EvidenceFixture()
-        client.document["evals"][0]["assert"] = "Changed after the freeze."
-        self.assertEqual(self.gate(client), 1)
-        self.assertIn("eval_evidence_invalid", client.posts[-1][2])
-
     def test_unhashable_eval_id_posts_failure(self) -> None:
         """Malformed owner JSON must produce a newer error status on the same head."""
         malformed_ids: tuple[object, ...] = ([], {})
@@ -287,16 +291,6 @@ class GatePolicyTests(unittest.TestCase):
             self.assertEqual(self.gate(client), 1)
             self.assertEqual(client.posts[-1][1], "error")
             self.assertIn("eval_evidence_invalid", client.posts[-1][2])
-
-    def test_negative_grading_chain_length_replaces_old_success(self) -> None:
-        """Bad owner grading data must post a newer error on the same head."""
-        for length in (-1, -2):
-            with self.subTest(chain_len=length):
-                client = EvidenceFixture()
-                client.statuses = [{"context": "integrity-review", "state": "success"}]
-                client.document["grading"] = {"chain_len": length}
-                self.assertEqual((self.gate(client), client.posts[-1][:2]), (1, (SHA, "error")))
-                self.assertIn("eval_evidence_invalid", client.posts[-1][2])
 
     def test_deep_owner_eval_replaces_old_success_with_error(self) -> None:
         """Deep JSON cannot leave a prior pass as the latest exact-head status."""

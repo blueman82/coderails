@@ -14,10 +14,12 @@ import unittest
 from pathlib import Path
 from typing import Callable, cast
 
-# Subprocesses keep the root and Codex scripts packages isolated.
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/integrity-gate"))
 CODEX = ROOT / "packages/codex"
+sys.path.insert(0, str(ROOT))
+from packages.tests.eval_artifact_fixture import write_comment  # noqa: E402
+
 review_valid = cast(
     Callable[[str, int, str], bool],
     runpy.run_path(str(ROOT / "scripts/integrity-gate/integrity_evidence.py"))["review_valid"],
@@ -43,7 +45,9 @@ case "$1 $2" in
     echo
     { printf '<!-- coderails-review-summary v1 pr=7 head_sha=%s -->\\n' "$FAKE_SHA"
       printf '%s' "${FAKE_GENERAL:-## No findings}"; } | base64 | tr -d '\\n'
-    echo ;;
+    echo
+    [ -n "$FAKE_EVAL_FILE" ] && { base64 < "$FAKE_EVAL_FILE" | tr -d '\\n'; echo; }
+    ;;
 esac
 exit 0
 """
@@ -92,7 +96,7 @@ with patch.object(review_passes, "load_policy", side_effect=read_policy):
 
 
 def entry(name: str, verdict: str = "pass", digest: str = "") -> dict[str, object]:
-    """A passes[] entry, hand-built so the wire format is checked independently of review_passes.py."""
+    """Build a wire-format review pass."""
     text = CLEAN if verdict == "pass" else CRITICAL
     real = hashlib.sha256(text.strip().encode()).hexdigest()
     return {"name": name, "verdict": verdict, "blocking": verdict == "fail", "summary_sha256": digest or real}
@@ -129,6 +133,7 @@ class Repo(unittest.TestCase):
     """A temp repo with origin/main and a feature commit; subclasses choose the file the PR touches."""
 
     touched = "hooks/x.py"
+    eval_level = 1  # a hooks/ diff is outward: the derived minimum verification level
 
     def setUp(self) -> None:
         """Base commit on origin/main, then one feature commit touching `touched`."""
@@ -141,6 +146,7 @@ class Repo(unittest.TestCase):
         (self.dir / "README.md").write_text("doc\n")
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "base")
+        self.base = git_cmd(self.dir, "rev-parse", "HEAD").strip()
         git_cmd(self.dir, "update-ref", "refs/remotes/origin/main", "HEAD")
         git_cmd(self.dir, "checkout", "-qb", "feature/x")
         git_cmd(self.dir, "remote", "add", "origin", "https://github.com/o/r.git")
@@ -151,6 +157,7 @@ class Repo(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "change")
         self.sha = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        self.eval_file = write_comment(self.tmp, self.sha, self.eval_level, frozen_sha=self.base)
 
 
 class HookTests(Repo):
@@ -161,11 +168,12 @@ class HookTests(Repo):
         environment = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
         environment |= {
             "FAKE_SHA": self.sha,
-            "FAKE_BASE_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
+            "FAKE_BASE_SHA": self.base,
             **artifact(entry("review-pr")),
             **env,
         }
+        environment |= {"FAKE_EVAL_FILE": str(self.eval_file), **env}
         command = {"command": "gh pr merge 7"}
         payload = {"session_id": "s", "cwd": str(self.dir), "tool_name": "Bash", "tool_input": command}
         argv = [sys.executable, str(HOOK)]
@@ -390,7 +398,3 @@ class MirrorTests(unittest.TestCase):
             profiles = json.loads((root / "capabilities/profiles.json").read_text())
             self.assertEqual(profiles["agents"]["security-reviewer"], ["repo.inspect", "diff.read"])
         self.assertIn('"security-reviewer"', (ROOT / "scripts/installer/codex.py").read_text())
-
-
-if __name__ == "__main__":
-    unittest.main()

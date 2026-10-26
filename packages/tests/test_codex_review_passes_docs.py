@@ -14,6 +14,7 @@ class DocsOnlyTests(Repo):
     """A docs-only PR needs only review-pr."""
 
     touched = "docs/a.md"
+    eval_level = 0
 
     def test_docs_only_needs_review_pr_only(self) -> None:
         """A valid review pair with only review-pr permits a docs-only diff."""
@@ -21,6 +22,7 @@ class DocsOnlyTests(Repo):
         environment |= {
             "FAKE_SHA": self.sha,
             "FAKE_BASE_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
+            "FAKE_EVAL_FILE": str(self.eval_file),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
             **artifact(entry("review-pr")),
         }
@@ -30,3 +32,9 @@ class DocsOnlyTests(Repo):
             [sys.executable, str(HOOK)], input=json.dumps(payload), text=True, capture_output=True, env=environment
         )
         self.assertEqual((result.returncode, result.stdout.strip()), (0, ""))
+
+
+if __name__ == "__main__":
+    import unittest
+
+    unittest.main()

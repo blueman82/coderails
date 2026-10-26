@@ -57,6 +57,15 @@ class Base(ArtifactCase):
 class SuiteHashTests(Base):
     """Oracle contents are bound; legitimately mutable fields are not."""
 
+    def test_new_freeze_binds_sha_and_time(self) -> None:
+        """A new level-1 signature fails if only freeze SHA or time changes."""
+        self.assertEqual(self.data.get("integrity_version"), 2)
+        for key, value in (("frozen_sha", "b" * 40), ("frozen_at", "2026-10-26T00:00:00Z")):
+            with self.subTest(key=key):
+                changed = {**self.data, key: value}
+                with self.assertRaisesRegex(IntegrityError, "suite_hash_mismatch"):
+                    verify_suite(changed)
+
     def test_record_smoke_stamps_frozen_hash(self) -> None:
         """Test record smoke stamps frozen hash."""
         self.assertEqual(self.data["frozen_hash"], suite_hash(self.data))

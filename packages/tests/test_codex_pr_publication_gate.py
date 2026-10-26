@@ -16,6 +16,7 @@ from typing import cast
 # packages/codex/scripts under the same name.
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+from packages.tests.eval_artifact_fixture import eval_comment, write_comment  # noqa: E402
 from packages.tests.graph_manifest_fixture import graph_progress  # noqa: E402
 
 HOOK = ROOT / "packages/codex/hooks/scripts/pr_publication_gate.py"
@@ -33,10 +34,16 @@ case "$1 $2" in
   "repo view") echo WRITE ;;
   "api repos/"*)
     # the review artifact the gate also reads: a v1 marker for the fake head, no passes line
-    case "$2" in */issues/1/comments) number=1; sha="$CLEAN_SHA" ;; *) number=7; sha="$FAKE_SHA" ;; esac
+    case "$2" in
+      */issues/1/comments) number=1; sha="$CLEAN_SHA"; eval="$CLEAN_EVAL_FILE" ;;
+      *) number=7; sha="$FAKE_SHA"; eval="$FAKE_EVAL_FILE" ;;
+    esac
     { printf '<!-- coderails-review-summary v1 pr=%s head_sha=%s -->\\n' "$number" "$sha"; echo '## No findings'; } \\
       | base64 | tr -d '\\n'
-    echo ;;
+    echo
+    # and the eval artifact (docs-level by default; the eval-level gate has its own tests)
+    [ -n "$eval" ] && { base64 < "$eval" | tr -d '\\n'; echo; }
+    ;;
 esac
 exit 0
 """
@@ -81,15 +88,26 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "secret")
         self.sha = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        clean_sha = git_cmd(self.dir, "rev-parse", "origin/main").strip()
+        clean_eval = self.dir.parent / "clean-eval-comment.md"
+        clean_eval.write_text(eval_comment(clean_sha, 0, pr="1"))
         self.env = {
             **os.environ,
+            "CODERAILS_KEYS_DIR": str(self.dir.parent / "keys"),
             "PATH": f"{install_gh_shim(self.dir.parent)}{os.pathsep}{os.environ['PATH']}",
             "FAKE_SHA": self.sha,
-            "CLEAN_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
-            "BASE_SHA": git_cmd(self.dir, "rev-parse", "origin/main").strip(),
+            "CLEAN_SHA": clean_sha,
+            "BASE_SHA": clean_sha,
+            "CLEAN_EVAL_FILE": str(clean_eval),
+            # an unclassified path is outward (level 1); frozen at the branch base, so not late
+            "FAKE_EVAL_FILE": str(self.signed_eval(self.sha, git_cmd(self.dir, "rev-parse", "main").strip())),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.loop),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
         }
+
+    def signed_eval(self, sha: str, frozen_sha: str) -> Path:
+        """Write a level-one eval signed by an isolated test key."""
+        return write_comment(self.dir.parent, sha, 1, signing_keys=self.dir.parent / "keys", frozen_sha=frozen_sha)
 
     def hook(self, command: str, session: str | None = "s1") -> dict[str, object]:
         """Run the hook for one Bash command and return its JSON output ({} when it allows)."""
@@ -160,16 +178,18 @@ class CodexPublicationGateTests(unittest.TestCase):
 
     def test_off_passes(self) -> None:
         """Negative control: diff_manifest off lets the same merge through."""
-        self.config("diff_manifest: off\n")
+        self.config("diff_manifest: off\nevals:\n  require_signatures: false\n")
         self.assertEqual(self.reason("gh pr merge 7"), "")
 
     def test_clean_diff_passes(self) -> None:
         """Negative control: a clean docs-only PR is not blocked by the default."""
         git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
-        (self.dir / "docs.md").write_text("x\n")
+        (self.dir / "docs").mkdir()
+        (self.dir / "docs" / "x.md").write_text("x\n")
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        self.env["FAKE_EVAL_FILE"] = str(write_comment(self.dir.parent, self.env["FAKE_SHA"], 0))
         self.assertEqual(self.reason("gh pr merge 7"), "")
 
     def test_owned_graph_unit_needs_manifest_binding(self) -> None:
@@ -201,6 +221,7 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        self.env["FAKE_EVAL_FILE"] = str(self.signed_eval(self.env["FAKE_SHA"], self.env["BASE_SHA"]))
         self.assertEqual(self.reason("gh pr merge 7"), "")
         self.assertTrue(self.reason("GH_REPO=other/repo gh pr merge 7").startswith("pr_repo_override:"))
         self.env["GH_REPO"] = "other/repo"
@@ -213,6 +234,7 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        self.env["FAKE_EVAL_FILE"] = str(self.signed_eval(self.env["FAKE_SHA"], self.env["BASE_SHA"]))
         self.assertEqual(self.reason("gh pr merge 7"), "")
         command = "gh pr edit 7 --base old-release && gh pr merge 7"
         self.assertTrue(self.reason(command).startswith("pr_base_mutation:"))
@@ -257,6 +279,7 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        self.env["FAKE_EVAL_FILE"] = str(self.signed_eval(self.env["FAKE_SHA"], self.env["CLEAN_SHA"]))
         progress = graph_progress(self.dir, self.loop, ["src/**"], session="s1", provider="codex")
         flags = f"--unit 2 --progress {progress}"
         self.assertTrue(self.reason(f"python3 scripts/merge.py {flags} 7").startswith("diff_manifest:out_of_manifest"))
@@ -274,6 +297,7 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        self.env["FAKE_EVAL_FILE"] = str(self.signed_eval(self.env["FAKE_SHA"], self.env["CLEAN_SHA"]))
         other = self.dir.parent / "other-worktree"
         git_cmd(self.dir, "worktree", "add", "-qb", "feature/intended", str(other), "HEAD")
         progress = graph_progress(self.dir, self.loop, ["*.md"], session="s1", provider="codex")
@@ -298,6 +322,7 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        self.env["FAKE_EVAL_FILE"] = str(self.signed_eval(self.env["FAKE_SHA"], self.env["CLEAN_SHA"]))
         other = self.dir.parent / "other-worktree"
         git_cmd(self.dir, "worktree", "add", "-qb", "feature/intended", str(other), "HEAD")
         progress = graph_progress(self.dir, self.loop, ["*.md"], session="s1", provider="codex")

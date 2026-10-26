@@ -753,6 +753,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `action_authority` | string/null | `"off"` | `"advisory"` | enforced_by_code | Absent = off; the shipped workflow uses advisory. Explicit enforce requires a signed receipt for guarded merges and pushes. Invalid values are rejected by strict config consumers. |
 | `diff_manifest` | string/null | `"enforce"` | `"enforce"` | enforced_by_code | Diff-manifest publication gate for push.py, merge.py and direct-merge hooks. Default enforce uses the shipped policy; invalid values are rejected by strict config consumers. |
 | `review_passes` | string | `"enforce"` | - | enforced_by_code | Required-reviewer check in the publication gate (policy/review_policy.json): off skips it; enforce (default) and any other value apply it. |
+| `eval_level` | string | `"enforce"` | - | enforced_by_code | Derived-eval-level and suite-integrity check in the publication gate (policy/surface_policy.json): off skips it; enforce (default) and any other value apply it. |
 | `diff_manifest_policy` | string/null | `null` | - | enforced_by_code | Path to the diff-manifest policy JSON; null or absent uses policy/diff-policy.default.json. |
 | `integrity_review` | object/null | `null` | - | enforced_by_code | Integrity attestation settings. |
 | `integrity_review.enabled` | boolean/null | `false` | - | enforced_by_code | true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live. |

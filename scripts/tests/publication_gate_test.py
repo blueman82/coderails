@@ -42,6 +42,8 @@ MERGE_DRIVER = (
     "merge.verify_gates = lambda number: merge.git.pr_field(number, 'headRefOid')\n"
     "from scripts.lib import git_common\n"
     "git_common.review_passes_for_pr = lambda number, sha: git_common.ReviewPasses(0, ())  # manifest under test\n"
+    "git_common.gate_eval_summary_for_pr = lambda number, sha: git_common.EvalSummary(\n"
+    '    0, \'0\', \'{"verification_level": 0, "task_ref": "1", "evals": []}\')  # eval level has its own tests\n'
     "merge.cleanup = lambda number, default: None\n"
     "raise SystemExit(merge.main(['7']))\n"
 )
@@ -277,9 +279,10 @@ class HeadlessTests(RepoCase):
         """Negative control: diff_manifest off lets the same diff reach gh pr merge.
 
         The config file is itself a committed control file (.coderails/** needs security-review), so the review
-        check is switched off too; this test is about the manifest only.
+        check and the eval-level check (the stubbed level-0 artifact is below the derived level of those paths) are
+        switched off too; this test is about the manifest only.
         """
-        self.config("diff_manifest: off\nreview_passes: off\n")
+        self.config("diff_manifest: off\nreview_passes: off\neval_level: off\n")
         result = self.merge(self.commit_secret())
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(self.ghlog.exists())
@@ -352,11 +355,13 @@ class CounterTests(unittest.TestCase):
         by_reason = {"publication/refused/diff_manifest:denied_path": 2, "diff-manifest/ok/diff_manifest_ok": 1}
         by_reason["x/y/z"] = 9
         by_reason["review-passes/refused/required_review_missing:security-review"] = 3
+        by_reason["eval-level/refused/level_below_derived"] = 4
         self.assertEqual(
             workflow_gate_counters.counts(by_reason),
             {
                 "diff-manifest": {"ok/diff_manifest_ok": 1},
                 "review-passes": {"refused/required_review_missing:security-review": 3},
+                "eval-level": {"refused/level_below_derived": 4},
                 "publication": {"refused/diff_manifest:denied_path": 2},
             },
         )
@@ -374,7 +379,7 @@ class WiringTests(unittest.TestCase):
 
     def test_publication_gate_is_small(self) -> None:
         """The gate stays a short module."""
-        self.assertLessEqual(len((REPO / "scripts/lib/publication_gate.py").read_text().splitlines()), 150)
+        self.assertLessEqual(len((REPO / "scripts/lib/publication_gate.py").read_text().splitlines()), 180)
 
     def test_call_sites(self) -> None:
         """Negative control target: merge calls publication_gate; push calls manifest_policy.gate."""

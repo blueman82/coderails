@@ -467,6 +467,65 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   required pass. The Codex hook only sees merges `guarded_segments` can match and needs `/hooks` trust. Row-9 wording in
   the closure matrix (`.json` policy file) is not recorded in this repo: the matrix lives outside it.
 
+## Eval level or suite integrity refused a merge
+
+- Symptom: `post_evals.py post`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex
+  `pr_publication_gate`) refuses with `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`,
+  `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, `integrity_stripped`, `not_frozen`,
+  `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed`,
+  `eval_head_mismatch`, `eval_result_mismatch` or `eval_level_diff_unavailable`.
+  The check is the third entry of the single publication gate, ON by default (config
+  `eval_level: off` is the optional switch). The minimum level comes from `policy/surface_policy.json` applied to the PR diff
+  from its live `baseRefOid` to the checked head (`scripts/lib/eval_level.py`). An unavailable PR base refuses the check and
+  cannot certify an on-time freeze. Level 2 applies to an irreversible path (`install.py`, `launchd/`, `.github/workflows/`,
+  `hooks/hooks.json`, ...) or three work units, level 1 for any outward path (`hooks/`, `scripts/`, `skills/`, ...) or two
+  units, else 0; only the anchored docs and test directories are neutral, every unlisted path (`AGENTS.md`, `.claude-plugin/`, ...) is outward.
+- Artifact: line 1 is the unchanged v1 marker, line 2 is `<!-- coderails-eval-facts v1 derived_min_level=N
+  late_freeze=0|1 suite=<16 hex> -->`, then the summary and the fenced embed whose `gate_facts` block is stamped by
+  `post_evals.py post <PR> <evals.json> [--progress PROGRESS]`. The merge side ignores the stamped level and recomputes it
+  from the live diff, the embed's declared `facts` and posted `gate_facts` (lower bounds), and the optional
+  `--unit N --progress PATH` flags of `merge.py`. Omitting progress on a direct hook call cannot erase a posted count.
+  The facts-line displayed minimum is informational at merge; the enforced floor is recomputed. The late-freeze
+  flag and suite hash are checked against the embedded suite, and the marker and embedded levels must agree.
+  The selected suite must name the current PR head and every P0 must pass under the same neutral GO rule used
+  by posting; a valid frozen hash or signature does not establish those volatile head/status fields.
+- Query: `trace.by_reason` for `eval-level/ok/eval_level_ok` and `eval-level/refused/<code>`, plus
+  `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
+- Remediation: `level_below_derived` means the suite was frozen at a lower level than the diff needs; write a suite at the
+  derived level (the level is part of the suite hash, so editing it after the freeze is `suite_hash_mismatch`), smoke-run
+  it and re-post. `suite_hash_mismatch` after an intentional oracle edit: `post_evals.py amend <evals.json> <eval_id>
+  <reason> <actor>`, then re-post. `late_freeze_unstamped`/`eval_facts_missing`: re-post with the current
+  `post_evals.py post` (an artifact posted by the old recipe has no facts line and is refused for outward diffs).
+  `eval_artifact_unreadable` is a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
+  `not_frozen` also rejects a missing, abbreviated or symbolic `frozen_sha` at level 1 or 2 on every merge route;
+  stamping it late does not satisfy the full 40-hex commit requirement.
+  A retained version 1 suite has unverifiable freeze timing, even if its SHA resolves before the branch base. A new
+  version 2 suite binds `frozen_sha` and `frozen_at` in its signed hash. If its freeze SHA is late or missing, work on
+  a copy. Set `CODERAILS_KEYS_DIR` to the preserved signing directory. Run `post_evals.py amend <copy> <eval_id>
+  'frozen_sha <40-hex SHA> frozen_at <ISO8601> timing=late' <actor>`. For version 1, use `timing=unverifiable`.
+  The reason must match that token exactly and bind both fields.
+  The posting and merge gates check the signed amendment. A plain `freeze_disclosure` or justification does not
+  clear this refusal. Regrade and post the copy.
+  `eval_head_mismatch` means the selected suite's head is absent or stale; `eval_result_mismatch` means its P0
+  statuses contradict GO. Correct the head/evidence, rerun and regrade the evals, then re-post with
+  `post_evals.py post <PR> <evals.json>`; the existing eval-level and publication trace rows/counters expose both codes.
+- Limits: a cooperating-agent safeguard. The work-unit count of a diff cannot be derived from the diff, so the floor
+  without `--progress` (and without a declared lower bound) assumes one unit; the PR author can omit the progress file.
+  `verify_suite` is tamper-evident, not tamper-proof: the suite hash and amendment chain are unkeyed and a signature is
+  optional, so a same-user agent can recompute `frozen_hash`/`suite_hash` after editing a cmd and post it with `gh api`;
+  nothing ties the embed to the hash recorded at smoke-run time (see `skills/task-evals/SKILL.md`). Only a naive edit is
+  caught. `late_freeze` is attestation, not evidence: an empty, abbreviated or rev-expression `frozen_sha` counts as late
+  (a level-0 suite may omit it) and level >= 1 needs a full 40-hex sha, but an honest-looking real sha cannot be proven to
+  be the freeze commit, and the
+  timing requirement for any version 1 suite, or a late or unresolved version 2 SHA, accepts only a verified signed
+  amendment with the exact SHA, timestamp and timing token. The surface
+  classes are globs: irreversible wins, then the anchored docs and test directories (`none`), and every other path is
+  outward (level 1), so a new control directory needs no entry to be covered, only an irreversible one does. The policy and
+  `eval_level.py`/`publication_gate.py` are themselves irreversible (editing them forces level 2), but they are read from the
+  running checkout, so run `merge.py` from main, not from the PR branch. The gate trusts the posted comment's author (the
+  authenticated, write-permission login), not the content. Config `eval_level: off` skips the check (absent or any other
+  value enforces) and records `eval-level/skipped/eval_level_off`.
+
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
 - Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a

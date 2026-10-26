@@ -63,7 +63,7 @@ class WorkflowGateTests(HookTestCase):
         env = {"PATH": str(mock) + os.pathsep + os.environ["PATH"], "FIXTURE_HEAD_SHA": head}
         for value in ("true", "'true'"):
             with self.subTest(value=value):
-                config.write_text(f"integrity_review:\n  enabled: {value}\n")
+                config.write_text(f"integrity_review:\n  enabled: {value}\nevals:\n  require_signatures: false\n")
                 result = self.run_hook("enforce_pr_workflow", payload, **env)
                 self.assertIn('"deny"', result.stdout)
                 self.assertIn("integrity-review status" if value == "true" else "config_rejected", result.stdout)
@@ -134,6 +134,9 @@ class WorkflowGateTests(HookTestCase):
             for name, contents in case["files"].items():
                 path = Path(name)
                 path.parent.mkdir(parents=True, exist_ok=True)
+                if path.name == "workflow.config.yaml":
+                    # This historical corpus tests workflow routing with unsigned fixture comments.
+                    contents += "evals:\n  require_signatures: false\n"
                 path.write_text(contents)
                 previous.add(path)
             with self.subTest(index=index, command=case["request"]["tool_input"]["command"]):
@@ -150,11 +153,18 @@ class WorkflowGateTests(HookTestCase):
                     "command bash scripts/merge.sh 140",
                     "command python3 scripts/merge.py 140",
                 )
+                # The original no-config case allowed a merge without an eval artifact;
+                # the default-on C3 gate now denies that historical input.
+                missing_eval = case["fixture_index"] == 91
                 self.assertEqual(
-                    '"deny"' in result.stdout, case["denied"] or wrapped_merge, result.stdout + result.stderr
+                    '"deny"' in result.stdout,
+                    case["denied"] or wrapped_merge or missing_eval,
+                    result.stdout + result.stderr,
                 )
                 if wrapped_merge:
                     self.assertIn("requires /pr-review-toolkit:review-pr", result.stdout)
+                if missing_eval:
+                    self.assertIn("eval_artifact_missing", result.stdout)
         self.assertEqual(original_count, 114)
 
 

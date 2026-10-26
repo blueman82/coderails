@@ -183,6 +183,10 @@
       "status": "enforced_by_code",
       "description": "Required-reviewer check in the publication gate (policy/review_policy.json): off skips it; enforce (default) and any other value apply it."
     },
+    "eval_level": {
+      "type": ["string"], "default": "enforce", "status": "enforced_by_code",
+      "description": "Derived-eval-level and suite-integrity check in the publication gate (policy/surface_policy.json): off skips it; enforce (default) and any other value apply it."
+    },
     "diff_manifest_policy": {
       "type": [
         "string",
