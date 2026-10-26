@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.lib.destructive_patterns import permanent_pattern, secret_path  # noqa: E402
 from scripts.lib import proof_results as pr  # noqa: E402
 from scripts.lib import proof_suite as suite  # noqa: E402
-from scripts.lib.proof_runtime import runtime_argv, source_snapshot  # noqa: E402
+from scripts.lib.proof_runtime import git_environment, runtime_argv, source_snapshot, trusted_executable  # noqa: E402
 from scripts.lib.proof_suite import items, validate  # noqa: E402
 
 DEFAULT_TIMEOUT_S = 600
@@ -162,15 +162,18 @@ def _execute(cmd: str, timeout: float, head: str | None) -> tuple[int | None, st
         except OSError as error:
             return None, "", str(error), False, False, False, None
         stdout, stderr, timed_out, overflow = _capture(process, timeout)
+        git = trusted_executable("git", Path.cwd())
         unchanged = subprocess.run(
-            ["git", "-C", str(source_cwd), "status", "--porcelain=v1", "--untracked-files=all"],
+            [git, "-C", str(source_cwd), "status", "--porcelain=v1", "--untracked-files=all"],
+            env=git_environment(),
             capture_output=True,
             text=True,
             check=False,
             timeout=30,
         )
         identity = subprocess.run(
-            ["git", "-C", str(source_cwd), "rev-parse", "HEAD", "HEAD^{tree}"],
+            [git, "-C", str(source_cwd), "rev-parse", "HEAD", "HEAD^{tree}"],
+            env=git_environment(),
             capture_output=True,
             text=True,
             check=False,
@@ -213,6 +216,7 @@ def _judge(entry: dict[str, Any], code: int | None, out: str, timed_out: bool) -
 
 def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path: Path) -> str:
     cmd, cwd = cast(str, entry["cmd"]), os.getcwd()
+    context = pr.git_context(Path.cwd())
     base: dict[str, Any] = {
         "kind": "run",
         "proof_id": entry["id"],
@@ -221,10 +225,7 @@ def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path:
         "session_id": who[0],
         "loop_id": who[1],
         "cwd": cwd,
-        "head_sha": subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
-        ).stdout.strip()
-        or None,
+        "head_sha": context[1] if context else None,
         "started": _now(),
     }
     if permanent_pattern(cmd, cwd)[0] or secret_path(cmd):
@@ -233,7 +234,7 @@ def _run_one(entry: dict[str, Any], freeze_sha: str, who: tuple[Any, Any], path:
         return "refused"
     try:
         code, out, err, timed_out, started, overflow, source_tree = _execute(
-            cmd, float(entry.get("timeout_s") or DEFAULT_TIMEOUT_S), cast(str | None, base["head_sha"])
+            cmd, float(entry.get("timeout_s") or DEFAULT_TIMEOUT_S), cast("str | None", base["head_sha"])
         )
     except (OSError, subprocess.TimeoutExpired, ValueError) as error:
         code, out, err, timed_out, started, overflow, source_tree = None, "", str(error), False, False, False, None

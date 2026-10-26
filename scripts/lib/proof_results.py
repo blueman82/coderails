@@ -18,6 +18,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, cast
 
+from scripts.lib.proof_runtime import git_environment, trusted_executable
+
 REASONS: dict[str, str] = {
     "proof_unexecuted": "no run row for this proof; run `python3 scripts/lib/proof.py run <state-dir> --all`.",
     "proof_failed": "the latest run exited nonzero or timed out; fix the cause and re-run the same proof.",
@@ -201,12 +203,13 @@ def _item(entry: object) -> dict[str, Any]:
     return cast(dict[str, Any], entry) if isinstance(entry, dict) else {}
 
 
-def _git_context(cwd: Path) -> tuple[Path, str, str] | None:
+def git_context(cwd: Path) -> tuple[Path, str, str] | None:
     """Resolve the repository and HEAD through Git, without trusting a recorded row's cwd as authority."""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel", "HEAD", "HEAD^{tree}"],
+            [trusted_executable("git", cwd), "rev-parse", "--show-toplevel", "HEAD", "HEAD^{tree}"],
             cwd=cwd,
+            env=git_environment(),
             capture_output=True,
             text=True,
             check=False,
@@ -239,7 +242,7 @@ def _check(
     if run["cmd_sha256"] != sha(cmd.strip()) or run["proof_json_sha256"] != freeze["proof_json_sha256"]:
         return "proof_stale_cmd"
     recorded_cwd = run.get("cwd")
-    recorded = _git_context(Path(recorded_cwd)) if isinstance(recorded_cwd, str) and recorded_cwd else None
+    recorded = git_context(Path(recorded_cwd)) if isinstance(recorded_cwd, str) and recorded_cwd else None
     if (
         current is None
         or recorded is None
@@ -274,7 +277,7 @@ def verify(
         if r["seq"] > after_seq and r["kind"] == "freeze" and (r["session_id"], r["loop_id"]) == (session, loop)
     ]
     runs = {r["proof_id"]: r for r in rows if r["seq"] > after_seq and r["kind"] == "run"}
-    current = _git_context(Path.cwd())
+    current = git_context(Path.cwd())
     offenders: list[str] = []
     disclosures: list[str] = []
     for name, item, is_withdrawn in everything:

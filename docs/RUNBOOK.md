@@ -423,7 +423,7 @@ python3 scripts/lib/proof.py run <state-dir> --all
 python3 scripts/lib/proof.py status <state-dir>
 ```
 
-For each proof, the controller makes a private copy of committed `HEAD`. The proof runs there. It cannot read the original checkout. The controller starts the pinned sandbox from its cached absolute path. A missing or changed cached runtime records `sandbox_unavailable`.
+For each proof, the controller makes a private copy of committed `HEAD`. The proof runs there. It cannot read the original checkout. The controller uses fixed system paths for Git and Node. It refuses a committed tree that has a symlink. It starts the pinned sandbox from its cached absolute path. A missing or changed cached runtime records `sandbox_unavailable`.
 
 The command stores one candidate by content hash and appends a chained `supersede` row. It binds the original and
 candidate raw and canonical hashes, loop identity, report bytes, reason, and issuance HEAD. Both providers use the

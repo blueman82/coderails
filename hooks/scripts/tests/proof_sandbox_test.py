@@ -86,23 +86,11 @@ class ProofSandboxTests(unittest.TestCase):
         repo = self.directory / f"repo-{uuid.uuid4().hex}"
         repo.mkdir()
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
         (repo / "claim.txt").write_text("bad\n")
         subprocess.run(["git", "-C", str(repo), "add", "claim.txt"], check=True)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repo),
-                "-c",
-                "user.name=Test",
-                "-c",
-                "user.email=test@example.invalid",
-                "commit",
-                "-qm",
-                "base",
-            ],
-            check=True,
-        )
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True)
         return repo
 
     def test_repository_package_cannot_run_before_proof_sandbox(self) -> None:
@@ -126,6 +114,45 @@ class ProofSandboxTests(unittest.TestCase):
                 result = self.run_proof(runner, "printf ok", cwd=repo)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertFalse((repo / "canary").exists())
+
+    def test_repository_path_cannot_supply_controller_binaries(self) -> None:
+        """A repository PATH entry must not run git or node before the sandbox starts."""
+        if not cached_runtime():
+            self.skipTest("the pinned runtime is not cached")
+        for runner in (ROOT / "scripts/lib/proof.py", ROOT / "packages/codex/scripts/lib/proof.py"):
+            with self.subTest(runner=runner):
+                repo = self.source_repo()
+                bin_dir = repo / "tools/bin"
+                bin_dir.mkdir(parents=True)
+                for name in ("git", "node"):
+                    binary = bin_dir / name
+                    binary.write_text(
+                        f"#!/bin/sh\nprintf attacked > {shlex.quote(str(repo / (name + '-canary')))}\nexit 92\n"
+                    )
+                    binary.chmod(0o755)
+                result = self.run_proof(
+                    runner, "printf ok", cwd=repo, path=str(bin_dir) + os.pathsep + os.environ["PATH"]
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse((repo / "git-canary").exists())
+                self.assertFalse((repo / "node-canary").exists())
+
+    def test_committed_symlink_cannot_read_mutable_external_target(self) -> None:
+        """A source link cannot make the proof read bytes outside the committed tree."""
+        if not cached_runtime():
+            self.skipTest("the pinned runtime is not cached")
+        for runner in (ROOT / "scripts/lib/proof.py", ROOT / "packages/codex/scripts/lib/proof.py"):
+            with self.subTest(runner=runner):
+                repo = self.source_repo()
+                outside = self.directory / f"target-{uuid.uuid4().hex}"
+                outside.write_text("good\n")
+                (repo / "link.txt").symlink_to(outside)
+                subprocess.run(["git", "-C", str(repo), "add", "link.txt"], check=True)
+                subprocess.run(["git", "-C", str(repo), "commit", "-qm", "link"], check=True)
+                result = self.run_proof(runner, "cat link.txt", cwd=repo, stdout_contains=("good",))
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                row = proof_results.read_rows(self.last_state / proof_results.RESULTS_NAME)[-1]
+                self.assertEqual(row["verdict"], "sandbox_unavailable")
 
     def test_proof_cannot_pass_on_uncommitted_source_then_restore_it(self) -> None:
         """A passing row must cover committed source bytes rather than a temporary file edit."""
