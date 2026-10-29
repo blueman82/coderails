@@ -71,6 +71,7 @@ class LessonsCli(StoreCase):
         self.assertEqual(got["lessons"][0]["text"], "Lesson for alpha-mode.")
         digest = hashlib.sha256(json.dumps(got["lessons"], sort_keys=True).encode()).hexdigest()
         self.assertEqual(got["sha256"], digest)
+        self.assertEqual(lessons.query_contract(self.dir, SESSION), (got, 0))
 
     def test_query_with_muninn_absent_degrades_without_text(self) -> None:
         """No ledger text leaks when Muninn is absent: exit 3, muninn_absent."""
@@ -81,6 +82,8 @@ class LessonsCli(StoreCase):
         )  # fmt: skip
         self.assertEqual((p.returncode, json.loads(p.stdout)), (3, {"degraded": "muninn_absent"}))
         self.assertNotIn("Lesson for", p.stdout)
+        with mock.patch.dict(os.environ, {"PATH": str(self.tmp / "nowhere")}):
+            self.assertEqual(lessons.query_contract(self.dir, SESSION), ({"degraded": "muninn_absent"}, 3))
 
     def test_predicate_reports_graduation_and_candidates(self) -> None:
         """Only an agnostic order recurred twice across sessions is a candidate; graduation is unmet at 0 retros."""

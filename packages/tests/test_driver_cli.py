@@ -236,6 +236,22 @@ class DriverCliTests(unittest.TestCase):
             self.assertIn("already", run.stderr)
             self.assertEqual(case.path.read_bytes(), before)
 
+    def synthetic_home(self, base: Path, bindir: Path) -> Path:
+        """Provide only disposable containment prerequisites for the inert Claude executable."""
+        home = base / "home"
+        credential = home / ".coderails/worker_credential"
+        credential.parent.mkdir(parents=True)
+        credential.write_text("CLAUDE_CODE_OAUTH_TOKEN=synthetic-test-token\n")
+        credential.chmod(0o600)
+        pin = home / ".npm/_npx/fixture/node_modules/@anthropic-ai/sandbox-runtime/package.json"
+        pin.parent.mkdir(parents=True)
+        pin.write_text(json.dumps({"version": "0.0.65"}))
+        for name in ("sandbox-exec", "bwrap", "rg"):
+            tool = bindir / name
+            tool.write_text("#!/bin/sh\nexit 0\n")
+            tool.chmod(0o755)
+        return home
+
     def test_one_wave_runs_with_both_provider_commands(self) -> None:
         """A valid terminal result records the full wave from each provider."""
         with tempfile.TemporaryDirectory() as directory:
@@ -243,6 +259,7 @@ class DriverCliTests(unittest.TestCase):
             checkout = base / "checkout"
             checkout.mkdir()
             subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            subprocess.run(["git", "-C", str(checkout), "checkout", "-qb", "feature/fixture-driver"], check=True)
             subprocess.run(
                 [
                     "git",
@@ -297,10 +314,13 @@ class DriverCliTests(unittest.TestCase):
                 "else printf '%s\\n' '" + response + "'; fi\n"
             )
             gh.chmod(0o755)
+            home = self.synthetic_home(base, bindir)
             environment = {
                 **os.environ,
                 "PATH": str(bindir) + os.pathsep + os.environ["PATH"],
                 "CLAUDE_CODE_SESSION_ID": "",
+                "HOME": str(home),
+                "TMPDIR": str(base),
             }
             for provider in ("claude", "codex"):
                 case = Case(provider, base)

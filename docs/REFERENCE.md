@@ -283,3 +283,21 @@ code, trace `decision.sync/degraded/<code>`, local row kept), 2 refused (wrong s
 written). Teardown runs `flush-decisions` to retry pending and safely degraded rows. An in-flight or uncertain sync
 returns `decision_sync_unknown` and must be reconciled against Muninn before any manual retry. Trace commands: `decision.record`,
 `decision.sync` (counted by `memory_counters.memory_counts`).
+
+### Integrated dispatch inputs and counter summaries
+
+New nonempty unit manifests require an absolute clean Git checkout through
+`add-unit --worktree`. Both providers store the source manifest binding and include
+that binding, the checkout HEAD, and current typed lessons in the dispatch contract.
+The retained `assign-worktree` command binds the same source fields for pending units.
+`graph_lessons.py` reads the provider's `lessons.py query --format contract` against
+this loop's repo-key directory before the progress lock; `graph_dispatch_inputs.py`
+checks that the owner, loop, and revision did not change during the read. Native and
+local driver authorization recheck the source and lesson snapshot before consuming
+an attempt. Unavailable or stale lessons remain a coded refusal.
+
+The dispatch, spec, stop, and worker counter CLIs accept `--trace-json` on stdin from
+`measure_graph_alignment.py --json`. Each reads `trace.by_reason` and retains local
+recovery events. The worker counter also preserves its source-specific mapping of
+recorded decision events. Null or malformed summaries and `--since` with aggregate
+input are refused. The measurement script itself remains unchanged.

@@ -228,6 +228,20 @@ class ChainTamper(Base):
         self.assertEqual((out["recorded"], out["reason_code"], out["exit_code"]), (False, "decision_invalid_chain", 2))
         self.assertEqual(len(self.decisions()), 3)
 
+    def test_malformed_decision_list_is_not_replaced(self) -> None:
+        """A scalar decision field must survive a refused record and flush."""
+        self.put({**self.state(), "decisions_absorbed": "damaged"})
+        before = self.path.read_bytes()
+        for _, transition in PROVIDERS:
+            out = self.rec(tr=transition)
+            self.assertEqual(
+                (out["recorded"], out["reason_code"], out["exit_code"]), (False, "decision_invalid_chain", 2)
+            )
+            self.assertEqual(self.path.read_bytes(), before)
+            out = dr.flush_pending(self.path, SESSION, transition=transition)
+            self.assertEqual((out["synced"], out["reason_code"], out["exit_code"]), ([], "decision_invalid_chain", 2))
+            self.assertEqual(self.path.read_bytes(), before)
+
     def test_flush_refuses_to_sync_a_tampered_chain(self) -> None:
         """Teardown must not turn a tampered pending row into a Muninn write."""
         rows = self.chain()

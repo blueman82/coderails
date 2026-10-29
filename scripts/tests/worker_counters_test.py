@@ -88,6 +88,16 @@ class WorkerCounterTests(unittest.TestCase):
             )
             self.assertEqual(count_reasons(root)["decision_recorded"], 1)
 
+    def test_measured_decisions_keep_source_mapping_and_nested_session_rows(self) -> None:
+        """Aggregate decision records retain their command meaning and do not count sync receipts."""
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            loop = root / "project/session"
+            loop.mkdir(parents=True)
+            (loop / "trace.jsonl").write_text(decision_line("nested"))
+            summary = {"trace": {"by_reason": {"decision.record/recorded/ok": 2, "decision.sync/degraded/ok": 50}}}
+            self.assertEqual(count_reasons(root, measurement=summary)["decision_recorded"], 3)
+
     def test_cli_uses_codex_loop_root_when_claude_root_is_absent(self) -> None:
         """Codex-only configuration reads the same root as the session trace writer."""
         with tempfile.TemporaryDirectory() as name:

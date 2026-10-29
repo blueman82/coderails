@@ -33,8 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so 
 from scripts.lib import memory_adapter as ma  # noqa: E402
 from scripts.lib import teardown_steps  # noqa: E402
 
-GENESIS = "0" * 64
-HASH_EXCLUDED = ("row_sha256", "muninn")
+GENESIS, HASH_EXCLUDED = "0" * 64, ("row_sha256", "muninn")
 QUOTE_MIN, QUOTE_MAX, CLAIM_MAX = 12, 300, 500  # muninn's quote and claim length rules
 REFUSALS = ("wrong_session", "wrong_loop", "wrong_revision", "blank_phase", "blank_decision", "invalid_chain")
 Transition = Callable[[Path, Callable[[dict[str, Any]], dict[str, Any]]], dict[str, Any]]
@@ -52,8 +51,10 @@ def row_digest(row: dict[str, Any]) -> str:
 
 
 def _rows(state: dict[str, Any]) -> list[Any]:
-    value: Any = state.get("decisions_absorbed")
-    rows: list[Any] = list(value) if isinstance(value, list) else []  # pyright: ignore[reportUnknownArgumentType]
+    value: Any = state.get("decisions_absorbed", [])
+    if not isinstance(value, list):
+        raise ValueError("invalid_chain")
+    rows: list[Any] = list(value)  # pyright: ignore[reportUnknownArgumentType]
     return rows
 
 

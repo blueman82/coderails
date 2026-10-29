@@ -128,6 +128,18 @@ def contract(payload: dict[str, Any]) -> dict[str, Any]:
     return {"lessons": rows, "sha256": hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()}
 
 
+def query_contract(repo_dir: Path, session: str = "") -> tuple[dict[str, Any], int]:
+    """Read the repo-key directory for the dispatch contract; preserve refused and degraded results."""
+    try:
+        ledger = ol.open_ledger(repo_dir)
+    except ol.ChainError as error:
+        return {"reason_code": "order_chain_broken", "offenders": error.offenders}, 2
+    except ValueError:
+        return {"reason_code": "order_state_error"}, 2
+    payload, rc = serve(ledger, session)
+    return (payload, rc) if rc else (contract(payload), 0)
+
+
 def selection(ledger: ol.Ledger, repo_dir: Path, session: str = "") -> dict[str, Any]:
     """Graduation result plus the promotion candidates (cited, agnostic, >= 2 recurrences, >= 2 distinct sessions).
 
@@ -168,6 +180,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("predicate")
     a = ap.parse_args(argv)
     repo_dir = Path(a.dir)
+    if a.cmd == "query":
+        payload, rc = query_contract(repo_dir, a.session)
+        print(json.dumps(payload, sort_keys=True))
+        return rc
     try:
         ledger = ol.open_ledger(repo_dir)
     except ol.ChainError as error:
@@ -188,9 +204,7 @@ def main(argv: list[str] | None = None) -> int:
         ol.trace("lesson.predicate", outcome, out.get("degraded", "ok"), a.session)
         print(json.dumps(out, sort_keys=True))
         return 3 if "degraded" in out else 0
-    payload, rc = serve(ledger, a.session)
-    print(json.dumps(payload if rc else contract(payload), sort_keys=True))
-    return rc
+    raise AssertionError("unreachable command")
 
 
 if __name__ == "__main__":
