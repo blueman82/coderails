@@ -55,9 +55,18 @@ class DriverOAuthTests(unittest.TestCase):
             child = tools / "codex"
             child.write_text(
                 "#!/usr/bin/env python3\nimport json, os, sys\nfrom pathlib import Path\n"
-                f"Path({str(capture)!r}).write_text(json.dumps({{'argv': sys.argv, 'env': sorted(os.environ)}}))\n"
+                f"Path({str(capture)!r}).write_text(json.dumps({{'argv': sys.argv, 'env': dict(os.environ)}}))\n"
             )
             child.chmod(0o755)
+            runtime = {
+                "PATH": f"{tools}:{os.environ['PATH']}",
+                "HOME": str(base),
+                "CODEX_HOME": str(base),
+                "TMPDIR": str(base),
+                "LANG": "C",
+                "LC_ALL": "C",
+                "TERM": "dumb",
+            }
             for role in ["loop-worker", *guarded]:
                 with self.subTest(role=role):
                     artifact = base / role
@@ -68,9 +77,7 @@ class DriverOAuthTests(unittest.TestCase):
                         os.environ,
                         {
                             **CANARIES,
-                            "PATH": f"{tools}:{os.environ['PATH']}",
-                            "HOME": str(base),
-                            "CODEX_HOME": str(base),
+                            **runtime,
                         },
                         clear=True,
                     ):
@@ -85,6 +92,8 @@ class DriverOAuthTests(unittest.TestCase):
                     self.assertEqual(run.returncode, 0, run.stderr)
                     observed = json.loads(capture.read_text())
                     self.assertEqual(set(observed["env"]) & set(CANARIES), set())
+                    for key, value in runtime.items():
+                        self.assertEqual(observed["env"].get(key), value)
                     self.assertIn('forced_login_method="chatgpt"', observed["argv"])
                     self.assertIn('model_provider="openai"', observed["argv"])
 
