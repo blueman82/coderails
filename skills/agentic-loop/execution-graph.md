@@ -101,7 +101,8 @@ transcript parser and independently installed pure graph semantics.
    --session <owner> query --format contract` before taking the progress lock.
    They put the typed rows and their digest in the existing contract and recheck the
    snapshot before authorization. A missing, refusing, or stale lesson result refuses
-   dispatch. An explicit `memory.backend: off` keeps its declared empty result.
+   dispatch. An explicit `memory.backend: off` keeps the eligible local ledger rows;
+   that result is empty only when no active eligible orders exist.
    Historical v2 records retain
    their original rendered sections and digest. A plugin agent that is not
    installed in the session cannot run a guarded

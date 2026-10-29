@@ -7,13 +7,22 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.tests.workflow_push_fixture import PushFixture
+from scripts.lib import source_manifest
 
 
 def owned_progress(fixture: PushFixture, unit: str, entry: dict[str, object]) -> Path:
     """Create a session-owned progress fixture at the supported repository path."""
+    if isinstance(entry.get("worktree"), str) and isinstance(entry.get("manifest"), list):
+        entry = {
+            **entry,
+            "source_manifest_sha256": source_manifest.digest(
+                cast(str, entry["worktree"]), cast(list[str], entry["manifest"])
+            ),
+        }
     root = fixture.root / "loops"
     fixture.environment["CLAUDE_AGENTIC_LOOP_DIR"] = str(root)
     fixture.environment["CODERAILS_PUBLICATION_SESSION_ID"] = "s"

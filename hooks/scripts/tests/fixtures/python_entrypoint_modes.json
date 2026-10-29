@@ -227,5 +227,6 @@
   "skills/dashboard/scripts/run_builder.py": "100755",
   "skills/dashboard/scripts/start_dashboard.py": "100755",
   "skills/dashboard/scripts/stop_dashboard.py": "100755",
-  "uninstall.py": "100755"
+  "uninstall.py": "100755",
+  "scripts/lib/source_manifest.py": "100644"
 }

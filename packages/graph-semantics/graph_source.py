@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, cast
+
+PLUGIN_ROOT = next(
+    parent for parent in Path(__file__).resolve().parents if (parent / "scripts/lib/source_manifest.py").is_file()
+)
+sys.path.insert(0, str(PLUGIN_ROOT))
+from scripts.lib import source_manifest  # noqa: E402
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -33,9 +38,7 @@ def source_binding(worktree: str, manifest: list[str]) -> dict[str, str]:
     status = _git(root, "status", "--porcelain", "--untracked-files=all")
     if status.returncode or status.stdout.strip():
         raise ValueError("--worktree must be clean before worker launch")
-    payload = {"worktree": str(root), "manifest": manifest}
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    return {"source_manifest_sha256": digest, "source_head_sha": head}
+    return {"source_manifest_sha256": source_manifest.digest(str(root), manifest), "source_head_sha": head}
 
 
 def check_binding(stored: object, contract: dict[str, Any]) -> None:

@@ -102,11 +102,11 @@ class MirrorTests(unittest.TestCase):
         codex = (CODEX / "scripts/action_receipt_cli.py").read_text()
         self.assertEqual(
             claude.replace(
-                "from hooks.scripts.lib.pr_workflow_match import operations",
-                "from hooks.scripts.lib.action_match import operations",
+                "from hooks.scripts.lib.pr_workflow_match import Operation, operations",
+                "from hooks.scripts.lib.action_match import Operation, operations",
             ).replace(
-                "from hooks.scripts.lib.action_match import operations\nfrom hooks.scripts.lib.trace_row",
-                "from hooks.scripts.lib.action_match import operations\n\nfrom hooks.scripts.lib.trace_row",
+                "from hooks.scripts.lib.action_match import Operation, operations\nfrom hooks.scripts.lib.trace_row",
+                "from hooks.scripts.lib.action_match import Operation, operations\n\nfrom hooks.scripts.lib.trace_row",
             ),
             codex,
         )

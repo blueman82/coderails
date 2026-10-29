@@ -24,6 +24,7 @@ def prefetch(
 
 
 def check_revision(preview: dict[str, Any], current: dict[str, Any], snapshot: dict[str, Any] | None) -> None:
-    """Refuse an identity or revision change after the pre-lock lesson read."""
-    if snapshot is not None and any(current[key] != preview[key] for key in ("session_id", "loop_id", "revision")):
+    """Recheck owned inputs even when no lesson read was initially required."""
+    fields = ("session_id", "loop_id", "revision", "work_units")
+    if any(current.get(key) != preview.get(key) for key in fields) or (needed(current) and snapshot is None):
         raise graph_contract.DispatchDeniedError("dispatch_lessons_stale", "graph changed during lessons query")
