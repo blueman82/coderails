@@ -1,59 +1,74 @@
-"""Verify actual desktop exec output framing without accepting ambiguous proof results."""
+"""Verify the Codex proof-results module's chained freeze and run frames."""
 
 from __future__ import annotations
 
-import json
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
-from graph_artifacts import parse_exec_result
+CODEX_ROOT = Path(__file__).resolve().parents[1] / "codex"
+sys.path.insert(0, str(CODEX_ROOT))
+from scripts.lib import proof_results as codex_proof_results  # noqa: E402
 
 
-class ProofFrameTests(unittest.TestCase):
-    """Native metadata is distinct from the single authoritative result object."""
+class CodexProofFrameTests(unittest.TestCase):
+    """Exercise Codex package proof rows and their consumer verification."""
 
-    def test_actual_completed_desktop_frames(self) -> None:
-        """Accept the exact frame shape observed in a real foreground proof execution."""
-        payload = {
-            "type": "custom_tool_call_output",
-            "call_id": "native-call",
-            "output": [
-                {"type": "input_text", "text": "Script completed\nWall time 4.2 seconds\nOutput:\n"},
-                {"type": "input_text", "text": json.dumps({"loop_id": "loop", "exit_code": 0, "output": "5 passed"})},
-            ],
+    def setUp(self) -> None:
+        """Create an isolated proof document and results path."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.results = Path(temporary.name) / codex_proof_results.RESULTS_NAME
+        self.state: dict[str, Any] = {"session_id": "codex-session", "loop_id": "codex-loop"}
+        self.document: dict[str, Any] = {
+            "schema_version": 2,
+            "proofs": [{"id": "P1", "cmd": "printf ok", "expect": {"exit_code": 0}}],
         }
-        self.assertEqual(parse_exec_result(payload), ("native-call", True, "loop"))
 
-    def test_ambiguous_or_noncompleted_frames_fail_closed(self) -> None:
-        """Extra results, arbitrary prefix prose and unfinished scripts cannot prove success."""
-        result = {"type": "input_text", "text": '{"exit_code":0,"loop_id":"loop"}'}
-        for frames in (
-            [result, result],
-            [{"type": "input_text", "text": "Script failed\nOutput:\n"}, result],
-            [{"type": "input_text", "text": "Script running with cell ID 1"}, result],
-            [{"type": "input_text", "text": "A purported successful execution: "}, result],
-            [{"type": "image", "text": "Script completed\nWall time 4.2 seconds\nOutput:\n"}, result],
-        ):
-            with self.subTest(frames=frames):
-                self.assertEqual(
-                    parse_exec_result({"type": "custom_tool_call_output", "call_id": "call", "output": frames}),
-                    ("call", False, None),
-                )
+    def append_frames(self, cmd: str = "printf ok") -> None:
+        """Append a freeze frame and an identity-bound satisfied run frame."""
+        identity = self.state | {"started": "start", "ended": "end"}
+        digest = codex_proof_results.doc_sha(self.document)
+        codex_proof_results.append(self.results, kind="freeze", proof_json_sha256=digest, **identity)
+        codex_proof_results.append(
+            self.results,
+            kind="run",
+            proof_id="P1",
+            cmd_sha256=codex_proof_results.sha(cmd),
+            proof_json_sha256=digest,
+            verdict="satisfied",
+            expect_matched=True,
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            source_tree_sha=subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
+            **identity,
+        )
 
-    def test_result_types_and_standalone_json(self) -> None:
-        """Preserve old JSON-result support and reject bool exits or malformed owner identities."""
-        for result, passed in (
-            ({"exit_code": 0}, True),
-            ({"exit_code": 1}, False),
-            ({"exit_code": False}, False),
-            ({"exit_code": 0, "loop_id": 123}, False),
-        ):
-            payload = {"type": "function_call_output", "call_id": "call", "output": json.dumps(result)}
-            observed = parse_exec_result(payload)
-            self.assertIsNotNone(observed)
-            self.assertEqual(observed, ("call", passed, None))
+    def test_valid_freeze_and_run_frames_verify(self) -> None:
+        """A correctly bound freeze/run pair has a valid chain and satisfies the proof."""
+        self.append_frames()
+
+        rows = codex_proof_results.read_rows(self.results)
+        self.assertEqual([row["kind"] for row in rows], ["freeze", "run"])
+        self.assertEqual(rows[1]["prev_sha256"], rows[0]["row_sha256"])
+        self.assertEqual(codex_proof_results.verify(self.document, self.results, self.state), ([], []))
+
+    def test_tampered_and_wrong_bound_frames_are_rejected(self) -> None:
+        """Edited bytes break the chain, while a re-chained wrong command hash fails proof binding."""
+        self.append_frames()
+        lines = self.results.read_text(encoding="utf-8").splitlines()
+        lines[1] = lines[1].replace('"verdict": "satisfied"', '"verdict": "failed"')
+        self.results.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with self.assertRaises(codex_proof_results.ChainError):
+            codex_proof_results.read_rows(self.results)
+
+        self.results.unlink()
+        self.append_frames(cmd="printf wrong")
+        offenders, _ = codex_proof_results.verify(self.document, self.results, self.state)
+        self.assertEqual(offenders, ["P1(proof_stale_cmd)"])
 
 
 if __name__ == "__main__":

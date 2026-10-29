@@ -14,7 +14,6 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 
 import graph  # noqa: E402
-import graph_contract  # noqa: E402
 import graph_semantics  # noqa: E402
 from graph_evidence import validate_worker_evidence  # noqa: E402
 from graph_identity import GraphError, task_name  # noqa: E402
@@ -40,6 +39,64 @@ class A6RuntimeTests(RuntimeFixture):
             self.assertEqual(result.stdout, "")
             record = next(iter(provider.read()["graph"]["dispatches"].values()))
             self.assertEqual(record["authorized"], {"tool_use_id": request["tool_use_id"]})
+
+    def test_child_cwd_must_match_assigned_worktree(self) -> None:
+        """A completed native child in another checkout cannot satisfy the issued unit."""
+        current = read_json(self.path)
+        current["work_units"] = {"1": {"status": "pending", "worktree": str(self.directory)}}
+        write_json(self.path, current)
+        graph.begin_wave(self.path)
+        child = spawn(self.parent, read_json(self.path))
+        rows = child.read_text(encoding="utf-8").splitlines()
+        first = json.loads(rows[0])
+        first["payload"]["cwd"] = "/tmp/foreign-worktree"
+        rows[0] = json.dumps(first)
+        child.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        self.assert_unchanged(self.record)
+        first["payload"]["cwd"] = str(self.directory)
+        rows[0] = json.dumps(first)
+        child.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        self.record()
+        validate_worker_evidence(read_json(self.path))
+        first["payload"]["cwd"] = "/tmp/foreign-worktree"
+        rows[0] = json.dumps(first)
+        child.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(GraphError, "worktree"):
+            validate_worker_evidence(read_json(self.path))
+
+    def test_record_wave_denied_dispatch_is_coded_without_traceback(self) -> None:
+        """Authorization, ciphertext and role refusals are coded and atomic."""
+        for scenario, code in (
+            ("authorization", "dispatch_unauthorized"),
+            ("ciphertext", "dispatch_missing_envelope"),
+            ("role", "role_mismatch"),
+        ):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
+                provider = Provider(Path(temporary), "codex")
+                provider.success("begin-wave")
+                report = provider.launch()
+                current = provider.read()
+                dispatch = next(iter(current["graph"]["dispatches"].values()))
+                if scenario == "authorization":
+                    dispatch["authorized"] = None
+                else:
+                    rows = provider.parent.read_text(encoding="utf-8").splitlines()
+                    call = json.loads(rows[1])
+                    arguments = json.loads(call["payload"]["arguments"])
+                    if scenario == "ciphertext":
+                        arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x00" * 72).decode("ascii")
+                    else:
+                        arguments["agent_type"] = "design-scout"
+                    call["payload"]["arguments"] = json.dumps(arguments)
+                    rows[1] = json.dumps(call)
+                    provider.parent.write_text("\n".join(rows) + "\n", encoding="utf-8")
+                provider.write(current)
+                before = provider.path.read_bytes()
+                result = provider.call("record-wave", json.dumps(report))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"reason_code={code}", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(provider.path.read_bytes(), before)
 
     def test_reject_invalid_native_dispatch_and_retry(self) -> None:
         """A finished spawn with no envelope is a failed attempt, never accepted worker work."""
@@ -84,8 +141,8 @@ class A6RuntimeTests(RuntimeFixture):
         self.record()
         validate_worker_evidence(read_json(self.path))
 
-    def test_hook_authorized_encrypted_native_dispatch(self) -> None:
-        """A consumed plaintext hook receipt can bind an opaque native transcript message."""
+    def test_old_encrypted_receipt_cannot_bind_native_dispatch(self) -> None:
+        """An old ciphertext receipt cannot complete an unverifiable worker."""
         graph.begin_wave(self.path)
         spawn(self.parent, read_json(self.path))
         lines = self.parent.read_text(encoding="utf-8").splitlines()
@@ -109,25 +166,12 @@ class A6RuntimeTests(RuntimeFixture):
             "ciphertext_sha256": hashlib.sha256(ciphertext.encode()).hexdigest(),
         }
         write_json(self.path, current)
-        arguments["message"] = "not encrypted"
-        call["payload"]["arguments"] = json.dumps(arguments)
-        lines[1] = json.dumps(call)
-        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
         self.assert_unchanged(self.record)
-        arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x00" * 72).decode("ascii")
-        call["payload"]["arguments"] = json.dumps(arguments)
-        lines[1] = json.dumps(call)
-        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        self.assert_unchanged(self.record)
-        with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": "on"}):
+        with (
+            patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": "on"}),
+            self.assertRaisesRegex(GraphError, "dispatch_prompt_unverifiable"),
+        ):
             self.record()
-        validate_worker_evidence(read_json(self.path))
-        arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x01" * 72).decode("ascii")
-        call["payload"]["arguments"] = json.dumps(arguments)
-        lines[1] = json.dumps(call)
-        self.parent.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        with self.assertRaisesRegex(graph_contract.DispatchDeniedError, "consumed hook authorization"):
-            validate_worker_evidence(read_json(self.path))
 
     def test_encrypted_dispatch_refuses_off_switch_receipt(self) -> None:
         """An off-mode receipt cannot bind an opaque native prompt to an approved call."""

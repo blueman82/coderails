@@ -256,7 +256,13 @@ class AddUnitTests(ControllerCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["reason_code"], "add_unit_registered")
             state = c.read()
-            self.assertEqual(state["work_units"], {"1": {"status": "pending"}, "2": {"status": "pending"}})
+            self.assertEqual(
+                state["work_units"],
+                {
+                    "1": {"status": "pending", "registered_revision": 2},
+                    "2": {"status": "pending", "registered_revision": 3},
+                },
+            )
             self.assertEqual(sorted(state["graph"]["nodes"]), ["J12-all-units", "U3[1]", "U3[2]"])
             node = state["graph"]["nodes"]["U3[2]"]
             self.assertEqual(
@@ -276,7 +282,6 @@ class AddUnitTests(ControllerCase):
                 {"id": "J12-all-units", "mode": "all", "inputs": ["U3[1]", "U3[2]"], "released": False},
             )
             self.assertEqual(c.codes("add-unit"), ["add_unit_registered"] * 2)
-            self.assertEqual(state["revision"], 3)
 
     def test_a_repeated_dependency_is_reported_once_matching_the_single_edge(self) -> None:
         """The reply must describe what was written: one edge, one depends_on entry."""

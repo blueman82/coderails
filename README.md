@@ -217,13 +217,18 @@ Compact metrics and expiry records persist separately. Emitted bytes do not esta
 With `sandbox_workers: true` (the default), the Claude implementation launcher
 uses pinned `@anthropic-ai/sandbox-runtime` in a scratch clone. It needs the
 OS sandbox, `npx`, and a dedicated Claude worker credential; missing inputs
-stop graph implementation dispatch. The orchestrator remains unsandboxed.
+stop graph implementation dispatch. The graph driver prepares execution C before
+authorization, then checks a fixed uncommitted proposal before materializing it
+into reserved root checkout D. Root reviews and publishes; resume preserves later
+root edits. The orchestrator remains unsandboxed.
 
 Codex native `spawn_agent` inherits the parent sandbox. The Codex dispatch hook
 therefore refuses native implementation work while containment is on. The
-separate OAuth launcher in `packages/codex/scripts/codex_worker.py` runs a
-worker with `workspace-write`; no API key is needed. Its result is not yet
-bound to graph `record-wave` evidence, so the graph cannot mark that work done.
+existing OAuth graph driver binds issued dispatches to sealed process evidence;
+see [driver recovery](docs/RUNBOOK-DRIVER.md). The standalone helper in
+`packages/codex/scripts/codex_worker.py` keeps its direct interface and runs with
+`workspace-write`, explicit ChatGPT login and the OpenAI provider. Its output
+and trace earn no graph completion credit. Neither route uses an API key.
 See [worker containment](docs/WORKER-CONTAINMENT.md) for recovery steps, counters, and limits.
 
 ## Requirements

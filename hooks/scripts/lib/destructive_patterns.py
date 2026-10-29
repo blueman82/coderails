@@ -65,7 +65,7 @@ def force_permitted(cwd: str) -> bool:
         return False
 
 
-def permanent_pattern(command: str, cwd: str) -> tuple[str, str]:
+def permanent_pattern(command: str, cwd: str, *, proof_only: bool = False) -> tuple[str, str]:
     """Return the first blocked pattern and its stable identifier, or empty values."""
     for line in command.split("\n"):
         if re.search(r"\bgit\s+clean\b", line, re.I):
@@ -90,7 +90,7 @@ def permanent_pattern(command: str, cwd: str) -> tuple[str, str]:
     naked = r"(--force([^-]|$)|(^|\s)-[a-zA-Z]*f[a-zA-Z]*(\s|$))"
     if re.search(rf"{push}.*({naked}|--force-with-lease\b)", flat, re.I):
         lease = re.search(rf"{push}\s+.*--force-with-lease\b", flat, re.I)
-        if not (lease and not re.search(rf"{push}.*{naked}", flat, re.I) and force_permitted(cwd)):
+        if proof_only or not (lease and not re.search(rf"{push}.*{naked}", flat, re.I) and force_permitted(cwd)):
             return "git push --force", "git-push-force"
     original = [
         (r"\brm\s+(-[rRfF]+|--recursive|--force)", "rm-rf"),

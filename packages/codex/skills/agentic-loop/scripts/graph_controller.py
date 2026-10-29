@@ -141,7 +141,12 @@ def register_unit(
     proposed = copy.deepcopy(state)
     proposed["revision"] += 1  # the graph changed: evals frozen at the old revision must go STALE
     graph = proposed["graph"]
-    stored = {"status": "pending", **({"manifest": manifest} if manifest else {}), **(fields or {})}
+    stored = {
+        "status": "pending",
+        "registered_revision": proposed["revision"],
+        **({"manifest": manifest} if manifest else {}),
+        **(fields or {}),
+    }
     proposed["work_units"][unit] = stored
     graph["nodes"].update(added["nodes"])
     graph["edges"].extend({"from": graph_spec.unit_root_id(spec, d), "to": node_id} for d in dict.fromkeys(deps))
@@ -256,6 +261,57 @@ def assign_worktree(path: Path, session: str, loop_id: str, unit: str, worktree:
         raise _refused("assign-worktree", path, ident, coded, inputs) from error
     trace(path, ident, "assigned", "worktree_assigned", inputs, [], "assign-worktree")
     return {"unit": unit, "worktree": assigned, "reason_code": "worktree_assigned"}
+
+
+def set_unit_disposition(
+    path: Path,
+    session: str,
+    loop_id: str,
+    revision: int,
+    unit: str,
+    kind: str,
+    named_blocker: str | None,
+    removal_ticket: str | None,
+    source_ref: str | None,
+) -> dict[str, Any]:
+    """Record one sourced compatibility choice on a pending unit under the Codex graph lock."""
+    ident = {"session_id": session, "loop_id": loop_id}
+    inputs = {"unit": unit, "revision": revision, "disposition": kind, "source_ref": source_ref}
+    try:
+        choice = validate_disposition(kind, named_blocker, removal_ticket)
+        source = (source_ref or "").strip()
+        if not source or len(source) > 500 or "\n" in source or "\r" in source:
+            raise ValueError("a single-line source reference is required")
+        with _locked(path):
+            state = _load(path)
+            units = state.get("work_units")
+            raw: object = cast(dict[str, object], units).get(unit) if isinstance(units, dict) else None
+            record = cast(dict[str, Any], raw) if isinstance(raw, dict) else None
+            if state.get("session_id") != session or state.get("loop_id") != loop_id:
+                raise ValueError("session or loop does not own this graph")
+            if state.get("status") != "in-progress" or state.get("revision") != revision:
+                raise ValueError("loop status or revision changed")
+            if state["graph"].get("active_wave") is not None:
+                raise ValueError("an active wave holds this graph")
+            if record is None or record.get("status") != "pending" or record.get("disposition") is not None:
+                raise ValueError("unit is absent, not pending, or already has a choice")
+            proposed = copy.deepcopy(state)
+            proposed["revision"] += 1
+            proposed["work_units"][unit].update(
+                disposition=choice, disposition_source=source, disposition_revision=proposed["revision"]
+            )
+            graph_semantics.validate(proposed)
+            _write(path, proposed)
+    except (OSError, ValueError) as error:
+        coded = RecoveryRefusedError("set_disposition_refused", str(error))
+        raise _refused("set-unit-disposition", path, ident, coded, inputs) from error
+    trace(path, proposed, "recorded", "unit_disposition_recorded", inputs, [], "set-unit-disposition")
+    return {
+        "unit": unit,
+        "disposition": choice,
+        "revision": proposed["revision"],
+        "reason_code": "unit_disposition_recorded",
+    }
 
 
 def instantiate(path: Path, session: str, loop_id: str, profile: str | None, units: list[str]) -> dict[str, Any]:

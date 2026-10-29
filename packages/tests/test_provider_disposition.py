@@ -66,6 +66,56 @@ class AddUnitDispositionTests(ControllerCase):
             self.assertEqual(c.read()["work_units"]["1"]["disposition"], expected)
             self.assertEqual(graph_contract.build_contract(c.read(), "U3[1]", "main")["disposition"], expected)
 
+    def test_existing_unit_records_one_sourced_choice_at_exact_revision(self) -> None:
+        """Both CLIs can register a late choice without changing any other unit."""
+        source = "https://github.com/blueman82/coderails/issues/567"
+        for c in self.each():
+            c.start()
+            c.add("1")
+            c.add("2")
+            revision = c.read()["revision"]
+            args = (
+                "--session",
+                "sess-1",
+                "--loop-id",
+                "loop-a",
+                "--revision",
+                str(revision),
+                "--unit",
+                "1",
+                "--disposition",
+                "preserve-compat",
+                *PAIR,
+                "--source-ref",
+                source,
+            )
+            result = c.run("set-unit-disposition", *args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            state = c.read()
+            self.assertEqual(state["revision"], revision + 1)
+            self.assertEqual(state["work_units"]["1"]["disposition"]["kind"], "preserve-compat")
+            self.assertEqual(state["work_units"]["1"]["disposition_source"], source)
+            self.assertEqual(state["work_units"]["1"]["disposition_revision"], revision + 1)
+            self.assertNotIn("disposition", state["work_units"]["2"])
+            before = c.path.read_bytes()
+            self.refused(c.run("set-unit-disposition", *args), "set_disposition_refused")
+            self.assertEqual(c.path.read_bytes(), before)
+
+    def test_existing_unit_choice_refuses_missing_provenance_and_foreign_owner(self) -> None:
+        """A choice needs a source and the current graph owner."""
+        for c in self.each():
+            c.start()
+            c.add("1")
+            revision = str(c.read()["revision"])
+            common = ("--loop-id", "loop-a", "--revision", revision, "--unit", "1", "--disposition", "clean-break")
+            before = c.path.read_bytes()
+            self.refused(c.run("set-unit-disposition", "--session", "sess-1", *common), "set_disposition_refused")
+            self.refused(
+                c.run("set-unit-disposition", "--session", "foreign", *common, "--source-ref", "PR #504"),
+                "set_disposition_refused",
+            )
+            self.assertEqual(c.path.read_bytes(), before)
+
     def test_audit_is_zero_for_valid_and_nonzero_for_a_hand_edited_unit(self) -> None:
         """The audit lists units and exits 1 when a preserve-compat unit lost half of its pair."""
         for c in self.each():

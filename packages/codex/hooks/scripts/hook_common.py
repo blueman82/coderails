@@ -8,6 +8,7 @@ import json
 import os
 import re
 import select
+import stat
 import subprocess
 import sys
 import time
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # Codex ships scripts/ beside hooks/
-from scripts.lib.authority_object import safe_session  # noqa: E402
+from scripts.lib.authority_object import safe_session as safe_session  # noqa: E402
 
 safe_id = safe_session
 
@@ -157,8 +158,10 @@ def session_dir(session_id: str) -> Path | None:
     return data_dir / "sessions" / safe_session
 
 
-def loop_state_path(cwd: str, session_id: str) -> Path | None:
-    """Return the session-owned graph state path using the established fallback order."""
+def loop_state_path(
+    cwd: str, session_id: str, *, strict: bool = False, timeout_seconds: float | None = None
+) -> Path | None:
+    """Find session state; strict callers refuse uncertain discovery instead of treating it as absent."""
     safe_session = session_id.replace("/", "_").replace("..", "")
     if not safe_session:
         return None
@@ -169,21 +172,68 @@ def loop_state_path(cwd: str, session_id: str) -> Path | None:
             capture_output=True,
             check=False,
             text=True,
+            timeout=timeout_seconds,
         )
     except OSError:
+        if strict:
+            raise
         result = None
+    if strict and result is not None and result.returncode:
+        if "not a git repository" not in result.stderr.lower():
+            raise OSError("cannot determine graph repository")
+        start = Path(cwd).resolve()
+        for directory in (start, *start.parents):
+            try:
+                (directory / ".git").stat()
+            except FileNotFoundError:
+                continue
+            raise OSError("Git metadata exists but graph repository discovery failed")
+    if strict and result is not None and result.returncode == 0 and not result.stdout.strip():
+        raise OSError("graph repository path is empty")
     source = result.stdout.strip() if result is not None and result.returncode == 0 else cwd
     canonical = root / source.replace("/", "-") / safe_session / "progress.json"
-    if canonical.exists():
+
+    def present(path: Path) -> bool:
+        if not strict:
+            return path.exists()
+        try:
+            mode = path.stat().st_mode
+        except FileNotFoundError:
+            return False
+        if not stat.S_ISREG(mode):
+            raise OSError("graph state path is not a regular file")
+        return True
+
+    if present(canonical):
         return canonical
     try:
-        matches = sorted(
-            candidate / safe_session / "progress.json"
-            for candidate in root.iterdir()
-            if (candidate / safe_session / "progress.json").exists()
-        )
+        candidates = list(root.iterdir())
+    except FileNotFoundError:
+        candidates = []
     except OSError:
+        if strict:
+            raise
+        candidates = []
+    matches: list[Path] = []
+    try:
+        for candidate in candidates:
+            mode = candidate.stat().st_mode
+            if stat.S_ISREG(mode):
+                continue
+            if not stat.S_ISDIR(mode):
+                raise OSError("graph root entry is not a directory")
+            path = candidate / safe_session / "progress.json"
+            if present(path):
+                matches.append(path)
+    except OSError:
+        if strict:
+            raise
         matches = []
+    matches.sort()
+    if strict and len(matches) > 1:
+        raise OSError("more than one graph state matches this session")
+    if strict:
+        return matches[0] if matches else None
     return matches[0] if matches else canonical
 
 
@@ -193,7 +243,7 @@ def graph_path() -> Path:
     return root / "skills" / "agentic-loop" / "scripts" / "graph.py"
 
 
-def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
+def graph_output(graph: Path, *arguments: str, timeout_seconds: float | None = None) -> dict[str, object] | None:
     """Run one graph command and return its object output when valid."""
     try:
         result = subprocess.run(
@@ -202,6 +252,7 @@ def graph_output(graph: Path, *arguments: str) -> dict[str, object] | None:
             check=False,
             stderr=subprocess.DEVNULL,
             text=True,
+            timeout=timeout_seconds,
         )
     except OSError as error:
         if error.errno in RESOURCE_ERRNOS:

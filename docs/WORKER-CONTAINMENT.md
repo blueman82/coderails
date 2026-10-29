@@ -56,12 +56,61 @@ jq -r 'select(.command=="worker_containment" or .command=="sandbox_launch" or .c
   `$TMPDIR/sw.*/clone` for inspection.
 - `branch_imported` and `branch_pushed`: the launcher completed those steps.
 
+## Claude driver source transfer
+
+For graph work, pass a new pristine feature checkout D through the existing
+`graph.py drive --checkout` or `--checkout-map` interface. The root reserves D;
+its tracked bytes, index and untracked state must match baseline H. The helper
+does not allocate a different destination or import into an existing dirty tree.
+It prepares a separate contained clone C before rendering and authorizing the
+prompt. The prompt names C as execution checkout and D as root publication
+checkout. The child receives the authorized stdin snapshot; the process receipt
+still observes D's actual HEAD at exit.
+
+After a successful admitted result, the root captures uncommitted proposed
+source into private Git objects outside worker write scope. Capture never runs
+worker Git, configuration, attributes, filters or index. Tracked H entries are
+always considered. New untracked eligibility uses only trusted H ignore rules
+in a root-owned context. Ignored directories may be pruned after checking the
+entry; their contents are not inspected. Worker ignore changes cannot hide
+out-of-scope proposed files. Scope, type, mode, path, dedicated credential and
+known-secret checks run on the fixed proposal before destination writes.
+
+Raw materialization preserves binary/new files/deletions without moving D's
+HEAD or index. Root then reviews, tests, edits and publishes D through existing
+gates. Resume validates the fixed receipt and never reapplies C over later root
+edits. Nonzero/malformed/failed worker results cannot import successful output.
+A drift or partial failure quarantines D; retain the journal and use the existing
+failed-attempt path with a new pristine D. No reset, rollback or overwrite is
+automatic. Historical unfinished Claude attempts cannot silently enter this route.
+
+The attempt retains `workspace.json`, `capture.json`, `transfer-journal.json`
+and `transfer.json`; additive hashes bind them to existing prepublication and
+sealed driver evidence. `head_at_exit`, C, H, captured tree and root publication
+HEAD remain distinct. Trace counters include `driver_workspace_prepared`,
+`driver_source_materialized` and `driver_transfer_quarantined`.
+
+Capture bounds: 10,000 visited entries, depth 64, 16 MiB per regular payload and
+128 MiB total; private control-record reads are capped at 1 MiB. Refusal never
+truncates source. Encoded or unknown secret formats may escape known-pattern
+scanning. These are fixed untrusted observations, not a coherent terminal
+filesystem snapshot. No stopped-descendant, genuine-provider or independent
+same-user protection claim follows. Worker-reported tests may cover other bytes;
+root verification must use the fixed proposed source.
+
 ## Codex workers
 
 Codex native `spawn_agent` inherits the parent sandbox. While containment is on,
 `loop_dispatch_guard.py` refuses a native implementation unit with
-`codex_native_worker_uncontained`. The separate Codex OAuth process needs no API
-key or second account. Launch it with:
+`codex_native_worker_uncontained`. Graph work uses the existing OAuth driver
+through `graph.py cutover-driver` and `graph.py drive`; see
+[driver recovery](RUNBOOK-DRIVER.md). Its authorization, immutable prompt,
+terminal receipt, publication and sealed evidence checks govern completion.
+A standalone successful process cannot supply that graph evidence.
+
+The direct helper remains available for standalone work. It needs no API key
+or second account and explicitly selects ChatGPT login with the OpenAI provider.
+Launch it with:
 
 ```sh
 python3 packages/codex/scripts/codex_worker.py --session <id> --checkout <feature-checkout> --prompt <file> --schema <checkout>/.coderails-worker/schema.json --output <checkout>/.coderails-worker/run.jsonl --final <checkout>/.coderails-worker/final.json
@@ -70,9 +119,9 @@ python3 packages/codex/scripts/codex_worker.py --session <id> --checkout <featur
 It records `codex_worker/starting/contained_process_start` before launch.
 It then records `codex_worker/allowed/contained_process_complete`,
 `codex_worker/failed/contained_process_failed`, or
-`codex_worker/refused/contained_process_unavailable`. The parent graph cannot
-yet bind this process to an implementation `record-wave` result. Keep the unit
-pending until a graph driver supplies sealed process evidence.
+`codex_worker/refused/contained_process_unavailable`. These standalone traces
+are diagnostic and cannot complete an implementation unit. The graph driver
+has its own issued-dispatch evidence path; it does not import these traces.
 With `sandbox_workers: false`, native dispatch uses the parent's sandbox mode.
 
 ## Counters and limits
@@ -112,7 +161,12 @@ directly to `measure_graph_alignment.py` belongs to that file's owner.
 This is a cooperating-agent safeguard, not absolute isolation. Claude can
 read under the real HOME and reach `api.anthropic.com`; its trusted launcher
 and the orchestrator are unsandboxed. GitHub egress is blocked in the Claude
-worker. Codex `workspace-write` limits writes but shares the user token.
+worker. Codex `workspace-write` limits writes but shares the user OAuth location.
+Its HOME, CODEX_HOME and TMPDIR follow the existing login environment; they are
+not the isolated Claude scratch directories. Both Codex launchers allowlist
+PATH, HOME, CODEX_HOME, TMPDIR, LANG, LC_ALL and TERM. Inherited API keys, tool
+tokens, auth endpoint overrides and executable configuration variables are dropped.
+Reads and same-user token access remain residuals.
 An agent can edit `sandbox_workers`, a unit manifest, or the user-tier receipt
 trust root. Synthetic OS probes do not prove a live Claude model session or
 an accepted Codex graph dispatch.

@@ -401,10 +401,12 @@ in `worker_statuses[]`, spends one retry and writes one typed stop row; a `done`
 
 What to count: `python3 scripts/lib/worker_counters.py` tallies `worker_status_<reason>` / `final_report_invalid`
 (refusals), `worker_status_<status>` / `final_report_recorded` (accepted) from `recovery-trace.jsonl`, and
-`pending_statuses` from `progress.json`. Disposition refusals are `add-unit/refused/add_unit_refused_disposition` rows.
+`pending_statuses` from `progress.json`. `decision_recorded` counts `decision.record/recorded/ok` rows in the session's
+`trace.jsonl`, including local records whose later Muninn sync degraded. Disposition refusals are
+`add-unit/refused/add_unit_refused_disposition` rows.
 Flip condition: refusal codes above zero mean workers return unshaped results (fix the worker prompt, not the gate);
 `pending_statuses` that never falls means typed stops were asked about but never logged with `record-decision
---worker-status-seq`; `decision_recorded` counts the ledger rows written (`record-decision/recorded` trace rows), the
+--worker-status-seq`; `decision_recorded` counts locally recorded choices, and the
 `record_decision_refused_*` refusals appear as `record-decision/refused` rows; three typed stops on one node exhaust its retries, so a high `worker_status_*` per node means the unit needs a human
 decision up front. Negative controls: delete the `prepare()` call from `record_wave`, skip the preserve-compat pair
 check, ignore the compat line in `merge.py`, drop the `final_report_required` branch, or touch `graph_semantics.py`; each

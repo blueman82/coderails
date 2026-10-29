@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
-"""Launch a Claude worker under the pinned OS sandbox, check its scope, import its branch and push it.
+"""Run Claude workers through the pinned OS sandbox.
 
-The worker never sees the primary repository or inherited environment secrets. The launcher:
-  1. clones the worktree (`git clone --no-hardlinks`) into a per-worker scratch directory and runs the worker there,
-     so the primary .git (refs, hooks, config) is not writable at all;
-  2. rebuilds the child environment from an allowlist with a scratch HOME and dedicated worker credential;
-  3. after a clean exit checks each commit against the graph unit manifest and scans new objects for known secrets,
-     then imports exactly the worker's branch (fast-forward only) and pushes it outside the sandbox.
-The launcher is trusted and reads under the real HOME remain possible. GitHub egress is blocked inside the sandbox;
-api.anthropic.com remains reachable. A run without graph identity may execute but cannot import or push commits.
-The scratch dir (clone, worker.log) is left in place for audit.
+Standalone mode clones the worktree into per-worker scratch with an isolated HOME and allowlisted credential.
+After a clean exit it checks committed scope and secrets, then imports exactly the worker branch and pushes it.
+Driver mode forwards the controller's captured stdin; publication remains with the graph driver and root.
+The launcher is trusted and unsandboxed. Reads under the real HOME remain possible. GitHub egress is blocked
+inside the sandbox; api.anthropic.com remains reachable. A standalone run without graph identity cannot import
+or push commits. Scratch clones and logs remain available for audit.
 """
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -32,20 +31,12 @@ from hooks.scripts.lib.graph_dispatch import authorize_dispatch
 from hooks.scripts.lib.loop_state_common import read_state
 from hooks.scripts.lib.trace_row import append_row
 from scripts.lib import manifest_policy
-from scripts.sandbox.containment import SRT_VERSION, worker_credential
+from scripts.sandbox import containment, driver_workspace
+from scripts.sandbox.containment import SECRET_PATTERNS, SRT_VERSION, worker_credential, worker_environment
+from scripts.sandbox.driver_schema import DRIVER_SCHEMA as DRIVER_SCHEMA
 from scripts.sandbox.render_settings import render_settings
 
 PROTECTED = ("main", "master")
-PASS_THROUGH = ("PATH", "LANG", "TERM")
-SECRET_PATTERNS = tuple(
-    (name, re.compile(regex))
-    for name, regex in (
-        ("an Anthropic key", r"sk-ant-[A-Za-z0-9_-]{20,}"),
-        ("a GitHub token", r"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})"),
-        ("an AWS access key id", r"AKIA[0-9A-Z]{16}"),
-        ("a private key", r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-    )
-)
 GIT_SAFE = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"]  # the clone's config is worker-written
 
 
@@ -122,30 +113,17 @@ def declared_manifest(worktree: str, prompt_file: str) -> list[str] | None:
     return cast(list[str], manifest)
 
 
-def worker_environment(scratch: Path, credential: tuple[str, str]) -> dict[str, str]:
-    """The allowlisted child environment: isolated dirs under scratch plus the worker credential, nothing inherited."""
-    home = scratch / "home"
-    dirs = {
-        "HOME": home,
-        "CLAUDE_CONFIG_DIR": home / ".claude",
-        "XDG_CONFIG_HOME": scratch / "xdg-config",
-        "XDG_CACHE_HOME": scratch / "xdg-cache",
-        "XDG_DATA_HOME": scratch / "xdg-data",
-        "XDG_STATE_HOME": scratch / "xdg-state",
-        "TMPDIR": scratch / "tmp",
-    }
-    for path in dirs.values():
-        path.mkdir(parents=True)
-    environment = {name: os.environ[name] for name in PASS_THROUGH if name in os.environ}
-    environment.update({name: str(path) for name, path in dirs.items()})
-    environment["npm_config_cache"] = str(Path.home() / ".npm")  # npx runs with the isolated HOME: keep the pin cache
-    environment[credential[0]] = credential[1]
-    return environment
-
-
-def stream_child(arguments: list[str], cwd: str, env: dict[str, str], log: IO[bytes]) -> int:
-    """Run the pinned child, tee its output to the log and stdout, and return its exit status."""
-    child = subprocess.Popen(arguments, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+def stream_child(
+    arguments: list[str],
+    cwd: str,
+    env: dict[str, str],
+    log: IO[bytes],
+    *,
+    stdin: IO[bytes] | None = None,
+    stderr: IO[bytes] | int = subprocess.STDOUT,
+) -> int:
+    """Forward the selected input stream, tee output and preserve the direct child's exit status."""
+    child = subprocess.Popen(arguments, cwd=cwd, env=env, stdin=stdin, stdout=subprocess.PIPE, stderr=stderr)
     if child.stdout is None:
         raise RuntimeError("sandbox stdout pipe was not created")
     while True:
@@ -156,6 +134,7 @@ def stream_child(arguments: list[str], cwd: str, env: dict[str, str], log: IO[by
         log.flush()
         sys.stdout.buffer.write(chunk)
         sys.stdout.buffer.flush()
+    child.stdout.close()
     code = child.wait()
     return code if code >= 0 else 128 - code
 
@@ -229,14 +208,36 @@ def import_and_push(
     trace("pushed", "branch_pushed")
 
 
-def launch(worktree: str, prompt_file: str, model: str) -> int:
-    """Prepare containment, run the pinned child on a scratch clone, then import and push its branch."""
+def role_tools(role: str) -> tuple[str, str]:
+    """Use the installed agent's tool allowlist for a driver worker."""
+    if re.fullmatch(r"[a-z][a-z0-9-]{0,60}", role) is None:
+        raise ValueError("driver role is invalid")
+    source = Path(__file__).resolve().parents[2] / "agents" / f"{role}.md"
+    if not source.is_file():
+        raise ValueError("driver role instructions are missing")
+    lines = source.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0] != "---" or "---" not in lines[1:]:
+        raise ValueError("driver role frontmatter is invalid")
+    frontmatter = lines[1 : lines.index("---", 1)]
+    fields = dict(line.split(":", 1) for line in frontmatter if ":" in line)
+    allowed = fields.get("tools", "").strip()
+    denied = fields.get("disallowedTools", "").strip()
+    if not allowed:
+        raise ValueError("driver role has no tool allowlist")
+    if "mcp__plugin_coderails_cap-" in allowed:
+        denied += ", Bash, Read, Grep, Glob, WebFetch, Write, Edit, NotebookEdit"
+    return allowed, ", ".join(part for part in ("Agent", "Task", denied) if part)
+
+
+def launch(worktree: str, prompt_file: str, model: str, *, driver: bool = False, role: str = "loop-worker") -> int:
+    """Prepare containment, acquire credentials externally, and stream the pinned child."""
     if not Path(worktree).is_dir():
         raise ValueError(f"worktree is not an existing directory: {worktree}")
-    if not Path(prompt_file).is_file():
+    if not driver and not Path(prompt_file).is_file():
         raise ValueError(f"prompt_file is not an existing file: {prompt_file}")
-    dispatch_guard(worktree, prompt_file, model)
-    manifest = declared_manifest(worktree, prompt_file)
+    if not driver:
+        dispatch_guard(worktree, prompt_file, model)
+    manifest = None if driver else declared_manifest(worktree, prompt_file)
     try:
         branch = git(worktree, "branch", "--show-current") if git(worktree, "rev-parse", "--git-common-dir") else ""
     except ValueError as error:
@@ -245,8 +246,8 @@ def launch(worktree: str, prompt_file: str, model: str) -> int:
         raise refuse(
             "branch_import_refused", f"the worktree must be on a feature branch, not {branch or 'a detached HEAD'}"
         )
-    if not shutil.which("npx"):
-        raise ValueError("npx not found on PATH")
+    if not containment.runtime_present(Path.home(), shutil.which, platform.system()):
+        raise refuse("sandbox_unavailable", "the pinned offline runtime and OS sandbox are required")
     credential = worker_credential()
     if credential is None:
         raise refuse("worker_credential_missing", "provision ~/.coderails/worker_credential (mode 0600)")
@@ -266,31 +267,97 @@ def launch(worktree: str, prompt_file: str, model: str) -> int:
         str(settings),
         "claude",
         "-p",
-        Path(prompt_file).read_text().rstrip("\n"),
-        "--model",
-        model,
-        "--dangerously-skip-permissions",
     ]
+    if driver:
+        allowed, denied = role_tools(role)
+        arguments.extend(
+            [
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--json-schema",
+                json.dumps(DRIVER_SCHEMA, sort_keys=True),
+                "--disallowedTools",
+                denied,
+                "--allowedTools",
+                allowed,
+            ]
+        )
+    else:
+        arguments.append(Path(prompt_file).read_text().rstrip("\n"))
+    arguments.extend(["--model", model, "--dangerously-skip-permissions"])
     header = (
         f"spawn-sandboxed-worker: npx --yes @anthropic-ai/sandbox-runtime@{SRT_VERSION} "
         f"--settings {settings} claude -p <{prompt_file}> --model {model} --dangerously-skip-permissions\n"
     )
-    with (scratch / "worker.log").open("wb") as log:
-        log.write(header.encode())
-        log.flush()
-        print(header, end="", flush=True)
-        code = stream_child(arguments, str(clone), environment, log)
-    if code:
-        print(f"spawn-sandboxed-worker: worker exited {code}; nothing imported, work left in {clone}", file=sys.stderr)
-        return code
-    import_and_push(worktree, clone, branch, before, credential[1], manifest)
-    return 0
+    if not driver:
+        with (scratch / "worker.log").open("wb") as log:
+            log.write(header.encode())
+            log.flush()
+            print(header, end="", flush=True)
+            code = stream_child(arguments, str(clone), environment, log)
+        if code:
+            print(f"spawn-sandboxed-worker: worker exited {code}; work left in {clone}", file=sys.stderr)
+            return code
+        import_and_push(worktree, clone, branch, before, credential[1], manifest)
+        return 0
+    with (scratch / "worker.log").open("wb") as log, (scratch / "worker.stderr.log").open("wb") as errors:
+        code = stream_child(arguments, worktree, environment, log, stdin=sys.stdin.buffer, stderr=errors)
+    if (scratch / "worker.stderr.log").stat().st_size:
+        print(f"sandbox worker stderr: {scratch / 'worker.stderr.log'}", file=sys.stderr)
+    return code if code >= 0 else 128 - code
+
+
+def launch_prepared(workspace_file: Path, model: str, role: str) -> int:
+    """Execute the already-authorized clone while the outer process observes the root checkout."""
+    prompt_bytes = sys.stdin.buffer.read()
+    workspace = driver_workspace.validate_prepared(workspace_file, prompt_bytes)
+    if not containment.runtime_present(Path.home(), shutil.which, platform.system()):
+        raise ValueError("sandbox_unavailable")
+    credential = worker_credential()
+    if credential is None or hashlib.sha256(credential[1].encode()).hexdigest() != workspace["credential_sha256"]:
+        raise ValueError("worker_credential_changed_or_missing")
+    environment = worker_environment(Path(workspace["scratch"]), credential)
+    allowed, denied = role_tools(role)
+    arguments = [
+        "npx",
+        "--yes",
+        f"@anthropic-ai/sandbox-runtime@{SRT_VERSION}",
+        "--settings",
+        workspace["settings"],
+        "claude",
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--json-schema",
+        json.dumps(DRIVER_SCHEMA, sort_keys=True),
+        "--disallowedTools",
+        denied,
+        "--allowedTools",
+        allowed,
+        "--model",
+        model,
+        "--dangerously-skip-permissions",
+    ]
+    with (
+        tempfile.TemporaryFile() as source,
+        (workspace_file.parent / "sandbox.stdout.log").open("xb") as log,
+        (workspace_file.parent / "sandbox.stderr.log").open("xb") as errors,
+    ):
+        source.write(prompt_bytes)
+        source.seek(0)
+        return stream_child(arguments, workspace["execution"], environment, log, stdin=source, stderr=errors)
 
 
 def main(arguments: list[str] | None = None) -> int:
     """Dispatch a contained worker and report preparation failures."""
     arguments = sys.argv[1:] if arguments is None else arguments
     try:
+        if arguments[:1] == ["--driver-ready"] and len(arguments) == 4:
+            return launch_prepared(Path(arguments[1]), arguments[2], arguments[3])
+        if arguments[:1] == ["--driver"] and len(arguments) in {4, 5}:
+            return launch(*arguments[1:4], driver=True, role=arguments[4] if len(arguments) == 5 else "loop-worker")
         if len(arguments) != 3:
             raise ValueError(f"expected 3 args (worktree prompt_file model), got {len(arguments)}")
         return launch(*arguments)

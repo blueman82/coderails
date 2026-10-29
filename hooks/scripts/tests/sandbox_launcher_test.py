@@ -64,6 +64,9 @@ class LauncherFlowTests(unittest.TestCase):
         shim = patch.object(shutil, "which", return_value="/fixture/tool")
         shim.start()
         self.addCleanup(shim.stop)
+        runtime = patch("scripts.sandbox.containment.runtime_present", return_value=True)
+        runtime.start()
+        self.addCleanup(runtime.stop)
         manifest = patch.object(spawn_sandboxed_worker, "declared_manifest", return_value=["**"])
         manifest.start()
         self.addCleanup(manifest.stop)
@@ -206,10 +209,12 @@ class LauncherFlowTests(unittest.TestCase):
             "XDG_DATA_HOME",
             "XDG_STATE_HOME",
             "npm_config_cache",
+            "npm_config_offline",
             "ANTHROPIC_API_KEY",
         }
         self.assertLessEqual(set(env), allowed)
         self.assertEqual(env["ANTHROPIC_API_KEY"], "sk-worker")
+        self.assertEqual(env.get("npm_config_offline"), "true")
         self.assertNotIn("CODERAILS_HEADLESS_RUN", env)
         self.assertNotEqual(env["HOME"], str(self.home))
         for name in (
@@ -323,6 +328,17 @@ class LauncherFlowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "branch_import_refused"):
             self.run_launcher(rewrite)
         self.assertEqual(self.refs(self.primary), before)
+
+    def test_missing_pinned_runtime_refuses_before_child_launch(self) -> None:
+        """A missing pinned dependency cannot download or launch an uncontained worker."""
+        with (
+            patch("scripts.sandbox.containment.runtime_present", return_value=False),
+            patch.object(spawn_sandboxed_worker, "worker_credential", return_value=None),
+            patch.object(spawn_sandboxed_worker, "stream_child") as child,
+            self.assertRaisesRegex(ValueError, "sandbox_unavailable"),
+        ):
+            spawn_sandboxed_worker.launch(str(self.worktree), str(self.prompt), "sonnet")
+        child.assert_not_called()
 
     def test_missing_credential_keeps_fallback(self) -> None:
         """Until the owner provisions a worker credential the launcher refuses with its reason code."""

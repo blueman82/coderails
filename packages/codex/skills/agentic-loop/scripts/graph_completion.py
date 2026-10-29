@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+import graph_driver_evidence
 import graph_semantics
 from graph_evidence import validate_completion_evidence, validate_worker_evidence
 from graph_identity import GraphError
@@ -47,8 +48,8 @@ def validate_work_units(state: dict[str, Any]) -> None:
         raise GraphError("work units have an illegal disposition: " + ", ".join(bad))
 
 
-def _validate_completion(
-    path: Path,
+def validate_completion_state(
+    state_path: Path,
     state: dict[str, Any],
     session: str,
     revision: int,
@@ -57,7 +58,10 @@ def _validate_completion(
     retro_path: Path,
     transcript_path: Path | None,
 ) -> None:
-    if state.get("proof_disposition") is not None and proof_path.absolute() != path.with_name("proof.json").absolute():
+    """Check graph, native or driver history, and current completion artifacts."""
+    if state.get("proof_disposition") is not None and (
+        proof_path.absolute() != state_path.with_name("proof.json").absolute()
+    ):
         raise GraphError("proof path must be beside progress.json for a no-proof decision")
     if state["session_id"] != session:
         raise GraphError("session does not own this loop")
@@ -65,7 +69,12 @@ def _validate_completion(
     if not eligibility["eligible"]:
         raise GraphError("cannot complete graph: " + ", ".join(eligibility["blockers"]))
     validate_work_units(state)
-    validate_worker_evidence(state)
+    if state["graph"].get("dispatch_mode") == "driver":
+        native = graph_driver_evidence.validate_backup(state_path, state)
+        validate_worker_evidence(native, require_complete=False)
+        graph_driver_evidence.validate_history(state_path, state)
+    else:
+        validate_worker_evidence(state)
     validate_completion_evidence(state, revision, evals_path, proof_path, retro_path, transcript_path)
 
 
@@ -75,7 +84,7 @@ def complete(
     """Prepare orders, save validated completion, then apply the lifecycle outside both locks."""
     current = _load(path)
     if current["status"] != "complete":
-        _validate_completion(
+        validate_completion_state(
             path, current, session, current["revision"], evals_path, proof_path, retro_path, transcript_path
         )
     orders = _orders()
@@ -94,7 +103,9 @@ def complete(
         else:
             revision = state["revision"]
         with traced_refusal(path, state, "complete", session):
-            _validate_completion(path, state, session, revision, evals_path, proof_path, retro_path, transcript_path)
+            validate_completion_state(
+                path, state, session, revision, evals_path, proof_path, retro_path, transcript_path
+            )
             if not already_complete:
                 if digest is None:
                     raise GraphError("order_source_mismatch")
@@ -124,7 +135,7 @@ def verify_completion(
     if state["status"] != "complete" or revision != state["revision"] - 1:
         raise GraphError("graph has no valid completion record")
     with traced_refusal(path, state, "verify-completion", session):
-        _validate_completion(path, state, session, revision, evals_path, proof_path, retro_path, transcript_path)
+        validate_completion_state(path, state, session, revision, evals_path, proof_path, retro_path, transcript_path)
         try:
             _orders().status(path, session)
         except (OSError, ValueError) as error:

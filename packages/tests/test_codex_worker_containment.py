@@ -55,6 +55,8 @@ class CodexWorkerTests(unittest.TestCase):
         self.assertEqual(argv[5], "workspace-write")
         self.assertEqual(argv[-1], "-")
         self.assertIn("features.multi_agent=false", argv)
+        self.assertIn('forced_login_method="chatgpt"', argv)
+        self.assertIn('model_provider="openai"', argv)
         self.assertNotIn("danger-full-access", argv)
         with self.assertRaisesRegex(ValueError, "scratch directory"):
             codex_worker.command(self.checkout, self.schema, self.root / "outside.json", executable="/fixture/codex")
@@ -71,11 +73,19 @@ class CodexWorkerTests(unittest.TestCase):
 
     def test_environment_excludes_synthetic_credentials(self) -> None:
         """Keep unrelated inherited credentials out of the child."""
-        with patch.dict(os.environ, {"GH_TOKEN": "canary-github", "ANTHROPIC_API_KEY": "canary-anthropic"}):
+        with patch.dict(
+            os.environ,
+            {
+                name: "synthetic-" + name
+                for name in ("GH_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY")
+            },
+        ):
             child = codex_worker.environment()
         self.assertNotIn("GH_TOKEN", child)
         self.assertNotIn("ANTHROPIC_API_KEY", child)
         self.assertNotIn("PYTHONPATH", child)
+        self.assertNotIn("OPENAI_API_KEY", child)
+        self.assertNotIn("CODEX_API_KEY", child)
 
     def test_missing_cli_or_symlink_schema_refuses(self) -> None:
         """Fail before launch when the CLI or safe artifact path is unavailable."""

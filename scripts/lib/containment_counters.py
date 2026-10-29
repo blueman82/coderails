@@ -29,6 +29,9 @@ CODES = (
     "contained_process_complete",
     "contained_process_failed",
     "contained_process_unavailable",
+    "driver_workspace_prepared",
+    "driver_source_materialized",
+    "driver_transfer_quarantined",
 )
 
 

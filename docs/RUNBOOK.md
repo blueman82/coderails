@@ -408,6 +408,78 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   different routine; select the correct routine log. Do not finish or replace another routine's state.
 - Limits: see `docs/routines.md` "Routine state machine and event log".
 
+## Proof gate blocked a `complete` declaration
+
+If one frozen proof suite must be replaced within the same graph, keep the original `proof.json` intact. Obtain a
+pending schema-2 candidate and a separate author report from an isolated proof author. Keep both input files outside
+the active graph. Review them, then run:
+
+```bash
+python3 scripts/lib/proof.py supersede <state-dir> --candidate <candidate-path> \
+  --reason "<why the original cannot run>" --original-sha256 <raw-proof-json-sha256> \
+  --author-evidence <report-path>
+python3 scripts/lib/proof.py freeze <state-dir>
+python3 scripts/lib/proof.py run <state-dir> --all
+python3 scripts/lib/proof.py status <state-dir>
+```
+
+For each proof, the controller makes a private copy of committed `HEAD`. The proof runs there. It cannot read the original checkout. The controller uses fixed system paths for Git and Node. It refuses a committed tree that has a symlink. It starts the pinned sandbox from its cached absolute path. A missing or changed cached runtime records `sandbox_unavailable`.
+
+The command stores one candidate by content hash and appends a chained `supersede` row. It binds the original and
+candidate raw and canonical hashes, loop identity, report bytes, reason, and issuance HEAD. Both providers use the
+same selected suite. Only freeze and run rows after that binding count. The run HEAD must match the current checkout.
+A second replacement, changed original or candidate, missing report, or invalid chain blocks. Keep the report at
+its recorded path. An orphan candidate
+file has no effect. The CLI checks report bytes, not the author's identity or independence; review that separately.
+
+- Symptom: `loop_stall_guard` (Claude) or `graph.py complete` / `verify-completion` (Codex) names frozen proofs as
+  `P1(proof_...)`. The gate reads only `proof_results.jsonl` beside `proof.json`, written by the controller via
+  `scripts/lib/proof.py`; the transcript and the `status` field are never consulted.
+- Query: `python3 scripts/lib/proof.py status <state-dir>` (latest verdict per proof), or
+  `python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['memory'])"`
+  (`by_reason_code` over `proof.freeze|run|gate` rows), or `grep '"command": "proof\.' <agentic-loop dir>/<session_id>/trace.jsonl`.
+- Remediation (reason code: fix, single source `scripts/lib/proof_results.py` `REASONS`):
+  `proof_unexecuted`: run `proof.py run <state-dir> --all`. `proof_failed`: the latest run exited nonzero or timed
+  out; fix the cause, re-run. `proof_expect_mismatch`: exit code or stdout did not match the frozen `expect`.
+  `proof_stale_cmd`: proof.json changed after the freeze row, or the run row hashes a different cmd; run
+  `proof.py freeze` then `run`. `proof_stale_head`: the run repository, HEAD, or source tree differs; run it
+  again from the current repository checkout. `proof_chain_broken`: a retained row was edited or a nonfinal row was
+  lost. Preserve `proof_results.jsonl` and start a new session and loop. `proof_cmd_destructive`: the cmd matches the
+  destructive classifier and was never executed; reword the proof. `proof_output_limit`: combined stdout and stderr
+  exceeded 1 MiB. The controller stopped the process group and recorded an `output_limit` row. Its output hashes cover
+  captured bytes only; the excerpt starts with `partial output`. Reduce output and run the proof again.
+  `proof_sandbox_unavailable`: the pinned sandbox did not start. Prepare and check the pinned runtime, then retry:
+
+  ```bash
+  npx --yes @anthropic-ai/sandbox-runtime@0.0.65 --help
+  npx --offline --yes @anthropic-ai/sandbox-runtime@0.0.65 --help
+  ```
+
+  The first command can download the runtime. The second confirms that the offline command used by `proof.py` works.
+  `proof_disposition_no_reason`: with no proof.json record `proof.py disposition <state-dir>
+  --none --reason-code <code> --reason <text>`; a bare `none` or a code outside `DISPOSITION_CODES` (`docs_only`,
+  `no_executable_surface`, `research_only`, `superseded`, `other`) is rejected, and a valid disposition is echoed in the
+  gate output. `proof_no_proofs`: proof.json holds no non-withdrawn proof (an empty or withdrawn-only document); freeze a
+  real proof or record a disposition. `proof_disposition_legacy` is a trace note
+  only (string `none: <reason>` accepted). `proof_withdrawn_unobserved`: a withdrawn proof needs a failed/timeout run row
+  and a reason.
+- The proof command runs inside a separate pinned OS sandbox. It can read host files. It can write only to a fresh
+  temporary directory, named by `TMPDIR`, and cannot use the network. The repository and loop state stay read-only to
+  the proof command. The controller writes the result row after the command ends. A proof that needs temporary files
+  must write them under `TMPDIR`. If the runtime is absent or the sandbox does not start, the run fails closed.
+  This proof runner uses `/tmp` for its private scratch on macOS and Linux. Windows proof runs fail closed until a
+  Windows scratch policy is implemented and checked. The live containment probe for this release ran on macOS.
+- Limit: a same-user agent can forge rows and recompute the chain, as it could forge a transcript. The chain detects
+  changes to retained rows and removal of a nonfinal row. It cannot detect removal of a final row when the remaining
+  rows form a valid prefix. The latest freeze wins, so an agent can weaken a command or withdraw a failing proof and
+  re-freeze. If the controller is killed before it appends a refusal, an earlier pass can remain the latest row.
+  A disposition's reason is checked for presence and an enum code, not truth.
+- Retained schema 1 proof files are historical evidence. Do not edit or convert them. For new work, start a new
+  session and loop with a schema 2 proof. The current runner cannot recheck completion or retry teardown for an old
+  schema 1 loop. Use the prior plugin version in an isolated checkout for that historical recovery operation.
+- Off-switch: none, by design. The proof gate is intentionally non-disableable on both providers (default ON, no config
+  key or env var); the previous transcript-based check was removed, so there is no earlier behaviour to fall back to.
+
 ## Diff-manifest check warned or refused
 
 For a graph unit's exact `push.py --unit N --progress PATH` command, the unit
@@ -419,6 +491,7 @@ before transport. Register an absolute worktree path with `add-unit --worktree`,
 `assign-worktree --session S --loop-id L --unit N --worktree ABS_PATH` after checkout setup.
 The latter fills an unassigned existing unit under the graph lock, even during an active wave;
 it preserves the revision and refuses a different assignment. The recorded path must match the Git checkout root at push time.
+Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their literal manifest names.
 
 - Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)
   refuses with `diff_manifest:<code>` and prints `! diff_manifest <code>: <path>` on stderr. The check is ON by default
@@ -490,8 +563,9 @@ it preserves the revision and refuses a different assignment. The recorded path 
   enforces; `diff_manifest: off` does not touch it). The policy file is the control, and deleting or corrupting it
   refuses (`review_policy_unreadable`), it does not allow.
 - Artifact: `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]` posts two comments for one head.
-  The first has the v1 marker, a passes line, and the review text. The passes line gives the name, verdict, blocking
-  value, and summary hash for each pass. The second has the same v1 marker and the same general review text. It lets
+  The first has the v1 marker, a passes line, an optional compat-findings line, and the review text. The passes line
+  gives the name, verdict, blocking value, and summary hash for each pass. The second has the same v1 marker, the
+  same optional compat-findings line, and the same general review text. It lets
   the current server integrity check read the review. The local gate accepts the pair only when the comments are
   adjacent and the general review text is identical. The script derives each verdict from the text. A Critical finding
   fails the pass. A present passes line must include `review-pr` with a verdict bound to its summary. An old single
@@ -818,6 +892,16 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   `begin-wave` / `graph.py authorize-dispatch` fails. The hook message names the failure; the reason code is a row in the
   loop's `recovery-trace.jsonl` (`authorize-dispatch/refused/<code>`, allowed spawns are `authorized/dispatch_authorized`).
 - Query: `python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]` counts `dispatch_authorized` and every refusal code.
+- If the Codex hook cannot create or write its temporary message file, it denies the spawn with
+  `dispatch_message_unavailable` and records that code in `discipline.log`. Repair local scratch storage and retry.
+- If the hook input or its local check raises unexpectedly, the hook denies the spawn with `dispatch_hook_error`
+  and records that code in `discipline.log`. Plaintext envelope first lines over 8192 characters get the same denial.
+  Codex config discovery, graph discovery, and graph commands share a seven-second budget so a stalled Git lookup or
+  held graph lock cannot outlive the ten-second hook limit.
+  Config and graph discovery use strict reads for this hook. An ordinary spawn is free when config is valid or absent
+  and graph state is absent. Unsafe session IDs, completed graph state, lookup errors, and multiple fallback graphs deny
+  the spawn.
+  Inspect the hook input and local runtime; do not treat the spawn as authorized.
 - Codes and fixes: `dispatch_missing_envelope` (no/old/garbled first-line `CODERAILS_GRAPH_DISPATCH` envelope: paste the
   `prompt_prefix` from `plan` or `begin-wave`; a plaintext Codex spawn needs it, while an opaque native hook message uses the exact issued `task_name` and call id),
   `dispatch_unknown_id` (the id was never issued: run `begin-wave`), `dispatch_foreign` (session, loop, node, wave or Codex
@@ -871,8 +955,12 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   `collaborationspawn_agent` only, so `SendMessage` on
   Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
   (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
-  `spawn_agent` function-call message with its v2 record, role and consumed authorization; encrypted messages also require
-  the PreToolUse `tool_use_id` to equal the native function-call id and the stored ciphertext SHA-256 to equal the actual native request message. The hook and reader cannot decrypt or verify the hidden prompt. An off-mode receipt or task-name-only legacy event
+  `spawn_agent` function-call message with its v2 record, role and consumed authorization.
+  Current Codex native calls give the hook an encrypted worker prompt.
+  The hook refuses them with `dispatch_prompt_unverifiable` before a worker starts.
+  Do not retry a native graph spawn.
+  Use the checked local Codex OAuth graph driver after it is installed.
+  Until then, stop graph dispatch. A task-name-only legacy event
   cannot bind a contract-era wave. Claude matches a non-null hook `tool_use_id` to the native Agent call; when the hook
   supplies no id, it retains the consumed flag and one-spawn-per-id check without claiming call-id proof. Historical
   pre-contract attempts retain their original evidence rules. Claude hooks can still fail open if the hook times out
@@ -885,13 +973,19 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   unit is stored as `work_units[u].disposition = {kind, named_blocker?, removal_ticket?}` and is what the dispatch
   contract carries. `graph.py disposition-audit <state>` prints every unit's kind and exits 1 on a hand-edited unit that
   broke the rule; `complete` / `verify-completion` refuse the same unit on both providers (default ON, no switch).
+- For an existing pending unit with no choice, run `graph.py set-unit-disposition <state> --session S --loop-id L
+  --revision R --unit N --disposition preserve-compat --named-blocker TEXT --removal-ticket ISSUE
+  --source-ref URL` (or `clean-break` without blocker and ticket). The command requires the current revision and an
+  inactive wave. It records the source reference and a new revision. It refuses repeated disposition flags or a second stored choice. Inspect the source
+  and choose the value before this command; the command does not prove that a source supports the choice.
 - `/coderails:merge` says `compat_findings_nonzero`: the posted review artifact carries a second line
   `<!-- coderails-compat-findings v1 pr=N head_sha=S count=K disposition=D -->` (built by
   `post_review.py compat-line <pr> <sha> --count K --disposition D`) with `disposition=clean-break` and `K > 0`. Remove the
   retained compatibility code, creating a new head SHA, and post a fresh review; or register the unit `preserve-compat`
   with a blocker and ticket. Posting a passing review on the same SHA cannot override an earlier refusing compat line.
-  `compat_findings_malformed` means a line with that prefix is not exactly the typed form. `compat_findings_missing`
-  means no line matches this PR and head; post a fresh artifact including the line, even for a zero count.
+  `compat_findings_malformed` means a current line with that prefix is not exactly the typed form.
+  Legacy review artifacts may omit the compatibility line. The current-head v1 review artifact remains required.
+  The Codex direct merge hook applies the same compatibility check, including when required review passes are off.
   The v1 review marker the root-owned integrity daemon matches is unchanged. Any refusing line for the
   head wins; the merge refusal is a stderr reason code, not a trace row (merge.py has no loop session).
 - Limits: `K` and `D` are the reviewer's own judgement, not a measurement, and a same-user agent can write any line, so
