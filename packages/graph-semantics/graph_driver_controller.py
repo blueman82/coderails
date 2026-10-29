@@ -268,6 +268,7 @@ def drive_once(
     result: Result,
 ) -> dict[str, Any]:
     """Start or observe each worker once, then atomically record a full wave."""
+    path = path.resolve(strict=True)
     with graph_driver_process.lease(path):
         state = _load(path, session)
         if state["graph"]["active_wave"] is None:
