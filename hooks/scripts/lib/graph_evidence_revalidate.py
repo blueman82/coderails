@@ -24,11 +24,13 @@ def revalidate_all(state: dict[str, Any]) -> None:
         expected = node["retry"]["attempts"] + node["respawn"]["generation"]
         if node["status"] in {"done", "skipped", "stale"}:
             expected += 1
-        if len(refs) != expected or {item.get("attempt") for item in refs} != set(range(1, expected + 1)):
+        if {item.get("attempt") for item in refs} != set(range(1, expected + 1)):
             raise ValueError(f"node {node_id} has missing or forged native attempt history")
         ordering: dict[int, set[str]] = {}
         for ref in refs:
             if ref.get("kind") == "graph_skip":
+                if sum(item.get("attempt") == ref.get("attempt") for item in refs) != 1:
+                    raise ValueError(f"node {node_id} has missing or forged native attempt history")
                 validate_skip_reference(state, node_id, node, ref, rows, history)
                 ordering.setdefault(ref["attempt"], set()).add(ref["wave_id"])
                 continue
