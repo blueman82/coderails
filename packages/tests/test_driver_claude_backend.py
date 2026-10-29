@@ -18,6 +18,24 @@ from scripts.sandbox.spawn_sandboxed_worker import DRIVER_SCHEMA  # noqa: E402
 class ClaudeBackendTests(unittest.TestCase):
     """Fail closed on a missing sandbox route or structured result."""
 
+    def test_malformed_outcome_types_return_a_coded_failure(self) -> None:
+        """External JSON arrays, objects and scalars cannot escape result parsing."""
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output.jsonl"
+            outcomes: tuple[object, ...] = ([], {}, None, True, 1)
+            for outcome in outcomes:
+                with self.subTest(outcome=outcome):
+                    malformed = {"outcome": outcome, "evidence": "inert malformed result", "final_report": None}
+                    rows = [
+                        {"type": "system", "subtype": "init", "session_id": "S"},
+                        {"type": "result", "subtype": "success", "is_error": False, "structured_output": malformed},
+                    ]
+                    output.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+                    self.assertEqual(
+                        graph_driver_claude.result(output, 0),
+                        {"outcome": "failed", "evidence": "claude:invalid_final_schema"},
+                    )
+
     def test_command_uses_existing_pinned_launcher(self) -> None:
         """The driver routes through the same sandbox script as native workers."""
         with tempfile.TemporaryDirectory() as directory:

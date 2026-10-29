@@ -170,6 +170,8 @@ def result(output: Path, exit_code: int) -> dict[str, Any]:
         return _failed("invalid_event_stream")
     rows = [cast(dict[str, Any], row) for row in decoded]
     events = [row.get("type") for row in rows]
+    if not all(isinstance(event, str) for event in events):
+        return _failed("invalid_event_stream")
     if (
         events.count("thread.started") != 1
         or events.count("turn.completed") != 1
@@ -199,6 +201,7 @@ def result(output: Path, exit_code: int) -> dict[str, Any]:
     parsed = cast(dict[str, Any], final)
     if (
         set(parsed) != {"outcome", "evidence", "final_report"}
+        or not isinstance(parsed["outcome"], str)
         or parsed["outcome"] not in {"done", "skipped", "failed", *worker_status.STATUSES}
         or not isinstance(parsed["evidence"], str)
         or not parsed["evidence"].strip()

@@ -60,6 +60,7 @@ def result(output: Path, exit_code: int) -> dict[str, Any]:
     parsed = cast(dict[str, Any], raw)
     if (
         set(parsed) != {"outcome", "evidence", "final_report"}
+        or not isinstance(parsed["outcome"], str)
         or parsed["outcome"] not in {"done", "skipped", "failed", *worker_status.STATUSES}
         or not isinstance(parsed["evidence"], str)
         or not parsed["evidence"].strip()

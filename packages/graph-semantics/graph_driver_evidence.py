@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Optional, cast
 
+import graph_contract
 import graph_driver_control
 import graph_driver_prepublication
 import graph_semantics
@@ -15,8 +16,6 @@ import graph_spec
 from graph_driver_publication import head as _head
 from graph_driver_publication import publication as publication
 from graph_driver_publication import validate_publication as validate_publication
-
-_DISPATCH_ID = re.compile(r"[a-zA-Z0-9_-]{1,100}\Z")
 
 
 def _digest(path: Path) -> str:
@@ -35,7 +34,7 @@ def needs_publication(node_id: str, result: dict[str, Any]) -> bool:
 
 def _record(state: dict[str, Any], node_id: str, dispatch_id: str) -> dict[str, Any]:
     """Require an authorized driver record owned by this graph and node."""
-    if not _DISPATCH_ID.fullmatch(dispatch_id):
+    if re.fullmatch(r"[a-zA-Z0-9_-]{1,100}\Z", dispatch_id) is None:
         raise ValueError("invalid dispatch id")
     if state.get("graph") is None:
         raise ValueError("driver graph is missing")
@@ -225,6 +224,9 @@ def validate(
         raise ValueError("driver prompt differs from its authorization")
     if _digest(artifact / "prompt.txt") != manifest.get("prompt_sha256"):
         raise ValueError("driver prompt changed")
+    prompt = (artifact / "prompt.txt").read_text(encoding="utf-8")
+    live = not historical and state["graph"].get("active_wave") is not None
+    graph_contract.check_dispatch(state, graph_contract.parse_envelope(prompt), prompt, live=live)
     if _digest(artifact / "output.jsonl") != manifest.get("output_sha256"):
         raise ValueError("driver output changed")
     if "prepublication_sha256" in manifest:
@@ -381,10 +383,8 @@ def validate_backup(state_path: Path, state: dict[str, Any]) -> dict[str, Any]:
     ):
         raise ValueError("native backup belongs to another graph")
     old_graph_value: object = old.get("graph")
-    if not isinstance(old_graph_value, dict):
-        raise ValueError("native backup has an invalid graph")
     old_graph = cast(dict[str, Any], old_graph_value)
-    if old_graph.get("dispatch_mode") is not None:
+    if not isinstance(old_graph_value, dict) or old_graph.get("dispatch_mode") is not None:
         raise ValueError("native backup has an invalid graph")
     for dispatch_id, record in cast(dict[str, Any], old_graph.get("dispatches", {})).items():
         if graph.get("dispatches", {}).get(dispatch_id) != record:

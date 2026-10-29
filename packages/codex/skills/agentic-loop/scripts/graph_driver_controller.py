@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Optional, Union, cast
 
+import graph_contract
 import graph_driver_control
 import graph_driver_dispatch
 import graph_driver_evidence as evidence
@@ -222,6 +223,8 @@ def _worker_result(
     prompt_bytes: bytes | None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Launch once and retain a completed attempt before recording the wave."""
+    content = (prompt_bytes if prompt_bytes is not None else prompt.read_bytes()).decode("utf-8")
+    graph_contract.check_dispatch(state, graph_contract.parse_envelope(content), content, live=True)
     node_id = record["node_id"]
     if (prompt.parent / "manifest.json").exists():
         reference, manifest = _reference(path, state, node_id, identifier)
