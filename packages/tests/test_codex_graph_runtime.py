@@ -310,7 +310,7 @@ class GraphRuntimeTests(RuntimeFixture):
         }
         with (
             patch.object(guard, "read_input", return_value=json.dumps(payload)),
-            patch.object(guard, "config_path", return_value=""),
+            patch.object(guard, "strict_config_path", return_value=""),
             patch.object(guard, "loop_state_path", return_value=self.path),
             patch("loop_dispatch_guard.tempfile.TemporaryDirectory", side_effect=OSError("scratch unavailable")),
             patch.object(guard, "deny") as denial,
@@ -322,7 +322,7 @@ class GraphRuntimeTests(RuntimeFixture):
         self.assertIsNone(next(iter(read_json(self.path)["graph"]["dispatches"].values()))["authorized"])
         with (
             patch.object(guard, "read_input", return_value=json.dumps(payload)),
-            patch.object(guard, "config_path", return_value=""),
+            patch.object(guard, "strict_config_path", return_value=""),
             patch.object(guard, "loop_state_path", return_value=self.path),
             patch.object(guard, "deny") as denial,
         ):

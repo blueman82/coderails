@@ -104,7 +104,7 @@ def parser() -> argparse.ArgumentParser:
         if name == "set-unit-disposition":
             command.add_argument("--revision", required=True, type=int)
             command.add_argument("--unit", required=True)
-            command.add_argument("--disposition", required=True, choices=DISPOSITION_KINDS)
+            command.add_argument("--disposition", required=True, choices=DISPOSITION_KINDS, action="append")
             command.add_argument("--named-blocker")
             command.add_argument("--removal-ticket")
             command.add_argument("--source-ref")
@@ -304,6 +304,9 @@ def main() -> int:
         elif args.command == "assign-worktree":
             output = graph_controller.assign_worktree(args.state, args.session, args.loop_id, args.unit, args.worktree)
         elif args.command == "set-unit-disposition":
+            if len(args.disposition) != 1:
+                raise ValueError("[reason_code=set_disposition_refused] --disposition must occur exactly once")
+            args.disposition = args.disposition[0]
             output = graph_controller.set_unit_disposition_args(args)
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)

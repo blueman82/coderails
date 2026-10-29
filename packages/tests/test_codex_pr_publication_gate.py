@@ -41,7 +41,9 @@ case "$1 $2" in
     esac
     { printf '<!-- coderails-review-summary v1 pr=%s head_sha=%s -->\\n' "$number" "$sha";
       compat_format='<!-- coderails-compat-findings v1 pr=%s head_sha=%s count=%s disposition=clean-break -->\\n'
-      printf "$compat_format" "$number" "$sha" "${FAKE_COMPAT_COUNT:-0}";
+      if [ "${FAKE_COMPAT_OMIT:-0}" != 1 ]; then
+        printf "$compat_format" "$number" "$sha" "${FAKE_COMPAT_COUNT:-0}";
+      fi;
       echo '## No findings'; } \\
       | base64 | tr -d '\\n'
     echo
@@ -234,6 +236,10 @@ class CodexPublicationGateTests(unittest.TestCase):
                 self.assertTrue(self.reason(command).startswith("compat_findings_nonzero"))
         self.env["FAKE_COMPAT_COUNT"] = "0"
         self.assertEqual(self.reason("gh pr merge 7"), "")
+        self.env["FAKE_COMPAT_OMIT"] = "1"
+        for command in ("gh pr merge 7", "gh api -X PUT repos/o/r/pulls/7/merge"):
+            with self.subTest(command=command):
+                self.assertEqual(self.reason(command), "")
 
     def test_owned_graph_unit_needs_manifest_binding(self) -> None:
         """The direct hook uses its session ID to refuse an unbound graph publication."""

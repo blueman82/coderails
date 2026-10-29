@@ -9,6 +9,7 @@ from typing import Any, cast
 import graph_spec
 from graph_data import event_payload, object_value, read_records
 from graph_identity import GraphError, is_legacy_task_name, task_node
+from graph_vocab import disposition_offenders
 
 
 def assigned_worktree(state: dict[str, Any], node_id: str) -> str | None:
@@ -23,7 +24,7 @@ def assigned_worktree(state: dict[str, Any], node_id: str) -> str | None:
 
 
 def validate_wave_revisions(state: dict[str, Any], waves: set[int]) -> None:
-    """Account for supported unit registrations between native worker waves."""
+    """Account for supported unit registrations and disposition choices between native waves."""
     if not waves:
         return
     graph = state["graph"]
@@ -42,21 +43,38 @@ def validate_wave_revisions(state: dict[str, Any], waves: set[int]) -> None:
     units = state.get("work_units")
     spec = graph_spec.load_spec()
     for unit, row in cast(dict[str, Any], units).items() if isinstance(units, dict) else ():
-        if not isinstance(row, dict) or "registered_revision" not in row:
+        if not isinstance(row, dict):
             continue
-        registered: object = cast(dict[str, Any], row)["registered_revision"]
-        if (
-            type(registered) is not int
-            or registered < 2
-            or registered > revision
-            or registered in registrations
-            or registered in waves
-            or registered - 1 in waves
-            or (graph["active_wave"] is not None and registered >= state["revision"])
-            or graph_spec.unit_root_id(spec, unit) not in graph["nodes"]
-        ):
-            raise GraphError("stored unit registration does not match graph revisions")
-        registrations.add(registered)
+        record = cast(dict[str, Any], row)
+        for field in ("registered_revision", "disposition_revision"):
+            if field not in record:
+                continue
+            registered: object = record[field]
+            if (
+                type(registered) is not int
+                or registered < 2
+                or registered > revision
+                or registered in registrations
+                or registered in waves
+                or registered - 1 in waves
+                or (graph["active_wave"] is not None and registered >= state["revision"])
+                or graph_spec.unit_root_id(spec, unit) not in graph["nodes"]
+            ):
+                raise GraphError("stored unit transition does not match graph revisions")
+            if field == "disposition_revision":
+                source = record.get("disposition_source")
+                if (
+                    record.get("disposition") is None
+                    or disposition_offenders({unit: record})
+                    or not isinstance(source, str)
+                    or not source.strip()
+                    or len(source) > 500
+                    or "\n" in source
+                    or "\r" in source
+                    or registered <= record.get("registered_revision", 1)
+                ):
+                    raise GraphError("stored disposition does not match graph revisions")
+            registrations.add(registered)
     generations = sum(node["respawn"]["generation"] for node in graph["nodes"].values())
     stale = 2 if any(node["status"] == "stale" for node in graph["nodes"].values()) else 0
     additions = sum(registered > min(waves) for registered in registrations)

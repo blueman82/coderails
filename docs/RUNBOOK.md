@@ -976,15 +976,15 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
 - For an existing pending unit with no choice, run `graph.py set-unit-disposition <state> --session S --loop-id L
   --revision R --unit N --disposition preserve-compat --named-blocker TEXT --removal-ticket ISSUE
   --source-ref URL` (or `clean-break` without blocker and ticket). The command requires the current revision and an
-  inactive wave. It records the source reference and a new revision. It refuses a second choice. Inspect the source
+  inactive wave. It records the source reference and a new revision. It refuses repeated disposition flags or a second stored choice. Inspect the source
   and choose the value before this command; the command does not prove that a source supports the choice.
 - `/coderails:merge` says `compat_findings_nonzero`: the posted review artifact carries a second line
   `<!-- coderails-compat-findings v1 pr=N head_sha=S count=K disposition=D -->` (built by
   `post_review.py compat-line <pr> <sha> --count K --disposition D`) with `disposition=clean-break` and `K > 0`. Remove the
   retained compatibility code, creating a new head SHA, and post a fresh review; or register the unit `preserve-compat`
   with a blocker and ticket. Posting a passing review on the same SHA cannot override an earlier refusing compat line.
-  `compat_findings_malformed` means a line with that prefix is not exactly the typed form. `compat_findings_missing`
-  means no line matches this PR and head; post a fresh artifact including the line, even for a zero count.
+  `compat_findings_malformed` means a current line with that prefix is not exactly the typed form.
+  Legacy review artifacts may omit the compatibility line. The current-head v1 review artifact remains required.
   The Codex direct merge hook applies the same compatibility check, including when required review passes are off.
   The v1 review marker the root-owned integrity daemon matches is unchanged. Any refusing line for the
   head wins; the merge refusal is a stderr reason code, not a trace row (merge.py has no loop session).

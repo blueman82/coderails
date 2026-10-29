@@ -45,6 +45,33 @@ class ExistingDispositionGuards(ControllerCase):
                     self.refused(result, "set_disposition_refused")
                     self.assertEqual(c.path.read_bytes(), before)
 
+    def test_repeated_disposition_is_refused_in_both_orders(self) -> None:
+        """Contradictory choices cannot silently select the final flag."""
+        for c in self.each():
+            c.start()
+            c.add("1")
+            before = c.path.read_bytes()
+            for first, second in (("clean-break", "preserve-compat"), ("preserve-compat", "clean-break")):
+                result = c.run(
+                    "set-unit-disposition",
+                    "--session",
+                    "sess-1",
+                    "--loop-id",
+                    "loop-a",
+                    "--revision",
+                    str(c.read()["revision"]),
+                    "--unit",
+                    "1",
+                    "--source-ref",
+                    "PR #504",
+                    "--disposition",
+                    first,
+                    "--disposition",
+                    second,
+                )
+                self.refused(result, "set_disposition_refused")
+                self.assertEqual(c.path.read_bytes(), before)
+
     def test_nonpending_existing_choice_and_active_wave_are_refused(self) -> None:
         """A closed unit, prior choice or active dispatch cannot be rewritten."""
         for c in self.each():

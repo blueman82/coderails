@@ -180,7 +180,7 @@ def _add_unit_args(controller: argparse.ArgumentParser, *, assign_only: bool = F
 
 def _add_existing_disposition_args(controller: argparse.ArgumentParser) -> None:
     controller.add_argument("--revision", required=True, type=int)
-    controller.add_argument("--disposition", required=True, choices=DISPOSITION_KINDS)
+    controller.add_argument("--disposition", required=True, choices=DISPOSITION_KINDS, action="append")
     for flag in ("unit", "named-blocker", "removal-ticket", "source-ref"):
         controller.add_argument(f"--{flag}", required=flag == "unit")
 
@@ -301,13 +301,15 @@ def main() -> int:
         elif args.command == "assign-worktree":
             output = assign_worktree(args.state, args.session, args.loop_id, args.unit, args.worktree)
         elif args.command == "set-unit-disposition":
+            if len(args.disposition) != 1:
+                raise ValueError("[reason_code=set_disposition_refused] --disposition must occur exactly once")
             output = set_unit_disposition(
                 args.state,
                 args.session,
                 args.loop_id,
                 args.revision,
                 args.unit,
-                args.disposition,
+                args.disposition[0],
                 args.named_blocker,
                 args.removal_ticket,
                 args.source_ref,
