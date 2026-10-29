@@ -228,6 +228,9 @@ def unit_manifest(progress: str, unit: str) -> list[str]:
     manifest = cast(dict[str, Any], entry).get("manifest")
     if not isinstance(manifest, list) or not all(isinstance(path, str) for path in cast(list[object], manifest)):
         raise ValueError("unit manifest invalid")
+    worktree = cast(dict[str, Any], entry).get("worktree")
+    if not isinstance(worktree, str) or not worktree.strip() or not Path(worktree).is_absolute():
+        raise ValueError("unit worktree invalid")
     return strings(cast(list[object], manifest))
 
 

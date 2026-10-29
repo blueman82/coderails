@@ -76,6 +76,13 @@ class DriverAuthorizationTests(unittest.TestCase):
                 wrong_role = subprocess.run([*base, "--role", "wrong"], capture_output=True, text=True, check=False)
                 self.assertNotEqual(wrong_role.returncode, 0)
                 self.assertEqual(case.path.read_bytes(), before)
+                if provider == "codex":
+                    traces = [
+                        json.loads(line)
+                        for line in case.path.with_name("recovery-trace.jsonl").read_text().splitlines()
+                    ]
+                    self.assertEqual(traces[-1]["reason_code"], "driver_authorization_refused")
+                    self.assertEqual(traces[-1]["outcome"], "refused")
                 prompt.write_text(original.replace("CODERAILS_GRAPH_CONTRACT v2", "BROKEN CONTRACT"))
                 altered = subprocess.run([*base, "--role", role], capture_output=True, text=True, check=False)
                 self.assertNotEqual(altered.returncode, 0)

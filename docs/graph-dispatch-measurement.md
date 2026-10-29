@@ -33,6 +33,10 @@ native node/wave/attempt evidence; `dispatch_check_off` counts its use. Claude e
 to the native Agent call and re-asserts role, consumption and one spawn per id. Prompt body, `write_scope`, unguarded
 roles, `SendMessage`/resume and absent hook tool ids remain the RUNBOOK limits.
 
+Current native Codex calls give the hook an encrypted prompt. The hook records `dispatch_prompt_unverifiable` and refuses
+the spawn without consuming its dispatch record. These checks do not establish a successful native Codex graph worker.
+Run graph work through the checked local Codex OAuth driver after it is installed.
+
 **Reproduce.**
 
 ```

@@ -108,7 +108,7 @@ class DriverProcessTests(unittest.TestCase):
             artifact = Path(directory)
             module_dir = Path(graph_driver_process.__file__).parent
             worker = (
-                "from pathlib import Path\nimport time\n" "while not Path('release').exists():\n    time.sleep(0.01)\n"
+                "from pathlib import Path\nimport time\nwhile not Path('release').exists():\n    time.sleep(0.01)\n"
             )
             script = (
                 "import sys\nfrom pathlib import Path\n"
@@ -245,6 +245,25 @@ class DriverProcessTests(unittest.TestCase):
             self.assertEqual((artifact / "output.jsonl").read_text().splitlines(), ["owned prompt", "True"])
             self.assertNotIn("disposable-marker", (artifact / "launch.json").read_text())
             self.assertNotIn("disposable-marker", (artifact / "terminal.json").read_text())
+
+    def test_worker_receives_checked_bytes_after_prompt_file_changes(self) -> None:
+        """The Codex worker must not reopen a mutable prompt after authorization."""
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory)
+            prompt = artifact / "prompt.txt"
+            expected = "authorized café Ω\nsecond line\nterminal canary\n".encode()
+            prompt.write_bytes(expected)
+            graph_driver_process.start(
+                artifact,
+                [sys.executable, "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"],
+                artifact,
+                stdin_bytes=expected,
+            )
+            prompt.write_bytes(b"changed prompt\n")
+            for _attempt in range(100):
+                if graph_driver_process.observe(artifact, 0.05)["status"] == "finished":
+                    break
+            self.assertEqual((artifact / "output.jsonl").read_bytes(), expected)
 
 
 if __name__ == "__main__":

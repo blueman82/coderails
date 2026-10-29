@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 import graph_contract
 import graph_driver_control
 import graph_driver_controller
 import graph_driver_dispatch
 import graph_driver_evidence
+import graph_encrypted_content
 import graph_repair
 import graph_semantics
 import graph_stops
@@ -25,42 +25,6 @@ from graph_io import write as _write
 from graph_recovery import RecoveryRefusedError, trace, traced_refusal
 from graph_transcript import transcript_cursor
 from json_types import JsonValue
-
-
-class ScopeParsers(Protocol):
-    """The parser operation used by both scope commands."""
-
-    def add_parser(self, name: str) -> argparse.ArgumentParser:
-        """Add a subcommand parser."""
-        ...
-
-
-def add_scope_arguments(commands: ScopeParsers) -> None:
-    """Add both unit scope commands to the Codex CLI."""
-    assignment = commands.add_parser("assign-unit-scope")
-    assignment.add_argument("state", type=Path)
-    for field in ("session", "unit", "scope"):
-        assignment.add_argument(f"--{field}", required=True)
-    scope_note = commands.add_parser("append-unit-scope-note")
-    scope_note.add_argument("state", type=Path)
-    for field in ("session", "loop-id", "revision", "unit", "expected-scope-sha256", "note", "reason"):
-        scope_note.add_argument(f"--{field}", required=True, type=int if field == "revision" else str)
-
-
-def run_scope_command(args: argparse.Namespace) -> dict[str, Any]:
-    """Apply the selected locked unit-scope command."""
-    if args.command == "assign-unit-scope":
-        return assign_scope(args.state, args.session, args.unit, args.scope)
-    return append_scope_note(
-        args.state,
-        args.session,
-        args.loop_id,
-        args.revision,
-        args.unit,
-        args.expected_scope_sha256,
-        args.note,
-        args.reason,
-    )
 
 
 def assign_scope(path: Path, session: str, unit: str, scope: str) -> dict[str, Any]:
@@ -163,16 +127,20 @@ def authorize_driver(
     with _locked(path):
         state = _load(path)
         validate_evals(state, None, path.with_name("evals.json"))
-        proposed = graph_driver_dispatch.authorize(
-            state,
-            path,
-            Path(__file__).resolve().parents[3] / "scripts/push.py",
-            session,
-            dispatch_id,
-            prompt_file,
-            role,
-            driver_run_id,
-        )
+        try:
+            proposed = graph_driver_dispatch.authorize(
+                state,
+                path,
+                Path(__file__).resolve().parents[3] / "scripts/push.py",
+                session,
+                dispatch_id,
+                prompt_file,
+                role,
+                driver_run_id,
+            )
+        except (ValueError, OSError) as error:
+            trace(path, state, "refused", "driver_authorization_refused", {"session": session}, [], "authorize-driver")
+            raise GraphError(str(error)) from error
         _write(path, proposed)
         return {"dispatch_id": dispatch_id, "driver_run_id": driver_run_id}
 
@@ -232,7 +200,10 @@ def record_wave(path: Path, raw_results: str) -> dict[str, Any]:
         if state["graph"].get("dispatch_mode") == "driver":
             raise GraphError("driver graph refuses native record-wave")
         with traced_refusal(path, state, "record-wave"):
-            proposed, transition = apply_record(state, raw_results, typed=True)
+            try:
+                proposed, transition = apply_record(state, raw_results, typed=True)
+            except graph_contract.DispatchDeniedError as error:
+                raise RecoveryRefusedError(error.code, error.message) from error
         statuses = transition["statuses"]
         if statuses:  # one typed stop row on the post-record state, in the same locked write
             category, code, reason = worker_status.stop_for(statuses)
@@ -293,6 +264,21 @@ def record_driver_control(path: Path, session: str, node_id: str, result_file: P
         return reference
 
 
+def _require_owner(path: Path, state: dict[str, Any], session: str) -> None:
+    """Trace a foreign owner before refusing to consume an issued dispatch."""
+    if state["session_id"] != session:
+        trace(
+            path,
+            state,
+            "refused",
+            "dispatch_foreign_owner",
+            {"owner_match": False},
+            [(None, None, None)],
+            "authorize-dispatch",
+        )
+        raise GraphError("session does not own this loop")
+
+
 def authorize_dispatch(
     path: Path,
     session: str,
@@ -303,18 +289,13 @@ def authorize_dispatch(
     evals_path: Path,
     tool_use_id: str = "",
 ) -> dict[str, Any]:
-    """Check a spawn_agent message against its begin-wave record, assert agent_type == role, consume the id.
-
-    Every check runs under the state lock before anything is written; a refusal leaves progress.json untouched and
-    leaves one coded trace row. The task name stays the evidence identity and must equal the record's.
-    """
+    """Authorize one native spawn under the graph lock; refusal leaves state unchanged and writes a coded trace."""
     with _locked(path):
         state = _load(path)
         if state["graph"].get("dispatch_mode") == "driver":
             trace(path, state, "refused", "driver_native_dispatch", {"session": session}, [], "authorize-dispatch")
             raise GraphError("driver graph refuses native authorization")
-        if state["session_id"] != session:
-            raise GraphError("session does not own this loop")
+        _require_owner(path, state, session)
         if state["status"] == "complete":
             raise GraphError("completed graph does not own worker dispatch")
         named: str | None = None
@@ -358,6 +339,10 @@ def authorize_dispatch(
         try:
             graph_contract.require_converted(state)
             message = message_file.read_text(encoding="utf-8")
+            if graph_encrypted_content.is_opaque(message):
+                raise graph_contract.DispatchDeniedError(
+                    "dispatch_prompt_unverifiable", "native hook cannot verify encrypted prompt instructions"
+                )
             request = graph_contract.parse_envelope(message)
             named = request["node_id"]
             if request["dispatch_id"] != dispatch_id:
@@ -384,5 +369,5 @@ def authorize_dispatch(
             "task_name": task,
             "wave_id": record["wave_id"],
             "revision": state["revision"],
-            "dispatch_id": dispatch_id,
+            "dispatch_id": request["dispatch_id"],
         }

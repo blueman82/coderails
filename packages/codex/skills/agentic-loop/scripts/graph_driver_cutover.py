@@ -6,7 +6,7 @@ import argparse
 import hashlib
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import graph_contract
 import graph_convert
@@ -23,6 +23,42 @@ from graph_recovery import trace
 COMMANDS = frozenset(
     {"cutover-driver", "begin-driver-wave", "record-driver-wave", "record-driver-control", "authorize-driver", "drive"}
 )
+
+
+class ScopeParsers(Protocol):
+    """The parser operation used by both scope commands."""
+
+    def add_parser(self, name: str) -> argparse.ArgumentParser:
+        """Add a subcommand parser."""
+        ...
+
+
+def add_scope_arguments(commands: ScopeParsers) -> None:
+    """Add both unit scope commands to the Codex CLI."""
+    assignment = commands.add_parser("assign-unit-scope")
+    assignment.add_argument("state", type=Path)
+    for field in ("session", "unit", "scope"):
+        assignment.add_argument(f"--{field}", required=True)
+    scope_note = commands.add_parser("append-unit-scope-note")
+    scope_note.add_argument("state", type=Path)
+    for field in ("session", "loop-id", "revision", "unit", "expected-scope-sha256", "note", "reason"):
+        scope_note.add_argument(f"--{field}", required=True, type=int if field == "revision" else str)
+
+
+def run_scope_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Apply the selected locked unit-scope command."""
+    if args.command == "assign-unit-scope":
+        return graph_dispatch.assign_scope(args.state, args.session, args.unit, args.scope)
+    return graph_dispatch.append_scope_note(
+        args.state,
+        args.session,
+        args.loop_id,
+        args.revision,
+        args.unit,
+        args.expected_scope_sha256,
+        args.note,
+        args.reason,
+    )
 
 
 def cutover_driver(path: Path, session: str) -> dict[str, Any]:
@@ -105,6 +141,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 wait_seconds=args.wait_seconds,
             )
         except (ValueError, OSError, TypeError, KeyError) as error:
+            code = (
+                "driver_prompt_digest_mismatch"
+                if str(error) == "driver prompt changed after authorization"
+                else "driver_launch_refused"
+            )
+            trace(args.state, {"session_id": args.session}, "refused", code, {}, [], "drive")
             raise GraphError(str(error)) from error
     if args.command == "record-driver-wave":
         return graph_dispatch.record_driver_wave(args.state, args.results_json)

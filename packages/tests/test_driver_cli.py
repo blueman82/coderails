@@ -25,6 +25,41 @@ from packages.tests.test_driver_authorize import frozen_evals  # noqa: E402
 class DriverCliTests(unittest.TestCase):
     """Use fake AI executables, real graph commands and real process wrappers."""
 
+    def test_missing_codex_cli_records_launch_refusal(self) -> None:
+        """A real CLI setup failure emits a refusal, without authorizing or launching."""
+        with tempfile.TemporaryDirectory() as directory:
+            case = Case("codex", Path(directory))
+            state = case.read()
+            state["work_units"]["1"] = {"status": "pending", "scope": "Build unit one"}
+            case.write(state)
+            self.assertEqual(case.graph("convert").returncode, 0)
+            self.assertEqual(case.graph("cutover-driver").returncode, 0)
+            case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+            run = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS["codex"]),
+                    "drive",
+                    str(case.path),
+                    "--session",
+                    "S",
+                    "--checkout",
+                    directory,
+                ],
+                env={**os.environ, "PATH": "/usr/bin:/bin"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(run.returncode, 0)
+            self.assertIn("codex exec is not installed", run.stderr)
+            traces = [json.loads(line) for line in case.path.with_name("recovery-trace.jsonl").read_text().splitlines()]
+            self.assertTrue(
+                any(row["reason_code"] == "driver_launch_refused" and row["outcome"] == "refused" for row in traces)
+            )
+            self.assertTrue(all(record["authorized"] is None for record in case.read()["graph"]["dispatches"].values()))
+            self.assertFalse(list(case.path.parent.rglob("launch.json")))
+
     def test_command_setup_failure_does_not_consume_dispatch(self) -> None:
         """A missing worker CLI can be fixed and retried before authorization."""
         with tempfile.TemporaryDirectory() as directory:

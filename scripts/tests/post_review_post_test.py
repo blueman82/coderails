@@ -113,6 +113,32 @@ class PostTests(unittest.TestCase):
         self.assertFalse(review_valid(fake.posted[0], 12, SHA))
         self.assertTrue(review_valid(fake.posted[1], 12, SHA))
 
+    def test_compat_pair_is_consumed_and_mismatch_refused(self) -> None:
+        """A preserve-compat line binds both comments; changing either comment breaks the pair."""
+        summary = "## Critical\nNone\n\n## Important\n- Retained compatibility\n\n## Suggestions\nNone\n"
+        finding = self.dir / "finding.md"
+        finding.write_text(summary)
+        fake = FakeGh([SHA])
+        code, _, err = self.run_post(
+            fake, "post", "12", "--summary", str(finding), "--compat-count", "1", "--disposition", "preserve-compat"
+        )
+        self.assertEqual(code, 0, err)
+        compat = review_artifact.compat_line("12", SHA, 1, "preserve-compat")
+        self.assertEqual(fake.posted[1], review_artifact.marker("12", SHA) + "\n" + compat + "\n" + summary)
+        self.assertTrue(review_valid(fake.posted[1], 12, SHA))
+        with mock.patch.object(git, "trusted_comment_bodies", return_value=fake.posted):
+            found = git.review_passes_for_pr("12", SHA)
+        self.assertEqual(found.status, 0)
+        self.assertEqual([p["name"] for p in found.passes or ()], ["review-pr"])
+        for changed in (
+            [fake.posted[0], fake.posted[1].replace("count=1", "count=2")],
+            [fake.posted[0].replace("count=1", "count=bad"), fake.posted[1]],
+            [fake.posted[0].replace("count=1", "count=2"), fake.posted[1]],
+            [fake.posted[0], fake.posted[1].replace("head_sha=" + SHA, "head_sha=" + OTHER)],
+        ):
+            with self.subTest(changed=changed), mock.patch.object(git, "trusted_comment_bodies", return_value=changed):
+                self.assertIsNone(git.review_passes_for_pr("12", SHA).passes)
+
     def test_partial_post_adds_only_the_companion(self) -> None:
         """A failed second post can resume without publishing a second pass record."""
         first = FakeGh([SHA])

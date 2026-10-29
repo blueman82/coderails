@@ -6,8 +6,80 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
+import graph_spec
 from graph_data import event_payload, object_value, read_records
 from graph_identity import GraphError, is_legacy_task_name, task_node
+from graph_vocab import disposition_offenders
+
+
+def assigned_worktree(state: dict[str, Any], node_id: str) -> str | None:
+    """Return the checkout assigned to a concrete unit, when present."""
+    unit = graph_spec.split_id(node_id)[1]
+    units = state.get("work_units")
+    if unit is None or not isinstance(units, dict):
+        return None
+    row = cast(dict[str, Any], units).get(unit)
+    value = cast(dict[str, Any], row).get("worktree") if isinstance(row, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def validate_wave_revisions(state: dict[str, Any], waves: set[int]) -> None:
+    """Account for supported unit registrations and disposition choices between native waves."""
+    if not waves:
+        return
+    graph = state["graph"]
+    completion = state.get("completion") if state.get("status") == "complete" else None
+    revision: object = (
+        cast(dict[str, Any], completion).get("revision") if isinstance(completion, dict) else state["revision"]
+    )
+    if type(revision) is not int:
+        raise GraphError("graph revision must be an integer")
+    last_wave = revision - (2 if graph["active_wave"] is not None else 1)
+    ordered = sorted(waves)
+    gaps = sum(right - left - 2 for left, right in zip(ordered, ordered[1:]))
+    if max(waves) > last_wave or any(right - left < 2 for left, right in zip(ordered, ordered[1:])):
+        raise GraphError("stored worker wave evidence does not match graph revisions")
+    registrations: set[int] = set()
+    units = state.get("work_units")
+    spec = graph_spec.load_spec()
+    for unit, row in cast(dict[str, Any], units).items() if isinstance(units, dict) else ():
+        if not isinstance(row, dict):
+            continue
+        record = cast(dict[str, Any], row)
+        for field in ("registered_revision", "disposition_revision"):
+            if field not in record:
+                continue
+            registered: object = record[field]
+            if (
+                type(registered) is not int
+                or registered < 2
+                or registered > revision
+                or registered in registrations
+                or registered in waves
+                or registered - 1 in waves
+                or (graph["active_wave"] is not None and registered >= state["revision"])
+                or graph_spec.unit_root_id(spec, unit) not in graph["nodes"]
+            ):
+                raise GraphError("stored unit transition does not match graph revisions")
+            if field == "disposition_revision":
+                source = record.get("disposition_source")
+                if (
+                    record.get("disposition") is None
+                    or disposition_offenders({unit: record})
+                    or not isinstance(source, str)
+                    or not source.strip()
+                    or len(source) > 500
+                    or "\n" in source
+                    or "\r" in source
+                    or registered <= record.get("registered_revision", 1)
+                ):
+                    raise GraphError("stored disposition does not match graph revisions")
+            registrations.add(registered)
+    generations = sum(node["respawn"]["generation"] for node in graph["nodes"].values())
+    stale = 2 if any(node["status"] == "stale" for node in graph["nodes"].values()) else 0
+    additions = sum(registered > min(waves) for registered in registrations)
+    if gaps < 0 or gaps + last_wave - max(waves) > 3 * generations + stale + additions:
+        raise GraphError("stored worker wave evidence does not match graph revisions")
 
 
 def thread_transcript(thread_id: str) -> Path:
@@ -152,6 +224,7 @@ def child_read_records(
     agent_nickname: str | None,
     expected_path: str | None,
     expected_role: str | None,
+    expected_cwd: str | None = None,
 ) -> list[tuple[int, dict[str, Any]]]:
     """Read a child transcript and validate its native dispatch ownership."""
     records = read_records(thread_transcript(agent_thread_id), f"child {agent_thread_id} transcript")
@@ -166,6 +239,10 @@ def child_read_records(
         or ("agent_path" in metadata and metadata["agent_path"] != expected_path)
     ):
         raise GraphError(f"child {agent_thread_id} belongs to a different graph dispatch")
+    if expected_cwd is not None and (
+        not isinstance(metadata.get("cwd"), str) or Path(metadata["cwd"]).resolve() != Path(expected_cwd).resolve()
+    ):
+        raise GraphError(f"child {agent_thread_id} ran outside its assigned worktree")
     source = object_value(metadata.get("source"), f"child {agent_thread_id}.source")
     spawn = object_value(
         object_value(source.get("subagent"), f"child {agent_thread_id}.source.subagent").get("thread_spawn"),
@@ -190,13 +267,16 @@ def child_terminal(
     expected_path: str | None,
     expected_role: str | None,
     turn_id: str | None = None,
+    expected_cwd: str | None = None,
 ) -> str:
     """Require a uniquely started successful turn, and a successful latest child activity.
 
     Without `turn_id` the final terminal turn is returned. With it, that earlier recorded turn is accepted
     only if it is a uniquely started task_complete and the child's latest lifecycle event is a task_complete.
     """
-    records = child_read_records(parent_session, agent_thread_id, agent_nickname, expected_path, expected_role)
+    records = child_read_records(
+        parent_session, agent_thread_id, agent_nickname, expected_path, expected_role, expected_cwd
+    )
     started_at = records[0][1].get("timestamp")
     if not isinstance(started_at, str):
         raise GraphError(f"child {agent_thread_id} has invalid session metadata")

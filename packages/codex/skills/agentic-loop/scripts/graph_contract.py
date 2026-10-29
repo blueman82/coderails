@@ -39,6 +39,7 @@ ENVELOPE_FIELDS = ("envelope_version", "dispatch_id", "session_id", "loop_id", "
 LEGACY_FIELDS = ("session_id", "loop_id", "revision", "wave_id", "node_id")
 CODES = (
     "dispatch_missing_envelope",
+    "dispatch_call_id_missing",
     "dispatch_unknown_id",
     "dispatch_foreign",
     "dispatch_stale_revision",
@@ -159,15 +160,15 @@ def unit_fields(
         or subprocess.run(["git", "check-ref-format", "--branch", base_branch], capture_output=True).returncode
     ):
         raise ValueError("--base-branch must be a valid Git branch")
-    if worktree is not None and not Path(worktree).is_absolute():
-        raise ValueError("--worktree must be an absolute path")
+    if worktree is not None and (not worktree.strip() or not Path(worktree).is_absolute()):
+        raise ValueError("--worktree must be a nonblank absolute path")
     given = {
         "model_role": model_role,
         "write_scope": write_scope or None,
         "lessons": lessons or None,
         "scope": scope,
         "base_branch": base_branch,
-        "worktree": worktree,
+        "worktree": str(Path(worktree).resolve()) if worktree is not None else None,
     }
     return {key: value for key, value in given.items() if value is not None}
 

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any
@@ -66,6 +68,222 @@ def message_for(state: dict[str, Any]) -> str:
 class NativeDispatchCliTests(unittest.TestCase):
     """Require v3 ownership, a begin-wave record and frozen evals for every spawn in a graph-bound session."""
 
+    def test_native_hook_traces_invalid_identity_without_using_it_as_a_path(self) -> None:
+        """Malformed harness identity is denied with a stable code and a safe audit record."""
+        plugin = ROOT / "packages/codex"
+        with tempfile.TemporaryDirectory() as scratch:
+            directory = Path(scratch)
+            audit = directory / "discipline.log"
+            base: dict[str, object] = {
+                "tool_name": "collaborationspawn_agent",
+                "tool_input": {"task_name": "ordinary", "message": "ordinary task"},
+                "session_id": "parent",
+                "cwd": scratch,
+            }
+            env = os.environ | {
+                "PLUGIN_ROOT": str(plugin),
+                "PLUGIN_DATA": str(directory / "data"),
+                "CODERAILS_DISCIPLINE_LOG": str(audit),
+                "CODERAILS_AGENTIC_LOOP_DIR": str(directory / "loops"),
+            }
+            cases: list[tuple[dict[str, object], str]] = [
+                ({"session_id": ...}, "dispatch_session_required"),
+                ({"session_id": None}, "dispatch_session_required"),
+                ({"session_id": 7}, "dispatch_session_required"),
+                ({"session_id": []}, "dispatch_session_required"),
+                ({"session_id": "  "}, "dispatch_session_required"),
+                ({"cwd": ...}, "dispatch_cwd_required"),
+                ({"cwd": None}, "dispatch_cwd_required"),
+                ({"cwd": 7}, "dispatch_cwd_required"),
+                ({"cwd": []}, "dispatch_cwd_required"),
+                ({"cwd": "  "}, "dispatch_cwd_required"),
+                ({"session_id": ".."}, "dispatch_unsafe_session"),
+                ({"session_id": "a/b"}, "dispatch_unsafe_session"),
+                ({"session_id": "a..b"}, "dispatch_unsafe_session"),
+            ]
+            for graph_task in (False, True):
+                for mutation, code in cases:
+                    with self.subTest(graph_task=graph_task, mutation=mutation):
+                        payload = base | mutation
+                        for field, value in mutation.items():
+                            if value is ...:
+                                payload.pop(field)
+                        if graph_task:
+                            payload["tool_input"] = {"task_name": TASK, "message": "graph task"}
+                        before = audit.read_text() if audit.exists() else ""
+                        trace_owner = "parent" if payload.get("session_id") == "parent" else "invalid-dispatch"
+                        trace = directory / "loops" / trace_owner / "trace.jsonl"
+                        trace_before = len(trace.read_text().splitlines()) if trace.exists() else 0
+                        result = subprocess.run(
+                            [sys.executable, str(plugin / "hooks/scripts/loop_dispatch_guard.py")],
+                            input=json.dumps(payload),
+                            capture_output=True,
+                            text=True,
+                            env=env,
+                            check=False,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        decision = json.loads(result.stdout)["hookSpecificOutput"]
+                        self.assertEqual(decision["permissionDecision"], "deny")
+                        self.assertIn(code, decision["permissionDecisionReason"])
+                        added = audit.read_text()[len(before) :]
+                        self.assertIn(f"reason_code={code}", added)
+                        self.assertNotIn(f"session={mutation.get('session_id', '..')}", added)
+                        rows = trace.read_text().splitlines()
+                        self.assertEqual(len(rows), trace_before + 1)
+                        self.assertEqual(json.loads(rows[-1])["reason_code"], code)
+                        if code == "dispatch_unsafe_session":
+                            self.assertNotIn(str(payload["session_id"]), rows[-1])
+            self.assertFalse((directory / "loops" / "a").exists())
+            ordinary = subprocess.run(
+                [sys.executable, str(plugin / "hooks/scripts/loop_dispatch_guard.py")],
+                input=json.dumps(base),
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(ordinary.returncode, 0, ordinary.stderr)
+            self.assertEqual(ordinary.stdout, "")
+
+    def test_native_hook_denies_when_authorization_lock_is_held(self) -> None:
+        """One blocked flock cannot outlive the host's ten-second hook budget without a denial."""
+        plugin = ROOT / "packages/codex"
+        with tempfile.TemporaryDirectory() as scratch:
+            directory = Path(scratch)
+            state_path = directory / "loops/project/parent/progress.json"
+            state_path.parent.mkdir(parents=True)
+            state = seeded_state(state_path)
+            state_path.write_text(json.dumps(state))
+            lock = Path(f"{state_path}.lock")
+            holder = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "import fcntl,sys,time; f=open(sys.argv[1],'a+'); "
+                    "fcntl.flock(f,fcntl.LOCK_EX); print('ready',flush=True); time.sleep(12)",
+                    str(lock),
+                ],
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                assert holder.stdout is not None
+                self.assertEqual(holder.stdout.readline().strip(), "ready")
+                payload = {
+                    "tool_name": "collaborationspawn_agent",
+                    "tool_use_id": "call_lock_probe",
+                    "session_id": "parent",
+                    "cwd": scratch,
+                    "tool_input": {"task_name": TASK, "message": message_for(state)},
+                }
+                start = time.monotonic()
+                result = subprocess.run(
+                    [sys.executable, str(plugin / "hooks/scripts/loop_dispatch_guard.py")],
+                    input=json.dumps(payload),
+                    capture_output=True,
+                    text=True,
+                    env=os.environ
+                    | {
+                        "CODERAILS_AGENTIC_LOOP_DIR": str(directory / "loops"),
+                        "PLUGIN_ROOT": str(plugin),
+                        "PLUGIN_DATA": str(directory / "data"),
+                    },
+                    timeout=9.5,
+                    check=False,
+                )
+                self.assertLess(time.monotonic() - start, 9.5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                denial = json.loads(result.stdout)["hookSpecificOutput"]
+                self.assertEqual(denial["permissionDecision"], "deny")
+                self.assertIn("dispatch_graph_timeout", denial["permissionDecisionReason"])
+                trace = directory / "loops/parent/trace.jsonl"
+                self.assertEqual(
+                    json.loads(trace.read_text().splitlines()[-1])["reason_code"], "dispatch_graph_timeout"
+                )
+            finally:
+                holder.terminate()
+                holder.wait(timeout=3)
+                assert holder.stdout is not None
+                holder.stdout.close()
+
+    def test_opaque_native_message_is_refused_without_consuming_dispatch(self) -> None:
+        """Visible task and ciphertext hash cannot prove the hidden prompt instructions."""
+        plugin = ROOT / "packages/codex"
+        with tempfile.TemporaryDirectory() as scratch:
+            directory = Path(scratch)
+            state_path = directory / "loops/project/parent/progress.json"
+            state_path.parent.mkdir(parents=True)
+            state = seeded_state(state_path)
+            state_path.write_text(json.dumps(state))
+            state_path.with_name("evals.json").write_text(
+                json.dumps(
+                    {
+                        "session_id": "parent",
+                        "loop_id": "loop",
+                        "scope": "loop",
+                        "task_ref": "loop",
+                        "verification_justification": "Native dispatch fixture",
+                        "verification_level": 1,
+                        "frozen_sha": "fixture-sha",
+                        "result": None,
+                        "grading": None,
+                        "evals": [{"id": "E1", "priority": "P0", "mode": "agent-run"}],
+                    }
+                )
+            )
+            environment = os.environ | {
+                "CODERAILS_AGENTIC_LOOP_DIR": str(directory / "loops"),
+                "PLUGIN_ROOT": str(plugin),
+                "PLUGIN_DATA": str(directory / "data"),
+            }
+            token = base64.urlsafe_b64encode(bytes([128]) + bytes(8 + 16 + 16 + 32)).decode()
+            tool_input: dict[str, str] = {"task_name": TASK, "message": token}
+            payload = {
+                "tool_name": "collaborationspawn_agent",
+                "tool_use_id": "call_native_1",
+                "session_id": "parent",
+                "cwd": scratch,
+                "tool_input": tool_input,
+            }
+
+            def run() -> tuple[bool, str]:
+                result = subprocess.run(
+                    [sys.executable, str(plugin / "hooks/scripts/loop_dispatch_guard.py")],
+                    input=json.dumps(payload),
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                if not result.stdout:
+                    return False, ""
+                output = json.loads(result.stdout)["hookSpecificOutput"]
+                return output["permissionDecision"] == "deny", str(output["permissionDecisionReason"])
+
+            before = state_path.read_bytes()
+            altered = base64.urlsafe_b64encode(bytes([128, 1]) + bytes(71)).decode()
+            for message in (token, altered, token):
+                tool_input["message"] = message
+                denied, reason = run()
+                self.assertTrue(denied)
+                self.assertIn("dispatch_prompt_unverifiable", reason)
+                self.assertIn("Codex OAuth graph driver", reason)
+                self.assertIn("Do not retry native spawn", reason)
+                self.assertEqual(state_path.read_bytes(), before)
+                record = next(iter(json.loads(state_path.read_text())["graph"]["dispatches"].values()))
+                self.assertIsNone(record["authorized"])
+                trace = json.loads(state_path.with_name("recovery-trace.jsonl").read_text().splitlines()[-1])
+                self.assertEqual(trace["reason_code"], "dispatch_prompt_unverifiable")
+            tool_input["message"] = message_for(state)
+            denied, _reason = run()
+            self.assertFalse(denied)
+            record = next(iter(json.loads(state_path.read_text())["graph"]["dispatches"].values()))
+            self.assertEqual(record["authorized"], {"tool_use_id": None})
+            state_path.unlink()
+            self.assertTrue(run()[0], "a graph-shaped task name cannot bypass a missing graph")
+
     def test_v3_native_dispatch_authority(self) -> None:
         """Allow an owned dispatch once; deny replay, missing evals, foreign session, task and bare spawns."""
         plugin = ROOT / "packages/codex"
@@ -118,8 +336,8 @@ class NativeDispatchCliTests(unittest.TestCase):
 
             base = seed()
             payload: dict[str, Any] = {
-                "tool_name": "spawn_agent",
-                "tool_use_id": "call-native-dispatch",
+                "tool_name": "collaborationspawn_agent",
+                "tool_use_id": "call_501f6560969348d29d04eeef99cb2650",
                 "session_id": "parent",
                 "cwd": scratch,
                 "tool_input": {"task_name": TASK, "message": message_for(base)},

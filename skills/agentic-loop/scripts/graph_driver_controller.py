@@ -10,11 +10,12 @@ import secrets
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional, Union, cast
+from typing import Any, Optional, Union, cast
 
-import graph_contract
 import graph_driver_control
+import graph_driver_dispatch
 import graph_driver_evidence as evidence
 import graph_driver_process
 import graph_semantics
@@ -167,66 +168,6 @@ def _checkout_problem(state: dict[str, Any], nodes: list[str], checkouts: Checko
     return None
 
 
-def _prompt(
-    path: Path,
-    state: dict[str, Any],
-    identifier: str,
-    record: dict[str, Any],
-    checkout: Path,
-    provider: str,
-    script: Path,
-) -> Path:
-    """Write the exact envelope and contract once before authorization."""
-    artifact = path.parent / "driver-evidence" / identifier
-    if artifact.parent.is_symlink() or artifact.is_symlink():
-        raise ValueError("driver artifact path is a symlink")
-    artifact.mkdir(parents=True, exist_ok=True)
-    prompt = artifact / "prompt.txt"
-    content = graph_contract.prompt_prefix(state, identifier, record) + "\n"
-    content += graph_contract.render_sections(record["contract"]) + "\n"
-    node = graph_spec.node_for(graph_spec.load_spec(), record["node_id"])
-    if node is None:
-        raise ValueError("driver task has no graph specification")
-    role = record["contract"]["role"]
-    if role not in graph_contract.roles():
-        raise ValueError("driver task has no valid role")
-    suffix = ".toml" if provider == "codex" else ".md"
-    source = script.resolve().parents[3] / "agents" / f"{role}{suffix}"
-    if source.is_symlink() or not source.is_file():
-        raise ValueError("driver role instructions are missing")
-    content += f"\nRole instructions for {role}:\n{source.read_text(encoding='utf-8')}\n"
-    content += f"\nTask: {node['label']}\n"
-    implementation = graph_spec.split_id(record["node_id"])[0] == "U3"
-    wiki = record["node_id"] == "S9-wiki"
-    acceptance = (
-        "wiki edits and lint ready for root publication"
-        if wiki
-        else ("source edits and checks ready for root publication" if implementation else node["ready_when"])
-    )
-    content += f"Acceptance: {acceptance}\n"
-    content += f"Assigned scope: {record['contract']['scope']}\n"
-    content += f"Checkout: {checkout}\n"
-    content += "Work only in the assigned checkout. Report failed if the task is unclear or incomplete.\n"
-    content += "For done, give a final_report with cited claims and explicit did_not_verify items.\n"
-    content += (
-        "For a human request, set outcome to NEEDS_DECISION, OUTSIDE_SCOPE, or IRREVERSIBLE_ACTION. "
-        "Put the matching typed worker status object as JSON in evidence and set final_report null.\n"
-    )
-    if implementation or wiki:
-        content += "Do not run git add or git commit. The root will commit and open the PR after checking your work.\n"
-    if wiki:
-        content += "If no wiki update is in scope, report skipped with final_report null.\n"
-        content += "The root will merge the wiki PR and verify its commit on origin/main before recording done.\n"
-    content += "Do not push, open a PR, merge, or change progress.json without the owner's explicit go.\n"
-    if prompt.exists():
-        if prompt.read_text(encoding="utf-8") != content:
-            raise ValueError("existing driver prompt differs from its contract")
-    else:
-        with prompt.open("x", encoding="utf-8") as stream:
-            stream.write(content)
-    return prompt
-
-
 def _reference(
     path: Path, state: dict[str, Any], node_id: str, identifier: str
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -265,6 +206,56 @@ def _record_wave(
         json.dumps({"wave_id": active["wave_id"], "results": results, "references": references}),
     )
     return {"status": "recorded", "wave_id": active["wave_id"], "nodes": sorted(results)}
+
+
+def _worker_result(
+    path: Path,
+    state: dict[str, Any],
+    identifier: str,
+    record: dict[str, Any],
+    prompt: Path,
+    worker_checkout: Path,
+    provider: str,
+    command: Command,
+    result: Result,
+    prepared: tuple[list[str], dict[str, str] | None, Path | None] | None,
+    prompt_bytes: bytes | None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Launch once and retain a completed attempt before recording the wave."""
+    node_id = record["node_id"]
+    if (prompt.parent / "manifest.json").exists():
+        reference, manifest = _reference(path, state, node_id, identifier)
+    else:
+        if not (prompt.parent / "launch.json").exists():
+            if prepared is None:
+                prepared = command(prompt, record)
+            argv, environment, input_path = prepared
+            expected = state["graph"]["dispatches"][identifier]["authorized"]["prompt_sha256"]
+            if prompt_bytes is not None and hashlib.sha256(prompt_bytes).hexdigest() != expected:
+                raise ValueError("driver prompt changed after authorization")
+            graph_driver_process.start(
+                prompt.parent,
+                argv,
+                worker_checkout,
+                environment=environment,
+                stdin_path=input_path if prompt_bytes is None else None,
+                stdin_bytes=prompt_bytes,
+            )
+        observation = graph_driver_process.observe(prompt.parent, 0.05)
+        if observation["status"] != "finished":
+            return {**observation, "node": node_id, "dispatch_id": identifier, "attempt": str(prompt.parent)}, None
+        code = observation["exit_code"]
+        parsed = _admit_result(state, node_id, result(prompt.parent / "output.jsonl", code))
+        if evidence.needs_publication(node_id, parsed):
+            try:
+                evidence.publication(worker_checkout, require_merged=node_id == "S9-wiki")
+            except ValueError as error:
+                evidence.seal_pending(path, state, node_id, identifier, worker_checkout, provider, code, parsed)
+                detail = str(error)
+                return {"status": "paused", "reason": "publication_required", "node": node_id, "detail": detail}, None
+        reference = evidence.seal(path, state, node_id, identifier, worker_checkout, provider, code, parsed)
+        manifest = evidence.validate(path, state, node_id, reference)
+    return reference, manifest
 
 
 def drive_once(
@@ -317,7 +308,10 @@ def drive_once(
         for identifier, record in _dispatches(state):
             node_id = record["node_id"]
             worker_checkout = checkout_for(checkout, node_id)
-            prompt = _prompt(path, state, identifier, record, worker_checkout, provider, script)
+            prompt = graph_driver_dispatch.write_prompt(
+                path, state, identifier, record, worker_checkout, provider, script
+            )
+            prompt_bytes = prompt.read_bytes() if provider == "codex" else None
             prepared = command(prompt, record) if record.get("authorized") is None else None
             if prepared is not None:
                 _graph(
@@ -336,30 +330,21 @@ def drive_once(
                     secrets.token_hex(16),
                 )
                 state = _load(path, session)
-            if (prompt.parent / "manifest.json").exists():
-                reference, manifest = _reference(path, state, node_id, identifier)
-            else:
-                if not (prompt.parent / "launch.json").exists():
-                    if prepared is None:
-                        prepared = command(prompt, record)
-                    argv, environment, input_path = prepared
-                    graph_driver_process.start(
-                        prompt.parent, argv, worker_checkout, environment=environment, stdin_path=input_path
-                    )
-                observation = graph_driver_process.observe(prompt.parent, 0.05)
-                if observation["status"] != "finished":
-                    return {**observation, "node": node_id, "dispatch_id": identifier, "attempt": str(prompt.parent)}
-                code = observation["exit_code"]
-                parsed = _admit_result(state, node_id, result(prompt.parent / "output.jsonl", code))
-                if evidence.needs_publication(node_id, parsed):
-                    try:
-                        evidence.publication(worker_checkout, require_merged=node_id == "S9-wiki")
-                    except ValueError as error:
-                        evidence.seal_pending(path, state, node_id, identifier, worker_checkout, provider, code, parsed)
-                        detail = str(error)
-                        return {"status": "paused", "reason": "publication_required", "node": node_id, "detail": detail}
-                reference = evidence.seal(path, state, node_id, identifier, worker_checkout, provider, code, parsed)
-                manifest = evidence.validate(path, state, node_id, reference)
+            reference, manifest = _worker_result(
+                path,
+                state,
+                identifier,
+                record,
+                prompt,
+                worker_checkout,
+                provider,
+                command,
+                result,
+                prepared,
+                prompt_bytes,
+            )
+            if manifest is None:
+                return reference
             if Path(manifest["checkout"]) != worker_checkout:
                 return {"status": "unresolved", "reason": "checkout_changed", "node": node_id}
             results[node_id], references[node_id] = manifest["result"], reference

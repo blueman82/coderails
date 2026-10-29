@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -15,6 +16,7 @@ from hooks.scripts.lib.loop_evals import EvalStatus, EvalVerdict
 from hooks.scripts.lib.loop_state_common import LoopState, count_invocations
 from hooks.scripts.loop_stall_guard import complete
 from hooks.scripts.tests.lib.hook_test_support import HookTestCase
+from scripts.lib import proof_results as pr
 from scripts.lib.eval_artifact import grading_checksum
 
 
@@ -37,15 +39,8 @@ class StallGuardTests(HookTestCase):
 
     def complete_fixture(self) -> Path:
         """Create a zero-work current graph, explicit proof disposition, and graded artifacts."""
-        graph: dict[str, Any] = {
-            "nodes": {},
-            "edges": [],
-            "joins": {},
-            "active_wave": None,
-            "hard_stop": None,
-            "wave_history": {},
-        }
-        path = self.progress(graph=graph, proof_disposition="none", work_units={})
+        graph: dict[str, Any] = dict(nodes={}, edges=[], joins={}, active_wave=None, hard_stop=None, wave_history={})
+        path = self.progress(graph=graph, proof_disposition="none: no executable surface", work_units={})
         identity = {"session_id": self.session, "loop_id": "loop-test"}
         path.with_name("retro.json").write_text(json.dumps({"schema_version": 2, **identity}))
         suite_path = path.with_name("evals.json")
@@ -122,7 +117,7 @@ class StallGuardTests(HookTestCase):
         """Return the non-authoritative trace reason codes written for this session."""
         path = self.directory / "state" / self.session / "trace.jsonl"
         rows = path.read_text().splitlines() if path.is_file() else []
-        return [json.loads(row)["reason_code"] for row in rows]
+        return [value["reason_code"] for row in rows if (value := json.loads(row)).get("command") == "loop_stall_guard"]
 
     def test_text_is_only_a_rendering_the_row_decides(self) -> None:
         """Matrix scenario: conflicting text releases as the row's category; the same text with no row blocks."""
@@ -350,18 +345,40 @@ class StallGuardTests(HookTestCase):
         path.write_text(original)
         self.arm(path, row)
         proof = path.with_name("proof.json")
-        proof.write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "session_id": self.session,
-                    "loop_id": "loop-test",
-                    "proofs": [{"id": "P1", "cmd": "unrun"}],
-                }
-            )
-        )
+        document: dict[str, Any] = {"schema_version": 1, "session_id": self.session, "loop_id": "loop-test"}
+        document["proofs"] = [{"id": "P1", "cmd": "unrun"}]
+        proof.write_text(json.dumps(document))
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)
         self.assertEqual(json.loads(path.read_text())["loop_stop_counts"], {"complete": 1})  # only the baseline run
+
+    def test_controller_run_row_releases_the_stall_guard_without_a_transcript_call(self) -> None:
+        """A satisfied proof_results row releases `complete` though the transcript has no matching Bash call."""
+        path = self.complete_fixture()
+        cmd = "python3 never_called_in_transcript.py"
+        document = {
+            "schema_version": 2,
+            "session_id": self.session,
+            "loop_id": "loop-test",
+            "proofs": [{"id": "P1", "cmd": cmd, "expect": {"exit_code": 0}}],
+        }
+        path.with_name("proof.json").write_text(json.dumps(document))
+        self.arm(path, self.stop(1, "complete"))
+        payload = self.payload(self.stopped("LOOP-STOP: complete"))
+        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)
+        results = path.with_name(pr.RESULTS_NAME)
+        identity = {"session_id": self.session, "loop_id": "loop-test"}
+        pr.append(results, kind="freeze", proof_json_sha256=pr.doc_sha(document), **identity)
+        run = {
+            "proof_id": "P1",
+            "cmd_sha256": pr.sha(cmd),
+            "proof_json_sha256": pr.doc_sha(document),
+            "verdict": "satisfied",
+            "cwd": str(Path.cwd()),
+            "head_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            "source_tree_sha": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
+        }
+        pr.append(results, kind="run", **run, **identity)
+        self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 0)
 
     def test_shared_absent_grace_and_complete_off_switch(self) -> None:
         """Only matching absent-state grace releases; existing active state stays policed."""

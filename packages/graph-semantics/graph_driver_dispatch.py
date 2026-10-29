@@ -91,3 +91,63 @@ def authorize(
         "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest(),
     }
     return proposed
+
+
+def write_prompt(
+    path: Path,
+    state: dict[str, Any],
+    identifier: str,
+    record: dict[str, Any],
+    checkout: Path,
+    provider: str,
+    script: Path,
+) -> Path:
+    """Write the exact envelope and contract once before authorization."""
+    artifact = path.parent / "driver-evidence" / identifier
+    if artifact.parent.is_symlink() or artifact.is_symlink():
+        raise ValueError("driver artifact path is a symlink")
+    artifact.mkdir(parents=True, exist_ok=True)
+    prompt = artifact / "prompt.txt"
+    content = graph_contract.prompt_prefix(state, identifier, record) + "\n"
+    content += graph_contract.render_sections(record["contract"]) + "\n"
+    node = graph_spec.node_for(graph_spec.load_spec(), record["node_id"])
+    if node is None:
+        raise ValueError("driver task has no graph specification")
+    role = record["contract"]["role"]
+    if role not in graph_contract.roles():
+        raise ValueError("driver task has no valid role")
+    suffix = ".toml" if provider == "codex" else ".md"
+    source = script.resolve().parents[3] / "agents" / f"{role}{suffix}"
+    if source.is_symlink() or not source.is_file():
+        raise ValueError("driver role instructions are missing")
+    content += f"\nRole instructions for {role}:\n{source.read_text(encoding='utf-8')}\n"
+    content += f"\nTask: {node['label']}\n"
+    implementation = graph_spec.split_id(record["node_id"])[0] == "U3"
+    wiki = record["node_id"] == "S9-wiki"
+    acceptance = (
+        "wiki edits and lint ready for root publication"
+        if wiki
+        else ("source edits and checks ready for root publication" if implementation else node["ready_when"])
+    )
+    content += f"Acceptance: {acceptance}\n"
+    content += f"Assigned scope: {record['contract']['scope']}\n"
+    content += f"Checkout: {checkout}\n"
+    content += "Work only in the assigned checkout. Report failed if the task is unclear or incomplete.\n"
+    content += "For done, give a final_report with cited claims and explicit did_not_verify items.\n"
+    content += (
+        "For a human request, set outcome to NEEDS_DECISION, OUTSIDE_SCOPE, or IRREVERSIBLE_ACTION. "
+        "Put the matching typed worker status object as JSON in evidence and set final_report null.\n"
+    )
+    if implementation or wiki:
+        content += "Do not run git add or git commit. The root will commit and open the PR after checking your work.\n"
+    if wiki:
+        content += "If no wiki update is in scope, report skipped with final_report null.\n"
+        content += "The root will merge the wiki PR and verify its commit on origin/main before recording done.\n"
+    content += "Do not push, open a PR, merge, or change progress.json without the owner's explicit go.\n"
+    if prompt.exists():
+        if prompt.read_text(encoding="utf-8") != content:
+            raise ValueError("existing driver prompt differs from its contract")
+    else:
+        with prompt.open("x", encoding="utf-8") as stream:
+            stream.write(content)
+    return prompt

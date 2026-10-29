@@ -24,7 +24,7 @@ TOOLS = {"repo.inspect", "diff.read", "tests.run", "pr.comment", "cmd.run"}
 SECURITY_REVIEW_GRANTS = ["repo.inspect", "diff.read"]
 ENV_ALLOW = ("PATH", "HOME", "CODEX_HOME", "LANG", "LC_ALL", "TERM", "TMPDIR")
 ROLE = re.compile(r"^[a-z][a-z0-9-]{0,60}$")
-OPTIONS = {"--role", "--prompt-file", "--cwd", "--schema", "--final", "--model"}
+OPTIONS = {"--role", "--prompt-file", "--cwd", "--schema", "--final", "--model", "--prompt-source"}
 SOURCE_AUDITOR_APPROVALS = (
     'mcp_servers.cap-source-auditor.tools.cmd_run.approval_mode="approve"',
     'mcp_servers.cap-source-auditor.tools.tests_run.approval_mode="approve"',
@@ -93,6 +93,10 @@ def build_argv(role: str, root: Path, cwd: str | None = None) -> list[str]:
         "features.shell_tool=false",
         "-c",
         "features.multi_agent=false",
+        "-c",
+        'forced_login_method="chatgpt"',
+        "-c",
+        'model_provider="openai"',
     ]
     argv += ["-c", f"developer_instructions={json.dumps(role_instructions(root, role))}"]
     argv += ["-c", f"mcp_servers.cap-{role}={{command = {command}, args = {args}}}"]
@@ -117,6 +121,8 @@ def contained(argv: list[str], role: str) -> bool:
         and sandbox == ["read-only"]
         and "features.shell_tool=false" in overrides
         and "features.multi_agent=false" in overrides
+        and 'forced_login_method="chatgpt"' in overrides
+        and 'model_provider="openai"' in overrides
         and len(instructions) == 1
         and len(servers) == 1
         and servers[0].startswith(f"mcp_servers.cap-{role}=")
@@ -161,11 +167,15 @@ def main(argv: list[str]) -> int:
         print(f"codex_role_session: {error}", file=sys.stderr)
         emit("refused", "codex_role_session_refused", role[:40])
         return 2
-    if not prompt.is_file():
+    if args.get("--prompt-source", "file") == "file" and not prompt.is_file():
         print(f"codex_role_session: prompt file {prompt} not found", file=sys.stderr)
         emit("refused", "codex_role_session_no_prompt", role)
         return 2
     driver_options = {"--schema", "--final", "--model"}
+    prompt_source = args.get("--prompt-source", "file")
+    if prompt_source not in {"file", "stdin"} or (prompt_source == "stdin" and not driver_options <= set(args)):
+        print("codex_role_session: invalid driver prompt source", file=sys.stderr)
+        return 2
     if driver_options & set(args):
         schema = Path(args.get("--schema", ""))
         final = Path(args.get("--final", ""))
@@ -192,6 +202,8 @@ def main(argv: list[str]) -> int:
             "features.multi_agent=false",
         ]
     emit("ok", "codex_role_session_launched", role)
+    if prompt_source == "stdin":
+        return subprocess.run(command, stdin=sys.stdin.buffer, env=scrubbed_env(), check=False).returncode
     with prompt.open("rb") as stream:
         return subprocess.run(command, stdin=stream, env=scrubbed_env(), check=False).returncode
 

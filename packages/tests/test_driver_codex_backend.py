@@ -35,7 +35,7 @@ class CodexBackendTests(unittest.TestCase):
             self.assertIn("features.multi_agent=false", argv)
             self.assertEqual(argv[argv.index("--model") + 1], "gpt-6.1-sol")
             self.assertEqual(stdin_path, prompt)
-            self.assertIsNone(environment)
+            self.assertIsInstance(environment, dict)
             self.assertIn("--ignore-user-config", argv)
 
     def test_unguarded_role_rejects_checkout_codex_config(self) -> None:
@@ -61,7 +61,7 @@ class CodexBackendTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--role") + 1], "preflight-scout")
             self.assertEqual(argv[argv.index("--schema") + 1], str(prompt.parent / "result.schema.json"))
             self.assertEqual(argv[argv.index("--model") + 1], "gpt-6-astra")
-            self.assertIsNone(environment)
+            self.assertIsInstance(environment, dict)
 
     def test_guarded_role_wrapper_launches_one_read_only_capability_session(self) -> None:
         """The guarded wrapper applies its profile before starting the model CLI."""
@@ -94,6 +94,42 @@ class CodexBackendTests(unittest.TestCase):
             self.assertIn("features.shell_tool=false", launched)
             self.assertEqual(sum(value.startswith("mcp_servers.") for value in launched), 1)
             self.assertEqual(launched[launched.index("--model") + 1], "gpt-6-astra")
+
+    def test_guarded_driver_uses_checked_stdin_when_prompt_file_changes(self) -> None:
+        """Both launcher copies forward exact bytes even when the source is replaced or removed."""
+        root = Path(__file__).resolve().parents[2]
+        expected = "authorized café Ω\nsecond line\nterminal canary\n".encode()
+        for wrapper in (root / "scripts/codex_role_session.py", root / "packages/codex/scripts/codex_role_session.py"):
+            for remove in (False, True):
+                with self.subTest(wrapper=wrapper, remove=remove), tempfile.TemporaryDirectory() as directory:
+                    checkout = Path(directory)
+                    prompt = checkout / "prompt.txt"
+                    prompt.write_bytes(expected)
+                    argv, _, _ = graph_driver_codex.command(prompt, checkout, role="preflight-scout")
+                    argv[1] = str(wrapper)
+                    tool_dir = checkout / "bin"
+                    tool_dir.mkdir()
+                    capture = checkout / "stdin.bin"
+                    fake = tool_dir / "codex"
+                    fake.write_text(
+                        "#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n"
+                        f"Path({str(capture)!r}).write_bytes(sys.stdin.buffer.read())\n"
+                    )
+                    fake.chmod(0o755)
+                    if remove:
+                        prompt.unlink()
+                    else:
+                        prompt.write_bytes(b"changed prompt\n")
+                    run = subprocess.run(
+                        argv,
+                        input=expected,
+                        cwd=checkout,
+                        env={"PATH": f"{tool_dir}:{os.environ['PATH']}", "HOME": directory, "CODEX_HOME": directory},
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    self.assertEqual(capture.read_bytes(), expected)
 
     def test_result_requires_successful_terminal_event_and_closed_json(self) -> None:
         """An exit code or plausible prose cannot stand in for completed structured output."""

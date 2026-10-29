@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 from typing import Any
 
+import graph_convert
 import graph_driver_control
 import graph_driver_controller
 import graph_driver_dispatch
 import graph_driver_evidence
+import graph_driver_mode
 import graph_repair
 import worker_status
 
 from .graph_dispatch import validate_dispatch_evals
 from .graph_evidence import object_value
-from .graph_executor import ROOT, graph_semantics, load, transition
+from .graph_evidence_revalidate import revalidate_all
+from .graph_executor import ROOT, graph_semantics, load, transition, validate_state
+from .graph_recovery import trace
 from .graph_stops import record_stop
+from .loop_state_common import atomic_progress_update
 
 
 def add_arguments(name: str, command: argparse.ArgumentParser) -> None:
@@ -146,3 +152,38 @@ def authorize(
 
     transition(path, update)
     return {"dispatch_id": dispatch_id, "driver_run_id": driver_run_id}
+
+
+def cutover_driver(path: Path, session: str) -> dict[str, Any]:
+    """Verify retained native history, then mark one driver-only wave boundary."""
+    output: dict[str, Any] = {}
+    refusal: list[str] = []
+
+    def update(state: dict[str, Any]) -> dict[str, Any]:
+        try:
+            validate_state(state)
+            if state["session_id"] != session:
+                raise ValueError("session does not own this loop")
+            if state.get("state_minor", 0) < 2:
+                raise ValueError("run graph.py convert before driver cutover")
+            result = graph_driver_mode.cutover(state, hashlib.sha256(path.read_bytes()).hexdigest())
+            graph = state["graph"]
+            fresh = not graph.get("wave_history") and all(
+                node["status"] == "pending" and node["retry"]["attempts"] == 0 and not node["evidence"]
+                for node in graph["nodes"].values()
+            )
+            if not fresh:
+                revalidate_all(state)
+            proposed = object_value(result["state"], "driver cutover state")
+            graph_semantics.validate(proposed)
+            graph_convert.write_backup(path, ".pre-driver")
+            output.update(revision=proposed["revision"], driver_from_revision=result["driver_from_revision"])
+            return proposed
+        except ValueError as error:
+            refusal.append(str(error))
+            raise
+
+    if not atomic_progress_update(path, update):
+        raise ValueError(refusal[0] if refusal else "progress.json is locked or unreadable")
+    trace(path, {"session_id": session}, "ok", "driver_cutover", {}, [], "cutover-driver")
+    return output

@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
 sys.path.insert(0, str(ROOT / "skills/agentic-loop/scripts"))
 import graph_driver_control  # noqa: E402
 import graph_driver_controller  # noqa: E402
+import graph_driver_dispatch  # noqa: E402
 import graph_driver_evidence  # noqa: E402
 
 from hooks.scripts.tests.graph_convert_test import SCRIPTS, Case  # noqa: E402
@@ -290,10 +291,10 @@ class DriverControllerTests(unittest.TestCase):
             dispatch_id = issued["dispatch_id"]
             record = case.read()["graph"]["dispatches"][dispatch_id]
             with self.assertRaisesRegex(ValueError, "role instructions"):
-                graph_driver_controller._prompt(  # pyright: ignore[reportPrivateUsage]
+                graph_driver_dispatch.write_prompt(
                     case.path, case.read(), dispatch_id, record, Path(directory).resolve(), "codex", case.path
                 )
-            prompt = graph_driver_controller._prompt(  # pyright: ignore[reportPrivateUsage]
+            prompt = graph_driver_dispatch.write_prompt(
                 case.path, case.read(), dispatch_id, record, checkout.resolve(), "codex", SCRIPTS["codex"]
             )
             self.assertIn("Role instructions for loop-worker", prompt.read_text())

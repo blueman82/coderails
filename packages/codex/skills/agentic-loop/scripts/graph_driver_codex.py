@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
 from typing import Any, cast
 
 import worker_status
+
+API_ENV = {
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "CODEX_API_KEY",
+    "CODEX_ACCESS_TOKEN",
+    "OPENAI_BASE_URL",
+    "CODEX_AUTHAPI_BASE_URL",
+}
 
 MODELS = {"fast-mechanical": "gpt-6-luna", "default": "gpt-6.1-sol", "frontier": "gpt-6-astra"}
 
@@ -101,6 +111,8 @@ def command(
             role,
             "--prompt-file",
             str(prompt),
+            "--prompt-source",
+            "stdin",
             "--cwd",
             str(checkout),
             "--schema",
@@ -110,7 +122,7 @@ def command(
             "--model",
             MODELS[model_role],
         ]
-        return argv, None, prompt
+        return argv, {key: value for key, value in os.environ.items() if key not in API_ENV}, prompt
     else:
         for directory in (checkout.resolve(), *checkout.resolve().parents):
             if (directory / ".codex").exists():
@@ -137,8 +149,12 @@ def command(
         str(artifact / "final.json"),
         "-c",
         "features.multi_agent=false",
+        "-c",
+        'forced_login_method="chatgpt"',
+        "-c",
+        'model_provider="openai"',
     ]
-    return argv, None, prompt
+    return argv, {key: value for key, value in os.environ.items() if key not in API_ENV}, prompt
 
 
 def _failed(code: str) -> dict[str, str]:
