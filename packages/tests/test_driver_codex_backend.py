@@ -19,6 +19,47 @@ import graph_driver_codex  # noqa: E402
 class CodexBackendTests(unittest.TestCase):
     """Check the current OAuth CLI route and strict evidence parser."""
 
+    def test_malformed_outcome_types_return_a_coded_failure(self) -> None:
+        """External JSON arrays, objects and scalars cannot escape result parsing."""
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output.jsonl"
+            outcomes: tuple[object, ...] = ([], {}, None, True, 1)
+            for outcome in outcomes:
+                with self.subTest(outcome=outcome):
+                    malformed = {"outcome": outcome, "evidence": "inert malformed result", "final_report": None}
+                    rows = [
+                        {"type": "thread.started", "thread_id": "T"},
+                        {"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps(malformed)}},
+                        {"type": "turn.completed"},
+                    ]
+                    output.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+                    (output.parent / "final.json").write_text(json.dumps(malformed))
+                    self.assertEqual(
+                        graph_driver_codex.result(output, 0),
+                        {"outcome": "failed", "evidence": "codex:invalid_final_schema"},
+                    )
+
+    def test_malformed_event_types_return_a_coded_failure(self) -> None:
+        """An unhashable or nontext event type cannot escape the raw stream boundary."""
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output.jsonl"
+            final = {"outcome": "failed", "evidence": "inert result", "final_report": None}
+            (output.parent / "final.json").write_text(json.dumps(final))
+            events: tuple[object, ...] = ([], {}, None, True, 1)
+            for event in events:
+                with self.subTest(event=event):
+                    rows = [
+                        {"type": "thread.started", "thread_id": "T"},
+                        {"type": event},
+                        {"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps(final)}},
+                        {"type": "turn.completed"},
+                    ]
+                    output.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+                    self.assertEqual(
+                        graph_driver_codex.result(output, 0),
+                        {"outcome": "failed", "evidence": "codex:invalid_event_stream"},
+                    )
+
     def test_command_uses_codex_exec_and_current_login(self) -> None:
         """The worker uses the existing Codex login with explicit result controls."""
         with tempfile.TemporaryDirectory() as directory:

@@ -174,11 +174,13 @@ def prepare_prompt(
     prepare: Prepare | None,
 ) -> Path:
     """Prepare an optional contained workspace before rendering and authorizing its path."""
+    artifact = path.parent / "driver-evidence" / identifier
+    if (artifact / "manifest.json").exists():
+        return artifact / "prompt.txt"
     workspace = prepare(path, state, identifier, record, checkout) if prepare is not None else None
     execution = Path(workspace["execution"]) if workspace else checkout
     extra: dict[str, Any] = {}
     if workspace:
-        artifact = path.parent / "driver-evidence" / identifier
         extra = {
             "publication_checkout": checkout,
             "workspace_sha256": hashlib.sha256((artifact / "workspace.json").read_bytes()).hexdigest(),

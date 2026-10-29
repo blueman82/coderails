@@ -17,8 +17,11 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
 sys.path.insert(0, str(ROOT / "packages/codex/skills/agentic-loop/scripts"))
+import graph_contract  # noqa: E402
 import graph_driver_evidence  # noqa: E402
 from graph_evidence import validate_worker_evidence  # noqa: E402
+
+from packages.tests.test_driver_resume import prepare_authorized  # noqa: E402
 
 
 class DriverEvidenceTests(unittest.TestCase):
@@ -213,12 +216,18 @@ class DriverEvidenceTests(unittest.TestCase):
 
     def check_failed_without_final(self, state_path: Path, state: dict[str, Any], checkout: Path) -> None:
         """A process failure can be sealed when Codex writes no final file."""
-        failed_id = "disp_failed_attempt"
-        original = state["graph"]["dispatches"]["disp_0123456789abcdef"]
+        original_id, original = next(iter(state["graph"]["dispatches"].items()))
+        failed_id = graph_contract.dispatch_id(state["loop_id"], original["wave_id"], "U3[1]", 2)
         state["graph"]["dispatches"][failed_id] = deepcopy(original)
+        record = state["graph"]["dispatches"][failed_id]
+        record["attempt"] = 2
+        state["graph"]["nodes"]["U3[1]"]["retry"]["attempts"] = 1
         artifact = state_path.parent / "driver-evidence" / failed_id
         artifact.mkdir()
-        (artifact / "prompt.txt").write_text("build one unit\n")
+        prompt = graph_contract.prompt_prefix(state, failed_id, record) + "\n"
+        prompt += graph_contract.render_sections(record["contract"]) + "\n"
+        (artifact / "prompt.txt").write_text(prompt)
+        record["authorized"]["prompt_sha256"] = hashlib.sha256(prompt.encode()).hexdigest()
         (artifact / "output.jsonl").write_text('{"type":"turn.failed"}\n')
         ref = graph_driver_evidence.seal(
             state_path,
@@ -232,6 +241,8 @@ class DriverEvidenceTests(unittest.TestCase):
         )
         graph_driver_evidence.validate(state_path, state, "U3[1]", ref)
         state["graph"]["dispatches"].pop(failed_id)
+        state["graph"]["nodes"]["U3[1]"]["retry"]["attempts"] = 0
+        self.assertIn(original_id, state["graph"]["dispatches"])
 
     def check_descendant_publication(
         self,
@@ -298,39 +309,9 @@ class DriverEvidenceTests(unittest.TestCase):
         """A past pass cannot survive changed worker bytes or changed source."""
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            checkout = base / "checkout"
-            checkout.mkdir()
-            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
-            self.commit_empty(checkout, "first")
-            state_path = base / "S" / "progress.json"
-            state_path.parent.mkdir()
-            dispatch_id = "disp_0123456789abcdef"
-            state: dict[str, Any] = {
-                "session_id": "S",
-                "loop_id": "L",
-                "graph": {
-                    "dispatch_mode": "driver",
-                    "driver_from_revision": 3,
-                    "native_last_revision": 1,
-                    "dispatches": {
-                        dispatch_id: {
-                            "node_id": "U3[1]",
-                            "wave_id": "wave-3",
-                            "revision": 3,
-                            "attempt": 1,
-                            "dispatch_mode": "driver",
-                            "task_name": "worker_one",
-                            "authorized": {
-                                "driver_run_id": "run-1",
-                                "prompt_sha256": hashlib.sha256(b"build one unit\n").hexdigest(),
-                            },
-                        }
-                    },
-                },
-            }
+            case, checkout, dispatch_id, _prompt = prepare_authorized(self, base, "U3[1]")
+            state_path, state = case.path, case.read()
             artifact = state_path.parent / "driver-evidence" / dispatch_id
-            artifact.mkdir(parents=True)
-            (artifact / "prompt.txt").write_text("build one unit\n")
             output = artifact / "output.jsonl"
             output.write_text('{"type":"turn.completed"}\n')
             final = artifact / "final.json"

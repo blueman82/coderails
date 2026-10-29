@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Optional, Union, cast
 
+import graph_contract
 import graph_driver_control
 import graph_driver_dispatch
 import graph_driver_evidence as evidence
@@ -226,6 +227,8 @@ def _worker_result(
     finish_workspace: Finish | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Launch once and retain a completed attempt before recording the wave."""
+    content = (prompt_bytes if prompt_bytes is not None else prompt.read_bytes()).decode("utf-8")
+    graph_contract.check_dispatch(state, graph_contract.parse_envelope(content), content, live=True)
     node_id = record["node_id"]
     if (prompt.parent / "manifest.json").exists():
         reference, manifest = _reference(path, state, node_id, identifier)
@@ -291,8 +294,7 @@ def drive_once(
                 return {"status": "paused", "reason": "missing_task", "nodes": missing}
             if not ready:
                 return {"status": "paused", "reason": "no_ready_nodes"}
-            problem = _checkout_problem(state, workers, checkout, path)
-            if problem:
+            if problem := _checkout_problem(state, workers, checkout, path):
                 return {"status": "paused", "reason": problem, "nodes": ready}
             _graph(script, "begin-driver-wave", path)
             state = _load(path, session)
@@ -300,8 +302,7 @@ def drive_once(
         workers = sorted(set(active["nodes"]) - set(_control_nodes(active["nodes"])))
         if _missing_tasks(state, workers):
             return {"status": "unresolved", "reason": "active_missing_task", "nodes": workers}
-        problem = _checkout_problem(state, workers, checkout, path)
-        if problem:
+        if problem := _checkout_problem(state, workers, checkout, path):
             return {"status": "unresolved", "reason": problem, "nodes": workers}
         results: dict[str, Any] = {}
         references: dict[str, Any] = {}
