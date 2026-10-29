@@ -74,6 +74,19 @@ class AddUnitContractTests(ControllerCase):
             self.refused(result, "add_unit_refused_bad_field")
             self.assertEqual(c.path.read_bytes(), before)
 
+    def test_worktree_is_stored_and_relative_path_is_refused(self) -> None:
+        """A unit keeps its absolute checkout path; an invalid path cannot change the graph."""
+        for c in self.each():
+            c.start()
+            worktree = str(c.root.resolve())
+            result = c.add("1", "--worktree", worktree)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(c.read()["work_units"]["1"]["worktree"], worktree)
+            before = c.path.read_bytes()
+            result = c.add("2", "--worktree", "relative/path")
+            self.refused(result, "add_unit_refused_bad_field")
+            self.assertEqual(c.path.read_bytes(), before)
+
     def test_stored_inputs_and_defaults_reach_the_begin_wave_contract(self) -> None:
         """begin-wave renders the unit's inputs; unset inputs take the documented defaults (write_scope = manifest)."""
         for c in self.each():

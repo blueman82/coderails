@@ -33,6 +33,10 @@ def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list
         manifest_policy.trace(f"{git.repo()}@pr-{number}", "refused", code, command="review-passes")
         return [{"code": code, "detail": detail}]
 
+    status, reason = git.gate_review_summary_for_pr(number, sha)
+    if status:
+        code = reason if status == 3 else "review_artifact_missing" if status == 1 else "review_artifact_unreadable"
+        return refused(code, reason)
     values, _ = load_config(config_path() or "")
     if str(values.get("review_passes") or "enforce") == "off":
         manifest_policy.trace(f"{git.repo()}@pr-{number}", "skipped", "review_passes_off", command="review-passes")

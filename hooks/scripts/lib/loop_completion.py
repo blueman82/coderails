@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any, cast
 
 from .loop_proofs import validate_proofs
 from .loop_state_common import LoopState, log
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loop/scripts"))
+from graph_vocab import disposition_offenders
 
 ABSENT_TEXT = "cost not recorded"
 MINER_FAILED_TEXT = "cost unavailable (miner returned no data)"
@@ -96,6 +101,11 @@ def validate_work_units(state: dict[str, Any]) -> None:
         raise ValueError(
             "work_units are unfinished: " + ", ".join(offenders) + ".\n"
             'Every work_unit must be "done", or "dropped" with a non-empty dropped_reason.'
+        )
+    if bad := disposition_offenders(cast(dict[str, Any], units)):
+        raise ValueError(
+            "work_units have an illegal disposition: " + ", ".join(bad) + ".\n"
+            "preserve-compat needs a named blocker and a removal ticket; clean-break carries neither."
         )
 
 

@@ -22,6 +22,7 @@ import graph_dispatch
 from packages.tests.codex_fixture import (
     append,
     complete,
+    done_result,
     frozen_evals,
     node,
     read_json,
@@ -87,7 +88,7 @@ class RecoverChainTests(unittest.TestCase):
     def _record_done(self) -> None:
         """Record every unit done."""
         wave = read_json(self.path)["graph"]["active_wave"]["wave_id"]
-        results = {unit: {"outcome": "done", "evidence": "ok"} for unit in UNITS}
+        results = {unit: done_result("ok") for unit in UNITS}
         graph_dispatch.record_wave(self.path, json.dumps({"wave_id": wave, "results": results}))
 
     def _verify(self) -> dict[str, Any]:
@@ -128,6 +129,7 @@ class RecoverChainTests(unittest.TestCase):
             verdict="satisfied",
             cwd=str(Path.cwd()),
             head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            source_tree_sha=subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
             **identity,
         )
         complete(self.path, "parent", suite, proof, retro, log)

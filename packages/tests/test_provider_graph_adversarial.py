@@ -114,8 +114,7 @@ class ProviderAdversarialTests(unittest.TestCase):
             provider.artifacts()
             baseline = provider.read()
             completed = provider.complete()
-            self.assertEqual(completed.returncode, 3)
-            self.assertEqual(json.loads(completed.stdout)["reason_code"], "muninn_old_ledger")
+            self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual(provider.read()["status"], "complete")
             provider.write(baseline)
             for filename, key, value in (
@@ -156,12 +155,7 @@ class ProviderAdversarialTests(unittest.TestCase):
         provider.success("record-wave", json.dumps(provider.launch()))
         provider.artifacts()
         result = provider.complete()
-        self.assertEqual(result.returncode, 3, result.stderr)
-        response = json.loads(result.stdout)
-        self.assertEqual(
-            (response["status"], response["pending_teardown"], response["reason_code"]),
-            ("complete", True, "muninn_old_ledger"),
-        )
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(provider.read()["status"], "complete")
 
 

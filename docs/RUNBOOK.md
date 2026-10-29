@@ -563,8 +563,9 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
   enforces; `diff_manifest: off` does not touch it). The policy file is the control, and deleting or corrupting it
   refuses (`review_policy_unreadable`), it does not allow.
 - Artifact: `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]` posts two comments for one head.
-  The first has the v1 marker, a passes line, and the review text. The passes line gives the name, verdict, blocking
-  value, and summary hash for each pass. The second has the same v1 marker and the same general review text. It lets
+  The first has the v1 marker, a passes line, an optional compat-findings line, and the review text. The passes line
+  gives the name, verdict, blocking value, and summary hash for each pass. The second has the same v1 marker, the
+  same optional compat-findings line, and the same general review text. It lets
   the current server integrity check read the review. The local gate accepts the pair only when the comments are
   adjacent and the general review text is identical. The script derives each verdict from the text. A Critical finding
   fails the pass. A present passes line must include `review-pr` with a verdict bound to its summary. An old single
@@ -928,6 +929,15 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   graph is unaffected. Each allowed spawn leaves an
   `authorize-dispatch/reported/dispatch_check_off` trace row. Default ON; unset to re-enable. Use it only to rescue a
   loop wedged by a bad contract or an uninstalled plugin agent.
+- Codex evidence rollout: `CODERAILS_A6_EVIDENCE_WRITE` defaults OFF. While OFF, the new reader can validate old and new
+  references, `reject-invalid-dispatch --report-only` works, and attempts to persist invalid-dispatch or encrypted-message
+  evidence fail without changing `progress.json`; the dispatch off-switch also keeps its old no-receipt behavior. After
+  installing and trusting this reader, check active old graphs with
+  `inspect` and completed ones with `verify-completion` before setting the variable to `on` for new writes. Once either
+  new reference shape is stored, turn writing OFF to stop further new records, but keep this reader installed for later
+  completion and verification. The prior plugin reader cannot verify those histories, even after a loop is complete;
+  reinstalling it is not a rollback path. Enabling writes also changes how plaintext authorization binds native call IDs,
+  before either new reference shape is stored. The owner must accept the resulting reader pin before enabling writes.
 - Bad `add-unit --model-role` is `add_unit_refused_bad_field` (allowed: `fast-mechanical`, `default`, `frontier`).
 - Limits: a plugin agent that is not installed in the session cannot run a guarded scout (refused, never downgraded); the
   sandboxed Bash launcher carries no agent type, so the role is asserted on the `Agent` and `spawn_agent` routes only
@@ -955,3 +965,56 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   supplies no id, it retains the consumed flag and one-spawn-per-id check without claiming call-id proof. Historical
   pre-contract attempts retain their original evidence rules. Claude hooks can still fail open if the hook times out
   (10 s in `hooks.json`) before it denies.
+
+## Disposition refused, compat findings blocked a merge, or a worker status stopped the loop
+
+- `add-unit` says `add_unit_refused_disposition`: `--disposition preserve-compat` needs both a non-blank `--named-blocker`
+  and `--removal-ticket`; `--disposition clean-break` takes neither; either flag without `--disposition` is refused. The
+  unit is stored as `work_units[u].disposition = {kind, named_blocker?, removal_ticket?}` and is what the dispatch
+  contract carries. `graph.py disposition-audit <state>` prints every unit's kind and exits 1 on a hand-edited unit that
+  broke the rule; `complete` / `verify-completion` refuse the same unit on both providers (default ON, no switch).
+- For an existing pending unit with no choice, run `graph.py set-unit-disposition <state> --session S --loop-id L
+  --revision R --unit N --disposition preserve-compat --named-blocker TEXT --removal-ticket ISSUE
+  --source-ref URL` (or `clean-break` without blocker and ticket). The command requires the current revision and an
+  inactive wave. It records the source reference and a new revision. It refuses repeated disposition flags or a second stored choice. Inspect the source
+  and choose the value before this command; the command does not prove that a source supports the choice.
+- `/coderails:merge` says `compat_findings_nonzero`: the posted review artifact carries a second line
+  `<!-- coderails-compat-findings v1 pr=N head_sha=S count=K disposition=D -->` (built by
+  `post_review.py compat-line <pr> <sha> --count K --disposition D`) with `disposition=clean-break` and `K > 0`. Remove the
+  retained compatibility code, creating a new head SHA, and post a fresh review; or register the unit `preserve-compat`
+  with a blocker and ticket. Posting a passing review on the same SHA cannot override an earlier refusing compat line.
+  `compat_findings_malformed` means a current line with that prefix is not exactly the typed form.
+  Legacy review artifacts may omit the compatibility line. The current-head v1 review artifact remains required.
+  The Codex direct merge hook applies the same compatibility check, including when required review passes are off.
+  The v1 review marker the root-owned integrity daemon matches is unchanged. Any refusing line for the
+  head wins; the merge refusal is a stderr reason code, not a trace row (merge.py has no loop session).
+- Limits: `K` and `D` are the reviewer's own judgement, not a measurement, and a same-user agent can write any line, so
+  this is drift detection for a cooperating reviewer, not tamper evidence. The gate reads the PR's artifact only; it does
+  not cross-check `D` against `work_units[u].disposition`.
+- `record-wave` says `worker_status_<code>` (`not_an_object`, `unknown_status`, `missing_field`, `unknown_field`,
+  `bad_field`): a result carrying a `status` key is not a valid typed worker status, so the WHOLE report was rejected and
+  `progress.json` is byte-identical; fix the worker's result (the schema is in `scripts/worker_status.py`) and record
+  again. `final_report_invalid`: a `done` result for a dispatch with `final_report_required` lacks a valid
+  `final_report {claims: [{text, label, source?}], did_not_verify: [{item, tag, reason}]}` (non-empty claims, a `verified`
+  claim cites a source, tags `resolved|unverifiable`). Both leave a `record-wave/refused/<code>` trace row.
+- A valid typed status is recorded, not refused: `worker_statuses[]` gets a `decision_pending` row, the node is recorded
+  as a failed attempt; at the retry limit the terminal slot stays available behind that pending decision, so an answer
+  can resume the node. ONE typed
+  stop row is written in the same save (`awaiting-input/needs_human_input` for `NEEDS_DECISION`, `approval-gate/needs_approval`
+  for `OUTSIDE_SCOPE` and `IRREVERSIBLE_ACTION`; approval outranks input when a wave returns both). The Stop guard releases
+  that row once. Ask the human with `to_decision_request()`, then log the answer with `graph.py record-decision <state>
+  --session S --phase P --decision D --chosen C [--flip-condition F] --worker-status-seq <seq>`: it appends one typed row
+  to `decisions_absorbed` and marks that status resolved. `python3 scripts/lib/worker_counters.py` reports
+  `pending_statuses` (rows still `decision_pending`) and `decision_recorded`.
+- `record-decision` says `record_decision_refused_<foreign|field|state|status|chosen|human>`: the session does not own the
+  graph, a flag is blank, `decisions_absorbed` is not an array of objects, `--worker-status-seq` names no pending status
+  (unknown, already resolved, duplicated, or malformed), `--chosen` is not one of a `NEEDS_DECISION` status's options,
+  or the status is an approval gate (`OUTSIDE_SCOPE`, `IRREVERSIBLE_ACTION`) and `--human-answer` was not passed. Nothing is written. It does
+  not bump the revision. Limits: `phase`, `decision` and `chosen` are free text outside a status-linked answer (no enum,
+  no check against the graph); hand-appended `{phase, decision}` rows stay valid and unnumbered. There is no caller
+  authentication: `--session` and `--human-answer` are self-asserted, so a same-user agent can still forge a human
+  answer (or write any row); the flag makes that a deliberate act, not tamper evidence. Only the orchestrator should
+  pass `--human-answer`, and only after the human replied.
+- Limits: shape is checked, truth is not (a worker can write any claim); only results of dispatches with a begin-wave
+  record require the report, so a pre-conversion state behaves as before; `check_confidence_labels` and
+  `check_verify_loop` stay advisory lints on the orchestrator's own text.

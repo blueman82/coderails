@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import graph_convert
 import graph_semantics
+import worker_status
 from graph_identity import GraphError
 from graph_io import load, locked, write
 from graph_recovery import trace
@@ -43,6 +44,37 @@ def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str
         return {"unit": unit_id, "status": status, "revision": state["revision"]}
 
 
+def record_proof_disposition(
+    path: Path, session: str, loop_id: str, revision: int, disposition: str, reason: str
+) -> dict[str, Any]:
+    """Save an owner's no-proof decision under the Codex state lock."""
+    inputs = {"session": session, "loop_id": loop_id, "revision": revision, "disposition": disposition}
+    with locked(path):
+        state: dict[str, Any] = {}
+        try:
+            state = load(path)
+            if state["session_id"] != session or state["loop_id"] != loop_id:
+                raise GraphError("wrong owner or loop")
+            if state["revision"] != revision:
+                raise GraphError("stale revision")
+            if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
+                raise GraphError("no-proof decision requires an idle in-progress loop")
+            if disposition != "none" or not reason.strip() or reason.strip().lower().startswith("none:"):
+                raise GraphError("disposition must be none with a nonblank reason and no prefix")
+            if path.with_name("proof.json").exists():
+                raise GraphError("proof.json exists; no-proof decision is invalid")
+            if state.get("proof_disposition") is not None:
+                raise GraphError("proof disposition is already recorded")
+            state["proof_disposition"] = f"none: {reason.strip()}"
+            graph_semantics.validate(state)
+            write(path, state)
+        except (GraphError, graph_semantics.GraphSemanticError):
+            trace(path, state, "refused", "proof_disposition_refused", inputs, [], "record-proof-disposition")
+            raise
+        trace(path, state, "ok", "proof_disposition_recorded", inputs, [], "record-proof-disposition")
+        return {"proof_disposition": state["proof_disposition"], "revision": revision}
+
+
 def decision_transition(path: Path, fn: Any) -> dict[str, Any]:  # noqa: ANN401
     """Apply one decision transform through Codex's native graph lock."""
     with locked(path):
@@ -65,6 +97,10 @@ def record_decision(args: Any) -> dict[str, Any]:  # noqa: ANN401
         flip_condition=args.flip_condition,
         unit=args.unit,
         cite_quote=args.cite_quote,
+        chosen=args.chosen,
+        worker_status_seq=args.worker_status_seq,
+        human_answer=args.human_answer,
+        status_resolver=worker_status.resolve_pending,
     )
 
 

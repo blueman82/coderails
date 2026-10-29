@@ -26,6 +26,9 @@ Write the `review-pr` findings to a new file in the system temp directory, for e
 (`- …`) or the literal line `None`. Include `review-pr`'s own finding counts so a hollow
 summary is visibly inconsistent with the review that ran.
 
+Record the reviewer's compatibility finding count and the unit's `clean-break` or
+`preserve-compat` choice. Use `0` only when the reviewer found no compatibility code.
+
 The merge gate computes which further reviews the diff needs from `policy/review_policy.json`:
 a diff touching `hooks/`, `scripts/`, `install.py`, `uninstall.py`, `.claude-plugin/` or the Codex
 hook/script trees needs a `security-review` pass (spawn the `security-reviewer` agent);
@@ -41,7 +44,7 @@ resolves the head, posts the passes and a server compatible review summary as tw
 reuses an identical existing pair, refuses if the head moved while posting, and writes the progress cache:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/post_review.py" post <PR#> --summary /tmp/coderails-review-summary.md --pass security-review=/tmp/coderails-security-review.md
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/post_review.py" post <PR#> --summary /tmp/coderails-review-summary.md --compat-count <COUNT> --disposition <CHOICE> --pass security-review=/tmp/coderails-security-review.md
 ```
 
 Omit `--pass NAME=FILE` for passes the diff does not need. A non-zero exit can follow the first comment;

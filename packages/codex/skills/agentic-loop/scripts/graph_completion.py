@@ -14,6 +14,7 @@ from graph_io import locked as _locked
 from graph_io import object_value as _object
 from graph_io import write as _write
 from graph_recovery import traced_refusal
+from graph_vocab import disposition_offenders
 
 
 def _orders() -> Any:  # noqa: ANN401
@@ -42,6 +43,8 @@ def validate_work_units(state: dict[str, Any]) -> None:
         if unit.get("status") == "dropped" and isinstance(reason, str) and reason.strip():
             continue
         raise GraphError(f"work unit {unit_id} is unfinished or malformed")
+    if bad := disposition_offenders(cast(dict[str, Any], units)):
+        raise GraphError("work units have an illegal disposition: " + ", ".join(bad))
 
 
 def _validate_completion(

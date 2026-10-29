@@ -181,6 +181,12 @@ def report(graph: dict[str, Any], outcome: str = "done") -> dict[str, Any]:
     results: dict[str, Any] = {
         node: {"outcome": outcome, "evidence": "Focused behavior checks executed"} for node in wave["nodes"]
     }
+    if outcome == "done":  # dispatch records require a final_report on every done result
+        for result in results.values():
+            result["final_report"] = {
+                "claims": [{"text": "behavior checks ran", "label": "verified", "source": "fixture command: OK"}],
+                "did_not_verify": [],
+            }
     if outcome == "stale":
         for result in results.values():
             result["stale_check"] = {"checked": True, "method": "inspect native child", "result": "no terminal"}

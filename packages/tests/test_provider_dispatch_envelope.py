@@ -107,6 +107,7 @@ class DispatchEnvelopeTests(unittest.TestCase):
         """A faithful dispatch is allowed once and the record notes its authorization."""
 
         def case(provider: Provider) -> None:
+            provider.environment["CODERAILS_A6_EVIDENCE_WRITE"] = "off"
             self.assertFalse(self.verdict(provider, provider.request()))
             state = provider.read()
             record = next(iter(state["graph"]["dispatches"].values()))
@@ -317,7 +318,6 @@ class DispatchEnvelopeTests(unittest.TestCase):
         report = provider.launch()
         self.unauthorize(provider)
         provider.success("record-wave", json.dumps(report))
-
         missing = self.opened("claude")
         missing.environment = {**missing.environment, "CODERAILS_GRAPH_DISPATCH": "off"}
         report = missing.launch()

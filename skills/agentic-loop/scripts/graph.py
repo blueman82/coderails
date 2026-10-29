@@ -13,7 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import graph_convert
 import graph_repair
 import graph_spec
-from graph_vocab import STOP_CATEGORIES, STOP_REASON_CODES
+import worker_status
+from graph_vocab import DISPOSITION_KINDS, STOP_CATEGORIES, STOP_REASON_CODES, disposition_report
 
 from hooks.scripts.lib import graph_controller, graph_recovery, graph_stops
 from hooks.scripts.lib import graph_dispatch as dispatch
@@ -25,17 +26,20 @@ from scripts.lib import decision_record
 
 
 def add_unit_options(command: argparse.ArgumentParser) -> None:
-    """Add worker contract fields to the unit command."""
+    """Add worker contract and compatibility fields to the unit command."""
     command.add_argument("--unit", required=True)
     command.add_argument("--depends-on", action="append", default=[])
     command.add_argument("--join", action="store_true")
     command.add_argument("--manifest", action="append", default=[])
-    command.add_argument("--worktree")
     command.add_argument("--base-branch", help="remote branch used for first stacked publication")
+    command.add_argument("--worktree", help="absolute path of this unit's checkout")
     command.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
     command.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
     command.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
     command.add_argument("--scope", help="one-line scope statement for the worker")
+    command.add_argument("--disposition", choices=DISPOSITION_KINDS, help="clean-break | preserve-compat")
+    command.add_argument("--named-blocker", help="what blocks removal (preserve-compat only)")
+    command.add_argument("--removal-ticket", help="ticket that removes it (preserve-compat only)")
 
 
 def dispatch_options(command: argparse.ArgumentParser) -> None:
@@ -49,31 +53,13 @@ def parser() -> argparse.ArgumentParser:
     """Expose only current semantic operations and native completion checks."""
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
-    for name in (
-        "start",
-        "add-unit",
-        "assign-worktree",
-        "instantiate",
-        "inspect",
-        "summarize",
-        "collection",
-        "recover-wave",
-        "plan",
-        "begin-wave",
-        "record-wave",
-        "record-unit",
-        "record-decision",
-        "flush-decisions",
-        "record-repair",
-        "record-proof-disposition",
-        "respawn-stale",
-        "hard-stop",
-        "stop",
-        "authorize-dispatch",
-        "complete",
-        "verify-completion",
-        "convert",
-    ):
+    for name in (  # noqa: SIM905
+        "start add-unit assign-worktree set-unit-disposition instantiate "
+        "inspect summarize collection recover-wave plan "
+        "begin-wave record-wave record-unit record-decision flush-decisions "
+        "record-repair record-proof-disposition respawn-stale hard-stop stop "
+        "authorize-dispatch complete verify-completion convert disposition-audit"
+    ).split():
         command = commands.add_parser(name)
         command.add_argument("state", type=Path)
         if name == "record-wave":
@@ -102,7 +88,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--revision", required=True, type=int)
             command.add_argument("--disposition", required=True)
             command.add_argument("--reason", required=True)
-        if name in {"start", "add-unit", "assign-worktree", "instantiate"}:
+        if name in {"start", "add-unit", "assign-worktree", "set-unit-disposition", "instantiate"}:
             command.add_argument("--session", required=True)
             command.add_argument("--loop-id", required=True)
         if name == "instantiate":
@@ -115,6 +101,13 @@ def parser() -> argparse.ArgumentParser:
         if name == "assign-worktree":
             command.add_argument("--unit", required=True)
             command.add_argument("--worktree", required=True)
+        if name == "set-unit-disposition":
+            command.add_argument("--revision", required=True, type=int)
+            command.add_argument("--unit", required=True)
+            command.add_argument("--disposition", required=True, choices=DISPOSITION_KINDS, action="append")
+            command.add_argument("--named-blocker")
+            command.add_argument("--removal-ticket")
+            command.add_argument("--source-ref")
         if name == "recover-wave":
             command.add_argument("--lease-seconds", type=int, default=900)
             command.add_argument("--report-only", action="store_true")
@@ -142,6 +135,10 @@ def parser() -> argparse.ArgumentParser:
         if name in {"respawn-stale", "hard-stop"}:
             command.add_argument("--node", required=True)
             command.add_argument("--reason", required=True)
+        if name == "record-decision":
+            command.add_argument("--chosen", help="answer to a recorded worker status")
+            command.add_argument("--worker-status-seq", type=int, help="resolve this worker status with the decision")
+            command.add_argument("--human-answer", action="store_true", help="a human answered an approval-gate status")
         if name == "authorize-dispatch":
             dispatch_options(command)
     return result
@@ -299,19 +296,18 @@ def main() -> int:
         if args.command == "start":
             output: object = graph_controller.start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
-            fields = {"model_role": args.model_role, "write_scope": args.write_scope, "lessons": args.lesson}
-            output = graph_controller.add_unit(
-                args.state,
-                args.session,
-                args.loop_id,
-                args.unit,
-                args.depends_on,
-                args.join,
-                args.manifest,
-                {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
-            )
+            fields: dict[str, Any] = {"model_role": args.model_role, "write_scope": args.write_scope}
+            fields.update(lessons=args.lesson, disposition=(args.disposition, args.named_blocker, args.removal_ticket))
+            unit_args = (args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest)
+            contract = {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree}
+            output = graph_controller.add_unit(*unit_args, contract)
         elif args.command == "assign-worktree":
             output = graph_controller.assign_worktree(args.state, args.session, args.loop_id, args.unit, args.worktree)
+        elif args.command == "set-unit-disposition":
+            if len(args.disposition) != 1:
+                raise ValueError("[reason_code=set_disposition_refused] --disposition must occur exactly once")
+            args.disposition = args.disposition[0]
+            output = graph_controller.set_unit_disposition_args(args)
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "inspect":
@@ -325,6 +321,13 @@ def main() -> int:
             output = graph_recovery.summarize(load(args.state))
         elif args.command == "collection":
             output = graph_recovery.collection(args.state)
+        elif args.command == "disposition-audit":
+            report = disposition_report(load(args.state).get("work_units"))
+            output = report
+            if report["offenders"]:
+                print(json.dumps(report, sort_keys=True))
+                print("graph: preserve-compat units must carry a named blocker and removal ticket", file=sys.stderr)
+                return 1
         elif args.command == "recover-wave":
             output = dispatch.recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
         elif args.command == "plan":
@@ -349,6 +352,10 @@ def main() -> int:
                 flip_condition=args.flip_condition,
                 unit=args.unit,
                 cite_quote=args.cite_quote,
+                chosen=args.chosen,
+                worker_status_seq=args.worker_status_seq,
+                human_answer=args.human_answer,
+                status_resolver=worker_status.resolve_pending,
             )
         elif args.command == "flush-decisions":
             output = decision_record.flush_pending(

@@ -53,9 +53,12 @@ def dispatch_id(message: str) -> str:
     if len(first) > MAX_ENVELOPE_LINE:
         raise ValueError("graph dispatch envelope line exceeds its limit")
     try:
-        found = json.loads(first.split("=", 1)[1]).get("dispatch_id")
-    except (ValueError, AttributeError):
+        envelope: object = json.loads(first.split("=", 1)[1])
+    except ValueError:
         return ""
+    if not isinstance(envelope, dict):
+        raise ValueError("graph dispatch envelope must be an object")
+    found = cast(dict[str, object], envelope).get("dispatch_id")
     return found if isinstance(found, str) else ""
 
 
@@ -70,6 +73,14 @@ def _remaining_budget(deadline: float) -> float:
 def _bounded_graph_output(graph: Path, deadline: float, *arguments: str) -> dict[str, object] | None:
     """Spend the same hook budget on each graph command."""
     return graph_output(graph, *arguments, timeout_seconds=_remaining_budget(deadline))
+
+
+def _native_payload() -> dict[str, object]:
+    """Require a structured native hook payload before testing its tool identity."""
+    payload = payload_object(read_input())
+    if not payload:
+        raise ValueError("native hook payload is unavailable or invalid")
+    return payload
 
 
 def _refuse(code: str, message: str, session_id: object = None) -> None:
@@ -157,17 +168,14 @@ def _identity(payload: dict[str, object]) -> tuple[str, str] | None:
 
 
 def _check() -> int:
-    """Check one native spawn against graph ownership and its single-use dispatch record."""
     deadline = time.monotonic() + 7.0
-    payload = payload_object(read_input())
+    payload = _native_payload()
     if text_field(payload, "tool_name") not in ("spawn_agent", "collaborationspawn_agent"):
         deny("Codex graph workers must use native spawn_agent.")
         return 0
     tool_input = object_field(payload, "tool_input")
-    message = tool_input.get("message")
-    message = message if isinstance(message, str) else ""
-    task = tool_input.get("task_name")
-    task = task if isinstance(task, str) else ""
+    message = text_field(tool_input, "message")
+    task = text_field(tool_input, "task_name")
     enveloped = message.startswith(ENVELOPE_KEY + "=")
     graph_named = bool(GRAPH_TASK.fullmatch(task))
     if "agent_type" in tool_input and (
@@ -186,6 +194,10 @@ def _check() -> int:
         if enveloped or graph_named:
             _refuse("dispatch_graph_missing", "Graph worker dispatch requires this session's progress.json", session_id)
         return 0  # no loop owns this session: nothing to bind the spawn to
+    tool_use_id = text_field(payload, "tool_use_id")
+    if not tool_use_id:
+        deny("Graph worker dispatch requires a native tool-call id.")
+        return 0
     graph = graph_path()
     if not graph.is_file():
         _refuse(
@@ -231,7 +243,7 @@ def _check() -> int:
                 "--task-name",
                 task,
                 "--tool-use-id",
-                text_field(payload, "tool_use_id"),
+                tool_use_id,
             )
     except OSError:
         _trace_graph_refusal(state, inspection, "dispatch_message_unavailable")

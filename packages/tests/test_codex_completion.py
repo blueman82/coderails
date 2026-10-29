@@ -23,6 +23,7 @@ from graph_identity import GraphError
 from packages.tests.codex_fixture import (
     append,
     complete,
+    done_result,
     frozen_evals,
     read_json,
     spawn,
@@ -80,7 +81,7 @@ class CompletionTests(unittest.TestCase):
         self.child = spawn(parent, read_json(self.path))
         graph_dispatch.record_wave(
             self.path,
-            json.dumps({"wave_id": "wave-2", "results": {"U3[1]": {"outcome": "done", "evidence": "checked"}}}),
+            json.dumps({"wave_id": "wave-2", "results": {"U3[1]": done_result()}}),
         )
         suite: dict[str, Any] = frozen_evals() | {
             "verification_level": 0,
@@ -122,6 +123,7 @@ class CompletionTests(unittest.TestCase):
             verdict=verdict,
             cwd=str(Path.cwd()),
             head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            source_tree_sha=subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
             **(IDENTITY | identity),
         )
 

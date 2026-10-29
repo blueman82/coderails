@@ -28,6 +28,23 @@ class Provider:
         self.home = root / name
         self.home.mkdir()
         subprocess.run(["git", "init", "-q", str(self.home)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.home),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
+            check=True,
+        )
         config = self.home / ".coderails/workflow.config.yaml"
         config.parent.mkdir()
         config.write_text("memory:\n  backend: off\n")
@@ -81,7 +98,7 @@ class Provider:
             text=True,
             check=False,
             env=self.environment,
-            cwd=ROOT if operation in ("complete", "verify-completion") else self.home,
+            cwd=self.home,
         )
 
     def success(self, operation: str, *arguments: str) -> dict[str, Any]:
@@ -108,7 +125,7 @@ class Provider:
             if self.name == "claude":
                 claude.spawn(self.parent, state, identifier, completed=outcome == "done")
             else:
-                codex.spawn(self.parent, state, identifier, terminal=outcome != "stale")
+                codex.spawn(self.parent, state, identifier, terminal=outcome != "stale", state_path=self.path)
         return claude.report(state, outcome)
 
     def finish_wave(self, outcome: str = "done") -> dict[str, Any]:
@@ -176,8 +193,11 @@ class Provider:
             cmd_sha256=proof_results.sha("true"),
             proof_json_sha256=digest,
             verdict="satisfied",
-            cwd=str(ROOT),
-            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+            cwd=str(self.home),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.home, text=True).strip(),
+            source_tree_sha=subprocess.check_output(
+                ["git", "rev-parse", "HEAD^{tree}"], cwd=self.home, text=True
+            ).strip(),
             **identity,
         )
 
@@ -200,7 +220,11 @@ class Provider:
             request.update(tool_name="Agent", tool_input={"subagent_type": "general-purpose", "prompt": prompt})
         else:
             task = self.success("inspect")["task_names"][identifier]
-            request.update(tool_name="spawn_agent", tool_input={"task_name": task, "message": prompt})
+            request.update(
+                tool_name="spawn_agent",
+                tool_use_id=f"call-{task}",
+                tool_input={"task_name": task, "message": prompt},
+            )
         return request
 
     def hook(self, name: str, payload: dict[str, Any]) -> subprocess.CompletedProcess[str]:

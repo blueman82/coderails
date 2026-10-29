@@ -21,16 +21,9 @@ from hook_common import loop_state_path
 
 from scripts.lib.config_discovery import strict_config_path
 
-ENVELOPE = "CODERAILS_GRAPH_DISPATCH=" + json.dumps(
-    {
-        "envelope_version": 2,
-        "dispatch_id": "disp_1",
-        "session_id": "parent",
-        "loop_id": "loop",
-        "revision": 2,
-        "wave_id": "wave-2",
-        "node_id": "U3[1]",
-    }
+ENVELOPE = (
+    'CODERAILS_GRAPH_DISPATCH={"envelope_version":2,"dispatch_id":"disp_1","session_id":"parent",'
+    '"loop_id":"loop","revision":2,"wave_id":"wave-2","node_id":"U3[1]"}'
 )
 
 
@@ -52,6 +45,7 @@ class DispatchGuardTests(unittest.TestCase):
         }
         self.payload: dict[str, Any] = {
             "tool_name": "spawn_agent",
+            "tool_use_id": "call-spawn",
             "session_id": "parent",
             "cwd": str(self.state.parent),
             "tool_input": self.tool_input,
@@ -132,6 +126,12 @@ class DispatchGuardTests(unittest.TestCase):
             ],
         )
         self.assertEqual(self.message_file_text, self.tool_input["message"])
+        self.assertEqual(self.sent[0][-2:], ("--tool-use-id", "call-spawn"))
+
+    def test_graph_spawn_without_native_call_id_is_denied(self) -> None:
+        """An opaque transcript cannot be joined to a hook approval without the native call id."""
+        del self.payload["tool_use_id"]
+        self.assertEqual(self._run(), (True, 0))
 
     def test_native_collaboration_tool_name_reaches_authority(self) -> None:
         """Codex's automatic hook name routes the same native spawn to graph authorization."""
