@@ -11,14 +11,7 @@ from typing import Any, cast
 
 import worker_status
 
-API_ENV = {
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "CODEX_API_KEY",
-    "CODEX_ACCESS_TOKEN",
-    "OPENAI_BASE_URL",
-    "CODEX_AUTHAPI_BASE_URL",
-}
+PASS_ENV = ("PATH", "HOME", "CODEX_HOME", "TMPDIR", "LANG", "LC_ALL", "TERM")
 
 MODELS = {"fast-mechanical": "gpt-6-luna", "default": "gpt-6.1-sol", "frontier": "gpt-6-astra"}
 
@@ -122,7 +115,7 @@ def command(
             "--model",
             MODELS[model_role],
         ]
-        return argv, {key: value for key, value in os.environ.items() if key not in API_ENV}, prompt
+        return argv, {key: os.environ[key] for key in PASS_ENV if key in os.environ}, prompt
     else:
         for directory in (checkout.resolve(), *checkout.resolve().parents):
             if (directory / ".codex").exists():
@@ -154,7 +147,7 @@ def command(
         "-c",
         'model_provider="openai"',
     ]
-    return argv, {key: value for key, value in os.environ.items() if key not in API_ENV}, prompt
+    return argv, {key: os.environ[key] for key in PASS_ENV if key in os.environ}, prompt
 
 
 def _failed(code: str) -> dict[str, str]:

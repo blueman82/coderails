@@ -312,7 +312,7 @@ def drive_once(
             prompt = graph_driver_dispatch.write_prompt(
                 path, state, identifier, record, worker_checkout, provider, script
             )
-            prompt_bytes = prompt.read_bytes() if provider == "codex" else None
+            prompt_bytes = prompt.read_bytes()
             prepared = command(prompt, record) if record.get("authorized") is None else None
             if prepared is not None:
                 _graph(

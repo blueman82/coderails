@@ -11,7 +11,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from contextlib import nullcontext
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -111,7 +110,7 @@ def launch(worktree: str, prompt_file: str, model: str, *, driver: bool = False,
     """Prepare containment, acquire credentials externally, and stream the pinned child."""
     if not Path(worktree).is_dir():
         raise ValueError(f"worktree is not an existing directory: {worktree}")
-    if not Path(prompt_file).is_file():
+    if not driver and not Path(prompt_file).is_file():
         raise ValueError(f"prompt_file is not an existing file: {prompt_file}")
     if not driver:
         dispatch_guard(worktree, prompt_file, model)
@@ -170,26 +169,25 @@ def launch(worktree: str, prompt_file: str, model: str, *, driver: bool = False,
             log.write(header.encode())
             log.flush()
             print(header, end="", flush=True)
-        with Path(prompt_file).open("rb") if driver else nullcontext(None) as worker_input:
-            child = subprocess.Popen(
-                arguments,
-                cwd=worktree,
-                env=environment,
-                stdin=worker_input,
-                stdout=subprocess.PIPE,
-                stderr=errors if driver else subprocess.STDOUT,
-            )
-            if child.stdout is None:
-                raise RuntimeError("sandbox stdout pipe was not created")
-            while True:
-                chunk = os.read(child.stdout.fileno(), 65536)
-                if not chunk:
-                    break
-                log.write(chunk)
-                log.flush()
-                sys.stdout.buffer.write(chunk)
-                sys.stdout.buffer.flush()
-            code = child.wait()
+        child = subprocess.Popen(
+            arguments,
+            cwd=worktree,
+            env=environment,
+            stdin=sys.stdin.buffer if driver else None,
+            stdout=subprocess.PIPE,
+            stderr=errors if driver else subprocess.STDOUT,
+        )
+        if child.stdout is None:
+            raise RuntimeError("sandbox stdout pipe was not created")
+        while True:
+            chunk = os.read(child.stdout.fileno(), 65536)
+            if not chunk:
+                break
+            log.write(chunk)
+            log.flush()
+            sys.stdout.buffer.write(chunk)
+            sys.stdout.buffer.flush()
+        code = child.wait()
     if driver and (scratch / "worker.stderr.log").stat().st_size:
         print(f"sandbox worker stderr: {scratch / 'worker.stderr.log'}", file=sys.stderr)
     return code if code >= 0 else 128 - code
