@@ -18,7 +18,7 @@ import graph_semantics
 import graph_spec
 import graph_stops
 from graph_completion import complete, verify_completion
-from graph_controller import add_unit, assign_worktree, instantiate, start
+from graph_controller import add_unit, assign_worktree, instantiate, set_unit_disposition, start
 from graph_dispatch import apply_record as _apply_record
 from graph_dispatch import authorize_dispatch, begin_wave, record_wave
 from graph_identity import GraphError, next_attempt, task_name
@@ -65,37 +65,6 @@ def record_repair(
             raise GraphError(str(error)) from error
         _write(path, proposed)
         return report
-
-
-def record_proof_disposition(
-    path: Path, session: str, loop_id: str, revision: int, disposition: str, reason: str
-) -> dict[str, Any]:
-    """Save an owner's no-proof decision under the sole Codex state lock."""
-    inputs = {"session": session, "loop_id": loop_id, "revision": revision, "disposition": disposition}
-    with _locked(path):
-        state: dict[str, Any] = {}
-        try:
-            state = _load(path)
-            if state["session_id"] != session or state["loop_id"] != loop_id:
-                raise GraphError("wrong owner or loop")
-            if state["revision"] != revision:
-                raise GraphError("stale revision")
-            if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
-                raise GraphError("no-proof decision requires an idle in-progress loop")
-            if disposition != "none" or not reason.strip() or reason.strip().lower().startswith("none:"):
-                raise GraphError("disposition must be none with a nonblank reason and no prefix")
-            if path.with_name("proof.json").exists():
-                raise GraphError("proof.json exists; no-proof decision is invalid")
-            if state.get("proof_disposition") is not None:
-                raise GraphError("proof disposition is already recorded")
-            state["proof_disposition"] = f"none: {reason.strip()}"
-            graph_semantics.validate(state)
-            _write(path, state)
-        except (GraphError, graph_semantics.GraphSemanticError):
-            trace(path, state, "refused", "proof_disposition_refused", inputs, [], "record-proof-disposition")
-            raise
-        trace(path, state, "ok", "proof_disposition_recorded", inputs, [], "record-proof-disposition")
-        return {"proof_disposition": state["proof_disposition"], "revision": revision}
 
 
 def inspect(path: Path) -> dict[str, Any]:
@@ -193,14 +162,13 @@ def recover_wave(
 def _add_unit_args(controller: argparse.ArgumentParser, *, assign_only: bool = False) -> None:
     """Register work-unit ownership and disposition fields."""
     controller.add_argument("--unit", required=True)
+    controller.add_argument("--worktree", required=assign_only, help="absolute path of this unit's checkout")
     if assign_only:
-        controller.add_argument("--worktree", required=True)
         return
     controller.add_argument("--depends-on", action="append", default=[])
     controller.add_argument("--join", action="store_true")
     controller.add_argument("--manifest", action="append", default=[])
     controller.add_argument("--base-branch", help="remote branch used for first stacked publication")
-    controller.add_argument("--worktree", help="absolute path of this unit's checkout")
     controller.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
     controller.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
     controller.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
@@ -210,19 +178,28 @@ def _add_unit_args(controller: argparse.ArgumentParser, *, assign_only: bool = F
     controller.add_argument("--removal-ticket", help="ticket that removes it (preserve-compat only)")
 
 
+def _add_existing_disposition_args(controller: argparse.ArgumentParser) -> None:
+    controller.add_argument("--revision", required=True, type=int)
+    controller.add_argument("--disposition", required=True, choices=DISPOSITION_KINDS)
+    for flag in ("unit", "named-blocker", "removal-ticket", "source-ref"):
+        controller.add_argument(f"--{flag}", required=flag == "unit")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Operate one native Codex agentic-loop graph.")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("begin-wave", "inspect", "summarize", "collection"):
         command = commands.add_parser(name)
         command.add_argument("root" if name == "collection" else "state", type=Path)
-    for name in ("start", "add-unit", "assign-worktree"):
+    for name in ("start", "add-unit", "assign-worktree", "set-unit-disposition"):
         controller = commands.add_parser(name)
         controller.add_argument("state", type=Path)
         controller.add_argument("--session", required=True)
         controller.add_argument("--loop-id", required=True)
         if name == "start":
             controller.add_argument("--prompt-file", required=True, type=Path)
+        elif name == "set-unit-disposition":
+            _add_existing_disposition_args(controller)
         else:
             _add_unit_args(controller, assign_only=name == "assign-worktree")
     graph_ledger.add_parsers(commands.add_parser)
@@ -281,11 +258,9 @@ def _parser() -> argparse.ArgumentParser:
         repair.add_argument(f"--{field}", required=True)
     disposition = commands.add_parser("record-proof-disposition")
     disposition.add_argument("state", type=Path)
-    disposition.add_argument("--session", required=True)
-    disposition.add_argument("--loop-id", required=True)
+    for flag in ("session", "loop-id", "disposition", "reason"):
+        disposition.add_argument(f"--{flag}", required=True)
     disposition.add_argument("--revision", required=True, type=int)
-    disposition.add_argument("--disposition", required=True)
-    disposition.add_argument("--reason", required=True)
     for name in ("respawn_stale", "hard_stop"):
         transition = commands.add_parser(name.replace("_", "-"))
         transition.add_argument("state", type=Path)
@@ -325,6 +300,18 @@ def main() -> int:
             output = add_unit(*unit_args, contract)
         elif args.command == "assign-worktree":
             output = assign_worktree(args.state, args.session, args.loop_id, args.unit, args.worktree)
+        elif args.command == "set-unit-disposition":
+            output = set_unit_disposition(
+                args.state,
+                args.session,
+                args.loop_id,
+                args.revision,
+                args.unit,
+                args.disposition,
+                args.named_blocker,
+                args.removal_ticket,
+                args.source_ref,
+            )
         elif args.command == "instantiate":
             output = instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "begin-wave":
@@ -346,7 +333,7 @@ def main() -> int:
                 args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis
             )
         elif args.command == "record-proof-disposition":
-            output = record_proof_disposition(
+            output = graph_mutations.record_proof_disposition(
                 args.state, args.session, args.loop_id, args.revision, args.disposition, args.reason
             )
         elif args.command in {"stop", "consume-stop"}:
@@ -380,7 +367,7 @@ def main() -> int:
                 args.message_file,
                 args.agent_type,
                 args.task_name,
-                args.evals or args.state.with_name("evals.json"),
+                args.evals or args.state.parent / "evals.json",
                 args.tool_use_id,
             )
         elif args.command == "complete":

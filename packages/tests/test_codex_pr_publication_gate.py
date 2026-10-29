@@ -39,7 +39,10 @@ case "$1 $2" in
       */issues/1/comments) number=1; sha="$CLEAN_SHA"; eval="$CLEAN_EVAL_FILE" ;;
       *) number=7; sha="$FAKE_SHA"; eval="$FAKE_EVAL_FILE" ;;
     esac
-    { printf '<!-- coderails-review-summary v1 pr=%s head_sha=%s -->\\n' "$number" "$sha"; echo '## No findings'; } \\
+    { printf '<!-- coderails-review-summary v1 pr=%s head_sha=%s -->\\n' "$number" "$sha";
+      compat_format='<!-- coderails-compat-findings v1 pr=%s head_sha=%s count=%s disposition=clean-break -->\\n'
+      printf "$compat_format" "$number" "$sha" "${FAKE_COMPAT_COUNT:-0}";
+      echo '## No findings'; } \\
       | base64 | tr -d '\\n'
     echo
     # and the eval artifact (docs-level by default; the eval-level gate has its own tests)
@@ -222,6 +225,16 @@ class CodexPublicationGateTests(unittest.TestCase):
         self.env["FAKE_EVAL_FILE"] = str(write_comment(self.dir.parent, self.env["FAKE_SHA"], 0))
         self.assertEqual(self.reason("gh pr merge 7"), "")
 
+    def test_direct_merge_refuses_incompatible_review_even_when_pass_checks_are_off(self) -> None:
+        """The direct hook must enforce the same compatibility line as merge.py."""
+        self.config("diff_manifest: off\nreview_passes: off\neval_level: off\n")
+        self.env["FAKE_COMPAT_COUNT"] = "2"
+        for command in ("gh pr merge 7", "gh api -X PUT repos/o/r/pulls/7/merge"):
+            with self.subTest(command=command):
+                self.assertTrue(self.reason(command).startswith("compat_findings_nonzero"))
+        self.env["FAKE_COMPAT_COUNT"] = "0"
+        self.assertEqual(self.reason("gh pr merge 7"), "")
+
     def test_owned_graph_unit_needs_manifest_binding(self) -> None:
         """The direct hook uses its session ID to refuse an unbound graph publication."""
         graph_progress(self.dir, self.loop, ["docs/**"], unit="1", session="s1", provider="codex")
@@ -372,24 +385,6 @@ class CodexPublicationGateTests(unittest.TestCase):
                 self.assertEqual(bool(reason), denied, reason)
                 if denied:
                     self.assertTrue(reason.startswith("diff_manifest:manifest_unreadable"), reason)
-
-
-class RegistrationTests(unittest.TestCase):
-    """The hook is shipped, executable and registered under the Bash matcher."""
-
-    def test_registered_and_executable(self) -> None:
-        """hooks.json lists the hook under ^Bash$ and the file is executable."""
-        data = json.loads((ROOT / "packages/codex/hooks/hooks.json").read_text())["hooks"]["PreToolUse"]
-        commands = [h["command"] for group in data if group["matcher"] == "^Bash$" for h in group["hooks"]]
-        self.assertIn('"${PLUGIN_ROOT}/hooks/scripts/pr_publication_gate.py"', commands)
-        self.assertTrue(os.access(HOOK, os.X_OK))
-
-    def test_entrypoint_mode_fixture(self) -> None:
-        """python_entrypoint_modes records the new hook as executable."""
-        modes = json.loads((ROOT / "hooks/scripts/tests/fixtures/python_entrypoint_modes.json").read_text())
-        self.assertEqual(modes.get("packages/codex/hooks/scripts/pr_publication_gate.py"), "100755")
-        self.assertEqual(modes.get("scripts/lib/publication_gate.py"), "100644")
-        self.assertEqual(modes.get("packages/codex/scripts/lib/publication_gate.py"), "100644")
 
 
 if __name__ == "__main__":

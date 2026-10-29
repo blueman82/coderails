@@ -973,6 +973,11 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   unit is stored as `work_units[u].disposition = {kind, named_blocker?, removal_ticket?}` and is what the dispatch
   contract carries. `graph.py disposition-audit <state>` prints every unit's kind and exits 1 on a hand-edited unit that
   broke the rule; `complete` / `verify-completion` refuse the same unit on both providers (default ON, no switch).
+- For an existing pending unit with no choice, run `graph.py set-unit-disposition <state> --session S --loop-id L
+  --revision R --unit N --disposition preserve-compat --named-blocker TEXT --removal-ticket ISSUE
+  --source-ref URL` (or `clean-break` without blocker and ticket). The command requires the current revision and an
+  inactive wave. It records the source reference and a new revision. It refuses a second choice. Inspect the source
+  and choose the value before this command; the command does not prove that a source supports the choice.
 - `/coderails:merge` says `compat_findings_nonzero`: the posted review artifact carries a second line
   `<!-- coderails-compat-findings v1 pr=N head_sha=S count=K disposition=D -->` (built by
   `post_review.py compat-line <pr> <sha> --count K --disposition D`) with `disposition=clean-break` and `K > 0`. Remove the
@@ -980,6 +985,7 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   with a blocker and ticket. Posting a passing review on the same SHA cannot override an earlier refusing compat line.
   `compat_findings_malformed` means a line with that prefix is not exactly the typed form. `compat_findings_missing`
   means no line matches this PR and head; post a fresh artifact including the line, even for a zero count.
+  The Codex direct merge hook applies the same compatibility check, including when required review passes are off.
   The v1 review marker the root-owned integrity daemon matches is unchanged. Any refusing line for the
   head wins; the merge refusal is a stderr reason code, not a trace row (merge.py has no loop session).
 - Limits: `K` and `D` are the reviewer's own judgement, not a measurement, and a same-user agent can write any line, so

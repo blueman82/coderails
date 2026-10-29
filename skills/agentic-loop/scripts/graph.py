@@ -54,7 +54,8 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
     for name in (  # noqa: SIM905
-        "start add-unit assign-worktree instantiate inspect summarize collection recover-wave plan "
+        "start add-unit assign-worktree set-unit-disposition instantiate "
+        "inspect summarize collection recover-wave plan "
         "begin-wave record-wave record-unit record-decision flush-decisions "
         "record-repair record-proof-disposition respawn-stale hard-stop stop "
         "authorize-dispatch complete verify-completion convert disposition-audit"
@@ -87,7 +88,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--revision", required=True, type=int)
             command.add_argument("--disposition", required=True)
             command.add_argument("--reason", required=True)
-        if name in {"start", "add-unit", "assign-worktree", "instantiate"}:
+        if name in {"start", "add-unit", "assign-worktree", "set-unit-disposition", "instantiate"}:
             command.add_argument("--session", required=True)
             command.add_argument("--loop-id", required=True)
         if name == "instantiate":
@@ -100,6 +101,13 @@ def parser() -> argparse.ArgumentParser:
         if name == "assign-worktree":
             command.add_argument("--unit", required=True)
             command.add_argument("--worktree", required=True)
+        if name == "set-unit-disposition":
+            command.add_argument("--revision", required=True, type=int)
+            command.add_argument("--unit", required=True)
+            command.add_argument("--disposition", required=True, choices=DISPOSITION_KINDS)
+            command.add_argument("--named-blocker")
+            command.add_argument("--removal-ticket")
+            command.add_argument("--source-ref")
         if name == "recover-wave":
             command.add_argument("--lease-seconds", type=int, default=900)
             command.add_argument("--report-only", action="store_true")
@@ -295,6 +303,8 @@ def main() -> int:
             output = graph_controller.add_unit(*unit_args, contract)
         elif args.command == "assign-worktree":
             output = graph_controller.assign_worktree(args.state, args.session, args.loop_id, args.unit, args.worktree)
+        elif args.command == "set-unit-disposition":
+            output = graph_controller.set_unit_disposition_args(args)
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "inspect":
