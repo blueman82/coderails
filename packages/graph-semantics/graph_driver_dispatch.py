@@ -175,6 +175,8 @@ def prepare_prompt(
 ) -> Path:
     """Prepare an optional contained workspace before rendering and authorizing its path."""
     artifact = path.parent / "driver-evidence" / identifier
+    if artifact.parent.is_symlink() or artifact.is_symlink():
+        raise ValueError("driver artifact path is a symlink")
     if (artifact / "manifest.json").exists():
         return artifact / "prompt.txt"
     workspace = prepare(path, state, identifier, record, checkout) if prepare is not None else None

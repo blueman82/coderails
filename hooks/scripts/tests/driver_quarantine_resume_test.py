@@ -114,6 +114,10 @@ class QuarantineResumeTests(unittest.TestCase):
             if first is not None and len(list(attempts.glob("*/launch.json"))) == 2:
                 self.assertEqual(json.loads(run.stdout)["status"], "running")
                 self.assertEqual(json.loads((first / "transfer.json").read_bytes())["status"], "quarantined")
+                deadline = time.monotonic() + 3
+                while self.launches.read_text().splitlines() != ["first", "second"] and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertEqual(self.launches.read_text().splitlines(), ["first", "second"])
                 return first
         self.fail("two-worker wave never reached its partially observed state")
 
@@ -195,6 +199,31 @@ class QuarantineResumeTests(unittest.TestCase):
         self.assertEqual(self._destinations(), destinations)
         self.assertFalse((attempt / "launch.json").exists())
         self.assertFalse(self.launches.exists())
+
+    def _assert_sealed_symlink_refused(self, *, parent: bool) -> None:
+        first = self._partial_wave()
+        before, destinations = self.case.path.read_bytes(), self._destinations()
+        fixed = {name: (first / name).read_bytes() for name in ("manifest.json", "transfer.json")}
+        launches = self.launches.read_bytes()
+        original = first.parent if parent else first
+        retained = original.with_name("retained-" + original.name)
+        original.rename(retained)
+        original.symlink_to(retained, target_is_directory=True)
+        refused = self._drive()
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("driver artifact path is a symlink", refused.stderr)
+        self.assertEqual(self.case.path.read_bytes(), before)
+        self.assertEqual(self._destinations(), destinations)
+        self.assertEqual({name: (first / name).read_bytes() for name in fixed}, fixed)
+        self.assertEqual(self.launches.read_bytes(), launches)
+
+    def test_sealed_attempt_directory_symlink_still_refuses(self) -> None:
+        """A completed result cannot bypass the attempt-directory ownership boundary."""
+        self._assert_sealed_symlink_refused(parent=False)
+
+    def test_sealed_evidence_parent_symlink_still_refuses(self) -> None:
+        """A completed result cannot follow a redirected driver-evidence directory."""
+        self._assert_sealed_symlink_refused(parent=True)
 
 
 if __name__ == "__main__":
