@@ -40,3 +40,16 @@ The OAuth selector is supported by Codex CLI 0.165.0 and documented in the
 [OpenAI authentication reference](https://learn.chatgpt.com/docs/auth#enforce-a-login-method-or-workspace).
 Synthetic child probes establish source routing and credential filtering. They do not establish real OAuth login,
 native model execution, a genuine publication, or full-loop acceptance.
+
+The worker wrapper records `head_at_exit` in its existing `terminal.json` receipt after the child ends and before
+publishing that receipt atomically. The receipt token must match the launch record, and its exit code must match the
+worker result. The prepublication exit HEAD must match the receipt. The later manifest records the published checkout
+HEAD separately. A root commit after the child exits does not change
+the recorded exit HEAD. Before the manifest exists, equivalent JSON formatting is accepted; bound facts must match.
+After the manifest exists, its raw seal hash also detects representation changes.
+
+Before upgrading, finish pending publication with the runtime that created the attempt and retain its qualification
+limits and artifacts. A historical terminal receipt without a valid exit HEAD cannot prove that provenance. This version
+refuses its prepublication qualification. It does not backfill the field from the current checkout or select an older
+runtime automatically. Other retained paths that do not require prepublication provenance keep their existing checks.
+The receipt and seal are same-user evidence. Matching fields detect one-sided changes, not coordinated forgery.

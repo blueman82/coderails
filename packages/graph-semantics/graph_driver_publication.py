@@ -9,13 +9,14 @@ from pathlib import Path
 from typing import Any, cast
 
 
-def head(checkout: Path) -> str:
+def head(checkout: Path, *, timeout: float | None = None) -> str:
     """Read the exact commit at the worker checkout."""
     result = subprocess.run(
         ["git", "-C", str(checkout), "rev-parse", "--verify", "HEAD"],
         capture_output=True,
         text=True,
         check=False,
+        timeout=timeout,
     )
     head = result.stdout.strip()
     if result.returncode or not re.fullmatch(r"[0-9a-f]{40,64}", head):

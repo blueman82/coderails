@@ -116,7 +116,7 @@ def seal_pending(
     """Write once, then recheck, the attempt paused for its root-owned PR."""
     claim = _prepublication_claim(state_path, state, node_id, dispatch_id, checkout, provider, exit_code, result)
     path = _artifact(state_path, dispatch_id) / "prepublication.json"
-    graph_driver_prepublication.seal(path, claim, _head(checkout))
+    graph_driver_prepublication.seal(path, claim)
 
 
 def seal(

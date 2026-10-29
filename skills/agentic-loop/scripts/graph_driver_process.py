@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -14,6 +15,8 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
+
+from graph_driver_publication import head as checkout_head
 
 _CHILDREN: dict[str, subprocess.Popen[bytes]] = {}
 
@@ -52,6 +55,28 @@ def _read(path: Path) -> dict[str, Any] | None:
     except (OSError, ValueError):
         return None
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
+
+
+def exit_head(artifact: Path, exit_code: int) -> str:
+    """Read exit provenance only from this attempt's matching terminal receipt."""
+    if any((artifact / name).is_symlink() for name in ("launch.json", "terminal.json")):
+        raise ValueError("worker exit HEAD receipt is not a regular artifact")
+    launch, terminal = _read(artifact / "launch.json"), _read(artifact / "terminal.json")
+    if (
+        launch is None
+        or terminal is None
+        or launch.get("status") != "started"
+        or not isinstance(launch.get("token"), str)
+        or not launch["token"]
+        or terminal.get("token") != launch["token"]
+        or terminal.get("exit_code") != exit_code
+        or type(terminal.get("exit_code")) is not int
+    ):
+        raise ValueError("worker exit HEAD receipt is missing or foreign")
+    value = terminal.get("head_at_exit")
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{40,64}", value) is None:
+        raise ValueError("worker exit HEAD is unavailable; terminal receipt has no valid provenance")
+    return value
 
 
 def _live(pid: int, token: str, artifact: Path) -> bool:
@@ -203,11 +228,16 @@ def _worker(artifact: Path, token: str, cwd: Path, stdin_path: Path | None, comm
     except (OSError, ValueError):
         code = 127
     finally:
+        observed_head: str | None = None
+        try:
+            observed_head = checkout_head(cwd, timeout=5)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            observed_head = None
         stopped.set()
         pulse.join()
         if input_stream is not None:
             input_stream.close()
-    _write(artifact / "terminal.json", {"token": token, "exit_code": code})
+    _write(artifact / "terminal.json", {"token": token, "exit_code": code, "head_at_exit": observed_head})
     return code
 
 
