@@ -22,9 +22,7 @@ class DriverCompletionTests(unittest.TestCase):
         """Pending old nodes do not become a completed-native requirement."""
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "owned-state.json"
-            external = Path(directory) / "external"
-            external.mkdir()
-            evals_path = external / "evals.json"
+            evals_path = path.with_name("evals.json")
             old: dict[str, Any] = {
                 "session_id": "S",
                 "loop_id": "L",
@@ -53,7 +51,9 @@ class DriverCompletionTests(unittest.TestCase):
                 patch("graph_completion.validate_worker_evidence") as native,
                 patch("graph_completion.validate_completion_evidence"),
             ):
-                validate_completion_state(path, state, "S", 3, evals_path, path, path, None)
+                validate_completion_state(
+                    path, state, "S", 3, evals_path, path.with_name("proof.json"), path.with_name("retro.json"), None
+                )
             native.assert_called_once_with(old, require_complete=False)
 
 

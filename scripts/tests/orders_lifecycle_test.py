@@ -50,8 +50,7 @@ def progress(repo: Path, session: str, loop: str, status: str = "complete") -> P
 
 def retrospective(repo: Path, session: str, loop: str) -> Path:
     """A completed source-bound retrospective with the original schema-2 required fields."""
-    state_path = progress(repo, session, loop)
-    state = json.loads(state_path.read_text())
+    state = json.loads((state_path := progress(repo, session, loop)).read_text())
     retro: dict[str, Any] = {
         "schema_version": 2,
         "session_id": session,
@@ -384,7 +383,8 @@ class TypedInputs(StoreCase):
             with self.subTest(field=field):
                 self.assertEqual(ol.retro_count(repo), 0)
         path.write_text(json.dumps({**original, "schema_version": 3}))
-        with self.assertRaisesRegex(ValueError, "order_retro_validator_unavailable"):
+        self.assertEqual(ol.retro_count(repo), 0)
+        with mock.patch.object(lifecycle, "RETRO_CHECK", None), self.assertRaisesRegex(ValueError, "unavailable"):
             ol.retro_count(repo)
 
     def test_duplicate_record_cannot_rejuvenate_an_aged_order(self) -> None:

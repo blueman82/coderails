@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.lib.loop_proofs import validate_proofs
+from scripts.lib import handoff_derive, retro_check
 from scripts.lib import proof_results as pr
 from scripts.lib import proof_suite as suite
 
@@ -199,6 +200,31 @@ class SupersessionTests(unittest.TestCase):
         self.assertEqual(self.cli(RUNNERS[0], "run", str(self.state), "--all").returncode, 0)
         self.assertEqual(self.gate(), "")
         self.assertEqual(self.codex_gate().returncode, 0)
+
+    def test_retro_and_handoff_report_only_the_selected_proof_run(self) -> None:
+        """A prior successful run cannot appear under a replacement suite."""
+        original = json.loads((self.state / "proof.json").read_text())
+        results = self.state / pr.RESULTS_NAME
+        pr.append(results, kind="freeze", proof_json_sha256=pr.doc_sha(original), **self.identity)
+        run = {
+            "kind": "run",
+            "cmd_sha256": pr.sha("true"),
+            "verdict": "satisfied",
+            "cwd": str(ROOT),
+            "head_sha": "0" * 40,
+            **self.identity,
+        }
+        pr.append(results, proof_id="OLD", proof_json_sha256=pr.doc_sha(original), **run)
+        self.assertEqual(self.supersede(RUNNERS[0]).returncode, 0)
+        self.assertEqual(retro_check.proof_summary(self.state, self.identity)["verdicts"], {})
+        degraded: list[dict[str, str]] = []
+        recorded, pending = handoff_derive.proof_lines(self.state, self.identity, degraded)
+        self.assertEqual((recorded, pending, degraded), (["proof NEW: unexecuted"], ["proof NEW: unexecuted"], []))
+        selected, _, _ = self.active()
+        assert selected is not None
+        pr.append(results, proof_id="NEW", proof_json_sha256=pr.doc_sha(selected), **run)
+        self.assertEqual(retro_check.proof_summary(self.state, self.identity)["verdicts"], {})
+        self.assertEqual(handoff_derive.proof_lines(self.state, self.identity, degraded)[0], ["proof NEW: unexecuted"])
 
     def test_tampered_original_candidate_evidence_and_chain_block(self) -> None:
         """Every bound file and the hash chain must retain its recorded bytes."""

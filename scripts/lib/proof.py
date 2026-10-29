@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Controller-run proofs: freeze proof.json, execute each frozen cmd verbatim, record chained results.
-
-Usage:
-  proof.py freeze <state-dir>
-  proof.py run <state-dir> [--id ID | --all]
-  proof.py status <state-dir>
-  proof.py disposition <state-dir> --none --reason-code CODE --reason TEXT
-  proof.py supersede <state-dir> --candidate PATH --reason TEXT --original-sha256 SHA --author-evidence PATH
-
-<state-dir> holds proof.json and progress.json; rows go to proof_results.jsonl. Exit 0 ok, 1 unsatisfied, 2 refused.
-"""
+"""Run frozen proofs with SHA-bound results; exit 0 satisfied, 1 unsatisfied, 2 refused."""
 
 from __future__ import annotations
 
@@ -33,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.lib.destructive_patterns import permanent_pattern, secret_path  # noqa: E402
 from scripts.lib import proof_results as pr  # noqa: E402
 from scripts.lib import proof_suite as suite  # noqa: E402
+from scripts.lib import teardown_steps  # noqa: E402
 from scripts.lib.proof_runtime import git_environment, runtime_argv, source_snapshot, trusted_executable  # noqa: E402
 from scripts.lib.proof_suite import items, validate  # noqa: E402
 
@@ -318,6 +309,10 @@ def cmd_run(state_dir: Path, wanted: str | None) -> int:
         print(json.dumps({"id": entry["id"], "verdict": verdict}))
         if verdict != "satisfied" and not withdrawn:
             status = 1
+    if wanted is None and status == 0:  # a full, clean run is the teardown step; `--id` runs and failures are not
+        teardown_steps.record(
+            state_dir, "proof_run", str(who[0]), cast("str | None", who[1]), teardown_steps.file_sha(path)
+        )
     return status
 
 
@@ -354,8 +349,9 @@ def cmd_disposition(state_dir: Path, code: str, reason: str) -> int:
         )
         return 2
     who = _identity(state_dir, {})
+    result_path = state_dir / pr.RESULTS_NAME
     pr.append(
-        state_dir / pr.RESULTS_NAME,
+        result_path,
         kind="disposition",
         session_id=who[0],
         loop_id=who[1],
@@ -365,6 +361,9 @@ def cmd_disposition(state_dir: Path, code: str, reason: str) -> int:
         ended=_now(),
     )
     pr.trace("proof.freeze", "disposition", "", *who)
+    teardown_steps.record(
+        state_dir, "proof_run", str(who[0]), cast("str | None", who[1]), teardown_steps.file_sha(result_path)
+    )  # the typed disposition resolves the proof stage
     return 0
 
 

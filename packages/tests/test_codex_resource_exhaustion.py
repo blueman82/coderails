@@ -6,6 +6,7 @@ import contextlib
 import errno
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -65,6 +66,21 @@ class ResourceExhaustionTests(unittest.TestCase):
         with patch("subprocess.run", side_effect=OSError(errno.ENOENT, "missing")):
             self.assertIsNone(hook_common.graph_output(self.graph, "inspect", str(self.state)))
 
+    def test_completion_error_code_is_bounded_and_known(self) -> None:
+        """Only the known retro refusal code may reach a Stop reason."""
+        codes: list[str] = []
+        for stderr, expected in (
+            ("graph: retro_memory_invalid: bad count\n", ["retro_memory_invalid"]),
+            ("graph: unknown_code: " + "x" * 4096, []),
+        ):
+            with (
+                self.subTest(stderr=stderr[:40]),
+                patch("subprocess.run", return_value=subprocess.CompletedProcess([], 1, "", stderr)),
+            ):
+                self.assertIsNone(hook_common.graph_output(self.graph, "verify-completion", failure_code=codes))
+                self.assertEqual(codes, expected)
+            codes.clear()
+
     def test_stop_hook_reports_resource_exhaustion_not_invalid_state(self) -> None:
         """Both inspect and verify-completion failures yield the resource message."""
         payload = {"session_id": "s", "cwd": "/x", "last_assistant_message": "done"}
@@ -78,7 +94,7 @@ class ResourceExhaustionTests(unittest.TestCase):
         self.assertNotIn("is invalid", reason)
         calls = iter([{"session_id": "s", "hard_stop": None}])
 
-        def second_call(*_: object) -> object:
+        def second_call(*_: object, **__: object) -> object:
             try:
                 return next(calls)
             except StopIteration:

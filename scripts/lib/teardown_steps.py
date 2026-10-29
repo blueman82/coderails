@@ -1,0 +1,288 @@
+"""teardown.jsonl: the append-only record of which Phase 13 teardown steps really ran (provider-neutral).
+
+A sibling of progress.json, deliberately: it needs no progress.json lock and no graph code. One row per step,
+`{step, ts, session_id, loop_id, evidence_sha256}`, published under the shared teardown lock. `proof.py run --all`,
+`orders.py prepare`, `decision_record.flush_pending` and `retro.py assemble` each record their own step; `orders.py`
+`tick` records the post-completion apply observation. A step whose
+latest row carries the same evidence is not appended twice, so a repeat run is idempotent. Cooperating-agent safeguard:
+a same-user agent can append a row by hand; the rows prove the commands ran only as far as the evidence hash they
+carry, which `retro.py assemble` binds into the retro.
+"""
+
+from __future__ import annotations
+
+import datetime
+import fcntl
+import hashlib
+import json
+import math
+import os
+import runpy
+import stat
+import uuid
+from contextlib import suppress
+from pathlib import Path
+from typing import Any, cast
+
+NAME = "teardown.jsonl"
+STEPS = (
+    "proof_run",
+    "decisions_flushed",
+    "orders_prepared",
+    "retro_assembled",
+    "orders_ticked",
+    "orders_rendered",
+    "lessons_written",
+)
+REQUIRED = STEPS[:4]  # orders_ticked is a post-completion apply observation; lessons_written is optional
+
+
+def normalize_consumed_complete_stop(state: dict[str, Any]) -> None:
+    """Undo only the final same-revision complete Stop hook consumption for D4 source checks."""
+    if state.get("status") != "complete":
+        return
+    stops: object = state.get("stops")
+    if (
+        not isinstance(stops, list)
+        or not stops
+        or not all(isinstance(row, dict) for row in cast("list[object]", stops))
+    ):
+        return
+    last = cast("dict[str, Any]", stops[-1])
+    previous = cast("list[dict[str, Any]]", stops[:-1])
+    if (
+        set(last) != {"seq", "category", "reason_code", "reason", "revision", "consumed", "at"}
+        or last.get("category") != "complete"
+        or last.get("consumed") is not True
+        or type(last.get("revision")) is not int
+        or last["revision"] != state.get("revision")
+        or type(last.get("seq")) is not int
+        or any(type(row.get("seq")) is not int for row in previous)
+        or last["seq"] != max((row["seq"] for row in previous), default=0) + 1
+        or not isinstance(last.get("reason_code"), str)
+        or not last["reason_code"].strip()
+        or not isinstance(last.get("reason"), str)
+        or not last["reason"].strip()
+        or type(last.get("at")) not in (int, float)
+        or not math.isfinite(last["at"])
+    ):
+        return
+    last["consumed"] = False
+
+
+def as_list(value: object) -> list[Any]:
+    """Return value as a list, or [] when it is not one (a hand-edited state never raises here)."""
+    return list(value) if isinstance(value, list) else []  # pyright: ignore[reportUnknownArgumentType]
+
+
+def sha_json(value: object) -> str:
+    """sha256 of the canonical JSON of value."""
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def file_sha(path: Path) -> str | None:
+    """sha256 of the file bytes, or None when the file is absent."""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def read_rows(state_dir: Path) -> list[dict[str, Any]]:
+    """Every parsed row; ValueError('teardown_unreadable') for a torn line or a row naming an unknown step."""
+    try:
+        lines = (state_dir / NAME).read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    except OSError as error:
+        raise ValueError("teardown_unreadable") from error
+    return _parse_rows(lines)
+
+
+def read_rows_fd(state_fd: int) -> list[dict[str, Any]]:
+    """Read receipt rows without following a path outside the held state directory."""
+    try:
+        data = _read_member(state_fd, NAME)
+    except FileNotFoundError:
+        return []
+    except OSError as error:
+        raise ValueError("teardown_unreadable") from error
+    try:
+        return _parse_rows(data.decode("utf-8").splitlines())
+    except UnicodeError as error:
+        raise ValueError("teardown_unreadable") from error
+
+
+def _parse_rows(lines: list[str]) -> list[dict[str, Any]]:
+    """Parse receipt lines from either a path read or an opened state directory."""
+    rows: list[dict[str, Any]] = []
+    for line in lines:
+        try:
+            value: object = json.loads(line)
+        except ValueError as error:
+            raise ValueError("teardown_unreadable") from error
+        if not isinstance(value, dict) or cast("dict[str, Any]", value).get("step") not in STEPS:
+            raise ValueError("teardown_unreadable")
+        rows.append(cast("dict[str, Any]", value))
+    return rows
+
+
+def open_state_dir(state_dir: Path) -> int:
+    """Open each directory component; allow only fixed root-owned system aliases."""
+    if ".." in state_dir.parts:
+        raise OSError("state directory traversal")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parts = list(state_dir.absolute().parts[1:])
+    descriptor = os.open("/", flags)
+    current = Path("/")
+    links = 0
+    try:
+        while parts:
+            part = parts.pop(0)
+            try:
+                child = os.open(part, flags, dir_fd=descriptor)
+            except OSError:
+                link = os.stat(part, dir_fd=descriptor, follow_symlinks=False)
+                parent = os.fstat(descriptor)
+                if (
+                    not stat.S_ISLNK(link.st_mode)
+                    or link.st_uid != 0
+                    or parent.st_uid != 0
+                    or parent.st_mode & 0o022
+                    or links >= 8
+                ):
+                    raise
+                target = os.readlink(part, dir_fd=descriptor)
+                alias = Path(target) if os.path.isabs(target) else current / target
+                parts = list(Path(os.path.abspath(alias)).parts[1:]) + parts
+                os.close(descriptor)
+                descriptor = os.open("/", flags)
+                current = Path("/")
+                links += 1
+                continue
+            os.close(descriptor)
+            descriptor = child
+            current /= part
+        return descriptor
+    except OSError:
+        os.close(descriptor)
+        raise
+
+
+def _read_member(state_fd: int, name: str) -> bytes:
+    """Read one regular, singly linked file relative to the held state directory."""
+    descriptor = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=state_fd)
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError("unsafe state file")
+        return stream.read()
+
+
+def _replace_receipt(state_fd: int, data: bytes) -> None:
+    """Replace the receipt inode so a newly added hard link cannot receive a write."""
+    temporary = f".{NAME}.{uuid.uuid4().hex}.tmp"
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=state_fd)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, NAME, src_dir_fd=state_fd, dst_dir_fd=state_fd)
+    finally:
+        with suppress(FileNotFoundError):
+            os.unlink(temporary, dir_fd=state_fd)
+
+
+def steps_done(rows: list[dict[str, Any]]) -> list[str]:
+    """Step names ordered by their latest receipt so a refreshed preparation can supersede stale history."""
+    latest: dict[str, int] = {}
+    for index, row in enumerate(rows):
+        latest[row["step"]] = index
+    return sorted(latest, key=latest.__getitem__)
+
+
+def hashed_view(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows the retro binds; post-completion apply observations may land after assembly."""
+    return [r for r in rows if r["step"] in REQUIRED]
+
+
+def order_problem(done: list[str]) -> str:
+    """'' when the required steps are all present in canonical order, else a short description."""
+    missing = [s for s in REQUIRED if s not in done]
+    if missing:
+        return "missing " + ", ".join(missing)
+    positions = [done.index(s) for s in REQUIRED]
+    if positions != sorted(positions):
+        return "out of order (expected " + " < ".join(REQUIRED) + "; got " + " < ".join(done) + ")"
+    return ""
+
+
+def _trace(step: str, session_id: str, loop_id: str | None) -> None:
+    """Fail-open trace row `teardown.step` (hooks/scripts/lib/trace_row.py of this layout)."""
+    try:
+        path = Path(__file__).resolve().parents[2] / "hooks/scripts/lib/trace_row.py"
+        runpy.run_path(str(path))["append_row"](
+            "teardown.step", "recorded", "ok", session_id or "teardown-nosession", loop_id, {"step": step}
+        )
+    except Exception:  # noqa: BLE001  fail open: tracing never blocks teardown
+        return
+
+
+def record(state_dir: Path, step: str, session_id: str, loop_id: str | None, evidence_sha256: str | None) -> bool:
+    """Append one row unless its matching receipt is current; never raises."""
+    if step not in STEPS:
+        return False
+    try:
+        if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+            return False
+        state_fd = open_state_dir(state_dir)
+        try:
+            progress = _read_member(state_fd, "progress.json")
+            lock_fd = os.open(
+                NAME + ".lock", os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | os.O_NOFOLLOW, 0o644, dir_fd=state_fd
+            )
+            try:
+                lock_info = os.fstat(lock_fd)
+                if not stat.S_ISREG(lock_info.st_mode) or lock_info.st_nlink != 1:
+                    return False
+                fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                try:
+                    try:
+                        prior = _read_member(state_fd, NAME)
+                    except FileNotFoundError:
+                        prior = b""
+                    rows = _parse_rows(prior.decode("utf-8").splitlines())
+                    if loop_id is None:
+                        loaded: object = json.loads(progress.decode("utf-8"))
+                        loop_id = (
+                            str(cast("dict[str, Any]", loaded).get("loop_id")) if isinstance(loaded, dict) else None
+                        )
+                    latest = [r for r in rows if r["step"] == step]
+                    if latest and latest[-1].get("evidence_sha256") == evidence_sha256:
+                        proof_after_flush = step == "decisions_flushed" and max(
+                            (i for i, row in enumerate(rows) if row["step"] == "proof_run"), default=-1
+                        ) > max((i for i, row in enumerate(rows) if row["step"] == "decisions_flushed"), default=-1)
+                        if not proof_after_flush:
+                            return False
+                    row = {
+                        "step": step,
+                        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+                        "session_id": session_id,
+                        "loop_id": loop_id,
+                        "evidence_sha256": evidence_sha256,
+                    }
+                    separator = b"\n" if prior and not prior.endswith(b"\n") else b""
+                    row_bytes = (json.dumps(row, sort_keys=True) + "\n").encode("utf-8")
+                    _replace_receipt(state_fd, prior + separator + row_bytes)
+                finally:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            finally:
+                os.close(lock_fd)
+        finally:
+            os.close(state_fd)
+    except (OSError, UnicodeError, ValueError):
+        return False
+    _trace(step, session_id, loop_id)
+    return True

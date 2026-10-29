@@ -118,6 +118,7 @@ def main() -> int:
     if recorded is not None and recorded.get("stop") is not None:  # the recorded row decides; final text is unread
         log(f"hook=graph_completion_guard session={session_id} recorded_stop=consumed blocked=0")
         return 0
+    failure_code: list[str] = []
     try:
         verified = (
             graph_output(
@@ -134,6 +135,7 @@ def main() -> int:
                 str(state.parent / "retro.json"),
                 "--transcript",
                 text_field(payload, "transcript_path"),
+                failure_code=failure_code,
             )
             is not None
         )
@@ -144,8 +146,9 @@ def main() -> int:
         return 0
     append_trace_row("graph_completion_guard", "blocked", "stop_row_missing", session_id)
     if not unresolved(state):
+        code = " (retro_memory_invalid)" if failure_code else ""
         continue_turn(
-            "The native Codex graph passed graph checks but completion evidence is invalid. "
+            f"The native Codex graph passed graph checks but completion evidence is invalid{code}. "
             "Repair evals, proof, retro, or standing-orders teardown evidence before stopping."
         )
         return 0

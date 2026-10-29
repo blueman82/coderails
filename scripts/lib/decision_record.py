@@ -1,29 +1,18 @@
 #!/usr/bin/env python3
-"""Typed, hash-chained loop decisions: the only writer of `decisions_absorbed`, synced to Muninn (provider-neutral).
+"""Write hash-chained loop decisions and sync them to Muninn for either provider.
 
-A decision row is `{seq, phase, decision, flip_condition, unit, revision, ts, prev_sha256, row_sha256, muninn}`; the
-dashboard's `{phase, decision}` keys are unchanged. `row_sha256` covers every field except `muninn` and itself, and
-`prev_sha256` names the previous row's hash (64 zeros for the first hashed row), so an edited, dropped, swapped or
-unhashed row is named by `verify_chain`. Cooperating-agent safeguard: a same-user agent can rewrite the file and
-recompute the whole chain; this is tamper-evidence, not a security boundary, and dropping the LAST row is undetectable.
-The `muninn` field is OUTSIDE the hash: a same-user agent can set `{state: written}` by hand and `flush_pending`
-will not retry it, so "synced to Muninn" is unauthenticated here; check the id against Muninn `list_records`.
-Entry point for both graph CLIs (`graph.py record-decision`), `transition(path, fn)` being the provider's lock wrapper
-(Claude `hooks.scripts.lib.graph_executor.transition`; Codex `graph_io.locked/load/write` wrapped to the same shape):
+Each row keeps phase and decision for the dashboard. Its hash covers all fields except
+the hash itself and `muninn`. A prior hash links the rows. `verify_chain` finds edits,
+missing middle rows, and changed order. A same-user agent can rewrite the whole chain
+or remove its last row. It can also set `muninn.state` to `written`; verify a claimed
+Muninn id with `list_records`. This check does not authenticate the writer.
 
-    out = record(path, session, phase, decision, expected_loop_id=loop_id,
-                 expected_revision=revision, transition=transition, flip_condition=fc, unit=unit)
-    print(json.dumps(out))
-    return out["exit_code"]
-
-`record` appends a local `syncing` row first under the lock (the authoritative loop record is never lost), calls
-Muninn outside the lock, then patches `muninn` under the lock again. exit_code: 0 written or disabled, 3 degraded
-or unknown (reason code printed, local row kept), 2 refused (nothing written). `flush_pending` claims only pending
-or safely degraded rows under the lock before retry. A crash or ambiguous external result leaves `syncing`/`unknown`;
-automatic retry stops with `decision_sync_unknown` until a human reconciles the Muninn store. Muninn refuses an
-approval-only citation and an
-agent cannot cite itself, so the cite is a quote of `authorising_prompt_raw` unless the caller passes a substantive
-user `cite_quote`; a short prompt such as "yes" stays a visible degrade. Never falls back to Markdown.
+Both graph CLIs call `record` with a provider transition function. The function first
+writes a `syncing` row under the graph lock. It calls Muninn outside that lock, then
+writes the result under the lock. Exit code 0 means written or disabled; 3 means
+degraded or unknown; 2 means refused. `flush_pending` retries pending and safe
+degraded rows. An ambiguous result stays `syncing` or `unknown` until it is resolved.
+A citation needs a user prompt or quote. Short approval text can degrade the sync.
 """
 
 from __future__ import annotations
@@ -42,6 +31,7 @@ from typing import Any, Optional, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
 from scripts.lib import memory_adapter as ma  # noqa: E402
+from scripts.lib import teardown_steps  # noqa: E402
 
 GENESIS = "0" * 64
 HASH_EXCLUDED = ("row_sha256", "muninn")
@@ -397,4 +387,12 @@ def flush_pending(
             _trace("decision.flush", "degraded", "decision_sync_unknown", session, str(state.get("loop_id")))
             return {"synced": synced, "reason_code": "decision_sync_unknown", "exit_code": 3}
         synced.append({"seq": row["seq"], "muninn": field})
+    final = transition(path, lambda s: s)  # evidence = the rows as they stand after the retries
+    teardown_steps.record(
+        path.parent,
+        "decisions_flushed",
+        session,
+        final.get("loop_id"),
+        teardown_steps.sha_json(final.get("decisions_absorbed")),
+    )
     return {"synced": synced, "exit_code": 3 if any(_exit_code(x["muninn"]) == 3 for x in synced) else 0}

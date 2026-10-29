@@ -12,6 +12,7 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages/codex/skills/agentic-loop/scripts"))
 from hooks.scripts.tests.claude_graph_test_support import node
+from hooks.scripts.tests.lib import assembled_retro
 from hooks.scripts.tests.lib import claude_transcript_fixture as claude
 from packages.tests import codex_fixture as codex
 from scripts.lib import proof_results
@@ -27,6 +28,7 @@ class Provider:
         self.name = name
         self.home = root / name
         self.home.mkdir()
+        self.checkout = self.home
         subprocess.run(["git", "init", "-q", str(self.home)], check=True)
         subprocess.run(
             [
@@ -72,8 +74,12 @@ class Provider:
     def state(self, identifiers: tuple[str, ...] = ("U3[1]",)) -> dict[str, Any]:
         """Return a current state using stable semantic IDs and native session identity."""
         value = claude.state(0)
-        value.update(session_id=self.session, loop_id="fixture-loop")
-        value.update(created="2026-10-24T10:00:00+00:00", authorising_prompt_raw="Run this bounded provider test.")
+        value.update(
+            session_id=self.session,
+            loop_id="fixture-loop",
+            created="2026-10-19T00:00:00+00:00",
+            authorising_prompt_raw="Complete the fixture loop with verified evidence.",
+        )
         value["graph"]["nodes"] = {identifier: node(identifier) for identifier in identifiers}
         return value
 
@@ -99,7 +105,7 @@ class Provider:
             text=True,
             check=False,
             env=self.environment,
-            cwd=self.home,
+            cwd=self.checkout,
         )
 
     def success(self, operation: str, *arguments: str) -> dict[str, Any]:
@@ -182,7 +188,6 @@ class Provider:
             "withdrawn_proofs": [],
         }
         self.write(document, "proof.json")
-        self.write({**identity, "schema_version": 1, "status": "complete"}, "retro.json")
         results = self.path.with_name(proof_results.RESULTS_NAME)
         results.unlink(missing_ok=True)
         digest = proof_results.doc_sha(document)
@@ -194,13 +199,14 @@ class Provider:
             cmd_sha256=proof_results.sha("true"),
             proof_json_sha256=digest,
             verdict="satisfied",
-            cwd=str(self.home),
-            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.home, text=True).strip(),
+            cwd=str(self.checkout),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.checkout, text=True).strip(),
             source_tree_sha=subprocess.check_output(
-                ["git", "rev-parse", "HEAD^{tree}"], cwd=self.home, text=True
+                ["git", "rev-parse", "HEAD^{tree}"], cwd=self.checkout, text=True
             ).strip(),
             **identity,
         )
+        assembled_retro.write(self.path.parent, identity["session_id"])  # last: the retro binds every source above
 
     def complete(self) -> subprocess.CompletedProcess[str]:
         """Run each provider's native completion options without sharing runtime code."""
@@ -237,5 +243,5 @@ class Provider:
             text=True,
             check=False,
             env=self.environment,
-            cwd=ROOT if name == "graph_completion_guard" else self.home,
+            cwd=self.checkout,
         )

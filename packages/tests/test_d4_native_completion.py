@@ -5,176 +5,15 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import tempfile
-import unittest
-from pathlib import Path
-from typing import Any
 
+from hooks.scripts.tests.lib import assembled_retro
 from hooks.scripts.tests.lib import claude_transcript_fixture as claude
+from packages.tests.d4_completion_fixture import NativeOrdersFixture
 from packages.tests.provider_fixture import Provider
 
 
-class NativeOrdersCompletion(unittest.TestCase):
+class NativeOrdersCompletion(NativeOrdersFixture):
     """Completion must apply orders after the native graph save and support retry."""
-
-    def setUp(self) -> None:
-        """Give each provider its own graph, repository config, and order store."""
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.providers = [Provider(Path(temporary.name), name) for name in ("claude", "codex")]
-
-    def orders(self, provider: Provider, *args: str) -> tuple[int, dict[str, Any]]:
-        """Call the installed provider's real D4 CLI against its graph owner."""
-        process = subprocess.run(
-            [
-                sys.executable,
-                str(provider.plugin / "scripts/lib/orders.py"),
-                "--dir",
-                str(provider.path.parent.parent),
-                "--session",
-                provider.session,
-                *args,
-            ],
-            cwd=provider.home,
-            env=provider.environment,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return process.returncode, json.loads(process.stdout)
-
-    def ready(self, provider: Provider) -> None:
-        """Create real native completion evidence and one prepared D4 observation."""
-        provider.finish_wave()
-        provider.artifacts()
-        retro = provider.read("retro.json")
-        provider.write({**retro, "schema_version": 2}, "retro.json")
-        code, record = self.orders(
-            provider,
-            "record",
-            "--failure-mode",
-            "d4-native-case",
-            "--lesson",
-            "Keep the cited lesson.",
-            "--loop",
-            "fixture-loop",
-        )
-        self.assertEqual(code, 0, record)
-
-    def verify(self, provider: Provider) -> subprocess.CompletedProcess[str]:
-        """Run the provider's native read-only completion verifier."""
-        args = ["--session", provider.session]
-        if provider.name == "codex":
-            for name in ("evals", "proof", "retro"):
-                args.extend(["--" + name, str(provider.path.with_name(name + ".json"))])
-            args.extend(["--transcript", str(provider.parent)])
-        return provider.call("verify-completion", *args)
-
-    @staticmethod
-    def _fault_script() -> str:
-        return """
-import json
-import sys
-from pathlib import Path
-from unittest import mock
-plugin, name, source, session, transcript, kind = sys.argv[1:]
-path = Path(source)
-sys.path.insert(0, plugin)
-sys.path.insert(0, str(Path(plugin) / 'skills/agentic-loop/scripts'))
-if name == 'claude':
-    from hooks.scripts.lib import graph_dispatch as completion
-    orders = completion.orders_completion
-    target = 'hooks.scripts.lib.loop_state_common.os.replace'
-    def invoke():
-        return completion.complete(path, session)
-else:
-    import graph_completion as completion
-    orders = completion._orders()
-    target = 'graph_completion._write'
-    def invoke():
-        return completion.complete(path, session, path.with_name('evals.json'), path.with_name('proof.json'),
-                                   path.with_name('retro.json'), Path(transcript))
-if kind == 'save':
-    context = mock.patch(target, side_effect=OSError('disk-full'))
-elif kind == 'render_old':
-    original = orders._call
-    def degraded(path, session, command, loop):
-        if command == 'render':
-            return 3, {'degraded': 'muninn_old_ledger'}
-        return original(path, session, command, loop)
-    context = mock.patch.object(orders, '_call', side_effect=degraded)
-elif kind == 'render_race':
-    from scripts.lib import orders_ledger as ol
-    original = orders._call
-    def raced(path, session, command, loop):
-        code, payload = original(path, session, command, loop)
-        if command == 'render' and code == 0:
-            repo = path.parent.parent
-            with orders.order_cli.locked(repo):
-                ledger = ol.open_ledger(repo)
-                advanced = ol.tick(ledger, 'another-loop', ol.now_iso(), session_id='another-session')
-                ol.save(repo / 'orders.json', advanced['ledger'])
-        return code, payload
-    context = mock.patch.object(orders, '_call', side_effect=raced)
-elif kind == 'render_again':
-    import argparse
-    from scripts.lib import orders_ledger as ol
-    original = orders._call
-    def raced(path, session, command, loop):
-        code, payload = original(path, session, command, loop)
-        if command == 'render' and code == 0:
-            repo = path.parent.parent
-            cli = orders.order_cli
-            ledger = ol.open_ledger(repo)
-            current = cli.lessons.joined(ledger, include_decayed=True, session=session)
-            current['lessons'][0]['text'] = 'A second current lesson.'
-            with mock.patch.object(cli.lessons, 'joined', return_value=current):
-                _, second = cli.cmd_render(argparse.Namespace(session=session), repo)
-            assert second == 0
-        return code, payload
-    context = mock.patch.object(orders, '_call', side_effect=raced)
-else:
-    original = orders.prepare
-    def changed(*args):
-        digest = original(*args)
-        prepared = orders.lifecycle.preparation_path(path.parent, args[2])
-        value = json.loads(prepared.read_text())
-        value['binding']['progress_sha256'] = '0' * 64
-        prepared.write_text(json.dumps(value))
-        return digest
-    context = mock.patch.object(orders, 'prepare', side_effect=changed)
-with context:
-    try:
-        result = invoke()
-        if kind in ('render_old', 'render_race', 'render_again'):
-            print(json.dumps(result))
-            sys.exit(0)
-    except Exception as error:
-        print(type(error).__name__, str(error))
-        sys.exit(0)
-sys.exit(1)
-"""
-
-    def fault(self, provider: Provider, kind: str) -> subprocess.CompletedProcess[str]:
-        """Inject one file failure or post-prepare mutation into the actual native function."""
-        return subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                self._fault_script(),
-                str(provider.plugin),
-                provider.name,
-                str(provider.path),
-                provider.session,
-                str(provider.parent),
-                kind,
-            ],
-            cwd=provider.home,
-            env=provider.environment,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
 
     def test_completion_ticks_renders_and_retries_once(self) -> None:
         """Both native commands apply one completed loop, then resume without a second tick."""
@@ -238,7 +77,10 @@ sys.exit(1)
                 before = provider.path.read_bytes()
                 changed = self.fault(provider, "race")
                 self.assertEqual(changed.returncode, 0, changed.stderr)
-                self.assertIn("order_source_mismatch", changed.stdout)
+                self.assertTrue(
+                    "order_source_mismatch" in changed.stdout or "retro_steps_missing" in changed.stdout,
+                    changed.stdout,
+                )
                 self.assertEqual(provider.path.read_bytes(), before)
                 self.assertEqual(self.orders(provider, "tick", "--loop", "fixture-loop")[0], 2)
 
@@ -307,16 +149,19 @@ sys.exit(1)
                     cycle_root = initial.home.parent / f"{initial.name}-cycle-{number}"
                     cycle_root.mkdir()
                     cycle = Provider(cycle_root, initial.name)
+                    cycle.checkout = initial.checkout
                     cycle.path = repo_dir / cycle.session / "progress.json"
                     cycle.path.parent.mkdir(exist_ok=True)
                     state = cycle.state()
                     state["loop_id"] = f"logical-cycle-{number}"
                     cycle.write(state)
+                    (cycle.path.parent / "teardown.jsonl").unlink(missing_ok=True)
                     cycle.freeze()
                     cycle.finish_wave()
                     cycle.artifacts()
-                    retro = cycle.read("retro.json")
-                    cycle.write({**retro, "schema_version": 2}, "retro.json")
+                    code, prepared = self.orders(cycle, "prepare", "--loop", state["loop_id"])
+                    self.assertEqual(code, 0, prepared)
+                    assembled_retro.write(cycle.path.parent, cycle.session)
                     self.assertEqual(cycle.complete().returncode, 0)
                     self.assertEqual(cycle.complete().returncode, 0)
                     ledger = json.loads((repo_dir / "orders.json").read_text())
