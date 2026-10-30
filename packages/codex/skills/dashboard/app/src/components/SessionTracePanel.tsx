@@ -81,6 +81,10 @@ function EventRow({ event, token, nativeSessionId, parentName }: {
   const source = event.provenance;
   const input = attribute(event, "gen_ai.usage.input_tokens");
   const output = attribute(event, "gen_ai.usage.output_tokens");
+  const cacheRead = attribute(event, "gen_ai.usage.cache_read_input_tokens");
+  const cacheCreated = attribute(event, "gen_ai.usage.cache_creation_input_tokens");
+  const usageSemantics = attribute(event, "coderails.usage.semantics");
+  const observation = attribute(event, "coderails.observation.kind");
   const tool = attribute(event, "tool.name");
   const callId = attribute(event, "coderails.native.call_id");
   const duration = attribute(event, "coderails.duration_ms");
@@ -132,8 +136,13 @@ function EventRow({ event, token, nativeSessionId, parentName }: {
       child source: {parentJoinChildRef ?? "unavailable"}</div>}
     {event.parentSpanId && !parentName && <div>parent join unresolved: {event.parentSpanId}</div>}
     {refs.length > 0 && <div>{refs.join(" · ")}</div>}
+    {observation && <div>Observation: {observation}; target: {attribute(event, "coderails.observation.target_kind")};
+      target SHA-256: {attribute(event, "coderails.observation.target_sha256")};
+      text bytes: {attribute(event, "coderails.observation.bytes") ?? "unavailable"}</div>}
     <div>{input === null && output === null ? "usage unavailable (no token counts in this event)" :
-      `usage observed: input ${input ?? "unavailable"}, output ${output ?? "unavailable"} tokens`}</div>
+      `usage observed: input ${input ?? "unavailable"}, output ${output ?? "unavailable"} tokens; ${usageSemantics ?? "semantics unavailable"}`}</div>
+    {(cacheRead !== null || cacheCreated !== null) && <div>cache tokens: read {cacheRead ?? "unavailable"};
+      created {cacheCreated ?? "unavailable"}; {usageSemantics ?? "semantics unavailable"}</div>}
     <div>cost unavailable (no per-event cost source)</div>
     <div>Source reference: {source.sourceRef.kind} {source.sourceRef.recordId}</div>
     <button type="button" onClick={toggle} aria-expanded={expanded} aria-label={`Source detail for ${event.name}`}>
@@ -157,6 +166,9 @@ export function SessionTracePanel({ token, dashboardRunId }: { token: string; da
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const currentSession = useRef("");
+  const observationKinds = ["invocation", "read", "failed_read", "mention", "uncertain"];
+  const observationCounts = observationKinds.map((kind) =>
+    `${kind.replace("_", " ")} ${events.filter((event) => attribute(event, "coderails.observation.kind") === kind).length}`);
 
   useEffect(() => {
     let active = true;
@@ -242,6 +254,8 @@ export function SessionTracePanel({ token, dashboardRunId }: { token: string; da
       {diagnostics.map((diagnostic, index) => <p key={index}>Trace diagnostic: {diagnostic}</p>)}
       {coverage && <p>Indexed source records: {coverage.scannedRecords === null ? "unavailable" : `${coverage.scannedRecords} (derived from local source scan)`}. Emitted events: {coverage.emittedEvents === null ? "unavailable" : `${coverage.emittedEvents} (derived from local trace index; not a native event count)`}.
         {coverage.truncated && " Source scan stopped at the size limit; this trace is incomplete."}</p>}
+      {events.some((event) => attribute(event, "coderails.observation.kind") !== null) &&
+        <p>Observations in loaded events: {observationCounts.join(" · ")}. Unloaded pages are not counted.</p>}
       {ambiguity && <p>Time is missing or tied for some records; source order is a display tie break, not a causal order.</p>}
       <ol aria-label="Trace timeline" style={{ listStyle: "none", paddingLeft: 0, marginTop: "1rem" }}>
         {events.map((event) => <EventRow key={event.eventId} event={event} token={token} nativeSessionId={selected}

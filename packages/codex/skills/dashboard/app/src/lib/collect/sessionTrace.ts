@@ -1,6 +1,7 @@
 import { basename, join, resolve, sep } from "node:path";
 import { TRACE_SCHEMA_VERSION, serializeTraceEvent, type NativeSessionSummary, type SourceRef, type TraceCollectionDeps, type TraceDetail, type TraceEvent, type TraceManifest, type TracePage } from "./traceSchema";
 import { CODEX_PARSER_VERSION, MAX_SOURCE_SCAN_BYTES, TranscriptResolutionError, addElapsedGaps, cacheDir, dispatches, isSubagentTranscript, nativeEvent, obj, orderEvents, paths, payload, safeId, safeReadError, source, terminalTurn, transcript, validChild, type Dispatch, type NativeSource } from "./codexTraceNative";
+import { observeCodexSource } from "./codexTraceObservation";
 import { auditEvents, auditSource, cacheEventPath, graphEvent, graphSource, pointer, saveCache } from "./codexTraceSupport";
 import { nodeAttributes } from "./nodeDisplay";
 
@@ -102,6 +103,7 @@ export async function collectCodexSessionTrace(sessionId: string, deps: TraceCol
         events.push(event);
       });
       addElapsedGaps(src, events);
+      observeCodexSource(src, events);
       for (const item of dispatch) {
         if (visited.has(item.childId)) { errors.push(`duplicate child identity ${item.childId}`); continue; }
         visited.add(item.childId);
