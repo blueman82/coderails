@@ -60,6 +60,7 @@
   "scripts/quality/quality_tools.py": "100644",
   "scripts/quality/source_kind.py": "100644",
   "scripts/sandbox/render_settings.py": "100755",
+  "scripts/sandbox/role_tools.py": "100644",
   "scripts/sandbox/sandbox_probe.py": "100755",
   "scripts/sandbox/spawn_sandboxed_worker.py": "100755",
   "hooks/scripts/action_authority_gate.py": "100755",
