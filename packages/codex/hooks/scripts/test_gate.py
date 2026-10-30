@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import cast
 
 from lib.argv_match import git_invocation, git_prefix
-from lib.destructive_patterns import git_output
+from lib.destructive_patterns import RESOURCE_ERRNOS, git_output
 from lib.shell_context import invocations, opaque_execution, payload_cwd
 from test_output import begin_run, finish_run
 
@@ -98,7 +98,7 @@ def deny(reason: str) -> None:
         mark_deny()
 
 
-def main() -> int:
+def _main() -> int:
     """Run the trusted command for Git commits and deny a failed command."""
     payload = payload_object(read_input())
     command = command_for(payload)
@@ -138,6 +138,16 @@ def main() -> int:
             deny("Test output could not be captured or recorded; commit blocked.")
             return 0
     return 0
+
+
+def main() -> int:
+    """Deny a commit when a host resource error prevents a Git lookup."""
+    try:
+        return _main()
+    except OSError as error:
+        cause = "Host resource exhaustion" if error.errno in RESOURCE_ERRNOS else "Git lookup failure"
+        deny(f"{cause} prevented this hook from checking Git. Retry; the commit is blocked.")
+        return 0
 
 
 if __name__ == "__main__":

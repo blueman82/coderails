@@ -6,7 +6,8 @@ Advisory warns on missing receipts; live authority denials and
 unbindable merges under a live merge cap still block.
 Enforce denies unless
 authority.permits() allows and a receipt verifies (mirrored scripts/lib/receipt_gate.py, shared with merge.py, which is
-independently fail-closed); unexpected errors deny under enforce or live authority. Receipts are signed and bound to
+independently fail-closed); resource errors before policy and authority discovery deny. Later unexpected errors
+deny under enforce or live authority and otherwise fail open. Receipts are signed and bound to
 repository+ref+sha; with the user-tier trust root that is a cooperating-agent safeguard, not a boundary. The hash
 covers only the command text seen here.
 """
@@ -21,7 +22,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
-from hook_common import append_trace_row, deny, payload_object, read_input, text_field
+from hook_common import RESOURCE_ERRNOS, append_trace_row, deny, payload_object, read_input, text_field
 from lib.action_match import MERGE_SCRIPT, Operation, guarded_operations, repository, state_mutated_before_guard
 from lib.destructive_patterns import git_output
 from lib.shell_context import opaque_execution
@@ -120,13 +121,14 @@ def check_action_modes(
 
 
 def main() -> int:
-    """Check one Bash payload; deny unexpected errors under enforce or live authority."""
+    """Check Bash; refuse resource uncertainty, then apply the known mode and authority error policy."""
     payload = payload_object(read_input())
     session = text_field(payload, "session_id")
     trace_id = session or "_no_session"
     loop: str | None = None
     mode_ = "off"
     authority: dict[str, Any] = {}
+    policy_known = False
     try:
         data = payload.get("tool_input")
         command = cast(dict[str, object], data).get("command") if isinstance(data, dict) else None
@@ -164,6 +166,7 @@ def main() -> int:
             return 0
         mode_ = "enforce" if any(selected_mode == "enforce" for _, selected_mode in active) else "advisory"
         authority = read_authority(session) or {}
+        policy_known = True
         loop_id = authority.get("loop_id")
         loop = loop_id if isinstance(loop_id, str) else None
         signers, tier = resolve_trust_root()
@@ -185,8 +188,13 @@ def main() -> int:
         need = "needs a bound PR and head" if code.startswith("budget_") else "needs an action receipt"
         deny(f"Blocked: {name.replace('_', ' ')} {need} ({code}). {how_to_proceed(code, session, name)}")
     except Exception as error:  # noqa: BLE001 - live authority must refuse unexpected hook errors
-        if mode_ == "enforce" or authority:
-            deny(f"Blocked: action authority gate error ({type(error).__name__}).")
+        resource = isinstance(error, OSError) and error.errno in RESOURCE_ERRNOS
+        if (resource and not policy_known) or mode_ == "enforce" or authority:
+            deny(
+                "Host resource exhaustion prevented action authority checks. Retry; the action is blocked."
+                if resource
+                else f"Blocked: action authority gate error ({type(error).__name__})."
+            )
             with suppress(Exception):  # trace is not required to deny the command
                 append_trace_row("action_authority", "denied", "denied_gate_error", trace_id, {"loop_id": loop})
         else:
