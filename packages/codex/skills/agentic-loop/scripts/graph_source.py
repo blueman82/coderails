@@ -15,6 +15,15 @@ sys.path.insert(0, str(PLUGIN_ROOT))
 from scripts.lib import source_manifest  # noqa: E402
 
 
+def base_ref() -> str:
+    """Use origin/main when origin exists in the current repository, else main."""
+    try:
+        done = subprocess.run(["git", "remote"], capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return "main"
+    return "origin/main" if "origin" in done.stdout.split() else "main"
+
+
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run a bounded Git read and convert process failures to a typed source refusal."""
     try:

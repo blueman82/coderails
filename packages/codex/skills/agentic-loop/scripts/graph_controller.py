@@ -58,6 +58,7 @@ def _stub(session: str, loop_id: str, prompt: str) -> dict[str, Any]:
             "wave_history": {},
             "dispatches": {},
             "contract_from_revision": 1,
+            "context_from_revision": 1,
         },
     }
 

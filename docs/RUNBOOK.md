@@ -285,6 +285,8 @@ The first table gives an action for each control category. The second table list
 - Remediation: `loop: none` for a foreign or unsafe session id is correct (ids match exactly, never sanitised). For
   `manifest_state_unreadable` repair progress.json; for `manifest_graph_invalid` run `graph.py inspect <state>`.
   Check `CLAUDE_AGENTIC_LOOP_DIR` (wins) versus `CODERAILS_AGENTIC_LOOP_DIR`. Routes are advisory text only.
+  `route_meta` counts required, offered, recorded, and dropped skill routes within the four-skill budget. It does not
+  show that the agent read or used a skill. The active graph contract supplies required routes before keyword matches.
 
 ## Crack-on denial wrong (stuck on, or off too early)
 
@@ -1066,9 +1068,11 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   out: paste `prompt_sections` verbatim), `role_mismatch` (dispatch a guarded scout as `coderails:<role>` / Codex
   `agent_type: <role>`; other roles accept their own type or `general-purpose` on Claude, and their own type or omitted
   `agent_type` on Codex; a different named native role such as `explorer` is refused),
-  `dispatch_state_unconverted` (`state_minor` < 2 or a malformed current-minor contract cutoff: run
+  `dispatch_state_unconverted` (`state_minor` < 3 or a malformed contract/context cutoff: run
   `graph.py convert --check` then `convert` for old state; inspect malformed current state without editing frozen evidence;
   conversion refuses while a wave is open, `convert_refused_active_wave_in_flight`),
+  `dispatch_context_mismatch` (typed required skills or checks differ from the registered node and unit facts: recover
+  the wave and use the new `prompt_sections`; do not edit the stored record),
   `dispatch_publication_mismatch` (the stored unit worker command names a different unit, push script or progress path:
   use the exact `publication_command` returned by `begin-wave`), `dispatch_unauthorized` (Claude
   `record-wave` / completion found a bound spawn whose record the PreToolUse guard never consumed, i.e. a spawn the hook did

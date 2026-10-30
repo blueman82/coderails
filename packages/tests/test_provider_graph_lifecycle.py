@@ -104,7 +104,7 @@ class ProviderLifecycleTests(unittest.TestCase):
                 "start", "--session", provider.session, "--loop-id", "fixture-loop", "--prompt-file", str(prompt)
             )
             state = provider.read()
-            self.assertEqual((state["stops"], state["state_minor"]), ([], 2))
+            self.assertEqual((state["stops"], state["state_minor"]), ([], 3))
             self.assertEqual(state["graph"]["wave_history"], {})
             state["graph"].pop("wave_history")  # a graph written by the old `start`, before the key existed
             provider.write(state)

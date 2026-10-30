@@ -232,5 +232,7 @@
   "scripts/lib/source_manifest.py": "100644",
   "hooks/scripts/lib/hook_decision.py": "100644",
   "packages/codex/hooks/scripts/lib/hook_decision.py": "100644",
-  "scripts/gen_hooks.py": "100755"
+  "scripts/gen_hooks.py": "100755",
+  "skills/agentic-loop/scripts/graph_contract_render.py": "100644",
+  "skills/agentic-loop/scripts/graph_required_context.py": "100644"
 }
