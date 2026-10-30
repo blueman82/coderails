@@ -33,9 +33,15 @@ class TeardownIdentity(Base):
             row["session_id"] = "foreign"
             row["loop_id"] = "other"
             (self.dir / teardown_steps.NAME).write_text("".join(json.dumps(item) + "\n" for item in rows))
-            self.assertEqual(self.assemble()[0], 0)
-            with self.assertRaisesRegex(ValueError, rf"retro_steps_missing.*{step}"):
-                self.gate()
+            code, result = self.assemble()
+            if step == "retro_assembled":
+                self.assertEqual((code, result["reason_code"]), (2, "retro_steps_missing"))
+                with self.assertRaises(ValueError):
+                    self.gate()
+            else:
+                self.assertEqual(code, 0)
+                with self.assertRaisesRegex(ValueError, rf"retro_steps_missing.*{step}"):
+                    self.gate()
             (self.dir / teardown_steps.NAME).write_text("".join(json.dumps(item) + "\n" for item in original))
             self.rewrite_retro(source_hashes=retro_check.source_hashes(self.state(), self.dir))
             self.assertEqual(self.gate(), [])

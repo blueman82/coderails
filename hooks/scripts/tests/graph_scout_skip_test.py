@@ -74,6 +74,7 @@ class ScoutSkipTests(GraphCase):
         wave_state = copy.deepcopy(state)
         wave_state["revision"] = 3
         wave_state["graph"]["contract_from_revision"] = 3
+        wave_state["graph"]["context_from_revision"] = 3
         scout = wave_state["graph"]["nodes"]["S2.5"]
         scout.update(status="running", outcome="running", evidence=scout["evidence"][:1])
         wave_state["graph"]["nodes"]["S2.6"] = node("S2.6", "running")

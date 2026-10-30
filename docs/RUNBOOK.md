@@ -285,6 +285,8 @@ The first table gives an action for each control category. The second table list
 - Remediation: `loop: none` for a foreign or unsafe session id is correct (ids match exactly, never sanitised). For
   `manifest_state_unreadable` repair progress.json; for `manifest_graph_invalid` run `graph.py inspect <state>`.
   Check `CLAUDE_AGENTIC_LOOP_DIR` (wins) versus `CODERAILS_AGENTIC_LOOP_DIR`. Routes are advisory text only.
+  `route_meta` counts required, offered, recorded, and dropped skill routes within the four-skill budget. It does not
+  show that the agent read or used a skill. The active graph contract supplies required routes before keyword matches.
 
 ## Crack-on denial wrong (stuck on, or off too early)
 
@@ -1038,6 +1040,42 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
 
 See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
 
+## Source-bound dispatch upgrade and rollback
+
+This boundary applies to both provider installs. Before activating the source-bound dispatch and publication
+runtime, finish active loops with the runtime that created them, including worker publication and completion.
+Do not upgrade an in-flight implementation or publication wave. Existing assigned units can lack
+`source_manifest_sha256`; the new publication check refuses them with `publication:source_manifest_mismatch`.
+`assign-worktree` only accepts pending units, so it cannot repair an already active assignment. Readability of an
+old dispatch record does not establish that its unit can publish under this runtime.
+
+Start new loops on the new runtime only after the old loops have drained. Keep each loop's matching runtime
+available in an isolated checkout with its progress, dispatch history, proof, orders and retro artifacts preserved
+together. Historical state can also require an older completion/retro reader, as described above; do not assume
+all retained histories can be checked by the pre-upgrade runtime.
+
+Once a new loop stores expanded source/lesson dispatch contracts, reverting code alone is not a safe resume or
+verification procedure: older closed-field readers can reject those contracts. Retain the matching newer runtime
+for that loop through publication, completion and any later verification or retry. A rollback for future work does
+not convert existing records. Do not hand-add hashes, relabel units, reset status, edit frozen evidence, or treat
+`graph.py convert` as an automatic migration for missing source bindings. There is no automatic migration in this
+rollout procedure and no publication bypass is authorized.
+
+Native/global installation remains on HOLD until operational qualification separately verifies this drain and
+runtime-retention procedure. Source review, local tests and a successful commit gate do not establish that an
+installed upgrade, rollback or live-provider loop has been qualified.
+
+Assigned-source inspection refuses effective Git `filter` attributes before status can invoke a clean/process
+helper. Unused filter/LFS configuration alone is permitted. It does not disable a conversion and silently treat
+raw file bytes as the filtered HEAD representation. The refusal also covers explicit `-filter`: Git's attribute
+output cannot distinguish that value from the literal driver name `unset`. An actual `!filter` reset has no
+effective filter row. Inspection does not change attributes, filter configuration or index metadata. Keep the
+trusted assigned checkout and its configuration stable during inspection; these reads are not an atomic snapshot
+or a boundary against concurrent same-user filesystem changes. A refused filtered checkout needs an owner-reviewed
+source workflow; this reader provides no automatic filter migration or bypass.
+It also refuses checkouts containing Git submodule entries before status can inspect a nested checkout and run
+that checkout's filters. It does not ignore submodule dirtiness or claim that nested source has been validated.
+
 ## Dispatch refused: `dispatch_*` or `role_mismatch`
 
 - Symptom: `loop_dispatch_guard` (Claude `Agent`, Codex `spawn_agent`, which this Codex host reports to hooks as
@@ -1066,9 +1104,11 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   out: paste `prompt_sections` verbatim), `role_mismatch` (dispatch a guarded scout as `coderails:<role>` / Codex
   `agent_type: <role>`; other roles accept their own type or `general-purpose` on Claude, and their own type or omitted
   `agent_type` on Codex; a different named native role such as `explorer` is refused),
-  `dispatch_state_unconverted` (`state_minor` < 2 or a malformed current-minor contract cutoff: run
+  `dispatch_state_unconverted` (`state_minor` < 3 or a malformed contract/context cutoff: run
   `graph.py convert --check` then `convert` for old state; inspect malformed current state without editing frozen evidence;
   conversion refuses while a wave is open, `convert_refused_active_wave_in_flight`),
+  `dispatch_context_mismatch` (typed required skills or checks differ from the registered node and unit facts: recover
+  the wave and use the new `prompt_sections`; do not edit the stored record),
   `dispatch_publication_mismatch` (the stored unit worker command names a different unit, push script or progress path:
   use the exact `publication_command` returned by `begin-wave`), `dispatch_unauthorized` (Claude
   `record-wave` / completion found a bound spawn whose record the PreToolUse guard never consumed, i.e. a spawn the hook did

@@ -13,7 +13,7 @@ from typing import Any, cast
 
 import graph_contract
 
-STATE_MINOR = 2
+STATE_MINOR = 3
 CODES = (
     "state_not_object",
     "unknown_schema",
@@ -85,7 +85,48 @@ def _v1_to_v2(state: dict[str, Any]) -> None:
     graph.setdefault("contract_from_revision", revision)
 
 
-CONVERSIONS: tuple[tuple[int, Callable[[dict[str, Any]], None]], ...] = ((0, _v0_to_v1), (1, _v1_to_v2))
+def _v2_to_v3(state: dict[str, Any]) -> None:
+    """Start required-context contracts at this revision; never convert an open or torn v2 wave."""
+    graph = _graph(state)
+    if graph.get("active_wave") is not None:
+        raise ConvertRefusedError(
+            "active_wave_in_flight", "finish or recover the v2 wave before required-context conversion"
+        )
+    revision, start = state.get("revision"), graph.get("contract_from_revision")
+    dispatches = graph.get("dispatches")
+    if (
+        type(revision) is not int
+        or type(start) is not int
+        or not 1 <= start <= revision
+        or not isinstance(dispatches, dict)
+    ):
+        raise ConvertRefusedError("invalid_result", "v2 dispatch records or cutoff are invalid")
+    for identifier, raw_row in cast(dict[object, object], dispatches).items():
+        if not isinstance(identifier, str) or not isinstance(raw_row, dict):
+            raise ConvertRefusedError("invalid_result", "v2 dispatch record is incomplete")
+        row = cast(dict[str, Any], raw_row)
+        if (
+            not all(isinstance(row.get(key), str) and row[key] for key in ("node_id", "wave_id"))
+            or type(row.get("revision")) is not int
+            or not start <= row["revision"] < revision
+            or type(row.get("attempt")) is not int
+            or row["attempt"] < 1
+            or row.get("envelope_version") != graph_contract.ENVELOPE_VERSION
+            or identifier
+            != graph_contract.dispatch_id(state["loop_id"], row["wave_id"], row["node_id"], row["attempt"])
+        ):
+            raise ConvertRefusedError("invalid_result", "v2 dispatch record is incomplete")
+        try:
+            contract = graph_contract.validate_contract(row.get("contract"))
+            digest = graph_contract.sections_sha256(contract)
+        except (TypeError, ValueError) as error:
+            raise ConvertRefusedError("invalid_result", "v2 dispatch contract is invalid") from error
+        if row.get("prompt_sections_sha256") != digest:
+            raise ConvertRefusedError("invalid_result", "v2 dispatch contract digest is invalid")
+    graph["context_from_revision"] = revision
+
+
+CONVERSIONS: tuple[tuple[int, Callable[[dict[str, Any]], None]], ...] = ((0, _v0_to_v1), (1, _v1_to_v2), (2, _v2_to_v3))
 
 
 def convert(state: object, session: str | None = None) -> tuple[dict[str, Any], dict[str, Any]]:

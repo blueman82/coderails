@@ -56,9 +56,20 @@ class Provider:
         self.parent = claude.parent(self.home) if name == "claude" else codex.transcripts(self.home)
         self.path = self.home / "state/fixture" / self.session / "progress.json"
         self.path.parent.mkdir(parents=True)
+        guards = self.home / "denied-executables"
+        guards.mkdir()
+        self.external_refusals = self.home / "external-call-refused"
+        for executable in ("gh", "claude", "codex", "muninn", "openai"):
+            guard = guards / executable
+            guard.write_text(
+                f"#!{sys.executable}\nfrom pathlib import Path\n"
+                f"Path({str(self.external_refusals)!r}).write_text({executable!r})\nraise SystemExit(97)\n"
+            )
+            guard.chmod(0o755)
         self.environment = {
             **os.environ,
             "HOME": str(self.home),
+            "PATH": str(guards) + os.pathsep + os.environ.get("PATH", ""),
             "CLAUDE_PROJECTS_DIR": str(self.home / ".claude/projects"),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.home / "state"),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.home / "state"),
