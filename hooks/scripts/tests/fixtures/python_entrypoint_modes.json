@@ -198,6 +198,7 @@
   "scripts/sandbox/driver_transfer.py": "100644",
   "scripts/sandbox/driver_workspace.py": "100644",
   "scripts/sandbox/render_settings.py": "100755",
+  "scripts/sandbox/role_tools.py": "100644",
   "scripts/sandbox/sandbox_probe.py": "100755",
   "scripts/sandbox/source_capture.py": "100644",
   "scripts/sandbox/source_materialize.py": "100644",

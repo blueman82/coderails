@@ -35,6 +35,7 @@ from scripts.sandbox import containment, driver_workspace
 from scripts.sandbox.containment import SECRET_PATTERNS, SRT_VERSION, worker_credential, worker_environment
 from scripts.sandbox.driver_schema import DRIVER_SCHEMA as DRIVER_SCHEMA
 from scripts.sandbox.render_settings import render_settings
+from scripts.sandbox.role_tools import role_isolation, role_tools
 
 PROTECTED = ("main", "master")
 GIT_SAFE = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"]  # the clone's config is worker-written
@@ -62,8 +63,8 @@ def dispatch_guard(worktree: str, prompt_file: str, model: str) -> None:
 
 
 def git(repo: str | Path, *arguments: str, hardened: bool = False) -> str:
-    """Run git in `repo` and return stdout; `hardened` (used for the clone) ignores worker-written fsmonitor/hooks."""
-    command = ["git", *(GIT_SAFE if hardened else []), "-C", str(repo), *arguments]
+    """Read original objects; hardened clone calls also ignore worker-written hooks/fsmonitor."""
+    command = ["git", "--no-replace-objects", *(GIT_SAFE if hardened else []), "-C", str(repo), *arguments]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode:
         raise ValueError(f"git {arguments[0]} failed in {repo}: {result.stderr.strip()}")
@@ -146,7 +147,9 @@ def committed_secret(clone: Path, old: str | None, new: str, credential_value: s
     for row in objects:
         oid = row.split(" ", 1)[0]
         result = subprocess.run(
-            ["git", *GIT_SAFE, "-C", str(clone), "cat-file", "-p", oid], capture_output=True, check=False
+            ["git", "--no-replace-objects", *GIT_SAFE, "-C", str(clone), "cat-file", "-p", oid],
+            capture_output=True,
+            check=False,
         )
         if result.returncode:
             raise refuse("branch_import_refused", f"cannot inspect worker object {oid}")
@@ -208,27 +211,6 @@ def import_and_push(
     trace("pushed", "branch_pushed")
 
 
-def role_tools(role: str) -> tuple[str, str]:
-    """Use the installed agent's tool allowlist for a driver worker."""
-    if re.fullmatch(r"[a-z][a-z0-9-]{0,60}", role) is None:
-        raise ValueError("driver role is invalid")
-    source = Path(__file__).resolve().parents[2] / "agents" / f"{role}.md"
-    if not source.is_file():
-        raise ValueError("driver role instructions are missing")
-    lines = source.read_text(encoding="utf-8").splitlines()
-    if not lines or lines[0] != "---" or "---" not in lines[1:]:
-        raise ValueError("driver role frontmatter is invalid")
-    frontmatter = lines[1 : lines.index("---", 1)]
-    fields = dict(line.split(":", 1) for line in frontmatter if ":" in line)
-    allowed = fields.get("tools", "").strip()
-    denied = fields.get("disallowedTools", "").strip()
-    if not allowed:
-        raise ValueError("driver role has no tool allowlist")
-    if "mcp__plugin_coderails_cap-" in allowed:
-        denied += ", Bash, Read, Grep, Glob, WebFetch, Write, Edit, NotebookEdit"
-    return allowed, ", ".join(part for part in ("Agent", "Task", denied) if part)
-
-
 def launch(worktree: str, prompt_file: str, model: str, *, driver: bool = False, role: str = "loop-worker") -> int:
     """Prepare containment, acquire credentials externally, and stream the pinned child."""
     if not Path(worktree).is_dir():
@@ -270,6 +252,7 @@ def launch(worktree: str, prompt_file: str, model: str, *, driver: bool = False,
     ]
     if driver:
         allowed, denied = role_tools(role)
+        arguments.extend(role_isolation(role, allowed))
         arguments.extend(
             [
                 "--output-format",
@@ -340,6 +323,7 @@ def launch_prepared(workspace_file: Path, model: str, role: str) -> int:
         model,
         "--dangerously-skip-permissions",
     ]
+    arguments.extend(role_isolation(role, allowed))
     with (
         tempfile.TemporaryFile() as source,
         (workspace_file.parent / "sandbox.stdout.log").open("xb") as log,
