@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from hooks.scripts.lib.capability_profiles import load_profiles
-from scripts.lib.capability_validation import claude_errors, guarded, server_id
+from scripts.lib.capability_validation import EXTRA_TOOLS, claude_errors, guarded, server_id
 
 
 def role_tools(role: str) -> tuple[str, str]:
@@ -46,6 +46,7 @@ def role_isolation(role: str, allowed: str) -> list[str]:
         return []
     if claude_errors(role, caps, [tool.strip() for tool in allowed.split(",")]):
         raise ValueError("driver role tools differ from capability profile")
+    extras = list(EXTRA_TOOLS.get(role, ()))
     server = {
         "command": sys.executable,
         "args": [str(root / "scripts/capability_mcp.py"), "--role", role],
@@ -57,12 +58,12 @@ def role_isolation(role: str, allowed: str) -> list[str]:
         name: {
             "description": f"Contained {role}",
             "prompt": prompt,
-            "tools": [tool.strip() for tool in allowed.split(",") if tool.strip().startswith("mcp__")],
+            "tools": [tool.strip() for tool in allowed.split(",") if tool.strip().startswith("mcp__")] + extras,
         }
     }
     return [
         "--tools",
-        "",
+        ",".join(extras),
         "--strict-mcp-config",
         "--mcp-config",
         json.dumps(config, sort_keys=True),

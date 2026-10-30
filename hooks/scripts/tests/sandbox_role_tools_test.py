@@ -31,6 +31,11 @@ class RoleIsolationTests(unittest.TestCase):
             with self.subTest(role=role), tempfile.TemporaryDirectory() as temporary:
                 allowed, _ = role_tools(role)
                 options = role_isolation(role, allowed)
+                declared = {tool.strip() for tool in allowed.split(",")}
+                extras = {tool for tool in declared if not tool.startswith("mcp__")}
+                definitions = json.loads(options[options.index("--agents") + 1])
+                active = definitions[options[options.index("--agent") + 1]]
+                self.assertEqual(set(active["tools"]), declared)
                 servers = json.loads(options[options.index("--mcp-config") + 1])["mcpServers"]
                 self.assertEqual(list(servers), [f"plugin_coderails_cap-{role}"])
                 server = next(iter(servers.values()))
@@ -67,7 +72,8 @@ class RoleIsolationTests(unittest.TestCase):
                 expected = {tool.replace(".", "_") for tool in profile_tools(profiles["agents"][role])}
                 self.assertEqual(actual, expected)
                 self.assertEqual(rows[1]["error"]["code"], -32602)
-                self.assertEqual(options[options.index("--tools") + 1], "")
+                effective_extras = set(filter(None, options[options.index("--tools") + 1].split(",")))
+                self.assertEqual(effective_extras, extras)
                 self.assertIn("--strict-mcp-config", options)
 
     def test_guarded_frontmatter_cannot_expand_the_profile(self) -> None:
