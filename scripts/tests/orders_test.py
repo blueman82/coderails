@@ -1,7 +1,6 @@
-"""Standing orders as typed records: decay/recurrence/idempotence, the hash chain, Muninn round trip, generated views.
+"""Standing orders: lifecycle, hash chain, Muninn round trip, and generated views.
 
-The CLI is exercised as a subprocess (a real restart each call) against the hermetic fake `muninn`; nothing here touches
-the live Muninn store. Each rule has a negative control that mutates the one thing it proves.
+CLI subprocess tests use a hermetic fake; negative controls change the rule each test proves.
 """
 
 from __future__ import annotations
@@ -193,15 +192,23 @@ class Cli(StoreCase):
         path = self.tmp / "loops" / SESSION / "trace.jsonl"
         return [json.loads(x) for x in path.read_text().splitlines()] if path.exists() else []
 
+    def complete_order(self, out: dict[str, Any], lesson: str = LESSON) -> str:
+        """Complete the saved fake review, then reconcile the same request."""
+        rid = out["muninn"]["request_id"]
+        self.assertEqual(self.muninn("learn", "complete", rid, "--kind", "lesson", "--content", lesson)[0], 0)
+        rc, saved = self.run_cli("cite", FM, "--quote", PROMPT)
+        self.assertEqual((rc, saved["muninn"]["state"]), (0, "written"), saved)
+        return str(saved["muninn"]["id"])
+
     def test_round_trip_survives_restart_and_muninn_status(self) -> None:
-        """(f) record with a user quote; a fresh process returns the same text, K-id and cite; retract drops it."""
+        """A completed request becomes a current lesson; retraction removes it."""
         rc, out = self.rec("--quote", PROMPT)
-        self.assertEqual((rc, out["muninn"]["state"]), (0, "written"))
-        kid = out["muninn"]["id"]
+        self.assertEqual((rc, out["muninn"]["state"]), (3, "pending"))
+        kid = self.complete_order(out)
         rc, got = self.run_cli("lessons")
         self.assertEqual(rc, 0, got)
         row = got["lessons"][0]
-        self.assertEqual((row["text"], row["muninn_id"], row["quote"]), (LESSON, kid, PROMPT))
+        self.assertEqual((row["text"], row["muninn_id"]), (LESSON, kid))
         self.assertTrue(row["cite"])
         self.assertEqual(self.muninn("know", "retract", kid, "--reason", "test")[0], 0)
         rc, got = self.run_cli("lessons")
@@ -209,25 +216,15 @@ class Cli(StoreCase):
         self.assertIn("lesson_not_current", [r["reason_code"] for r in self.trace() if r["command"] == "lesson.query"])
 
     def test_expired_entry_is_excluded(self) -> None:
-        """(f) a Muninn entry past valid_until drops out of `lessons`."""
+        """An expired current note drops out of lessons."""
         _, out = self.rec("--quote", PROMPT)
-        self.sql("UPDATE knowledge SET valid_until = ? WHERE id = ?", 1.0, int(out["muninn"]["id"][1:]))
+        kid = self.complete_order(out)
+        path = self.home / "requests.json"
+        data = json.loads(path.read_text())
+        data["knowledge"][kid]["expiry"] = {"at": 1.0}
+        path.write_text(json.dumps(data))
         rc, got = self.run_cli("lessons")
         self.assertEqual((rc, got["lessons"]), (0, []))
-
-    def test_superseding_record_replaces_the_text(self) -> None:
-        """(f) a record that supersedes the entry (same ord- tag) replaces it in `lessons`."""
-        _, out = self.rec("--quote", PROMPT)
-        tag = next(
-            t for t in self.muninn("know", "show", out["muninn"]["id"])[1]["entry"]["tags"] if t.startswith("ord-")
-        )
-        rc, _ = self.muninn(
-            "know", "add", "--kind", "lesson", "--text", "Replacement lesson text.", "--cite", "claude:s1:1.1",
-            "--quote", PROMPT, "--tag", "order", "--tag", tag, "--supersedes", out["muninn"]["id"],
-        )  # fmt: skip
-        self.assertEqual(rc, 0)
-        _, got = self.run_cli("lessons")
-        self.assertEqual([r["text"] for r in got["lessons"]], ["Replacement lesson text."])
 
     def test_muninn_absent_lessons_prints_no_ledger_text_and_record_degrades(self) -> None:
         """(g) lessons exits 3 with muninn_absent and no lesson text; record still writes the ledger and exits 3."""
@@ -266,12 +263,13 @@ class Cli(StoreCase):
         self.assertEqual((rc, [r["text"] for r in got["lessons"]]), (0, [LESSON]))
 
     def test_no_quote_stores_degraded_and_cite_attaches_later(self) -> None:
-        """A record with no quote is active, degraded no_user_cite, exit 3; `cite` writes it to Muninn later."""
+        """A missing quote does not make a pending request written."""
         rc, out = self.rec()
-        self.assertEqual((rc, out["muninn"]["state"], out["muninn"]["reason_code"]), (3, "degraded", "no_user_cite"))
+        self.assertEqual((rc, out["muninn"]["state"], out["muninn"]["reason_code"]), (3, "pending", "learning_pending"))
         self.assertEqual(order(self.ledger(), FM)["status"], "active")
         rc, got = self.run_cli("cite", FM, "--quote", LATER)
-        self.assertEqual((rc, got["muninn"]["state"]), (0, "written"))
+        self.assertEqual((rc, got["muninn"]["state"]), (3, "pending"))
+        self.complete_order(out)
         self.assertTrue(order(self.ledger(), FM)["muninn"]["id"])
         self.assertEqual(self.run_cli("cite", "nope", "--quote", LATER)[0], 2)
 
@@ -286,7 +284,8 @@ class Cli(StoreCase):
 
     def test_tick_cli_decays_and_renders_views(self) -> None:
         """(a)(e) five ticks decay it; render writes both views with the marker, mode 0444, decayed only in its file."""
-        self.rec("--quote", PROMPT)
+        _, out = self.rec("--quote", PROMPT)
+        self.complete_order(out)
         for n in range(5):
             progress(self.dir, SESSION, f"T{n}", "in-progress")
             self.assertEqual(self.run_cli("prepare", "--loop", f"T{n}")[0], 0)
@@ -306,7 +305,8 @@ class Cli(StoreCase):
 
     def test_render_refuses_a_hand_written_file(self) -> None:
         """(e) a standing-orders.md with no marker is never overwritten: handwritten_protected."""
-        self.rec("--quote", PROMPT)
+        _, out = self.rec("--quote", PROMPT)
+        self.complete_order(out)
         hand = self.dir / "standing-orders.md"
         hand.write_text("# hand written\n")
         rc, out = self.run_cli("render")

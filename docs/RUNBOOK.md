@@ -322,15 +322,22 @@ The first table gives an action for each control category. The second table list
   `memory-adapter-nosession`. A muninn refusal keeps its original code in the reason (`refused_<code>`).
 - Remediation (reason code: one-line fix, single source `scripts/lib/memory_reasons.py`):
 
+The active decision and order paths request a Muninn review of an indexed source window. Their old `--quote` and
+`--cite-quote` inputs are ignored. Quote and citation codes below apply to the older direct-write adapter CLI only.
+
 | Code | Remediation |
 |------|-------------|
 | `memory_backend_off` | memory.backend is off in the workflow config; set it to muninn (or remove the key) to write typed memory. |
 | `memory_backend_invalid` | memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml. |
 | `muninn_absent` | muninn is not on PATH; install it (the Markdown path is not a fallback). |
-| `muninn_old_ledger` | the D4 adapter expects retired Muninn flags. Keep the result degraded until a current request-bound adapter is designed. |
+| `muninn_old_ledger` | The installed Muninn command lacks task requests, or this record has only an old K-id. Upgrade Muninn and reconcile old records before reuse. |
 | `muninn_timeout` | muninn hung past 10s; run `muninn know list` by hand and check store locks. |
 | `muninn_error` | muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and read stderr. |
-| `muninn_bad_output` | the retired D4 write protocol returned no numeric K-id. Inspect current Muninn records without a legacy scope flag. |
+| `muninn_bad_output` | Muninn returned a reply that does not match the task request or current-note contract. Inspect its output. |
+| `learning_pending` | Muninn accepted the task request. Keep its R_ ID and check the same request later. |
+| `learning_request_unknown` | Muninn may have accepted a request without returning its R_ ID. Inspect `muninn learn list`; do not submit again. |
+| `learning_request_failed` | The saved Muninn request failed or was cancelled. Inspect it with `muninn learn show R_ID`. |
+| `learning_no_matching_record` | The completed request produced no active note with this exact task and text. Inspect its receipt and notes. |
 | `muninn_store_missing` | no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once. |
 | `muninn_schema_old` | the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2. |
 | `muninn_schema_incomplete` | the D4 adapter expects retired v2 columns or tables. Inspect the current store with `muninn doctor`, then redesign the adapter. |
@@ -383,11 +390,11 @@ The first table gives an action for each control category. The second table list
 | `order_pending_teardown` | completion saved but local apply or observation failed; retry tick with the same bound source. |
 | `order_retro_validator_unavailable` | schema3 retros need the matching retro_check.py validator; reconcile that source dependency before graduation. |
 | `order_already_ticked` | this session and logical loop were already counted; the tick was skipped (informational). |
-| `no_user_cite` | the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner prompt text>`. |
-| `legacy_uncited` | an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`. |
+| `no_user_cite` | Old direct-write adapter reason only. Current task requests read the source session and do not use `--quote`. |
+| `legacy_uncited` | An imported hand-written order has no Muninn request. Review the source session before any new request. |
 | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
 | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
-| `lesson_not_current` | no unambiguous current cited claim exists; inspect conflicting current evidence, or explicitly re-record a retracted/expired lesson with a fresh quote. |
+| `lesson_not_current` | No single active note matches the saved request. Inspect its receipt and any conflicting, retracted or expired notes. Request a new review from the source session if needed. |
 | `retro_not_assembled` | For a new loop, assemble schema-3 retro.json with `retro.py assemble` after the final stop and orders preparation. Preserve the source artifacts. For an old completed loop, see the recovery rule below. |
 | `retro_source_mismatch` | A named source changed after assembly; finish that source and re-assemble. |
 | `retro_decisions_chain_broken` | Restore the damaged decision row; record decisions through the graph CLI. |
@@ -403,8 +410,8 @@ Retained schema-1 and schema-2 retros are historical records. This version requi
 
 After this version writes a schema-3 retro, a code rollback to the preceding proof-only version cannot validate that retro. Its orders command can refuse graduation with `order_retro_validator_unavailable`. Keep a matching version with `retro_check.py` in an isolated checkout for a completion check or orders retry on that loop. Preserve its progress, proof, retro and orders receipts together; a code rollback does not convert them.
 
-- Limits: only the orchestrator session can write (subagent threads are not citable); cites must anchor in a user
-  prompt; the hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Measurement note: compare
+- Limits: only the orchestrator session can request learning. Muninn reviews its source window; the old `--quote`
+  option is ignored. The hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Compare
   `by_reason_code` before and after a change; a rising `muninn_absent` or `refused_approval_needs_reply` is the signal.
   See `docs/decisions/2026-10-05-memory-authoritative.md`.
 
@@ -417,17 +424,20 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
 - Query: `python3 -c "import json;[print(r['seq'],r['muninn']) for r in json.load(open('progress.json'))['decisions_absorbed']]"`,
   or `grep '"command": "decision\.' <agentic-loop dir>/<session_id>/trace.jsonl`. Chain check:
   `python3 -c "import json,sys;sys.path.insert(0,'.');from scripts.lib import decision_record as d;print(d.verify_chain(json.load(open('progress.json'))['decisions_absorbed']))"`.
-- Fix: read the reason in the table above. An authorising prompt of "yes" (`cite_too_short`) is expected to degrade: at
-  teardown run `flush_pending(path, session, transition=..., cite_quote="<a substantive sentence the owner typed>")`;
-  the same `seq` is patched to `written`. Rows are never deleted or rewritten to clear a degrade.
+- Fix: inspect the saved R_ ID with `muninn learn show <R_ID>`. A decision row with an R_ ID but no saved project and
+  source window stays unknown. A pending request stays pending. An unknown submission
+  must be reconciled against Muninn's request list before any new submission. A completed receipt must contain one
+  active note with the exact project, task, kind and text before the row becomes written. The old `cite_quote` input
+  is ignored by the request path. Rows are never deleted to clear a failure.
 - Limits: the chain is a cooperating-agent safeguard (a same-user agent can rewrite file and chain), and dropping the
   last row is detected only by the in-file head anchor, which the same agent can also rewrite. Measurement note: `docs/typed-records-measurement.md`.
 
-## Standing order stored without a cite, or a lesson missing from dispatch
+## Standing order request pending or unknown
 
-- Symptom: `orders.py record` exited 3 with `muninn.reason_code` (`no_user_cite`, `muninn_absent`, `cite_*`), or
+- Symptom: `orders.py record` exited 3 with `muninn.reason_code` (`learning_pending`,
+  `learning_request_unknown`, `muninn_absent`), or
   `lessons.py query` / `orders.py lessons` exited 3 with `{"degraded": ...}`, or an order you recorded is absent from the
-  list. Before completion, `record` stages bound inputs and syncs the cited claim without lifecycle effects. After
+  list. Before completion, `record` stages bound inputs and requests source review without lifecycle effects. After
   owned progress is durably complete, local apply records recurrence and aging in `orders.json`. A degraded store
   result retains any prior K-id. `lessons` never prints ledger text when Muninn is down (`memory.backend: off` is the
   explicit switch). Trace rows: `order.record|prepare|tick|render|import|cite`, `lesson.query|predicate`.
@@ -436,9 +446,11 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   is retracted, expired or superseded, reason `lesson_not_current`), or
   `grep -E '"command": "(order|lesson)\.' <agentic-loop dir>/<session_id>/trace.jsonl`. A hand edit of `orders.json` is
   refused with `order_chain_broken` naming the order.
-- Fix: read the reason in the table above. For `no_user_cite` / `legacy_uncited` run
-  `orders.py --dir <repo-key dir> cite <id> --quote "<verbatim words the owner typed>"` from the owning session. To
-  adopt the old hand-written file run `orders.py import-legacy`. It archives an exact byte copy under the next free
+- Fix: read the reason in the table above. For a saved R_ ID, inspect the same request. An `order-request-*.json`
+  journal can restore the exact returned ID after a failed final order save. For an unknown submission without that
+  journal, inspect `muninn learn list` and its exact source window, project and task; do not submit again when the ID is not
+  proven. `orders.py cite <id>` inspects a saved request. Its old `--quote` option is accepted, ignored and reported
+  as `quote_ignored`. To adopt the old hand-written file run `orders.py import-legacy`. It archives an exact byte copy under the next free
   `standing-orders.legacy*.md` name and retains the source (`archived_to`, `source_retained: true`). Check the ledger
   and archive; retire the hand-written `standing-orders.md` before `orders.py render`. Use typed orders thereafter.
 - Apply contract: use `--dir <repo-key dir> --session <provider session>` with the separate logical `--loop` copied
@@ -452,8 +464,8 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   that lock. If they differ, completion stays pending; repeat the native completion command to render again.
   The Claude Stop guard and Codex `verify-completion` block when the tick or bound generated views are incomplete.
   If render fails on the installed Muninn API, the pending result and later verifier show its actual reason code.
-  The installed Muninn uses a current request-bound API that this D4 adapter does not support. Treat live lesson
-  activation as pending; do not use ledger text as a substitute for a current cited claim.
+  This adapter uses Muninn's request-bound API. Treat live lesson activation as pending until the installed Muninn
+  completes a request and current-note check. Do not use ledger text as a substitute for a current note.
 - Pre-D4 complete loop: review its retained evidence before the exact-hash admission. The receipt then follows only
   completion bookkeeping; other graph changes still block. See `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 - Completed text replacement: when this session/loop observation already exists, explicit `record` captures
@@ -488,7 +500,7 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   are accepted recurrences; conflicts and foreign/malformed stored bindings refuse before superseding a store claim.
 - Current citation: explicit `record` alone may replace lesson text. `cite` reconciles the current tagged claim even
   when the ledger holds older text, without a knowledge write. A formerly cited id without a current replacement
-  refuses; a genuinely uncited first attachment still validates the owner's quote. Distinct simultaneous current
+  refuses; a first attachment with no saved request stays unverified. Distinct simultaneous current
   claims refuse as `lesson_not_current`. Tick performs current reads without knowledge writes; outages retain saved
   K-ids over stale preparation metadata and return explicit degradation. Idempotent tick retry may refresh metadata
   without repeating lifecycle effects. Promotion uses the current cited join, independent of cached write state.
@@ -1033,6 +1045,42 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
   Wiki lint is advisory; presence on base and absence at the first parent do not prove PR authorship.
 
 See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
+
+## Source-bound dispatch upgrade and rollback
+
+This boundary applies to both provider installs. Before activating the source-bound dispatch and publication
+runtime, finish active loops with the runtime that created them, including worker publication and completion.
+Do not upgrade an in-flight implementation or publication wave. Existing assigned units can lack
+`source_manifest_sha256`; the new publication check refuses them with `publication:source_manifest_mismatch`.
+`assign-worktree` only accepts pending units, so it cannot repair an already active assignment. Readability of an
+old dispatch record does not establish that its unit can publish under this runtime.
+
+Start new loops on the new runtime only after the old loops have drained. Keep each loop's matching runtime
+available in an isolated checkout with its progress, dispatch history, proof, orders and retro artifacts preserved
+together. Historical state can also require an older completion/retro reader, as described above; do not assume
+all retained histories can be checked by the pre-upgrade runtime.
+
+Once a new loop stores expanded source/lesson dispatch contracts, reverting code alone is not a safe resume or
+verification procedure: older closed-field readers can reject those contracts. Retain the matching newer runtime
+for that loop through publication, completion and any later verification or retry. A rollback for future work does
+not convert existing records. Do not hand-add hashes, relabel units, reset status, edit frozen evidence, or treat
+`graph.py convert` as an automatic migration for missing source bindings. There is no automatic migration in this
+rollout procedure and no publication bypass is authorized.
+
+Native/global installation remains on HOLD until operational qualification separately verifies this drain and
+runtime-retention procedure. Source review, local tests and a successful commit gate do not establish that an
+installed upgrade, rollback or live-provider loop has been qualified.
+
+Assigned-source inspection refuses effective Git `filter` attributes before status can invoke a clean/process
+helper. Unused filter/LFS configuration alone is permitted. It does not disable a conversion and silently treat
+raw file bytes as the filtered HEAD representation. The refusal also covers explicit `-filter`: Git's attribute
+output cannot distinguish that value from the literal driver name `unset`. An actual `!filter` reset has no
+effective filter row. Inspection does not change attributes, filter configuration or index metadata. Keep the
+trusted assigned checkout and its configuration stable during inspection; these reads are not an atomic snapshot
+or a boundary against concurrent same-user filesystem changes. A refused filtered checkout needs an owner-reviewed
+source workflow; this reader provides no automatic filter migration or bypass.
+It also refuses checkouts containing Git submodule entries before status can inspect a nested checkout and run
+that checkout's filters. It does not ignore submodule dirtiness or claim that nested source has been validated.
 
 ## Dispatch refused: `dispatch_*` or `role_mismatch`
 

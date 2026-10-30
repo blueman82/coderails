@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.tests import fake_muninn_review as review  # noqa: E402
 from scripts.tests import fake_muninn_store as fs  # noqa: E402
 from scripts.tests.fake_muninn_read import (
     cmd_list,
@@ -161,7 +162,13 @@ def main(argv: list[str]) -> int:
     home = Path(os.environ.get("MUNINN_HOME") or Path.home() / ".local/share/muninn")
     if "--help" in argv or "-h" in argv:
         text = (
-            ADD_HELP if argv[:2] == ["know", "add"] else LIST_HELP if argv[:2] == ["know", "list"] else "usage: muninn"
+            ADD_HELP
+            if argv[:2] == ["know", "add"]
+            else (
+                LIST_HELP + " --task"
+                if argv[:2] == ["know", "list"]
+                else "usage: learn request --session --task" if argv[:2] == ["learn", "request"] else "usage: muninn"
+            )
         )
         if os.environ.get("FAKE_MUNINN_HELP") == "real":
             sys.stderr.write(text + "\n")
@@ -177,13 +184,33 @@ def main(argv: list[str]) -> int:
         if sub == "add":
             return cmd_add(home, args)
         if sub == "list":
+            if "--task" in args:
+                code, payload = review.list_current(home, args[args.index("--task") + 1])
+                return out(payload, code)
             return cmd_list(home, args)
         if sub == "show" and args:
+            if args[0].startswith("K_"):
+                code, payload = review.show_note(home, args[0])
+                return out(payload, code)
             return cmd_show(home, args[0])
         if sub == "retract" and args:
+            if args[0].startswith("K_"):
+                code, payload = review.retract(home, args[0])
+                return out(payload, code)
             return cmd_retract(home, args)
     elif cmd == "search":
         return cmd_search(home, rest)
+    elif cmd == "learn" and rest:
+        sub, args = rest[0], rest[1:]
+        if sub == "request":
+            code, payload = review.request(home, args)
+            return out(payload, code)
+        if sub == "show" and args:
+            code, payload = review.show(home, args[0])
+            return out(payload, code)
+        if sub == "complete" and args:
+            code, payload = review.complete(home, args)
+            return out(payload, code)
     elif cmd == "session" and rest:
         evs = fs.load_events(fs.roots_from_env()).get(rest[0], [])
         return out(

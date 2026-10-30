@@ -21,7 +21,7 @@ def add_parsers(add: Callable[[str], argparse.ArgumentParser]) -> None:
         decision = add(name)
         decision.add_argument("state", type=Path)
         decision.add_argument("--session", required=True)
-        decision.add_argument("--cite-quote")
+        decision.add_argument("--cite-quote", help="deprecated compatibility input; ignored by task review")
         if name == "record-decision":
             decision.add_argument("--loop-id", required=True)
             decision.add_argument("--revision", required=True, type=int)

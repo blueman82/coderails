@@ -166,12 +166,13 @@ def valid_record(row: dict[str, Any]) -> bool:
     if not isinstance(field, dict):
         return False
     field = cast("dict[str, Any]", field)
-    if field.get("state") not in ("written", "pending", "degraded", "disabled"):
+    if field.get("state") not in ("written", "pending", "degraded", "disabled", "unknown"):
         return False
-    kid = field.get("id")
-    if kid is not None and (not isinstance(kid, str) or not re.fullmatch(r"K\d+", kid)):
-        return False
-    return field.get("state") != "written" or kid is not None
+    patterns = {"id": r"K(?:\d+|_[0-9a-f]{32})", "request_id": r"R_[0-9a-f]{32}",
+                "task": r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", "claim_sha256": r"[0-9a-f]{64}"}  # fmt: skip
+    fields_valid = all(field.get(key) is None or isinstance(field[key], str) and re.fullmatch(pattern, field[key])
+                       for key, pattern in patterns.items())  # fmt: skip
+    return fields_valid and (field.get("state") != "written" or field.get("id") is not None)
 
 
 def prepared(state_dir: Path, binding: dict[str, Any], required: bool = False) -> dict[str, Any]:
@@ -282,8 +283,7 @@ def prepare(
 
 def _finite_float(value: str) -> float:
     """Reject named nonfinite values and overflowing exponent tokens at every nested JSON position."""
-    number = float(value)
-    if not math.isfinite(number):
+    if not math.isfinite(number := float(value)):
         raise ValueError("order_source_invalid")
     return number
 

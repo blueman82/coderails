@@ -21,7 +21,9 @@ from scripts.lib import memory_adapter as ma  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
 from scripts.lib import orders_legacy_import as legacy_import  # noqa: E402
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
+from scripts.lib import orders_request as request_sync  # noqa: E402
 from scripts.lib.memory_reasons import REASONS  # noqa: E402
+from scripts.lib.orders_request import sync_order  # noqa: E402
 
 CLAIM_MAX = 500  # muninn's claim length rule
 VIEWS = (("standing-orders.md", False), ("standing-orders-decayed.md", True))
@@ -64,31 +66,8 @@ def update(repo_dir: Path, change: Callable[[ol.Ledger], tuple[ol.Ledger | None,
         return _refuse(str(error) if str(error) in REASONS else "order_state_error")
 
 
-def sync_order(
-    order: dict[str, Any], session: str, quote: str, repo_dir: Path, ledger: ol.Ledger, replace: bool = False
-) -> dict[str, Any]:
-    """Reconcile current tagged claims before add; the caller holds the one orders lock throughout."""
-    lifecycle.check_staged_identity(repo_dir, ledger, order)
-    prior = order.get("muninn", {}).get("id")
-    claim = _collapse(str(order["lesson"]))
-    current = lessons.current(order["id"], session, prior)
-    if isinstance(current, ma.Degraded) or current and (not replace or current.claim == claim or not quote.strip()):
-        return lessons.metadata(current, prior)
-    if not replace and prior:
-        return lessons.metadata(None, prior)
-    if not quote.strip():
-        return lessons.metadata(ma.Degraded("no_user_cite"), prior)
-    try:
-        rec = ma.Record("repository", "lesson", claim, "", _collapse(quote), ["order", lessons.tag_for(order["id"])])
-        rec.confidence, rec.supersedes = "inferred", current.id if current else None
-        res: ma.Degraded | ma.Written = ma.resolve_cite(rec, False, session) or ma.add(rec, session)
-    except Exception:  # noqa: BLE001  a failed sync retains the prior K-id and reports explicit degradation
-        res = ma.Degraded("muninn_error")
-    return lessons.metadata(res, prior)
-
-
 def _exit(field: dict[str, Any]) -> int:
-    return 3 if field["state"] == "degraded" else 0
+    return 3 if field["state"] in {"degraded", "pending", "unknown"} else 0
 
 
 def _prepare(state_dir: Path, prepared: dict[str, Any]) -> None:
@@ -124,9 +103,10 @@ def cmd_record(a: argparse.Namespace, repo_dir: Path) -> Result:
         lifecycle.observe(state_dir)
         held["complete"] = state["status"] == "complete"
         prepared = lifecycle.prepared(state_dir, binding)
-        old: dict[str, Any] = (
-            ol.find(ledger, order_id) or next((r for r in prepared["records"] if r["id"] == order_id), None) or {}
-        )
+        old: dict[str, Any] = ol.find(ledger, order_id) or {}
+        staged = next((r for r in prepared["records"] if r["id"] == order_id), None)
+        if staged is not None:
+            old = {**old, **staged}
         row: dict[str, Any] = {
             "id": order_id,
             "failure_mode": a.failure_mode,
@@ -136,9 +116,15 @@ def cmd_record(a: argparse.Namespace, repo_dir: Path) -> Result:
         }
         if any((e["session_id"], e["loop_id"]) == (a.session, a.loop) for e in old.get("evidence", [])):
             row["replaces_source"] = old.get("lesson_source")
-        row["muninn"] = sync_order({**old, **row}, a.session, a.quote, repo_dir, ledger, replace=True)
+        source = request_sync.recover({**old, **row}, repo_dir, a.session, a.loop)
+        issue = request_sync.needs_submit(source, a.loop, a.session)
+        row["muninn"] = sync_order(source, a.session, repo_dir, ledger, a.loop)
         prepared["records"] = [r for r in prepared["records"] if r["id"] != order_id] + [row]
         _prepare(state_dir, prepared)
+        if issue:
+            row["muninn"] = sync_order(row, a.session, repo_dir, ledger, a.loop, issue=True)
+            request_sync.save_response(row, repo_dir, a.session, a.loop, row["muninn"])
+            _prepare(state_dir, prepared)
         new = None
         if state["status"] == "complete":
             new = ol.set_muninn(_record_row(ledger, row, binding), order_id, row["muninn"])
@@ -151,6 +137,8 @@ def cmd_record(a: argparse.Namespace, repo_dir: Path) -> Result:
             return {**payload, "pending_teardown": True, "progress_complete": True}, 3
         return payload, rc
     field = payload["muninn"]
+    if a.quote:
+        payload["quote_ignored"] = True
     outcome = {"written": "recorded", "disabled": "disabled"}.get(field["state"], "degraded")
     ol.trace("order.record", outcome, field["reason_code"], a.session, a.loop)
     return payload, _exit(field)
@@ -188,9 +176,28 @@ def cmd_tick(a: argparse.Namespace, repo_dir: Path) -> Result:
             prior = known["muninn"].get("id") or row["muninn"].get("id")
             if ol.needs_record(known, row, binding, acknowledged is True):
                 ledger = _record_row(ledger, row, binding)
-            field = lessons.metadata(lessons.current(row["id"], a.session, prior), prior)
+            previous = row["muninn"]
+            if not previous.get("request_id") and previous.get("state") != "unknown":
+                previous = known["muninn"]
+            if previous.get("state") == "unknown":
+                field = dict(previous)
+            else:
+                observed = lessons.current(
+                    row["id"],
+                    a.session,
+                    prior,
+                    request_id=previous.get("request_id"),
+                    task=previous.get("task"),
+                    claim=row["lesson"],
+                    request_window=previous.get("request_window"),
+                    project_id=previous.get("project_id"),
+                )
+                field = lessons.metadata(observed, prior)
+            field.update({key: previous[key] for key in (
+                "request_id", "task", "source_session", "claim_sha256", "request_window", "project_id"
+            ) if key in previous})  # fmt: skip
             ledger = ol.set_muninn(ledger, row["id"], field)
-            if field["state"] == "degraded":
+            if field["state"] in {"degraded", "pending", "unknown"}:
                 degraded = field["reason_code"]
         out = ol.tick(ledger, a.loop, ol.now_iso(), session_id=a.session)
         if out["ticked"] or out["ledger"] != original:
@@ -297,13 +304,21 @@ def cmd_import(a: argparse.Namespace, repo_dir: Path) -> Result:
 
 
 def cmd_cite(a: argparse.Namespace, repo_dir: Path) -> Result:
-    """Reconcile/attach a user cite under the same single lock as its ledger save."""
+    """Inspect a saved order request; accept the old quote option for compatibility."""
 
     def change(ledger: ol.Ledger) -> tuple[ol.Ledger, dict[str, Any]]:
         order = ol.find(ledger, a.order_id)
         if order is None:
             raise ValueError("order_not_found")
-        field = sync_order(order, a.session, a.quote, repo_dir, ledger)
+        task = order["evidence"][-1]["loop_id"]
+        order = request_sync.recover(order, repo_dir, a.session, task)
+        issue = request_sync.needs_submit(order, task, a.session)
+        field = sync_order(order, a.session, repo_dir, ledger, task)
+        if issue:
+            ledger = ol.set_muninn(ledger, a.order_id, field)
+            ol.save(repo_dir / "orders.json", ledger)
+            field = sync_order({**order, "muninn": field}, a.session, repo_dir, ledger, task, issue=True)
+            request_sync.save_response(order, repo_dir, a.session, task, field)
         return ol.set_muninn(ledger, a.order_id, field), {"id": a.order_id, "muninn": field}
 
     payload, rc = update(repo_dir, change)
@@ -311,6 +326,8 @@ def cmd_cite(a: argparse.Namespace, repo_dir: Path) -> Result:
     outcome = "refused" if rc else field["state"]
     reason = payload.get("reason_code", field.get("reason_code"))
     ol.trace("order.cite", outcome, reason, a.session)
+    if a.quote:
+        payload["quote_ignored"] = True
     return payload, rc or _exit(field)
 
 
@@ -337,7 +354,7 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--loop", required=True)
     rec.add_argument("--id", default="")
     rec.add_argument("--scope", choices=ol.SCOPES, default="repo")
-    rec.add_argument("--quote", default="", help="verbatim quote of the owner's own prompt (12-300 chars)")
+    rec.add_argument("--quote", default="", help="deprecated compatibility input; ignored by task review")
     sub.add_parser("tick").add_argument("--loop", required=True)
     prep = sub.add_parser("prepare")
     prep.add_argument("--loop", required=True)
@@ -348,7 +365,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("import-legacy").add_argument("--file", default="")
     cite = sub.add_parser("cite")
     cite.add_argument("order_id")
-    cite.add_argument("--quote", required=True)
+    cite.add_argument("--quote", default="", help="deprecated compatibility input; ignored by task review")
     return ap
 
 

@@ -136,7 +136,7 @@ class DecisionCliTests(StoreCase):
                     "--decision",
                     "adopt shape A",
                 )
-                self.assertEqual((code, out.get("recorded"), out.get("seq")), (0, True, 1))
+                self.assertEqual((code, out.get("recorded"), out.get("seq")), (3, True, 1))
                 rows = self.state()["decisions_absorbed"]
                 self.assertEqual((len(rows), dr.verify_chain(rows)), (1, []))
                 rows[0]["decision"] = "tampered"
@@ -175,8 +175,57 @@ class DecisionCliTests(StoreCase):
                 self.assertEqual((code, out.get("reason_code")), (2, "decision_wrong_session"))
                 self.assertEqual(self.path.read_bytes(), before)
 
-    def test_degraded_record_can_flush_with_valid_user_quote(self) -> None:
-        """A short approval degrades, then the native flush command syncs the same row."""
+    def test_ignored_quote_is_disclosed_only_when_supplied(self) -> None:
+        """Both decision commands disclose ignored input without echoing or persisting it."""
+        private_quote = "PRIVATE_QUOTE_SHOULD_NEVER_BE_ECHOED_564"
+        for script in GRAPH_SCRIPTS:
+            for command in ("record-decision", "flush-decisions"):
+                baseline: dict[str, Any] | None = None
+                for quote in (None, "", private_quote):
+                    with self.subTest(provider=script, command=command, supplied=quote is not None, empty=quote == ""):
+                        self.put(
+                            {
+                                **fixture.state(),
+                                "session_id": SESSION,
+                                "loop_id": "L1",
+                                "authorising_prompt_raw": PROMPT,
+                            }
+                        )
+                        args = [command, str(self.path), "--session", SESSION]
+                        if command == "record-decision":
+                            args += [
+                                "--loop-id",
+                                "L1",
+                                "--revision",
+                                str(self.state()["revision"]),
+                                "--phase",
+                                "2.5",
+                                "--decision",
+                                "adopt shape A",
+                            ]
+                        if quote is not None:
+                            args += ["--cite-quote", quote]
+                        result = subprocess.run(
+                            [sys.executable, str(script), *args], cwd=self.tmp,
+                            env={**os.environ, "CLAUDE_CODE_SESSION_ID": SESSION},
+                            capture_output=True, text=True, check=False,
+                        )  # fmt: skip
+                        self.assertEqual(
+                            (result.returncode, result.stderr), (3 if command == "record-decision" else 0, "")
+                        )
+                        output = json.loads(result.stdout)
+                        if quote is None:
+                            self.assertNotIn("quote_ignored", output)
+                            baseline = output
+                        else:
+                            self.assertIs(output.get("quote_ignored"), True)
+                            self.assertEqual(
+                                {key: value for key, value in output.items() if key != "quote_ignored"}, baseline
+                            )
+                        self.assertNotIn(private_quote, result.stdout + result.stderr + self.path.read_text())
+
+    def test_pending_record_flushes_only_its_completed_request(self) -> None:
+        """A short approval does not supply request evidence; flush inspects the saved completed request."""
         for script in GRAPH_SCRIPTS:
             with self.subTest(provider=script):
                 self.put({**fixture.state(), "session_id": SESSION, "loop_id": "L1", "authorising_prompt_raw": "yes"})
@@ -195,7 +244,12 @@ class DecisionCliTests(StoreCase):
                     "--decision",
                     "adopt shape A",
                 )
-                self.assertEqual((code, out.get("muninn", {}).get("state")), (3, "degraded"))
+                self.assertEqual((code, out.get("muninn", {}).get("state")), (3, "pending"))
+                rid = out["muninn"]["request_id"]
+                self.assertEqual(
+                    self.muninn("learn", "complete", rid, "--kind", "decision", "--content", "2.5: adopt shape A")[0],
+                    0,
+                )
                 code, out = self.run_graph(
                     script,
                     "flush-decisions",
