@@ -373,6 +373,7 @@ def main() -> int:
     except (GraphError, graph_semantics.GraphSemanticError, graph_contract.DispatchDeniedError) as error:
         print(f"graph: {error}", file=sys.stderr)
         return 1
+    output.update({"quote_ignored": True} if getattr(args, "cite_quote", None) is not None else {})
     print(json.dumps(output, sort_keys=True))
     return int(output.get("exit_code", 0))
 
