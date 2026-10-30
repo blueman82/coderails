@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, readFile, readdir, stat, truncate, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { collectClaudeSessionTrace, listClaudeSessions, readClaudeTraceDetail, readClaudeTracePage, type TraceCollectionDeps } from "../src/lib/collect/sessionTrace";
@@ -23,6 +23,30 @@ async function fixture() {
 }
 
 describe("Claude native session trace detail and evidence", () => {
+  it.each([
+    ["Map Scout", "Map Scout"], ["Signal Reader", "Signal Reader"],
+    ["Map  Scout", "Worker"], ["<img src=x>\n\u0007", "Worker"],
+  ])("keeps a checked native teammate name %j separate from its worker type", async (name, expected) => {
+    const { deps, parent, child, rows, children } = await fixture();
+    const input = ((rows[0].message as { content: Array<Record<string, unknown>> }).content[0].input) as Record<string, unknown>;
+    const prompt = "A named native teammate task";
+    input.prompt = prompt;
+    input.subagent_type = "worker";
+    rows[1].toolUseResult = { status: "teammate_spawned", agent_id: `${name}@team-1`, teammate_id: `${name}@team-1`,
+      name, team_name: "team-1", prompt, agent_type: "worker" };
+    children[0].message = { role: "user", content: `<teammate-message>\n${prompt}\n</teammate-message>` };
+    await writeFile(join(dirname(child), "agent-a1.meta.json"), JSON.stringify({ name, teamName: "team-1" }));
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    await writeFile(child, children.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    const worker = page.events.find((event) => event.attributes["coderails.actor.id"] === "a1")!;
+    expect(page.complete).toBe(true);
+    expect(worker.attributes).toMatchObject({ "coderails.actor.id": "a1", "coderails.actor.name": expected });
+    expect(worker.parentSpanId).toBe(page.events.find((event) =>
+      event.attributes["coderails.native.call_id"] === "tool-1" && event.name === "tool_request")?.spanId);
+    expect(JSON.stringify(page)).not.toContain("<img");
+  });
+
   it("keeps worker names on mixed mentions with hashed native usage", async () => {
     const { deps, child, children } = await fixture();
     children[1].message = { ...(children[1].message as Record<string, unknown>), id: "PRIVATE_MESSAGE_ID",

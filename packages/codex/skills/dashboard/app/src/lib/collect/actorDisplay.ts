@@ -1,6 +1,6 @@
 function readable(value: unknown, namespaced = false): string | null {
   if (typeof value !== "string" || value.length > 40) return null;
-  const parts = value.split(":");
+  const parts = (namespaced ? value : value.replaceAll(" ", "-")).split(":");
   if (parts.length > 1 && (!namespaced || parts.length !== 2 ||
     !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(parts[0]))) return null;
   const part = parts.at(-1);

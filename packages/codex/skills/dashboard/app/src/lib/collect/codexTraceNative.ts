@@ -5,7 +5,7 @@ import { TRACE_SCHEMA_VERSION, record, type SourceRef, type TraceAttribute, type
 import { nodeAttributes } from "./nodeDisplay";
 import { actorDisplayName } from "./actorDisplay";
 
-export const CODEX_PARSER_VERSION = 8;
+export const CODEX_PARSER_VERSION = 9;
 export const MAX_SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
 export function safeReadError(error: unknown): string {
   return error instanceof Error && error.message.startsWith("source exceeds trace scan limit:")
