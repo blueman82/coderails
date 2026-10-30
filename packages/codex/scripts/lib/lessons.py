@@ -6,7 +6,7 @@
 
 Only active, non-decayed orders are served. An order written to Muninn is served with Muninn's text, K-id and cite, and
 is excluded (and traced `lesson.query/excluded/lesson_not_current`) when its entry is retracted, expired or superseded
-with no current replacement; a current entry carrying the order's own `ord-` tag replaces it. With Muninn down this
+with no exact current note in the same saved task request. With Muninn down this
 exits 3 with the reason and prints NO ledger text (`memory.backend: off` is the explicit switch: ledger text, exit 0).
 Orders that never reached Muninn (no cite yet, legacy import) are listed flagged `cited: false` by `orders.py lessons`
 (diagnostic) but are NOT in `query --format contract` and are never promotion candidates.
@@ -25,6 +25,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
 from scripts.lib import memory_adapter as ma  # noqa: E402
+from scripts.lib import memory_request as mr  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
 from scripts.lib.memory_reasons import REASONS  # noqa: E402
 
@@ -60,24 +61,50 @@ def pick(records: list[ma.Record], order_id: str, prior: str | None = None) -> m
     return exact or max(mine, key=lambda r: int(str(r.id)[1:]), default=None)
 
 
-def current(order_id: str, session: str, prior: str | None = None) -> ma.Record | ma.Degraded | None:
-    """Read this order's current cited claim without authoring knowledge."""
+def claim_text(text: str) -> str:
+    """Canonical intended lesson text for request sync and every currentness check."""
+    return " ".join(text.split())
+
+
+def current(
+    order_id: str,
+    session: str,
+    prior: str | None = None,
+    *,
+    request_id: str | None = None,
+    task: str | None = None,
+    claim: str | None = None,
+    request_window: dict[str, Any] | None = None,
+    project_id: str | None = None,
+) -> ma.Record | ma.Degraded | None:
+    """Read the exact saved task request and its current note."""
     if ma.backend() == "off":
         return ma.Degraded("memory_backend_off")
-    try:
-        listed = ma.list_records("repository", type="lesson", tags=["order"], session_id=session)
-        return listed if isinstance(listed, ma.Degraded) else pick(listed, order_id, prior)
-    except Exception:  # noqa: BLE001  unavailable currentness stays explicit and never becomes an empty read
-        return ma.Degraded("muninn_error")
+    if not request_id or not task or claim is None:
+        return ma.Degraded("muninn_old_ledger") if prior else None
+    if not isinstance(request_window, dict) or not request_window or not isinstance(project_id, str) or not project_id:
+        return ma.Degraded("learning_request_unknown")
+    result = mr.inspect(
+        request_id, task, "lesson", claim_text(claim), expected_window=request_window, expected_project=project_id
+    )
+    if isinstance(result, mr.Pending):
+        return ma.Degraded("learning_pending")
+    return result
 
 
-def metadata(result: ma.Record | ma.Written | ma.Degraded | None, prior: str | None) -> dict[str, Any]:
+def metadata(result: ma.Record | ma.Written | mr.Pending | ma.Degraded | None, prior: str | None) -> dict[str, Any]:
     """Cache an observation, retaining known provenance when currentness cannot be established."""
     if isinstance(result, (ma.Record, ma.Written)):
         return {"id": result.id, "state": "written", "reason_code": "ok"}
+    if isinstance(result, mr.Pending):
+        return {"id": prior, "state": "pending", "request_id": result.request_id, "reason_code": "learning_pending"}
     reason = result.reason if isinstance(result, ma.Degraded) else "lesson_not_current" if prior else "no_user_cite"
     if reason == "memory_backend_off":
         return {"id": prior, "state": "disabled", "reason_code": reason}
+    if reason == "learning_pending":
+        return {"id": prior, "state": "pending", "reason_code": reason}
+    if reason == "learning_request_unknown":
+        return {"id": prior, "state": "unknown", "reason_code": reason}
     return {"id": prior, "state": "degraded", "reason_code": reason}
 
 
@@ -88,17 +115,35 @@ def joined(ledger: ol.Ledger, include_decayed: bool = False, session: str = "") 
     )
     if ma.backend() == "off":
         return {"lessons": [_row(o, None) for o in active], "excluded": [], "state": "memory_backend_off"}
-    listed = ma.list_records("repository", type="lesson", tags=["order"], session_id=session)
-    if isinstance(listed, ma.Degraded):
-        return {"degraded": listed.reason}
+    down = mr.probe()
+    if down is not None:
+        return {"degraded": down.reason}
     rows: list[dict[str, Any]] = []
     excluded: list[dict[str, str]] = []
     for order in active:
-        current = pick(listed, order["id"], order["muninn"].get("id"))
-        if isinstance(current, ma.Degraded):
-            return {"degraded": current.reason}
-        if current is not None:
-            rows.append(_row(order, current))
+        field = order["muninn"]
+        if field.get("state") == "unknown":
+            return {"degraded": "learning_request_unknown"}
+        observed = current(
+            order["id"],
+            session,
+            field.get("id"),
+            request_id=field.get("request_id"),
+            task=field.get("task"),
+            claim=order["lesson"],
+            request_window=field.get("request_window"),
+            project_id=field.get("project_id"),
+        )
+        if isinstance(observed, ma.Degraded):
+            if field.get("state") == "pending" and observed.reason == "learning_pending":
+                rows.append(_row(order, None))
+                continue
+            if field.get("state") == "written" and observed.reason == "learning_no_matching_record":
+                excluded.append({"order": order["id"], "reason": "lesson_not_current"})
+                continue
+            return {"degraded": observed.reason}
+        if observed is not None:
+            rows.append(_row(order, observed))
         elif order["muninn"].get("state") != "written":  # diagnostic only; never a contract/promotion fallback
             rows.append(_row(order, None))
         else:

@@ -31,7 +31,8 @@ class LocalFirstAndChain(Base):
                 self.assertEqual(rows[1]["unit"], "U1")
                 self.assertEqual(rows[0]["prev_sha256"], dr.GENESIS)
                 self.assertEqual(rows[1]["prev_sha256"], rows[0]["row_sha256"])
-                self.assertEqual(rows[0]["muninn"]["state"], "written")
+                self.assertEqual(rows[0]["muninn"]["state"], "pending")
+                self.assertTrue(rows[0]["muninn"]["request_id"].startswith("R_"))
                 self.assertEqual(dr.verify_chain(rows), [])
 
     def test_worker_answer_is_one_hashed_row_and_one_resolved_status(self) -> None:
@@ -68,13 +69,28 @@ class LocalFirstAndChain(Base):
                     status_resolver=worker_status.resolve_pending,
                 )
                 after = self.state()
-                self.assertEqual(out["exit_code"], 0)
+                self.assertEqual(out["exit_code"], 3)
+                self.assertEqual(out["muninn"]["state"], "pending")
                 self.assertEqual(len(after["decisions_absorbed"]), 1)
                 self.assertEqual(dr.verify_chain(after["decisions_absorbed"], after["chain_started_seq"]), [])
                 self.assertEqual(after["decisions_absorbed"][0]["worker_status_seq"], 1)
                 self.assertEqual(after["decisions_absorbed"][0]["chosen"], "allow")
                 self.assertEqual(after["worker_statuses"][0]["resolved_by_decision"], 1)
-                self.assertFalse(decision_pending(after, "U3[1]"))
+                self.assertTrue(decision_pending(after, "U3[1]"))
+                self.assertEqual(
+                    self.muninn(
+                        "learn",
+                        "complete",
+                        out["muninn"]["request_id"],
+                        "--kind",
+                        "decision",
+                        "--content",
+                        "2.5: adopt shape A",
+                    )[0],
+                    0,
+                )
+                self.assertEqual(dr.flush_pending(self.path, SESSION, transition=tr)["exit_code"], 0)
+                self.assertFalse(decision_pending(self.state(), "U3[1]"))
 
     def test_unresolved_memory_sync_keeps_the_answered_node_blocked(self) -> None:
         """A local hashed answer survives a store outage but cannot release the next wave."""

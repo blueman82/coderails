@@ -12,6 +12,7 @@ from hooks.scripts.lib.graph_executor import transition as claude_transition
 from hooks.scripts.tests.lib import claude_transcript_fixture as fixture
 from scripts.lib import decision_record as dr
 from scripts.lib import memory_adapter as ma
+from scripts.lib import memory_request as mr
 from scripts.tests.decision_record_test import Base
 
 WRITTEN = {"state": "written", "id": "K1", "reason_code": "ok"}
@@ -77,13 +78,13 @@ class SyncRaceTests(Base):
             self.assertEqual(sync.call_count, 1)
 
     def test_ambiguous_external_result_needs_reconciliation(self) -> None:
-        """A missing K-id after an attempted add cannot be assumed safe to retry."""
-        with mock.patch.object(ma, "add", return_value=ma.Degraded("muninn_bad_output")) as add:
+        """An uncertain request reply cannot be assumed safe to submit again."""
+        with mock.patch.object(mr, "submit", return_value=ma.Degraded("muninn_bad_output")) as submit:
             out = self.rec()
             self.assertEqual((out["exit_code"], out["muninn"]["state"]), (3, "unknown"))
             retry = dr.flush_pending(self.path, "s1", transition=claude_transition)
             self.assertEqual((retry["exit_code"], retry["reason_code"]), (3, "decision_sync_unknown"))
-            self.assertEqual(add.call_count, 1)
+            self.assertEqual(submit.call_count, 1)
 
     def test_rearmed_loop_cannot_receive_old_sync_result(self) -> None:
         """An old result must not mark a replacement loop's first row."""
