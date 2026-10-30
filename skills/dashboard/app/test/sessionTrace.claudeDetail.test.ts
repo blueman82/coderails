@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, readFile, readdir, stat, truncate, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { collectClaudeSessionTrace, listClaudeSessions, readClaudeTraceDetail, readClaudeTracePage, type TraceCollectionDeps } from "../src/lib/collect/sessionTrace";
@@ -23,6 +23,85 @@ async function fixture() {
 }
 
 describe("Claude native session trace detail and evidence", () => {
+  it.each([
+    ["Map Scout", "Map Scout"], ["Signal Reader", "Signal Reader"],
+    ["Map  Scout", "Worker"], ["<img src=x>\n\u0007", "Worker"],
+  ])("keeps a checked native teammate name %j separate from its worker type", async (name, expected) => {
+    const { deps, parent, child, rows, children } = await fixture();
+    const input = ((rows[0].message as { content: Array<Record<string, unknown>> }).content[0].input) as Record<string, unknown>;
+    const prompt = "A named native teammate task";
+    input.prompt = prompt;
+    input.subagent_type = "worker";
+    rows[1].toolUseResult = { status: "teammate_spawned", agent_id: `${name}@team-1`, teammate_id: `${name}@team-1`,
+      name, team_name: "team-1", prompt, agent_type: "worker" };
+    children[0].message = { role: "user", content: `<teammate-message>\n${prompt}\n</teammate-message>` };
+    await writeFile(join(dirname(child), "agent-a1.meta.json"), JSON.stringify({ name, teamName: "team-1" }));
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    await writeFile(child, children.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    const worker = page.events.find((event) => event.attributes["coderails.actor.id"] === "a1")!;
+    expect(page.complete).toBe(true);
+    expect(worker.attributes).toMatchObject({ "coderails.actor.id": "a1", "coderails.actor.name": expected });
+    expect(worker.parentSpanId).toBe(page.events.find((event) =>
+      event.attributes["coderails.native.call_id"] === "tool-1" && event.name === "tool_request")?.spanId);
+    expect(JSON.stringify(page)).not.toContain("<img");
+  });
+
+  it("keeps worker names on mixed mentions with hashed native usage", async () => {
+    const { deps, child, children } = await fixture();
+    children[1].message = { ...(children[1].message as Record<string, unknown>), id: "PRIVATE_MESSAGE_ID",
+      usage: { input_tokens: 8 }, content: [
+        { type: "text", text: "See skills/wiki-query/SKILL.md before continuing." },
+        { type: "tool_use", name: "Bash", id: "child-tool", input: { command: "true" } },
+      ] };
+    await writeFile(child, children.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    const mention = page.events.find((event) => event.attributes["coderails.observation.kind"] === "mention")!;
+    const tool = page.events.find((event) => event.attributes["coderails.native.call_id"] === "child-tool")!;
+    expect(mention.attributes).toMatchObject({ "coderails.actor.kind": "worker", "coderails.actor.id": "a1",
+      "coderails.actor.name": "Worker", "coderails.usage.semantics": "incremental" });
+    expect(mention.attributes["coderails.usage.identity_sha256"]).toMatch(/^[a-f0-9]{64}$/);
+    expect(mention.attributes["coderails.usage.identity_sha256"]).toBe(tool.attributes["coderails.usage.identity_sha256"]);
+    expect(mention.parentSpanId).toBe(tool.parentSpanId);
+    expect(JSON.stringify(page)).not.toContain("PRIVATE_MESSAGE_ID");
+  });
+
+  it("names a validated worker from its graph job without changing native identity", async () => {
+    const { deps, parent, child, rows, children } = await fixture();
+    const call = (rows[0].message as { content: Array<Record<string, unknown>> }).content[0];
+    const input = call.input as Record<string, unknown>;
+    input.prompt = String(input.prompt).replaceAll('"node_id":"U1"', '"node_id":"U3[1]"');
+    (children[0].message as { content: string }).content = String(input.prompt);
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    await writeFile(child, children.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    const worker = page.events.find((event) => event.attributes["coderails.actor.id"] === "a1")!;
+    expect(worker.attributes).toMatchObject({ "coderails.actor.id": "a1", "coderails.actor.name": "Builder",
+      "coderails.node.id": "U3[1]" });
+    expect(worker.parentSpanId).toBe(page.events.find((event) => event.name === "tool_request" &&
+      event.attributes["coderails.native.call_id"] === "tool-1")?.spanId);
+  });
+
+  it.each([
+    ["coderails:source-auditor", "Source Auditor"],
+    ["<img src=x onerror=alert(1)>", "Worker"],
+  ])("uses a bounded native role for %s", async (role, expected) => {
+    const { deps, parent, child, rows, children } = await fixture();
+    const call = (rows[0].message as { content: Array<Record<string, unknown>> }).content[0];
+    const input = call.input as Record<string, unknown>;
+    input.prompt = "Native non-graph task";
+    input.subagent_type = role;
+    (children[0].message as { content: string }).content = "Native non-graph task";
+    children[1].attributionAgent = role;
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    await writeFile(child, children.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    const worker = page.events.find((event) => event.attributes["coderails.actor.id"] === "a1")!;
+    expect(worker.attributes["coderails.actor.name"]).toBe(expected);
+    expect(worker.attributes["coderails.actor.id"]).toBe("a1");
+    expect(JSON.stringify(page)).not.toContain("<img");
+  });
+
   it("removes metadata generations when the native session is deleted", async () => {
     const { deps, parent } = await fixture();
     await collectClaudeSessionTrace("s1", deps);

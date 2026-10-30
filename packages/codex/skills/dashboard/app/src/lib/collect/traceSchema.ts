@@ -1,3 +1,5 @@
+import { validActorDisplayName } from "./actorDisplay";
+
 export const TRACE_SCHEMA_VERSION = 1 as const;
 
 export type TraceProvider = "claude" | "codex";
@@ -119,6 +121,7 @@ const attributeKeys = new Set([
   "coderails.source.ordinal",
   "coderails.actor.kind",
   "coderails.actor.id",
+  "coderails.actor.name",
   "coderails.loop.id",
   "coderails.graph.revision",
   "coderails.wave.id",
@@ -210,7 +213,13 @@ function attributes(value: unknown): boolean {
   return record(value) && Object.entries(value).every(([key, item]) =>
     attributeKeys.has(key) && (item === null || typeof item === "string" ||
       (typeof item === "number" && Number.isFinite(item)) || typeof item === "boolean")) &&
-    observationAttributes(value) && usageAttributes(value);
+    observationAttributes(value) && usageAttributes(value) && actorAttributes(value);
+}
+
+function actorAttributes(value: Record<string, unknown>): boolean {
+  const name = value["coderails.actor.name"];
+  return name === undefined || (value["coderails.actor.kind"] === "worker" &&
+    nonempty(value["coderails.actor.id"]) && value["coderails.actor.id"].trim().length > 0 && validActorDisplayName(name));
 }
 
 function observationAttributes(value: Record<string, unknown>): boolean {

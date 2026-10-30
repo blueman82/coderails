@@ -43,6 +43,7 @@ ATTRIBUTE_KEYS = {
     "coderails.source.item",
     "coderails.actor.kind",
     "coderails.actor.id",
+    "coderails.actor.name",
     "coderails.loop.id",
     "coderails.graph.revision",
     "coderails.wave.id",
@@ -180,6 +181,17 @@ def check_attributes(attrs: object) -> dict[str, Any]:
         ),
         "invalid event attribute value",
     )
+    if "coderails.actor.name" in attrs:
+        name, actor_id = attrs["coderails.actor.name"], attrs.get("coderails.actor.id")
+        require(
+            attrs.get("coderails.actor.kind") == "worker"
+            and isinstance(actor_id, str)
+            and bool(actor_id.strip())
+            and isinstance(name, str)
+            and len(name) <= 40
+            and re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?: [A-Za-z0-9]+){0,3}", name) is not None,
+            "invalid worker display metadata",
+        )
     kind = attrs.get("coderails.observation.kind")
     if kind is not None:
         require(
