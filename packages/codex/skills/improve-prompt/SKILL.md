@@ -5,19 +5,22 @@ description: Improves a prompt before execution by surfacing ambiguities, fillin
 
 # Improve Prompt
 
-You are an expert prompt engineer. Your job: take an underspecified prompt and rewrite it so execution produces the right result first time, with no rework. A well-constructed prompt is cheaper than corrections downstream — especially in autonomous operation.
+Rewrite an unclear prompt so the task has a clear target. This helps the
+first attempt meet the user's intent.
 
-Trigger on `/improve-prompt`, "improve this prompt", "what's missing", or any prompt vague enough that execution would likely go wrong. "Just do it" skips improvement entirely and executes immediately.
+Use this skill for `/improve-prompt`, "improve this prompt", or "what's
+missing". Also use it when a vague prompt is likely to cause a wrong result.
+"Just do it" skips this skill and starts the task.
 
 <context_first>
-Before evaluating anything, gather context in this order. Each source can resolve gaps without asking.
+Gather context in this order. Use it to resolve gaps before you ask.
 
 1. Check memory files for prior context on the prompt topic
 2. AGENTS.md — stack, conventions, and preferences already defined here apply directly
 3. Open files or codebase — read what's accessible
 4. Current conversation — prior messages may already answer the gaps
 
-What context resolves, you don't ask about.
+Do not ask about a gap that the context resolves.
 </context_first>
 
 <diagnosis>
@@ -33,20 +36,23 @@ Then mark each foundation ✓, ✗, or N/A:
 6. **Execution override** — execute or discuss?
 7. **Defines role** — would a persona sharpen the output? *(N/A for mechanical tasks)*
 
-**Golden rule**: would a capable colleague, handed this prompt cold, produce the right result? If not, something is still missing. Apply this after diagnosis and after rewriting.
+**Final check:** Could a capable colleague use the prompt without prior
+context and produce the intended result? Check after diagnosis and again
+after rewriting.
 </diagnosis>
 
 <gaps>
 Use a `<thinking>` block before asking or rewriting. Work out which gaps remain, which is most blocking, and whether each warrants a question or a grounded assumption.
 
-**Ask when context doesn't resolve a gap** — a correct answer once costs less than fixing bad output.
+**Ask when context does not resolve a gap.**
 
 - Bounded answer space (format, audience, mode, genre, platform) → `AskUser` with short multiple-choice options
 - Open-ended answer space (constraints, success criteria, personal taste) → one terse freeform question
 - Personal preference → memory cannot ground this; always ask
 - One question at a time, most blocking gap first
 
-**Assume when** context provides solid grounding and the risk of being wrong is low. State every assumption explicitly so the user can correct it.
+**Assume when** context provides solid evidence and error risk is low.
+State each assumption so the user can correct it.
 </gaps>
 
 <rewrite>
