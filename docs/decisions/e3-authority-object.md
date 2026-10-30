@@ -154,3 +154,17 @@ it never mints authority. The earlier authorize/crack-on descriptions above are 
 
 When the optional action-receipt gate is off, routine PR work needs no receipt, key or passphrase. Explicit enforce
 mode still requires its existing signed receipt. The separate review, eval and integrity gates remain in force.
+
+## Legacy reader retirement — PR #562
+
+[PR #562](https://github.com/blueman82/coderails/pull/562) retires the old flag readers, optional/missing or
+`legacy_phrase` authority stamps, and the `authority.py create` alias. Existing flag files and legacy authority
+objects are not automatically changed, migrated, relabelled or deleted. They no longer supply a valid authority;
+owners use the current `authorise` entrypoints and typed `grant` path when they choose to issue a new grant.
+
+This deliberate compatibility break also removes rejected legacy objects' denied-action restrictions, max-PR caps,
+authority-derived loop binding and advisory merge-budget reservation through the existing no-authority branches.
+It is not monotonic security tightening or an independent approval boundary. Optional receipt-off behavior and
+the separate review, eval and integrity gates remain unchanged. Typed grants retain session binding, expiry and
+revocation. Live retained-state and external-client presence remain unknown; old historical descriptions above
+record their former behavior.
