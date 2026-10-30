@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -23,8 +24,27 @@ class PublicationSessionTests(HookTestCase):
         from packages.tests.graph_manifest_fixture import graph_progress
         from scripts.lib import manifest_policy
 
-        subprocess.run(["git", "init", "-q", str(self.directory)], check=True)
-        loop = self.directory / "loops"
+        subprocess.run(["git", "init", "-q", "-b", "feature/publication-session", str(self.directory)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.directory),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@test",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "source",
+            ],
+            check=True,
+        )
+        temporary_loop = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_loop.cleanup)
+        loop = Path(temporary_loop.name)
         graph_progress(self.directory, loop, ["src/**"], session="owner-session")
         seen: list[tuple[str, bool]] = []
 

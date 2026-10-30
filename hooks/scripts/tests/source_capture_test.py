@@ -71,7 +71,11 @@ class CaptureTests(unittest.TestCase):
         workspace = self.workspace(tracked=True)
         Path(str(workspace["execution"]), "allowed.txt").unlink()
         proposal = self.freeze(workspace)
-        self.assertEqual(capture.tree_entries(Path(str(workspace["store"])), str(proposal["tree"])), {})
+        store = Path(str(workspace["store"]))
+        baseline = capture.tree_entries(store, str(workspace["head"]))
+        self.assertIn("allowed.txt", baseline)
+        expected = {path: entry for path, entry in baseline.items() if path != "allowed.txt"}
+        self.assertEqual(capture.tree_entries(store, str(proposal["tree"])), expected)
 
     def test_trusted_ignore_allows_cache_but_worker_ignore_cannot_hide_source(self) -> None:
         """Trusted ignore allows cache but worker ignore cannot hide source."""

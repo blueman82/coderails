@@ -68,8 +68,8 @@ transcript parser and independently installed pure graph semantics.
 2. Run `begin-wave <path-to-progress.json>` immediately before dispatch. It
    records exactly the ready nodes as running, captures the native transcript
    cursor, stores one single-use dispatch record per node in `graph.dispatches`
-   (its closed contract: role, model_role, base_ref, manifest, publication_command, disposition,
-   lessons, write_scope, skip_phases, scope) and returns each dispatch's
+   (its closed contract: role, model_role, base_ref, worktree, manifest, source_manifest_sha256,
+   source_head_sha, publication_command, disposition, lessons, lessons_sha256, write_scope, skip_phases, scope) and returns each dispatch's
    `dispatch_id`, `prompt_prefix` and `prompt_sections`. A failure means no
    dispatch is authorized; a state older than `state_minor` 2 must be converted
    first (`graph.py convert`, which refuses while a wave is open).
@@ -93,6 +93,16 @@ transcript parser and independently installed pure graph semantics.
    `add-unit --base-branch <parent>`; later pushes use the live PR base.
    The push script validates those flags, the registered manifest, both paths
    of any rename in the PR diff, and any recorded worktree before transport.
+   Register a new source manifest with `add-unit --manifest <glob> --worktree <absolute-checkout>`.
+   The assigned checkout must be a clean Git root with a committed HEAD. Registration
+   stores its manifest binding; dispatch also binds its current HEAD. The existing
+   `assign-worktree` operation applies the same checks to a pending unit.
+   Both native and driver dispatch adapters read `lessons.py --dir <repo-key-dir>
+   --session <owner> query --format contract` before taking the progress lock.
+   They put the typed rows and their digest in the existing contract and recheck the
+   snapshot before authorization. A missing, refusing, or stale lesson result refuses
+   dispatch. An explicit `memory.backend: off` keeps the eligible local ledger rows;
+   that result is empty only when no active eligible orders exist.
    Historical v2 records retain
    their original rendered sections and digest. A plugin agent that is not
    installed in the session cannot run a guarded

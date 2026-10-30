@@ -1,57 +1,38 @@
-"""Closed dispatch contract and v2 envelope shared by both providers; materialized byte-for-byte.
-
-`begin-wave` stores one record per dispatched node in `graph.dispatches`; the worker prompt must carry the record's
-first-line envelope and its rendered contract block verbatim. `check_dispatch` cross-checks a prompt against the stored
-record, `assert_role` pins the requested provider role to the contract's role. Pure apart from `base_ref` (one `git
-remote` call) and reading capabilities/profiles.json, the single source of the role enum.
-"""
+"""Share the closed dispatch contract and v2 envelope across both providers."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, cast
 
 import graph_spec
+from graph_lessons import query as query_lessons
+from graph_source import check_binding
+from graph_source import source_assignment as source_assignment
+from graph_source import source_binding as source_binding
 from graph_vocab import decision_pending, decision_sync_pending
 
-ENVELOPE_VERSION = 2
-ENVELOPE_KEY = "CODERAILS_GRAPH_DISPATCH"
+ENVELOPE_VERSION, ENVELOPE_KEY = 2, "CODERAILS_GRAPH_DISPATCH"
 MODEL_ROLES = ("fast-mechanical", "default", "frontier")
-CONTRACT_FIELDS = (
-    "role",
-    "model_role",
-    "base_ref",
-    "manifest",
-    "publication_command",
-    "disposition",
-    "lessons",
-    "write_scope",
-    "skip_phases",
-    "scope",
+CONTRACT_FIELDS = tuple(
+    "role model_role base_ref worktree manifest source_manifest_sha256 source_head_sha "  # noqa: SIM905
+    "publication_command disposition lessons lessons_sha256 write_scope skip_phases scope".split()
 )
 LIST_FIELDS = ("manifest", "lessons", "write_scope", "skip_phases")
 ENVELOPE_FIELDS = ("envelope_version", "dispatch_id", "session_id", "loop_id", "revision", "wave_id", "node_id")
 LEGACY_FIELDS = ("session_id", "loop_id", "revision", "wave_id", "node_id")
-CODES = (
-    "dispatch_missing_envelope",
-    "dispatch_call_id_missing",
-    "dispatch_unknown_id",
-    "dispatch_foreign",
-    "dispatch_stale_revision",
-    "dispatch_attempt_mismatch",
-    "dispatch_replayed",
-    "dispatch_contract_altered",
-    "dispatch_sections_missing",
-    "dispatch_state_unconverted",
-    "role_mismatch",
-    "dispatch_unauthorized",
-    "dispatch_publication_mismatch",
-)
+CODES = (  # noqa: SIM905 - keep the shared counter vocabulary compact
+    "dispatch_missing_envelope dispatch_call_id_missing dispatch_unknown_id dispatch_foreign "
+    "dispatch_stale_revision dispatch_attempt_mismatch dispatch_replayed dispatch_contract_altered "
+    "dispatch_sections_missing dispatch_state_unconverted role_mismatch dispatch_unauthorized "
+    "dispatch_publication_mismatch dispatch_source_mismatch dispatch_lessons_unavailable dispatch_lessons_stale"
+).split()
 OFF_SWITCH = "CODERAILS_GRAPH_DISPATCH"  # off/0/false: bypass policy after v2 ownership (default ON)
 BEGIN, END = "CODERAILS_GRAPH_CONTRACT v2", "END CODERAILS_GRAPH_CONTRACT"
 CAPABILITY_TOOLS = ("repo.inspect", "diff.read", "tests.run", "pr.comment")  # mirrors hooks capability_profiles.TOOLS
@@ -76,8 +57,7 @@ def dispatch_off() -> bool:
 def load_profiles() -> dict[str, Any]:
     """The nearest capabilities/profiles.json above this file (repo root, or the Codex plugin root)."""
     for parent in Path(__file__).resolve().parents:
-        candidate = parent / "capabilities" / "profiles.json"
-        if candidate.is_file():
+        if (candidate := parent / "capabilities" / "profiles.json").is_file():
             return cast(dict[str, Any], json.loads(candidate.read_text(encoding="utf-8")))
     raise ValueError("capabilities/profiles.json not found")
 
@@ -101,8 +81,8 @@ def validate_contract(contract: object) -> dict[str, Any]:
     if not isinstance(contract, dict):
         raise ValueError("contract must be an object")
     value = cast(dict[str, Any], contract)
-    old_fields = set(CONTRACT_FIELDS) - {"publication_command"}
-    if set(value) not in (old_fields, set(CONTRACT_FIELDS)):
+    prior_fields = set(CONTRACT_FIELDS) - {"worktree", "source_manifest_sha256", "source_head_sha", "lessons_sha256"}
+    if set(value) not in (prior_fields - {"publication_command"}, prior_fields, set(CONTRACT_FIELDS)):
         raise ValueError(f"contract fields must match the current or historical v2 set: {list(CONTRACT_FIELDS)}")
     if value["role"] not in roles():
         raise ValueError("contract role is not a known agent")
@@ -113,14 +93,31 @@ def validate_contract(contract: object) -> dict[str, Any]:
             raise ValueError(f"contract {key} must be a string")
     for key in LIST_FIELDS:
         items = value[key]
-        if not isinstance(items, list) or not all(isinstance(item, str) for item in cast(list[object], items)):
+        if not isinstance(items, list) or not all(
+            isinstance(item, str)
+            or (key == "lessons" and isinstance(item, dict) and isinstance(cast(dict[str, Any], item).get("text"), str))
+            for item in cast(list[object], items)
+        ):
             raise ValueError(f"contract {key} must be an array of strings")
+    digest = value.get("lessons_sha256")
+    if digest is not None and (not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+        raise ValueError("contract lessons_sha256 must be a SHA256 or null")
     if value["disposition"] is not None and not isinstance(value["disposition"], dict):
         raise ValueError("contract disposition must be an object or null")
     if value.get("publication_command") is not None and (
         not isinstance(value["publication_command"], str) or not value["publication_command"].strip()
     ):
         raise ValueError("contract publication_command must be a non-empty string or null")
+    if "worktree" in value:
+        worktree = value["worktree"]
+        if worktree is not None and (not isinstance(worktree, str) or not Path(worktree).is_absolute()):
+            raise ValueError("contract worktree must be an absolute path or null")
+        digest = value["source_manifest_sha256"]
+        if digest is not None and (not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+            raise ValueError("contract source_manifest_sha256 must be a SHA256 or null")
+        head = value["source_head_sha"]
+        if head is not None and (not isinstance(head, str) or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head) is None):
+            raise ValueError("contract source_head_sha must be a Git SHA or null")
     return value
 
 
@@ -173,6 +170,33 @@ def unit_fields(
     return {key: value for key, value in given.items() if value is not None}
 
 
+def require_source_binding(state: dict[str, Any], record: dict[str, Any]) -> None:
+    """Refuse a changed assigned checkout or manifest before a native worker starts."""
+    unit = graph_spec.split_id(record["node_id"])[1]
+    if unit is None:
+        return
+    stored = state.get("work_units", {}).get(unit, {})
+    contract = validate_contract(record["contract"])
+    try:
+        check_binding(stored, contract)
+    except ValueError as error:
+        raise DispatchDeniedError("dispatch_source_mismatch", str(error)) from error
+
+
+def current_lessons(progress: Path, push_script: Path, session: str) -> dict[str, Any]:
+    """Read the provider's current cited lessons before acquiring the graph lock."""
+    try:
+        return query_lessons(progress, push_script, session)
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        raise DispatchDeniedError("dispatch_lessons_unavailable", str(error)) from error
+
+
+def require_current_lessons(record: dict[str, Any], snapshot: dict[str, Any]) -> None:
+    """Refuse an old lesson snapshot before worker launch."""
+    if validate_contract(record["contract"]).get("lessons_sha256") != snapshot["sha256"]:
+        raise DispatchDeniedError("dispatch_lessons_stale", "current lessons changed after begin-wave")
+
+
 def publication_command(node_id: str, progress: Path, push_script: Path) -> str | None:
     """Render the exact executable publication command for a unit worker."""
     unit = graph_spec.split_id(node_id)[1]
@@ -191,7 +215,12 @@ def require_publication(record: dict[str, Any], progress: Path, push_script: Pat
 
 
 def build_contract(
-    state: dict[str, Any], node_id: str, base: str, progress: Path | None = None, push_script: Path | None = None
+    state: dict[str, Any],
+    node_id: str,
+    base: str,
+    progress: Path | None = None,
+    push_script: Path | None = None,
+    lesson_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The contract for one node: unit inputs (defaults applied), role and skip_phases from the graph spec."""
     spec, policy = graph_spec.load_spec(), graph_spec.load_policy()
@@ -199,22 +228,33 @@ def build_contract(
     stored = cast(dict[str, Any], state.get("work_units", {}).get(unit, {})) if unit else {}
     node = graph_spec.node_for(spec, node_id)
     manifest = list(stored.get("manifest", []))
+    source = {"worktree": stored.get("worktree"), "source_manifest_sha256": None, "source_head_sha": None}
+    if source["worktree"] is not None:
+        try:
+            source.update(source_binding(str(source["worktree"]), manifest))
+        except ValueError as error:
+            raise DispatchDeniedError("dispatch_source_mismatch", str(error)) from error
     if (progress is None) != (push_script is None):
         raise ValueError("publication needs both progress and push script paths")
-    return {
+    lesson_rows: list[Any] = cast(list[Any], lesson_snapshot["lessons"]) if lesson_snapshot else []
+    contract: dict[str, Any] = {
         "role": (node or {}).get("agent_role") or "loop-worker",
         "model_role": stored.get("model_role", "default"),
         "base_ref": base,
+        **source,
         "manifest": manifest,
         "publication_command": (
             publication_command(node_id, progress, push_script) if progress and push_script else None
         ),
         "disposition": stored.get("disposition"),  # null until the disposition-scout record exists
-        "lessons": list(stored.get("lessons", [])),
+        "lessons": [*stored.get("lessons", []), *lesson_rows],
+        "lessons_sha256": lesson_snapshot["sha256"] if lesson_snapshot else None,
         "write_scope": list(stored.get("write_scope", manifest)),
         "skip_phases": [n["id"] for n in spec["nodes"] if graph_spec.skip_when_met(state, spec, policy, n["id"])],
         "scope": stored.get("scope", ""),
     }
+    require_source_binding(state, {"node_id": node_id, "contract": contract})
+    return contract
 
 
 def dispatch_id(loop_id: str, wave_id: str, node_id: str, attempt: int) -> str:
@@ -330,10 +370,7 @@ def check_dispatch(state: dict[str, Any], env: dict[str, Any], prompt: str, live
 
 
 def assert_role(contract: dict[str, Any], requested: str, prefix: str, generic: tuple[str, ...] | None) -> None:
-    """Guarded roles need their own typed agent; other roles accept only a truly omitted or generic type.
-
-    `generic` lists the accepted untyped agents (Claude); None accepts only an omitted type (Codex).
-    """
+    """Guard typed roles; generic names allowed Claude agents, while None means an omitted Codex type."""
     role = contract["role"]
     if requested == prefix + role:
         return

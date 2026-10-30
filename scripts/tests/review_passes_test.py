@@ -127,6 +127,23 @@ class PolicyTests(unittest.TestCase):
 class LineTests(unittest.TestCase):
     """render, parse and verdict_from_summary."""
 
+    def test_optional_compatibility_line_retains_strict_binding(self) -> None:
+        """The optional legacy line binds PR/head without replacing summary and section checks."""
+        passes = [entry("review-pr"), entry("security-review")]
+        lines = body(passes).splitlines()
+        compat = review_artifact.compat_line("7", SHA, 0, "clean-break")
+        valid = "\n".join([*lines[:2], compat, *lines[2:]])
+        self.assertEqual(review_passes.parse(valid, "7", SHA), passes)
+        for invalid in (
+            valid.replace(compat, review_artifact.compat_line("8", SHA, 0, "clean-break")),
+            valid.replace(compat, review_artifact.compat_line("7", OTHER, 0, "clean-break")),
+            valid.replace("count=0", "count=bad"),
+            valid.replace("## No findings", "## Critical\n- unreviewed change", 1),
+            valid.replace("<!-- coderails-review-pass security-review -->", "<!-- coderails-review-pass other -->"),
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertIsNone(review_passes.parse(invalid, "7", SHA))
+
     def test_round_trip(self) -> None:
         """A rendered line parses back to the same entries."""
         passes = [entry("review-pr"), entry("security-review")]

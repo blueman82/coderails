@@ -137,8 +137,7 @@ class Repo(unittest.TestCase):
 
     def setUp(self) -> None:
         """Base commit on origin/main, then one feature commit touching `touched`."""
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
+        self.addCleanup((temporary := tempfile.TemporaryDirectory()).cleanup)
         self.tmp = Path(temporary.name)
         self.dir = self.tmp / "repo"
         self.dir.mkdir()
@@ -157,7 +156,7 @@ class Repo(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "change")
         self.sha = git_cmd(self.dir, "rev-parse", "HEAD").strip()
-        self.eval_file = write_comment(self.tmp, self.sha, self.eval_level, frozen_sha=self.base)
+        self.eval_file = write_comment(self.tmp, self.sha, self.eval_level, self.tmp / "keys", frozen_sha=self.base)
 
 
 class HookTests(Repo):
@@ -168,6 +167,7 @@ class HookTests(Repo):
         environment = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
         environment |= {
             "FAKE_SHA": self.sha,
+            "CODERAILS_KEYS_DIR": str(self.tmp / "keys"),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
             "FAKE_BASE_SHA": self.base,
             **artifact(entry("review-pr")),

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from . import git_common as git
+from . import source_manifest
 from .config import config_path
 from .config_strict import ConfigRejected, strict_settings
 
@@ -231,6 +232,7 @@ def unit_manifest(progress: str, unit: str) -> list[str]:
     worktree = cast(dict[str, Any], entry).get("worktree")
     if not isinstance(worktree, str) or not worktree.strip() or not Path(worktree).is_absolute():
         raise ValueError("unit worktree invalid")
+    source_manifest.validate(cast(dict[str, Any], entry))
     return strings(cast(list[object], manifest))
 
 

@@ -5,9 +5,29 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 CONTEXT_COMMANDS = ("context_manifest", "context_route")
+
+
+def measured_reasons(payload: object, reasons: tuple[str, ...]) -> dict[str, int]:
+    """Read typed reason totals from measure_graph_alignment's trace.by_reason."""
+    if not isinstance(payload, dict):
+        raise ValueError("missing trace summary")
+    trace = cast("dict[str, object]", payload).get("trace")
+    if not isinstance(trace, dict):
+        raise ValueError("missing trace summary")
+    by_reason = cast("dict[str, object]", trace).get("by_reason")
+    if not isinstance(by_reason, dict):
+        raise ValueError("missing trace.by_reason")
+    counts: dict[str, int] = dict.fromkeys(reasons, 0)
+    for key, value in cast("dict[object, object]", by_reason).items():
+        if not isinstance(key, str) or type(value) is not int or value < 0:
+            raise ValueError("invalid trace.by_reason entry")
+        code = key.rpartition("/")[2]
+        if code in counts:
+            counts[code] += value
+    return counts
 
 
 def count_events(

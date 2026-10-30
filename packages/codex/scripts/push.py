@@ -10,7 +10,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import git_common as git
-from scripts.lib import manifest_policy
+from scripts.lib import manifest_policy, source_manifest
 
 
 def refuse_publication(code: str, message: str) -> None:
@@ -56,6 +56,10 @@ def unit_manifest(unit: str | None, progress: str | None) -> tuple[list[str], st
         or Path(assigned).resolve() != Path(git.output("git", "rev-parse", "--show-toplevel", check=True)).resolve()
     ):
         refuse_publication("publication:worktree_invalid", "publication worktree does not match the unit")
+    try:
+        source_manifest.validate(record)
+    except ValueError as error:
+        refuse_publication("publication:source_manifest_mismatch", str(error))
     base = record.get("base_branch")
     if base is not None and (not isinstance(base, str) or not base or base.startswith("-")):
         raise git.WorkflowError("publication base branch is invalid")

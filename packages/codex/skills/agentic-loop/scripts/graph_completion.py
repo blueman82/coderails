@@ -58,7 +58,7 @@ def validate_completion_state(
     retro_path: Path,
     transcript_path: Path | None,
 ) -> list[str]:
-    """Check graph, native or driver history, and current completion artifacts."""
+    """Check graph, native or driver history, and current canonical completion artifacts."""
     if state.get("proof_disposition") is not None and (
         proof_path.absolute() != state_path.with_name("proof.json").absolute()
     ):
@@ -83,6 +83,7 @@ def validate_completion_state(
 
 
 def _result(state: dict[str, Any], disclosures: list[str]) -> dict[str, Any]:
+    """The completion record; `disclosures` (Muninn degrades) appears only when there is something to disclose."""
     result: dict[str, Any] = {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
     return {**result, "disclosures": disclosures} if disclosures else result
 
