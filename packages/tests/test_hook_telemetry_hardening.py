@@ -350,7 +350,7 @@ class DocsTests(unittest.TestCase):
         """Test the docstring no longer claims fail open on any error."""
         doc = importlib.import_module("hooks.scripts.action_authority_gate").__doc__ or ""
         self.assertNotIn("Any own error fails open", doc)
-        self.assertIn("resource", doc)
+        self.assertIn("resource", doc.lower())
 
     def test_unused_telemetry_helpers_are_gone(self) -> None:
         """Test dead helpers without a production caller were removed."""

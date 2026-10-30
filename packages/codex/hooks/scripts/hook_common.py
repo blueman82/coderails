@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -107,6 +108,7 @@ def append_trace_row(
     if not session_id or session_id in {"?", "."} or "/" in session_id or ".." in session_id or "\0" in session_id:
         return False
     root = loop_root()
+    hashed = {k: hashlib.sha256(v.encode("utf-8")).hexdigest() for k, v in (extra or {}).get("inputs", {}).items()}
     row: dict[str, object] = {
         "schema_version": 1,
         "event_id": str(uuid.uuid4()),
@@ -116,10 +118,13 @@ def append_trace_row(
         "command": command,
         "outcome": outcome,
         "reason_code": reason_code,
-        "inputs": {
-            k: hashlib.sha256(v.encode("utf-8")).hexdigest() for k, v in (extra or {}).get("inputs", {}).items()
-        },
+        "inputs": hashed,
     }
+    try:
+        hook_decision = importlib.import_module("hooks.scripts.lib.hook_decision")
+        row["decision_record"] = hook_decision.make_record(command, outcome, reason_code, hashed)
+    except Exception:  # noqa: BLE001 - malformed or unavailable telemetry never changes a hook decision
+        return False
     try:
         path = root / session_id / "trace.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)

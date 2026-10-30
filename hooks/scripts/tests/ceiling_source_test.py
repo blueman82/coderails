@@ -65,7 +65,8 @@ class CeilingSourceTests(HookCase):
         self.assertEqual(self.counter(repo, "run_all").read_text().strip(), "3")
         self.assertEqual(self.run_times(RUN_ALL, repo, 1, session_id="s1"), [True])
         self.assertEqual(self.counter(repo, "run_all").read_text().strip(), "4")
-        self.assertEqual((self.loop / "s1/trace.jsonl").read_text().count("ceiling_legacy_migrated"), 1)
+        rows = [json.loads(line) for line in (self.loop / "s1/trace.jsonl").read_text().splitlines()]
+        self.assertEqual(sum(row["reason_code"] == "ceiling_legacy_migrated" for row in rows), 1)
 
     def test_rollback_reads_continued_legacy_count(self) -> None:
         """A prior hook version must see runs charged after an upgrade."""
