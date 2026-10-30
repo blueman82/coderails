@@ -220,11 +220,14 @@ and pinned `@anthropic-ai/sandbox-runtime`, using Seatbelt on macOS or
 bubblewrap on Linux. The launcher applies the provider's filesystem policy;
 the orchestrator is unaffected. It requires `node`/`npx`, macOS or Linux/WSL2.
 
-Codex graph workers use native `spawn_agent` and inherit the parent session's
-sandbox, permissions, and MCP servers. A custom agent TOML cannot override the
-parent sandbox. The Codex hook receives no effective-sandbox field, so
-`sandbox_workers` does not configure or prove per-worker Codex containment;
-that depends on the parent Codex session configuration.
+Native Codex children inherit the parent session's sandbox, permissions, and
+MCP servers. A custom agent TOML cannot override the parent sandbox. The Codex
+hook cannot verify encrypted graph prompts, so it refuses those native graph
+dispatches. The local driver supports an explicit one-way cutover and uses
+`codex exec` with the current ChatGPT OAuth login. See the
+[driver recovery guide](docs/RUNBOOK-DRIVER.md) for launch controls, retained
+attempts, and containment limits. `sandbox_workers` does not configure or prove
+a separate Codex child sandbox.
 
 ## Requirements
 

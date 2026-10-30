@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from .graph_executor import graph_contract, graph_semantics, graph_spec, transition
+from .graph_records import record_proof_disposition as record_proof_disposition
+from .graph_records import record_repair as record_repair
+from .graph_records import record_unit as record_unit
 from .graph_recovery import RecoveryRefusedError, trace
 from .loop_state_common import atomic_progress_update
 

@@ -14,8 +14,54 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.sandbox.render_settings import render_settings
+from scripts.sandbox.role_tools import role_isolation, role_tools
 
 SRT_VERSION = "0.0.65"
+DRIVER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "outcome": {
+            "type": "string",
+            "enum": ["done", "skipped", "failed", "NEEDS_DECISION", "OUTSIDE_SCOPE", "IRREVERSIBLE_ACTION"],
+        },
+        "evidence": {"type": "string"},
+        "final_report": {
+            "type": ["object", "null"],
+            "properties": {
+                "claims": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "label": {"type": "string", "enum": ["verified", "inferred", "guess"]},
+                            "source": {"type": "string"},
+                        },
+                        "required": ["text", "label", "source"],
+                        "additionalProperties": False,
+                    },
+                },
+                "did_not_verify": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "item": {"type": "string"},
+                            "tag": {"type": "string", "enum": ["resolved", "unverifiable"]},
+                            "reason": {"type": "string"},
+                        },
+                        "required": ["item", "tag", "reason"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["claims", "did_not_verify"],
+            "additionalProperties": False,
+        },
+    },
+    "required": ["outcome", "evidence", "final_report"],
+    "additionalProperties": False,
+}
 
 
 def dispatch_guard(worktree: str, prompt_file: str, model: str) -> None:
@@ -39,13 +85,14 @@ def dispatch_guard(worktree: str, prompt_file: str, model: str) -> None:
         raise ValueError(str(output.get("permissionDecisionReason", "loop dispatch denied")))
 
 
-def launch(worktree: str, prompt_file: str, model: str) -> int:
+def launch(worktree: str, prompt_file: str, model: str, *, driver: bool = False, role: str = "loop-worker") -> int:
     """Prepare containment, acquire credentials externally, and stream the pinned child."""
     if not Path(worktree).is_dir():
         raise ValueError(f"worktree is not an existing directory: {worktree}")
-    if not Path(prompt_file).is_file():
+    if not driver and not Path(prompt_file).is_file():
         raise ValueError(f"prompt_file is not an existing file: {prompt_file}")
-    dispatch_guard(worktree, prompt_file, model)
+    if not driver:
+        dispatch_guard(worktree, prompt_file, model)
     result = subprocess.run(
         ["git", "-C", worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"],
         capture_output=True,
@@ -73,21 +120,42 @@ def launch(worktree: str, prompt_file: str, model: str) -> int:
         str(settings),
         "claude",
         "-p",
-        Path(prompt_file).read_text().rstrip("\n"),
-        "--model",
-        model,
-        "--dangerously-skip-permissions",
     ]
+    if driver:
+        allowed, denied = role_tools(role)
+        arguments.extend(role_isolation(role, allowed))
+        arguments.extend(
+            [
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--json-schema",
+                json.dumps(DRIVER_SCHEMA, sort_keys=True),
+                "--disallowedTools",
+                denied,
+                "--allowedTools",
+                allowed,
+            ]
+        )
+    else:
+        arguments.append(Path(prompt_file).read_text().rstrip("\n"))
+    arguments.extend(["--model", model, "--dangerously-skip-permissions"])
     header = (
         f"spawn-sandboxed-worker: npx --yes @anthropic-ai/sandbox-runtime@{SRT_VERSION} "
         f"--settings {settings} claude -p <{prompt_file}> --model {model} --dangerously-skip-permissions\n"
     )
-    with (scratch / "worker.log").open("wb") as log:
-        log.write(header.encode())
-        log.flush()
-        print(header, end="", flush=True)
+    with (scratch / "worker.log").open("wb") as log, (scratch / "worker.stderr.log").open("wb") as errors:
+        if not driver:
+            log.write(header.encode())
+            log.flush()
+            print(header, end="", flush=True)
         child = subprocess.Popen(
-            arguments, cwd=worktree, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            arguments,
+            cwd=worktree,
+            env=environment,
+            stdin=sys.stdin.buffer if driver else None,
+            stdout=subprocess.PIPE,
+            stderr=errors if driver else subprocess.STDOUT,
         )
         if child.stdout is None:
             raise RuntimeError("sandbox stdout pipe was not created")
@@ -100,6 +168,8 @@ def launch(worktree: str, prompt_file: str, model: str) -> int:
             sys.stdout.buffer.write(chunk)
             sys.stdout.buffer.flush()
         code = child.wait()
+    if driver and (scratch / "worker.stderr.log").stat().st_size:
+        print(f"sandbox worker stderr: {scratch / 'worker.stderr.log'}", file=sys.stderr)
     return code if code >= 0 else 128 - code
 
 
@@ -107,6 +177,8 @@ def main(arguments: list[str] | None = None) -> int:
     """Dispatch a contained worker and report preparation failures."""
     arguments = sys.argv[1:] if arguments is None else arguments
     try:
+        if arguments[:1] == ["--driver"] and len(arguments) in {4, 5}:
+            return launch(*arguments[1:4], driver=True, role=arguments[4] if len(arguments) == 5 else "loop-worker")
         if len(arguments) != 3:
             raise ValueError(f"expected 3 args (worktree prompt_file model), got {len(arguments)}")
         return launch(*arguments)

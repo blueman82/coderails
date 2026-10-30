@@ -385,6 +385,6 @@ def bind_worker_evidence(
     return references, stored_references(state, False, used)
 
 
-def validate_worker_evidence(state: dict[str, Any]) -> None:
-    """Validate all stored worker evidence against native transcripts."""
-    stored_references(state, True)
+def validate_worker_evidence(state: dict[str, Any], require_complete: bool = True) -> None:
+    """Validate native evidence; permit pending nodes only at driver cutover."""
+    stored_references(state, require_complete)

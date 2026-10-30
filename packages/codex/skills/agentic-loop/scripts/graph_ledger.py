@@ -1,4 +1,4 @@
-"""Read-only disposition audit for the native Codex graph CLI."""
+"""Decision and audit CLI options for the native Codex graph."""
 
 from __future__ import annotations
 
@@ -15,8 +15,23 @@ COMMANDS = ("disposition-audit",)
 
 
 def add_parsers(add: Callable[[str], argparse.ArgumentParser]) -> None:
-    """Register the disposition audit on a subparsers action's add_parser."""
+    """Register the graph's decision and audit commands."""
     add("disposition-audit").add_argument("state", type=Path)
+    for name in ("record-decision", "flush-decisions"):
+        decision = add(name)
+        decision.add_argument("state", type=Path)
+        decision.add_argument("--session", required=True)
+        decision.add_argument("--cite-quote")
+        if name == "record-decision":
+            decision.add_argument("--loop-id", required=True)
+            decision.add_argument("--revision", required=True, type=int)
+            decision.add_argument("--phase", required=True)
+            decision.add_argument("--decision", required=True)
+            decision.add_argument("--flip-condition")
+            decision.add_argument("--unit")
+            decision.add_argument("--chosen", help="answer to a recorded worker status")
+            decision.add_argument("--worker-status-seq", type=int, help="resolve this worker status with the decision")
+            decision.add_argument("--human-answer", action="store_true", help="human answered an approval gate")
 
 
 def run(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
