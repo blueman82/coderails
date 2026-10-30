@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -20,14 +20,15 @@ import graph_convert
 import graph_semantics
 import loop_dispatch_guard as guard
 from graph_completion import validate_work_units
-from graph_evidence import validate_worker_evidence
+from graph_controller import add_unit
+from graph_evidence import stored_references, validate_worker_evidence
 from graph_identity import GraphError, task_name, task_node
 
-from packages.tests.codex_fixture import frozen_evals, read_json, spawn, state, transcripts, write_json
+from packages.tests.codex_fixture import done_result, frozen_evals, read_json, spawn, state, transcripts, write_json
 
 
-class GraphRuntimeTests(unittest.TestCase):
-    """Verify atomic transitions against real isolated native transcript fixtures."""
+class RuntimeFixture(unittest.TestCase):
+    """Build a native graph and provide shared real-adapter test helpers."""
 
     def setUp(self) -> None:
         """Prepare an independent graph, eval suite, and native session."""
@@ -49,7 +50,14 @@ class GraphRuntimeTests(unittest.TestCase):
             json.dumps(
                 {
                     "wave_id": current["graph"]["active_wave"]["wave_id"],
-                    "results": {"U3[1]": {"outcome": outcome, "evidence": "checked", **extra}},
+                    "results": {
+                        "U3[1]": {
+                            **(done_result() if outcome == "done" else {}),
+                            "outcome": outcome,
+                            "evidence": "checked",
+                            **extra,
+                        }
+                    },
                 }
             ),
         )
@@ -60,6 +68,10 @@ class GraphRuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             operation(*arguments, **keywords)
         self.assertEqual(self.path.read_bytes(), before)
+
+
+class GraphRuntimeTests(RuntimeFixture):
+    """Verify atomic transitions against native transcript fixtures."""
 
     def test_legacy_schema_rejected(self) -> None:
         """Reject historical state without migration or fallback."""
@@ -88,6 +100,37 @@ class GraphRuntimeTests(unittest.TestCase):
         self.record()
         validate_worker_evidence(read_json(self.path))
         self.assertEqual(graph.inspect(self.path)["ready"], [])
+
+    def test_add_unit_between_native_waves_preserves_prior_evidence(self) -> None:
+        """A registered unit spends a revision without making the earlier real child stale."""
+        current = read_json(self.path)
+        current["work_units"] = {"1": {"status": "pending"}}
+        write_json(self.path, current)
+        graph.begin_wave(self.path)
+        spawn(self.parent, read_json(self.path))
+        self.record()
+        added = add_unit(self.path, "parent", "loop", "2", [], False)
+        self.assertEqual(read_json(self.path)["work_units"]["2"]["registered_revision"], added["revision"])
+        stored_references(read_json(self.path), False)
+        opened = graph.begin_wave(self.path)
+        for node_id in opened["nodes"]:
+            spawn(self.parent, read_json(self.path), node_id=node_id)
+        results = {node_id: done_result() for node_id in opened["nodes"]}
+        graph.record_wave(self.path, json.dumps({"wave_id": opened["wave_id"], "results": results}))
+        validate_worker_evidence(read_json(self.path))
+        missing = read_json(self.path)
+        del missing["work_units"]["2"]["registered_revision"]
+        with self.assertRaisesRegex(GraphError, "graph revisions"):
+            validate_worker_evidence(missing)
+        altered = read_json(self.path)
+        altered["work_units"]["2"]["registered_revision"] = altered["revision"] + 1
+        with self.assertRaisesRegex(GraphError, "graph revisions"):
+            validate_worker_evidence(altered)
+        foreign = read_json(self.path)
+        reference = cast(dict[str, Any], foreign["graph"]["nodes"]["U3[1]"]["evidence"][1])
+        reference["wave_id"] = "wave-999"
+        with self.assertRaisesRegex(ValueError, "dispatch_foreign"):
+            validate_worker_evidence(foreign)
 
     def test_retry_exhaustion(self) -> None:
         """Retry failures receive unique native identities and stop at the configured cap."""
@@ -267,7 +310,7 @@ class GraphRuntimeTests(unittest.TestCase):
         }
         with (
             patch.object(guard, "read_input", return_value=json.dumps(payload)),
-            patch.object(guard, "config_path", return_value=""),
+            patch.object(guard, "strict_config_path", return_value=""),
             patch.object(guard, "loop_state_path", return_value=self.path),
             patch("loop_dispatch_guard.tempfile.TemporaryDirectory", side_effect=OSError("scratch unavailable")),
             patch.object(guard, "deny") as denial,
@@ -279,7 +322,7 @@ class GraphRuntimeTests(unittest.TestCase):
         self.assertIsNone(next(iter(read_json(self.path)["graph"]["dispatches"].values()))["authorized"])
         with (
             patch.object(guard, "read_input", return_value=json.dumps(payload)),
-            patch.object(guard, "config_path", return_value=""),
+            patch.object(guard, "strict_config_path", return_value=""),
             patch.object(guard, "loop_state_path", return_value=self.path),
             patch.object(guard, "deny") as denial,
         ):

@@ -171,13 +171,18 @@ def gate_eval_summary_for_pr(number: str, sha: str) -> EvalSummary:
 
 
 def gate_review_summary_for_pr(number: str, sha: str) -> tuple[int, str]:
-    """Return review status with a distinct failing trust-lookup stage."""
+    """Return (status, reason): 0 present, 1 absent, 2 fetch failure (stage), 3 compat refusal (reason code)."""
     try:
         bodies = trusted_comment_bodies(number)
     except (TrustFetchError, OSError) as error:
         return 2, str(error)
-    matched = any(review_artifact.matches_marker(line, number, sha) for body in bodies for line in body.splitlines())
-    return (0 if matched else 1), ""
+    matching = [
+        body for body in bodies if any(review_artifact.matches_marker(line, number, sha) for line in body.splitlines())
+    ]
+    if not matching:
+        return 1, ""
+    problem = review_artifact.compat_problem(matching, number, sha)
+    return (3, problem) if problem else (0, "")
 
 
 @dataclass(frozen=True)
@@ -228,25 +233,45 @@ def review_passes_for_pr(number: str, sha: str) -> ReviewPasses:
     previous = bodies[last - 1]
     if not previous.startswith(marker + "\n" + review_passes.PREFIX):
         return ReviewPasses(0, None)
-    parsed = review_passes.parse(previous, number, sha)
+    _, _, remainder = previous.partition("\n")
+    passes_line, _, summary = remainder.partition("\n")
+    compat = ""
+    if summary.startswith(review_artifact.COMPAT_PREFIX):
+        compat, _, summary = summary.partition("\n")
+        if review_artifact.parse_compat_line(compat, number, sha) is None:
+            return ReviewPasses(0, None)
+    parsed = review_passes.parse("\n".join([marker, passes_line, summary]), number, sha)
     if parsed is None or not parsed:
         return ReviewPasses(0, None)
-    _, _, remainder = previous.partition("\n")
-    _, _, summary = remainder.partition("\n")
     general, separator, _ = summary.partition("\n<!-- coderails-review-pass ")
     if separator:
         summary = general
-    if companion != marker + "\n" + summary:
+    if companion != "\n".join([marker, *([compat] if compat else []), summary]):
         return ReviewPasses(0, None)
     return ReviewPasses(0, tuple(parsed))
 
 
 def has_coderails_review_for_head(number: str, sha: str) -> int:
-    """Return 0 for exact trusted review, 1 if absent, or 2 on fetch failure."""
+    """Return 0 for exact trusted review, 1 if absent, or 2 on fetch failure (a compat refusal is still a review)."""
     status, reason = gate_review_summary_for_pr(number, sha)
     if status == 2:
         print(f"TRUST_FETCH_FAIL_REASON={reason}", file=sys.stderr)
-    return status
+    return 0 if status == 3 else status
+
+
+def compat_failure_message(reason: str) -> str:
+    """Explain a status-3 review gate result; the closed reason code is part of the text."""
+    if reason == "compat_findings_missing":
+        return (
+            "The review artifact needs a compat-findings line for the current PR head "
+            "[reason_code=compat_findings_missing]"
+        )
+    if reason == "compat_findings_malformed":
+        return "A compat-findings line on the review artifact is malformed [reason_code=compat_findings_malformed]"
+    return (
+        "The review reported compat findings on a clean-break change; remove the compatibility code or set a "
+        f"preserve-compat disposition with a named blocker and removal ticket [reason_code={reason}]"
+    )
 
 
 def trust_failure_message(reason: str) -> str:

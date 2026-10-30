@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_spec
+from graph_vocab import decision_pending, decision_sync_pending
 
 ENVELOPE_VERSION = 2
 ENVELOPE_KEY = "CODERAILS_GRAPH_DISPATCH"
@@ -305,6 +306,10 @@ def check_ownership(state: dict[str, Any], env: dict[str, Any], live: bool) -> d
         node = state["graph"]["nodes"][record["node_id"]]
         if attempt != node["retry"]["attempts"] + node["respawn"]["generation"] + 1:
             raise DispatchDeniedError("dispatch_attempt_mismatch", "dispatch attempt is not the node's next attempt")
+    if live and decision_sync_pending(state):
+        raise DispatchDeniedError("decision_pending", "cannot authorize while decision sync is pending")
+    if live and decision_pending(state, record["node_id"]):
+        raise DispatchDeniedError("decision_pending", "cannot authorize a node with a pending worker decision")
     return record
 
 

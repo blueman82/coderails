@@ -8,23 +8,18 @@ unhashed row is named by `verify_chain`. Cooperating-agent safeguard: a same-use
 recompute the whole chain; this is tamper-evidence, not a security boundary, and dropping the LAST row is undetectable.
 The `muninn` field is OUTSIDE the hash: a same-user agent can set `{state: written}` by hand and `flush_pending`
 will not retry it, so "synced to Muninn" is unauthenticated here; check the id against Muninn `list_records`.
-
 Entry point for both graph CLIs (`graph.py record-decision`), `transition(path, fn)` being the provider's lock wrapper
 (Claude `hooks.scripts.lib.graph_executor.transition`; Codex `graph_io.locked/load/write` wrapped to the same shape):
 
-    out = record(path, session, phase, decision, expected_loop_id=loop_id,
-                 expected_revision=revision, transition=transition, flip_condition=fc, unit=unit)
-    print(json.dumps(out))
-    return out["exit_code"]
+Call record with the provider transition, expected loop id and revision; use its exit_code.
 
 `record` appends a local `syncing` row first under the lock (the authoritative loop record is never lost), calls
 Muninn outside the lock, then patches `muninn` under the lock again. exit_code: 0 written or disabled, 3 degraded
 or unknown (reason code printed, local row kept), 2 refused (nothing written). `flush_pending` claims only pending
 or safely degraded rows under the lock before retry. A crash or ambiguous external result leaves `syncing`/`unknown`;
-automatic retry stops with `decision_sync_unknown` until a human reconciles the Muninn store. Muninn refuses an
-approval-only citation and an
-agent cannot cite itself, so the cite is a quote of `authorising_prompt_raw` unless the caller passes a substantive
-user `cite_quote`; a short prompt such as "yes" stays a visible degrade. Never falls back to Markdown.
+automatic retry stops with `decision_sync_unknown` until a human reconciles the Muninn store.
+Muninn refuses approval-only citations. An agent cannot cite itself; use `authorising_prompt_raw` or a substantive
+user `cite_quote`; short prompts such as "yes" stay a visible degrade. Never falls back to Markdown.
 """
 
 from __future__ import annotations
@@ -39,7 +34,7 @@ import sys
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
 from scripts.lib import memory_adapter as ma  # noqa: E402
@@ -50,6 +45,7 @@ HASH_EXCLUDED = ("row_sha256", "muninn")
 QUOTE_MIN, QUOTE_MAX, CLAIM_MAX = 12, 300, 500  # muninn's quote and claim length rules
 REFUSALS = ("wrong_session", "wrong_loop", "wrong_revision", "blank_phase", "blank_decision", "invalid_chain")
 Transition = Callable[[Path, Callable[[dict[str, Any]], dict[str, Any]]], dict[str, Any]]
+StatusResolver = Callable[[dict[str, Any], Optional[int], Optional[str], bool, int], None]
 
 
 def _collapse(text: str) -> str:
@@ -83,6 +79,10 @@ def add_decision(
     flip_condition: str | None = None,
     unit: str | None = None,
     now: datetime.datetime | str | None = None,
+    chosen: str | None = None,
+    worker_status_seq: int | None = None,
+    human_answer: bool = False,
+    status_resolver: StatusResolver | None = None,
 ) -> dict[str, Any]:
     """Append one hashed row; return {"state", "decision"}. Raises ValueError(<REFUSALS code>) and mutates nothing."""
     if state.get("session_id") != session:
@@ -95,6 +95,10 @@ def add_decision(
         raise ValueError("blank_phase")
     if not str(decision or "").strip():
         raise ValueError("blank_decision")
+    if chosen is not None and not chosen.strip():
+        raise ValueError("record_decision_refused_field")
+    if worker_status_seq is not None and (chosen is None or status_resolver is None):
+        raise ValueError("record_decision_refused_field")
     stamp = now.isoformat(timespec="seconds") if isinstance(now, datetime.datetime) else now
     rows = _rows(state)
     ensure_chain(state)
@@ -109,9 +113,15 @@ def add_decision(
         "ts": stamp or datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "prev_sha256": last.get("row_sha256") or GENESIS,
     }
+    if chosen is not None:
+        row["chosen"] = chosen.strip()
+    if worker_status_seq is not None:
+        row["worker_status_seq"] = worker_status_seq
     row["row_sha256"] = row_digest(row)
     row["muninn"] = {"state": "syncing"}
     new = copy.deepcopy(state)
+    if status_resolver is not None:
+        status_resolver(new, worker_status_seq, chosen, human_answer, row["seq"])
     new["decisions_absorbed"] = [*rows, row]
     new.setdefault("chain_started_seq", row["seq"])  # first hashed row of this loop; see verify_chain
     return {"state": new, "decision": row}
@@ -262,13 +272,29 @@ def record(
     prompt_raw: str | None = None,
     cite_quote: str | None = None,
     now: datetime.datetime | str | None = None,
+    chosen: str | None = None,
+    worker_status_seq: int | None = None,
+    human_answer: bool = False,
+    status_resolver: StatusResolver | None = None,
 ) -> dict[str, Any]:
     """Append locally, sync to Muninn outside the lock, patch the row. Returns {recorded, seq, muninn, exit_code}."""
     held: dict[str, Any] = {}
 
     def append(state: dict[str, Any]) -> dict[str, Any]:
         out = add_decision(
-            state, session, phase, decision, expected_loop_id, expected_revision, flip_condition, unit, now
+            state,
+            session,
+            phase,
+            decision,
+            expected_loop_id,
+            expected_revision,
+            flip_condition,
+            unit,
+            now,
+            chosen,
+            worker_status_seq,
+            human_answer,
+            status_resolver,
         )
         held.update(out["decision"])
         new: dict[str, Any] = out["state"]
@@ -277,9 +303,13 @@ def record(
     try:
         state = transition(path, append)
     except ValueError as error:
-        code = str(error) if str(error) in REFUSALS else "state_error"
-        _trace("decision.record", "refused", f"decision_{code}", session, None)
-        return {"recorded": False, "reason_code": f"decision_{code}", "exit_code": 2}
+        message = str(error)
+        marked = re.search(r"\[reason_code=(record_decision_refused_[a-z_]+)\]", message)
+        raw = str(getattr(error, "code", marked.group(1) if marked else message))
+        code = raw if raw in REFUSALS or raw.startswith("record_decision_refused_") else "state_error"
+        reason = code if code.startswith("record_decision_refused_") else f"decision_{code}"
+        _trace("decision.record", "refused", reason, session, None)
+        return {"recorded": False, "reason_code": reason, "exit_code": 2}
     _trace("decision.record", "recorded", "ok", session, str(state.get("loop_id")))
     field = _sync_safely(held, state, session, prompt_raw, cite_quote)
     seq = held["seq"]
@@ -309,15 +339,28 @@ def flush_pending(
     cite_quote: str | None = None,
 ) -> dict[str, Any]:
     """Retry every row still pending or degraded (teardown). Returns {synced: [{seq, muninn}], exit_code}."""
-    state = transition(path, lambda s: s)  # identity transition: a read under the provider's lock
-    if state.get("session_id") != session:
-        _trace("decision.flush", "refused", "decision_wrong_session", session, None)
-        return {"synced": [], "reason_code": "decision_wrong_session", "exit_code": 2}
+    refused: dict[str, Any] = {}
+
+    def checked(state: dict[str, Any]) -> dict[str, Any]:
+        # Provider transitions may stamp even an identity transform. Reject before that write.
+        if state.get("session_id") != session:
+            refused.update(reason="decision_wrong_session", loop_id=None)
+            raise ValueError("wrong_session")
+        try:
+            ensure_chain(state)
+        except ValueError:
+            refused.update(reason="decision_invalid_chain", loop_id=str(state.get("loop_id")))
+            raise
+        return state
+
     try:
-        ensure_chain(state)
+        state = transition(path, checked)
     except ValueError:
-        _trace("decision.flush", "refused", "decision_invalid_chain", session, str(state.get("loop_id")))
-        return {"synced": [], "reason_code": "decision_invalid_chain", "exit_code": 2}
+        if not refused:
+            raise
+        reason = refused["reason"]
+        _trace("decision.flush", "refused", reason, session, refused["loop_id"])
+        return {"synced": [], "reason_code": reason, "exit_code": 2}
     if any(_as_row(row.get("muninn")).get("state") in {"syncing", "unknown"} for row in map(_as_row, _rows(state))):
         _trace("decision.flush", "degraded", "decision_sync_unknown", session, str(state.get("loop_id")))
         return {"synced": [], "reason_code": "decision_sync_unknown", "exit_code": 3}
@@ -352,11 +395,6 @@ def flush_pending(
             return {"synced": synced, "reason_code": "decision_sync_unknown", "exit_code": 3}
         synced.append({"seq": row["seq"], "muninn": field})
     final = transition(path, lambda s: s)  # evidence = the rows as they stand after the retries
-    teardown_steps.record(
-        path.parent,
-        "decisions_flushed",
-        session,
-        final.get("loop_id"),
-        teardown_steps.sha_json(final.get("decisions_absorbed")),
-    )
+    evidence = teardown_steps.sha_json(final.get("decisions_absorbed"))
+    teardown_steps.record(path.parent, "decisions_flushed", session, final.get("loop_id"), evidence)
     return {"synced": synced, "exit_code": 3 if any(_exit_code(x["muninn"]) == 3 for x in synced) else 0}

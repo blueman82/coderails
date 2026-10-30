@@ -54,11 +54,11 @@ Resolve [post_review.py](../../scripts/post_review.py) relative to this `SKILL.m
 Write the summary files with the file-writing tool (not a shell heredoc), then run the one command, replacing `<PR>` with the validated number:
 
 ```bash
-python3 <resolved post_review.py> post <PR> --summary <review-summary-file> --pass security-review=<security-summary-file>
+python3 <resolved post_review.py> post <PR> --summary <review-summary-file> --compat-count <COUNT> --disposition <CHOICE> --pass security-review=<security-summary-file>
 ```
 
-Omit `--pass NAME=FILE` for passes the diff does not need. The script validates every file, resolves the head, and posts two comments with `gh api`: one with the passes and one with the server compatible review summary. It reuses an identical pair and checks the head before and after each post. A failed second post can leave the first comment; a retry completes the pair. For `stale`, review the new head before you post again.
+Omit `--pass NAME=FILE` for passes the diff does not need. Set `COUNT` to the reviewer's count of retained compatibility code findings; use `0` only when no such finding exists. Set `CHOICE` to the registered work-unit choice (`clean-break` or `preserve-compat`). The script validates the files, binds all lines to the current head, and posts two comments: a review-passes record that also carries the compatibility choice, then a server compatible summary. It checks the head before and after each post. A failed second post can leave the first comment; a retry completes the pair. For `stale`, review the new head before posting again. The merge gate refuses a missing compatibility line or `clean-break` with a positive count.
 
 The GitHub PR comment is authoritative. Do not read or write local review caches.
 
-Report the PR number, reviewed SHA, spawned reviewer names and counts, whether the artifact was reused or posted, and the comment URL.
+Report the PR number, reviewed SHA, spawned reviewer names and counts, and the posted comment URL.

@@ -111,6 +111,7 @@ class ResourceExhaustionTests(unittest.TestCase):
             "session_id": "s",
             "cwd": "/x",
             "tool_name": "spawn_agent",
+            "tool_use_id": "call-resource-probe",
             "hook_event_name": "PreToolUse",
             "tool_input": {"task_name": marker, "message": f"CODERAILS_GRAPH_TASK={marker}\nwork"},
         }

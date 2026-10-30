@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -233,7 +233,7 @@ class GraphConvertTests(unittest.TestCase):
             patch.object(claude_graph, "atomic_progress_update", side_effect=fail_after_transform),
             self.assertRaisesRegex(ValueError, "locked|unreadable|write"),
         ):
-            claude_graph.convert_state(case.path, SESSION, False)
+            cast(Any, claude_graph).convert_state(case.path, SESSION, False)
         self.assertEqual(case.path.read_bytes(), before)
         self.assertEqual(case.backup.read_bytes(), before)
         self.assertNotIn("convert_ok", case.reasons())

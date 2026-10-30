@@ -214,17 +214,22 @@ Compact metrics and expiry records persist separately. Emitted bytes do not esta
 
 ## Sandboxed workers
 
-With `config.sandbox_workers: true` (`.coderails/workflow.config.yaml`), Claude
-implementation workers run through `scripts/sandbox/spawn_sandboxed_worker.py`
-and pinned `@anthropic-ai/sandbox-runtime`, using Seatbelt on macOS or
-bubblewrap on Linux. The launcher applies the provider's filesystem policy;
-the orchestrator is unaffected. It requires `node`/`npx`, macOS or Linux/WSL2.
+With `sandbox_workers: true` (the default), the Claude implementation launcher
+uses pinned `@anthropic-ai/sandbox-runtime` in a scratch clone. It needs the
+OS sandbox, `npx`, and a dedicated Claude worker credential; missing inputs
+stop graph implementation dispatch. The graph driver prepares execution C before
+authorization, then checks a fixed uncommitted proposal before materializing it
+into reserved root checkout D. Root reviews and publishes; resume preserves later
+root edits. The orchestrator remains unsandboxed.
 
-Codex graph workers use native `spawn_agent` and inherit the parent session's
-sandbox, permissions, and MCP servers. A custom agent TOML cannot override the
-parent sandbox. The Codex hook receives no effective-sandbox field, so
-`sandbox_workers` does not configure or prove per-worker Codex containment;
-that depends on the parent Codex session configuration.
+Codex native `spawn_agent` inherits the parent sandbox. The Codex dispatch hook
+therefore refuses native implementation work while containment is on. The
+existing OAuth graph driver binds issued dispatches to sealed process evidence;
+see [driver recovery](docs/RUNBOOK-DRIVER.md). The standalone helper in
+`packages/codex/scripts/codex_worker.py` keeps its direct interface and runs with
+`workspace-write`, explicit ChatGPT login and the OpenAI provider. Its output
+and trace earn no graph completion credit. Neither route uses an API key.
+See [worker containment](docs/WORKER-CONTAINMENT.md) for recovery steps, counters, and limits.
 
 ## Requirements
 

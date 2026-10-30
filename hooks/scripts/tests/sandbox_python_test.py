@@ -1,4 +1,4 @@
-"""Check sandbox policy substitution and launch safeguards without launching srt."""
+"""Check sandbox policy substitution and pre-launch refusal without launching srt."""
 
 from __future__ import annotations
 
@@ -19,32 +19,28 @@ from scripts.sandbox import render_settings, sandbox_probe, spawn_sandboxed_work
 
 
 class SandboxPythonTests(unittest.TestCase):
-    """Preserve allow-only policy, executable denies and pre-launch refusal."""
+    """Preserve allow-only policy, scratch-only writes and pre-launch refusal."""
 
     def test_json_paths_and_denies(self) -> None:
-        """Path punctuation stays data and does not inject extra allow entries."""
+        """Path punctuation stays data; only the per-worker scratch (and its provider state slug) is writable."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            worktree = root / 'work|"\\tree'
             scratch = root / "scratch"
-            primary = root / "primary.git"
+            workdir = scratch / 'clone|"\\tree'
             home = root / "home"
-            for path in (worktree, scratch, primary, home):
-                path.mkdir()
+            workdir.mkdir(parents=True)
+            home.mkdir()
             output = root / "settings.json"
             with (
                 patch.dict(os.environ, {"HOME": str(home), "TMPDIR": str(scratch) + "/"}),
                 patch.object(shutil, "which", return_value="/fixture/rg"),
             ):
-                render_settings.render_settings(str(worktree), str(scratch), str(primary), str(output))
+                render_settings.render_settings(str(workdir), str(scratch), str(output))
             data = json.loads(output.read_text())
-            self.assertIn(str(worktree), data["filesystem"]["allowWrite"])
-            self.assertEqual(len(data["filesystem"]["allowWrite"]), 7)
-            for path in (primary / "hooks", primary / "config", home / ".claude/hooks", home / ".claude/plugins"):
-                self.assertIn(str(path), data["filesystem"]["denyWrite"])
+            state = Path(f"/private/tmp/claude-{os.getuid()}") / str(workdir).replace("/", "-")
+            self.assertEqual(data["filesystem"]["allowWrite"], [str(scratch), str(state)])
             self.assertEqual(data["filesystem"]["denyRead"], [])
             self.assertNotIn("*", data["network"]["allowedDomains"])
-            state = Path(f"/private/tmp/claude-{os.getuid()}") / str(worktree).replace("/", "-")
             state.rmdir()
 
     def test_bad_input_never_writes_policy(self) -> None:
@@ -52,7 +48,7 @@ class SandboxPythonTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "settings.json"
             with self.assertRaises(ValueError):
-                render_settings.render_settings("relative", temporary, temporary, str(output))
+                render_settings.render_settings("relative", temporary, str(output))
             self.assertFalse(output.exists())
 
     def test_guard_denial_precedes_scratch(self) -> None:
@@ -88,13 +84,20 @@ class SandboxPythonTests(unittest.TestCase):
             worktree.mkdir()
             home.mkdir()
             subprocess.run(["git", "init", "-q", str(worktree)], check=True)
-            with patch.dict(os.environ, {"HOME": str(home)}):
+            (home / ".claude.json").write_text("{}")
+            with patch.dict(os.environ, {"HOME": str(home), "GH_TOKEN": "leaked"}):
                 self.assertEqual(sandbox_probe.probe(worktree), 2)
+            self.assertEqual((home / ".claude.json").read_text(), "{}")
             self.assertFalse((home / ".sandbox-escape-probe").exists())
             self.assertFalse((root / "escape-probe").exists())
-            with patch.object(sandbox_probe, "probe_write", side_effect=[True, False, False]):
+            inside = worktree / ".sandbox-probe"
+
+            def only_inside(path: Path) -> bool:
+                return path == inside
+
+            with (
+                patch.dict(os.environ, {"HOME": str(home)}, clear=False),
+                patch.object(sandbox_probe, "probe_write", side_effect=only_inside),
+            ):
+                os.environ.pop("GH_TOKEN", None)
                 self.assertEqual(sandbox_probe.probe(worktree), 0)
-
-
-if __name__ == "__main__":
-    unittest.main()

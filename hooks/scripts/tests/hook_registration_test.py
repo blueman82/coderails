@@ -61,6 +61,15 @@ class HookRegistrationTests(unittest.TestCase):
         names = [Path(item["command"].strip('"')).name for item in group["hooks"]]
         self.assertEqual(names[names.index("reviewer_bash_allowlist.py") + 1], "subagent_identity_gate.py")
 
+    def test_containment_gate_is_a_separate_agent_hook(self) -> None:
+        """Negative control: unregistering it lets a high-risk in-process loop-worker dispatch through."""
+        groups = json.loads((ROOT / "hooks/hooks.json").read_text())["hooks"]["PreToolUse"]
+        agent = next(group for group in groups if group["matcher"] == "Agent")
+        names = [Path(item["command"].split('"')[1]).name for item in agent["hooks"]]
+        self.assertIn("worker_containment_gate.py", names)
+        self.assertIn("loop_dispatch_guard.py", names)
+        self.assertNotIn("worker_containment", (ROOT / "hooks/scripts/loop_dispatch_guard.py").read_text())
+
     def test_manifest_versions_and_honest_ceiling(self) -> None:
         """Version synchronization and the invocation-only boundary cannot disappear silently."""
         plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())["version"]

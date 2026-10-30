@@ -7,15 +7,22 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import graph_convert
-import graph_repair
+import graph_driver_controller
 import graph_spec
-from graph_vocab import STOP_CATEGORIES, STOP_REASON_CODES
+import worker_status
+from graph_vocab import DISPOSITION_KINDS, STOP_CATEGORIES, STOP_REASON_CODES, disposition_report
 
-from hooks.scripts.lib import graph_controller, graph_recovery, graph_stops
+from hooks.scripts.lib import (
+    graph_controller,
+    graph_driver_adapter,
+    graph_driver_claude,
+    graph_recovery,
+    graph_stops,
+)
 from hooks.scripts.lib import graph_dispatch as dispatch
 from hooks.scripts.lib.graph_evidence import object_value
 from hooks.scripts.lib.graph_executor import graph_semantics, load, transition, validate_state
@@ -25,17 +32,20 @@ from scripts.lib import decision_record
 
 
 def add_unit_options(command: argparse.ArgumentParser) -> None:
-    """Add worker contract fields to the unit command."""
+    """Add worker contract and compatibility fields to the unit command."""
     command.add_argument("--unit", required=True)
     command.add_argument("--depends-on", action="append", default=[])
     command.add_argument("--join", action="store_true")
     command.add_argument("--manifest", action="append", default=[])
-    command.add_argument("--worktree")
     command.add_argument("--base-branch", help="remote branch used for first stacked publication")
+    command.add_argument("--worktree", help="absolute path of this unit's checkout")
     command.add_argument("--model-role", help="dispatch model class: fast-mechanical | default | frontier")
     command.add_argument("--write-scope", action="append", default=[], help="path the worker may write")
     command.add_argument("--lesson", action="append", default=[], help="lesson the worker prompt must carry")
     command.add_argument("--scope", help="one-line scope statement for the worker")
+    command.add_argument("--disposition", choices=DISPOSITION_KINDS, help="clean-break | preserve-compat")
+    command.add_argument("--named-blocker", help="what blocks removal (preserve-compat only)")
+    command.add_argument("--removal-ticket", help="ticket that removes it (preserve-compat only)")
 
 
 def dispatch_options(command: argparse.ArgumentParser) -> None:
@@ -45,38 +55,24 @@ def dispatch_options(command: argparse.ArgumentParser) -> None:
     command.add_argument("--tool-use-id", help="PreToolUse tool_use_id; makes a retried hook idempotent")
 
 
+GRAPH_COMMANDS = (  # noqa: SIM905 - keep the combined native and driver command list within CLI size limits.
+    "start add-unit assign-worktree set-unit-disposition assign-unit-scope append-unit-scope-note "
+    "instantiate inspect summarize recover-wave "
+    "plan begin-wave begin-driver-wave drive record-wave record-driver-wave record-driver-control record-unit "
+    "record-repair record-proof-disposition respawn-stale hard-stop stop authorize-dispatch "
+    "authorize-driver complete verify-completion "
+    "convert cutover-driver disposition-audit record-decision flush-decisions collection"
+).split()
+
+
 def parser() -> argparse.ArgumentParser:
-    """Expose only current semantic operations and native completion checks."""
+    """Expose current semantic operations and native completion checks."""
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
-    for name in (
-        "start",
-        "add-unit",
-        "assign-worktree",
-        "instantiate",
-        "inspect",
-        "summarize",
-        "collection",
-        "recover-wave",
-        "plan",
-        "begin-wave",
-        "record-wave",
-        "record-unit",
-        "record-decision",
-        "flush-decisions",
-        "record-repair",
-        "record-proof-disposition",
-        "respawn-stale",
-        "hard-stop",
-        "stop",
-        "authorize-dispatch",
-        "complete",
-        "verify-completion",
-        "convert",
-    ):
+    for name in GRAPH_COMMANDS:
         command = commands.add_parser(name)
         command.add_argument("state", type=Path)
-        if name == "record-wave":
+        if name in {"record-wave", "record-driver-wave"}:
             command.add_argument("results_json")
         if name in {"record-decision", "flush-decisions"}:
             command.add_argument("--session", required=True)
@@ -102,9 +98,15 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--revision", required=True, type=int)
             command.add_argument("--disposition", required=True)
             command.add_argument("--reason", required=True)
-        if name in {"start", "add-unit", "assign-worktree", "instantiate"}:
+        if name in {"start", "add-unit", "assign-worktree", "set-unit-disposition", "instantiate"}:
             command.add_argument("--session", required=True)
             command.add_argument("--loop-id", required=True)
+        if name == "authorize-driver":
+            for field in ("session", "dispatch-id", "role", "driver-run-id"):
+                command.add_argument(f"--{field}", required=True)
+            command.add_argument("--prompt-file", required=True, type=Path)
+        if name in {"record-driver-control", "drive", "assign-unit-scope", "append-unit-scope-note"}:
+            graph_driver_adapter.add_arguments(name, command)
         if name == "instantiate":
             command.add_argument("--profile", choices=graph_spec.PROFILES, help="default: policy graph.profile")
             command.add_argument("--unit", action="append", default=[], help="work unit id to register (repeatable)")
@@ -115,6 +117,13 @@ def parser() -> argparse.ArgumentParser:
         if name == "assign-worktree":
             command.add_argument("--unit", required=True)
             command.add_argument("--worktree", required=True)
+        if name == "set-unit-disposition":
+            command.add_argument("--revision", required=True, type=int)
+            command.add_argument("--unit", required=True)
+            command.add_argument("--disposition", required=True, choices=DISPOSITION_KINDS, action="append")
+            command.add_argument("--named-blocker")
+            command.add_argument("--removal-ticket")
+            command.add_argument("--source-ref")
         if name == "recover-wave":
             command.add_argument("--lease-seconds", type=int, default=900)
             command.add_argument("--report-only", action="store_true")
@@ -137,11 +146,16 @@ def parser() -> argparse.ArgumentParser:
             "verify-completion",
             "recover-wave",
             "convert",
+            "cutover-driver",
         }:
             command.add_argument("--session", required=True)
         if name in {"respawn-stale", "hard-stop"}:
             command.add_argument("--node", required=True)
             command.add_argument("--reason", required=True)
+        if name == "record-decision":
+            command.add_argument("--chosen", help="answer to a recorded worker status")
+            command.add_argument("--worker-status-seq", type=int, help="resolve this worker status with the decision")
+            command.add_argument("--human-answer", action="store_true", help="a human answered an approval-gate status")
         if name == "authorize-dispatch":
             dispatch_options(command)
     return result
@@ -215,81 +229,41 @@ def convert_state(path: Path, session: str, check: bool) -> dict[str, Any]:
     return {**report, "check": check, "backup": backup[0].name if backup else None}
 
 
-def record_unit(path: Path, session: str, unit_id: str, status: str, detail: str) -> dict[str, Any]:
-    """Record an independently checked work-unit decision through the Claude lock."""
-    output: dict[str, Any] = {}
-
-    def update(state: dict[str, Any]) -> dict[str, Any]:
-        if state["session_id"] != session:
-            raise ValueError("session does not own this graph")
-        if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
-            raise ValueError("work unit requires an in-progress graph without an active wave")
-        units = cast(object, state.get("work_units"))
-        if not unit_id.strip() or not isinstance(units, dict):
-            raise ValueError("work unit must be registered")
-        unit = cast(dict[str, object], units).get(unit_id)
-        if not isinstance(unit, dict):
-            raise ValueError("work unit must be registered and pending")
-        record = cast(dict[str, object], unit)
-        if record.get("status") != "pending":
-            raise ValueError("work unit must be registered and pending")
-        if status not in {"done", "dropped"} or not detail.strip():
-            raise ValueError("work unit decision requires a status and nonblank evidence or reason")
-        record["status"] = status
-        record["evidence" if status == "done" else "dropped_reason"] = detail.strip()
-        output.update(unit=unit_id, status=status, revision=state["revision"])
-        return state
-
-    transition(path, update)
-    return output
+def _decision(args: argparse.Namespace) -> dict[str, Any]:
+    """Record or flush a decision through the current graph transition."""
+    if args.command == "flush-decisions":
+        return decision_record.flush_pending(
+            args.state, args.session, transition=transition, cite_quote=args.cite_quote
+        )
+    return decision_record.record(
+        args.state,
+        args.session,
+        args.phase,
+        args.decision,
+        expected_loop_id=args.loop_id,
+        expected_revision=args.revision,
+        transition=transition,
+        flip_condition=args.flip_condition,
+        unit=args.unit,
+        cite_quote=args.cite_quote,
+        chosen=args.chosen,
+        worker_status_seq=args.worker_status_seq,
+        human_answer=args.human_answer,
+        status_resolver=worker_status.resolve_pending,
+    )
 
 
-def record_repair(
-    path: Path, session: str, unit: str, failed_node: str, kind: str, identity: str, diagnosis: str
-) -> dict[str, Any]:
-    """Record a bounded, distinct repair under the Claude state lock."""
-    output: dict[str, Any] = {}
-
-    def update(state: dict[str, Any]) -> dict[str, Any]:
-        proposed, report = graph_repair.record_repair(state, session, unit, failed_node, kind, identity, diagnosis)
-        output.update(report)
-        return proposed
-
-    transition(path, update)
-    return output
+def _record_unit(args: argparse.Namespace) -> dict[str, Any]:
+    if (args.status == "done") != (args.evidence is not None):
+        raise ValueError("done requires --evidence; dropped requires --reason")
+    return graph_controller.record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
 
 
-def record_proof_disposition(
-    path: Path, session: str, loop_id: str, revision: int, disposition: str, reason: str
-) -> dict[str, Any]:
-    """Save an owner's no-proof decision under the sole Claude state lock."""
-    inputs = {"session": session, "loop_id": loop_id, "revision": revision, "disposition": disposition}
-    observed: dict[str, Any] = {}
-
-    def update(state: dict[str, Any]) -> dict[str, Any]:
-        observed.update(state)
-        if state["session_id"] != session or state["loop_id"] != loop_id:
-            raise ValueError("wrong owner or loop")
-        if state["revision"] != revision:
-            raise ValueError("stale revision")
-        if state["status"] != "in-progress" or state["graph"]["active_wave"] is not None:
-            raise ValueError("no-proof decision requires an idle in-progress loop")
-        if disposition != "none" or not reason.strip() or reason.strip().lower().startswith("none:"):
-            raise ValueError("disposition must be none with a nonblank reason and no prefix")
-        if path.with_name("proof.json").exists():
-            raise ValueError("proof.json exists; no-proof decision is invalid")
-        if state.get("proof_disposition") is not None:
-            raise ValueError("proof disposition is already recorded")
-        state["proof_disposition"] = f"none: {reason.strip()}"
-        return state
-
-    try:
-        transition(path, update)
-    except ValueError:
-        trace(path, observed, "refused", "proof_disposition_refused", inputs, [], "record-proof-disposition")
-        raise
-    trace(path, observed, "ok", "proof_disposition_recorded", inputs, [], "record-proof-disposition")
-    return {"proof_disposition": f"none: {reason.strip()}", "revision": revision}
+def _drive(args: argparse.Namespace) -> dict[str, Any]:
+    checkouts = graph_driver_controller.select_checkouts(args.checkout, args.checkout_map)
+    return graph_driver_claude.run_wave(
+        args.state, args.session, checkouts, Path(__file__), graph_driver_controller.drive_wave, args.wait_seconds
+    )
 
 
 def main() -> int:
@@ -299,19 +273,20 @@ def main() -> int:
         if args.command == "start":
             output: object = graph_controller.start(args.state, args.session, args.loop_id, args.prompt_file)
         elif args.command == "add-unit":
-            fields = {"model_role": args.model_role, "write_scope": args.write_scope, "lessons": args.lesson}
-            output = graph_controller.add_unit(
-                args.state,
-                args.session,
-                args.loop_id,
-                args.unit,
-                args.depends_on,
-                args.join,
-                args.manifest,
-                {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree},
-            )
+            fields: dict[str, Any] = {"model_role": args.model_role, "write_scope": args.write_scope}
+            fields.update(lessons=args.lesson, disposition=(args.disposition, args.named_blocker, args.removal_ticket))
+            unit_args = (args.state, args.session, args.loop_id, args.unit, args.depends_on, args.join, args.manifest)
+            contract = {**fields, "scope": args.scope, "base_branch": args.base_branch, "worktree": args.worktree}
+            output = graph_controller.add_unit(*unit_args, contract)
         elif args.command == "assign-worktree":
             output = graph_controller.assign_worktree(args.state, args.session, args.loop_id, args.unit, args.worktree)
+        elif args.command == "set-unit-disposition":
+            if len(args.disposition) != 1:
+                raise ValueError("[reason_code=set_disposition_refused] --disposition must occur exactly once")
+            args.disposition = args.disposition[0]
+            output = graph_controller.set_unit_disposition_args(args)
+        elif args.command in {"assign-unit-scope", "append-unit-scope-note"}:
+            output = graph_driver_adapter.run_scope_command(args)
         elif args.command == "instantiate":
             output = graph_controller.instantiate(args.state, args.session, args.loop_id, args.profile, args.unit)
         elif args.command == "inspect":
@@ -325,6 +300,13 @@ def main() -> int:
             output = graph_recovery.summarize(load(args.state))
         elif args.command == "collection":
             output = graph_recovery.collection(args.state)
+        elif args.command == "disposition-audit":
+            report = disposition_report(load(args.state).get("work_units"))
+            output = report
+            if report["offenders"]:
+                print(json.dumps(report, sort_keys=True))
+                print("graph: preserve-compat units must carry a named blocker and removal ticket", file=sys.stderr)
+                return 1
         elif args.command == "recover-wave":
             output = dispatch.recover_wave(args.state, args.session, args.lease_seconds, apply=not args.report_only)
         elif args.command == "plan":
@@ -333,36 +315,30 @@ def main() -> int:
             output = dispatch.begin_wave(args.state)
         elif args.command == "record-wave":
             output = dispatch.record_wave(args.state, object_value(json.loads(args.results_json), "wave report"))
+        elif args.command == "record-driver-wave":
+            output = graph_driver_adapter.record_wave(
+                args.state, object_value(json.loads(args.results_json), "driver wave report")
+            )
+        elif args.command == "record-driver-control":
+            output = graph_driver_adapter.record_control(args.state, args.session, args.node, args.result_file)
+        elif args.command == "begin-driver-wave":
+            output = graph_driver_adapter.begin_wave(args.state)
+        elif args.command == "drive":
+            output = _drive(args)
+        elif args.command == "authorize-driver":
+            output = graph_driver_adapter.authorize(
+                args.state, args.session, args.dispatch_id, args.prompt_file, args.role, args.driver_run_id
+            )
         elif args.command == "record-unit":
-            if (args.status == "done") != (args.evidence is not None):
-                raise ValueError("done requires --evidence; dropped requires --reason")
-            output = record_unit(args.state, args.session, args.unit, args.status, args.evidence or args.reason)
-        elif args.command == "record-decision":
-            output = decision_record.record(
-                args.state,
-                args.session,
-                args.phase,
-                args.decision,
-                expected_loop_id=args.loop_id,
-                expected_revision=args.revision,
-                transition=transition,
-                flip_condition=args.flip_condition,
-                unit=args.unit,
-                cite_quote=args.cite_quote,
-            )
-        elif args.command == "flush-decisions":
-            output = decision_record.flush_pending(
-                args.state,
-                args.session,
-                transition=transition,
-                cite_quote=args.cite_quote,
-            )
+            output = _record_unit(args)
+        elif args.command in {"record-decision", "flush-decisions"}:
+            output = _decision(args)
         elif args.command == "record-repair":
-            output = record_repair(
+            output = graph_controller.record_repair(
                 args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis
             )
         elif args.command == "record-proof-disposition":
-            output = record_proof_disposition(
+            output = graph_controller.record_proof_disposition(
                 args.state, args.session, args.loop_id, args.revision, args.disposition, args.reason
             )
         elif args.command in {"respawn-stale", "hard-stop"}:
@@ -371,6 +347,8 @@ def main() -> int:
             output = record_stop(args.state, args.session, args.category, args.reason_code, args.reason)
         elif args.command == "convert":
             output = convert_state(args.state, args.session, args.check)
+        elif args.command == "cutover-driver":
+            output = graph_driver_adapter.cutover_driver(args.state, args.session)
         elif args.command == "authorize-dispatch":
             output = dispatch.authorize_dispatch(
                 args.state, args.session, args.prompt, args.subagent_type, args.tool_use_id

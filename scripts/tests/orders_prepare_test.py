@@ -68,7 +68,11 @@ class PreparationRefresh(StoreCase):
 
     def revise(self, **fields: Any) -> None:  # noqa: ANN401
         """Use the real atomic writer to save a new owned source without declaring completion."""
-        self.assertTrue(atomic_progress_update(self.path, lambda state: {**state, **fields}))
+        self.assertTrue(
+            atomic_progress_update(
+                self.path, lambda state: {**state, **fields}, preserve_updated_at=fields.get("status") == "complete"
+            )
+        )
 
     def refresh(self, evidence: str | None = None) -> tuple[int, dict[str, Any]]:
         """Supply the current preparation's canonical evidence hash as the compare-and-swap input."""

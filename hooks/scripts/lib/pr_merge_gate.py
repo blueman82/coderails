@@ -15,7 +15,14 @@ from scripts.lib import merge_target, publication_gate
 from scripts.lib.artifact_io import array_value
 from scripts.lib.config import config_path, integrity_enabled, integrity_status_login
 from scripts.lib.config_strict import ConfigRejected, strict_settings
-from scripts.lib.git_common import gate_eval_summary_for_pr, pr_field, repo, run
+from scripts.lib.git_common import (
+    compat_failure_message,
+    gate_eval_summary_for_pr,
+    gate_review_summary_for_pr,
+    pr_field,
+    repo,
+    run,
+)
 from scripts.lib.integrity_attestation import parse_attestation
 from scripts.post_evals import smoke_verify
 
@@ -85,6 +92,11 @@ def merge_reason(number: str, cwd: str, session: str = "", unit: str = "", progr
     sha = pr_field(number, "headRefOid")
     if not sha:
         return prefix + "GitHub fetch failed, could not resolve PR head SHA. Retry, or check gh auth/network."
+    review, reason = gate_review_summary_for_pr(number, sha)
+    if review == 2:
+        return prefix + "GitHub fetch failed, could not verify the review artifact. Retry, or check gh auth/network."
+    if review == 3:
+        return prefix + compat_failure_message(reason)
     summary = gate_eval_summary_for_pr(number, sha)
     if summary.status == 2:
         descriptions = {

@@ -7,7 +7,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -19,87 +18,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/script
 import loop_dispatch_guard as guard
 from hook_common import loop_state_path
 
+from packages.tests.codex_dispatch_fixture import ENVELOPE, DispatchFixture
 from scripts.lib.config_discovery import strict_config_path
 
-ENVELOPE = "CODERAILS_GRAPH_DISPATCH=" + json.dumps(
-    {
-        "envelope_version": 2,
-        "dispatch_id": "disp_1",
-        "session_id": "parent",
-        "loop_id": "loop",
-        "revision": 2,
-        "wave_id": "wave-2",
-        "node_id": "U3[1]",
-    }
-)
 
-
-class DispatchGuardTests(unittest.TestCase):
+class DispatchGuardTests(DispatchFixture):
     """Test graph dispatch routing and fail-closed authority results."""
-
-    def setUp(self) -> None:
-        """Create a graph-bound session with one enveloped dispatch."""
-        self.scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(self.scratch.cleanup)
-        graph_root = patch.dict(os.environ, {"CODERAILS_AGENTIC_LOOP_DIR": str(Path(self.scratch.name) / "loops")})
-        graph_root.start()
-        self.addCleanup(graph_root.stop)
-        self.state = Path(self.scratch.name) / "progress.json"
-        self.state.touch()
-        self.tool_input: dict[str, Any] = {
-            "task_name": "loop_worker_6c6f6f70_55335b315d",
-            "message": ENVELOPE + "\nsections\nImplement the node.",
-        }
-        self.payload: dict[str, Any] = {
-            "tool_name": "spawn_agent",
-            "session_id": "parent",
-            "cwd": str(self.state.parent),
-            "tool_input": self.tool_input,
-        }
-        self.sent: list[tuple[Any, ...]] = []
-        self.message_file_text = ""
-
-    def _run(
-        self, authorized: bool = True, status: str = "in-progress", config: Path | None = None
-    ) -> tuple[bool, int]:
-        """Run the hook; return (denied, authorize calls)."""
-
-        def graph_output(_graph: Path, *arguments: str, timeout_seconds: float | None = None) -> dict[str, Any] | None:
-            if arguments[0] == "inspect":
-                return {"status": status}
-            self.sent.append(arguments)
-            self.message_file_text = Path(arguments[arguments.index("--message-file") + 1]).read_text()
-            return {"loop_id": "loop", "wave_id": "wave-2", "dispatch_id": "disp_1"} if authorized else None
-
-        def state_path(
-            _cwd: str, _session: str, *, strict: bool = False, timeout_seconds: float | None = None
-        ) -> Path | None:
-            return self.state if self.state.is_file() else None
-
-        with (
-            patch.object(guard, "read_input", return_value=json.dumps(self.payload)),
-            patch.object(guard, "strict_config_path", return_value=str(config) if config else ""),
-            patch.object(guard, "loop_state_path", side_effect=state_path),
-            patch.object(guard, "graph_path", return_value=Path(guard.__file__)),
-            patch.object(guard, "graph_output", side_effect=graph_output),
-            patch.object(guard, "deny") as denial,
-            patch.object(guard, "log"),
-        ):
-            self.assertEqual(guard.main(), 0)
-            self.denial_reason = str(denial.call_args.args[0]) if denial.call_args else ""
-        return denial.called, len(self.sent)
-
-    def test_invalid_typed_config_blocks_native_worker_dispatch(self) -> None:
-        """A misspelled sandbox control cannot reach Codex's actual spawn gate."""
-        config = Path(self.scratch.name) / "workflow.config.yaml"
-        config.write_text("sandbox_workerz: true\n", encoding="utf-8")
-        self.assertEqual(self._run(config=config), (True, 0))
-
-    def test_valid_default_sandbox_setting_does_not_claim_a_codex_override(self) -> None:
-        """The existing Codex API continues dispatch; its sandbox is inherited from the parent session."""
-        config = Path(self.scratch.name) / "workflow.config.yaml"
-        config.write_text("sandbox_workers: true\n", encoding="utf-8")
-        self.assertEqual(self._run(config=config), (False, 1))
 
     def test_roleless_dispatch_reaches_authority(self) -> None:
         """Require the existing active-wave and frozen-eval authority for role-less workers."""
@@ -132,6 +56,12 @@ class DispatchGuardTests(unittest.TestCase):
             ],
         )
         self.assertEqual(self.message_file_text, self.tool_input["message"])
+        self.assertEqual(self.sent[0][-2:], ("--tool-use-id", "call-spawn"))
+
+    def test_graph_spawn_without_native_call_id_is_denied(self) -> None:
+        """An opaque transcript cannot be joined to a hook approval without the native call id."""
+        del self.payload["tool_use_id"]
+        self.assertEqual(self._run(), (True, 0))
 
     def test_native_collaboration_tool_name_reaches_authority(self) -> None:
         """Codex's automatic hook name routes the same native spawn to graph authorization."""

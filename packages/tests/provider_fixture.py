@@ -49,7 +49,8 @@ class Provider:
         )
         config = self.home / ".coderails/workflow.config.yaml"
         config.parent.mkdir()
-        config.write_text("memory:\n  backend: off\n")
+        # These cases verify native graph dispatch, not worker containment.
+        config.write_text("memory:\n  backend: off\nsandbox_workers: false\n")
         self.plugin = ROOT if name == "claude" else ROOT / "packages/codex"
         self.session = "fixture-session" if name == "claude" else "parent"
         self.parent = claude.parent(self.home) if name == "claude" else codex.transcripts(self.home)
@@ -131,7 +132,7 @@ class Provider:
             if self.name == "claude":
                 claude.spawn(self.parent, state, identifier, completed=outcome == "done")
             else:
-                codex.spawn(self.parent, state, identifier, terminal=outcome != "stale")
+                codex.spawn(self.parent, state, identifier, terminal=outcome != "stale", state_path=self.path)
         return claude.report(state, outcome)
 
     def finish_wave(self, outcome: str = "done") -> dict[str, Any]:
@@ -226,7 +227,11 @@ class Provider:
             request.update(tool_name="Agent", tool_input={"subagent_type": "general-purpose", "prompt": prompt})
         else:
             task = self.success("inspect")["task_names"][identifier]
-            request.update(tool_name="spawn_agent", tool_input={"task_name": task, "message": prompt})
+            request.update(
+                tool_name="spawn_agent",
+                tool_use_id=f"call-{task}",
+                tool_input={"task_name": task, "message": prompt},
+            )
         return request
 
     def hook(self, name: str, payload: dict[str, Any]) -> subprocess.CompletedProcess[str]:

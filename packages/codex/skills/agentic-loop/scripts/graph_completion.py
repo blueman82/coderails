@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+import graph_driver_evidence
 import graph_semantics
 from graph_evidence import validate_completion_evidence, validate_worker_evidence
 from graph_identity import GraphError
@@ -14,6 +15,7 @@ from graph_io import locked as _locked
 from graph_io import object_value as _object
 from graph_io import write as _write
 from graph_recovery import traced_refusal
+from graph_vocab import disposition_offenders
 
 
 def _orders() -> Any:  # noqa: ANN401
@@ -42,10 +44,12 @@ def validate_work_units(state: dict[str, Any]) -> None:
         if unit.get("status") == "dropped" and isinstance(reason, str) and reason.strip():
             continue
         raise GraphError(f"work unit {unit_id} is unfinished or malformed")
+    if bad := disposition_offenders(cast(dict[str, Any], units)):
+        raise GraphError("work units have an illegal disposition: " + ", ".join(bad))
 
 
-def _validate_completion(
-    path: Path,
+def validate_completion_state(
+    state_path: Path,
     state: dict[str, Any],
     session: str,
     revision: int,
@@ -54,7 +58,12 @@ def _validate_completion(
     retro_path: Path,
     transcript_path: Path | None,
 ) -> list[str]:
-    state_dir = path.resolve().parent
+    """Check graph, native or driver history, and current completion artifacts."""
+    if state.get("proof_disposition") is not None and (
+        proof_path.absolute() != state_path.with_name("proof.json").absolute()
+    ):
+        raise GraphError("proof path must be beside progress.json for a no-proof decision")
+    state_dir = state_path.resolve().parent
     for artifact, name in ((evals_path, "evals.json"), (proof_path, "proof.json"), (retro_path, "retro.json")):
         if artifact.resolve() != (state_dir / name).resolve():
             raise GraphError(f"{name} path is not canonical beside progress.json")
@@ -64,12 +73,16 @@ def _validate_completion(
     if not eligibility["eligible"]:
         raise GraphError("cannot complete graph: " + ", ".join(eligibility["blockers"]))
     validate_work_units(state)
-    validate_worker_evidence(state)
+    if state["graph"].get("dispatch_mode") == "driver":
+        native = graph_driver_evidence.validate_backup(state_path, state)
+        validate_worker_evidence(native, require_complete=False)
+        graph_driver_evidence.validate_history(state_path, state)
+    else:
+        validate_worker_evidence(state)
     return validate_completion_evidence(state, revision, evals_path, proof_path, retro_path, transcript_path)
 
 
 def _result(state: dict[str, Any], disclosures: list[str]) -> dict[str, Any]:
-    """The completion record; `disclosures` (Muninn degrades) appears only when there is something to disclose."""
     result: dict[str, Any] = {"status": "complete", "loop_id": state["loop_id"], "revision": state["revision"]}
     return {**result, "disclosures": disclosures} if disclosures else result
 
@@ -80,7 +93,7 @@ def complete(
     """Prepare orders, save validated completion, then apply the lifecycle outside both locks."""
     current = _load(path)
     if current["status"] != "complete":
-        _validate_completion(
+        validate_completion_state(
             path, current, session, current["revision"], evals_path, proof_path, retro_path, transcript_path
         )
     orders = _orders()
@@ -99,7 +112,7 @@ def complete(
         else:
             revision = state["revision"]
         with traced_refusal(path, state, "complete", session):
-            disclosures = _validate_completion(
+            disclosures = validate_completion_state(
                 path, state, session, revision, evals_path, proof_path, retro_path, transcript_path
             )
             if not already_complete:
@@ -131,7 +144,7 @@ def verify_completion(
     if state["status"] != "complete" or revision != state["revision"] - 1:
         raise GraphError("graph has no valid completion record")
     with traced_refusal(path, state, "verify-completion", session):
-        disclosures = _validate_completion(
+        disclosures = validate_completion_state(
             path, state, session, revision, evals_path, proof_path, retro_path, transcript_path
         )
         try:
