@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -236,6 +237,7 @@ class CheckTests(unittest.TestCase):
     def codes(self, reply: git.ReviewPasses, changes: manifest_policy.Changes | None = HOOKS) -> list[str]:
         """Run the check against a canned artifact and diff."""
         with (
+            mock.patch.object(git, "gate_review_summary_for_pr", return_value=(0, "")),
             mock.patch.object(git, "review_passes_for_pr", return_value=reply),
             mock.patch.object(git, "pr_field", return_value="base-sha"),
             mock.patch.object(manifest_policy, "diff_changes", return_value=changes),
@@ -254,6 +256,7 @@ class CheckTests(unittest.TestCase):
 
         with (
             mock.patch.object(git, "pr_field", return_value="release-sha"),
+            mock.patch.object(git, "gate_review_summary_for_pr", return_value=(0, "")),
             mock.patch.object(git, "review_passes_for_pr", return_value=found([entry("review-pr")])),
             mock.patch.object(manifest_policy, "diff_changes", side_effect=changes),
         ):
@@ -356,6 +359,9 @@ class PathTests(unittest.TestCase):
         """merge.py publishes through publication_gate.enforce; a hooks/ PR without the pass is refused."""
         reply = found([entry("review-pr")])
         with (
+            mock.patch.dict(os.environ, {"CODERAILS_PUBLICATION_SESSION_ID": "fixture-session"}),
+            mock.patch.object(git, "gate_review_summary_for_pr", return_value=(0, "")),
+            mock.patch.object(git, "pr_field", return_value="base-sha"),
             mock.patch.object(git, "review_passes_for_pr", return_value=reply),
             mock.patch.object(git, "gate_eval_summary_for_pr", return_value=git.EvalSummary(1)),
             mock.patch.object(manifest_policy, "diff_changes", return_value=HOOKS),
@@ -363,7 +369,9 @@ class PathTests(unittest.TestCase):
             self.assertRaises(git.WorkflowError) as caught,
         ):
             publication_gate.enforce("7", SHA)
-        self.assertTrue(str(caught.exception).startswith("required_review_missing:security-review"))
+        self.assertTrue(
+            str(caught.exception).startswith("required_review_missing:security-review"), str(caught.exception)
+        )
         self.assertIn(publication_gate.review_passes_check, publication_gate.CHECKS)
         self.assertTrue(hasattr(merge, "publication_gate"))
 
@@ -372,6 +380,7 @@ class PathTests(unittest.TestCase):
         violation = [{"code": "required_review_missing:security-review", "detail": "x"}]
         with (
             mock.patch.object(pr_merge_gate, "pr_field", return_value=SHA),
+            mock.patch.object(pr_merge_gate, "gate_review_summary_for_pr", return_value=(0, "")),
             mock.patch.object(pr_merge_gate, "gate_eval_summary_for_pr", return_value=git.EvalSummary(0, "0", "{}")),
             mock.patch.object(pr_merge_gate, "smoke_verify", return_value=0),
             mock.patch.object(publication_gate, "evaluate", return_value=violation),

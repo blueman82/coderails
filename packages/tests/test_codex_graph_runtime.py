@@ -299,6 +299,8 @@ class GraphRuntimeTests(RuntimeFixture):
 
     def test_staging_fault_has_recovery_trace_and_fresh_retry(self) -> None:
         """The hook traces a temporary-message failure before a valid retry consumes the dispatch."""
+        config = self.directory / "workflow.config.yaml"
+        config.write_text("sandbox_workers: false\n")
         opened = graph.begin_wave(self.path)["dispatches"][0]
         payload = {
             "tool_name": "collaborationspawn_agent",
@@ -312,7 +314,7 @@ class GraphRuntimeTests(RuntimeFixture):
         }
         with (
             patch.object(guard, "read_input", return_value=json.dumps(payload)),
-            patch.object(guard, "strict_config_path", return_value=""),
+            patch.object(guard, "strict_config_path", return_value=str(config)),
             patch.object(guard, "loop_state_path", return_value=self.path),
             patch("loop_dispatch_guard.tempfile.TemporaryDirectory", side_effect=OSError("scratch unavailable")),
             patch.object(guard, "deny") as denial,
@@ -324,7 +326,7 @@ class GraphRuntimeTests(RuntimeFixture):
         self.assertIsNone(next(iter(read_json(self.path)["graph"]["dispatches"].values()))["authorized"])
         with (
             patch.object(guard, "read_input", return_value=json.dumps(payload)),
-            patch.object(guard, "strict_config_path", return_value=""),
+            patch.object(guard, "strict_config_path", return_value=str(config)),
             patch.object(guard, "loop_state_path", return_value=self.path),
             patch.object(guard, "deny") as denial,
         ):

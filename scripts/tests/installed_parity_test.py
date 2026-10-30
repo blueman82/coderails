@@ -42,6 +42,19 @@ class InstalledParityTests(unittest.TestCase):
         write(self.source, "packages/codex/skills/x/a.py", b"codex-body\n")
         write(self.claude, "skills/x/a.py", b"claude-body\n")
         write(self.codex, "skills/x/a.py", b"codex-body\n")
+        for root, relative in (
+            (self.source, ".claude-plugin/plugin.json"),
+            (self.source, "hooks/hooks.json"),
+            (self.source, "packages/codex/.codex-plugin/plugin.json"),
+            (self.source, "packages/codex/hooks/hooks.json"),
+            (self.claude, ".claude-plugin/plugin.json"),
+            (self.claude, "hooks/hooks.json"),
+            (self.codex, ".codex-plugin/plugin.json"),
+            (self.codex, "hooks/hooks.json"),
+        ):
+            write(root, relative, b"{}\n")
+        subprocess.run(["git", "init", "-q", str(self.source)], check=True)
+        subprocess.run(["git", "-C", str(self.source), "add", "-A"], check=True)
 
     def run_parity(self) -> subprocess.CompletedProcess[str]:
         """Compare the fixture installs against the fixture source."""
@@ -100,6 +113,222 @@ class InstalledParityTests(unittest.TestCase):
         result = parity("--source-root", str(self.source), home=self.temporary.name)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.count("not installed, skipped"), 2)
+
+    def test_strict_refuses_when_both_installs_are_absent(self) -> None:
+        """A release check cannot pass without either provider."""
+        result = parity("--require-both", "--source-root", str(self.source), home=self.temporary.name)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("claude: not installed", result.stdout)
+        self.assertIn("codex: not installed", result.stdout)
+        self.assertNotIn("skipped", result.stdout)
+
+    def test_strict_refuses_when_one_install_is_absent(self) -> None:
+        """One present provider does not hide a missing second provider."""
+        result = parity(
+            "--require-both",
+            "--source-root",
+            str(self.source),
+            "--claude-installed",
+            str(self.claude),
+            home=self.temporary.name,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("claude: 0 difference(s)", result.stdout)
+        self.assertIn("codex: not installed", result.stdout)
+
+    def test_strict_accepts_both_matching_installs(self) -> None:
+        """Both matching provider installs satisfy strict presence."""
+        result = parity(
+            "--require-both",
+            "--source-root",
+            str(self.source),
+            "--claude-installed",
+            str(self.claude),
+            "--codex-installed",
+            str(self.codex),
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_strict_explicit_missing_directory_is_usage_error(self) -> None:
+        """A bad explicit path remains a usage error in strict mode."""
+        result = parity(
+            "--require-both",
+            "--source-root",
+            str(self.source),
+            "--claude-installed",
+            str(self.claude / "missing"),
+            "--codex-installed",
+            str(self.codex),
+        )
+        self.assertEqual(result.returncode, 2)
+
+    def test_strict_refuses_symlink_installed_root(self) -> None:
+        """A link to the source tree is not evidence of an installed copy."""
+        linked = Path(self.temporary.name) / "linked-claude"
+        linked.symlink_to(self.source, target_is_directory=True)
+        result = parity(
+            "--require-both",
+            "--source-root",
+            str(self.source),
+            "--claude-installed",
+            str(linked),
+            "--codex-installed",
+            str(self.codex),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("symlink", result.stderr)
+
+    def test_strict_refuses_nested_symlink_file_or_directory(self) -> None:
+        """An installed tree cannot hide a linked file or directory."""
+        linked_file = self.claude / "skills/x/linked.py"
+        linked_file.symlink_to(self.source / "skills/x/a.py")
+        linked_dir = self.codex / "linked-skills"
+        linked_dir.symlink_to(self.source / "packages/codex/skills", target_is_directory=True)
+        result = parity(
+            "--require-both",
+            "--source-root",
+            str(self.source),
+            "--claude-installed",
+            str(self.claude),
+            "--codex-installed",
+            str(self.codex),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("symlink", result.stderr)
+
+    def test_strict_refuses_ignored_runtime_source_even_if_installed(self) -> None:
+        """An ignored hook cannot become part of a release by matching the install."""
+        write(self.source, ".gitignore", b"hooks/extra.py\n")
+        write(self.source, "hooks/extra.py", b"print('hidden')\n")
+        write(self.claude, "hooks/extra.py", b"print('hidden')\n")
+        result = parity(
+            "--require-both",
+            "--source-root",
+            str(self.source),
+            "--claude-installed",
+            str(self.claude),
+            "--codex-installed",
+            str(self.codex),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("untracked runtime source", result.stderr)
+
+    def test_strict_refuses_extra_installed_runtime_file(self) -> None:
+        """A hook absent from the tracked source cannot pass strict parity."""
+        write(self.claude, "hooks/extra.py", b"print('extra')\n")
+        result = parity(
+            "--require-both",
+            "--source-root",
+            str(self.source),
+            "--claude-installed",
+            str(self.claude),
+            "--codex-installed",
+            str(self.codex),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not tracked", result.stderr)
+
+    def test_strict_refuses_source_without_git_inventory(self) -> None:
+        """A release needs a source tree whose file list Git can verify."""
+        other = Path(self.temporary.name) / "not-a-repo"
+        write(other, "skills/x/a.py", b"claude-body\n")
+        write(other, "packages/codex/skills/x/a.py", b"codex-body\n")
+        result = parity(
+            "--require-both",
+            "--source-root",
+            str(other),
+            "--claude-installed",
+            str(self.claude),
+            "--codex-installed",
+            str(self.codex),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Git source", result.stderr)
+
+    def test_strict_refuses_empty_installed_directories(self) -> None:
+        """Directory presence alone does not prove either plugin is installed."""
+        empty_claude = Path(self.temporary.name) / "empty-claude"
+        empty_codex = Path(self.temporary.name) / "empty-codex"
+        empty_claude.mkdir()
+        empty_codex.mkdir()
+        result = parity(
+            "--require-both",
+            "--source-root",
+            str(self.source),
+            "--claude-installed",
+            str(empty_claude),
+            "--codex-installed",
+            str(empty_codex),
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("required installed file missing", result.stderr)
+
+    def test_strict_refuses_source_checkout_as_installed_plugin(self) -> None:
+        """Matching source bytes cannot stand in for an installed provider."""
+        for claude, codex in (
+            (self.source, self.codex),
+            (self.claude, self.source / "packages/codex"),
+        ):
+            result = parity(
+                "--require-both",
+                "--source-root",
+                str(self.source),
+                "--claude-installed",
+                str(claude),
+                "--codex-installed",
+                str(codex),
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("source checkout", result.stderr)
+
+    def test_strict_keeps_cache_file_exclusions(self) -> None:
+        """Python caches and Finder files do not become release source files."""
+        for root in (self.source, self.claude):
+            write(root, "hooks/__pycache__/gate.cpython-39.pyc")
+            write(root, "hooks/.DS_Store")
+        result = parity(
+            "--require-both",
+            "--source-root",
+            str(self.source),
+            "--claude-installed",
+            str(self.claude),
+            "--codex-installed",
+            str(self.codex),
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_strict_refuses_missing_runtime_files_in_either_provider(self) -> None:
+        """Matching registration files cannot hide a missing skill or control data file."""
+        for bundle, installed, prefix in (
+            ("claude", self.claude, ""),
+            ("codex", self.codex, "packages/codex/"),
+        ):
+            for relative in ("policy/review_policy.json", "capabilities/profiles.json", "routines/docs-sync.json"):
+                write(self.source, prefix + relative, b"{}\n")
+                write(installed, relative, b"{}\n")
+            subprocess.run(["git", "-C", str(self.source), "add", "-A"], check=True)
+            for relative in (
+                "skills/x/a.py",
+                "policy/review_policy.json",
+                "capabilities/profiles.json",
+                "routines/docs-sync.json",
+            ):
+                with self.subTest(bundle=bundle, relative=relative):
+                    target = installed / relative
+                    original = target.read_bytes()
+                    target.unlink()
+                    result = parity(
+                        "--require-both",
+                        "--source-root",
+                        str(self.source),
+                        "--claude-installed",
+                        str(self.claude),
+                        "--codex-installed",
+                        str(self.codex),
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn(relative, result.stderr)
+                    target.write_bytes(original)
 
     def test_default_locations_are_discovered(self) -> None:
         """Defaults resolve the Claude installPath and the Codex plugin cache under HOME."""
