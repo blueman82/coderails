@@ -108,6 +108,14 @@ const attributeKeys = new Set([
   "gen_ai.response.model",
   "gen_ai.usage.input_tokens",
   "gen_ai.usage.output_tokens",
+  "gen_ai.usage.cache_read_input_tokens",
+  "gen_ai.usage.cache_creation_input_tokens",
+  "coderails.usage.semantics",
+  "coderails.usage.identity_sha256",
+  "coderails.observation.kind",
+  "coderails.observation.target_kind",
+  "coderails.observation.target_sha256",
+  "coderails.observation.bytes",
   "coderails.source.ordinal",
   "coderails.actor.kind",
   "coderails.actor.id",
@@ -201,7 +209,30 @@ function timeBasis(value: unknown, attrs: Record<string, unknown>, prefix: strin
 function attributes(value: unknown): boolean {
   return record(value) && Object.entries(value).every(([key, item]) =>
     attributeKeys.has(key) && (item === null || typeof item === "string" ||
-      (typeof item === "number" && Number.isFinite(item)) || typeof item === "boolean"));
+      (typeof item === "number" && Number.isFinite(item)) || typeof item === "boolean")) &&
+    observationAttributes(value) && usageAttributes(value);
+}
+
+function observationAttributes(value: Record<string, unknown>): boolean {
+  const kind = value["coderails.observation.kind"];
+  const target = value["coderails.observation.target_kind"];
+  const digest = value["coderails.observation.target_sha256"];
+  const bytes = value["coderails.observation.bytes"];
+  if (kind === undefined) return target === undefined && digest === undefined && bytes === undefined;
+  return ["invocation", "read", "failed_read", "mention", "uncertain"].includes(String(kind)) &&
+    (target === "skill" || target === "context") &&
+    typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest) &&
+    (bytes === null || ordinal(bytes));
+}
+
+function usageAttributes(value: Record<string, unknown>): boolean {
+  const semantics = value["coderails.usage.semantics"];
+  if (semantics !== undefined && semantics !== "cumulative" && semantics !== "incremental") return false;
+  const identity = value["coderails.usage.identity_sha256"];
+  if (identity !== undefined && (semantics !== "incremental" || typeof identity !== "string" ||
+    !/^[a-f0-9]{64}$/.test(identity))) return false;
+  return ["gen_ai.usage.cache_read_input_tokens", "gen_ai.usage.cache_creation_input_tokens"]
+    .every((key) => value[key] === undefined || ordinal(value[key]));
 }
 
 function sourceRef(value: unknown): boolean {
