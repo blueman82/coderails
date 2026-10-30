@@ -34,7 +34,7 @@ partial writes. Same-user forgery and runner limits are in `docs/routines.md`.
 ## 1. Audit
 
 Invoke `$coderails-codex:sync-docs` and run its audit phases: discover
-project structure, traditional audit, generate a drift report) to detect
+project structure, traditional audit, and generate a drift report to detect
 drift between this repo's documentation and its actual code.
 
 **Scope of docs this routine may fix: git-tracked `.md` files only** —

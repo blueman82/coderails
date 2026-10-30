@@ -12,7 +12,11 @@ Use the package-local [push helper](../../scripts/push.py) for the final stage, 
 1. Confirm the current directory is a Git repository and the current branch is neither `main` nor `master`. Stop on either failure.
 2. Resolve the nearest `.coderails/workflow.config.yaml` between the current directory and the repository root. Treat an absent file as no project config.
 3. Unless the user requested quick mode, inspect changed files against the remote default branch. If configured `engineering_principles_paths` match, invoke `$coderails-codex:engineering-principles` on those files.
-4. Treat violations of documented architecture, registration rules, or required contract tests as blocking. Present them and use `request_user_input` to ask whether to fix them or push as-is. If user input is unavailable, stop before pushing. Style and naming suggestions are non-blocking.
+4. Treat violations of documented architecture, registration rules, or required contract tests as blocking.
+   Show the violations.
+   Use `request_user_input` to ask whether to fix them or push as-is.
+   If user input is unavailable, stop before pushing.
+   Style and naming suggestions do not block the push.
 
 ## Run the helper
 
@@ -26,7 +30,9 @@ Resolve the linked helper relative to this `SKILL.md`, then run it from the user
 - If this session owns a graph unit in this worktree, pass its exact `--unit <id> --progress <absolute state path>`.
   Read both values from the active graph. Do not guess them.
 
-The helper must fail if the branch is protected, the commit or push fails, the remote branch does not match local `HEAD`, or pull-request creation fails. Do not report success without its resulting pull-request URL.
+The helper must fail if the branch is protected or the commit, push, or pull-request creation fails.
+It must also fail if the remote branch does not match local `HEAD`.
+Report success only when it returns a pull-request URL.
 
 ## Linked Jira ticket
 

@@ -43,8 +43,10 @@ Answers can take different forms — choose naturally:
 
 - **Markdown** — explanations, walkthroughs, summaries
 - **Comparison table** — comparing approaches, services, patterns
-- **Slide deck** (Marp format) — write a `.md` file with Marp frontmatter in `$vault/assets/`. Rendered by the Obsidian Marp Slides plugin
-- **Chart** (matplotlib) — write and execute a Python script, save `.png` to `$vault/assets/`
+- **Slide deck** (Marp format) — write a `.md` file with Marp frontmatter
+  in `$vault/assets/`. The Obsidian Marp Slides plugin renders it.
+- **Chart** (matplotlib) — write and run a Python script, then save its `.png`
+  file to `$vault/assets/`.
 
 ### Step 4: File Back
 
@@ -58,6 +60,7 @@ When the answer reveals something non-obvious or reusable:
 
 **If `wiki_git_worktree` is `false`**: write directly and commit to the vault.
 
-After writing, reindex if `qmd` is available: `qmd update` (refreshes all configured collections), then `qmd embed -c wiki` (`update` must run first to pick up new/changed files; `embed` alone only refreshes already-known content hashes). Run `qmd collection add <vault-path> --name wiki` only during first-time setup when the `wiki` collection is missing; it is not routine maintenance.
+After writing, reindex if `qmd` is available: `qmd update` (refreshes all configured collections), then `qmd embed -c wiki` (`update` must run first to pick up new/changed files; `embed` alone only refreshes already-known content hashes).
+Run `qmd collection add <vault-path> --name wiki` only during first-time setup when the `wiki` collection is missing; it is not routine maintenance.
 
 Good answers compound the knowledge base. File back anything that took real effort to assemble.

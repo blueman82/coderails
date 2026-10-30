@@ -125,7 +125,7 @@ python3 "$SKILL_DIR/scripts/graph.py" complete "$STATE" \
   --transcript "$TRANSCRIPT_PATH"
 ```
 
-Keep this sibling `proof.json` path when the saved no-proof disposition leaves the file absent.
+Keep this sibling `proof.json` path when the saved no-proof reason leaves the file absent.
 
 That command runs `prepare` before the graph lock, checks the prepared source under the graph lock, saves completion,
 then runs `$O tick --loop "$LOOP"` and `$O render --loop "$LOOP"` after it releases the lock. Apply validates the

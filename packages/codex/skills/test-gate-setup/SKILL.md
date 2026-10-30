@@ -5,11 +5,16 @@ description: Configure the native Coderails Codex commit test gate for the curre
 
 # Test Gate Setup
 
-Configure the current project's opt-in commit test gate. The Coderails Codex `PreToolUse` hook reads one command from the current worktree's trusted Git metadata and denies `git commit` when that command fails. A repository file cannot configure this gate.
+Configure the current project's opt-in commit test gate.
+The Coderails Codex `PreToolUse` hook reads one command from the current worktree's trusted Git metadata and denies `git commit` when that command fails.
+A repository file cannot configure this gate.
 
 Work from the project's root directory.
 
-1. Resolve the configuration path with `git rev-parse --git-path coderails/test_command`. If that file exists, read and report its current command. Use `request_user_input` to ask whether to keep or replace it. Stop without changing the file if the user keeps it.
+1. Resolve the configuration path with `git rev-parse --git-path coderails/test_command`.
+   If that file exists, read and report its current command.
+   Use `request_user_input` to ask whether to keep or replace it.
+   Stop without changing the file if the user keeps it.
 2. Otherwise, detect available test commands with `scripts/detect_test_command.py`, resolved relative to this `SKILL.md` (`../../scripts/detect_test_command.py`) and run from the project root. It owns the ordered marker list and prints JSON `{"command": ..., "candidates": [...]}`.
    A missing directory exits 2 with `directory_unavailable`; resolve the project root and rerun before selecting or writing a command.
 3. If `command` is set, propose it. If `command` is null and `candidates` has several entries, use `request_user_input` to select one. If `candidates` is empty, ask for a test command.
