@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import shlex
 import shutil
 import time
 from pathlib import Path
@@ -135,7 +136,8 @@ def install(root: Path, home: Path, memory: Path, *, dry_run: bool) -> None:
     else:
         register(root, home)
     discipline_and_memory(root, home, memory, dry_run=dry_run)
-    print("Run in Claude Code: /plugin install coderails@coderails")
+    print("Requires Claude Code 2.1.292 or newer; upgrade older versions first.")
+    print(f"Run in terminal: claude plugin install coderails --marketplace {shlex.quote(str(root))}")
 
 
 def uninstall(home: Path) -> None:
