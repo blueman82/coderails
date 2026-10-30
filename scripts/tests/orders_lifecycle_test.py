@@ -18,7 +18,7 @@ from unittest import mock
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from hooks.scripts.lib.loop_state_common import atomic_progress_update as progress_update  # noqa: E402
-from scripts.lib import orders  # noqa: E402
+from scripts.lib import orders, orders_atomic  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
 from scripts.tests.fake_muninn_case import PROMPT, SESSION, StoreCase  # noqa: E402
@@ -36,8 +36,7 @@ def progress(repo: Path, session: str, loop: str, status: str = "complete") -> P
         "loop_id": loop,
         "revision": 1,
         "status": status,
-        "created": STAMP,
-        "updated_at": STAMP,
+        **dict.fromkeys(("created", "updated_at"), STAMP),
         "authorising_prompt_raw": "Run this bounded loop.",
         "completed_marker": 0,
         "work_units": {},
@@ -195,7 +194,7 @@ class OwnedCli(StoreCase):
         output = io.StringIO()
         argv = ["--dir", str(self.repo), "--session", SESSION, "tick", "--loop", "logical-loop"]
         with (
-            mock.patch.object(lifecycle, "write_bytes", side_effect=OSError("receipt-publication")),
+            mock.patch.object(orders_atomic, "write_bytes", side_effect=OSError("receipt-publication")),
             contextlib.redirect_stdout(output),
         ):
             rc = orders.main(argv)
