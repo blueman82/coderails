@@ -47,17 +47,26 @@ def open_fds() -> int | None:
 
 
 _denied = False
+_blocked = False
 
 
 def exit_cause(code: int) -> str:
     """Name a clean-return exit code: a deny decision (exit 0 plus deny JSON), ok, block (2) or other."""
-    return "deny" if _denied and code == 0 else "ok" if code == 0 else "block" if code == 2 else "exit"
+    if code == 0:
+        return "block" if _blocked else "deny" if _denied else "ok"
+    return "block" if code == 2 else "exit"
 
 
 def mark_deny() -> None:
     """Called by deny(): the hook is emitting a deny decision, so run() records cause deny rather than ok."""
     global _denied
     _denied = True
+
+
+def mark_block() -> None:
+    """Mark a native Stop decision that blocks through JSON while returning exit 0."""
+    global _blocked
+    _blocked = True
 
 
 def record(hook: str, cause: str, duration_ms: int = 0, exit_code: int | None = None, **extra: object) -> None:
@@ -103,8 +112,9 @@ def note_child(hook: str, returncode: int) -> None:
 
 def run(hook: str, main: Callable[[], int]) -> int:
     """Run a hook main(), recording one row; every failure is recorded and re-raised, never turned into success."""
-    global _denied
+    global _denied, _blocked
     _denied = False
+    _blocked = False
     start = time.monotonic()
 
     def elapsed() -> int:

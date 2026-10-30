@@ -36,7 +36,11 @@ def main() -> int:
     if opaque_execution(command, cwd):
         deny("Blocked: executable shell body exceeds the guarded parser depth.")
         return 0
-    pattern, identifier = permanent_pattern(command, cwd)
+    try:
+        pattern, identifier = permanent_pattern(command, cwd)
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)
+        return 0
     if pattern:
         output(
             "PreToolUse",
@@ -56,7 +60,12 @@ def main() -> int:
             f"git push --force-with-lease is refused too ({verdict['reason']}). Full command: {command}"
         )
         return 0
-    if reason := source_write(command, cwd):
+    try:
+        reason = source_write(command, cwd)
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)
+        return 0
+    if reason:
         deny(reason)
         return 0
     if workflow_substitution(command):
