@@ -14,7 +14,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, log, read_payload
 from hooks.scripts.lib.capability_profiles import TOOLS, guarded_agents, load_profiles, may_use
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 
 ROOT = Path(__file__).resolve().parents[2]
 # Fallback when profiles.json is missing or malformed: keep the original guarded set so the allowlist stays on

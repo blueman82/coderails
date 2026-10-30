@@ -28,7 +28,7 @@ from hooks.scripts.lib.loop_state_common import (
     stop_in_this_turn,
 )
 from hooks.scripts.lib.stall_notice import marker_name, record_notice, seen, status_notice
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 
 
 def graph_unresolved(state: LoopState) -> bool:

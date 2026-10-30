@@ -18,7 +18,7 @@ from hooks.scripts.lib.ceiling_key import legacy_key, mirror, worktree_key
 from hooks.scripts.lib.dir_lock import acquire_dir_lock, release_dir_lock
 from hooks.scripts.lib.loop_state_common import atomic_progress_update, read_state
 from hooks.scripts.lib.shell_context import invocations, opaque_execution, payload_cwd
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 
 SUITES = ("run_all.py", "run_all.sh", "test_codex_hooks.py")
 CEREMONIES = ("validate-structure", "post")

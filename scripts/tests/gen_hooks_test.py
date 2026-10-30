@@ -86,6 +86,21 @@ class HookGenerationTests(unittest.TestCase):
         self.edit_json("hooks/messages.json", lambda data: data["reasons"].pop("authority_deny"))
         self.assertEqual(self.check(), 2)
 
+    def test_explicit_hook_emitter_keeps_reason_coverage(self) -> None:
+        """The routed crack-on hook stays covered with either its local alias or explicit API name."""
+        path = self.root / "hooks/scripts/crack_on_gate.py"
+        source = path.read_text()
+        self.assertIn("import append_hook_row as append_row", source)
+        self.assertIn("authority_deny", gen_hooks.emitted_reasons(path))
+        path.write_text(
+            source.replace("append_hook_row as append_row", "append_hook_row").replace(
+                "append_row(", "append_hook_row("
+            )
+        )
+        self.assertIn("authority_deny", gen_hooks.emitted_reasons(path))
+        self.edit_json("hooks/messages.json", lambda data: data["reasons"].pop("authority_deny"))
+        self.assertEqual(self.check(), 2)
+
     def test_registered_source_missing_refuses(self) -> None:
         """A registered hook must have an actual implementation."""
         (self.root / "hooks/scripts/inject_bootstrap.py").unlink()

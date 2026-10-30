@@ -177,7 +177,7 @@ def emitted_reasons(source: Path) -> set[str]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id in {"append_row", "append_trace_row"}
+        and node.func.id in {"append_row", "append_hook_row", "append_trace_row"}
         and len(node.args) > 2
         for code in texts(node.args[2])
     }

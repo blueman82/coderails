@@ -38,7 +38,7 @@ from hooks.scripts.lib.pr_workflow_match import (
     state_mutated_before_guard,
 )
 from hooks.scripts.lib.shell_context import opaque_execution
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 from scripts.lib import advisory_merge, merge_budget
 from scripts.lib.action_binding import binding, merge_number
 from scripts.lib.action_receipt import proposed_action

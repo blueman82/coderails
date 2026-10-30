@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import output, read_payload
 from hooks.scripts.lib.discipline_common import stable_text
 from hooks.scripts.lib.loop_state_common import log
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 
 REASON = "confidence_label_missing"
 

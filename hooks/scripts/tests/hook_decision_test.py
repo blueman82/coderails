@@ -13,7 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from hooks.scripts.lib import hook_decision  # noqa: E402
-from hooks.scripts.lib.trace_row import append_row  # noqa: E402
+from hooks.scripts.lib.trace_row import append_hook_row as append_row  # noqa: E402
 
 
 class HookDecisionTests(unittest.TestCase):
