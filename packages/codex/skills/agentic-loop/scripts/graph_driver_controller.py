@@ -19,12 +19,15 @@ import graph_driver_control
 import graph_driver_dispatch
 import graph_driver_evidence as evidence
 import graph_driver_process
+import graph_driver_transfer
 import graph_semantics
 import graph_spec
 import worker_status
 from graph_vocab import decision_pending
 
 Command = Callable[[Path, dict[str, Any]], tuple[list[str], Optional[dict[str, str]], Optional[Path]]]
+Finish = graph_driver_transfer.Finish
+Prepare = graph_driver_dispatch.Prepare
 Result = Callable[[Path, int], dict[str, Any]]
 Checkouts = Union[Path, dict[str, Path]]
 
@@ -221,6 +224,7 @@ def _worker_result(
     result: Result,
     prepared: tuple[list[str], dict[str, str] | None, Path | None] | None,
     prompt_bytes: bytes | None,
+    finish_workspace: Finish | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Launch once and retain a completed attempt before recording the wave."""
     content = (prompt_bytes if prompt_bytes is not None else prompt.read_bytes()).decode("utf-8")
@@ -249,6 +253,7 @@ def _worker_result(
             return {**observation, "node": node_id, "dispatch_id": identifier, "attempt": str(prompt.parent)}, None
         code = observation["exit_code"]
         parsed = _admit_result(state, node_id, result(prompt.parent / "output.jsonl", code))
+        parsed = graph_driver_transfer.finish(path, state, identifier, worker_checkout, code, parsed, finish_workspace)
         if evidence.needs_publication(node_id, parsed):
             try:
                 evidence.publication(worker_checkout, require_merged=node_id == "S9-wiki")
@@ -269,6 +274,9 @@ def drive_once(
     provider: str,
     command: Command,
     result: Result,
+    *,
+    prepare_workspace: Prepare | None = None,
+    finish_workspace: Finish | None = None,
 ) -> dict[str, Any]:
     """Start or observe each worker once, then atomically record a full wave."""
     path = path.resolve(strict=True)
@@ -286,8 +294,7 @@ def drive_once(
                 return {"status": "paused", "reason": "missing_task", "nodes": missing}
             if not ready:
                 return {"status": "paused", "reason": "no_ready_nodes"}
-            problem = _checkout_problem(state, workers, checkout, path)
-            if problem:
+            if problem := _checkout_problem(state, workers, checkout, path):
                 return {"status": "paused", "reason": problem, "nodes": ready}
             _graph(script, "begin-driver-wave", path)
             state = _load(path, session)
@@ -295,8 +302,7 @@ def drive_once(
         workers = sorted(set(active["nodes"]) - set(_control_nodes(active["nodes"])))
         if _missing_tasks(state, workers):
             return {"status": "unresolved", "reason": "active_missing_task", "nodes": workers}
-        problem = _checkout_problem(state, workers, checkout, path)
-        if problem:
+        if problem := _checkout_problem(state, workers, checkout, path):
             return {"status": "unresolved", "reason": problem, "nodes": workers}
         results: dict[str, Any] = {}
         references: dict[str, Any] = {}
@@ -312,8 +318,8 @@ def drive_once(
         for identifier, record in _dispatches(state):
             node_id = record["node_id"]
             worker_checkout = checkout_for(checkout, node_id)
-            prompt = graph_driver_dispatch.write_prompt(
-                path, state, identifier, record, worker_checkout, provider, script
+            prompt = graph_driver_dispatch.prepare_prompt(
+                path, state, identifier, record, worker_checkout, provider, script, prepare_workspace
             )
             prompt_bytes = prompt.read_bytes()
             prepared = command(prompt, record) if record.get("authorized") is None else None
@@ -346,6 +352,7 @@ def drive_once(
                 result,
                 prepared,
                 prompt_bytes,
+                finish_workspace,
             )
             if manifest is None:
                 return reference
@@ -364,6 +371,9 @@ def drive_wave(
     command: Command,
     result: Result,
     wait_seconds: float = 30,
+    *,
+    prepare_workspace: Prepare | None = None,
+    finish_workspace: Finish | None = None,
 ) -> dict[str, Any]:
     """Wait briefly for a wave; leave a running attempt intact for the next call."""
     if not 0 <= wait_seconds <= 3600:
@@ -371,7 +381,17 @@ def drive_wave(
     deadline = time.monotonic() + wait_seconds
     with graph_driver_process.lease(path, ".controller.lock"):
         while True:
-            report = drive_once(path, session, script, checkout, provider, command, result)
+            report = drive_once(
+                path,
+                session,
+                script,
+                checkout,
+                provider,
+                command,
+                result,
+                prepare_workspace=prepare_workspace,
+                finish_workspace=finish_workspace,
+            )
             if report["status"] != "running":
                 return report
             remaining = deadline - time.monotonic()

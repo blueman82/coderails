@@ -22,17 +22,18 @@ class SettingsContractTests(ArtifactCase):
         """All required srt fields and narrow provider paths survive literal substitution."""
         home = self.directory / "home"
         scratch = self.directory / "scratch"
+        shared_tmp = self.directory / "shared-tmp"
         primary = self.directory / "primary/.git"
-        for path in (home, scratch, primary):
+        for path in (home, scratch, shared_tmp, primary):
             path.mkdir(parents=True)
-        for name in ("worktree", "pipe|worktree", 'quoted"worktree'):
-            worktree = self.directory / name
-            worktree.mkdir()
-            project_state = Path(f"/private/tmp/claude-{os.getuid()}") / str(worktree).replace("/", "-")
+        for name in ("clone", "pipe|clone", 'quoted"clone'):
+            workdir = scratch / name
+            workdir.mkdir()
+            project_state = Path(f"/private/tmp/claude-{os.getuid()}") / str(workdir).replace("/", "-")
             self.addCleanup(project_state.rmdir)
             output = self.directory / f"{name}.json"
-            with patch.dict(os.environ, {"HOME": str(home), "TMPDIR": str(scratch) + "/"}):
-                render_settings(str(worktree), str(scratch), str(primary), str(output))
+            with patch.dict(os.environ, {"HOME": str(home), "TMPDIR": str(shared_tmp) + "/"}):
+                render_settings(str(workdir), str(scratch), str(output))
             data = read_object(output)
             for section, keys in (
                 ("network", ("allowedDomains", "deniedDomains")),
@@ -41,23 +42,12 @@ class SettingsContractTests(ArtifactCase):
                 for key in keys:
                     self.assertIsInstance(data[section][key], list, f"{section}.{key}")
             filesystem = data["filesystem"]
-            self.assertEqual(len(filesystem["allowWrite"]), 7)
-            for path in (worktree, scratch, primary, project_state):
-                self.assertIn(str(path), filesystem["allowWrite"])
+            self.assertEqual(filesystem["allowWrite"], [str(scratch), str(project_state)])
             self.assertNotIn(str(project_state.parent), filesystem["allowWrite"])
-            self.assertNotIn(str(home / ".cache"), filesystem["allowWrite"])
-            for path in (
-                primary / "hooks",
-                primary / "config",
-                home / ".claude/hooks",
-                home / ".claude/plugins",
-                home / ".claude/settings.json",
-                home / ".claude/settings.local.json",
-            ):
-                self.assertIn(str(path), filesystem["denyWrite"])
+            for path in (home / ".claude.json", home / ".claude", home, primary, shared_tmp, workdir):
+                self.assertNotIn(str(path), filesystem["allowWrite"])
             self.assertFalse(filesystem.get("allowGitConfig", False))
-            for domain in ("api.anthropic.com", "github.com"):
-                self.assertIn(domain, data["network"]["allowedDomains"])
+            self.assertEqual(data["network"]["allowedDomains"], ["api.anthropic.com"])
             self.assertNotIn("%%", output.read_text())
             self.assertFalse(any(line.lstrip().startswith("//") for line in output.read_text().splitlines()))
             self.assertFalse(
@@ -73,7 +63,7 @@ class SettingsContractTests(ArtifactCase):
         output = self.directory / "settings.json"
         for path, reason in (("relative/path", "absolute"), (str(self.directory / "missing"), "missing")):
             with self.subTest(path=path), self.assertRaisesRegex(ValueError, reason):
-                render_settings(path, str(self.directory), str(self.directory), str(output))
+                render_settings(path, str(self.directory), str(output))
             self.assertFalse(output.exists())
         self.assertEqual(main([str(self.directory)]), 1)
 

@@ -28,7 +28,7 @@ from hook_common import (
 )
 
 from scripts.lib.config_discovery import strict_config_path
-from scripts.lib.config_strict import ConfigRejected, strict_settings
+from scripts.lib.config_strict import ConfigRejected, controls_resolved, strict_settings
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/agentic-loop/scripts"))
 from graph_encrypted_content import is_opaque  # noqa: E402
@@ -62,6 +62,43 @@ def dispatch_id(message: str) -> str:
     return found if isinstance(found, str) else ""
 
 
+def implementation_node(message: str, task: str, inspection: dict[str, object]) -> bool:
+    """Identify a graph implementation dispatch before native process launch."""
+    node: object = None
+    if message.startswith(ENVELOPE_KEY + "="):
+        try:
+            node = json.loads(message.split("\n", 1)[0].split("=", 1)[1]).get("node_id")
+        except (ValueError, AttributeError):
+            node = None
+    names = inspection.get("task_names")
+    if node is None and isinstance(names, dict):
+        task_names = cast(dict[str, object], names)
+        node = next((key for key, value in task_names.items() if value == task), None)
+    return isinstance(node, str) and node.startswith("U3[") and node.endswith("]")
+
+
+def refuse_uncontained_worker(
+    message: str, task: str, inspection: dict[str, object], settings: dict[str, object], session: str
+) -> bool:
+    """Stop an in-process implementation spawn when worker containment is enabled."""
+    if not implementation_node(message, task, inspection):
+        return False
+    try:
+        if controls_resolved(settings).get("sandbox_workers") is False:
+            return False
+    except ConfigRejected as error:
+        append_trace_row("worker_containment", "denied", "containment_gate_error", session)
+        deny(f"Graph worker containment needs a readable config schema: {error}")
+        return True
+    append_trace_row("worker_containment", "denied", "codex_native_worker_uncontained", session)
+    deny(
+        "Codex graph implementation workers need separate-process containment. "
+        "Native spawn_agent inherits the parent sandbox and cannot prove worker containment. "
+        "Use the contained Codex worker launcher and bind its evidence through the graph driver."
+    )
+    return True
+
+
 def _remaining_budget(deadline: float) -> float:
     """Return time left for all graph discovery and authorization work."""
     remaining = deadline - time.monotonic()
@@ -92,15 +129,14 @@ def _refuse(code: str, message: str, session_id: object = None) -> None:
     deny(f"{message} [reason_code={code}].")
 
 
-def _discover(cwd: str, session_id: str, deadline: float) -> tuple[bool, Path | None]:
+def _discover(cwd: str, session_id: str, deadline: float) -> tuple[bool, Path | None, dict[str, object]]:
     """Separate proven graph absence from discovery errors."""
     try:
         config = strict_config_path(cwd, timeout_seconds=_remaining_budget(deadline))
-        if config:
-            strict_settings(config, session_id)
+        settings = strict_settings(config, session_id) if config else {}
         state = loop_state_path(cwd, session_id, strict=True, timeout_seconds=_remaining_budget(deadline))
         _remaining_budget(deadline)
-        return True, state
+        return True, state, settings
     except ConfigRejected:
         _refuse("dispatch_config_invalid", "Graph worker dispatch requires valid workflow configuration", session_id)
     except (subprocess.TimeoutExpired, TimeoutError):
@@ -110,7 +146,7 @@ def _discover(cwd: str, session_id: str, deadline: float) -> tuple[bool, Path | 
             "dispatch_discovery_ambiguous" if "more than one graph state" in str(error) else "dispatch_discovery_error"
         )
         _refuse(code, "Graph worker dispatch could not verify graph or config discovery", session_id)
-    return False, None
+    return False, None, {}
 
 
 def _graph_call(
@@ -176,8 +212,6 @@ def _check() -> int:
     tool_input = object_field(payload, "tool_input")
     message = text_field(tool_input, "message")
     task = text_field(tool_input, "task_name")
-    enveloped = message.startswith(ENVELOPE_KEY + "=")
-    graph_named = bool(GRAPH_TASK.fullmatch(task))
     if "agent_type" in tool_input and (
         not isinstance(tool_input["agent_type"], str) or not tool_input["agent_type"].strip()
     ):
@@ -187,11 +221,11 @@ def _check() -> int:
     if identity is None:
         return 0
     session_id, cwd = identity
-    discovered, state = _discover(cwd, session_id, deadline)
+    discovered, state, settings = _discover(cwd, session_id, deadline)
     if not discovered:
         return 0
     if state is None:
-        if enveloped or graph_named:
+        if message.startswith(ENVELOPE_KEY + "=") or GRAPH_TASK.fullmatch(task):
             _refuse("dispatch_graph_missing", "Graph worker dispatch requires this session's progress.json", session_id)
         return 0  # no loop owns this session: nothing to bind the spawn to
     tool_use_id = text_field(payload, "tool_use_id")
@@ -219,7 +253,9 @@ def _check() -> int:
     if inspection.get("status") == "complete":
         _refuse("dispatch_graph_complete", "A completed graph cannot dispatch native workers", session_id)
         return 0
-    if _refuse_opaque(state, inspection, message, session_id):
+    if _refuse_opaque(state, inspection, message, session_id) or refuse_uncontained_worker(
+        message, task, inspection, settings, session_id
+    ):
         return 0
     agent_type = tool_input.get("agent_type")
     try:

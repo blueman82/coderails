@@ -22,7 +22,32 @@ class SandboxDriverTests(unittest.TestCase):
             base = Path(directory)
             checkout = base / "checkout"
             checkout.mkdir()
-            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            subprocess.run(["git", "init", "-q", "-b", "feature/driver", str(checkout)], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(checkout),
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    "base",
+                ],
+                check=True,
+            )
+            home = base / "home"
+            credential = home / ".coderails/worker_credential"
+            credential.parent.mkdir(parents=True)
+            credential.write_text("CLAUDE_CODE_OAUTH_TOKEN=synthetic-unused-token\n")
+            credential.chmod(0o600)
+            pin = home / ".npm/_npx/fixture/node_modules/@anthropic-ai/sandbox-runtime/package.json"
+            pin.parent.mkdir(parents=True)
+            pin.write_text(json.dumps({"version": "0.0.65"}))
             prompt = base / "prompt.txt"
             prompt.write_text("owned worker prompt\n")
             bindir = base / "bin"
@@ -32,29 +57,21 @@ class SandboxDriverTests(unittest.TestCase):
             npx.write_text(
                 "#!/usr/bin/env python3\n"
                 "import json, os, sys\nfrom pathlib import Path\n"
-                "Path(os.environ['DRIVER_ARGV_CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n"
+                f"Path({str(capture)!r}).write_text(json.dumps(sys.argv[1:]))\n"
                 "print('sandbox-diagnostic-marker', file=sys.stderr)\n"
                 "print(json.dumps({'type':'system','subtype':'init','session_id':'fake'}))\n"
                 "print(json.dumps({'type':'result','subtype':'success','is_error':False,"
                 "'structured_output':{'outcome':'done','evidence':'fake'}}))\n"
             )
             npx.chmod(0o755)
-            gh = bindir / "gh"
-            gh.write_text("#!/bin/sh\nprintf 'fake-token\\n'\n")
-            gh.chmod(0o755)
-            home = base / "home"
-            home.mkdir()
             foreign = {"mcpServers": {"foreign": {"command": "/never/run/foreign"}}}
             (checkout / ".mcp.json").write_text(json.dumps(foreign))
             (home / ".claude.json").write_text(json.dumps(foreign))
             environment = {
-                **os.environ,
+                "HOME": str(home),
                 "PATH": str(bindir) + os.pathsep + os.environ["PATH"],
-                "DRIVER_ARGV_CAPTURE": str(capture),
                 "TMPDIR": str(base),
                 "CLAUDE_CODE_SESSION_ID": "",
-                "HOME": str(home),
-                "CLAUDE_CONFIG_DIR": str(home / ".claude"),
             }
             launcher = ROOT / "scripts/sandbox/spawn_sandboxed_worker.py"
             run = subprocess.run(
@@ -63,13 +80,14 @@ class SandboxDriverTests(unittest.TestCase):
                 env=environment,
                 capture_output=True,
                 text=True,
+                input=prompt.read_text(),
                 timeout=10,
                 check=False,
             )
             self.assertEqual(run.returncode, 0, run.stderr)
             self.assertNotIn("sandbox-diagnostic-marker", run.stdout)
             self.assertIn("worker.stderr.log", run.stderr)
-            logs = list(base.glob("sandbox-worker.*/worker.stderr.log"))
+            logs = list(base.glob("sw.*/worker.stderr.log"))
             self.assertEqual(len(logs), 1)
             self.assertIn("sandbox-diagnostic-marker", logs[0].read_text())
             self.assertEqual(json.loads(run.stdout.splitlines()[0])["type"], "system")
@@ -88,6 +106,7 @@ class SandboxDriverTests(unittest.TestCase):
                 env=environment,
                 capture_output=True,
                 text=True,
+                input=prompt.read_text(),
                 timeout=10,
                 check=False,
             )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -101,6 +102,9 @@ def write_prompt(
     checkout: Path,
     provider: str,
     script: Path,
+    *,
+    publication_checkout: Path | None = None,
+    workspace_sha256: str | None = None,
 ) -> Path:
     """Write the exact envelope and contract once before authorization."""
     artifact = path.parent / "driver-evidence" / identifier
@@ -132,6 +136,9 @@ def write_prompt(
     content += f"Acceptance: {acceptance}\n"
     content += f"Assigned scope: {record['contract']['scope']}\n"
     content += f"Checkout: {checkout}\n"
+    if publication_checkout is not None:
+        content += f"Root publication checkout: {publication_checkout} (worker writes forbidden)\n"
+        content += f"Workspace SHA256: {workspace_sha256}\n"
     content += "Work only in the assigned checkout. Report failed if the task is unclear or incomplete.\n"
     content += "For done, give a final_report with cited claims and explicit did_not_verify items.\n"
     content += (
@@ -151,3 +158,33 @@ def write_prompt(
         with prompt.open("x", encoding="utf-8") as stream:
             stream.write(content)
     return prompt
+
+
+Prepare = Callable[[Path, dict[str, Any], str, dict[str, Any], Path], dict[str, Any]]
+
+
+def prepare_prompt(
+    path: Path,
+    state: dict[str, Any],
+    identifier: str,
+    record: dict[str, Any],
+    checkout: Path,
+    provider: str,
+    script: Path,
+    prepare: Prepare | None,
+) -> Path:
+    """Prepare an optional contained workspace before rendering and authorizing its path."""
+    artifact = path.parent / "driver-evidence" / identifier
+    if artifact.parent.is_symlink() or artifact.is_symlink():
+        raise ValueError("driver artifact path is a symlink")
+    if (artifact / "manifest.json").exists():
+        return artifact / "prompt.txt"
+    workspace = prepare(path, state, identifier, record, checkout) if prepare is not None else None
+    execution = Path(workspace["execution"]) if workspace else checkout
+    extra: dict[str, Any] = {}
+    if workspace:
+        extra = {
+            "publication_checkout": checkout,
+            "workspace_sha256": hashlib.sha256((artifact / "workspace.json").read_bytes()).hexdigest(),
+        }
+    return write_prompt(path, state, identifier, record, execution, provider, script, **extra)

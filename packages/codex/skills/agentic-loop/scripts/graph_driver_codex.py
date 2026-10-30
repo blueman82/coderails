@@ -12,9 +12,9 @@ from typing import Any, cast
 
 import worker_status
 
-PASS_ENV = ("PATH", "HOME", "CODEX_HOME", "TMPDIR", "LANG", "LC_ALL", "TERM")
-
 MODELS = {"fast-mechanical": "gpt-6-luna", "default": "gpt-6.1-sol", "frontier": "gpt-6-astra"}
+OAUTH_ARGS = ("-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"')
+PASS_ENV = ("PATH", "HOME", "CODEX_HOME", "TMPDIR", "LANG", "LC_ALL", "TERM")
 
 SCHEMA = {
     "type": "object",
@@ -160,10 +160,7 @@ def command(
         str(artifact / "final.json"),
         "-c",
         "features.multi_agent=false",
-        "-c",
-        'forced_login_method="chatgpt"',
-        "-c",
-        'model_provider="openai"',
+        *OAUTH_ARGS,
     ]
     return argv, {key: os.environ[key] for key in PASS_ENV if key in os.environ}, prompt
 

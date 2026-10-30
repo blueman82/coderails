@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -20,7 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from hooks.scripts.lib.action_match import operations
+from hooks.scripts.lib.action_match import Operation, operations
 
 from hooks.scripts.lib.trace_row import append_row
 from scripts.lib import action_receipt as ar
@@ -28,7 +29,7 @@ from scripts.lib import receipt_signing as rs
 from scripts.lib.action_binding import binding, git_out
 from scripts.lib.authority_object import read_authority
 
-KINDS = ("merge", "git_push")
+KINDS = ("merge", "git_push", "worker_fallback")  # worker_fallback: acknowledge an in-process high-risk worker
 
 
 def refuse(code: str, message: str, session: str | None = None, loop: str | None = None) -> int:
@@ -43,7 +44,10 @@ def approve(args: argparse.Namespace) -> int:
     """Write one new signed receipt for the exact command, cwd, branch and computed binding; never overwrites."""
     now = datetime.now(timezone.utc)
     cwd = args.cwd or str(Path.cwd())
-    calls = [call for call in operations(args.action_command, cwd) if call.name == args.kind]
+    if args.kind == "worker_fallback" and re.fullmatch(r"worker_fallback [1-9][0-9]*", args.action_command):
+        calls = [Operation(args.kind, args.action_command, cwd, cwd, [], [], cwd)]
+    else:
+        calls = [call for call in operations(args.action_command, cwd) if call.name == args.kind]
     if len(calls) != 1:
         return refuse(
             "receipt_refused_binding_unknown", "command must select one bound action", args.session, args.loop

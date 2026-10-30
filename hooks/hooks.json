@@ -169,6 +169,11 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/loop_dispatch_guard.py\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/worker_containment_gate.py\"",
+            "timeout": 10
           }
         ]
       },

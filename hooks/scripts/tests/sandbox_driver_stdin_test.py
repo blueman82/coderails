@@ -44,14 +44,13 @@ class DriverStdinTests(unittest.TestCase):
                 home, tools, temporary = base / "home", base / "bin", base / "tmp"
                 tools.mkdir()
                 temporary.mkdir()
-                home.mkdir()
-                gh = tools / "gh"
-                gh.write_text(
-                    f"#!{sys.executable}\nimport sys\n"
-                    "assert sys.argv[1:] == ['auth', 'token']\n"
-                    "print('synthetic-unused-token')\n"
-                )
-                gh.chmod(0o755)
+                credential = home / ".coderails/worker_credential"
+                credential.parent.mkdir(parents=True)
+                credential.write_text("CLAUDE_CODE_OAUTH_TOKEN=synthetic-unused-token\n")
+                credential.chmod(0o600)
+                pin = home / ".npm/_npx/fixture/node_modules/@anthropic-ai/sandbox-runtime/package.json"
+                pin.parent.mkdir(parents=True)
+                pin.write_text(json.dumps({"version": "0.0.65"}))
                 capture, arguments = base / "stdin.bin", base / "argv.json"
                 shim = tools / "npx"
                 shim.write_text(
@@ -61,7 +60,7 @@ class DriverStdinTests(unittest.TestCase):
                     f"Path({str(arguments)!r}).write_text(json.dumps(sys.argv[1:]))\n"
                 )
                 shim.chmod(0o755)
-                for tool in ("rg",):
+                for tool in ("sandbox-exec", "bwrap", "rg"):
                     executable = tools / tool
                     executable.write_text("#!/bin/sh\nexit 0\n")
                     executable.chmod(0o755)

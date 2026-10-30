@@ -10,6 +10,8 @@ from typing import Any, Callable, cast
 import graph_driver_controller
 import worker_status
 
+from scripts.sandbox import driver_transfer, driver_workspace
+
 
 def command(
     prompt: Path, checkout: Path, model: str = "sonnet", role: str = "loop-worker"
@@ -20,6 +22,9 @@ def command(
     launcher = Path(__file__).resolve().parents[3] / "scripts/sandbox/spawn_sandboxed_worker.py"
     if not launcher.is_file():
         raise ValueError("Claude sandbox launcher is missing")
+    workspace = prompt.parent / "workspace.json"
+    if workspace.exists():
+        return [sys.executable, str(launcher), "--driver-ready", str(workspace), model, role], None, prompt
     return [sys.executable, str(launcher), "--driver", str(checkout), str(prompt), model, role], None, prompt
 
 
@@ -106,4 +111,6 @@ def run_wave(
         select,
         result,
         wait_seconds=wait_seconds,
+        prepare_workspace=driver_workspace.prepare_workspace,
+        finish_workspace=driver_transfer.finish_workspace,
     )

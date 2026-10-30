@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional, cast
 import graph_contract
 import graph_driver_control
 import graph_driver_prepublication
+import graph_driver_transfer
 import graph_semantics
 import graph_spec
 from graph_driver_publication import head as _head
@@ -19,7 +20,6 @@ from graph_driver_publication import validate_publication as validate_publicatio
 
 
 def _digest(path: Path) -> str:
-    """Hash the exact bytes at a regular artifact path."""
     if path.is_symlink() or not path.is_file():
         raise ValueError(f"missing or invalid {path.name}")
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -61,9 +61,7 @@ def _record(state: dict[str, Any], node_id: str, dispatch_id: str) -> dict[str, 
     return record
 
 
-def _artifact(state_path: Path, dispatch_id: str) -> Path:
-    """Use a fixed artifact directory under the owned graph directory."""
-    return state_path.parent / "driver-evidence" / dispatch_id
+_artifact = graph_driver_transfer.artifact
 
 
 def _prepublication_claim(
@@ -76,30 +74,18 @@ def _prepublication_claim(
     exit_code: int,
     result: dict[str, Any],
 ) -> dict[str, Any]:
-    """Bind one finished worker result before root publication can proceed."""
-    record = _record(state, node_id, dispatch_id)
-    artifact = _artifact(state_path, dispatch_id)
-    prompt_sha256 = _digest(artifact / "prompt.txt")
-    if prompt_sha256 != record["authorized"]["prompt_sha256"]:
-        raise ValueError("driver prompt differs from its authorization")
-    if provider not in {"codex", "claude"} or type(exit_code) is not int:
-        raise ValueError("invalid worker result metadata")
-    return {
-        "session_id": state.get("session_id"),
-        "loop_id": state.get("loop_id"),
-        "node_id": node_id,
-        "dispatch_id": dispatch_id,
-        "wave_id": record["wave_id"],
-        "attempt": record["attempt"],
-        "driver_run_id": record["authorized"]["driver_run_id"],
-        "provider": provider,
-        "checkout": str(checkout.resolve(strict=True)),
-        "prompt_sha256": prompt_sha256,
-        "output_sha256": _digest(artifact / "output.jsonl"),
-        "final_sha256": _digest(artifact / "final.json") if provider == "codex" else None,
-        "exit_code": exit_code,
-        "result": result,
-    }
+    """Assemble the fixed prepublication claim through the shared evidence helper."""
+    return graph_driver_transfer.prepublication_claim(
+        state_path,
+        state,
+        node_id,
+        dispatch_id,
+        checkout,
+        provider,
+        exit_code,
+        result,
+        record=_record(state, node_id, dispatch_id),
+    )
 
 
 def seal_pending(
@@ -156,6 +142,7 @@ def seal(
         "output_sha256": _digest(artifact / "output.jsonl"),
         "exit_code": exit_code,
         "result": result,
+        **graph_driver_transfer.claim(artifact, state, record, dispatch_id, checkout, provider, exit_code, result),
     }
     if provider == "codex":
         final = artifact / "final.json"
@@ -229,6 +216,19 @@ def validate(
     graph_contract.check_dispatch(state, graph_contract.parse_envelope(prompt), prompt, live=live)
     if _digest(artifact / "output.jsonl") != manifest.get("output_sha256"):
         raise ValueError("driver output changed")
+    transfer = graph_driver_transfer.claim(
+        artifact,
+        state,
+        record,
+        dispatch_id,
+        Path(manifest["checkout"]),
+        manifest["provider"],
+        manifest["exit_code"],
+        manifest["result"],
+        required="transfer_sha256" in manifest,
+    )
+    if any(manifest.get(key) != value for key, value in transfer.items()):
+        raise ValueError("driver transfer seal changed")
     if "prepublication_sha256" in manifest:
         claim = _prepublication_claim(
             state_path,
