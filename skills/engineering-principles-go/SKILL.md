@@ -49,7 +49,8 @@ paths: "**/*.go"
 
 ## Imperative → Idiomatic Patterns (MANDATORY)
 
-Go is intentionally imperative — no map/filter/reduce. Instead, enforce Go-specific idioms that reduce verbosity and improve clarity.
+Go uses loops instead of map, filter, and reduce. Apply Go idioms that make
+the code shorter and clearer.
 
 ### Loop Anti-Patterns
 

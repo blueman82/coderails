@@ -8,20 +8,24 @@ model: sonnet
 
 ## Overview
 
-A claim that "PR #N is merged" is a claim, not a fact. Re-derive it from the tools yourself before you rely on it.
+Check a reported PR merge before you rely on it.
 
-**Core principle:** Never trust a reported merge on its word. Independently re-derive three things: the merge STATE, the CONTENT on `origin/main`, and the SIBLING PRs the reporter may not have mentioned.
+Check the PR's merge state. Check its content on `origin/main`.
+Check other PRs that merged in the same period.
 
-The third is the one agents skip. A teammate or headless builder usually reports the *one* PR it means to, but sessions often land several. Verifying only the named PR confirms the claim while missing half the work that actually merged.
+A builder may report one PR even when it merged several. Check related PRs
+so the handoff covers the full set of changes.
 
 ## When to Use
 
-- An agent / teammate / CI report / session summary says a PR is merged, shipped, live, or landed.
-- You are about to build on top of, deploy, or hand off work that depends on the merge being real.
-- A headless builder or loop reports "done — PR merged" and gives you one PR number.
-- You need to confirm the *changed content* — not just a merge marker — is present on `origin/main`.
+- An agent, teammate, CI report, or session summary says a PR merged,
+  shipped, or went live.
+- You will build, deploy, or hand off work that depends on that merge.
+- A builder or loop reports one merged PR number.
+- You need to confirm that the changed content is on `origin/main`.
 
-**When NOT to use:** you performed the merge yourself this session and watched it complete, or the claim is about an open/draft PR (nothing to verify as merged yet).
+Do not use this skill if you completed and observed the merge in this
+session. An open or draft PR has no merge to verify.
 
 ## The Three Checks
 
@@ -33,7 +37,10 @@ Run all three. The claim is confirmed only when state, content, and siblings all
 gh pr view <N> --json state,mergedAt,mergeCommit,author,headRefName,baseRefName,url
 ```
 
-Confirm `state` is `MERGED`, `mergedAt` is non-null, and note `mergeCommit.oid`, `author.login`, and `baseRefName`. A PR can be closed-not-merged, or merged into a branch other than the one you assumed — the JSON tells you which.
+Confirm that `state` is `MERGED` and `mergedAt` is not null.
+Record `mergeCommit.oid`, `author.login`, and `baseRefName`.
+The PR could be closed without a merge. It could target a different base.
+Use the JSON fields to distinguish these cases.
 
 ### 2. Confirm the CONTENT is actually on origin/main
 
@@ -47,7 +54,7 @@ It prints a JSON verdict (`confirmed`, `method`, `reasons`) and exits 0 only whe
 
 ### 3. Enumerate SIBLING PRs by author and time window
 
-The reporter named one PR. Find the others that landed in the same burst, so you build on the full picture, not a fragment.
+The reporter named one PR. Find other PRs that merged in the same period.
 
 ```bash
 gh pr list --state merged --limit 20 \
@@ -55,7 +62,10 @@ gh pr list --state merged --limit 20 \
   --json number,title,mergedAt,headRefName,mergeCommit
 ```
 
-Read the `mergedAt` timestamps. PRs clustered tightly around the named one (minutes apart, same author) are almost certainly the same stream of work. List every PR in that window in your verdict — not just the one you were told about. A wide time gap before the cluster marks its start; treat merges before the gap as a separate stream unless you have a reason to include them.
+Read the `mergedAt` timestamps. Find PRs by the same author that merged
+within minutes of the named PR. List each one in your verdict.
+A wide time gap can mark a different work stream. Include earlier merges
+only when you have a reason.
 
 ## Quick Reference
 
@@ -67,7 +77,7 @@ Read the `mergedAt` timestamps. PRs clustered tightly around the named one (minu
 
 ## Reporting the Verdict
 
-State the verdict as CONFIRMED or NOT CONFIRMED, then:
+State CONFIRMED or NOT CONFIRMED. Then report:
 - The merge commit and `mergedAt` for the named PR.
 - Whether its content is present on `origin/<base>` (the script's `method` and `reasons`).
 - **Every sibling PR** in the same author/time cluster, with numbers and timestamps — call out any the reporter did not mention.

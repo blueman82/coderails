@@ -30,11 +30,9 @@ entry in the Claude role map, so the native graph CLI `plan` command reports the
 
 ## The Phase 13 self-audit report
 
-The orchestrator audits its own autonomy from the `progress.json` counters and reports raw,
-unscored facts — no numeric pass/fail scorecard, no "target: approaching zero" framing. The human
-is the only party positioned to judge "should I have been asked about that?"; hand them the raw
-list rather than have the process pre-grade itself. A clean-looking scorecard is more dangerous
-than an honest unscored list because it is more likely to be trusted uncritically.
+Read the autonomy counters in `progress.json`. Report the facts without a
+score or target. The user judges whether the loop should have asked for
+approval. Do not pre-grade that decision.
 
 **The two core facts:**
 

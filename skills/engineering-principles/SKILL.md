@@ -7,7 +7,9 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 # Engineering Principles & Language Standards
 
 **Version:** 4.0.0
-**Purpose:** Proactively enforce engineering principles and language-specific idioms. Uses LSP (Serena) for structural verification and reference counting. **Dispatches to language-specific skills for idiom enforcement.**
+**Purpose:** Apply engineering principles and language idioms to code changes.
+Use Serena LSP to check structure and references. Invoke the matching
+language skill to check idioms.
 
 ## When to Activate
 
@@ -32,7 +34,8 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 | `.ts`, `.tsx` | Execute `engineering-principles-ts` skill |
 | `.sh` (or no extension with a `bash`/`sh` shebang, e.g. `#!/usr/bin/env bash`) | Execute `engineering-principles-bash` skill |
 
-**The language-specific skill provides idioms, patterns, and examples. This coordinator provides universal principles and MCP analysis.**
+The language skill supplies idioms and examples. This skill applies the
+shared principles and MCP analysis.
 
 ---
 
