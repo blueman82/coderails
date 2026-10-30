@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import { TRACE_SCHEMA_VERSION, serializeTraceEvent, nonempty, type SourceRef, type TraceCollectionDeps, type TraceDetail, type TraceEvent, type TraceManifest, type TracePage, type NativeSessionSummary } from "./sessionTraceSchema";
 import { CLAUDE_PARSER_VERSION, safeReadError, type NativeRecord, type Source, obj, safeSession, cacheDir, parentPath, source, artifactSource, auditSource, auditEvents, toolBlocks, dispatch, makeEvent, childValid, graphEvent, pointerPart, completedNotification, terminalChild, saveCache, clearCache, cacheEventPath, teammateChild, explicitBlockedLaunch, claudeSessionSummary, claudeUnavailableSummary } from "./sessionTraceClaudeHelpers";
 import { actorDisplayName } from "./actorDisplay";
+import { registeredClaudeSources } from "./claudeSourceRegistry";
 import { nodeAttributes } from "./nodeDisplay";
 import { markClaudeReadPairs, markClaudeRequestOrMention, readTarget } from "./claudeObservation";
 export * from "./sessionTraceSchema";
@@ -307,7 +308,7 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
   const manifest: TraceManifest = {
     schemaVersion: TRACE_SCHEMA_VERSION, parserVersion: CLAUDE_PARSER_VERSION,
     provider: "claude", nativeSessionId: sessionId, loopId,
-    sources: sources.map((item) => ({ sourceId: item.id, fingerprint: item.fingerprint, cursor: item.cursor })),
+    sources: registeredClaudeSources(sources),
     generatedAt: deps.now().toISOString(), complete: errors.length === 0, errors, eventCount: events.length, eventFile: "",
   };
   const dir = cacheDir(sessionId, deps);
