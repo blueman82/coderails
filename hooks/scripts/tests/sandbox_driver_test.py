@@ -100,7 +100,7 @@ class SandboxDriverTests(unittest.TestCase):
         self.assertNotIn("Bash", scout_argv[scout_argv.index("--allowedTools") + 1])
         self.assertIn("Bash", scout_argv[scout_argv.index("--disallowedTools") + 1])
         self.assertIn("--tools", scout_argv)
-        self.assertEqual(scout_argv[scout_argv.index("--tools") + 1], "")
+        self.assertEqual(scout_argv[scout_argv.index("--tools") + 1], "Skill")
         self.assertIn("--strict-mcp-config", scout_argv)
         self.assertIn("--agent", scout_argv)
         definitions = json.loads(scout_argv[scout_argv.index("--agents") + 1])
@@ -110,6 +110,7 @@ class SandboxDriverTests(unittest.TestCase):
             {
                 "mcp__plugin_coderails_cap-preflight-scout__repo_inspect",
                 "mcp__plugin_coderails_cap-preflight-scout__diff_read",
+                "Skill",
             },
         )
         config = json.loads(scout_argv[scout_argv.index("--mcp-config") + 1])
