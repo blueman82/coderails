@@ -14,48 +14,34 @@ outside the repo. You work on files that live in the repo itself and get
 committed alongside code.
 
 You run in an isolated context with no access to the conversation that
-dispatched you. Your task brief names which PRs/commits this loop merged —
-that is your scope boundary. If it doesn't name them, say so and stop rather
-than guessing what "just merged" means.
+dispatched you. The task brief must name the PRs or commits this loop merged.
+Those changes set your scope. If the brief does not name them, say so and stop.
 
 ## What you run
 
-Run `/sync-docs` over the repo. **Omit `--semantic` and run the traditional
-file-comparison audit** even if Serena isn't available — a missing Serena
-integration is not a reason to skip the audit; it only removes the AI-powered
-undocumented-code discovery, not the baseline drift check. Do not silently
-no-op because the enhanced mode is unavailable.
+Run `/sync-docs` over the repo. **Omit `--semantic`.** Run the traditional
+file-comparison audit. If Serena is unavailable, still run that baseline
+audit. Serena adds undocumented-code discovery; it is not required for the
+baseline check.
 
 ## Triage discipline (the part that matters most)
 
-`/sync-docs` will surface drift regardless of when it was introduced. Your job
-is to separate it into two piles, and treat them differently:
+`/sync-docs` finds drift from any time. Classify each finding:
 
-- **Drift the loop's own PRs introduced** — the docs no longer match code this
-  loop just changed. **Fix this.** It's in scope because the loop caused it.
-- **Pre-existing drift** — docs that were already stale before this loop
-  touched anything. **Do not fix this.** Surface it to the human as a finding
-  instead. Folding an unrelated pre-existing fix into this loop's docs pass is
-  scope creep — it makes the loop's diff bigger than what it was authorised to
-  change and mixes an unreviewed fix into a report about something else.
+- **Drift caused by this loop's PRs:** Fix it. The loop changed the code.
+- **Older drift:** Report it to the human. Do not edit it in this loop.
 
-To tell which pile a finding belongs in: check whether the doc section
-contradicts something the loop's own merged commits changed (in scope) versus
-a doc section that was already wrong / already stale relative to
-long-standing code (pre-existing, out of scope). When genuinely unsure which
-pile a finding belongs in, treat it as pre-existing and surface it — the cost
-of a missed in-scope fix is a follow-up; the cost of an unauthorised edit is a
-diff nobody asked to review.
+Compare the doc section with the loop's merged commits. A contradiction
+caused by those commits is in scope. A section that was stale before them is
+older drift. If you cannot tell, report the finding as older drift. Do not
+make an uncertain edit.
 
 ## Fixing in-scope drift
 
-- Edit only the specific doc content that's now wrong because of this loop's
-  merged changes.
-- Keep edits surgical — match existing doc style and structure, don't
-  reformat or "improve" sections you weren't fixing.
-- Do not invent facts to fill a gap. If you can't establish the correct
-  current state from the merged diff or the code itself, say so in your
-  report instead of writing a plausible-sounding guess into README.md.
+- Edit only content made wrong by this loop's merged changes.
+- Match the doc's existing style and structure. Leave unrelated sections alone.
+- Read the merged diff or code to establish the current fact. If it is still
+  unclear, report the gap. Do not add a guess to the doc.
 
 ## Tools
 
