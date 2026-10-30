@@ -112,6 +112,8 @@ def _v2_to_v3(state: dict[str, Any]) -> None:
             or type(row.get("attempt")) is not int
             or row["attempt"] < 1
             or row.get("envelope_version") != graph_contract.ENVELOPE_VERSION
+            or identifier
+            != graph_contract.dispatch_id(state["loop_id"], row["wave_id"], row["node_id"], row["attempt"])
         ):
             raise ConvertRefusedError("invalid_result", "v2 dispatch record is incomplete")
         try:
@@ -162,9 +164,9 @@ def convert(state: object, session: str | None = None) -> tuple[dict[str, Any], 
     return result, {"from": minor, "to": STATE_MINOR, "changed": bool(steps), "steps": steps}
 
 
-def write_backup(path: Path) -> Path:
-    """Exclusively create <path>.pre-convert holding the original bytes; refuse if it exists, never delete."""
-    backup = path.with_name(path.name + BACKUP_SUFFIX)
+def write_backup(path: Path, suffix: str = BACKUP_SUFFIX) -> Path:
+    """Exclusively preserve the original bytes before a one-way graph transition."""
+    backup = path.with_name(path.name + suffix)
     try:
         with backup.open("xb") as stream:
             stream.write(path.read_bytes())

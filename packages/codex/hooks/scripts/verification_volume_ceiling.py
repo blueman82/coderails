@@ -9,15 +9,16 @@ import re
 import stat
 import sys
 import tempfile
+from collections import Counter
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
 from hook_common import append_trace_row, loop_state_path
 from lib import argv_match
-from lib.ceiling_key import mirror, worktree_key
+from lib.ceiling_key import legacy_key, mirror, worktree_key
 from lib.dir_lock import acquire_dir_lock, release_dir_lock
-from lib.shell_context import invocations, payload_cwd
+from lib.shell_context import invocations, opaque_execution, payload_cwd
 from test_output import file_lock
 
 SUITES = ("run_all.py", "run_all.sh", "test_codex_hooks.py")
@@ -37,16 +38,15 @@ def payload_object(raw_payload: str) -> dict[str, object]:
     return cast(dict[str, object], decoded) if isinstance(decoded, dict) else {}
 
 
-def target_for(command: object) -> str | None:
-    """Return the counted command family, if the hook command is eligible."""
-    if not isinstance(command, str):
-        return None
-    for argv in argv_match.argvs(command):
+def counted_invocations(command: str, cwd: str) -> list[tuple[str, str]]:
+    """Return every counted action with its invocation-local directory."""
+    found: list[tuple[str, str]] = []
+    for _, argv, where in invocations(command, cwd):
         if argv_match.is_script(argv, SUITES):
-            return "full-suite"
-        if argv_match.is_script(argv, "post_evals.py", CEREMONIES):
-            return "eval-ceremony"
-    return None
+            found.append((where, "full-suite"))
+        elif argv_match.is_script(argv, "post_evals.py", CEREMONIES):
+            found.append((where, "eval-ceremony"))
+    return found
 
 
 def deny(reason: str) -> None:
@@ -114,16 +114,21 @@ def main() -> int:
     tool_input = payload.get("tool_input")
     typed_tool_input = cast(dict[str, object], tool_input) if isinstance(tool_input, dict) else {}
     command = typed_tool_input.get("cmd", typed_tool_input.get("command"))
-    target = target_for(command)
-    if target is None or isinstance(payload.get("agent_id"), str) and payload["agent_id"]:
+    if not isinstance(command, str) or isinstance(payload.get("agent_id"), str) and payload["agent_id"]:
         return 0
-
-    cwd = next(
-        where
-        for _, argv, where in invocations(str(command), payload_cwd(payload))
-        if argv_match.is_script(argv, SUITES) or argv_match.is_script(argv, "post_evals.py", CEREMONIES)
-    )
-    digest, top = worktree_key(cwd)
+    if opaque_execution(command, payload_cwd(payload)):
+        deny("Verification-volume ceiling: executable shell body exceeds the guarded parser depth.")
+        return 0
+    found = counted_invocations(command, payload_cwd(payload))
+    if not found:
+        return 0
+    contexts: dict[tuple[str, str], tuple[str, str]] = {}
+    amounts: Counter[tuple[str, str]] = Counter()
+    for cwd, target in found:
+        digest, top = worktree_key(cwd)
+        key = (digest, target)
+        contexts[key] = (top, cwd)
+        amounts[key] += 1
     data_root = Path(os.environ.get("PLUGIN_DATA", str(Path.home() / ".coderails" / "codex")))
     state_dir = data_root / "verification-ceiling"
     try:
@@ -132,27 +137,52 @@ def main() -> int:
         deny(STATE_ERROR)
         return 0
 
-    count_path = state_dir / f"{digest}__{target}.count"
-    lock_path = Path(f"{count_path}.lock")
-    if not acquire_dir_lock(lock_path, 15, 0.1)[0]:
-        deny(LOCK_ERROR)
-        return 0
+    paths = {key: state_dir / f"{key[0]}__{key[1]}.count" for key in amounts}
+    legacy_paths = {key: state_dir / legacy_key(contexts[key][1], key[1], codex=True) for key in amounts}
+    locked: list[Path] = []
     session = payload.get("session_id")
     try:
-        count = count_for(count_path)
-        try:
-            count_path.write_text(f"{count + 1}\n", encoding="utf-8")
-        except OSError:
-            deny(WRITE_ERROR)
-            return 0
-        mirror_count(cwd, session if isinstance(session, str) else "", top, target, count + 1)
+        for path in sorted(set(paths.values()) | set(legacy_paths.values())):
+            lock = Path(f"{path}.lock")
+            if not acquire_dir_lock(lock, 15, 0.1)[0]:
+                deny(LOCK_ERROR)
+                return 0
+            locked.append(lock)
+        migrated: set[tuple[str, str]] = set()
+        totals: dict[tuple[str, str], int] = {}
+        for key, path in paths.items():
+            source = path
+            if not path.exists():
+                source = legacy_paths[key]
+                if source.exists():
+                    migrated.add(key)
+            totals[key] = count_for(source) + amounts[key]
+        exceeded = next((key for key, count in totals.items() if count >= 3), None)
+        for key, path in paths.items():
+            if exceeded and totals[key] < 3:
+                continue
+            try:
+                legacy = legacy_paths[key]
+                if legacy.exists():
+                    legacy.write_text(f"{max(count_for(legacy), totals[key])}\n", encoding="utf-8")
+                path.write_text(f"{totals[key]}\n", encoding="utf-8")
+            except OSError:
+                deny(WRITE_ERROR)
+                return 0
+            top, cwd = contexts[key]
+            if key in migrated and isinstance(session, str):
+                append_trace_row("argv", "allowed", "ceiling_legacy_migrated", session)
+            mirror_count(cwd, session if isinstance(session, str) else "", top, key[1], totals[key])
     finally:
-        release_dir_lock(lock_path)
+        for lock in reversed(locked):
+            release_dir_lock(lock)
 
-    if count >= 2:
+    if exceeded:
+        top, _ = contexts[exceeded]
+        target = exceeded[1]
         append_trace_row("argv", "denied", "ceiling_exceeded", session if isinstance(session, str) else "")
         deny(
-            f"This is run {count + 1} of the same {target} in worktree '{top}'. "
+            f"This is run {totals[exceeded]} of the same {target} in worktree '{top}'. "
             "The third and later full re-runs are blocked; use a focused check or "
             "delegate verification with spawn_agent."
         )

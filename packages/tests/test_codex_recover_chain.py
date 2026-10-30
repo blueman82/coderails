@@ -179,6 +179,7 @@ class RecoverChainTests(unittest.TestCase):
             verdict="satisfied",
             cwd=str(Path.cwd()),
             head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            source_tree_sha=subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
             **identity,
         )
         self._assemble_retro()  # last: the retro binds every source above

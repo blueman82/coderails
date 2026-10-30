@@ -68,7 +68,9 @@ function markClaudeRead(request: TraceEvent, result: TraceEvent | null,
   if (!result || !resultBlock) { mark(request, "uncertain", item, null); return; }
   const fields = textFields(resultBlock.content);
   const bytes = fields.length ? Buffer.byteLength(fields.join(""), "utf8") : null;
-  const kind = resultBlock.is_error === true ? "failed_read" : bytes === null ? "uncertain" : "read";
+  const validSuccess = resultBlock.is_error === undefined || resultBlock.is_error === false;
+  const kind = resultBlock.is_error === true ? "failed_read" :
+    !validSuccess || bytes === null || item.kind === "skill" ? "uncertain" : "read";
   mark(result, kind, item, bytes);
 }
 

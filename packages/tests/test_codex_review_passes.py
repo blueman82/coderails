@@ -5,20 +5,25 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import runpy
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import cast
+from typing import Callable, cast
 
-# Subprocesses keep the root and Codex scripts packages isolated.
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/integrity-gate"))
 CODEX = ROOT / "packages/codex"
 sys.path.insert(0, str(ROOT))
 from packages.tests.eval_artifact_fixture import write_comment  # noqa: E402
 
+review_valid = cast(
+    Callable[[str, int, str], bool],
+    runpy.run_path(str(ROOT / "scripts/integrity-gate/integrity_evidence.py"))["review_valid"],
+)
 HOOK = CODEX / "hooks/scripts/pr_publication_gate.py"
 POST = CODEX / "scripts/post_review.py"
 CLEAN = "## No findings\n"
@@ -34,9 +39,12 @@ case "$1 $2" in
   "api repos/"*)
     [ -n "$FAKE_NO_ARTIFACT" ] && exit 0
     { printf '<!-- coderails-review-summary v1 pr=7 head_sha=%s -->\\n' "$FAKE_SHA"
-      [ -n "$FAKE_PASSES" ] && printf '<!-- coderails-review-passes v1 {"head_sha": "%s", "passes": %s} -->\\n' \\
+      printf '<!-- coderails-review-passes v1 {"head_sha": "%s", "passes": %s} -->\\n' \\
         "${FAKE_PASSES_SHA:-$FAKE_SHA}" "$FAKE_PASSES"
-      printf '%s\\n' "${FAKE_TAIL:-## No findings}"; } | base64 | tr -d '\\n'
+      printf '%s' "${FAKE_TAIL:-## No findings}"; } | base64 | tr -d '\\n'
+    echo
+    { printf '<!-- coderails-review-summary v1 pr=7 head_sha=%s -->\\n' "$FAKE_SHA"
+      printf '%s' "${FAKE_GENERAL:-## No findings}"; } | base64 | tr -d '\\n'
     echo
     [ -n "$FAKE_EVAL_FILE" ] && { base64 < "$FAKE_EVAL_FILE" | tr -d '\\n'; echo; }
     ;;
@@ -57,7 +65,10 @@ if a[:2] == ["pr", "view"]:
 elif a[:2] == ["api", "user"]:
     print("me")
 elif a[0] == "api" and "-F" in a:
-    open(os.environ["FAKE_POSTED"], "w").write(open(a[a.index("-F") + 1].removeprefix("body=@")).read())
+    path = os.environ["FAKE_POSTED"]
+    if os.path.exists(path):
+        path += ".companion"
+    open(path, "w").write(open(a[a.index("-F") + 1].removeprefix("body=@")).read())
     print(json.dumps({"url": "https://github.com/o/r/pull/12#c1", "author": "me", "created": "t"}))
 elif a[0] == "api":
     for row in json.loads(os.environ["FAKE_COMMENTS"]):
@@ -85,7 +96,7 @@ with patch.object(review_passes, "load_policy", side_effect=read_policy):
 
 
 def entry(name: str, verdict: str = "pass", digest: str = "") -> dict[str, object]:
-    """A passes[] entry, hand-built so the wire format is checked independently of review_passes.py."""
+    """Build a wire-format review pass."""
     text = CLEAN if verdict == "pass" else CRITICAL
     real = hashlib.sha256(text.strip().encode()).hexdigest()
     return {"name": name, "verdict": verdict, "blocking": verdict == "fail", "summary_sha256": digest or real}
@@ -93,12 +104,12 @@ def entry(name: str, verdict: str = "pass", digest: str = "") -> dict[str, objec
 
 def artifact(*passes: dict[str, object]) -> dict[str, str]:
     """Env for the fake gh: the passes line plus the posted sections each pass was derived from."""
-    parts = [CLEAN.strip()]  # the review-pr summary comes first
+    parts = [CLEAN]  # the review-pr summary comes first, with its original final newline
     for item in passes:
         if item["name"] != "review-pr":
             parts.append(f"<!-- coderails-review-pass {item['name']} -->")
-            parts.append((CLEAN if item["verdict"] == "pass" else CRITICAL).strip())
-    return {"FAKE_PASSES": json.dumps(list(passes)), "FAKE_TAIL": "\n".join(parts)}
+            parts.append(CLEAN if item["verdict"] == "pass" else CRITICAL)
+    return {"FAKE_PASSES": json.dumps(list(passes)), "FAKE_TAIL": "\n".join(parts), "FAKE_GENERAL": CLEAN}
 
 
 def git_cmd(cwd: Path, *args: str) -> str:
@@ -126,8 +137,7 @@ class Repo(unittest.TestCase):
 
     def setUp(self) -> None:
         """Base commit on origin/main, then one feature commit touching `touched`."""
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
+        self.addCleanup((temporary := tempfile.TemporaryDirectory()).cleanup)
         self.tmp = Path(temporary.name)
         self.dir = self.tmp / "repo"
         self.dir.mkdir()
@@ -146,7 +156,7 @@ class Repo(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "change")
         self.sha = git_cmd(self.dir, "rev-parse", "HEAD").strip()
-        self.eval_file = write_comment(self.tmp, self.sha, self.eval_level, frozen_sha=self.base)
+        self.eval_file = write_comment(self.tmp, self.sha, self.eval_level, self.tmp / "keys", frozen_sha=self.base)
 
 
 class HookTests(Repo):
@@ -157,9 +167,11 @@ class HookTests(Repo):
         environment = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
         environment |= {
             "FAKE_SHA": self.sha,
-            "CLAUDE_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
+            "CODERAILS_KEYS_DIR": str(self.tmp / "keys"),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
             "FAKE_BASE_SHA": self.base,
+            **artifact(entry("review-pr")),
+            **env,
         }
         environment |= {"FAKE_EVAL_FILE": str(self.eval_file), **env}
         command = {"command": "gh pr merge 7"}
@@ -210,10 +222,10 @@ class HookTests(Repo):
         self.assertTrue(self.reason(FAKE_NO_ARTIFACT="1").startswith("review_artifact_missing"))
         self.assertTrue(self.reason(FAKE_PASSES='"nope"').startswith("review_passes_malformed"))
 
-    def test_passes_line_for_another_head_is_ignored(self) -> None:
-        """A passes line carrying a different head_sha does not satisfy the policy."""
+    def test_passes_line_for_another_head_is_malformed(self) -> None:
+        """A stale line cannot be treated as a legacy artifact without a passes line."""
         reason = self.reason(**artifact(entry("review-pr"), entry("security-review")), FAKE_PASSES_SHA="stale")
-        self.assertTrue(reason.startswith("required_review_missing:security-review"), reason)
+        self.assertTrue(reason.startswith("review_passes_malformed"), reason)
 
     def test_conflicting_summary_and_section_markers_are_refused(self) -> None:
         """The actual hook refuses ambiguous grammar even when every declared hash matches."""
@@ -275,11 +287,7 @@ class PostTests(Repo):
         }
         path = POST if provider == "codex" else ROOT / "scripts/post_review.py"
         result = subprocess.run(
-            [sys.executable, str(path), "post", *arguments, "--compat-count", "0", "--disposition", "clean-break"],
-            cwd=self.dir,
-            env=env,
-            capture_output=True,
-            text=True,
+            [sys.executable, str(path), "post", *arguments], cwd=self.dir, env=env, capture_output=True, text=True
         )
         return result, log, posted
 
@@ -292,13 +300,13 @@ class PostTests(Repo):
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = posted.read_text().splitlines()
         self.assertEqual(lines[0], f"<!-- coderails-review-summary v1 pr=12 head_sha={self.sha} -->")
-        self.assertEqual(
-            lines[2], f"<!-- coderails-compat-findings v1 pr=12 head_sha={self.sha} count=0 disposition=clean-break -->"
-        )
         data = json.loads(lines[1].removeprefix("<!-- coderails-review-passes v1 ").removesuffix(" -->"))
         self.assertEqual(data["head_sha"], self.sha)
         verdicts = {p["name"]: (p["verdict"], p["blocking"]) for p in data["passes"]}
         self.assertEqual(verdicts, {"review-pr": ("pass", False), "security-review": ("fail", True)})
+        self.assertEqual(posted.with_name(posted.name + ".companion").read_text(), lines[0] + "\n" + CLEAN)
+        self.assertFalse(review_valid(posted.read_text(), 12, self.sha))
+        self.assertTrue(review_valid(posted.with_name(posted.name + ".companion").read_text(), 12, self.sha))
 
     def test_invalid_number_makes_no_gh_call(self) -> None:
         """Negative control: injection-shaped numbers fail with pr_number_invalid and the gh shim is never run."""
@@ -328,12 +336,13 @@ class PostTests(Repo):
             result, _, posted = self.post("12", "--summary", str(clean), provider=provider)
             self.assertEqual(result.returncode, 0, result.stderr)
             good = {"url": "old", "author": "me", "created": "t", "body": posted.read_text()}
+            companion = {**good, "body": posted.with_name(posted.name + ".companion").read_text()}
             corrupt = {**good, "url": "corrupt", "body": "\n".join(good["body"].splitlines()[:2]) + "\n" + CRITICAL}
             for comments, reused in (
                 ([good, corrupt], ""),
                 ([corrupt], ""),
-                ([good, {**good, "url": "new"}], "new"),
-                ([good, {**corrupt, "author": "other"}], "old"),
+                ([good, {**companion, "url": "new"}], "new"),
+                ([good, companion, {**corrupt, "author": "other"}], "old"),
             ):
                 with self.subTest(provider=provider, reused=reused, count=len(comments)):
                     result, log, _ = self.post("12", "--summary", str(clean), provider=provider, comments=comments)
@@ -389,7 +398,3 @@ class MirrorTests(unittest.TestCase):
             profiles = json.loads((root / "capabilities/profiles.json").read_text())
             self.assertEqual(profiles["agents"]["security-reviewer"], ["repo.inspect", "diff.read"])
         self.assertIn('"security-reviewer"', (ROOT / "scripts/installer/codex.py").read_text())
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -16,7 +16,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib.config import load_config  # noqa: E402
 from scripts.lib.git_common import repo_from_url  # noqa: E402
 
-RUNTIME_DIRS = (".claude-plugin/", "agents/", "commands/", "hooks/", "instructions/", "scripts/", "skills/")
+RUNTIME_DIRS = (
+    ".claude-plugin/",
+    "agents/",
+    "capabilities/",
+    "commands/",
+    "hooks/",
+    "instructions/",
+    "policy/",
+    "routines/",
+    "scripts/",
+    "skills/",
+)
 ROOT_FILES = frozenset({"AGENTS.md", "config.schema.json", "install.py", "wiki.schema.json"})
 CODEX_PREFIX = "packages/codex/"
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -195,7 +206,7 @@ def verify(manifest: object, root: Path, config: Path, claude: Path, codex: Path
                 continue
             if candidate.is_symlink():
                 raise ValueError("installed_path_symlink")
-            if candidate.is_file() and selected[1] not in current_files[bundle]:
+            if candidate.is_file() and selected[0] == bundle and selected[1] not in current_files[bundle]:
                 raise ValueError("installed_file_extra")
         for relative, expected_sha in current_files[bundle].items():
             target = installed

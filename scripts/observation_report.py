@@ -123,9 +123,10 @@ def session_result(session: object, base: Path) -> dict[str, Any]:
     event_ids: set[str] = set()
     span_ids: set[str] = set()
     parent_ids: set[str] = set()
-    usage_records = 0
+    usage_records: set[tuple[str, int | str]] = set()
     for line in lines:
-        event_id, kind, usage, span_id, parent_id = check_event(parse_json(line), row, set(sources))
+        event = mapping(parse_json(line), "event")
+        event_id, kind, usage, span_id, parent_id = check_event(event, row, set(sources))
         require(event_id not in event_ids, "duplicate event ID")
         event_ids.add(event_id)
         require(span_id not in span_ids, "duplicate span ID")
@@ -135,7 +136,10 @@ def session_result(session: object, base: Path) -> dict[str, Any]:
         if kind is not None and row["eligible"]:
             counts[kind] += 1
         if usage and row["eligible"]:
-            usage_records += 1
+            provenance = event["provenance"]
+            identity = event["attributes"].get("coderails.usage.identity_sha256")
+            usage_id = identity if row["provider"] == "claude" and identity else provenance["sourceOrdinal"]
+            usage_records.add((provenance["sourceId"], usage_id))
     require(parent_ids <= span_ids, "foreign parent span")
     return {
         "provider": row["provider"],
@@ -149,7 +153,7 @@ def session_result(session: object, base: Path) -> dict[str, Any]:
         "events_sha256": row["events_sha256"],
         "sources": [{"source_id": key, "sha256": sources[key]} for key in sorted(sources)],
         "observations": counts,
-        "usage_records": usage_records,
+        "usage_records": len(usage_records),
     }
 
 

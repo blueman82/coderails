@@ -229,7 +229,7 @@ Codex protocol: Codex hook event response: exit 0 JSON decision.
 | claude | SubagentStop | all | `offload_push_guard.py` | timeout=15 | nudge | registered for its provider event | offload push guard | Keep the push in the authorised workflow. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
 | claude | PreToolUse | Bash | `destructive_bash_gate.py` | timeout=5 | block | registered for its provider event | destructive bash gate | Use a safe command that avoids the blocked operation. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
 | claude | PreToolUse | Bash | `enforce_pr_workflow.py` | timeout=10 | block | inactive without workflow config | enforce pr workflow | Run the required PR review and post current-head evidence. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Bash | `test_gate.py` | timeout=120 | block | off unless test commands are configured | test gate | Fix the failed tests before the commit. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
+| claude | PreToolUse | Bash | `test_gate.py` | timeout=180 | block | off unless test commands are configured | test gate | Fix the failed tests before the commit. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
 | claude | PreToolUse | Bash | `verification_volume_ceiling.py` | timeout=5 | block | registered for its provider event | verification volume ceiling | Use focused tests after the allowed full-suite runs. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
 | claude | PreToolUse | Bash | `reviewer_bash_allowlist.py` | timeout=5 | block | registered for its provider event | reviewer bash allowlist | Use an allowed read-only command or a granted capability tool. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
 | claude | PreToolUse | Bash | `subagent_identity_gate.py` | timeout=5 | block | registered for its provider event | subagent identity gate | Dispatch with a native agent type that the graph can identify. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
@@ -250,12 +250,12 @@ Codex protocol: Codex hook event response: exit 0 JSON decision.
 | codex | Stop | all | `check_confidence_labels.py` | timeout=10 | advisory | registered for its provider event | check confidence labels | Add the correct confidence label to each claim that needs one. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
 | codex | SubagentStop | all | `check_confidence_labels.py` | timeout=10 | advisory | registered for its provider event | check confidence labels | Add the correct confidence label to each claim that needs one. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
 | codex | PreToolUse | ^Bash$ | `destructive_bash_gate.py` | timeout=10 | block | registered for its provider event | destructive bash gate | Use a safe command that avoids the blocked operation. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PreToolUse | ^Bash$ | `test_gate.py` | timeout=120 | block | off unless test commands are configured | test gate | Fix the failed tests before the commit. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
+| codex | PreToolUse | ^Bash$ | `test_gate.py` | timeout=180 | block | off unless test commands are configured | test gate | Fix the failed tests before the commit. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
 | codex | PreToolUse | ^Bash$ | `verification_volume_ceiling.py` | timeout=10 | block | registered for its provider event | verification volume ceiling | Use focused tests after the allowed full-suite runs. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
 | codex | PreToolUse | ^Bash$ | `pr_publication_gate.py` | timeout=60 | block | applies to guarded Codex publication commands | pr publication gate | Complete the required review and eval steps for this PR head. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
 | codex | PreToolUse | ^Bash$ | `action_authority_gate.py` | timeout=10 | block | off by default; advisory warns; enforce checks signed receipts | action authority gate | Use the configured authority path for the exact action and session. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
 | codex | PreToolUse | ^request_user_input$ | `crack_on_gate.py` | timeout=10 | block | the phrase grants nothing; a live typed authority can block questions | crack on gate | Use the typed authority command, or continue after the authority expires. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PreToolUse | ^spawn_agent$ | `loop_dispatch_guard.py` | timeout=10 | block | registered for its provider event | loop dispatch guard | Use the current owned graph dispatch envelope and role. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
+| codex | PreToolUse | ^(?:spawn_agent\|collaborationspawn_agent)$ | `loop_dispatch_guard.py` | timeout=10 | block | registered for its provider event | loop dispatch guard | Use the current owned graph dispatch envelope and role. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
 | codex | PreToolUse | ^apply_patch$ | `no_edit_on_main.py` | timeout=10 | block | registered for its provider event | no edit on main | Move the source edit to a feature branch. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
 | codex | PreToolUse | ^apply_patch$ | `comment_citation_gate.py` | timeout=10 | block | registered for its provider event | comment citation gate | State the durable rule in the comment without a session label. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
 | codex | PreToolUse | ^apply_patch$ | `wiki_taxonomy_gate.py` | timeout=10 | block | inactive without workflow config and a resolved wiki | wiki taxonomy gate | Write the page under a directory allowed by the wiki schema. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
@@ -284,13 +284,18 @@ evidence. A local test does not prove that an installed provider used a control.
 With `sandbox_workers: true` (the default), the Claude implementation launcher
 uses pinned `@anthropic-ai/sandbox-runtime` in a scratch clone. It needs the
 OS sandbox, `npx`, and a dedicated Claude worker credential; missing inputs
-stop graph implementation dispatch. The orchestrator remains unsandboxed.
+stop graph implementation dispatch. The graph driver prepares execution C before
+authorization, then checks a fixed uncommitted proposal before materializing it
+into reserved root checkout D. Root reviews and publishes; resume preserves later
+root edits. The orchestrator remains unsandboxed.
 
 Codex native `spawn_agent` inherits the parent sandbox. The Codex dispatch hook
 therefore refuses native implementation work while containment is on. The
-separate OAuth launcher in `packages/codex/scripts/codex_worker.py` runs a
-worker with `workspace-write`; no API key is needed. Its result is not yet
-bound to graph `record-wave` evidence, so the graph cannot mark that work done.
+existing OAuth graph driver binds issued dispatches to sealed process evidence;
+see [driver recovery](docs/RUNBOOK-DRIVER.md). The standalone helper in
+`packages/codex/scripts/codex_worker.py` keeps its direct interface and runs with
+`workspace-write`, explicit ChatGPT login and the OpenAI provider. Its output
+and trace earn no graph completion credit. Neither route uses an API key.
 See [worker containment](docs/WORKER-CONTAINMENT.md) for recovery steps, counters, and limits.
 
 ## Requirements

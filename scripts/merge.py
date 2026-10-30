@@ -65,7 +65,7 @@ def smoke_stage(number: str, sha: str, context: Context) -> None:
 
 
 def integrity_stage(number: str, sha: str, context: Context) -> None:
-    """When integrity_review.machine_user is configured, its successful integrity-review status is on the head."""
+    """When integrity review is enabled, require its successful status on the exact head."""
     config = config_path()
     if config and integrity_enabled(config):
         verify_integrity_status(sha, integrity_status_login(config))

@@ -9,7 +9,7 @@ import { mkdir, readdir, rename, rmdir, stat as nodeStat, unlink, writeFile as n
 import { basename, dirname, join, relative, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-export const CLAUDE_PARSER_VERSION = 6;
+export const CLAUDE_PARSER_VERSION = 7;
 const MAX_SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
 export function safeReadError(error: unknown): string {
   if (error instanceof Error && error.message.startsWith("source exceeds trace scan limit:"))
@@ -274,7 +274,11 @@ export function makeEvent(sessionId: string, src: Source, ordinal: number, row: 
     attributes["gen_ai.usage.cache_read_input_tokens"] = cacheRead;
   if (typeof cacheCreated === "number" && Number.isSafeInteger(cacheCreated) && cacheCreated >= 0)
     attributes["gen_ai.usage.cache_creation_input_tokens"] = cacheCreated;
-  if (usage) attributes["coderails.usage.semantics"] = "incremental";
+  if (usage) {
+    attributes["coderails.usage.semantics"] = "incremental";
+    if (typeof message?.id === "string" && message.id.trim())
+      attributes["coderails.usage.identity_sha256"] = hash(message.id);
+  }
   const id = hash(`claude:${sessionId}:${src.id}:${ordinal}:${itemIndex}:${name}`);
   const time = nano(row.timestamp);
   attributes["coderails.start_time.basis"] = time === null ? "unavailable" : "source";

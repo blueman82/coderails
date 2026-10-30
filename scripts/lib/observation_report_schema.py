@@ -38,10 +38,12 @@ ATTRIBUTE_KEYS = {
     "gen_ai.usage.cache_read_input_tokens",
     "gen_ai.usage.cache_creation_input_tokens",
     "coderails.usage.semantics",
+    "coderails.usage.identity_sha256",
     "coderails.source.ordinal",
     "coderails.source.item",
     "coderails.actor.kind",
     "coderails.actor.id",
+    "coderails.actor.name",
     "coderails.loop.id",
     "coderails.graph.revision",
     "coderails.wave.id",
@@ -179,6 +181,17 @@ def check_attributes(attrs: object) -> dict[str, Any]:
         ),
         "invalid event attribute value",
     )
+    if "coderails.actor.name" in attrs:
+        name, actor_id = attrs["coderails.actor.name"], attrs.get("coderails.actor.id")
+        require(
+            attrs.get("coderails.actor.kind") == "worker"
+            and isinstance(actor_id, str)
+            and bool(actor_id.strip())
+            and isinstance(name, str)
+            and len(name) <= 40
+            and re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?: [A-Za-z0-9]+){0,3}", name) is not None,
+            "invalid worker display metadata",
+        )
     kind = attrs.get("coderails.observation.kind")
     if kind is not None:
         require(
@@ -195,6 +208,12 @@ def check_attributes(attrs: object) -> dict[str, Any]:
         require(not any(key.startswith("coderails.observation.") for key in attrs), "partial observation")
     semantics = attrs.get("coderails.usage.semantics")
     require(semantics is None or semantics in ("cumulative", "incremental"), "invalid usage semantics")
+    identity = attrs.get("coderails.usage.identity_sha256")
+    if "coderails.usage.identity_sha256" in attrs:
+        require(
+            semantics == "incremental" and isinstance(identity, str) and HEX.fullmatch(identity) is not None,
+            "invalid usage identity",
+        )
     for key in ("gen_ai.usage.cache_read_input_tokens", "gen_ai.usage.cache_creation_input_tokens"):
         number = attrs.get(key)
         require(number is None or (type(number) is int and number >= 0), "invalid cache usage")
@@ -272,6 +291,6 @@ def check_event(
         valid = record_id == f"audit:{ordinal}"
     else:
         valid = False
-    require(valid, "foreign source reference")
+    require(valid and kind.startswith(f"{session['provider']}_"), "foreign source reference")
     usage = any(key.startswith("gen_ai.usage.") for key in attrs)
     return event["eventId"], attrs.get("coderails.observation.kind"), usage, event["spanId"], event["parentSpanId"]

@@ -23,11 +23,11 @@ from graph_required_context import required_context as required_context
 from graph_required_context import validate_context
 from graph_source import base_ref as base_ref
 from graph_source import check_binding
+from graph_source import source_assignment as source_assignment
 from graph_source import source_binding as source_binding
 from graph_vocab import decision_pending, decision_sync_pending
 
-ENVELOPE_VERSION = 2
-ENVELOPE_KEY = "CODERAILS_GRAPH_DISPATCH"
+ENVELOPE_VERSION, ENVELOPE_KEY = 2, "CODERAILS_GRAPH_DISPATCH"
 MODEL_ROLES = ("fast-mechanical", "default", "frontier")
 LIST_FIELDS = ("manifest", "lessons", "write_scope", "skip_phases")
 ENVELOPE_FIELDS = ("envelope_version", "dispatch_id", "session_id", "loop_id", "revision", "wave_id", "node_id")
@@ -55,8 +55,7 @@ def dispatch_off() -> bool:
 def load_profiles() -> dict[str, Any]:
     """The nearest capabilities/profiles.json above this file (repo root, or the Codex plugin root)."""
     for parent in Path(__file__).resolve().parents:
-        candidate = parent / "capabilities" / "profiles.json"
-        if candidate.is_file():
+        if (candidate := parent / "capabilities" / "profiles.json").is_file():
             return cast(dict[str, Any], json.loads(candidate.read_text(encoding="utf-8")))
     raise ValueError("capabilities/profiles.json not found")
 
@@ -105,14 +104,8 @@ def validate_contract(contract: object, require_context: bool = False) -> dict[s
             for item in cast(list[object], items)
         ):
             raise ValueError(f"contract {key} must be an array of strings")
-    if (
-        "lessons_sha256" in value
-        and value["lessons_sha256"] is not None
-        and (
-            not isinstance(value["lessons_sha256"], str)
-            or re.fullmatch(r"[0-9a-f]{64}", value["lessons_sha256"]) is None
-        )
-    ):
+    digest = value.get("lessons_sha256")
+    if digest is not None and (not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
         raise ValueError("contract lessons_sha256 must be a SHA256 or null")
     if value["disposition"] is not None and not isinstance(value["disposition"], dict):
         raise ValueError("contract disposition must be an object or null")
@@ -151,17 +144,15 @@ def unit_fields(
         or subprocess.run(["git", "check-ref-format", "--branch", base_branch], capture_output=True).returncode
     ):
         raise ValueError("--base-branch must be a valid Git branch")
-    if worktree is not None:
-        if not Path(worktree).is_absolute():
-            raise ValueError("--worktree must be an absolute path")
-        worktree = str(Path(worktree).resolve())
+    if worktree is not None and (not worktree.strip() or not Path(worktree).is_absolute()):
+        raise ValueError("--worktree must be a nonblank absolute path")
     given = {
         "model_role": model_role,
         "write_scope": write_scope or None,
         "lessons": lessons or None,
         "scope": scope,
         "base_branch": base_branch,
-        "worktree": worktree,
+        "worktree": str(Path(worktree).resolve()) if worktree is not None else None,
     }
     return {key: value for key, value in given.items() if value is not None}
 
@@ -329,9 +320,20 @@ def check_ownership(state: dict[str, Any], env: dict[str, Any], live: bool) -> d
         raise DispatchDeniedError("dispatch_stale_revision", "dispatch envelope revision is not the record's")
     if any(env[key] != record.get(key) for key in ("node_id", "wave_id")):
         raise DispatchDeniedError("dispatch_foreign", "dispatch envelope does not own the recorded node and wave")
+    attempt = record.get("attempt")
+    if (
+        type(attempt) is not int
+        or attempt < 1
+        or env["dispatch_id"] != dispatch_id(state["loop_id"], record["wave_id"], record["node_id"], attempt)
+    ):
+        raise DispatchDeniedError("dispatch_attempt_mismatch", "dispatch id does not match its recorded attempt")
     active = state["graph"].get("active_wave")
     if live and not (active and active["wave_id"] == record["wave_id"] and record["node_id"] in active["nodes"]):
         raise DispatchDeniedError("dispatch_foreign", "dispatch envelope does not own an exact node in the active wave")
+    if live:
+        node = state["graph"]["nodes"][record["node_id"]]
+        if attempt != node["retry"]["attempts"] + node["respawn"]["generation"] + 1:
+            raise DispatchDeniedError("dispatch_attempt_mismatch", "dispatch attempt is not the node's next attempt")
     if live and decision_sync_pending(state):
         raise DispatchDeniedError("decision_pending", "cannot authorize while decision sync is pending")
     if live and decision_pending(state, record["node_id"]):

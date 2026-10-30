@@ -207,6 +207,37 @@ class GateTests(GateCase):
 class AckCliTests(GateCase):
     """The owner mints the acknowledgement with the existing receipt CLI (new kind worker_fallback)."""
 
+    def test_cli_refuses_compound_fallback_command(self) -> None:
+        """A receipt cannot cover another command appended to the unit acknowledgement."""
+        signers = self.directory / "home/.coderails/keys/receipt_signers"
+        with (
+            mock.patch.dict(
+                os.environ, {"CLAUDE_AGENTIC_LOOP_DIR": str(self.loop), "HOME": str(self.directory / "home")}
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            code = action_receipt_cli.main(
+                [
+                    "approve-action",
+                    "--session",
+                    "s1",
+                    "--kind",
+                    containment.ACK_KIND,
+                    "--command",
+                    "worker_fallback 4; git push origin main",
+                    "--cwd",
+                    str(self.repo),
+                    "--key",
+                    str(self.key),
+                    "--signers",
+                    str(signers),
+                ],
+                tty_ok=lambda: True,
+            )
+        self.assertEqual(code, 2)
+        self.assertFalse(list((self.loop / "s1/receipts").glob("*.json")))
+
     def test_cli_mints_a_receipt_the_gate_accepts(self) -> None:
         """approve-action --kind worker_fallback binds repository + branch + base sha and the gate consumes it."""
         self.state(["hooks/x.py"])

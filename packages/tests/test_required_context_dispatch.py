@@ -23,6 +23,7 @@ class RequiredContextDispatchTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         provider = Provider(Path(temporary.name), name)
+        self.addCleanup(lambda: self.assertFalse(provider.external_refusals.exists()))
         provider.success("begin-wave")
         return provider
 
@@ -68,6 +69,25 @@ class RequiredContextDispatchTests(unittest.TestCase):
                     result = provider.call("inspect")
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("dispatch_state_unconverted", result.stderr)
+
+    def test_unreadable_facts_keep_the_discovered_active_loop_route(self) -> None:
+        """A facts read failure cannot remove the active-loop floor or claim valid requirements."""
+        for name in ("claude", "codex"):
+            provider = self.open(name)
+            prefix = "coderails" if name == "claude" else "coderails-codex"
+            for content in (b"{", b"\xff"):
+                with self.subTest(provider=name, content=content):
+                    provider.path.write_bytes(content)
+                    result = provider.hook(
+                        "inject_context",
+                        {"session_id": provider.session, "cwd": str(provider.home), "prompt": "hello"},
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    text = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+                    self.assertIn(f"route: {prefix}:agentic-loop", text)
+                    self.assertIn("facts=unavailable", text)
+                    self.assertNotIn(f"{prefix}:task-evals", text)
+                    self.assertEqual(provider.path.read_bytes(), content)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one Codex worker in a separate, workspace-sandboxed OAuth process."""
+"""Run one standalone Codex OAuth worker; its output is not graph completion evidence."""
 
 from __future__ import annotations
 
@@ -15,7 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 MODELS = {"fast-mechanical": "gpt-6-luna", "default": "gpt-6.1-sol", "frontier": "gpt-6-astra"}
-PASS_ENV = ("PATH", "HOME", "CODEX_HOME", "TMPDIR", "LANG", "TERM")
+OAUTH_ARGS = ("-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"')
+PASS_ENV = ("PATH", "HOME", "CODEX_HOME", "TMPDIR", "LANG", "LC_ALL", "TERM")
 
 
 def trace(session: str, outcome: str, reason: str) -> bool:
@@ -96,6 +97,7 @@ def command(
         str(final),
         "-c",
         "features.multi_agent=false",
+        *OAUTH_ARGS,
         "-",
     ]
 

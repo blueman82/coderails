@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -12,20 +14,60 @@ from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny,
 from hooks.scripts.lib.loop_state_common import log
 from hooks.scripts.lib.pr_merge_gate import merge_reason
 from hooks.scripts.lib.pr_workflow_match import (
+    UNBINDABLE,
+    Operation,
     operations,
     pr_number,
     repository,
+    same_repository,
     step_found,
     targets_main_call,
     transcript_entries,
 )
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.shell_context import opaque_execution
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import git_common as git
 from scripts.lib import merge_target, publication_gate
 from scripts.lib.authority_permits import permits
 from scripts.lib.config import config_path
+
+
+@contextmanager
+def _publication_session(session: str) -> Generator[None, None, None]:
+    """Bind publication checks to this hook call only."""
+    previous = os.environ.get("CODERAILS_PUBLICATION_SESSION_ID")
+    os.environ["CODERAILS_PUBLICATION_SESSION_ID"] = session
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("CODERAILS_PUBLICATION_SESSION_ID", None)
+        else:
+            os.environ["CODERAILS_PUBLICATION_SESSION_ID"] = previous
+
+
+def _push_changes_repository(calls: list[Operation], cwd: str) -> bool:
+    """A protected push with Git root options needs its own binding check."""
+    for call in calls:
+        if call.name != "git_push":
+            continue
+        if any(
+            token in {"-C", "--git-dir", "--work-tree"} or token.startswith(("-C", "--git-dir=", "--work-tree="))
+            for token in call.prefix
+        ) and not same_repository(call, cwd):
+            return True
+    return False
+
+
+def _transcripts(payload: Mapping[str, object]) -> list[str]:
+    """Keep only readable transcript paths from this hook request."""
+    return [
+        str(payload[key])
+        for key in ("transcript_path", "agent_transcript_path")
+        if isinstance(payload.get(key), str) and Path(str(payload[key])).is_file()
+    ]
 
 
 def _main() -> int:
@@ -40,26 +82,39 @@ def _main() -> int:
     if not isinstance(command, str) or not command:
         return 0
     cwd = str(payload.get("cwd") or os.getcwd())
-    session = str(payload.get("session_id") or "")
+    if opaque_execution(command, cwd):
+        deny("Blocked: executable shell body exceeds the guarded parser depth.")
+        return 0
+    raw_session = payload.get("session_id")
+    session = raw_session if isinstance(raw_session, str) else ""
     calls = operations(command, cwd)
     merges = [call for call in calls if call.name == "merge"]
-    if merges and not (verdict := permits(session, "merge"))["allow"]:  # early; nothing is consumed
-        append_row("action_authority", "denied", f"denied_{verdict['reason']}", session)
-        deny(f"Blocked: gh pr merge — this session's authority refuses it ({verdict['reason']}); authority.py inspect.")
+    guarded = [call for call in calls if call.name == "merge" or (call.name == "git_push" and targets_main_call(call))]
+    if len(guarded) > 1:
+        deny("Blocked: run one protected action per command so each gets its own review and evidence check.")
         return 0
     if merges and merge_target.has_repo_override(command):
         publication_gate.trace_preflight("pr_repo_override")
         deny("pr_repo_override: GH_REPO can retarget publication outside this repository.")
         return 0
+    if guarded and guarded[0].segment.startswith(UNBINDABLE):
+        deny("Blocked: child working directory or command target cannot be bound to this repository.")
+        return 0
+    if _push_changes_repository(guarded, cwd):
+        deny("Blocked: Git working directory differs from this repository; run that action separately.")
+        return 0
+    if merges and not session.strip():
+        deny("Blocked: merge publication requires a valid session ID.")
+        return 0
     if merges and merge_target.has_base_mutation(command):
         publication_gate.trace_preflight("pr_base_mutation")
         deny("pr_base_mutation: edit the PR and re-run the checked merge separately.")
         return 0
-    paths = [
-        str(payload[key])
-        for key in ("transcript_path", "agent_transcript_path")
-        if isinstance(payload.get(key), str) and Path(str(payload[key])).is_file()
-    ]
+    if merges and not (verdict := permits(session, "merge"))["allow"]:  # early; nothing is consumed
+        append_row("action_authority", "denied", f"denied_{verdict['reason']}", session)
+        deny(f"Blocked: gh pr merge — this session's authority refuses it ({verdict['reason']}); authority.py inspect.")
+        return 0
+    paths = _transcripts(payload)
     configured_calls = [
         call for call in calls if (config_path(repository(call)) or config_path(cwd)) and targets_main_call(call)
     ]
@@ -70,16 +125,16 @@ def _main() -> int:
         return 0
     entries = transcript_entries(paths)
     for call in merges:
-        selected = repository(call)
         requested, unit, progress = merge_target.parse(call.segment)
         previous = os.getcwd()
         try:
-            os.chdir(selected)
+            os.chdir(repository(call))
             number = merge_target.resolve(requested)
             sha = git.pr_field(number, "headRefOid") if number else ""
             if not sha:
                 raise ValueError("PR head unavailable")
-            publication_gate.enforce(number, sha, unit=unit, progress=progress)
+            with _publication_session(session):
+                publication_gate.enforce(number, sha, unit=unit, progress=progress)
         except git.WorkflowError as error:
             deny(str(error))
             return 0
@@ -105,7 +160,8 @@ def _main() -> int:
         if call.name == "merge":
             try:
                 _, unit, progress = merge_target.parse(call.segment)
-                reason = merge_reason(number, selected, session, unit=unit, progress=progress)
+                with _publication_session(session):
+                    reason = merge_reason(number, selected, session, unit=unit, progress=progress)
             except (OSError, ValueError, RuntimeError) as error:
                 reason = f"Blocked: gh pr merge — eval artifact verification failed: {error}. Do not bypass."
             if reason:

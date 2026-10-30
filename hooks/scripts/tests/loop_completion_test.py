@@ -230,6 +230,20 @@ class CompletionTests(HookTestCase):
             {"schema_version": True},
             {"schema_version": 1, "proofs": {}},
             {"schema_version": 1, "withdrawn_proofs": "bad"},
+            {
+                "schema_version": 2,
+                "session_id": self.state.data["session_id"],
+                "loop_id": self.state.data["loop_id"],
+                "proofs": [],
+                "withdrawn_proofs": {},
+            },
+            {
+                "schema_version": 2,
+                "session_id": self.state.data["session_id"],
+                "loop_id": self.state.data["loop_id"],
+                "proofs": [],
+                "withdrawn_proofs": None,
+            },
             {"schema_version": 1, "proofs": [{}] * 51, "withdrawn_proofs": [{}] * 50},
         ]
         for document in cases:
@@ -239,7 +253,17 @@ class CompletionTests(HookTestCase):
         self.proof.write_text("{broken")
         with self.assertRaisesRegex(ValueError, "malformed"):
             validate_proofs(self.proof, self.state.data, str(self.trace))
-        self.proof.write_text('{"schema_version":1,"proofs":null,"withdrawn_proofs":null}')
+        self.proof.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "session_id": self.state.data["session_id"],
+                    "loop_id": self.state.data["loop_id"],
+                    "proofs": [],
+                    "withdrawn_proofs": [],
+                }
+            )
+        )
         self.assertIn("No-proof disposition", validate_proofs(self.proof, self.state.data, str(self.trace)))
         self.state.data.pop("proof_disposition")
         with self.assertRaisesRegex(ValueError, "proof_no_proofs"):
@@ -247,7 +271,16 @@ class CompletionTests(HookTestCase):
 
     def test_matching_transcript_no_longer_satisfies_a_proof(self) -> None:
         """A perfectly matching foreground Bash call in the transcript is ignored: only controller run rows count."""
-        self.proof.write_text(json.dumps({"schema_version": 1, "proofs": [{"id": "P1", "cmd": "python3 verify.py"}]}))
+        self.proof.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "session_id": self.state.data["session_id"],
+                    "loop_id": self.state.data["loop_id"],
+                    "proofs": [{"id": "P1", "cmd": "python3 verify.py"}],
+                }
+            )
+        )
         self.execution("a", "python3 verify.py")
         with self.assertRaisesRegex(ValueError, r"P1\(proof_stale_cmd\)"):
             validate_proofs(self.proof, self.state.data, str(self.trace))

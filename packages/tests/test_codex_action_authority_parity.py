@@ -29,11 +29,72 @@ MIRRORS = (
 class MirrorTests(unittest.TestCase):
     """The Codex copies of the receipt modules are the Claude files, byte for byte."""
 
+    def test_codex_env_split_string_push_is_guarded(self) -> None:
+        """The Codex matcher recognizes a protected ref inside a supported env -S wrapper."""
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            subprocess.run(["git", "-C", tmp, "symbolic-ref", "HEAD", "refs/heads/feature"], check=True)
+            found = codex_match.guarded_operations('env -S "git push origin HEAD:main"', tmp, implicit_push=True)
+            self.assertEqual([call.name for call in found], ["git_push"])
+
+    def test_codex_external_time_value_options_do_not_hide_push(self) -> None:
+        """GNU time option values precede the executable in the Codex matcher."""
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            subprocess.run(["git", "-C", tmp, "symbolic-ref", "HEAD", "refs/heads/feature"], check=True)
+            command = "/usr/bin/time -f %E -o report git push origin HEAD:main"
+            self.assertEqual([call.name for call in codex_match.guarded_operations(command, tmp)], ["git_push"])
+
     def test_mirrors_byte_identical(self) -> None:
         """Every mirrored file matches its Claude source."""
         for name in MIRRORS:
             with self.subTest(name):
                 self.assertTrue(filecmp.cmp(ROOT / name, CODEX / name, shallow=False), name)
+        self.assertTrue(
+            filecmp.cmp(
+                ROOT / "hooks/scripts/lib/headless_command.py",
+                CODEX / "hooks/scripts/lib/headless_command.py",
+                shallow=False,
+            )
+        )
+
+    def test_git_directory_selectors_bind_the_same_worktree_on_both_providers(self) -> None:
+        """A selected Git directory must resolve to the same physical worktree and Git dir."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            other = Path(tmp) / "other"
+            for path in (repo, other):
+                subprocess.run(["git", "init", "-q", str(path)], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=t@example.com",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    "init",
+                ],
+                check=True,
+            )
+            linked = Path(tmp) / "linked"
+            subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "--detach", str(linked)], check=True)
+            self.assertTrue((linked / ".git").is_file())
+            alias = Path(tmp) / "alias"
+            alias.symlink_to(repo)
+            for matcher in (claude_match, codex_match):
+                for cwd, target, expected in (
+                    (repo, alias, True),
+                    (linked, linked, True),
+                    (repo, other, False),
+                    (linked, repo, False),
+                ):
+                    call = matcher.operations(f'git -C "{target}" push origin main', str(cwd))[0]
+                    self.assertEqual(matcher.same_repository(call, str(cwd)), expected)
 
     def test_receipt_cli_diff_is_provider_import(self) -> None:
         """Receipt commands differ only in the provider-local command classifier import."""
@@ -41,11 +102,11 @@ class MirrorTests(unittest.TestCase):
         codex = (CODEX / "scripts/action_receipt_cli.py").read_text()
         self.assertEqual(
             claude.replace(
-                "from hooks.scripts.lib.pr_workflow_match import operations",
-                "from hooks.scripts.lib.action_match import operations",
+                "from hooks.scripts.lib.pr_workflow_match import Operation, operations",
+                "from hooks.scripts.lib.action_match import Operation, operations",
             ).replace(
-                "from hooks.scripts.lib.action_match import operations\nfrom hooks.scripts.lib.trace_row",
-                "from hooks.scripts.lib.action_match import operations\n\nfrom hooks.scripts.lib.trace_row",
+                "from hooks.scripts.lib.action_match import Operation, operations\nfrom hooks.scripts.lib.trace_row",
+                "from hooks.scripts.lib.action_match import Operation, operations\n\nfrom hooks.scripts.lib.trace_row",
             ),
             codex,
         )
@@ -102,3 +163,15 @@ class MatchParityTests(unittest.TestCase):
                         found = matcher.guarded_segments(command, tmp)
                         self.assertEqual(len(found), 1)
                         self.assertTrue(found[0][1].startswith(matcher.UNBINDABLE), found)
+
+    def test_headless_prompts_and_quoted_git_directory_are_guarded_by_both_providers(self) -> None:
+        """A child prompt or spaced Git directory cannot hide a protected action."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for matcher in (claude_match, codex_match):
+                for command, expected in (
+                    ("codex exec 'gh pr merge 2 --squash'", "merge"),
+                    ("claude -p 'gh pr merge 2 --squash'", "merge"),
+                    ('git -C "/tmp/path with spaces" push origin HEAD:main', "git_push"),
+                ):
+                    with self.subTest(matcher=matcher.__name__, command=command):
+                        self.assertEqual([name for name, _, _ in matcher.guarded_segments(command, tmp)], [expected])

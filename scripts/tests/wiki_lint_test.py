@@ -123,8 +123,8 @@ class StaleTests(WikiLintCase):
         self.write_page("old.md", "2026-08-01", "[hooks/moved.py]")
         self.assertEqual(self.stale_pages(self.run_stale()), [])
 
-    def test_old_pages_without_comparable_sources_are_only_data_gaps(self) -> None:
-        """Missing, untracked and vault-only sources cannot prove source drift."""
+    def test_old_pages_without_comparable_sources_use_date_only_fallback(self) -> None:
+        """Missing, untracked and vault-only sources retain gaps and use the page-age rule."""
         (self.repo / "hooks/untracked.py").write_text("untracked\n")
         (self.vault / "sources/reference.md").write_text(page("2026-01-01", "[]"))
         for name, sources in (
@@ -134,11 +134,17 @@ class StaleTests(WikiLintCase):
             ("vault.md", "[sources/reference.md]"),
         ):
             self.write_page(name, "2026-01-01", sources)
-        report = self.run_stale()
-        self.assertEqual(self.stale_pages(report), [])
-        self.assertEqual(
-            {Path(g["page"]).name for g in report["data_gaps"]}, {"empty.md", "missing.md", "untracked.md", "vault.md"}
-        )
+        self.write_page("recent.md", "2026-09-25", "[]")
+        for script in (SCRIPT, CODEX_SCRIPT):
+            with self.subTest(script=script):
+                report = self.run_stale(script)
+                self.assertEqual(set(self.stale_pages(report)), {"empty.md", "missing.md", "untracked.md", "vault.md"})
+                self.assertEqual({item["basis"] for item in report["stale"]}, {"date_only"})
+                self.assertEqual(
+                    {Path(g["page"]).name for g in report["data_gaps"]},
+                    {"empty.md", "missing.md", "untracked.md", "vault.md"},
+                )
+                self.assertNotIn("hooks/recent.md", report["candidates"])
 
     def test_missing_vault_is_unavailable_instead_of_an_empty_report(self) -> None:
         """A nonexistent input directory must not look like a healthy empty vault."""
@@ -186,9 +192,10 @@ class StaleTests(WikiLintCase):
         (self.vault / "sources/pr_1_x.md").write_text(page("2026-01-01", "[]"))
         self.config(None)
         data = self.run_stale()
-        self.assertEqual(sorted(self.stale_pages(data)), ["short.md"])
+        self.assertEqual(sorted(self.stale_pages(data)), ["short.md", "vaultonly.md"])
         by_name = {Path(s["page"]).name: s for s in data["stale"]}
         self.assertEqual(by_name["short.md"]["basis"], "sources")
+        self.assertEqual(by_name["vaultonly.md"]["basis"], "date_only")
         self.assertEqual(data["data_gaps"], [{"page": "hooks/vaultonly.md", "source": "", "reason": "no_repo_sources"}])
 
     def test_unresolvable_source_is_a_data_gap_not_unchanged(self) -> None:

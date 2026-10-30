@@ -52,11 +52,11 @@ def main() -> int:
         if body:
             print(base64.b64encode(body.encode()).decode())
         if number and not os.environ.get("MOCK_GH_NO_REVIEW"):
-            # An empty fixture diff has a clean review and no compatibility findings.
+            # The empty fixture diff has no required review passes or compatibility findings.
             review = (
                 f"<!-- coderails-review-summary v1 pr={number[1]} head_sha={sha} -->\n"
-                f"<!-- coderails-compat-findings v1 pr={number[1]} head_sha={sha} "
-                "count=0 disposition=clean-break -->\n## No findings\n"
+                f"<!-- coderails-compat-findings v1 pr={number[1]} head_sha={sha} count=0 disposition=clean-break -->\n"
+                "## No findings\n"
             )
             print(base64.b64encode(review.encode()).decode())
     elif "/statuses" in arguments:

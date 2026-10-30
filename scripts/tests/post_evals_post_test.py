@@ -85,8 +85,11 @@ class PostCase(ArtifactCase):
 
     def suite(self, head: str, level: int, **extra: object) -> None:
         """Write the suite for this head and freeze it exactly as smoke-run does."""
+        for key in ("frozen_hash", "signature", "amendment_chain", "amendments", "grading", "integrity_version"):
+            self.data.pop(key, None)
+        frozen_sha = extra.pop("frozen_sha", self.base)
         self.data.update(
-            verification_level=level, head_sha=head, frozen_sha=self.base, evals=[entry()] if level else [], **extra
+            verification_level=level, head_sha=head, frozen_sha=frozen_sha, evals=[entry()] if level else [], **extra
         )
         self.save()
         record_smoke(self.path)
@@ -241,25 +244,6 @@ class LateFreezeTests(PostCase):
         facts = eval_artifact.parse_facts(fake.posted[0].splitlines()[1])
         return None if facts is None else facts[1]
 
-    def late_suite(self, head: str, justification: str) -> None:
-        """A level-2 suite whose frozen_sha is a commit on the branch."""
-        self.suite(head, 2, verification_justification=justification)
-        data = self.reload()
-        data["frozen_sha"] = head
-        self.data = data
-        self.save()
-
-    def test_undisclosed_is_refused_and_disclosed_is_stamped(self) -> None:
-        """Acceptance 3: refused with an empty disclosure; accepted with one and stamped late_freeze=1."""
-        head = self.commit("install.py")
-        self.late_suite(head, "2 work-units, irreversible surface")
-        self.assertEqual(self.post(FakeGh([head]))[0], 1)
-        self.late_suite(head, "irreversible surface; late freeze, frozen after the first commit")
-        fake = FakeGh([head])
-        code, _, err = self.post(fake)
-        self.assertEqual((code, len(fake.posted)), (0, 1), err)
-        self.assertEqual(self.stamped_late(fake), True)
-
     def test_on_time_freeze_is_stamped_zero(self) -> None:
         """Negative control: a freeze at the base is late_freeze=0."""
         head = self.commit("install.py")
@@ -281,16 +265,18 @@ class LateFreezeTests(PostCase):
         head, advanced = self.pr_history(present)
         self.assertEqual(self.git("rev-parse", "HEAD"), advanced)
         self.assertEqual(eval_level.branch_base(head), self.base if present else "")
-        self.suite(head, 1)
-        self.data = self.reload()
         for frozen, justification, late, expected in (
             (advanced, "outward surface", None, 1),
             (self.base, "outward surface", False, 0),
             (advanced, "outward surface; late freeze", True, 0),
         ):
             with self.subTest(frozen=frozen, justification=justification):
-                self.data.update(frozen_sha=frozen, verification_justification=justification)
-                self.save()
+                self.suite(head, 1, frozen_sha=frozen, verification_justification=justification)
+                self.data = self.reload()
+                if late:
+                    token = f"frozen_sha {frozen} frozen_at {self.data['frozen_at']} timing=late"
+                    amended = self.cli("amend", "E1", token, "eval-author")
+                    self.assertEqual(amended.returncode, 0, amended.stderr)
                 fake = FakeGh([head])
                 code, _, error = self.post(fake)
                 self.git("cat-file", "-e", head)
@@ -299,7 +285,7 @@ class LateFreezeTests(PostCase):
                 self.assertEqual(code, expected, error)
                 if expected:
                     self.assertEqual(fake.posted, [])
-                    self.assertIn("disclose the late freeze", error)
+                    self.assertIn("freeze_timing_unverified", error)
                 else:
                     self.assertEqual(self.stamped_late(fake), late)
                     self.assertEqual(fake.posted[0].splitlines()[0], eval_artifact.marker("7", head, "GO", "1"))

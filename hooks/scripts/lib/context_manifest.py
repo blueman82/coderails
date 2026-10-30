@@ -110,8 +110,12 @@ def route_for_payload(raw: str, prefix: str) -> tuple[str, str, str]:
     sid = sid if isinstance(sid, str) else ""
     try:
         root = loop_root(prefix)
-        active = safe_id(sid) and find_state(root, sid, cwd if isinstance(cwd, str) else "") is not None
-        required = required_skills(root, sid, cwd if isinstance(cwd, str) else "") if active else ()
+        state = find_state(root, sid, cwd if isinstance(cwd, str) else "") if safe_id(sid) else None
+        active = state is not None
+        try:
+            required = required_skills(root, sid, state_path=state) if active else ()
+        except (OSError, ValueError, TypeError):
+            required = ()
     except (OSError, ValueError, TypeError):
         active, required = False, ()
     text = route(prompt if isinstance(prompt, str) else "", active, prefix, required)
@@ -143,11 +147,11 @@ def phrase_hit(text: str, trigger: str, slash: bool) -> bool:
     return False
 
 
-def required_skills(root: Path, session_id: str, cwd: str = "") -> tuple[str, ...]:
+def required_skills(root: Path, session_id: str, cwd: str = "", state_path: Path | None = None) -> tuple[str, ...]:
     """Read this session's active dispatch requirements; no other session can supply a route."""
     if not safe_id(session_id):
         return ()
-    state = find_state(root, session_id, cwd)
+    state = state_path or find_state(root, session_id, cwd)
     raw = parse_object(state.read_text(encoding="utf-8")) if state else None
     if raw is None or raw.get("session_id") != session_id or not isinstance(raw.get("graph"), dict):
         return ()
@@ -244,9 +248,11 @@ def _display_node(node_names: object, node_id: object) -> str:
     return str(node_id)
 
 
-def loop_lines(root: Path, session_id: str, plugin_root: Path, cwd: str = "") -> tuple[list[str], str, bool]:
+def loop_lines(
+    root: Path, session_id: str, plugin_root: Path, cwd: str = "", state_path: Path | None = None
+) -> tuple[list[str], str, bool]:
     """Return (lines, reason, active) for this session's loop. Raises ValueError/OSError on unreadable state."""
-    state = find_state(root, session_id, cwd)
+    state = state_path or find_state(root, session_id, cwd)
     if state is None:
         return ["loop: none"], "manifest_ok", False
     raw = parse_object(state.read_text(encoding="utf-8"))
@@ -290,11 +296,16 @@ def manifest_with_reason(
             body, reason = [head, "authority: none", "loop: none"], "manifest_no_session"
         else:
             try:
-                loop, reason, active = loop_lines(root, session_id, plugin_root, cwd)
+                state = find_state(root, session_id, cwd)
+                loop, reason, active = (
+                    loop_lines(root, session_id, plugin_root, cwd, state)
+                    if state is not None
+                    else (["loop: none"], "manifest_ok", False)
+                )
             except (OSError, ValueError, AttributeError, TypeError):
                 return FALLBACK, "manifest_state_unreadable"
             body = [head, authority_line(root, session_id)] + loop
-            required = required_skills(root, session_id, cwd) if active else ()
+            required = required_skills(root, session_id, state_path=state) if active else ()
             hint = route("", active, prefix, required)
             body += [hint] if hint else []
         return "\n".join(body + [CONSTRAINTS, FAILSAFE]), reason
@@ -319,6 +330,6 @@ def trace(command: str, outcome: str, reason: str, session_id: str, prefix: str 
         spec = importlib.util.spec_from_file_location("trace_row", Path(__file__).with_name("trace_row.py"))
         module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
         spec.loader.exec_module(module)  # type: ignore[union-attr]
-        return bool(module.append_row(command, outcome, reason, session_id, base=loop_root(prefix)))
+        return bool(module.append_hook_row(command, outcome, reason, session_id, base=loop_root(prefix)))
     except Exception:
         return False

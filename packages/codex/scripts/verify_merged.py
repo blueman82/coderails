@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -29,9 +30,19 @@ def run(repo: Path, *argv: str) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(argv, 127, "", str(error))
 
 
-def pr_facts(repo: Path, number: str) -> dict[str, object] | None:
+def pr_facts(repo: Path, number: str, origin_repo: str) -> dict[str, object] | None:
     """`gh pr view` fields as a dict, or None when gh fails or returns something unusable."""
-    result = run(repo, "gh", "pr", "view", number, "--json", "state,mergedAt,mergeCommit,baseRefName,headRefOid")
+    result = run(
+        repo,
+        "gh",
+        "pr",
+        "view",
+        number,
+        "--repo",
+        f"github.com/{origin_repo}",
+        "--json",
+        "state,mergedAt,mergeCommit,baseRefName,headRefOid",
+    )
     try:
         data: object = json.loads(result.stdout)
     except ValueError:
@@ -43,7 +54,23 @@ def verify(repo: Path, number: str, needle: str, path: str) -> dict[str, object]
     """Apply the rule set and return the verdict."""
     verdict: dict[str, object] = {"pr": number, "confirmed": False, "method": "", "reasons": []}
     reasons: list[str] = verdict["reasons"]  # type: ignore[assignment]
-    facts = pr_facts(repo, number)
+    if not number.isascii() or not number.isdecimal() or not number.strip("0"):
+        reasons.append("pr_number_invalid")
+        return verdict
+    origin_url = run(repo, "git", "config", "--get", "remote.origin.url").stdout.strip()
+    match = re.fullmatch(
+        r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)",
+        origin_url,
+    )
+    origin_repo = match.group(1).removesuffix(".git") if match else ""
+    if not origin_repo:
+        reasons.append("origin_repo_unresolved")
+        return verdict
+    override = os.environ.get("GH_REPO", "").casefold()
+    if override and override not in (origin_repo.casefold(), f"github.com/{origin_repo}".casefold()):
+        reasons.append("repo_mismatch")
+        return verdict
+    facts = pr_facts(repo, number, origin_repo)
     if facts is None:
         reasons.append("gh_failed")
         return verdict
@@ -102,6 +129,15 @@ def trace(repo: Path, verdict: dict[str, object]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry."""
+    arguments = sys.argv[1:] if argv is None else argv
+    if (
+        arguments
+        and arguments[0].startswith("-")
+        and arguments[0] not in ("-h", "--help", "--grep", "--path", "--repo", "--")
+    ):
+        verdict = verify(Path.cwd(), arguments[0], "", "")
+        print(json.dumps(verdict, indent=2))
+        return 1
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pr")
     parser.add_argument(
@@ -111,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--path", default="", help="limit the grep to this path")
     parser.add_argument("--repo", type=Path, default=Path.cwd())
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     verdict = verify(args.repo.resolve(), args.pr, args.grep, args.path)
     trace(args.repo.resolve(), verdict)
     print(json.dumps(verdict, indent=2))

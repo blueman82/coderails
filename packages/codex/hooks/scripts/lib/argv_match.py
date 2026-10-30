@@ -20,6 +20,7 @@ _LONG_ARG = {
     "--strategy",
     "--strategy-option",
     "--cleanup",
+    "--push-option",
 }
 
 

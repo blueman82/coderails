@@ -80,6 +80,7 @@ def load(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     if any(target not in controls for target in aliases.values()):
         raise ValueError("alias names an unknown control")
 
+    sources: set[str] = set()
     seen: dict[str, set[str]] = {name: set() for name in controls}
     for provider, data in providers.items():
         registration = _object(data, f"{provider} registration")
@@ -108,6 +109,11 @@ def load(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
                         raise ValueError(f"{provider}/{event}/{name} has an unsupported type")
                     if "timeout" in entry and (type(entry["timeout"]) is not int or entry["timeout"] < 1):
                         raise ValueError(f"{provider}/{event}/{name} has an invalid timeout")
+                    source_root = "hooks/scripts" if provider == "claude" else "packages/codex/hooks/scripts"
+                    source = f"{source_root}/{name}.py"
+                    if not (root / source).is_file():
+                        raise ValueError(f"registered hook source is missing: {source}")
+                    sources.add(source)
                     seen[name].add(provider)
     for name, value in controls.items():
         control = _object(value, f"control {name}")
@@ -136,7 +142,45 @@ def load(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         literals = {node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)}
         if code not in literals:
             raise ValueError(f"{code} is not a literal emitted by {source}")
+    for source in sources:
+        missing = emitted_reasons(root / source) - set(emitted)
+        if missing:
+            raise ValueError(f"{source} has uncatalogued emitted reasons: {', '.join(sorted(missing))}")
     return registry, messages
+
+
+def emitted_reasons(source: Path) -> set[str]:
+    """Read static trace-call reasons, including module constants and conditional arms.
+
+    Runtime-derived reasons retain the hook-level remediation; this is not data-flow analysis.
+    """
+    tree = ast.parse(source.read_text())
+    constants = {
+        target.id: node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+
+    def texts(node: ast.AST) -> set[str]:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return {node.value}
+        if isinstance(node, ast.Name) and node.id in constants:
+            return texts(constants[node.id])
+        if isinstance(node, ast.IfExp):
+            return texts(node.body) | texts(node.orelse)
+        return set()
+
+    return {
+        code
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"append_row", "append_hook_row", "append_trace_row"}
+        and len(node.args) > 2
+        for code in texts(node.args[2])
+    }
 
 
 def splice(document: str, start: str, end: str, block: str) -> str:
@@ -225,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         registry, messages = load(root)
         rendered = outputs(root, registry, messages)
-    except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
+    except (OSError, ValueError, KeyError, TypeError, SyntaxError) as error:
         print(f"gen_hooks: {error}")
         return 2
     stale = [path for path, body in rendered.items() if not (root / path).exists() or (root / path).read_text() != body]

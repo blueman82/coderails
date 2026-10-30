@@ -1,0 +1,228 @@
+"""Both provider graph commands record only sealed driver worker attempts."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from typing import Any
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
+sys.path.insert(0, str(ROOT / "skills/agentic-loop/scripts"))
+import graph_driver_controller  # noqa: E402
+import graph_driver_dispatch  # noqa: E402
+import graph_driver_evidence  # noqa: E402
+
+from hooks.scripts.tests.graph_convert_test import SCRIPTS, Case  # noqa: E402
+from packages.tests.test_driver_authorize import frozen_evals  # noqa: E402
+
+
+class DriverWaveTests(unittest.TestCase):
+    """Exercise the real Claude and Codex graph CLIs on disposable files."""
+
+    def fake_gh(self, base: Path, head: str) -> None:
+        """Let the child graph CLIs find a disposable open PR at this HEAD."""
+        tool_dir = base / "bin"
+        tool_dir.mkdir()
+        gh = tool_dir / "gh"
+        response = json.dumps({"number": 42, "state": "OPEN", "headRefOid": head})
+        gh.write_text("#!/bin/sh\nprintf '%s\\n' '" + response + "'\n")
+        gh.chmod(0o755)
+        environment = patch.dict(os.environ, PATH=f"{tool_dir}:{os.environ['PATH']}")
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def test_invalid_final_report_records_a_failed_attempt(self) -> None:
+        """A bad report cannot be sealed as done and strand a retryable wave."""
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            case = Case("codex", base)
+            state = case.read()
+            state["work_units"]["1"] = {"status": "pending", "scope": "Build one unit"}
+            case.write(state)
+            self.assertEqual(case.graph("convert").returncode, 0)
+            self.assertEqual(case.graph("cutover-driver").returncode, 0)
+            case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+            checkout = base / "checkout"
+            checkout.mkdir()
+            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(checkout),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=t@example.test",
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    "first",
+                ],
+                check=True,
+            )
+            head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+            self.fake_gh(base, head)
+
+            def command(prompt: Path, _record: dict[str, Any]) -> tuple[list[str], None, Path]:
+                return [sys.executable, "-c", "import sys; print(sys.stdin.readline().strip())"], None, prompt
+
+            def result(output: Path, _code: int) -> dict[str, Any]:
+                parsed: dict[str, Any] = {
+                    "outcome": "done",
+                    "evidence": "bad report",
+                    "final_report": {"claims": [], "did_not_verify": []},
+                }
+                (output.parent / "final.json").write_text(json.dumps(parsed))
+                return parsed
+
+            report: dict[str, Any] = {"status": "unresolved"}
+            for _ in range(20):
+                report = graph_driver_controller.drive_once(
+                    case.path, "S", SCRIPTS["codex"], checkout, "codex", command, result
+                )
+                if report["status"] == "recorded":
+                    break
+            self.assertEqual(report["status"], "recorded")
+            state = case.read()
+            self.assertIsNone(state["graph"]["active_wave"])
+            self.assertEqual(state["graph"]["nodes"]["U3[1]"]["retry"]["attempts"], 1)
+            reference = state["graph"]["nodes"]["U3[1]"]["evidence"][-1]
+            manifest = case.path.parent / "driver-evidence" / reference["dispatch_id"] / "manifest.json"
+            self.assertEqual(json.loads(manifest.read_text())["result"]["outcome"], "failed")
+
+    def test_public_begin_reserves_root_control_without_worker_dispatch(self) -> None:
+        """A direct CLI call owns the proof wave without issuing a worker."""
+        with tempfile.TemporaryDirectory() as directory:
+            for provider in ("claude", "codex"):
+                case = Case(provider, Path(directory))
+                state = case.read()
+                state["graph"]["nodes"]["S13-proof"] = state["graph"]["nodes"].pop("U3[1]")
+                state["graph"]["nodes"]["S13-proof"]["label"] = "Run frozen proofs"
+                case.write(state)
+                self.assertEqual(case.graph("convert").returncode, 0)
+                self.assertEqual(case.graph("cutover-driver").returncode, 0)
+                case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+                opened = subprocess.run(
+                    [sys.executable, str(SCRIPTS[provider]), "begin-driver-wave", str(case.path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(opened.returncode, 0, (provider, opened.stderr))
+                self.assertEqual(json.loads(opened.stdout)["dispatches"], [])
+                self.assertEqual(case.read()["graph"]["active_wave"]["nodes"], ["S13-proof"])
+
+    def test_record_driver_wave_requires_seal_and_final_report(self) -> None:
+        """A sealed done result still needs the existing final-report gate."""
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            checkout = base / "checkout"
+            checkout.mkdir()
+            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(checkout),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=t@example.test",
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "-m",
+                    "first",
+                ],
+                check=True,
+            )
+            head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+            self.fake_gh(base, head)
+            for provider in ("claude", "codex"):
+                case = Case(provider, base)
+                self.assertEqual(case.graph("convert").returncode, 0)
+                self.assertEqual(case.graph("cutover-driver").returncode, 0)
+                case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+                opened = subprocess.run(
+                    [sys.executable, str(SCRIPTS[provider]), "begin-driver-wave", str(case.path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                self.assertEqual(opened.returncode, 0, opened.stderr)
+                issued = json.loads(opened.stdout)
+                wave_id = issued["wave_id"]
+                node_id = "U3[1]"
+                dispatch_id = issued["dispatches"][0]["dispatch_id"]
+                state = case.read()
+                record = state["graph"]["dispatches"][dispatch_id]
+                prompt = graph_driver_dispatch.write_prompt(
+                    case.path, state, dispatch_id, record, checkout.resolve(), provider, SCRIPTS[provider]
+                )
+                authorized = case.graph(
+                    "authorize-driver",
+                    "--dispatch-id",
+                    dispatch_id,
+                    "--prompt-file",
+                    str(prompt),
+                    "--role",
+                    record["contract"]["role"],
+                    "--driver-run-id",
+                    "test-run",
+                )
+                self.assertEqual(authorized.returncode, 0, authorized.stderr)
+                state = case.read()
+                result = {"outcome": "done", "evidence": "worker result"}
+                artifact = prompt.parent
+                (artifact / "output.jsonl").write_text('{"type":"turn.completed"}\n')
+                if provider == "codex":
+                    (artifact / "final.json").write_text(json.dumps(result))
+                head = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+                with patch.object(graph_driver_evidence, "publication", return_value={"number": 42, "head": head}):
+                    ref = graph_driver_evidence.seal(
+                        case.path, state, node_id, dispatch_id, checkout, provider, 0, result
+                    )
+                report = {"wave_id": wave_id, "results": {node_id: result}, "references": {node_id: ref}}
+
+                def collect(
+                    raw: str, script: Path = SCRIPTS[provider], path: Path = case.path
+                ) -> subprocess.CompletedProcess[str]:
+                    return subprocess.run(
+                        [sys.executable, str(script), "record-driver-wave", str(path), raw],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=False,
+                    )
+
+                missing = json.dumps({**report, "references": {}})
+                before = case.path.read_bytes()
+                denied = collect(missing)
+                self.assertNotEqual(denied.returncode, 0)
+                self.assertEqual(case.path.read_bytes(), before)
+                backup = case.path.with_name("progress.json.pre-driver")
+                original_backup = backup.read_bytes()
+                backup.write_bytes(original_backup + b" ")
+                corrupted = collect(json.dumps(report))
+                self.assertNotEqual(corrupted.returncode, 0, (provider, corrupted.stderr))
+                self.assertEqual(case.path.read_bytes(), before)
+                backup.write_bytes(original_backup)
+                unreviewed = collect(json.dumps(report))
+                self.assertNotEqual(unreviewed.returncode, 0, (provider, unreviewed.stderr))
+                self.assertIn("final_report_invalid", unreviewed.stderr)
+                self.assertEqual(case.path.read_bytes(), before)
+
+
+if __name__ == "__main__":
+    unittest.main()

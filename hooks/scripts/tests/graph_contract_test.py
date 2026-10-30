@@ -16,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "packages/graph-sem
 import graph_contract as contract_module
 from graph_contract import DispatchDeniedError
 
+from hooks.scripts.lib import context_manifest as manifest
+
 ROOT = Path(__file__).resolve().parents[3]
 CODEX = ROOT / "packages/codex/skills/agentic-loop/scripts/graph_contract.py"
 CLAUDE = ROOT / "skills/agentic-loop/scripts/graph_contract.py"
@@ -178,6 +180,22 @@ class ContractTests(unittest.TestCase):
         for check in ("dispatch-contract", "frozen-evals", "source-binding", "publication", "lessons"):
             self.assertIn(check, required["checks"])
 
+    def test_registered_required_routes_fit_the_existing_skill_budget(self) -> None:
+        """All skill-bearing registered node facts together fit the four-route cap."""
+        spec = json.loads((ROOT / "packages/graph-semantics/graph-spec.yaml").read_text())
+        required = {"agentic-loop"}
+        for node in spec["nodes"]:
+            source = node.get("source")
+            if isinstance(source, str) and source.startswith("skills/") and source.endswith("/SKILL.md"):
+                required.add(source.split("/")[1])
+        self.assertEqual(required, {"agentic-loop", "improve-prompt", "task-evals", "verify-merged-pr"})
+        self.assertLessEqual(len(required), manifest.MAX_ROUTE_SKILLS)
+        text = manifest.route("merge git push premortem", True, "coderails-codex", tuple(sorted(required)))
+        self.assertIn("required=4 offered=3 recorded=4 dropped=3 budget=4", text)
+        for skill in required:
+            self.assertIn(f"coderails-codex:{skill}", text)
+        self.assertLessEqual(len(text.encode()), 500)
+
     def test_role_assertion(self) -> None:
         """Guarded roles need their own type; other roles also accept the generic agent; nothing crosses roles."""
         scout = {**sample(), "role": "source-auditor"}
@@ -236,11 +254,15 @@ class ContractTests(unittest.TestCase):
             "session_id": "s",
             "loop_id": "l",
             "revision": 2,
-            "graph": {"active_wave": {"wave_id": "wave-2", "nodes": ["U3[1]"]}, "dispatches": {}},
+            "graph": {
+                "active_wave": {"wave_id": "wave-2", "nodes": ["U3[1]"]},
+                "nodes": {"U3[1]": {"retry": {"attempts": 0}, "respawn": {"generation": 0}}},
+                "dispatches": {},
+            },
         }
-        _, record = contract_module.make_record(state, "U3[1]", "wave-2", 1, value, None)
-        state["graph"]["dispatches"]["d1"] = record
-        prompt = envelope() + "\n" + contract_module.render_sections(value)
+        identifier, record = contract_module.make_record(state, "U3[1]", "wave-2", 1, value, None)
+        state["graph"]["dispatches"][identifier] = record
+        prompt = envelope(dispatch_id=identifier) + "\n" + contract_module.render_sections(value)
         env = contract_module.parse_envelope(prompt)
         contract_module.check_dispatch(state, env, prompt, True)
         cases: list[tuple[str, dict[str, Any], str]] = [
@@ -250,7 +272,7 @@ class ContractTests(unittest.TestCase):
             ("dispatch_stale_revision", {"revision": 1}, prompt),
             ("dispatch_foreign", {"node_id": "U3[2]"}, prompt),
             ("dispatch_foreign", {"wave_id": "wave-9"}, prompt),
-            ("dispatch_sections_missing", {}, envelope()),
+            ("dispatch_sections_missing", {}, envelope(dispatch_id=identifier)),
             ("dispatch_sections_missing", {}, prompt.replace("origin/main", "origin/dev")),
         ]
         for code, change, text in cases:
@@ -259,9 +281,9 @@ class ContractTests(unittest.TestCase):
                     contract_module.check_dispatch(state, {**env, **change}, text, True)
                 self.assertEqual(caught.exception.code, code)
         broken = copy.deepcopy(state)
-        del broken["graph"]["dispatches"]["d1"]["contract"]["write_scope"]
+        del broken["graph"]["dispatches"][identifier]["contract"]["write_scope"]
         retyped = copy.deepcopy(state)
-        retyped["graph"]["dispatches"]["d1"]["contract"]["scope"] = "other"
+        retyped["graph"]["dispatches"][identifier]["contract"]["scope"] = "other"
         for stored in (broken, retyped):
             with self.assertRaises(DispatchDeniedError) as caught:
                 contract_module.check_dispatch(stored, env, prompt, True)
@@ -278,36 +300,40 @@ class ContractTests(unittest.TestCase):
             "graph": {
                 "active_wave": {"wave_id": "wave-2", "nodes": ["U3[1]"]},
                 "dispatches": {},
+                "nodes": {"U3[1]": {"retry": {"attempts": 0}, "respawn": {"generation": 0}}},
                 "contract_from_revision": 1,
                 "context_from_revision": 2,
             },
         }
         current = {**sample(), "required_context": contract_module.required_context(state, "U3[1]")}
-        _, record = contract_module.make_record(state, "U3[1]", "wave-2", 1, current, None)
-        state["graph"]["dispatches"]["d1"] = record
-        prompt = envelope() + "\n" + contract_module.render_sections(current)
+        identifier, record = contract_module.make_record(state, "U3[1]", "wave-2", 1, current, None)
+        state["graph"]["dispatches"][identifier] = record
+        prompt = envelope(dispatch_id=identifier) + "\n" + contract_module.render_sections(current)
         env = contract_module.parse_envelope(prompt)
         contract_module.check_dispatch(state, env, prompt, True)
         missing = copy.deepcopy(state)
-        del missing["graph"]["dispatches"]["d1"]["contract"]["required_context"]
-        missing_record = missing["graph"]["dispatches"]["d1"]
+        del missing["graph"]["dispatches"][identifier]["contract"]["required_context"]
+        missing_record = missing["graph"]["dispatches"][identifier]
         missing_record["prompt_sections_sha256"] = contract_module.sections_sha256(missing_record["contract"])
         with self.assertRaises(DispatchDeniedError) as caught:
             contract_module.check_dispatch(missing, env, prompt, True)
         self.assertEqual(caught.exception.code, "dispatch_contract_altered")
         altered = copy.deepcopy(state)
-        altered_record = altered["graph"]["dispatches"]["d1"]
+        altered_record = altered["graph"]["dispatches"][identifier]
         altered_record["contract"]["required_context"]["skills"] = ["agentic-loop", "task-evals"]
         altered_record["prompt_sections_sha256"] = contract_module.sections_sha256(altered_record["contract"])
         with self.assertRaises(DispatchDeniedError) as caught:
             contract_module.check_dispatch(altered, env, prompt, True)
         self.assertEqual(caught.exception.code, "dispatch_context_mismatch")
         old = copy.deepcopy(state)
-        old_record = old["graph"]["dispatches"]["d1"]
+        old_record = old["graph"]["dispatches"][identifier]
         old_record["revision"] = 1
-        old_record["contract"] = sample()
-        old_record["prompt_sections_sha256"] = contract_module.sections_sha256(sample())
-        old_prompt = envelope(revision=1) + "\n" + contract_module.render_sections(sample())
+        historical = sample()
+        del historical["required_context"]
+        old_record["contract"] = historical
+        old_record["prompt_sections_sha256"] = contract_module.sections_sha256(historical)
+        old_prompt = envelope(dispatch_id=identifier, revision=1) + "\n" + contract_module.render_sections(historical)
+        self.assertNotIn("required_context:", old_prompt)
         contract_module.check_dispatch(old, contract_module.parse_envelope(old_prompt), old_prompt, False)
 
     def test_unit_fields_keep_only_given_values_and_reject_bad_model_role(self) -> None:

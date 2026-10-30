@@ -27,7 +27,7 @@
       ],
       "default": 30,
       "status": "enforced_by_code",
-      "description": "Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Age alone never makes a page stale (a source must also have moved)."
+      "description": "Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Without comparable repo sources, an old candidate is stale on a date-only basis."
     },
     "wiki_supervision": {
       "type": [
@@ -125,7 +125,7 @@
       ],
       "default": true,
       "status": "enforced_by_code",
-      "description": "Default ON. Claude graph_dispatch.plan() reports sandboxed or in-process-fallback:<reason> for U3 nodes. Codex refuses native U3 spawns while ON; its separate-process OAuth launcher must be bound to graph evidence before a U3 result can be accepted. OFF explicitly permits inherited parent sandbox behavior.",
+      "description": "Default ON. Claude graph_dispatch.plan() reports sandboxed or in-process-fallback:<reason> for U3 nodes. Codex refuses native U3 spawns while ON; use the existing OAuth graph driver and its sealed process evidence. Standalone worker output earns no graph completion credit. OFF explicitly permits inherited parent sandbox behavior.",
       "control": true,
       "on_value": true
     },

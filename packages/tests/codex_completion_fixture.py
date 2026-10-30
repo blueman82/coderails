@@ -100,7 +100,6 @@ class CompletionFixture(unittest.TestCase):
         self.evals = self.path.with_name("evals.json")
         write_json(self.evals, frozen_evals())
         parent = transcripts(self.directory)
-        self.parent = parent
         graph_dispatch.begin_wave(self.path)
         self.child = spawn(parent, read_json(self.path))
         graph_dispatch.record_wave(
@@ -147,6 +146,7 @@ class CompletionFixture(unittest.TestCase):
             verdict=verdict,
             cwd=str(Path.cwd()),
             head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            source_tree_sha=subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
             **(IDENTITY | identity),
         )
 

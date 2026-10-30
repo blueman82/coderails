@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, cast
 
-from scripts.lib import proof_results
+from scripts.lib import proof_results, proof_suite
 
 
 def _disposition(state: dict[str, Any], results: Path, code: str, why: str) -> str:
@@ -33,29 +32,40 @@ def validate_proofs(path: Path, state: dict[str, Any], transcript: str = "") -> 
     """
     results = path.with_name(proof_results.RESULTS_NAME)
     try:
-        document: object = json.loads(path.read_text())
-    except FileNotFoundError:
+        document, _, cutoff = proof_suite.active_suite(path, state)
+    except proof_results.ChainError as error:
+        raise ValueError(f"proof_chain_broken: {error}") from error
+    except proof_suite.SuiteError as error:
+        raise ValueError(str(error)) from error
+    if document is None:
         return _disposition(
             state, results, "proof_disposition_no_reason", "no proof.json and no proof_disposition explaining why"
         )
-    except (OSError, ValueError) as error:
-        raise ValueError("proof.json is malformed (not valid JSON)") from error
-    if not isinstance(document, dict):
-        raise ValueError("proof.json is malformed (not an object)")
-    value = cast(dict[str, Any], document)
+    value = document
+    for key in ("session_id", "loop_id"):
+        identity = value.get(key)
+        if not isinstance(identity, str) or not identity.strip() or identity != state.get(key):
+            raise ValueError(f"proof.json {key} must match the nonblank loop identity")
     version = value.get("schema_version")
     if not isinstance(version, (int, float)) or isinstance(version, bool) or version < 1:
         raise ValueError("proof.json has no valid schema_version (>= 1 required)")
-    proofs: object = value.get("proofs") if value.get("proofs") is not None else []
-    withdrawn: object = value.get("withdrawn_proofs") if value.get("withdrawn_proofs") is not None else []
+    proofs: object = value.get("proofs")
+    withdrawn: object = value.get("withdrawn_proofs", [])
     if not isinstance(proofs, list) or not isinstance(withdrawn, list):
         raise ValueError("proof.json .proofs and .withdrawn_proofs must be arrays")
     count = len(cast(list[object], proofs)) + len(cast(list[object], withdrawn))
     if count > 100:
         raise ValueError(f"proof.json has {count} proofs+withdrawn_proofs; cap is 100")
     if not proofs:
+        if withdrawn:
+            offenders, disclosures = proof_results.verify(value, results, state, cutoff)
+            if offenders:
+                raise ValueError("these frozen proofs are not verified: " + ", ".join(offenders))
+            return _disposition(state, results, "proof_no_proofs", "proof.json has no non-withdrawn proof") + (
+                "; Withdrawn proofs: " + "; ".join(disclosures)
+            )
         return _disposition(state, results, "proof_no_proofs", "proof.json has no non-withdrawn proof")
-    offenders, disclosures = proof_results.verify(value, results, state)
+    offenders, disclosures = proof_results.verify(value, results, state, cutoff)
     if offenders:
         raise ValueError(
             "these frozen proofs are not verified: " + ", ".join(offenders) + ".\n"

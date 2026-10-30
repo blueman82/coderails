@@ -12,6 +12,17 @@ from scripts.tests.retro_test import Base
 class TeardownIdentity(Base):
     """A foreign source row cannot authorize this loop's retrospective."""
 
+    def test_retro_identity_and_status_match_owned_progress(self) -> None:
+        """The Claude completion gate rejects a copied or edited retro envelope."""
+        self.ready()
+        original = self.retro()
+        for field, value in (("session_id", "foreign"), ("loop_id", "other"), ("status", "in-progress")):
+            self.rewrite_retro(**{field: value})
+            with self.assertRaisesRegex(ValueError, rf"retro_source_mismatch.*retro\.{field}"):
+                self.gate()
+            (self.dir / "retro.json").write_text(json.dumps(original))
+        self.assertEqual(self.gate(), [])
+
     def test_required_teardown_rows_keep_session_and_loop_identity(self) -> None:
         """A matching evidence hash cannot authorize a foreign teardown row."""
         self.ready()

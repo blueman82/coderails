@@ -13,7 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from hooks.scripts.lib import hook_decision  # noqa: E402
-from hooks.scripts.lib.trace_row import append_row  # noqa: E402
+from hooks.scripts.lib.trace_row import append_hook_row as append_row  # noqa: E402
 
 
 class HookDecisionTests(unittest.TestCase):
@@ -72,6 +72,13 @@ class HookDecisionTests(unittest.TestCase):
             for field in ("", " ", None, True):
                 with self.subTest(field=field), self.assertRaises(ValueError):
                     hook_decision.make_record(field, "blocked", "reason")
+
+    def test_unknown_decision_refuses_emission(self) -> None:
+        """Unknown decisions cannot be recorded as typed hook results."""
+        with self.assertRaises(ValueError):
+            hook_decision.make_record("gate", "made_up_decision", "reason")
+        self.assertFalse(append_row("gate", "made_up_decision", "reason", "session", base=self.base))
+        self.assertFalse((self.base / "session" / "trace.jsonl").exists())
 
     def test_trace_adds_record_without_raw_params(self) -> None:
         """The nested record reuses hashes rather than storing source text."""

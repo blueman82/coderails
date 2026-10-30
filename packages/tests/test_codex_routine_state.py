@@ -100,6 +100,26 @@ class CodexBehaviourTests(unittest.TestCase):
         self.assertEqual(subprocess.run(argv, capture_output=True, text=True, env=self.env).returncode, 2)
         self.assertFalse((self.root / "x.jsonl").exists())
 
+    def test_foreign_child_cannot_finish_or_abort_codex_run(self) -> None:
+        """A foreign or missing run ID cannot mutate the Codex child run."""
+        owner = "0123456789abcdef"
+        self.env["CODERAILS_ROUTINE_RUN_ID"] = owner
+        self.assertEqual(self.run_tool(self.root, "begin").returncode, 0)
+        before = self.log.with_suffix(".jsonl").read_bytes()
+        for foreign in ("fedcba9876543210", None):
+            with self.subTest(foreign=foreign):
+                if foreign is None:
+                    self.env.pop("CODERAILS_ROUTINE_RUN_ID", None)
+                else:
+                    self.env["CODERAILS_ROUTINE_RUN_ID"] = foreign
+                for command in (("finish", "no_drift"), ("abort", "incomplete-run"), ("stage", "fetch_branch")):
+                    result = self.run_tool(self.root, *command)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("run_id_mismatch", result.stderr)
+        self.assertEqual(self.log.with_suffix(".jsonl").read_bytes(), before)
+        self.env["CODERAILS_ROUTINE_RUN_ID"] = owner
+        self.assertEqual(self.run_tool(self.root, "finish", "no_drift").returncode, 0)
+
     def test_failed_event_write_keeps_the_stage_pending(self) -> None:
         """The independent Codex CLI refuses a failed log append without advancing or emitting half an event."""
         self.assertEqual(self.run_tool(self.root, "begin").returncode, 0)

@@ -113,6 +113,7 @@ const attributeKeys = new Set([
   "gen_ai.usage.cache_read_input_tokens",
   "gen_ai.usage.cache_creation_input_tokens",
   "coderails.usage.semantics",
+  "coderails.usage.identity_sha256",
   "coderails.observation.kind",
   "coderails.observation.target_kind",
   "coderails.observation.target_sha256",
@@ -201,7 +202,7 @@ function attributes(value: unknown): boolean {
 function actorAttributes(value: Record<string, unknown>): boolean {
   const name = value["coderails.actor.name"];
   return name === undefined || (value["coderails.actor.kind"] === "worker" &&
-    nonempty(value["coderails.actor.id"]) && validActorDisplayName(name));
+    nonempty(value["coderails.actor.id"]) && value["coderails.actor.id"].trim().length > 0 && validActorDisplayName(name));
 }
 
 function observationAttributes(value: Record<string, unknown>): boolean {
@@ -219,6 +220,9 @@ function observationAttributes(value: Record<string, unknown>): boolean {
 function usageAttributes(value: Record<string, unknown>): boolean {
   const semantics = value["coderails.usage.semantics"];
   if (semantics !== undefined && semantics !== "cumulative" && semantics !== "incremental") return false;
+  const identity = value["coderails.usage.identity_sha256"];
+  if (identity !== undefined && (semantics !== "incremental" || typeof identity !== "string" ||
+    !/^[a-f0-9]{64}$/.test(identity))) return false;
   return ["gen_ai.usage.cache_read_input_tokens", "gen_ai.usage.cache_creation_input_tokens"]
     .every((key) => value[key] === undefined || ordinal(value[key]));
 }

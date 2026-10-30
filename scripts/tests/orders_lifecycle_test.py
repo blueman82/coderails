@@ -17,7 +17,7 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
-from hooks.scripts.lib.loop_state_common import atomic_progress_update  # noqa: E402
+from hooks.scripts.lib.loop_state_common import atomic_progress_update as progress_update  # noqa: E402
 from scripts.lib import orders  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
@@ -37,6 +37,7 @@ def progress(repo: Path, session: str, loop: str, status: str = "complete") -> P
         "revision": 1,
         "status": status,
         "created": STAMP,
+        "updated_at": STAMP,
         "authorising_prompt_raw": "Run this bounded loop.",
         "completed_marker": 0,
         "work_units": {},
@@ -49,8 +50,7 @@ def progress(repo: Path, session: str, loop: str, status: str = "complete") -> P
 
 def retrospective(repo: Path, session: str, loop: str) -> Path:
     """A completed source-bound retrospective with the original schema-2 required fields."""
-    state_path = progress(repo, session, loop)
-    state = json.loads(state_path.read_text())
+    state = json.loads((state_path := progress(repo, session, loop)).read_text())
     retro: dict[str, Any] = {
         "schema_version": 2,
         "session_id": session,
@@ -120,7 +120,7 @@ class OwnedCli(StoreCase):
 
     def complete(self) -> None:
         """Use the existing atomic progress writer for the successful durable commit boundary."""
-        self.assertTrue(atomic_progress_update(self.path, lambda s: {**s, "status": "complete"}))
+        self.assertTrue(progress_update(self.path, lambda s: {**s, "status": "complete"}, preserve_updated_at=True))
 
     def test_running_record_only_prepares_without_recurrence(self) -> None:
         """A prospective completion may synchronize a claim but cannot create lifecycle evidence or ages."""
@@ -137,7 +137,7 @@ class OwnedCli(StoreCase):
         self.stage_record()
         self.assertEqual(self.cli("prepare", "--loop", "logical-loop")[0], 0)
         with mock.patch("hooks.scripts.lib.loop_state_common.os.replace", side_effect=OSError("disk-full")):
-            self.assertFalse(atomic_progress_update(self.path, lambda s: {**s, "status": "complete"}))
+            self.assertFalse(progress_update(self.path, lambda s: {**s, "status": "complete"}))
         self.assertEqual(self.cli("tick", "--loop", "logical-loop")[0], 2)
         self.assertEqual(self.ledger()["orders"], [])
         self.assertNotIn("orders_ticked", [r["step"] for r in self.rows()])
@@ -239,7 +239,7 @@ class OwnedCli(StoreCase):
                 got = subprocess.run([*prefix, *command], capture_output=True, text=True, timeout=15)
                 self.assertEqual(got.returncode, 0, got.stdout)
             path = self.repo / session / "progress.json"
-            self.assertTrue(atomic_progress_update(path, lambda s: {**s, "status": "complete"}))
+            self.assertTrue(progress_update(path, lambda s: {**s, "status": "complete"}, preserve_updated_at=True))
             got = subprocess.run(
                 [*prefix, "tick", "--loop", "logical-loop"], capture_output=True, text=True, timeout=15
             )

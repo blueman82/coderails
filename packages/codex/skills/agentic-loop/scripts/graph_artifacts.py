@@ -12,7 +12,7 @@ from graph_data import array_value, load_evidence, nonempty, object_value
 from graph_identity import GraphError, is_frozen_loop_evals
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from scripts.lib import proof_results, retro_check  # noqa: E402
+from scripts.lib import proof_results, proof_suite, retro_check  # noqa: E402
 from scripts.lib.eval_integrity import IntegrityError, verify_suite  # noqa: E402
 
 
@@ -74,24 +74,28 @@ def validate_evals(state: dict[str, Any], revision: int | None, path: Path) -> N
 def _validate_proofs(state: dict[str, Any], proof_path: Path) -> None:
     """Require a valid no-proof disposition, or every frozen proof satisfied by a controller-recorded run row."""
     results = proof_path.with_name(proof_results.RESULTS_NAME)
-    if not proof_path.exists():
-        try:
-            rows = proof_results.read_rows(results)
-        except proof_results.ChainError:
-            rows = []
+    try:
+        proof, rows, cutoff = proof_suite.active_suite(proof_path, state)
+    except proof_results.ChainError as error:
+        raise GraphError(f"proof_chain_broken: {error}") from error
+    except proof_suite.SuiteError as error:
+        raise GraphError(str(error)) from error
+    if proof is None:
         code = proof_results.disposition_reason(state, rows)
         if code:
             proof_results.trace("proof.gate", "blocked", code, state["session_id"], state["loop_id"])
             raise GraphError(f"proof evidence is missing and has no valid disposition ({code})")
         return
-    proof = load_evidence(proof_path, "proof")
     _matching(proof, state, "proof")
     proofs = array_value(proof.get("proofs"), "proof.proofs")
+    withdrawn = array_value(proof.get("withdrawn_proofs", []), "proof.withdrawn_proofs")
+    if len(proofs) + len(withdrawn) > 100:
+        raise GraphError("proofs+withdrawn_proofs exceeds cap of 100")
     if not proofs:
-        try:
-            rows = proof_results.read_rows(results)
-        except proof_results.ChainError:
-            rows = []
+        if withdrawn:
+            offenders, _ = proof_results.verify(proof, results, state, cutoff)
+            if offenders:
+                raise GraphError("frozen proofs are not verified: " + ", ".join(offenders))
         if proof_results.disposition_reason(state, rows):
             raise GraphError("proof evidence is missing or not passing (proof_no_proofs)")
         return
@@ -99,7 +103,7 @@ def _validate_proofs(state: dict[str, Any], proof_path: Path) -> None:
         item = object_value(raw_proof, f"proof.proofs[{index}]")
         nonempty(item.get("id"), f"proof.proofs[{index}].id")
         nonempty(item.get("cmd"), f"proof.proofs[{index}].cmd")
-    offenders, _ = proof_results.verify(proof, results, state)
+    offenders, _ = proof_results.verify(proof, results, state, cutoff)
     if offenders:
         raise GraphError("frozen proofs are not verified: " + ", ".join(offenders))
 
@@ -120,9 +124,13 @@ def validate_completion_evidence(
     (`retro_check`).
     """
     del transcript_path
-    if len({evals_path.resolve().parent, proof_path.resolve().parent, retro_path.resolve().parent}) != 1:
-        # the retro binds the hashes of the files in ITS directory; evals and proof must be those very files
-        raise GraphError("evals, proof and retro must live in one state directory")
+    state_dir = retro_path.resolve().parent
+    paths = ((evals_path, "evals.json"), (proof_path, "proof.json"), (retro_path, "retro.json"))
+    for path, name in paths:
+        if path.resolve() != (state_dir / name).resolve():
+            raise GraphError(f"{name} path is not canonical; evals, proof and retro must live in one state directory")
+    # Use the same files that retro_check hashes, even when the caller used a symlink alias.
+    evals_path, proof_path, retro_path = (state_dir / name for _, name in paths)
     retro = load_evidence(retro_path, "retro")
     _matching(retro, state, "retro")
     validate_evals(state, revision, evals_path)
@@ -133,6 +141,6 @@ def validate_completion_evidence(
     if retro.get("status") != "complete":
         raise GraphError("retro evidence is incomplete")
     try:
-        return retro_check.check(state, retro, retro_path.parent)
+        return retro_check.check(state, retro, state_dir)
     except retro_check.RetroError as error:
         raise GraphError(str(error)) from error

@@ -6,7 +6,35 @@ import { readCodexTracePage } from "../src/lib/collect/sessionTrace";
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
 describe("Codex transcript observations", () => {
-  it("keeps invocation, verified read, failed read, and mention separate without storing text", async () => {
+  it("does not establish installation from an arbitrary skill path", async () => {
+    const { deps, parent, rows, save } = await fixture();
+    await save(parent, [...rows,
+      { type: "response_item", payload: { type: "function_call", name: "read_file", call_id: "scratch",
+        arguments: JSON.stringify({ path: "/scratch/uninstalled/skills/wiki-query/SKILL.md" }) } },
+      { type: "response_item", payload: { type: "function_call_output", call_id: "scratch", is_error: false,
+        output: "complete 😀" } },
+    ]);
+    const page = await readCodexTracePage("parent", null, 30, deps);
+    expect(page.events.find((event) => event.name === "function_call_output" &&
+      event.attributes["coderails.native.call_id"] === "scratch")?.attributes)
+      .toMatchObject({ "coderails.observation.kind": "uncertain", "coderails.observation.bytes": 13 });
+  });
+
+  it("recognizes the declared Read file_path input", async () => {
+    const { deps, parent, rows, save } = await fixture();
+    await save(parent, [...rows,
+      { type: "response_item", payload: { type: "function_call", name: "Read", call_id: "read",
+        arguments: JSON.stringify({ file_path: "/repo/AGENTS.md" }) } },
+      { type: "response_item", payload: { type: "function_call_output", call_id: "read", is_error: false,
+        output: "known context" } },
+    ]);
+    const page = await readCodexTracePage("parent", null, 30, deps);
+    expect(page.events.find((event) => event.name === "function_call_output" &&
+      event.attributes["coderails.native.call_id"] === "read")?.attributes["coderails.observation.kind"])
+      .toBe("read");
+  });
+
+  it("keeps invocation, unproved skill-file read, failed read and mention separate without text", async () => {
     const { deps, parent, rows, save } = await fixture();
     const skill = "/plugin/skills/agentic-loop/SKILL.md";
     const secret = "PRIVATE_OBSERVATION_CANARY_π";
@@ -32,7 +60,7 @@ describe("Codex transcript observations", () => {
       "coderails.observation.target_sha256": digest("skill:agentic-loop"),
     });
     expect(byCall("read", "function_call_output")?.attributes).toMatchObject({
-      "coderails.observation.kind": "read", "coderails.observation.target_kind": "skill",
+      "coderails.observation.kind": "uncertain", "coderails.observation.target_kind": "skill",
       "coderails.observation.target_sha256": digest("skill:agentic-loop"),
       "coderails.observation.bytes": Buffer.byteLength(secret, "utf8"),
     });

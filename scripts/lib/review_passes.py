@@ -91,9 +91,11 @@ def validate_summary_text(text: str) -> None:
     if any(line.startswith("<!-- coderails-review-") for line in lines):
         raise ValueError("review marker inside summary")
     if "## No findings" in lines:
-        if any(heading in lines for heading in headings):
-            raise ValueError('ambiguous — "## No findings" present alongside structured headings')
+        if [line for line in lines if line.strip()] != ["## No findings"]:
+            raise ValueError('"## No findings" must be the only non-blank line')
         return
+    if [line for line in lines if line.startswith("## ")] != list(headings):
+        raise ValueError("summary headings must be Critical, Important, Suggestions in order")
     missing = [heading for heading in headings if heading not in lines]
     if missing:
         raise ValueError(f"missing required headings: {' '.join(missing)}")
@@ -128,7 +130,7 @@ def _bound(rest: str, passes: Passes) -> bool:
     parts = re.split(r"^<!-- coderails-review-pass ([a-z][a-z0-9-]*) -->\r?\n", rest, flags=re.MULTILINE)
     names = ["review-pr", *parts[1::2]]
     declared = [p["name"] for p in passes]
-    if len(names) != len(set(names)) or len(declared) != len(set(declared)):
+    if "review-pr" not in declared or len(names) != len(set(names)) or len(declared) != len(set(declared)):
         return False
     texts = dict(zip(names, [parts[0], *parts[2::2]]))
     if set(texts) != {"review-pr", *declared}:
@@ -167,7 +169,7 @@ def _valid(item: object) -> bool:
 
 
 def parse(body: str, pr: str, head_sha: str) -> Passes | None:
-    """Passes of the artifact for this PR head: [] when there is no line or it names another head, None if malformed."""
+    """Passes for this PR head: [] only when the passes line is absent, None when present but invalid."""
     lines = body.splitlines()
     marker = next((i for i, line in enumerate(lines) if review_artifact.matches_marker(line, pr, head_sha)), -1)
     line = lines[marker + 1] if 0 <= marker < len(lines) - 1 else ""
@@ -180,7 +182,7 @@ def parse(body: str, pr: str, head_sha: str) -> Passes | None:
     if not isinstance(data, dict) or not isinstance(cast(dict[str, Any], data).get("passes"), list):
         return None
     if cast(dict[str, Any], data).get("head_sha") != head_sha:
-        return []
+        return None
     passes = cast(Passes, cast(dict[str, Any], data)["passes"])
     start = marker + 2
     if start < len(lines) and lines[start].startswith(review_artifact.COMPAT_PREFIX):

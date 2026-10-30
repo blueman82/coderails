@@ -13,8 +13,10 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hooks.scripts.lib import context_manifest as manifest
 from packages.tests.provider_fixture import Provider
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -68,6 +70,11 @@ class ContextManifestTests(unittest.TestCase):
             state["graph"]["nodes"]["U3[1]"]["evidence"] = list(EVIDENCE)
             provider.write(state)
 
+    def tearDown(self) -> None:
+        """Every hook case must leave the external-executable sentinels untouched."""
+        for provider in self.providers:
+            self.assertFalse(provider.external_refusals.exists(), provider.name)
+
     def session_dir(self, provider: Provider) -> Path:
         """Return <loop root>/<session id>, where authority.json and trace.jsonl live."""
         return Path(provider.environment["CODERAILS_AGENTIC_LOOP_DIR"]) / provider.session
@@ -75,6 +82,22 @@ class ContextManifestTests(unittest.TestCase):
     def payload(self, provider: Provider, source: str = "startup") -> dict[str, object]:
         """Return a SessionStart payload for the provider's own session."""
         return {"session_id": provider.session, "cwd": str(provider.home), "source": source}
+
+    def test_required_routes_reuse_the_discovered_state(self) -> None:
+        """Required context cannot add another five-second Git discovery to each hook."""
+        provider = self.providers[0]
+        payload = json.dumps(self.payload(provider) | {"prompt": "hello"})
+        with patch.dict(os.environ, provider.environment):
+            for surface in ("prompt", "start"):
+                with (
+                    self.subTest(surface=surface),
+                    patch.object(manifest, "find_state", wraps=manifest.find_state) as find,
+                ):
+                    if surface == "prompt":
+                        manifest.route_for_payload(payload, "coderails")
+                    else:
+                        manifest.manifest_with_reason(str(provider.home), provider.session, "startup", provider.plugin)
+                    self.assertEqual(find.call_count, 1)
 
     def test_lib_copies_are_byte_identical(self) -> None:
         """The Codex copies stay in step with the Claude originals."""

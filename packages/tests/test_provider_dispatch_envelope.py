@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages/graph-semantics"))
 from hooks.scripts.tests.lib import claude_transcript_fixture as claude
 from packages.tests.provider_fixture import Provider
 
@@ -119,15 +118,6 @@ class DispatchEnvelopeTests(unittest.TestCase):
 
         self.each(case)
 
-    def test_codex_authorization_binds_call_id_after_rollout(self) -> None:
-        """The enabled reader records the exact native call ID."""
-        provider = self.opened("codex")
-        request = provider.request()
-        provider.environment["CODERAILS_A6_EVIDENCE_WRITE"] = "on"
-        self.assertFalse(self.verdict(provider, request))
-        record = next(iter(provider.read()["graph"]["dispatches"].values()))
-        self.assertEqual(record["authorized"], {"tool_use_id": request["tool_use_id"]})
-
     def test_missing_contract_field_in_the_stored_record(self) -> None:
         """A record whose contract lost a field no longer authorizes anything."""
 
@@ -208,6 +198,21 @@ class DispatchEnvelopeTests(unittest.TestCase):
             self.refuse(provider, request, "dispatch_unknown_id")
 
         self.each(case)
+
+    def test_stored_and_node_attempts_must_match_the_issued_dispatch(self) -> None:
+        """A changed record or node retry count cannot authorize the original native spawn."""
+        for name in ("claude", "codex"):
+            for target in ("record", "node"):
+                with self.subTest(provider=name, target=target):
+                    provider = self.opened(name)
+                    request = provider.request()
+                    state = provider.read()
+                    if target == "record":
+                        next(iter(state["graph"]["dispatches"].values()))["attempt"] = 2
+                    else:
+                        state["graph"]["nodes"]["U3[1]"]["retry"]["attempts"] = 1
+                    provider.write(state)
+                    self.refuse(provider, request, "dispatch_attempt_mismatch")
 
     def test_replayed_dispatch_id(self) -> None:
         """A second distinct tool use of an already authorized dispatch id is a replay."""
@@ -313,7 +318,6 @@ class DispatchEnvelopeTests(unittest.TestCase):
         report = provider.launch()
         self.unauthorize(provider)
         provider.success("record-wave", json.dumps(report))
-
         missing = self.opened("claude")
         missing.environment = {**missing.environment, "CODERAILS_GRAPH_DISPATCH": "off"}
         report = missing.launch()

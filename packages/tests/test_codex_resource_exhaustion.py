@@ -6,6 +6,7 @@ import contextlib
 import errno
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -65,6 +66,21 @@ class ResourceExhaustionTests(unittest.TestCase):
         with patch("subprocess.run", side_effect=OSError(errno.ENOENT, "missing")):
             self.assertIsNone(hook_common.graph_output(self.graph, "inspect", str(self.state)))
 
+    def test_completion_error_code_is_bounded_and_known(self) -> None:
+        """Only the known retro refusal code may reach a Stop reason."""
+        codes: list[str] = []
+        for stderr, expected in (
+            ("graph: retro_memory_invalid: bad count\n", ["retro_memory_invalid"]),
+            ("graph: unknown_code: " + "x" * 4096, []),
+        ):
+            with (
+                self.subTest(stderr=stderr[:40]),
+                patch("subprocess.run", return_value=subprocess.CompletedProcess([], 1, "", stderr)),
+            ):
+                self.assertIsNone(hook_common.graph_output(self.graph, "verify-completion", failure_code=codes))
+                self.assertEqual(codes, expected)
+            codes.clear()
+
     def test_state_lookup_resource_error_blocks_stop(self) -> None:
         """EMFILE in the path lookup must not appear to mean no active graph."""
         payload = {"session_id": "s", "cwd": "/x"}
@@ -84,7 +100,7 @@ class ResourceExhaustionTests(unittest.TestCase):
     def test_state_scan_resource_error_is_distinct_from_absence(self) -> None:
         """An exhausted directory scan must not turn into a missing state file."""
         with (
-            patch.object(hook_common, "loop_root", return_value=self.state.parent),
+            patch.dict("os.environ", {"CODERAILS_AGENTIC_LOOP_DIR": str(self.state.parent)}),
             patch("hook_common.subprocess.run", side_effect=OSError(errno.ENOENT, "git absent")),
             patch.object(Path, "iterdir", side_effect=OSError(errno.EMFILE, "x")),
             self.assertRaises(hook_common.HostResourceError),
@@ -126,8 +142,11 @@ class ResourceExhaustionTests(unittest.TestCase):
             "tool_input": {"task_name": marker, "message": f"CODERAILS_GRAPH_TASK={marker}\nwork"},
         }
         base = self.collaborators()
-        with patch.object(
-            loop_dispatch_guard, "graph_output", side_effect=hook_common.HostResourceError(errno.EMFILE, "x")
+        with (
+            patch.object(
+                loop_dispatch_guard, "graph_output", side_effect=hook_common.HostResourceError(errno.EMFILE, "x")
+            ),
+            patch.object(loop_dispatch_guard, "strict_config_path", return_value=None),
         ):
             reason = run_hook(loop_dispatch_guard, payload, **base)
         self.assertIn("not known to be invalid", reason)

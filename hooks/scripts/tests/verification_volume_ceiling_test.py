@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import sys
 import unittest
 from pathlib import Path
@@ -37,6 +38,30 @@ class CeilingTests(HookCase):
                 self.assertEqual(self.denied("verification_volume_ceiling", self.request(command)), expected)
             self.assertEqual(self.count(target).read_text(encoding="utf-8").strip(), "4")
             self.assertFalse(Path(f"{self.count(target)}.lock").exists())
+
+    def test_three_runs_in_one_command_are_denied(self) -> None:
+        """One tool call cannot hide the third run in later shell segments."""
+        command = "; ".join((self.full, self.full, self.full))
+        self.assertTrue(self.denied("verification_volume_ceiling", self.request(command)))
+        self.assertEqual(self.count("run_all").read_text(encoding="utf-8").strip(), "3")
+
+    def test_one_command_counts_each_worktree(self) -> None:
+        """A local cd changes the counter selected for the next run."""
+        other = self.repository("other", "unit-other")
+        command = f"{self.full}; cd {shlex.quote(str(other))}; {self.full}"
+        self.assertFalse(self.denied("verification_volume_ceiling", self.request(command)))
+        self.assertEqual(self.count("run_all").read_text(encoding="utf-8").strip(), "1")
+        self.assertEqual(self.count("run_all", other).read_text(encoding="utf-8").strip(), "1")
+
+    def test_denied_command_does_not_charge_other_worktree(self) -> None:
+        """A third run blocks the command before its other worktree can run."""
+        other = self.repository("other", "unit-other")
+        for _ in range(2):
+            self.assertFalse(self.denied("verification_volume_ceiling", self.request(self.full)))
+        command = f"{self.full}; cd {shlex.quote(str(other))}; {self.full}"
+        self.assertTrue(self.denied("verification_volume_ceiling", self.request(command)))
+        self.assertEqual(self.count("run_all").read_text(encoding="utf-8").strip(), "3")
+        self.assertFalse(self.count("run_all", other).exists())
 
     def test_existing_counter_survives_python_cutover(self) -> None:
         """A preexisting count blocks the first Python invocation without a reset."""

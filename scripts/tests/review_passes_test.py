@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -127,6 +128,23 @@ class PolicyTests(unittest.TestCase):
 class LineTests(unittest.TestCase):
     """render, parse and verdict_from_summary."""
 
+    def test_optional_compatibility_line_retains_strict_binding(self) -> None:
+        """The optional legacy line binds PR/head without replacing summary and section checks."""
+        passes = [entry("review-pr"), entry("security-review")]
+        lines = body(passes).splitlines()
+        compat = review_artifact.compat_line("7", SHA, 0, "clean-break")
+        valid = "\n".join([*lines[:2], compat, *lines[2:]])
+        self.assertEqual(review_passes.parse(valid, "7", SHA), passes)
+        for invalid in (
+            valid.replace(compat, review_artifact.compat_line("8", SHA, 0, "clean-break")),
+            valid.replace(compat, review_artifact.compat_line("7", OTHER, 0, "clean-break")),
+            valid.replace("count=0", "count=bad"),
+            valid.replace("## No findings", "## Critical\n- unreviewed change", 1),
+            valid.replace("<!-- coderails-review-pass security-review -->", "<!-- coderails-review-pass other -->"),
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertIsNone(review_passes.parse(invalid, "7", SHA))
+
     def test_round_trip(self) -> None:
         """A rendered line parses back to the same entries."""
         passes = [entry("review-pr"), entry("security-review")]
@@ -136,10 +154,15 @@ class LineTests(unittest.TestCase):
         """A v1 artifact without a passes line counts as passes=[]."""
         self.assertEqual(review_passes.parse(body(None), "7", SHA), [])
 
-    def test_line_bound_to_other_head_is_ignored(self) -> None:
-        """A passes line carrying a different head_sha is ignored, not trusted."""
+    def test_present_line_must_bind_review_pr_verdict(self) -> None:
+        """A specialist pass cannot hide a Critical finding in the main review summary."""
+        text = body([entry("security-review")], texts={"review-pr": CRITICAL})
+        self.assertIsNone(review_passes.parse(text, "7", SHA))
+
+    def test_line_bound_to_other_head_is_malformed(self) -> None:
+        """A stale passes line cannot become an absent legacy line."""
         text = "\n".join([review_artifact.marker("7", SHA), review_passes.render(OTHER, [entry("security-review")])])
-        self.assertEqual(review_passes.parse(text, "7", SHA), [])
+        self.assertIsNone(review_passes.parse(text, "7", SHA))
 
     def test_malformed_line_is_none(self) -> None:
         """A passes line that does not parse or validate is malformed (None), never silently empty."""
@@ -214,6 +237,7 @@ class CheckTests(unittest.TestCase):
     def codes(self, reply: git.ReviewPasses, changes: manifest_policy.Changes | None = HOOKS) -> list[str]:
         """Run the check against a canned artifact and diff."""
         with (
+            mock.patch.object(git, "gate_review_summary_for_pr", return_value=(0, "")),
             mock.patch.object(git, "review_passes_for_pr", return_value=reply),
             mock.patch.object(git, "pr_field", return_value="base-sha"),
             mock.patch.object(manifest_policy, "diff_changes", return_value=changes),
@@ -232,6 +256,7 @@ class CheckTests(unittest.TestCase):
 
         with (
             mock.patch.object(git, "pr_field", return_value="release-sha"),
+            mock.patch.object(git, "gate_review_summary_for_pr", return_value=(0, "")),
             mock.patch.object(git, "review_passes_for_pr", return_value=found([entry("review-pr")])),
             mock.patch.object(manifest_policy, "diff_changes", side_effect=changes),
         ):
@@ -261,17 +286,41 @@ class CheckTests(unittest.TestCase):
         """No passes line counts as passes=[]; a hooks/ PR is refused until re-posted (old behaviour: accepted)."""
         with mock.patch.object(git, "trusted_comment_bodies", return_value=[body(None)]):
             self.assertEqual(git.gate_review_summary_for_pr("7", SHA), (0, ""))  # the pre-change gate: accepted
-            self.assertEqual(git.review_passes_for_pr("7", SHA), found([]))
+            self.assertEqual(git.review_passes_for_pr("7", SHA), found([entry("review-pr")]))
         self.assertEqual(OLD_BEHAVIOUR_REQUIRED_NAMES, [])
         self.assertEqual(self.codes(found([])), ["required_review_missing:security-review"])
 
+    def test_legacy_critical_review_fails_docs_only(self) -> None:
+        """An old marker cannot hide a Critical general review finding."""
+        with mock.patch.object(git, "trusted_comment_bodies", return_value=[body(None, texts={"review-pr": CRITICAL})]):
+            result = git.review_passes_for_pr("7", SHA)
+        self.assertEqual(result.passes, (entry("review-pr", CRITICAL),))
+        self.assertEqual(self.codes(result, DOCS), ["required_review_failed:review-pr"])
+
     def test_newest_matching_artifact_wins_and_stale_head_is_not_accepted(self) -> None:
         """A newer artifact replaces an older one; a body for another head is not an artifact at all."""
-        bodies = [body([entry("review-pr"), entry("security-review")]), body([entry("review-pr")])]
+        bodies = [body([entry("review-pr"), entry("security-review")]), body([entry("review-pr")]), body(None)]
         with mock.patch.object(git, "trusted_comment_bodies", return_value=bodies):
             self.assertEqual(git.review_passes_for_pr("7", SHA).passes, (entry("review-pr"),))
         with mock.patch.object(git, "trusted_comment_bodies", return_value=[body([entry("review-pr")], sha=OTHER)]):
             self.assertEqual(git.review_passes_for_pr("7", SHA).status, 1)
+
+    def test_legacy_companion_must_match_preceding_pass_artifact(self) -> None:
+        """The server-compatible last comment cannot replace or hide a different review."""
+        passing = body([entry("review-pr"), entry("security-review")])
+        companion = body(None)
+        for bodies, expected in (
+            ([passing, companion], (entry("review-pr"), entry("security-review"))),
+            (
+                [passing, companion, "<!-- coderails-eval-summary v1 -->"],
+                (entry("review-pr"), entry("security-review")),
+            ),
+            ([passing, body(None, texts={"review-pr": CRITICAL})], None),
+            ([passing, body([entry("review-pr", CRITICAL)])], None),
+            ([companion], (entry("review-pr"),)),
+        ):
+            with self.subTest(bodies=bodies), mock.patch.object(git, "trusted_comment_bodies", return_value=bodies):
+                self.assertEqual(git.review_passes_for_pr("7", SHA).passes, expected)
 
     def test_artifact_missing_fetch_failure_and_malformed(self) -> None:
         """Absent artifact, a failed fetch and a malformed line each refuse with their own code."""
@@ -310,6 +359,9 @@ class PathTests(unittest.TestCase):
         """merge.py publishes through publication_gate.enforce; a hooks/ PR without the pass is refused."""
         reply = found([entry("review-pr")])
         with (
+            mock.patch.dict(os.environ, {"CODERAILS_PUBLICATION_SESSION_ID": "fixture-session"}),
+            mock.patch.object(git, "gate_review_summary_for_pr", return_value=(0, "")),
+            mock.patch.object(git, "pr_field", return_value="base-sha"),
             mock.patch.object(git, "review_passes_for_pr", return_value=reply),
             mock.patch.object(git, "gate_eval_summary_for_pr", return_value=git.EvalSummary(1)),
             mock.patch.object(manifest_policy, "diff_changes", return_value=HOOKS),
@@ -317,7 +369,9 @@ class PathTests(unittest.TestCase):
             self.assertRaises(git.WorkflowError) as caught,
         ):
             publication_gate.enforce("7", SHA)
-        self.assertTrue(str(caught.exception).startswith("required_review_missing:security-review"))
+        self.assertTrue(
+            str(caught.exception).startswith("required_review_missing:security-review"), str(caught.exception)
+        )
         self.assertIn(publication_gate.review_passes_check, publication_gate.CHECKS)
         self.assertTrue(hasattr(merge, "publication_gate"))
 
@@ -326,6 +380,7 @@ class PathTests(unittest.TestCase):
         violation = [{"code": "required_review_missing:security-review", "detail": "x"}]
         with (
             mock.patch.object(pr_merge_gate, "pr_field", return_value=SHA),
+            mock.patch.object(pr_merge_gate, "gate_review_summary_for_pr", return_value=(0, "")),
             mock.patch.object(pr_merge_gate, "gate_eval_summary_for_pr", return_value=git.EvalSummary(0, "0", "{}")),
             mock.patch.object(pr_merge_gate, "smoke_verify", return_value=0),
             mock.patch.object(publication_gate, "evaluate", return_value=violation),

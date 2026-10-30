@@ -26,7 +26,7 @@ def run(*argv: str, cwd: Path | None = None, **env: str) -> subprocess.Completed
 
 
 class MirrorTests(unittest.TestCase):
-    """Both trees ship the scripts; Codex also validates its own config at merge."""
+    """Both trees ship the scripts; only merge.py may differ, and only in provider command names."""
 
     def test_byte_identical_and_executable(self) -> None:
         """Four scripts are byte mirrors; every script is executable in both trees."""
@@ -37,21 +37,17 @@ class MirrorTests(unittest.TestCase):
                 if name not in CODEX_ONLY_TEXT:
                     self.assertEqual(claude.read_bytes(), codex.read_bytes())
 
-    def test_merge_copies_differ_only_in_command_names(self) -> None:
-        """The merge stages match apart from provider messages and Codex config validation."""
+    def test_merge_copies_keep_known_provider_differences_only(self) -> None:
+        """The merge logic agrees after provider names and Codex config validation are removed."""
         claude = (ROOT / "scripts/merge.py").read_text().replace("/coderails:post-", "$coderails-codex:post-")
         codex = (CODEX / "scripts/merge.py").read_text()
         codex = codex.replace("from scripts.lib.config_strict import ConfigRejected, strict_settings\n", "")
         codex = codex.replace(
-            "        try:\n            strict_settings(config)\n        except ConfigRejected as error:\n"
-            "            raise git.WorkflowError(str(error)) from error\n",
-            "",
-        )
-        codex = codex.replace(
-            "    if config:\n        if integrity_enabled(config):\n", "    if config and integrity_enabled(config):\n"
-        )
-        codex = codex.replace(
+            "    if config:\n        try:\n            strict_settings(config)\n"
+            "        except ConfigRejected as error:\n            raise git.WorkflowError(str(error)) from error\n"
+            "        if integrity_enabled(config):\n"
             "            verify_integrity_status(sha, integrity_status_login(config))",
+            "    if config and integrity_enabled(config):\n"
             "        verify_integrity_status(sha, integrity_status_login(config))",
         )
         self.assertEqual("".join(claude.split()), "".join(codex.split()))  # line wrapping may differ

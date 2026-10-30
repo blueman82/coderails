@@ -22,7 +22,75 @@ async function fixture(rows: Row[]) {
 }
 
 describe("Claude transcript observations", () => {
-  it("keeps skill invocation, successful read and mention separate without text in the trace", async () => {
+  it("keeps arbitrary skill-file origin unproved", async () => {
+    const { deps } = await fixture([
+      { type: "assistant", sessionId: "s1", message: { content: [
+        { type: "tool_use", name: "Read", id: "scratch", input: { file_path: "/scratch/uninstalled/skills/wiki-query/SKILL.md" } },
+      ] } },
+      { type: "user", sessionId: "s1", message: { content: [
+        { type: "tool_result", tool_use_id: "scratch", content: "complete 😀" },
+      ] } },
+    ]);
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    expect(page.events.find((event) => event.name === "tool_result")?.attributes)
+      .toMatchObject({ "coderails.observation.kind": "uncertain", "coderails.observation.bytes": 13 });
+  });
+
+  it("retains a separate mention beside tool calls without duplicating invocations", async () => {
+    const { deps } = await fixture([{ type: "assistant", sessionId: "s1", message: { content: [
+      { type: "text", text: "See skills/wiki-query/SKILL.md before continuing." },
+      { type: "tool_use", name: "Bash", id: "bash", input: { command: "true" } },
+      { type: "tool_use", name: "Skill", id: "skill", input: { skill: "coderails:wiki-query" } },
+    ] } }]);
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    const kinds = page.events.map((event) => event.attributes["coderails.observation.kind"]);
+    expect(kinds.filter((kind) => kind === "mention")).toHaveLength(1);
+    expect(kinds.filter((kind) => kind === "invocation")).toHaveLength(1);
+    expect(new Set(page.events.map((event) => event.eventId)).size).toBe(page.events.length);
+  });
+
+  it.each([null, "true", 1, {}, []].map((value) => [value]))("keeps malformed read error flag %j uncertain", async (is_error) => {
+    const { deps } = await fixture([
+      { type: "assistant", sessionId: "s1", message: { content: [
+        { type: "tool_use", name: "Read", id: "read", input: { file_path: "/repo/AGENTS.md" } },
+      ] } },
+      { type: "user", sessionId: "s1", message: { content: [
+        { type: "tool_result", tool_use_id: "read", is_error, content: "body" },
+      ] } },
+    ]);
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    expect(page.events.find((event) => event.name === "tool_result")?.attributes["coderails.observation.kind"])
+      .toBe("uncertain");
+  });
+
+  it.each([undefined, false])("retains valid context read success with flag %j", async (is_error) => {
+    const { deps } = await fixture([
+      { type: "assistant", sessionId: "s1", message: { content: [
+        { type: "tool_use", name: "Read", id: "read", input: { file_path: "/repo/AGENTS.md" } },
+      ] } },
+      { type: "user", sessionId: "s1", message: { content: [
+        { type: "tool_result", tool_use_id: "read", is_error, content: "body" },
+      ] } },
+    ]);
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    expect(page.events.find((event) => event.name === "tool_result")?.attributes["coderails.observation.kind"])
+      .toBe("read");
+  });
+
+  it("retains only a hashed native usage identity across repeated message rows", async () => {
+    const row = { type: "assistant", sessionId: "s1", message: { id: "PRIVATE_NATIVE_ID",
+      usage: { input_tokens: 8 }, content: [{ type: "text", text: "PRIVATE_BODY" }] } };
+    const { deps } = await fixture([row, row, { ...row, message: { ...row.message, id: "distinct-message" } }]);
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    const identities = page.events.map((event) => event.attributes["coderails.usage.identity_sha256"]);
+    expect(identities[0]).toMatch(/^[a-f0-9]{64}$/);
+    expect(identities[1]).toBe(identities[0]);
+    expect(identities[2]).not.toBe(identities[0]);
+    expect(JSON.stringify(page)).not.toContain("PRIVATE_NATIVE_ID");
+    expect(JSON.stringify(page)).not.toContain("PRIVATE_BODY");
+  });
+
+  it("keeps invocation, unproved skill-file read and mention separate without source text", async () => {
     const secret = "PRIVATE-😀";
     const rows: Row[] = [
       { type: "assistant", sessionId: "s1", message: { role: "assistant",
@@ -41,7 +109,7 @@ describe("Claude transcript observations", () => {
     const page = await readClaudeTracePage("s1", null, 50, deps);
     const observations = page.events.filter((event) => event.attributes["coderails.observation.kind"]);
     expect(observations.map((event) => event.attributes["coderails.observation.kind"]))
-      .toEqual(["invocation", "read", "mention"]);
+      .toEqual(["invocation", "uncertain", "mention"]);
     expect(observations.every((event) => event.attributes["coderails.observation.target_sha256"] ===
       digest("skill:wiki-query"))).toBe(true);
     expect(observations[1].attributes["coderails.observation.bytes"]).toBe(Buffer.byteLength(secret, "utf8"));

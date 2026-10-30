@@ -52,6 +52,9 @@ class SandboxCase(ArtifactCase):
         credential = self.home / ".coderails/worker_credential"
         credential.write_text("ANTHROPIC_API_KEY=sk-fixture\n")
         credential.chmod(0o600)
+        pin = self.home / ".npm/_npx/fixture/node_modules/@anthropic-ai/sandbox-runtime/package.json"
+        pin.parent.mkdir(parents=True)
+        pin.write_text(json.dumps({"version": "0.0.65"}))
         (self.home / ".claude.json").write_text("{}")
         self.primary = self.directory / ".git"
         self.clone = self.scratch / "clone"

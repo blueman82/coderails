@@ -14,6 +14,8 @@ sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
 import graph_contract  # noqa: E402
 
 from packages.tests.provider_fixture import Provider  # noqa: E402
+from packages.tests.test_provider_add_unit_contract import assigned_checkout  # noqa: E402
+from packages.tests.test_provider_controller_commands import Controller  # noqa: E402
 
 
 class PublicationContractTests(unittest.TestCase):
@@ -51,6 +53,60 @@ class PublicationContractTests(unittest.TestCase):
                 self.assertIn("deny", denied.stdout)
                 rows = provider.path.with_name("recovery-trace.jsonl").read_text().splitlines()
                 self.assertEqual(json.loads(rows[-1])["reason_code"], "dispatch_publication_mismatch")
+
+    def test_worktree_is_registered_or_assigned_with_supported_commands(self) -> None:
+        """A unit gets an absolute checkout at registration or through a later locked assignment."""
+        for name in ("claude", "codex"):
+            with self.subTest(provider=name), tempfile.TemporaryDirectory() as scratch:
+                c = Controller(Path(scratch), name)
+                self.assertEqual(c.start().returncode, 0)
+                checkout = Path(assigned_checkout(c.root))
+                self.assertEqual(c.add("1", "--manifest", "README.md", "--worktree", str(checkout)).returncode, 0)
+                self.assertEqual(c.read()["work_units"]["1"]["worktree"], str(checkout.resolve()))
+                self.assertEqual(c.add("2").returncode, 0)
+                assigned = c.run(
+                    "assign-worktree",
+                    "--session",
+                    "sess-1",
+                    "--loop-id",
+                    "loop-a",
+                    "--unit",
+                    "2",
+                    "--worktree",
+                    str(checkout),
+                )
+                self.assertEqual(assigned.returncode, 0, assigned.stderr)
+                self.assertEqual(c.read()["work_units"]["2"]["worktree"], str(checkout.resolve()))
+                self.assertIn("worktree_assigned", c.codes("assign-worktree"))
+
+    def test_existing_active_wave_keeps_its_revision_when_worktree_is_assigned(self) -> None:
+        """Repair old unit metadata under the provider lock without replacing its active dispatch."""
+        for name in ("claude", "codex"):
+            with self.subTest(provider=name), tempfile.TemporaryDirectory() as scratch:
+                provider = Provider(Path(scratch), name)
+                state = provider.read()
+                state["work_units"]["1"] = {"status": "pending", "manifest": ["README.md"]}
+                provider.write(state)
+                provider.success("begin-wave")
+                before = provider.read()
+                checkout = assigned_checkout(provider.home)
+                result = provider.call(
+                    "assign-worktree",
+                    "--session",
+                    provider.session,
+                    "--loop-id",
+                    before["loop_id"],
+                    "--unit",
+                    "1",
+                    "--worktree",
+                    checkout,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                after = provider.read()
+                self.assertEqual(after["revision"], before["revision"])
+                self.assertEqual(after["graph"]["active_wave"], before["graph"]["active_wave"])
+                self.assertEqual(after["graph"]["dispatches"], before["graph"]["dispatches"])
+                self.assertEqual(after["work_units"]["1"]["worktree"], checkout)
 
 
 if __name__ == "__main__":

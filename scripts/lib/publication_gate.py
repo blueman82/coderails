@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from pathlib import Path
 
-from . import eval_artifact, eval_level, manifest_policy, review_passes
+from . import eval_artifact, eval_level, eval_validation, manifest_policy, review_passes
 from . import git_common as git
 from .artifact_io import object_value
 from .config import config_path, load_config
@@ -21,24 +22,44 @@ def manifest_check(number: str, sha: str, unit: str, progress: str) -> list[Viol
 
 
 def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list[Violation]:
-    """Require live-diff reviews from the newest exact-head artifact; only explicit off skips."""
+    """Required reviewers for the diff (policy/review_policy.json) against the passes in the SHA-bound artifact.
+
+    `review-pr` is satisfied by the v1 marker itself; a v1 artifact with no passes line has passes=[]. A pass counts
+    only with verdict `pass`; the artifact's `blocking` flag never waives a required pass. Fails closed. Config
+    `review_passes: off` skips the check; absent or any other value enforces.
+    """
+
+    def refused(code: str, detail: str = "") -> list[Violation]:
+        manifest_policy.trace(f"{git.repo()}@pr-{number}", "refused", code, command="review-passes")
+        return [{"code": code, "detail": detail}]
+
+    status, reason = git.gate_review_summary_for_pr(number, sha)
+    if status:
+        code = reason if status == 3 else "review_artifact_missing" if status == 1 else "review_artifact_unreadable"
+        return refused(code, reason)
     values, _ = load_config(config_path() or "")
     if str(values.get("review_passes") or "enforce") == "off":
         manifest_policy.trace(f"{git.repo()}@pr-{number}", "skipped", "review_passes_off", command="review-passes")
         return []
     found = git.review_passes_for_pr(number, sha)
     if found.status:
-        return [{"code": "review_artifact_missing", "detail": found.failure_reason or "no artifact for this head"}]
+        return refused("review_artifact_missing", found.failure_reason or "no artifact for this head")
     if found.passes is None:
-        return [{"code": "review_passes_malformed", "detail": ""}]
+        return refused("review_passes_malformed")
     try:
         policy = review_passes.load_policy()
         base = git.pr_field(number, "baseRefOid")
         changes = manifest_policy.diff_changes(sha, f"pull/{number}/head", base) if base else None
     except ValueError:
-        return [{"code": "review_policy_unreadable", "detail": ""}]
+        return refused("review_policy_unreadable")
     if changes is None:
-        return [{"code": "review_policy_unreadable", "detail": "diff unavailable"}]
+        return refused("review_policy_unreadable", "diff unavailable")
+    if any(
+        not status.startswith("A") and manifest_policy.matches(path, manifest_policy.REVIEW_POLICY_PATHS)
+        for status, paths in changes
+        for path in paths
+    ):
+        return refused("review_policy_modified", "policy changes need a separate trusted release")
     verdicts = {p["name"]: p["verdict"] for p in found.passes}
     needed = review_passes.required(changes, policy)
     # a failed pass that marks itself blocking refuses even when the policy did not ask for it
@@ -80,7 +101,8 @@ def eval_level_check(number: str, sha: str, unit: str, progress: str) -> list[Vi
     if changes is None:
         return [{"code": "eval_level_diff_unavailable", "detail": ""}]
     _, minimum = eval_level.derive(changes, eval_level.progress_units(progress), data, eval_level.load_policy())
-    late = eval_level.suite_late(data, eval_level.branch_base(sha, pr=number))
+    base = eval_level.branch_base(sha, pr=number)
+    late = eval_level.suite_late(data, base)
     codes: list[str] = []
     if data.get("head_sha") != sha:
         codes.append("eval_head_mismatch")
@@ -98,8 +120,11 @@ def eval_level_check(number: str, sha: str, unit: str, progress: str) -> list[Vi
             codes.append("late_freeze_unstamped")
     try:
         eval_level.check_suite(data, found.verification_level, stamped=True)
+        eval_validation.require_freeze_timing(data, base, Path.cwd())
     except IntegrityError as error:
         codes.append(error.code)
+    except ValueError:
+        codes.append("not_frozen")
     if stamped is not None and stamped[2] != suite_hash(data)[:16]:
         codes.append("suite_hash_marker_mismatch")
     label = f"{git.repo()}@pr-{number}"
@@ -135,12 +160,15 @@ def trace_preflight(code: str) -> None:
 def evaluate(number: str, sha: str, unit: str = "", progress: str = "") -> list[Violation]:
     """Run every registered check; a check that raises is a refusal, never a pass."""
     found: list[Violation] = []
-    for check in CHECKS:
-        try:
-            found += check(number, sha, unit, progress)
-        except Exception as error:  # noqa: BLE001 - fail closed: an erroring check must not publish
-            code = "diff_manifest:manifest_internal_error" if check is manifest_check else f"{check.__name__}_error"
-            found.append({"code": code, "detail": type(error).__name__})
+    if not manifest_policy.publication_session():
+        found.append({"code": "publication:session_missing", "detail": "valid session ID required"})
+    else:
+        for check in CHECKS:
+            try:
+                found += check(number, sha, unit, progress)
+            except Exception as error:  # noqa: BLE001 - fail closed: an erroring check must not publish
+                code = "diff_manifest:manifest_internal_error" if check is manifest_check else f"{check.__name__}_error"
+                found.append({"code": code, "detail": type(error).__name__})
     try:
         label = f"{git.repo()}@pr-{number}"
     except Exception:  # noqa: BLE001 - trace metadata must never change the verdict

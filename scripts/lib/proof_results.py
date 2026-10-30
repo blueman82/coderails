@@ -12,20 +12,24 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import runpy
 import subprocess
 from pathlib import Path
 from typing import Any, cast
+
+from scripts.lib.proof_runtime import git_environment, trusted_executable
 
 REASONS: dict[str, str] = {
     "proof_unexecuted": "no run row for this proof; run `python3 scripts/lib/proof.py run <state-dir> --all`.",
     "proof_failed": "the latest run exited nonzero or timed out; fix the cause and re-run the same proof.",
     "proof_expect_mismatch": "the run's exit code or stdout did not match the frozen expect; fix and re-run.",
     "proof_stale_cmd": "proof.json changed after the freeze row, or the run row hashes a different cmd; re-freeze.",
-    "proof_stale_head": "the proof ran outside this repository or before HEAD changed; run it again at current HEAD.",
+    "proof_stale_head": "the proof repository, HEAD or source tree does not match; run it again at current HEAD.",
     "proof_chain_broken": "proof_results.jsonl is torn, edited or missing rows; never edit it by hand.",
     "proof_cmd_destructive": "the frozen cmd matches the destructive-command classifier and was never run.",
     "proof_sandbox_unavailable": "the pinned proof sandbox did not start; install its runtime and run the proof again.",
+    "proof_output_limit": "proof output exceeded the byte limit; reduce output and run the proof again.",
     "proof_no_proofs": "proof.json holds no non-withdrawn proof and no valid disposition; add a proof or record one.",
     "proof_disposition_no_reason": "a bare 'none' or unknown reason code is rejected; record an enum code + reason.",
     "proof_disposition_legacy": "string disposition 'none: <reason>' accepted; prefer `proof.py disposition`.",
@@ -40,11 +44,33 @@ VERDICT_REASON = {
     "expect_mismatch": "proof_expect_mismatch",
     "refused": "proof_cmd_destructive",
     "sandbox_unavailable": "proof_sandbox_unavailable",
+    "output_limit": "proof_output_limit",
 }
 _FIELDS = [
-    *("seq", "kind", "proof_id", "cmd_sha256", "proof_json_sha256", "session_id", "loop_id", "head_sha", "cwd"),
+    *(
+        "seq",
+        "kind",
+        "proof_id",
+        "cmd_sha256",
+        "proof_json_sha256",
+        "session_id",
+        "loop_id",
+        "head_sha",
+        "source_tree_sha",
+        "cwd",
+    ),
     *("exit_code", "stdout_sha256", "stderr_sha256", "excerpt", "started", "ended", "expect_matched", "verdict"),
 ]
+_SUPERSEDE_FIELDS = (
+    "original_raw_sha256",
+    "original_canonical_sha256",
+    "candidate_raw_sha256",
+    "candidate_canonical_sha256",
+    "candidate_path",
+    "author_evidence_sha256",
+    "author_evidence_path",
+    "reason",
+)
 
 
 class ChainError(ValueError):
@@ -85,6 +111,27 @@ def read_rows(path: Path) -> list[dict[str, Any]]:
         row = cast(dict[str, Any], value)
         if row.get("seq") != number or row.get("prev_sha256") != previous or row.get("row_sha256") != _digest(row):
             raise ChainError(f"row {number} breaks the hash chain")
+        if (
+            not set(_FIELDS).issubset(row)
+            or not isinstance(row["kind"], str)
+            or row["kind"] not in {"freeze", "run", "disposition", "supersede"}
+            or any(
+                row[key] is not None and not isinstance(row[key], str)
+                for key in ("proof_id", "session_id", "loop_id", "verdict")
+            )
+        ):
+            raise ChainError(f"row {number} has missing or invalid fields")
+        if row["kind"] == "supersede" and (
+            not set(_SUPERSEDE_FIELDS).issubset(row)
+            or any(not isinstance(row[key], str) or not row[key].strip() for key in _SUPERSEDE_FIELDS)
+            or any(
+                not isinstance(row[key], str) or re.fullmatch(r"[0-9a-f]{64}", row[key]) is None
+                for key in (*_SUPERSEDE_FIELDS[:4], "author_evidence_sha256")
+            )
+            or not isinstance(row["head_sha"], str)
+            or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", row["head_sha"]) is None
+        ):
+            raise ChainError(f"row {number} has invalid supersession fields")
         previous = row["row_sha256"]
         rows.append(row)
     return rows
@@ -97,7 +144,11 @@ def append(path: Path, **fields: object) -> dict[str, Any]:
         fcntl.flock(stream, fcntl.LOCK_EX)
         stream.seek(0)
         rows = read_rows(path)
+        if fields.get("kind") == "supersede" and any(row["kind"] == "supersede" for row in rows):
+            raise ChainError("proof_supersession_duplicate")
         row: dict[str, Any] = {name: fields.get(name) for name in _FIELDS}
+        if fields.get("kind") == "supersede":
+            row.update({name: fields.get(name) for name in _SUPERSEDE_FIELDS})
         row["seq"] = len(rows) + 1
         row["prev_sha256"] = rows[-1]["row_sha256"] if rows else GENESIS
         row["row_sha256"] = _digest(row)
@@ -152,18 +203,23 @@ def _item(entry: object) -> dict[str, Any]:
     return cast(dict[str, Any], entry) if isinstance(entry, dict) else {}
 
 
-def _git_context(cwd: Path) -> tuple[Path, str] | None:
+def git_context(cwd: Path) -> tuple[Path, str, str] | None:
     """Resolve the repository and HEAD through Git, without trusting a recorded row's cwd as authority."""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel", "HEAD"], cwd=cwd, capture_output=True, text=True, check=False
+            [trusted_executable("git", cwd), "rev-parse", "--show-toplevel", "HEAD", "HEAD^{tree}"],
+            cwd=cwd,
+            env=git_environment(),
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except (OSError, ValueError):
         return None
     lines = result.stdout.splitlines()
-    if result.returncode or len(lines) != 2 or not lines[1].strip():
+    if result.returncode or len(lines) != 3 or not lines[1].strip() or not lines[2].strip():
         return None
-    return Path(lines[0]).resolve(), lines[1].strip()
+    return Path(lines[0]).resolve(), lines[1].strip(), lines[2].strip()
 
 
 def _check(
@@ -172,7 +228,7 @@ def _check(
     freeze: dict[str, Any],
     runs: dict[str, Any],
     state: dict[str, Any],
-    current: tuple[Path, str] | None,
+    current: tuple[Path, str, str] | None,
 ) -> str:
     """Return the reason code a single proof fails with, or '' when its latest run row satisfies it."""
     cmd, run = item.get("cmd"), runs.get(_label(item, ""))
@@ -185,16 +241,26 @@ def _check(
         return "proof_withdrawn_unobserved" if withdrawn else "proof_unexecuted"
     if run["cmd_sha256"] != sha(cmd.strip()) or run["proof_json_sha256"] != freeze["proof_json_sha256"]:
         return "proof_stale_cmd"
+    if run["verdict"] == "refused":
+        return "proof_cmd_destructive"
     recorded_cwd = run.get("cwd")
-    recorded = _git_context(Path(recorded_cwd)) if isinstance(recorded_cwd, str) and recorded_cwd else None
-    if current is None or recorded is None or recorded[0] != current[0] or run.get("head_sha") != current[1]:
+    recorded = git_context(Path(recorded_cwd)) if isinstance(recorded_cwd, str) and recorded_cwd else None
+    if (
+        current is None
+        or recorded is None
+        or recorded[0] != current[0]
+        or run.get("head_sha") != current[1]
+        or run.get("source_tree_sha") != current[2]
+    ):
         return "proof_stale_head"
     if withdrawn:
         return "" if run["verdict"] in {"failed", "timeout"} else "proof_withdrawn_unobserved"
     return "" if run["verdict"] == "satisfied" else VERDICT_REASON.get(run["verdict"], "proof_failed")
 
 
-def verify(proof_doc: dict[str, Any], results_path: Path, state: dict[str, Any]) -> tuple[list[str], list[str]]:
+def verify(
+    proof_doc: dict[str, Any], results_path: Path, state: dict[str, Any], after_seq: int = 0
+) -> tuple[list[str], list[str]]:
     """Return (offenders, disclosures): every frozen proof needs a latest satisfied run row on a valid chain."""
     proofs = [_item(p) for p in cast(list[object], proof_doc.get("proofs") or [])]
     withdrawn = [_item(p) for p in cast(list[object], proof_doc.get("withdrawn_proofs") or [])]
@@ -207,9 +273,13 @@ def verify(proof_doc: dict[str, Any], results_path: Path, state: dict[str, Any])
     except ChainError:
         trace("proof.gate", "blocked", "proof_chain_broken", session, loop)
         return [f"{name}(proof_chain_broken)" for name, _, _ in everything], []
-    freezes = [r for r in rows if r["kind"] == "freeze" and (r["session_id"], r["loop_id"]) == (session, loop)]
-    runs = {r["proof_id"]: r for r in rows if r["kind"] == "run"}
-    current = _git_context(Path.cwd())
+    freezes = [
+        r
+        for r in rows
+        if r["seq"] > after_seq and r["kind"] == "freeze" and (r["session_id"], r["loop_id"]) == (session, loop)
+    ]
+    runs = {r["proof_id"]: r for r in rows if r["seq"] > after_seq and r["kind"] == "run"}
+    current = git_context(Path.cwd())
     offenders: list[str] = []
     disclosures: list[str] = []
     for name, item, is_withdrawn in everything:

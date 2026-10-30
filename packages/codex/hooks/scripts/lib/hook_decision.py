@@ -7,6 +7,71 @@ from pathlib import Path
 from typing import TypedDict, cast
 
 CATALOG = Path(__file__).resolve().parents[2] / "messages.json"
+DECISIONS = frozenset(
+    {
+        "ok",
+        "block",
+        "deny",
+        "exit",
+        "sigterm",
+        "resource",
+        "exception",
+        "native_signal",
+        "allowed",
+        "denied",
+        "blocked",
+        "advisory",
+        "demoted",
+        "ignored",
+        "refused",
+        "failed_open",
+        "failed_closed",
+        "fail_open",
+        "fallback",
+        "not_ready",
+        "missing",
+        "torn",
+        "nudged",
+        "suppressed",
+        "accepted",
+        "approved",
+        "granted",
+        "narrowed",
+        "revoked",
+        "legacy",
+        "warned",
+        "skipped",
+        "resolved",
+        "degraded",
+        "excluded",
+        "served",
+        "prepared",
+        "rendered",
+        "imported",
+        "pushed",
+        "assembled",
+        "recorded",
+        "pending",
+        "synced",
+        "complete",
+        "aborted",
+        "failed",
+        "started",
+        "ready",
+        "branch_imported",
+        "branch_pushed",
+        "disabled",
+        "ticked",
+        "met",
+        "unmet",
+        "written",
+        "stage_ok",
+        "run_ok",
+        "run_abort",
+        "run_refused",
+        "run_incomplete",
+    }
+)
 FALLBACK_REMEDIATION = "Read the hook reason and retry after you correct its cause."
 
 
@@ -54,6 +119,8 @@ def make_record(hook: object, decision: object, reason_code: object, params: obj
     """Use the emitted reason and the catalog remediation; refuse malformed fields."""
     if any(not isinstance(value, str) or not value.strip() for value in (hook, decision, reason_code)):
         raise ValueError("hook decision needs nonempty text fields")
+    if decision not in DECISIONS:
+        raise ValueError("hook decision is unknown")
     if params is not None:
         if not isinstance(params, dict):
             raise ValueError("hook decision params must map names to text")

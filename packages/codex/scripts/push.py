@@ -10,10 +10,21 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import git_common as git
-from scripts.lib import manifest_policy
+from scripts.lib import manifest_policy, source_manifest
 
 
-def unit_manifest(unit: str | None, progress: str | None) -> tuple[list[str], str | None, bool] | None:
+def refuse_publication(code: str, message: str) -> None:
+    """Record a unit preflight refusal before raising its stable reason code."""
+    manifest_policy.trace(
+        manifest_policy.publication_session() or "publication",
+        "refused",
+        code.removeprefix("publication:"),
+        command="publication",
+    )
+    raise git.WorkflowError(f"{code}: {message}")
+
+
+def unit_manifest(unit: str | None, progress: str | None) -> tuple[list[str], str | None] | None:
     """Bind an optional publication request to a registered unit and its assigned checkout."""
     if (unit is None) != (progress is None):
         raise git.WorkflowError("--unit and --progress must be provided together")
@@ -38,16 +49,27 @@ def unit_manifest(unit: str | None, progress: str | None) -> tuple[list[str], st
     ):
         raise git.WorkflowError("publication unit needs a nonempty manifest")
     assigned = record.get("worktree")
-    if assigned is not None and (not isinstance(assigned, str) or Path(assigned).resolve() != Path.cwd().resolve()):
-        raise git.WorkflowError("publication worktree does not match the unit")
+    if (
+        not isinstance(assigned, str)
+        or not assigned.strip()
+        or not Path(assigned).is_absolute()
+        or Path(assigned).resolve() != Path(git.output("git", "rev-parse", "--show-toplevel", check=True)).resolve()
+    ):
+        refuse_publication("publication:worktree_invalid", "publication worktree does not match the unit")
+    try:
+        source_manifest.validate(record)
+    except ValueError as error:
+        refuse_publication("publication:source_manifest_mismatch", str(error))
     base = record.get("base_branch")
     if base is not None and (not isinstance(base, str) or not base or base.startswith("-")):
         raise git.WorkflowError("publication base branch is invalid")
     state_fields = cast(dict[str, Any], state)
-    owned_graph = all(
-        isinstance(state_fields.get(key), str) and bool(state_fields[key]) for key in ("session_id", "loop_id")
-    )
-    return cast(list[str], manifest), base if isinstance(base, str) else None, owned_graph
+    if any(
+        not isinstance(state_fields.get(key), str) or not str(state_fields[key]).strip()
+        for key in ("session_id", "loop_id")
+    ):
+        refuse_publication("publication:graph_owner_missing", "publication graph owner is missing")
+    return cast(list[str], manifest), base if isinstance(base, str) else None
 
 
 def commit(message: str, jira_key: str, paths: list[str], manifest: list[str] | None = None) -> None:
@@ -62,9 +84,11 @@ def commit(message: str, jira_key: str, paths: list[str], manifest: list[str] | 
         print("! Untracked files not staged (run 'git add' explicitly to include them):")
         for path in untracked:
             print(f"!   {path}")
-    staged = git.output("git", "diff", "--cached", "--name-only").splitlines()
+    staged = [
+        path for path in git.run("git", "diff", "--cached", "--name-only", "-z", check=True).stdout.split("\0") if path
+    ]
     if manifest is not None and any(not manifest_policy.matches(path, manifest) for path in staged):
-        raise git.WorkflowError("publication staged paths exceed the unit manifest")
+        refuse_publication("diff_manifest:out_of_manifest", "publication staged paths exceed the unit manifest")
     if not staged:
         return
     message = message or f"Update {len(staged)} files"
@@ -80,11 +104,11 @@ def check_publication_diff(manifest: list[str], recorded_base: str | None) -> No
     number = git.pr_num()
     base = git.pr_field(number, "baseRefName", "") if number else recorded_base or git.main()
     if not base or (recorded_base and base != recorded_base):
-        raise git.WorkflowError("publication base branch does not match the unit")
+        refuse_publication("publication:base_mismatch", "publication base branch does not match the unit")
     raw = git.output("git", "diff", "--raw", "-z", "-M", f"origin/{base}...HEAD", check=True)
     violations = manifest_policy.check(manifest_policy.parse_raw_z(raw), {}, manifest)["violations"]
     if violations:
-        raise git.WorkflowError("diff_manifest:out_of_manifest: publication branch diff exceeds the unit manifest")
+        refuse_publication("diff_manifest:out_of_manifest", "publication branch diff exceeds the unit manifest")
 
 
 def parse_arguments(arguments: list[str]) -> tuple[bool, str, list[str], str | None, str | None]:
@@ -146,8 +170,9 @@ def main(arguments: list[str] | None = None) -> int:
             number = git.pr_num()
             print(f"✓ Up to date │ {git.pr_field(number, 'url')}" if number else "• Nothing to push")
             return 0
-        if publication is not None and publication[2]:
-            manifest_policy.gate(unit=unit or "", progress=progress or "")
+        if publication is not None:
+            base = git.output("git", "rev-parse", f"origin/{publication[1]}", check=True) if publication[1] else ""
+            manifest_policy.gate(unit=unit or "", progress=progress or "", base=base)
         else:
             manifest_policy.gate()
         arguments = ["git", "push"] + (["--force-with-lease"] if force else []) + ["-u", "origin", current]

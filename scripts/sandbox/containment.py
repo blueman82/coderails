@@ -21,6 +21,7 @@ import json
 import os
 import platform
 import posixpath
+import re
 import shutil
 import sys
 from collections.abc import Callable
@@ -32,6 +33,17 @@ from scripts.lib.action_binding import binding
 from scripts.lib.config import config_path, load_config
 
 SRT_VERSION = "0.0.65"
+PASS_THROUGH = ("PATH", "LANG", "TERM")
+SECRET_PATTERNS = tuple(
+    (name, re.compile(regex))
+    for name, regex in (
+        ("an Anthropic key", r"sk-ant-[A-Za-z0-9_-]{20,}"),
+        ("a GitHub token", r"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})"),
+        ("an AWS access key id", r"AKIA[0-9A-Z]{16}"),
+        ("a private key", r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    )
+)
+
 ACK_KIND = "worker_fallback"
 CREDENTIAL_VARS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
 # The seam for protected_paths.json: a manifest that can touch any of these needs an owner acknowledgement to run in
@@ -119,6 +131,28 @@ def resolve(
     if worker_credential(home) is None:
         return {"mode": "fallback", "reason_code": "worker_credential_missing"}
     return {"mode": "sandboxed", "reason_code": "sandboxed"}
+
+
+def worker_environment(scratch: Path, credential: tuple[str, str]) -> dict[str, str]:
+    """The allowlisted child environment: isolated dirs under scratch plus the worker credential, nothing inherited."""
+    home = scratch / "home"
+    dirs = {
+        "HOME": home,
+        "CLAUDE_CONFIG_DIR": home / ".claude",
+        "XDG_CONFIG_HOME": scratch / "xdg-config",
+        "XDG_CACHE_HOME": scratch / "xdg-cache",
+        "XDG_DATA_HOME": scratch / "xdg-data",
+        "XDG_STATE_HOME": scratch / "xdg-state",
+        "TMPDIR": scratch / "tmp",
+    }
+    for path in dirs.values():
+        path.mkdir(parents=True)
+    environment = {name: os.environ[name] for name in PASS_THROUGH if name in os.environ}
+    environment.update({name: str(path) for name, path in dirs.items()})
+    environment["npm_config_cache"] = str(Path.home() / ".npm")  # npx runs with the isolated HOME: keep the pin cache
+    environment["npm_config_offline"] = "true"
+    environment[credential[0]] = credential[1]
+    return environment
 
 
 def main(arguments: list[str] | None = None) -> int:

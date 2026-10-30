@@ -47,7 +47,9 @@ class StopBudgetTests(unittest.TestCase):
         """Later graph calls cannot restart the ten-second Stop allowance."""
         timeouts: list[float] = []
 
-        def graph(_path: Path, command: str, *_args: str, timeout_seconds: float) -> object:
+        def graph(
+            _path: Path, command: str, *_args: str, timeout_seconds: float, failure_code: list[str] | None = None
+        ) -> object:
             timeouts.append(timeout_seconds)
             return {"session_id": "s"} if command == "inspect" else None
 
@@ -71,7 +73,9 @@ class StopBudgetTests(unittest.TestCase):
             captured.append(deadline)
             return "status"
 
-        def graph(_path: Path, command: str, *_args: str, timeout_seconds: float) -> object:
+        def graph(
+            _path: Path, command: str, *_args: str, timeout_seconds: float, failure_code: list[str] | None = None
+        ) -> object:
             return {"session_id": "s", "loop_id": "l", "revision": 1} if command == "inspect" else None
 
         with (

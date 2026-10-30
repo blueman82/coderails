@@ -45,6 +45,7 @@ class CodexHookDecisionTests(unittest.TestCase):
             )
             env = {
                 **os.environ,
+                "HOME": str(base),
                 "CODERAILS_AGENTIC_LOOP_DIR": str(base),
                 "PYTHONPATH": os.pathsep.join((str(CODEX), str(CODEX / "hooks/scripts"))),
             }
@@ -77,6 +78,7 @@ class CodexHookDecisionTests(unittest.TestCase):
             )
             env = {
                 **os.environ,
+                "HOME": str(base),
                 "CODERAILS_AGENTIC_LOOP_DIR": str(base),
                 "PYTHONPATH": os.pathsep.join((str(CODEX), str(CODEX / "hooks/scripts"))),
             }
@@ -91,6 +93,33 @@ class CodexHookDecisionTests(unittest.TestCase):
                     row = json.loads((base / "s1" / "trace.jsonl").read_text().splitlines()[-1])
                     self.assertEqual(row["decision_record"]["reason_code"], "bad_state")
                     self.assertEqual(row["decision_record"]["remediation"], FALLBACK_REMEDIATION)
+
+    def test_native_malformed_decision_is_not_emitted(self) -> None:
+        """The native trace writer refuses unknown decisions and empty reasons."""
+        with tempfile.TemporaryDirectory() as scratch:
+            base = Path(scratch)
+            env = {
+                **os.environ,
+                "HOME": str(base),
+                "CODERAILS_AGENTIC_LOOP_DIR": str(base),
+                "PYTHONPATH": os.pathsep.join((str(CODEX), str(CODEX / "hooks/scripts"))),
+            }
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from hook_common import append_trace_row; "
+                    "assert not append_trace_row('gate', 'made_up_decision', 'reason', 's1'); "
+                    "assert not append_trace_row('gate', 'blocked', '', 's1')",
+                ],
+                cwd=base,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((base / "s1" / "trace.jsonl").exists())
 
     def test_helpers_are_mirrored(self) -> None:
         """Both standalone plugins ship the same typed helper and trace writer."""

@@ -349,6 +349,7 @@ class StallGuardTests(StallGuardCase):
             verdict="satisfied",
             cwd=str(Path.cwd()),
             head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            source_tree_sha=subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
             **identity,
         )
         self.assertEqual(self.run_hook("loop_stall_guard", payload).returncode, 2)  # old retro binds old proof files

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest import mock
 
@@ -18,7 +19,7 @@ sys.path.insert(0, str(REPO))
 from hooks.scripts.tests.lib.post_evals_fixture import command, entry  # noqa: E402
 from scripts.lib import eval_artifact, eval_level, eval_validation, publication_gate  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
-from scripts.lib.eval_integrity import IntegrityError, suite_hash  # noqa: E402
+from scripts.lib.eval_integrity import IntegrityError, sign_suite, suite_hash  # noqa: E402
 from scripts.lib.git_common import EvalSummary  # noqa: E402
 
 POLICY = eval_level.load_policy()
@@ -98,9 +99,11 @@ class RepoCase(unittest.TestCase):
 
     def setUp(self) -> None:
         """Commit a base, publish it as origin/main, then branch."""
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.dir = Path(tmp.name)
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        self.dir = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        keys = stack.enter_context(tempfile.TemporaryDirectory())
+        stack.enter_context(mock.patch.dict(os.environ, {"CODERAILS_KEYS_DIR": keys}))
         self.git("init", "-q", "-b", "main")
         (self.dir / "README.md").write_text("base\n")
         self.git("add", "-A")
@@ -128,11 +131,14 @@ class RepoCase(unittest.TestCase):
     ) -> tuple[EvalSummary, dict[str, object]]:
         """The newest trusted artifact as post would have written it (marker level, facts line, embed)."""
         data: dict[str, object] = {
-            "verification_level": level, "head_sha": head or self.git("rev-parse", "HEAD"),
+            "verification_level": level, "integrity_version": 2, "frozen_at": "2026-10-07T00:00:00Z",
+            "head_sha": head or self.git("rev-parse", "HEAD"),
             "task_ref": "1", "evals": [entry()], **over,
         }  # fmt: skip
         data.setdefault("frozen_sha", self.base)
         data["frozen_hash"] = suite_hash(data)
+        if level:
+            sign_suite(data, strict=True)
         digest = suite_hash(data)
         stamp = eval_artifact.facts_line(level if derived is None else derived, late, digest[:16])
         return EvalSummary(0, str(level), json.dumps(data), facts=stamp), data
@@ -161,15 +167,15 @@ class LateFreezeTests(RepoCase):
         self.assertEqual(eval_level.branch_base(head), self.base)
         self.assertEqual(eval_level.pr_changes("", head), [("A", ["install.py"])])
 
-    def test_validate_freeze_still_requires_disclosure(self) -> None:
-        """The refactor keeps validate_freeze's behaviour: late and undisclosed is refused, disclosed accepted."""
+    def test_validate_freeze_ignores_mutable_disclosure(self) -> None:
+        """A mutable justification cannot authorize a late freeze."""
         later = self.commit("a.txt")
         path = self.dir / "evals.json"
-        path.write_text(json.dumps({"frozen_sha": later, "verification_justification": "x"}))
-        with self.assertRaisesRegex(ValueError, "disclose the late freeze"):
-            eval_validation.validate_freeze(path)
-        path.write_text(json.dumps({"frozen_sha": later, "verification_justification": "late freeze: see PR"}))
-        eval_validation.validate_freeze(path)
+        for justification in ("x", "late freeze: see PR"):
+            data = {"frozen_sha": later, "frozen_at": "2026-10-25T00:00:00Z"}
+            path.write_text(json.dumps({**data, "verification_justification": justification}))
+            with self.assertRaisesRegex(ValueError, "freeze_timing_unverified"):
+                eval_validation.validate_freeze(path)
 
 
 class SuiteIntegrityTests(unittest.TestCase):
@@ -310,18 +316,18 @@ class MergeCheckTests(RepoCase):
         self.assertIn("suite_hash_marker_mismatch", codes)
 
     def test_stripped_frozen_hash(self) -> None:
-        """Acceptance 2: a level >= 1 embed without frozen_hash is not_frozen."""
+        """A signed level-2 embed refuses a removed frozen hash as stripped integrity."""
         self.commit("install.py")
         summary, _ = self.posted(2, "")
         stripped = json.loads(summary.embed)
         del stripped["frozen_hash"]
-        self.assertIn("not_frozen", self.check(EvalSummary(0, "2", json.dumps(stripped), facts=summary.facts)))
+        self.assertIn("integrity_stripped", self.check(EvalSummary(0, "2", json.dumps(stripped), facts=summary.facts)))
 
     def test_late_freeze_must_be_stamped(self) -> None:
         """Acceptance 3: a branch frozen_sha with a facts line claiming late_freeze=0 is late_freeze_unstamped."""
         late = self.commit("install.py")
         self.assertIn("late_freeze_unstamped", self.check(self.posted(2, "", frozen_sha=late)[0]))
-        self.assertEqual(self.check(self.posted(2, "", late=True, frozen_sha=late)[0]), [])
+        self.assertIn("freeze_timing_unverified", self.check(self.posted(2, "", late=True, frozen_sha=late)[0]))
         self.assertIn("late_freeze_unstamped", self.check(self.posted(2, "", late=True)[0]))  # claims late, is not
 
     def test_missing_facts_line(self) -> None:
@@ -392,7 +398,3 @@ class PolicyDriftTests(unittest.TestCase):
             bad.write_text('{"none": [], "irreversible": "x", "outward": [], "level_2_work_units": 3}')
             with self.assertRaisesRegex(ValueError, "surface_policy_unreadable"):
                 eval_level.load_policy(bad)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -14,6 +14,7 @@ from typing import NamedTuple
 
 from . import argv_match
 from .destructive_patterns import git_output
+from .headless_command import headless_cwd_override, headless_prompt
 from .shell_context import invocations
 
 MERGE_SCRIPT = r"""(?:(?:bash|sh|python3?)\s+)?["']?(?:[^\s"']*/)?merge\.(?:py|sh)["']?(?:\s|$)"""
@@ -50,7 +51,7 @@ def _gh_args(argv: list[str]) -> list[str]:
     return argv[index:]
 
 
-def operations(command: str, cwd: str = "") -> list[Operation]:
+def operations(command: str, cwd: str = "", _depth: int = 0) -> list[Operation]:
     """Classify each invoked action; keep unknown bindings visibly unbindable."""
     cwd = cwd or os.getcwd()
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -58,12 +59,18 @@ def operations(command: str, cwd: str = "") -> list[Operation]:
 
     found: list[Operation] = []
     for source, argv, where in invocations(command, cwd):
+        if _depth < 5 and (prompt := headless_prompt(shlex.join(argv))):
+            nested = operations(prompt, where, _depth + 1)
+            if headless_cwd_override(shlex.join(argv)) or re.search(r"(?:^|\s)[A-Za-z_]\w*=", source):
+                nested = [call._replace(segment=UNBINDABLE + call.segment) for call in nested]
+            found.extend(nested)
+            continue
         name, prefix, git_args, selected = "", [], [], where
         gh_args = _gh_args(argv)
         call = argv_match.git_invocation(argv, where)
         if call is not None:
             subcommand, selected, rest = call
-            options = argv_match.flags(rest, "mFsX" if subcommand == "merge" else "")
+            options = argv_match.flags(rest, "mFsX" if subcommand == "merge" else "o")
             if options & {"--dry-run", "--help"}:
                 continue
             if subcommand == "merge" and not options & {"--abort", "--continue", "--quit", "--skip"}:
@@ -116,6 +123,18 @@ def repository(call: Operation) -> str:
     return git_output(call.git_cwd, *call.prefix, "rev-parse", "--show-toplevel") or call.cwd
 
 
+def same_repository(call: Operation, cwd: str) -> bool:
+    """Check that Git's global options select the payload's physical worktree."""
+    selected = (
+        git_output(call.git_cwd, *call.prefix, "rev-parse", "--show-toplevel"),
+        git_output(call.git_cwd, *call.prefix, "rev-parse", "--absolute-git-dir"),
+    )
+    original = (git_output(cwd, "rev-parse", "--show-toplevel"), git_output(cwd, "rev-parse", "--absolute-git-dir"))
+    return all((*selected, *original)) and tuple(map(os.path.realpath, selected)) == tuple(
+        map(os.path.realpath, original)
+    )
+
+
 def targets_main_call(call: Operation, *, implicit_push: bool = False) -> bool:
     """Guard a protected branch or a push whose target may be protected."""
     if call.name not in {"git_merge", "git_push"}:
@@ -125,7 +144,7 @@ def targets_main_call(call: Operation, *, implicit_push: bool = False) -> bool:
     if git_output(call.git_cwd, *call.prefix, "branch", "--show-current") in {"main", "master"}:
         return True
     if call.name == "git_push":
-        return _push_guarded(call.segment, implicit_push=implicit_push)
+        return _push_guarded(shlex.join(["git", "push", *call.git_args]), implicit_push=implicit_push)
     return False
 
 

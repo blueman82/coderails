@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import re
+import shlex
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib import argv_match, destructive_patterns, shell_context
+from hooks.scripts.lib.pr_workflow_match import operations
 
 # The regexes the gates used before the classifier, kept as literals to document the defect.
 OLD_CLAUDE_COMMIT = re.compile(r"\bgit +commit\b")
@@ -52,6 +54,17 @@ class ClassifierTests(unittest.TestCase):
         for command in COMMIT_FORMS:
             with self.subTest(command=command):
                 self.assertTrue(is_commit(command))
+
+    def test_quoted_command_substitutions_are_executed(self) -> None:
+        """Double quotes keep command substitutions live; single quotes do not."""
+        for command in ('echo "$(git push origin HEAD:main)"', 'echo "`git push origin HEAD:main`"'):
+            with self.subTest(command=command):
+                self.assertEqual([call.name for call in operations(command)], ["git_push"])
+        for command in ('echo "$(gh pr merge 519 --merge)"', 'echo "`gh pr merge 519 --merge`"'):
+            with self.subTest(command=command):
+                self.assertEqual([call.name for call in operations(command)], ["merge"])
+        for command in ("echo '$(git push origin HEAD:main)'", r'echo "\$(git push origin HEAD:main)"'):
+            self.assertEqual(operations(command), [])
 
     def test_quoted_and_other_subcommands_are_not_commit(self) -> None:
         """Quoted text, grep arguments and other subcommands never classify as commit."""
@@ -156,6 +169,35 @@ ABBREVIATED_NO_VERIFY = ["--no-verif", "--no-ver", "--no-v"]
 
 class HardeningTests(unittest.TestCase):
     """Reviewer findings: wrapper options, shell keywords, redirections, comments and -c option values."""
+
+    def test_shell_depth_marks_opaque_executable_bodies(self) -> None:
+        """Bash, eval and quoted substitutions cannot disappear beyond five levels."""
+        for inner in (
+            "bash -c 'git push origin HEAD:main'",
+            "eval 'git push origin HEAD:main'",
+            'echo "$(git push origin HEAD:main)"',
+        ):
+            command = inner
+            for _ in range(5):
+                command = "bash -c " + shlex.quote(command)
+            with self.subTest(inner=inner):
+                self.assertTrue(shell_context.opaque_execution(command))
+        command = "git push origin HEAD:main"
+        for _ in range(5):
+            command = "bash -c " + shlex.quote(command)
+        self.assertFalse(shell_context.opaque_execution(command))
+
+    def test_opaque_shell_forms_leave_literal_text_and_supported_options_alone(self) -> None:
+        """ANSI-C commands are refused; inert text and parseable shell options stay usable."""
+        for command in ("bash -c $'git push origin x:main'", "bash --rcfile /dev/null -c 'git push origin x:main'"):
+            self.assertTrue(shell_context.opaque_execution(command), command)
+        for command in (
+            "echo '$'",
+            'echo "$\'literal"',
+            "bash -o pipefail -c 'printf ready'",
+            "bash --rcfile=/dev/null -c 'printf ready'",
+        ):
+            self.assertFalse(shell_context.opaque_execution(command), command)
 
     def test_directories_are_invocation_local(self) -> None:
         """Git -C composes while wrapper, nested shell and subshell directories stay local."""

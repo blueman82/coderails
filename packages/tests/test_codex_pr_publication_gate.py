@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import stat
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from typing import cast
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from packages.tests.eval_artifact_fixture import eval_comment, write_comment  # noqa: E402
+from packages.tests.graph_manifest_fixture import graph_progress  # noqa: E402
 
 HOOK = ROOT / "packages/codex/hooks/scripts/pr_publication_gate.py"
 SECRET = ".en" + "v"  # two parts so no source line spells the secret-file name
@@ -37,7 +39,12 @@ case "$1 $2" in
       */issues/1/comments) number=1; sha="$CLEAN_SHA"; eval="$CLEAN_EVAL_FILE" ;;
       *) number=7; sha="$FAKE_SHA"; eval="$FAKE_EVAL_FILE" ;;
     esac
-    { printf '<!-- coderails-review-summary v1 pr=%s head_sha=%s -->\\n' "$number" "$sha"; echo '## No findings'; } \\
+    { printf '<!-- coderails-review-summary v1 pr=%s head_sha=%s -->\\n' "$number" "$sha";
+      compat_format='<!-- coderails-compat-findings v1 pr=%s head_sha=%s count=%s disposition=clean-break -->\\n'
+      if [ "${FAKE_COMPAT_OMIT:-0}" != 1 ]; then
+        printf "$compat_format" "$number" "$sha" "${FAKE_COMPAT_COUNT:-0}";
+      fi;
+      echo '## No findings'; } \\
       | base64 | tr -d '\\n'
     echo
     # and the eval artifact (docs-level by default; the eval-level gate has its own tests)
@@ -92,22 +99,27 @@ class CodexPublicationGateTests(unittest.TestCase):
         clean_eval.write_text(eval_comment(clean_sha, 0, pr="1"))
         self.env = {
             **os.environ,
+            "CODERAILS_KEYS_DIR": str(self.dir.parent / "keys"),
             "PATH": f"{install_gh_shim(self.dir.parent)}{os.pathsep}{os.environ['PATH']}",
             "FAKE_SHA": self.sha,
             "CLEAN_SHA": clean_sha,
             "BASE_SHA": clean_sha,
             "CLEAN_EVAL_FILE": str(clean_eval),
             # an unclassified path is outward (level 1); frozen at the branch base, so not late
-            "FAKE_EVAL_FILE": str(
-                write_comment(self.dir.parent, self.sha, 1, frozen_sha=git_cmd(self.dir, "rev-parse", "main").strip())
-            ),
+            "FAKE_EVAL_FILE": str(self.signed_eval(self.sha, git_cmd(self.dir, "rev-parse", "main").strip())),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.loop),
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.loop),
         }
 
-    def hook(self, command: str) -> dict[str, object]:
+    def signed_eval(self, sha: str, frozen_sha: str) -> Path:
+        """Write a level-one eval signed by an isolated test key."""
+        return write_comment(self.dir.parent, sha, 1, signing_keys=self.dir.parent / "keys", frozen_sha=frozen_sha)
+
+    def hook(self, command: str, session: str | None = "s1") -> dict[str, object]:
         """Run the hook for one Bash command and return its JSON output ({} when it allows)."""
-        payload = {"session_id": "s1", "cwd": str(self.dir), "tool_name": "Bash", "tool_input": {"command": command}}
+        payload: dict[str, object] = {"cwd": str(self.dir), "tool_name": "Bash", "tool_input": {"command": command}}
+        if session is not None:
+            payload["session_id"] = session
         result = subprocess.run(
             [sys.executable, str(HOOK)], input=json.dumps(payload), text=True, capture_output=True, env=self.env
         )
@@ -119,6 +131,16 @@ class CodexPublicationGateTests(unittest.TestCase):
         output = cast(dict[str, str], self.hook(command).get("hookSpecificOutput") or {})
         return output.get("permissionDecisionReason", "")
 
+    def test_missing_session_refuses_real_graph_merge(self) -> None:
+        """A payload with no session cannot borrow an ambient session to publish."""
+        graph_progress(self.dir, self.loop, ["docs/**"], session="s1", provider="codex")
+        self.env["CODEX_SESSION_ID"] = "s1"
+        for session in (None, "", "  "):
+            with self.subTest(session=session):
+                result = self.hook("gh pr merge 7", session)
+                output = cast(dict[str, str], result.get("hookSpecificOutput") or {})
+                self.assertIn("session_missing", output.get("permissionDecisionReason", ""))
+
     def config(self, text: str) -> None:
         """Write the repo's workflow config."""
         (self.dir / ".coderails").mkdir(exist_ok=True)
@@ -128,12 +150,41 @@ class CodexPublicationGateTests(unittest.TestCase):
         """Plain, bash -c wrapped and merge.py invocations are denied with the reason code first."""
         for command in (
             "gh pr merge 7 --merge",
+            "gh pr 'mer'ge 7",
+            r"gh pr m\erge 7",
             "bash -c 'gh pr merge 7'",
             "python3 scripts/merge.py 7",
             "gh api -X PUT repos/o/r/pulls/7/merge",
         ):
             with self.subTest(command=command):
                 self.assertTrue(self.reason(command).startswith("diff_manifest:denied_path"), command)
+
+    def test_over_limit_shell_body_is_denied(self) -> None:
+        """An opaque sixth shell level cannot conceal a PR merge."""
+        for wrapper in ("bash -c", "eval"):
+            command = "gh pr merge 7"
+            for _ in range(6):
+                command = f"{wrapper} {shlex.quote(command)}"
+            with self.subTest(wrapper=wrapper):
+                self.assertIn("deny", str(self.hook(command)))
+                payload = json.dumps({"session_id": "s1", "cwd": str(self.dir), "tool_input": {"command": command}})
+                for hook in (
+                    "action_authority_gate",
+                    "destructive_bash_gate",
+                    "test_gate",
+                    "verification_volume_ceiling",
+                ):
+                    with self.subTest(hook=hook):
+                        result = subprocess.run(
+                            [sys.executable, str(HOOK.parent / f"{hook}.py")],
+                            input=payload,
+                            capture_output=True,
+                            text=True,
+                            env=self.env,
+                            check=False,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertIn('"deny"', result.stdout)
 
     def test_non_merge_commands_pass(self) -> None:
         """Negative control: ordinary commands are not touched."""
@@ -176,26 +227,41 @@ class CodexPublicationGateTests(unittest.TestCase):
         self.env["FAKE_EVAL_FILE"] = str(write_comment(self.dir.parent, self.env["FAKE_SHA"], 0))
         self.assertEqual(self.reason("gh pr merge 7"), "")
 
+    def test_direct_merge_refuses_incompatible_review_even_when_pass_checks_are_off(self) -> None:
+        """The direct hook must enforce the same compatibility line as merge.py."""
+        self.config("diff_manifest: off\nreview_passes: off\neval_level: off\n")
+        self.env["FAKE_COMPAT_COUNT"] = "2"
+        for command in ("gh pr merge 7", "gh api -X PUT repos/o/r/pulls/7/merge"):
+            with self.subTest(command=command):
+                self.assertTrue(self.reason(command).startswith("compat_findings_nonzero"))
+        self.env["FAKE_COMPAT_COUNT"] = "0"
+        self.assertEqual(self.reason("gh pr merge 7"), "")
+        self.env["FAKE_COMPAT_OMIT"] = "1"
+        for command in ("gh pr merge 7", "gh api -X PUT repos/o/r/pulls/7/merge"):
+            with self.subTest(command=command):
+                self.assertEqual(self.reason(command), "")
+
     def test_owned_graph_unit_needs_manifest_binding(self) -> None:
         """The direct hook uses its session ID to refuse an unbound graph publication."""
-        common = git_cmd(self.dir, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
-        progress = self.loop / common.replace("/", "-") / "s1" / "progress.json"
-        progress.parent.mkdir(parents=True)
-        progress.write_text(
-            json.dumps(
-                {
-                    "schema_version": 3,
-                    "session_id": "s1",
-                    "loop_id": "test-loop",
-                    "work_units": {"C1": {"worktree": str(self.dir), "manifest": ["docs/**"]}},
-                }
-            )
-        )
+        graph_progress(self.dir, self.loop, ["docs/**"], unit="1", session="s1", provider="codex")
         self.env["CLAUDE_AGENTIC_LOOP_DIR"] = str(self.loop / "other-root")
         self.assertTrue(self.reason("gh pr merge 1").startswith("diff_manifest:manifest_unreadable"))
         self.env["CLAUDE_AGENTIC_LOOP_DIR"] = str(self.loop)
         self.env["CODERAILS_AGENTIC_LOOP_DIR"] = str(self.loop / "other-root")
         self.assertEqual(self.reason("gh pr merge 1"), "")
+
+    def test_same_session_fallback_graph_blocks_unbound_merge(self) -> None:
+        """A Codex graph under an old repo slug still stops an unbound publication."""
+        git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
+        (self.dir / "docs.md").write_text("clean\n")
+        git_cmd(self.dir, "add", "-A")
+        git_cmd(self.dir, "commit", "-qm", "docs")
+        self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
+        other = self.dir.parent / "old-repo"
+        other.mkdir()
+        git_cmd(other, "init", "-q", "-b", "main")
+        graph_progress(other, self.loop, ["docs/**"], session="s1", provider="codex")
+        self.assertTrue(self.reason("gh pr merge 7").startswith("diff_manifest:manifest_unreadable"))
 
     def test_gh_repo_retarget_refuses_even_clean_diff(self) -> None:
         """A same-number PR in another repository cannot borrow this repository's clean result."""
@@ -204,9 +270,7 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
-        self.env["FAKE_EVAL_FILE"] = str(
-            write_comment(self.dir.parent, self.env["FAKE_SHA"], 1, frozen_sha=self.env["BASE_SHA"])
-        )
+        self.env["FAKE_EVAL_FILE"] = str(self.signed_eval(self.env["FAKE_SHA"], self.env["BASE_SHA"]))
         self.assertEqual(self.reason("gh pr merge 7"), "")
         self.assertTrue(self.reason("GH_REPO=other/repo gh pr merge 7").startswith("pr_repo_override:"))
         self.env["GH_REPO"] = "other/repo"
@@ -219,9 +283,7 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
-        self.env["FAKE_EVAL_FILE"] = str(
-            write_comment(self.dir.parent, self.env["FAKE_SHA"], 1, frozen_sha=self.env["BASE_SHA"])
-        )
+        self.env["FAKE_EVAL_FILE"] = str(self.signed_eval(self.env["FAKE_SHA"], self.env["BASE_SHA"]))
         self.assertEqual(self.reason("gh pr merge 7"), "")
         command = "gh pr edit 7 --base old-release && gh pr merge 7"
         self.assertTrue(self.reason(command).startswith("pr_base_mutation:"))
@@ -266,22 +328,11 @@ class CodexPublicationGateTests(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
-        self.env["FAKE_EVAL_FILE"] = str(
-            write_comment(self.dir.parent, self.env["FAKE_SHA"], 1, frozen_sha=self.env["CLEAN_SHA"])
-        )
-        progress = self.dir.parent / "progress.json"
-        progress.write_text(
-            json.dumps(
-                {
-                    "session_id": "s",
-                    "loop_id": "l",
-                    "work_units": {"2": {"manifest": ["src/**"], "worktree": str(self.dir)}},
-                }
-            )
-        )
+        self.env["FAKE_EVAL_FILE"] = str(self.signed_eval(self.env["FAKE_SHA"], self.env["CLEAN_SHA"]))
+        progress = graph_progress(self.dir, self.loop, ["src/**"], session="s1", provider="codex")
         flags = f"--unit 2 --progress {progress}"
         self.assertTrue(self.reason(f"python3 scripts/merge.py {flags} 7").startswith("diff_manifest:out_of_manifest"))
-        self.assertEqual(self.reason("python3 scripts/merge.py 7"), "")  # control: no unit, clean docs diff passes
+        self.assertTrue(self.reason("python3 scripts/merge.py 7").startswith("diff_manifest:manifest_unreadable"))
 
     def test_unresolvable_head_fails_closed(self) -> None:
         """No head SHA from gh means the diff cannot be read: deny, not allow."""
@@ -289,55 +340,50 @@ class CodexPublicationGateTests(unittest.TestCase):
         self.assertTrue(self.reason("gh pr merge 7").startswith("diff_manifest:manifest_unreadable"))
 
     def test_outer_cd_before_shell_wrapper_binds_the_intended_worktree(self) -> None:
-        """A nested merge uses its preceding cd; the same unit from the starting cwd is refused."""
+        """Linked worktrees share a graph state, while another repository cannot borrow it."""
         git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
         (self.dir / "docs.md").write_text("canary\n")
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
-        self.env["FAKE_EVAL_FILE"] = str(
-            write_comment(self.dir.parent, self.env["FAKE_SHA"], 1, frozen_sha=self.env["CLEAN_SHA"])
-        )
+        self.env["FAKE_EVAL_FILE"] = str(self.signed_eval(self.env["FAKE_SHA"], self.env["CLEAN_SHA"]))
         other = self.dir.parent / "other-worktree"
         git_cmd(self.dir, "worktree", "add", "-qb", "feature/intended", str(other), "HEAD")
-        progress = self.dir.parent / "progress.json"
-        progress.write_text(
-            json.dumps(
-                {"session_id": "s", "loop_id": "l", "work_units": {"2": {"manifest": ["*.md"], "worktree": str(other)}}}
-            )
-        )
+        progress = graph_progress(self.dir, self.loop, ["*.md"], session="s1", provider="codex")
         command = f"python3 scripts/merge.py 7 --unit 2 --progress {progress}"
-        self.assertTrue(self.reason(command).startswith("diff_manifest:manifest_unreadable"))
+        self.assertEqual(self.reason(command), "")
         self.assertEqual(self.reason(f"cd {other} && {command}"), "")
         self.assertEqual(self.reason(f"cd {other} && bash -c '{command}'"), "")
+        foreign = self.dir.parent / "foreign-repo"
+        foreign.mkdir()
+        git_cmd(foreign, "init", "-q", "-b", "main")
+        foreign_progress = graph_progress(foreign, self.loop / "foreign", ["*.md"], session="s1", provider="codex")
+        self.assertTrue(
+            self.reason(f"python3 scripts/merge.py 7 --unit 2 --progress {foreign_progress}").startswith(
+                "diff_manifest:manifest_unreadable"
+            )
+        )
 
     def test_subshell_and_brace_groups_bind_the_trailing_unit_to_their_actual_cwd(self) -> None:
-        """A subshell restores the starting worktree; a brace group retains its cd."""
+        """A group may change linked worktrees; a foreign graph path still refuses."""
         git_cmd(self.dir, "reset", "-q", "--hard", "origin/main")
         (self.dir / "docs.md").write_text("canary\n")
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "docs")
         self.env["FAKE_SHA"] = git_cmd(self.dir, "rev-parse", "HEAD").strip()
-        self.env["FAKE_EVAL_FILE"] = str(
-            write_comment(self.dir.parent, self.env["FAKE_SHA"], 1, frozen_sha=self.env["CLEAN_SHA"])
-        )
+        self.env["FAKE_EVAL_FILE"] = str(self.signed_eval(self.env["FAKE_SHA"], self.env["CLEAN_SHA"]))
         other = self.dir.parent / "other-worktree"
         git_cmd(self.dir, "worktree", "add", "-qb", "feature/intended", str(other), "HEAD")
-        paths = [self.dir.parent / "own-progress.json", self.dir.parent / "other-progress.json"]
-        for path, worktree in zip(paths, (self.dir, other)):
-            path.write_text(
-                json.dumps(
-                    {
-                        "session_id": "s",
-                        "loop_id": "l",
-                        "work_units": {"2": {"manifest": ["*.md"], "worktree": str(worktree)}},
-                    }
-                )
-            )
-        own, intended = (f"python3 scripts/merge.py 7 --unit 2 --progress {path}" for path in paths)
+        progress = graph_progress(self.dir, self.loop, ["*.md"], session="s1", provider="codex")
+        own = intended = f"python3 scripts/merge.py 7 --unit 2 --progress {progress}"
+        foreign = self.dir.parent / "foreign-repo"
+        foreign.mkdir()
+        git_cmd(foreign, "init", "-q", "-b", "main")
+        foreign_progress = graph_progress(foreign, self.loop / "foreign", ["*.md"], session="s1", provider="codex")
+        foreign_command = f"python3 scripts/merge.py 7 --unit 2 --progress {foreign_progress}"
         for command, denied in (
             (f"(cd {other} && {intended}); {own}", False),
-            (f"(cd {other} && {intended}); {intended}", True),
+            (f"(cd {other} && {intended}); {foreign_command}", True),
             (f"{{ cd {other} && {intended}; }}; {intended}", False),
         ):
             with self.subTest(command=command):
@@ -345,24 +391,6 @@ class CodexPublicationGateTests(unittest.TestCase):
                 self.assertEqual(bool(reason), denied, reason)
                 if denied:
                     self.assertTrue(reason.startswith("diff_manifest:manifest_unreadable"), reason)
-
-
-class RegistrationTests(unittest.TestCase):
-    """The hook is shipped, executable and registered under the Bash matcher."""
-
-    def test_registered_and_executable(self) -> None:
-        """hooks.json lists the hook under ^Bash$ and the file is executable."""
-        data = json.loads((ROOT / "packages/codex/hooks/hooks.json").read_text())["hooks"]["PreToolUse"]
-        commands = [h["command"] for group in data if group["matcher"] == "^Bash$" for h in group["hooks"]]
-        self.assertIn('"${PLUGIN_ROOT}/hooks/scripts/pr_publication_gate.py"', commands)
-        self.assertTrue(os.access(HOOK, os.X_OK))
-
-    def test_entrypoint_mode_fixture(self) -> None:
-        """python_entrypoint_modes records the new hook as executable."""
-        modes = json.loads((ROOT / "hooks/scripts/tests/fixtures/python_entrypoint_modes.json").read_text())
-        self.assertEqual(modes.get("packages/codex/hooks/scripts/pr_publication_gate.py"), "100755")
-        self.assertEqual(modes.get("scripts/lib/publication_gate.py"), "100644")
-        self.assertEqual(modes.get("packages/codex/scripts/lib/publication_gate.py"), "100644")
 
 
 if __name__ == "__main__":

@@ -12,7 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, output, read_payload_strict
 from hooks.scripts.lib.destructive_patterns import normalize_ifs, permanent_pattern, source_write, workflow_substitution
 from hooks.scripts.lib.destructive_routes import ROUTES
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.shell_context import opaque_execution
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 from scripts.lib.authority_permits import permits
 
 LEASE = re.compile(r"\bgit\b.*\bpush\b.*--force-with-lease\b", re.I)  # the one family permanent_pattern can allow
@@ -32,6 +33,9 @@ def main() -> int:
     command = normalize_ifs(raw)
     cwd_value = payload.get("cwd")
     cwd = cwd_value if isinstance(cwd_value, str) and cwd_value else os.getcwd()
+    if opaque_execution(command, cwd):
+        deny("Blocked: executable shell body exceeds the guarded parser depth.")
+        return 0
     try:
         pattern, identifier = permanent_pattern(command, cwd)
     except HostResourceError:

@@ -32,6 +32,8 @@ from .loop_evals import EvalStatus, read_loop_evals
 from .loop_state_common import LoopState, read_state
 
 sys.path.insert(0, str(ROOT))
+import graph_dispatch_inputs  # noqa: E402
+import graph_driver_evidence  # noqa: E402
 import worker_status  # noqa: E402
 
 from scripts.lib.config import config_path, load_config  # noqa: E402
@@ -128,18 +130,12 @@ def plan(path: Path) -> list[dict[str, Any]]:
 def begin_wave(path: Path) -> dict[str, Any]:
     """Open exactly the core-ready wave and capture its native transcript boundary."""
     base, mode = graph_contract.base_ref(), sandbox_mode(load_config(config_path())[0])
-    preview = load(path)
-    lesson_snapshot = None
-    if any(
-        unit.get(key) for unit in preview.get("work_units", {}).values() for key in ("manifest", "worktree", "lessons")
-    ):
-        lesson_snapshot = graph_contract.current_lessons(path, ROOT / "scripts/push.py", preview["session_id"])
+    preview, lesson_snapshot = graph_dispatch_inputs.prefetch(path, ROOT / "scripts/push.py", load)
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
-        if lesson_snapshot is not None and any(
-            state[key] != preview[key] for key in ("session_id", "loop_id", "revision")
-        ):
-            raise graph_contract.DispatchDeniedError("dispatch_lessons_stale", "graph changed during lessons query")
+        graph_dispatch_inputs.check_revision(preview, state, lesson_snapshot)
+        if state["graph"].get("dispatch_mode") == "driver":
+            raise ValueError("driver graph refuses native begin-wave")
         graph_contract.require_converted(state)
         for node in graph_semantics.ready(state):
             validate_dispatch_evals(path, state, node)
@@ -170,6 +166,8 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
     recorded: list[list[dict[str, Any]]] = []
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
+        if state["graph"].get("dispatch_mode") == "driver":
+            raise ValueError("driver graph refuses native record-wave")
         try:
             core, statuses, reports = worker_status.prepare(state, results)
         except worker_status.WorkerResultError as error:
@@ -223,18 +221,14 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
 def authorize_dispatch(
     path: Path, session: str, prompt: str, role: str, tool_use_id: str | None = None
 ) -> dict[str, Any]:
-    """Check a native Agent request under lock, consume its dispatch ID, and trace a coded refusal."""
+    """Check and consume a native Agent dispatch, preserving the coded refusal trace."""
     state = load(path)
+    if state["graph"].get("dispatch_mode") == "driver":
+        trace(path, state, "refused", "driver_native_dispatch", {"session": session}, [], "authorize-dispatch")
+        raise ValueError("driver graph refuses native authorization")
     if state["session_id"] != session or state["status"] == "complete":
         raise ValueError("this session does not own an active loop")
-    lesson_snapshot = (
-        graph_contract.current_lessons(path, ROOT / "scripts/push.py", session)
-        if any(
-            record.get("contract", {}).get("lessons_sha256") is not None
-            for record in state["graph"].get("dispatches", {}).values()
-        )
-        else None
-    )
+    preview, lesson_snapshot = graph_dispatch_inputs.prefetch(path, ROOT / "scripts/push.py", load, True)
     role = role.strip()
     inputs = {"session": session, "role": role}
     if not role:
@@ -269,6 +263,7 @@ def authorize_dispatch(
     named: list[str | None] = [None]  # the envelope's node, once it parses, for the trace row
 
     def update(current: dict[str, Any]) -> dict[str, Any]:
+        graph_dispatch_inputs.check_revision(preview, current, lesson_snapshot)
         try:
             graph_contract.require_converted(current)
             request = graph_contract.parse_envelope(prompt)
@@ -306,7 +301,7 @@ def validate_graph_shape(path: Path) -> None:
     load(path)
 
 
-def validate_graph_state_completion(state: dict[str, Any], session: str) -> None:
+def validate_graph_state_completion(path: Path, state: dict[str, Any], session: str) -> None:
     """Check pure graph eligibility and re-derive every native worker reference."""
     validate_state(state)
     if state["session_id"] != session:
@@ -314,13 +309,18 @@ def validate_graph_state_completion(state: dict[str, Any], session: str) -> None
     eligibility = graph_semantics.can_complete(state)
     if not eligibility["eligible"]:
         raise ValueError("graph cannot complete: " + ", ".join(eligibility["blockers"]))
-    revalidate_all(state)
+    if state["graph"].get("dispatch_mode") == "driver":
+        native = graph_driver_evidence.validate_backup(path, state)
+        revalidate_all(native)
+        graph_driver_evidence.validate_history(path, state)
+    else:
+        revalidate_all(state)
 
 
 def validate_graph_completion(path: Path, session: str) -> None:
     """Read and validate graph completion for the native Stop hook."""
     try:
-        validate_graph_state_completion(load(path), session)
+        validate_graph_state_completion(path, load(path), session)
     except (KeyError, TypeError, AttributeError) as error:
         raise ValueError(f"malformed native graph evidence: {error}") from error
 
@@ -354,7 +354,7 @@ def complete(path: Path, session: str, write: bool = True, completed_marker: int
     """Prepare orders, save validated completion, then apply the lifecycle outside both locks."""
     current = load(path)
     if write and current["status"] != "complete":
-        validate_graph_state_completion(current, session)
+        validate_graph_state_completion(path, current, session)
         validate_artifacts(path, current)
     digest = (
         orders_completion.prepare(path, session, current["loop_id"])
@@ -363,7 +363,7 @@ def complete(path: Path, session: str, write: bool = True, completed_marker: int
     )
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
-        validate_graph_state_completion(state, session)
+        validate_graph_state_completion(path, state, session)
         validate_artifacts(path, state)
         if write and state["status"] != "complete":
             if digest is None:

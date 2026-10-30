@@ -1,7 +1,4 @@
-"""Controller commands `start` and `add-unit`: the only writers of a loop's initial state and work units.
-
-Each is one lock and one atomic replace. Every outcome carries a closed reason code and a non-authoritative trace row.
-"""
+"""Controller commands create initial loop state and work units under one atomic lock, with coded traced outcomes."""
 
 from __future__ import annotations
 
@@ -11,9 +8,12 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .graph_executor import graph_contract, graph_semantics, graph_spec, transition
+from .graph_records import record_proof_disposition as record_proof_disposition
+from .graph_records import record_repair as record_repair
+from .graph_records import record_unit as record_unit
 from .graph_recovery import RecoveryRefusedError, trace
 from .loop_state_common import atomic_progress_update
 
@@ -147,7 +147,12 @@ def register_unit(
     proposed = copy.deepcopy(state)
     proposed["revision"] += 1  # the graph changed: evals frozen at the old revision must go STALE
     graph = proposed["graph"]
-    stored = {"status": "pending", **({"manifest": manifest} if manifest else {}), **(fields or {})}
+    stored = {
+        "status": "pending",
+        "registered_revision": proposed["revision"],
+        **({"manifest": manifest} if manifest else {}),
+        **(fields or {}),
+    }
     proposed["work_units"][unit] = stored
     graph["nodes"].update(added["nodes"])
     graph["edges"].extend({"from": graph_spec.unit_root_id(spec, d), "to": node_id} for d in dict.fromkeys(deps))
@@ -197,12 +202,7 @@ def add_unit(
             given.get("base_branch"),
             given.get("worktree"),
         )
-        if manifest and not fields.get("worktree"):
-            raise ValueError("--worktree is required when a unit has a source manifest")
-        if worktree := fields.get("worktree"):
-            fields["source_manifest_sha256"] = graph_contract.source_binding(worktree, manifest or [])[
-                "source_manifest_sha256"
-            ]
+        fields.update(graph_contract.source_assignment(fields.get("worktree"), manifest or []))
     except ValueError as error:
         coded = RecoveryRefusedError("add_unit_refused_bad_field", str(error))
         raise _refused("add-unit", path, ident, coded, inputs) from error
@@ -256,6 +256,108 @@ def add_unit(
         "revision": revision[0],
         "reason_code": "add_unit_registered",
     }
+
+
+def assign_worktree(path: Path, session: str, loop_id: str, unit: str, worktree: str) -> dict[str, Any]:
+    """Assign a checkout to an existing unit without changing graph revision or active dispatches."""
+    ident = {"session_id": session, "loop_id": loop_id}
+    inputs = {"unit": unit, "worktree": worktree}
+    try:
+        assigned = graph_contract.unit_fields(None, [], [], None, worktree=worktree)["worktree"]
+    except ValueError as error:
+        coded = RecoveryRefusedError("assign_worktree_refused", str(error))
+        raise _refused("assign-worktree", path, ident, coded, inputs) from error
+    refusal: list[RecoveryRefusedError] = []
+
+    def update(state: dict[str, Any]) -> dict[str, Any]:
+        units: object = state.get("work_units")
+        raw: object = cast(dict[str, object], units).get(unit) if isinstance(units, dict) else None
+        record = cast(dict[str, Any], raw) if isinstance(raw, dict) else None
+        if state["session_id"] != session or state["loop_id"] != loop_id or state["status"] != "in-progress":
+            refusal.append(RecoveryRefusedError("assign_worktree_refused", "loop ownership or status mismatch"))
+            raise refusal[0]
+        if record is None or record.get("status") != "pending":
+            refusal.append(RecoveryRefusedError("assign_worktree_refused", "unit is not pending"))
+            raise refusal[0]
+        if record.get("worktree") not in (None, assigned):
+            refusal.append(RecoveryRefusedError("assign_worktree_refused", "unit already has another worktree"))
+            raise refusal[0]
+        record.update(graph_contract.source_assignment(assigned, record.get("manifest", [])))
+        return state
+
+    try:
+        transition(path, update)
+    except ValueError as error:
+        coded = refusal[0] if refusal else RecoveryRefusedError("assign_worktree_refused", str(error))
+        raise _refused("assign-worktree", path, ident, coded, inputs) from error
+    trace(path, ident, "assigned", "worktree_assigned", inputs, [], "assign-worktree")
+    return {"unit": unit, "worktree": assigned, "reason_code": "worktree_assigned"}
+
+
+def set_unit_disposition(
+    path: Path,
+    session: str,
+    loop_id: str,
+    revision: int,
+    unit: str,
+    kind: str,
+    named_blocker: str | None,
+    removal_ticket: str | None,
+    source_ref: str | None,
+) -> dict[str, Any]:
+    """Record one sourced compatibility choice on a pending unit under the graph lock."""
+    ident = {"session_id": session, "loop_id": loop_id}
+    inputs = {"unit": unit, "revision": revision, "disposition": kind, "source_ref": source_ref}
+    try:
+        choice = validate_disposition(kind, named_blocker, removal_ticket)
+        source = (source_ref or "").strip()
+        if not source or len(source) > 500 or "\n" in source or "\r" in source:
+            raise ValueError("a single-line source reference is required")
+
+        def update(state: dict[str, Any]) -> dict[str, Any]:
+            units = state.get("work_units")
+            raw: object = cast(dict[str, object], units).get(unit) if isinstance(units, dict) else None
+            record = cast(dict[str, Any], raw) if isinstance(raw, dict) else None
+            if state.get("session_id") != session or state.get("loop_id") != loop_id:
+                raise ValueError("session or loop does not own this graph")
+            if state.get("status") != "in-progress" or state.get("revision") != revision:
+                raise ValueError("loop status or revision changed")
+            if state["graph"].get("active_wave") is not None:
+                raise ValueError("an active wave holds this graph")
+            if record is None or record.get("status") != "pending" or record.get("disposition") is not None:
+                raise ValueError("unit is absent, not pending, or already has a choice")
+            proposed = copy.deepcopy(state)
+            proposed["revision"] += 1
+            stored = proposed["work_units"][unit]
+            stored.update(disposition=choice, disposition_source=source, disposition_revision=proposed["revision"])
+            return proposed
+
+        result = transition(path, update)
+    except (OSError, ValueError) as error:
+        coded = RecoveryRefusedError("set_disposition_refused", str(error))
+        raise _refused("set-unit-disposition", path, ident, coded, inputs) from error
+    trace(path, result, "recorded", "unit_disposition_recorded", inputs, [], "set-unit-disposition")
+    return {
+        "unit": unit,
+        "disposition": choice,
+        "revision": result["revision"],
+        "reason_code": "unit_disposition_recorded",
+    }
+
+
+def set_unit_disposition_args(args: Any) -> dict[str, Any]:  # noqa: ANN401
+    """Pass parsed CLI fields to the typed state writer."""
+    return set_unit_disposition(
+        args.state,
+        args.session,
+        args.loop_id,
+        args.revision,
+        args.unit,
+        args.disposition,
+        args.named_blocker,
+        args.removal_ticket,
+        args.source_ref,
+    )
 
 
 def instantiate(path: Path, session: str, loop_id: str, profile: str | None, units: list[str]) -> dict[str, Any]:

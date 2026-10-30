@@ -16,7 +16,7 @@ _WRAPPERS: dict[str, tuple[str, tuple[str, ...], int]] = {
     "env": ("uCS", ("--unset", "--chdir", "--split-string"), 0),
     "sudo": ("ugphCDRT", ("--user", "--group", "--host", "--prompt", "--chdir", "--chroot", "--close-from"), 0),
     "command": ("", (), 0),
-    "time": ("", (), 0),
+    "time": ("fo", ("--format", "--output"), 0),
     "nohup": ("", (), 0),
     "nice": ("n", ("--adjustment",), 0),
     "exec": ("a", (), 0),
@@ -28,6 +28,10 @@ _WRAPPERS: dict[str, tuple[str, tuple[str, ...], int]] = {
 }
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 _FALLBACK_SPLIT = re.compile(r"&&|\|\||[;|&()\n]")
+
+
+class OpaqueShellError(ValueError):
+    """A command body would execute beyond the parser's bounded recursion."""
 
 
 def move(cwd: str, target: str) -> str:
@@ -80,6 +84,56 @@ def split_all(command: str) -> list[tuple[str, list[str]]]:
             for part in _FALLBACK_SPLIT.split(command)
             if (tokens := part.replace("'", " ").replace('"', " ").split())
         ]
+
+
+def quoted_commands(source: str) -> list[str]:
+    """Find command substitutions that remain executable inside double quotes."""
+    found: list[str] = []
+    quote = ""
+    index = 0
+    while index < len(source):
+        char = source[index]
+        if char == "\\" and quote != "'":
+            index += 2
+            continue
+        if char in "'\"" and (not quote or quote == char):
+            quote = "" if quote else char
+        elif quote == '"' and source.startswith("$(", index):
+            start, depth, inner_quote = index + 2, 1, ""
+            end = start
+            while end < len(source) and depth:
+                token = source[end]
+                if token == "\\" and inner_quote != "'":
+                    end += 2
+                    continue
+                if token in "'\"" and (not inner_quote or inner_quote == token):
+                    inner_quote = "" if inner_quote else token
+                elif not inner_quote:
+                    if token == "(":
+                        depth += 1
+                    elif token == ")":
+                        depth -= 1
+                end += 1
+            if depth == 0:
+                found.append(source[start : end - 1])
+                index = end
+                continue
+        elif quote == '"' and char == "`":
+            end = index + 1
+            while end < len(source):
+                if source[end] == "\\":
+                    end += 2
+                elif source[end] == "`":
+                    found.append(source[index + 1 : end])
+                    index = end + 1
+                    break
+                else:
+                    end += 1
+            else:
+                index = end
+            continue
+        index += 1
+    return found
 
 
 def strip_wrapper(name: str, argv: list[str], cwd: str) -> tuple[list[str], str]:
@@ -147,12 +201,41 @@ def shell_body(argv: list[str]) -> str | None:
     return None
 
 
-def invocations(command: str, cwd: str = "", depth: int = 0) -> list[tuple[str, list[str], str]]:
+def ansi_c_quote(source: str) -> bool:
+    """Detect active Bash $'...' quoting without matching inert single-quoted text."""
+    quote = ""
+    index = 0
+    while index < len(source):
+        char = source[index]
+        if char == "\\" and quote != "'":
+            index += 2
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char == "$" and source[index + 1 : index + 2] == "'":
+            return True
+        elif char in "'\"":
+            quote = char
+        index += 1
+    return False
+
+
+def shell_c_requested(argv: list[str]) -> bool:
+    """Recognize a -c option whose body the bounded parser could not locate."""
+    return any(token.startswith("-") and not token.startswith("--") and "c" in token[1:] for token in argv[1:])
+
+
+def invocations(
+    command: str, cwd: str = "", depth: int = 0, *, strict: bool = False
+) -> list[tuple[str, list[str], str]]:
     """Yield exact source, unwrapped argv and effective cwd, with local shell/subshell scope."""
     found: list[tuple[str, list[str], str]] = []
     directories: list[str] = []
     cursor = 0
     for segment, tokens in split_all(command):
+        if strict and ansi_c_quote(segment):
+            raise OpaqueShellError("ANSI-C quoted shell syntax is opaque")
         at = command.find(segment, cursor)
         if at < 0:
             at = cursor
@@ -165,6 +248,12 @@ def invocations(command: str, cwd: str = "", depth: int = 0) -> list[tuple[str, 
                 cwd = directories.pop()
             continue
         argv, where = unwrap(tokens, cwd)
+        for embedded in quoted_commands(segment):
+            if depth >= 5:
+                if strict:
+                    raise OpaqueShellError("quoted command exceeds shell depth")
+            else:
+                found.extend(invocations(embedded, cwd, depth + 1, strict=strict))
         if not argv:
             continue
         if argv[0] == "cd":
@@ -178,11 +267,27 @@ def invocations(command: str, cwd: str = "", depth: int = 0) -> list[tuple[str, 
                 cwd = move(where, args[0])
             continue
         found.append((segment, argv, where))
-        if (body := shell_body(argv)) is not None and depth < 5:
-            found.extend(invocations(body, where, depth + 1))
-        elif argv[0] == "eval" and len(argv) > 1 and depth < 5:
-            found.extend(invocations(" ".join(argv[1:]), where, depth + 1))
+        body = shell_body(argv)
+        if strict and body is None and argv[0] in SHELLS and shell_c_requested(argv):
+            raise OpaqueShellError("shell -c body follows unsupported options")
+        if body is None and argv[0] == "eval" and len(argv) > 1:
+            body = " ".join(argv[1:])
+        if body is not None:
+            if depth >= 5:
+                if strict:
+                    raise OpaqueShellError("shell command exceeds shell depth")
+            else:
+                found.extend(invocations(body, where, depth + 1, strict=strict))
     return found
+
+
+def opaque_execution(command: str, cwd: str = "") -> bool:
+    """True if supported shell forms would execute beyond the parser's depth limit."""
+    try:
+        invocations(command, cwd, strict=True)
+    except OpaqueShellError:
+        return True
+    return False
 
 
 def payload_cwd(payload: Mapping[str, object]) -> str:

@@ -65,6 +65,7 @@ def artifacts(case: GraphCase, state: dict[str, Any]) -> None:
         verdict="satisfied",
         cwd=str(Path.cwd()),
         head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+        source_tree_sha=subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
         **identity,
     )
     prepared_retro(case, state["session_id"])
@@ -267,8 +268,8 @@ class ArtifactGateTests(GraphCase):
                 {**original, "session_id": "foreign"},
                 None,
                 2,
-                "proof_stale_cmd",
-            ),  # the foreign doc no longer hashes to the freeze row
+                "proof.json session_id",
+            ),
             (None, None, 2, "no proof_disposition"),
             (None, "none: no executable surface", 0, ""),
         )

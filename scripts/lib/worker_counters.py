@@ -1,8 +1,9 @@
 """Count typed worker results and recorded decisions from per-loop trace rows and state (read-only, counts only).
 
-Usage: python3 scripts/lib/worker_counters.py [--since <ISO ts>]   (loop dir: CLAUDE_AGENTIC_LOOP_DIR or default)
-Pass --trace-json to read measure_graph_alignment JSON on stdin; recovery traces and pending state are still read.
-Trace rows come from `record-wave` and `record-decision` in each loop's recovery-trace.jsonl on both providers:
+Usage: python3 scripts/lib/worker_counters.py [--since <ISO ts>]   (loop dir: provider override or default)
+Pass --trace-json to read measure_graph_alignment JSON on stdin; local decision mapping remains source-specific.
+Worker rows come from `record-wave` in each loop's recovery-trace.jsonl; locally recorded decisions come from
+`decision.record/recorded/ok` in the session's trace.jsonl on both providers:
 `worker_status_<reason>` and `final_report_invalid` are whole-report refusals, `worker_status_<status>` a recorded typed
 status, `final_report_recorded` a stored report, `decision_recorded` a ledger row. `pending_statuses` is read from each
 progress.json (worker_statuses rows still `decision_pending`): a number that stays above zero means a human question was
@@ -34,11 +35,16 @@ REASON_CODES = (
 
 def count_reasons(root: Path, since: str = "", measurement: object = None) -> dict[str, int]:
     """Occurrences of each reason code, once per (file, event_id), rows with ts >= since when given; plus pending."""
-    base: dict[str, int] = (
-        measured_reasons(measurement, REASON_CODES) if measurement is not None else dict.fromkeys(REASON_CODES, 0)
-    )
+    base = measured_reasons(measurement, REASON_CODES) if measurement is not None else dict.fromkeys(REASON_CODES, 0)
+    if measurement is not None:
+        summary = cast("dict[str, Any]", measurement)["trace"]["by_reason"]
+        base["decision_recorded"] += summary.get("decision.record/recorded/ok", 0)
     counts: dict[str, int] = {**base, "pending_statuses": 0}
-    for trace in sorted([*root.glob("*/recovery-trace.jsonl"), *root.glob("*/*/recovery-trace.jsonl")]):
+    traces = [*root.glob("*/recovery-trace.jsonl"), *root.glob("*/*/recovery-trace.jsonl")]
+    traces += [*root.glob("*/*/trace.jsonl")]
+    if measurement is None:
+        traces += [*root.glob("*/trace.jsonl")]
+    for trace in sorted(traces):
         try:
             lines = trace.read_text(encoding="utf-8").splitlines()
         except (OSError, ValueError):
@@ -51,6 +57,12 @@ def count_reasons(root: Path, since: str = "", measurement: object = None) -> di
                 continue
             fields = cast("dict[str, Any]", row) if isinstance(row, dict) else {}
             code, stamp, event = fields.get("reason_code"), fields.get("ts"), fields.get("event_id")
+            if trace.name == "trace.jsonl":
+                code = (
+                    "decision_recorded"
+                    if (fields.get("command"), fields.get("outcome"), code) == ("decision.record", "recorded", "ok")
+                    else None
+                )
             if since and not (isinstance(stamp, str) and stamp >= since):
                 continue
             if isinstance(code, str) and code in counts and not (isinstance(event, str) and event in seen):
@@ -81,7 +93,11 @@ def counts(loop_roots: list[Path]) -> dict[str, int]:
 def main() -> int:
     """Print the counts as JSON."""
     since = sys.argv[sys.argv.index("--since") + 1] if "--since" in sys.argv[:-1] else ""
-    root = Path(os.environ.get("CLAUDE_AGENTIC_LOOP_DIR", str(Path.home() / ".coderails/agentic-loop")))
+    root = Path(
+        os.environ.get("CLAUDE_AGENTIC_LOOP_DIR")
+        or os.environ.get("CODERAILS_AGENTIC_LOOP_DIR")
+        or Path.home() / ".coderails/agentic-loop"
+    )
     measurement = json.load(sys.stdin) if "--trace-json" in sys.argv else None
     if "--trace-json" in sys.argv and measurement is None:
         raise ValueError("missing trace summary")

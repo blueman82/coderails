@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loo
 import graph_contract
 
 ENVELOPE_KEY = graph_contract.ENVELOPE_KEY
+API_METADATA_TYPES = {"api-request-shape", "api-request-blob", "api-request"}
 
 
 def object_value(value: object, label: str) -> dict[str, Any]:
@@ -172,7 +173,11 @@ def child_identity(
     child = path.with_suffix("") / "subagents" / f"agent-{agent}.jsonl"
     entries = records(child)
     if not entries or any(
-        item.get("agentId") != agent or item.get("sessionId") != session or item.get("isSidechain") is not True
+        item.get("agentId") != agent
+        or item.get("sessionId") != session
+        or not (
+            item.get("isSidechain") is True or ("isSidechain" not in item and item.get("type") in API_METADATA_TYPES)
+        )
         for item in entries
     ):
         raise ValueError("native child belongs to another parent session or identity")

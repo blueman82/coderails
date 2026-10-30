@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.tests.lib.post_evals_fixture import ArtifactCase, entry
+from scripts.lib.eval_integrity import sign_suite, suite_hash
 from scripts.lib.eval_validation import validate_embed, validate_structure
 
 
@@ -89,8 +90,14 @@ class StructureTests(ArtifactCase):
 
         self.assertEqual(main([]), 1)
 
-    def test_freeze_ancestry_and_explicit_disclosure(self) -> None:
-        """Use real Git history to distinguish the branch base from a late freeze."""
+    def test_freeze_ancestry_and_mutable_disclosure(self) -> None:
+        """Use real Git history and reject a mutable late-freeze justification."""
+
+        def freeze() -> None:
+            self.data["frozen_hash"] = suite_hash(self.data)
+            sign_suite(self.data, strict=True)
+            self.save()
+
         base = self.repository()
         base_reply = patch("scripts.lib.git_common.pr_field", return_value=base)
         base_reply.start()
@@ -100,19 +107,22 @@ class StructureTests(ArtifactCase):
         self.git("commit", "--allow-empty", "-m", "implementation")
         later = self.git("rev-parse", "HEAD")
         self.data["head_sha"] = later
+        self.data["integrity_version"] = 2
+        self.data["frozen_at"] = "2026-10-25T00:00:00Z"
         self.data["frozen_sha"] = base
-        self.save()
+        freeze()
         validate_structure(self.path, "192", later)
         self.data["frozen_sha"] = later
-        self.save()
-        with self.assertRaisesRegex(ValueError, "late freeze"):
+        freeze()
+        with self.assertRaisesRegex(ValueError, "is late"):
             validate_structure(self.path, "192", later)
         validate_structure(self.path, scope="loop")
         self.data["verification_justification"] = "Explicit late freeze after implementation"
-        self.save()
-        validate_structure(self.path, "192", later)
+        freeze()
+        with self.assertRaisesRegex(ValueError, "freeze_timing_unverified"):
+            validate_structure(self.path, "192", later)
         self.data["frozen_sha"] = "f" * 40
-        self.save()
+        freeze()
         with self.assertRaisesRegex(ValueError, "does not resolve"):
             validate_structure(self.path, "192", later)
         for unverifiable in (None, "", "origin/main", base[:12]):

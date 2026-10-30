@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Check that installed Claude and Codex coderails bundles are byte-identical to their source tree."""
+"""Check source/assets inventory parity for installed Claude and Codex coderails bundles.
+
+Compared files must match source bytes. Excludes every .pyc file, every path
+containing a __pycache__ component, and .DS_Store files. A passing check does not
+authenticate retained bytecode or prove executed-code integrity.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +16,9 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.release_manifest import source_files  # noqa: E402
+
 IGNORED_DIRS = {"__pycache__"}
 IGNORED_NAMES = {".DS_Store"}
 IGNORED_SUFFIXES = (".pyc",)
@@ -20,7 +28,10 @@ RUNTIME_PATHS = (
     "scripts",
     "commands",
     "agents",
+    "capabilities",
     "instructions",
+    "policy",
+    "routines",
     ".claude-plugin",
     "packages/graph-semantics",
     "packages/codex",
@@ -117,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         tracked: set[str] = _tracked_source(source) if args.require_both else set()
+        runtime = source_files(source) if args.require_both else {}
     except (OSError, ValueError) as error:
         print(f"installed_parity: {error}", file=sys.stderr)
         return 2
@@ -152,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             prefix = "packages/codex/" if bundle == "codex" else ""
             expected = {path[len(prefix) :] for path in tracked if path.startswith(prefix)}
-            for required in REQUIRED_FILES[bundle]:
+            for required in (*REQUIRED_FILES[bundle], *runtime[bundle]):
                 if required not in expected or not (installed / required).is_file():
                     print(f"installed_parity: {bundle}: required installed file missing: {required}", file=sys.stderr)
                     return 2

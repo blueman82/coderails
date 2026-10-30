@@ -99,6 +99,7 @@ class MergeContractTests(unittest.TestCase):
             stack.enter_context(patch.object(manifest_policy, "violations", return_value=[]))
             stack.enter_context(patch("scripts.lib.eval_level.branch_base", return_value="a" * 40))
             stack.enter_context(patch("scripts.lib.eval_level.suite_late", return_value=False))
+            stack.enter_context(patch("scripts.lib.eval_validation.require_freeze_timing"))
             stack.enter_context(patch.object(merge, "config_path", return_value=""))
             stack.enter_context(patch.object(merge, "has_wiki_ingest_for_merged_prs"))
             stack.enter_context(patch.object(merge, "require_merge_receipt", return_value=None))

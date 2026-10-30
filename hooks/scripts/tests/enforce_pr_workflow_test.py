@@ -23,6 +23,46 @@ FIXTURES = Path(__file__).with_name("fixtures")
 class WorkflowGateTests(HookTestCase):
     """Replay original registration, review ordering, branches, and exact-head eval gates."""
 
+    def test_over_limit_shell_body_is_denied(self) -> None:
+        """An opaque sixth shell level cannot conceal a protected push."""
+        repo = self.git_repo("deep_shell", "feature")
+        for wrapper in ("bash -c", "eval"):
+            command = "git push origin HEAD:main"
+            for _ in range(6):
+                command = f"{wrapper} {shlex.quote(command)}"
+            with self.subTest(wrapper=wrapper):
+                payload = {
+                    "session_id": "S1",
+                    "cwd": str(repo),
+                    "tool_name": "Bash",
+                    "tool_input": {"command": command},
+                }
+                for hook in (
+                    "enforce_pr_workflow",
+                    "action_authority_gate",
+                    "destructive_bash_gate",
+                    "test_gate",
+                    "verification_volume_ceiling",
+                ):
+                    with self.subTest(hook=hook):
+                        result = self.run_hook(hook, payload)
+                        self.assertIn('"deny"', result.stdout)
+
+    def test_ansi_c_shell_body_is_denied(self) -> None:
+        """Opaque Bash quoting and value options cannot hide a protected push."""
+        repo = self.git_repo("ansi_shell", "feature")
+        for command in ("bash -c $'git push origin x:main'", "bash --rcfile /dev/null -c 'git push origin x:main'"):
+            payload = {
+                "session_id": "S1",
+                "cwd": str(repo),
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+            }
+            for hook in ("enforce_pr_workflow", "action_authority_gate", "destructive_bash_gate", "test_gate"):
+                with self.subTest(command=command, hook=hook):
+                    result = self.run_hook(hook, payload)
+                    self.assertIn('"deny"', result.stdout)
+
     def test_guarded_action_denies_when_transcript_is_unavailable(self) -> None:
         """A missing review record cannot permit a configured protected action."""
         repo = self.git_repo("missing_transcript", "main")
@@ -130,6 +170,7 @@ class WorkflowGateTests(HookTestCase):
             case = json.loads(
                 json.dumps(original).replace("{sandbox}", str(self.directory)).replace("{head_sha}", fixture_sha)
             )
+            case["request"]["session_id"] = "S1"  # corpus predates the required hook session field
             for path in previous:
                 path.unlink(missing_ok=True)
             previous = set()

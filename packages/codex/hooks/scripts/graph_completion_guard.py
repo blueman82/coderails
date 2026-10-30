@@ -160,25 +160,24 @@ def main() -> int:
     if recorded is not None and recorded.get("stop") is not None:  # the recorded row decides; final text is unread
         log(f"hook=graph_completion_guard session={session_id} recorded_stop=consumed blocked=0")
         return 0
+    failure_code: list[str] = []
     try:
-        verified = (
-            graph_output(
-                graph,
-                "verify-completion",
-                str(state),
-                "--session",
-                session_id,
-                "--evals",
-                str(state.parent / "evals.json"),
-                "--proof",
-                str(state.parent / "proof.json"),
-                "--retro",
-                str(state.parent / "retro.json"),
-                "--transcript",
-                text_field(payload, "transcript_path"),
-                timeout_seconds=remaining(),
-            )
-            is not None
+        verified = graph_output(
+            graph,
+            "verify-completion",
+            str(state),
+            "--session",
+            session_id,
+            "--evals",
+            str(state.parent / "evals.json"),
+            "--proof",
+            str(state.parent / "proof.json"),
+            "--retro",
+            str(state.parent / "retro.json"),
+            "--transcript",
+            text_field(payload, "transcript_path"),
+            failure_code=failure_code,
+            timeout_seconds=remaining(),
         )
     except HostResourceError:
         continue_turn(RESOURCE_MESSAGE)
@@ -186,12 +185,13 @@ def main() -> int:
     except GraphTimeoutError:
         continue_turn(TIMEOUT_MESSAGE)
         return 0
-    if verified:
+    if verified is not None:
         return 0
     append_trace_row("graph_completion_guard", "blocked", "stop_row_missing", session_id)
     if not unresolved(state):
+        code = " (retro_memory_invalid)" if failure_code else ""
         continue_turn(
-            "The native Codex graph passed graph checks but completion evidence is invalid. "
+            f"The native Codex graph passed graph checks but completion evidence is invalid{code}. "
             "Repair evals, proof, retro, or standing-orders teardown evidence before stopping."
         )
         return 0

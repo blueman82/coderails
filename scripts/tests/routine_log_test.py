@@ -9,6 +9,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TextIO, cast
+from unittest import mock
+
+from packages.codex.scripts import routine_log as codex_routine_log
+from scripts import routine_log
 
 REPO = Path(__file__).resolve().parents[2]
 TOOL = REPO / "scripts" / "routine_log.py"
@@ -102,6 +107,56 @@ class EmitTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("log_unwritable", result.stderr)
         self.assertEqual(self.rows(), [])
+
+    def test_failed_human_append_refuses_both_provider_emits(self) -> None:
+        """A write failure after both files open returns log_unwritable for both providers."""
+        original_open = Path.open
+
+        class BrokenHuman:
+            def __init__(self, stream: TextIO) -> None:
+                self.stream = stream
+
+            def __enter__(self) -> BrokenHuman:
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                self.stream.close()
+
+            def write(self, value: str) -> None:
+                raise OSError("ENOSPC")
+
+        for name, module in (("claude", routine_log), ("codex", codex_routine_log)):
+            with self.subTest(provider=name):
+                log, human = self.dir / name / "x.jsonl", self.dir / name / "x.log"
+                self.assertEqual(
+                    module.emit(log, "r0", "docs-sync", "begin", "run_incomplete", "incomplete-run", human), ""
+                )
+
+                def broken_open(
+                    path: Path,
+                    mode: str = "r",
+                    buffering: int = -1,
+                    encoding: str | None = None,
+                    errors: str | None = None,
+                    newline: str | None = None,
+                    *,
+                    human_path: Path = human,
+                ) -> TextIO | BrokenHuman:
+                    stream = cast(TextIO, original_open(path, mode, buffering, encoding, errors, newline))
+                    return BrokenHuman(stream) if path == human_path else stream
+
+                with mock.patch.object(Path, "open", broken_open):
+                    refusal = module.emit(log, "r1", "docs-sync", "merge", "run_ok", human_log=human)
+                self.assertEqual(refusal, "log_unwritable")
+                outcomes = [json.loads(line)["outcome"] for line in log.read_text().splitlines()]
+                self.assertEqual(outcomes, ["run_incomplete", "run_ok"])
+                self.assertTrue(human.read_text().splitlines()[-1].endswith("abort=incomplete-run"))
+
+    def test_unknown_merge_uses_unknown_human_marker(self) -> None:
+        """The uncertain-merge JSONL reason gets the matching human marker."""
+        result = emit(self.dir, "--outcome", "run_incomplete", "--reason-code", "merge_state_unknown")
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue((self.dir / "x.log").read_text().splitlines()[-1].endswith("incomplete=merge-unknown"))
 
 
 if __name__ == "__main__":

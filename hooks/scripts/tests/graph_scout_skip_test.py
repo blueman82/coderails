@@ -18,6 +18,28 @@ from hooks.scripts.tests.claude_graph_test_support import GraphCase, dispatch, f
 class ScoutSkipTests(GraphCase):
     """Check a whole Claude wave with two skipped scout stages."""
 
+    def test_historical_native_fanout_revalidates(self) -> None:
+        """Distinct children in one pre-contract attempt remain valid historical evidence."""
+        state = load(self.path)
+        state["revision"] = 2
+        state["graph"]["contract_from_revision"] = 100
+        state["graph"]["nodes"]["U3[1]"].update(status="running", outcome="running")
+        state["graph"]["active_wave"] = {
+            "wave_id": "wave-2",
+            "revision": 2,
+            "nodes": ["U3[1]"],
+            "transcript_cursor": 1,
+        }
+        state["graph"]["wave_history"] = {"wave-2": {"cursor": 1, "nodes": ["U3[1]"], "revision": 2}}
+        fixture.spawn(self.parent, state, "U3[1]", suffix="first")
+        fixture.spawn(self.parent, state, "U3[1]", suffix="second")
+        refs = bind_wave(state, {"U3[1]": {"outcome": "done", "evidence": "historical native fanout"}})["U3[1]"]
+        self.assertEqual(len(refs), 2)
+        state["graph"]["nodes"]["U3[1]"].update(status="done", outcome="done", evidence=refs)
+        state["graph"]["active_wave"] = None
+        state["revision"] = 3
+        revalidate_all(state)
+
     def assert_approval_tamper_refused(
         self, state: dict[str, Any], rows: list[dict[str, Any]], request: str, save: Callable[[], None]
     ) -> None:

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, cast
+
+PLUGIN_ROOT = next(
+    parent for parent in Path(__file__).resolve().parents if (parent / "scripts/lib/source_manifest.py").is_file()
+)
+sys.path.insert(0, str(PLUGIN_ROOT))
+from scripts.lib import source_manifest  # noqa: E402
 
 
 def base_ref() -> str:
@@ -42,9 +47,7 @@ def source_binding(worktree: str, manifest: list[str]) -> dict[str, str]:
     status = _git(root, "status", "--porcelain", "--untracked-files=all")
     if status.returncode or status.stdout.strip():
         raise ValueError("--worktree must be clean before worker launch")
-    payload = {"worktree": str(root), "manifest": manifest}
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    return {"source_manifest_sha256": digest, "source_head_sha": head}
+    return {"source_manifest_sha256": source_manifest.digest(str(root), manifest), "source_head_sha": head}
 
 
 def check_binding(stored: object, contract: dict[str, Any]) -> None:
@@ -66,3 +69,15 @@ def check_binding(stored: object, contract: dict[str, Any]) -> None:
         contract.get(key) != value for key, value in expected.items()
     ):
         raise ValueError("assigned worktree or manifest changed")
+
+
+def source_assignment(worktree: str | None, manifest: list[str]) -> dict[str, str]:
+    """Bind new and late source assignments with the same checkout and manifest checks."""
+    if manifest and not worktree:
+        raise ValueError("--worktree is required when a unit has a source manifest")
+    if worktree is None:
+        return {}
+    return {
+        "worktree": worktree,
+        "source_manifest_sha256": source_binding(worktree, manifest)["source_manifest_sha256"],
+    }

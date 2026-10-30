@@ -92,8 +92,12 @@ class LateFreezeEvidenceTests(RepoCase):
             path.write_text(json.dumps({"verification_level": "1", "frozen_sha": frozen}))
             with self.subTest(frozen=frozen), self.assertRaisesRegex(ValueError, "40-hex frozen_sha"):
                 eval_validation.validate_freeze(path)
-        path.write_text(json.dumps({"verification_level": "1", "frozen_sha": self.base}))
-        eval_validation.validate_freeze(path)
+        path.write_text(
+            json.dumps({"verification_level": "1", "integrity_version": 2, "frozen_sha": self.base,
+                        "frozen_at": "2026-10-07T00:00:00Z"})
+        )  # fmt: skip
+        with self.assertRaisesRegex(ValueError, "not_frozen"):
+            eval_validation.validate_freeze(path)
         path.write_text(json.dumps({"verification_level": "0"}))
         eval_validation.validate_freeze(path)
 
@@ -236,26 +240,28 @@ class PostFreshnessTests(PostCase):
         """External artifacts retain early-freeze acceptance and require disclosure for a late freeze."""
         self.assertEqual(Path.cwd(), self.directory.resolve())
         head = self.commit("install.py")
-        self.suite(head, 2)
-        self.data = self.reload()
         external = tempfile.TemporaryDirectory(prefix="coderails-external-evals-")
         self.addCleanup(external.cleanup)
         self.path = Path(external.name) / "evals.json"
         self.assertNotEqual(self.path.parent, self.directory)
         for frozen, justification, late, expected in (
             (self.base, "irreversible surface", False, 0),
-            (head, "irreversible surface; late freeze", True, 0),
             (head, "irreversible surface", None, 1),
+            (head, "irreversible surface; late freeze", True, 0),
         ):
             with self.subTest(frozen=frozen, justification=justification):
-                self.data.update(frozen_sha=frozen, verification_justification=justification)
-                self.save()
+                self.suite(head, 2, frozen_sha=frozen, verification_justification=justification)
+                self.data = self.reload()
+                if late:
+                    token = f"frozen_sha {frozen} frozen_at {self.data['frozen_at']} timing=late"
+                    amended = self.cli("amend", "E1", token, "eval-author")
+                    self.assertEqual(amended.returncode, 0, amended.stderr)
                 fake = FakeGh([head])
                 code, _, error = self.post(fake)
                 self.assertEqual(code, expected, error)
                 if expected:
                     self.assertEqual(fake.posted, [])
-                    self.assertIn("disclose the late freeze", error)
+                    self.assertIn("freeze_timing_unverified", error)
                 else:
                     self.assertEqual(len(fake.posted), 1)
                     facts = eval_artifact.parse_facts(fake.posted[0].splitlines()[1])
@@ -390,7 +396,3 @@ class PostBodyInjectionTests(unittest.TestCase):
             body.write_text("\n".join(lines))
             with self.assertRaisesRegex(ValueError, "marker-like line"):
                 eval_validation.validate_embed(source, body)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -42,30 +42,37 @@ def sections(summary: Path, extra: list[str]) -> list[tuple[str, str]]:
     return texts
 
 
-def comment_for(repo: str, number: int, login: str, head: str, top: list[str]) -> dict[str, str] | None:
-    """Reuse only the author's newest recognized artifact for this head when its whole body is valid."""
+def comments_for(repo: str, number: int, login: str) -> list[dict[str, str]]:
+    """Return this author's comments in posted order so an intervening comment breaks a pair."""
     listing = git.run(
         "gh", "api", f"repos/{repo}/issues/{number}/comments", "--paginate",
         "--jq", ".[] | {url:.html_url,author:.user.login,created:.created_at,body:.body}",
         check=True,
     )  # fmt: skip
-    newest = None
+    found: list[dict[str, str]] = []
     for line in filter(None, listing.stdout.splitlines()):
         comment = cast(dict[str, str], json.loads(line))
-        if comment["author"] == login and any(
-            review_artifact.matches_marker(line, str(number), head) for line in comment["body"].splitlines()
-        ):
-            newest = comment
-    if (
-        newest is not None
-        and newest["body"].splitlines()[:3] == top
-        and review_passes.parse(newest["body"], str(number), head) is not None
-    ):
-        return newest
-    return None
+        if comment["author"] == login:
+            found.append(comment)
+    return found
 
 
-def post(number: int, summary: Path, extra: list[str], compat_count: int, disposition: str) -> int:
+def post_body(repo: str, number: int, body: str) -> dict[str, str]:
+    """Post one review comment and return its GitHub identity."""
+    with tempfile.TemporaryDirectory(prefix="coderails-review-") as directory:
+        path = Path(directory) / "body.md"
+        path.write_text(body)
+        reply = git.run(
+            "gh", "api", f"repos/{repo}/issues/{number}/comments", "-F", f"body=@{path}",
+            "--jq", "{url:.html_url,author:.user.login,created:.created_at}",
+            check=True,
+        )  # fmt: skip
+    return cast(dict[str, str], json.loads(reply.stdout))
+
+
+def post(
+    number: int, summary: Path, extra: list[str], compat_count: int | None = None, disposition: str | None = None
+) -> int:
     """Post (or reuse) the artifact for the PR's current head; a head that moves mid-post is refused as stale."""
     texts = sections(summary, extra)
     head = git.pr_field(str(number), "headRefOid")
@@ -76,30 +83,33 @@ def post(number: int, summary: Path, extra: list[str], compat_count: int, dispos
          "summary_sha256": review_passes.summary_sha256(t)}
         for n, t in texts
     ]  # fmt: skip
-    top = [
-        review_artifact.marker(str(number), head),
-        review_passes.render(head, passes),
-        review_artifact.compat_line(str(number), head, compat_count, disposition),
-    ]
+    top = [review_artifact.marker(str(number), head), review_passes.render(head, passes)]
+    if compat_count is not None and disposition is not None:
+        top.append(review_artifact.compat_line(str(number), head, compat_count, disposition))
     repo = git.repo()
     login = git.output("gh", "api", "user", "-q", ".login", check=True)
-    comment = comment_for(repo, number, login, head, top)
-    if git.pr_field(str(number), "headRefOid") != head:
-        raise ValueError(f"stale: PR head moved from {head} before posting; review the new head")
-    if comment:
-        print(f"Artifact already posted for SHA {head} — skipping duplicate post.\nExisting: {comment['url']}")
+    pass_body = "\n".join(top + [review_passes.tail(texts)])
+    companion_body = "\n".join([top[0], *top[2:], texts[0][1]])
+    comments = comments_for(repo, number, login)
+    positions = [
+        index
+        for index, item in enumerate(comments)
+        if item["body"].splitlines() and review_artifact.matches_marker(item["body"].splitlines()[0], str(number), head)
+    ]
+    last = positions[-1] if positions else -1
+    paired = last > 0 and comments[last - 1]["body"] == pass_body and comments[last]["body"] == companion_body
+    pending = last == len(comments) - 1 and last >= 0 and comments[last]["body"] == pass_body
+    comment = comments[last] if paired else None
+    if paired:
+        print(f"Artifact already posted for SHA {head} — skipping duplicate post.\nExisting: {comments[last]['url']}")
     else:
-        body = "\n".join(top + [review_passes.tail(texts)])
-        with tempfile.TemporaryDirectory(prefix="coderails-review-") as directory:
-            path = Path(directory) / "body.md"
-            path.write_text(body)
-            reply = git.run(
-                "gh", "api", f"repos/{repo}/issues/{number}/comments", "-F", f"body=@{path}",
-                "--jq", "{url:.html_url,author:.user.login,created:.created_at}",
-                check=True,
-            )  # fmt: skip
-        comment = json.loads(reply.stdout)
-        print(f"Posted: {comment['url']}")
+        for body in ([companion_body] if pending else [pass_body, companion_body]):
+            if git.pr_field(str(number), "headRefOid") != head:
+                raise ValueError(f"stale: PR head moved from {head} before posting; review the new head")
+            comment = post_body(repo, number, body)
+            print(f"Posted: {comment['url']}")
+            if git.pr_field(str(number), "headRefOid") != head:
+                raise ValueError(f"stale: PR head moved from {head} during posting; this artifact must not be used")
     if git.pr_field(str(number), "headRefOid") != head:
         raise ValueError(f"stale: PR head moved from {head} during posting; this artifact must not be used")
     return 0  # the Codex copy keeps no provider-local review cache
@@ -111,13 +121,15 @@ def post_main(arguments: list[str]) -> int:
     parser.add_argument("pr", type=pr_number)
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--pass", dest="passes", action="append", default=[], metavar="NAME=FILE")
-    parser.add_argument("--compat-count", type=int, required=True)
-    parser.add_argument("--disposition", choices=review_artifact.COMPAT_DISPOSITIONS, required=True)
+    parser.add_argument("--compat-count", type=int)
+    parser.add_argument("--disposition", choices=review_artifact.COMPAT_DISPOSITIONS)
     try:
         args = parser.parse_args(arguments)
     except SystemExit as error:
         return int(bool(error.code))
     try:
+        if (args.compat_count is None) != (args.disposition is None):
+            raise ValueError("--compat-count and --disposition must be supplied together")
         return post(args.pr, args.summary, args.passes, args.compat_count, args.disposition)
     except (OSError, ValueError, KeyError, git.WorkflowError) as error:
         print(f"post: {error}", file=sys.stderr)

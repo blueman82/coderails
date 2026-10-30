@@ -218,6 +218,14 @@
     "codex_native_worker_uncontained": {
       "source": "packages/codex/hooks/scripts/loop_dispatch_guard.py",
       "remediation": "Use a parent Codex sandbox that contains the worker."
+    },
+    "stale_stop_row": {
+      "source": "hooks/scripts/loop_stall_guard.py",
+      "remediation": "Record the required stop and complete unresolved graph work."
+    },
+    "ceiling_legacy_migrated": {
+      "source": "hooks/scripts/verification_volume_ceiling.py",
+      "remediation": "Use focused tests after the allowed full-suite runs."
     }
   }
 }

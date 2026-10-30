@@ -20,7 +20,7 @@ from hooks.scripts.lib.loop_state_common import (
     read_state,
     stable_invocations,
 )
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 from scripts.lib import orders_completion
 
 

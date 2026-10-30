@@ -23,6 +23,25 @@ async function fixture() {
 }
 
 describe("Claude native session trace detail and evidence", () => {
+  it("keeps worker names on mixed mentions with hashed native usage", async () => {
+    const { deps, child, children } = await fixture();
+    children[1].message = { ...(children[1].message as Record<string, unknown>), id: "PRIVATE_MESSAGE_ID",
+      usage: { input_tokens: 8 }, content: [
+        { type: "text", text: "See skills/wiki-query/SKILL.md before continuing." },
+        { type: "tool_use", name: "Bash", id: "child-tool", input: { command: "true" } },
+      ] };
+    await writeFile(child, children.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    const mention = page.events.find((event) => event.attributes["coderails.observation.kind"] === "mention")!;
+    const tool = page.events.find((event) => event.attributes["coderails.native.call_id"] === "child-tool")!;
+    expect(mention.attributes).toMatchObject({ "coderails.actor.kind": "worker", "coderails.actor.id": "a1",
+      "coderails.actor.name": "Worker", "coderails.usage.semantics": "incremental" });
+    expect(mention.attributes["coderails.usage.identity_sha256"]).toMatch(/^[a-f0-9]{64}$/);
+    expect(mention.attributes["coderails.usage.identity_sha256"]).toBe(tool.attributes["coderails.usage.identity_sha256"]);
+    expect(mention.parentSpanId).toBe(tool.parentSpanId);
+    expect(JSON.stringify(page)).not.toContain("PRIVATE_MESSAGE_ID");
+  });
+
   it("names a validated worker from its graph job without changing native identity", async () => {
     const { deps, parent, child, rows, children } = await fixture();
     const call = (rows[0].message as { content: Array<Record<string, unknown>> }).content[0];

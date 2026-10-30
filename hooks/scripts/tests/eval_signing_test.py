@@ -22,7 +22,7 @@ from hooks.scripts.lib.loop_evals import EvalStatus, EvalVerdict, read_loop_eval
 from hooks.scripts.tests.lib.post_evals_fixture import ROOT, ArtifactCase, command
 from scripts.lib import eval_signing
 from scripts.lib.eval_execution import record_smoke
-from scripts.lib.eval_integrity import IntegrityError, append_amendment, stamp, suite_hash, verify_suite
+from scripts.lib.eval_integrity import IntegrityError, append_amendment, sign_suite, stamp, suite_hash, verify_suite
 from scripts.post_evals import grade_loop, main
 
 HAVE_SSH = shutil.which("ssh-keygen") is not None
@@ -217,8 +217,10 @@ class SuiteTests(ArtifactCase):
             self.assertEqual(self.refusal(data), "signature_invalid")
 
     def test_never_signed_is_legacy_unsigned(self) -> None:
-        """A frozen suite with no signature and no signed marker is explicitly legacy_unsigned."""
+        """An unsigned v1 freeze remains a readable legacy suite."""
         data = self.reload()
+        data.pop("integrity_version", None)
+        data["frozen_hash"] = suite_hash(data)
         del data["signature"]
         self.assertEqual(verify_suite(data), "legacy_unsigned")
 
@@ -258,29 +260,28 @@ class SuiteTests(ArtifactCase):
             self.assertEqual(code_of(self, lambda: verify_suite(stripped)), "signature_missing")
 
     def test_key_missing_degrades_without_require(self) -> None:
-        """No trusted key in the verifying env is a loud non-blocking return."""
+        """No trusted key remains a non-blocking result for a signed v1 suite."""
+        data = self.reload()
+        data.pop("integrity_version", None)
+        data["frozen_hash"] = suite_hash(data)
+        sign_suite(data, strict=True)
         with tempfile.TemporaryDirectory() as empty, keys_in(empty):
-            self.assertEqual(verify_suite(self.reload()), "key_missing")
+            self.assertEqual(verify_suite(data), "key_missing")
 
     def test_freeze_without_ssh_keygen_degrades(self) -> None:
-        """Freeze still works unsigned, with a trace row and stderr line, when signing is impossible."""
+        """A v2 freeze refuses to write when signing is impossible."""
         fresh = self.directory / "fresh"
         fresh.mkdir()
         (fresh / "progress.json").write_text('{"schema_version":3,"session_id":"s","loop_id":"l"}')
         path = fresh / "evals.json"
         skip = ("signature", "frozen_hash")
         path.write_text(json.dumps({k: v for k, v in self.data.items() if k not in skip}))
-        err = io.StringIO()
         missing = patch("scripts.lib.eval_signing.subprocess.run", side_effect=FileNotFoundError)
-        with missing, contextlib.redirect_stderr(err):
-            record_smoke(path)
+        with missing:
+            self.assertEqual(code_of(self, lambda: record_smoke(path)), "key_missing")
         frozen = json.loads(path.read_text())
-        self.assertIn("frozen_hash", frozen)
+        self.assertNotIn("frozen_hash", frozen)
         self.assertNotIn("signature", frozen)
-        self.assertIn("reason=key_missing", err.getvalue())
-        lines = (fresh / "eval_trace.jsonl").read_text().splitlines()
-        seen = [(r["command"], r["outcome"], r["reason_code"]) for r in map(json.loads, lines)]
-        self.assertIn(("sign", "degraded", "key_missing"), seen)
 
     def test_torn_amend_never_passes(self) -> None:
         """A crash before re-sign leaves the file untouched; a half-applied amendment fails loudly."""

@@ -75,3 +75,15 @@ def query(progress: Path, push_script: Path, session: str) -> dict[str, Any]:
     if digest != calculated:
         raise ValueError("lessons reader returned a wrong digest")
     return {"lessons": rows, "sha256": digest}
+
+
+def needed(state: dict[str, Any], authorization: bool = False) -> bool:
+    """Select a current snapshot for assigned inputs or issued lesson-bearing contracts."""
+    if authorization:
+        return needed(state) or any(
+            row.get("contract", {}).get("lessons_sha256") is not None
+            for row in state["graph"].get("dispatches", {}).values()
+        )
+    return any(
+        unit.get(key) for unit in state.get("work_units", {}).values() for key in ("manifest", "worktree", "lessons")
+    )

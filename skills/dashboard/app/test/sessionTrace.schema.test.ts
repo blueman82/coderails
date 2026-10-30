@@ -43,6 +43,9 @@ describe("session trace contract", () => {
     const attrs = { ...event.attributes, "coderails.actor.kind": "worker", "coderails.actor.id": "a1",
       "coderails.actor.name": "Builder" };
     expect(isTraceEvent({ ...event, attributes: attrs })).toBe(true);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.name": "Builder\n" } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.id": " " } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.kind": "orchestrator" } })).toBe(false);
     expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.name": "<img src=x>" } })).toBe(false);
     expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.name": "Secret\nbody" } })).toBe(false);
   });
@@ -77,6 +80,15 @@ describe("session trace contract", () => {
     expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.observation.target_sha256": "raw path" } })).toBe(false);
     expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.observation.target_kind": undefined } })).toBe(false);
     expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.usage.semantics": "unknown" } })).toBe(false);
+  });
+
+  it("admits only a hashed incremental usage identity", () => {
+    const attrs = { ...event.attributes, "coderails.usage.semantics": "incremental",
+      "coderails.usage.identity_sha256": "b".repeat(64) };
+    expect(isTraceEvent({ ...event, attributes: attrs })).toBe(true);
+    for (const identity of [null, "PRIVATE_ID", 12, "B".repeat(64)])
+      expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.usage.identity_sha256": identity } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.usage.semantics": "cumulative" } })).toBe(false);
   });
 
   it("accepts decimal nanosecond timing and rejects invented time", () => {

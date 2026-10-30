@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 CODEX = ROOT / "packages/codex"
 sys.path.insert(0, str(ROOT))
+from hooks.scripts.lib.pr_merge_gate import merge_reason  # noqa: E402
+from hooks.scripts.tests.lib.hook_test_support import HookTestCase  # noqa: E402
 from scripts.lib import review_artifact  # noqa: E402
+from scripts.lib.git_common import EvalSummary  # noqa: E402
+
+MODULE = "hooks.scripts.lib.pr_merge_gate"
 
 SHA = "deadbeef"
 V1 = f"<!-- coderails-review-summary v1 pr=42 head_sha={SHA} -->"
@@ -107,14 +114,46 @@ class MergeGateTests(unittest.TestCase):
                 self.assertIn("compat_findings_nonzero", self.verdict(root, compat(3, "clean-break")))
                 self.assertIn(passes, self.verdict(root, compat(0, "clean-break")))
                 self.assertIn(passes, self.verdict(root, compat(3, "preserve-compat")))
-                self.assertIn("compat_findings_missing", self.verdict(root))
-                self.assertIn("compat_findings_missing", self.verdict(root, compat(3, "clean-break", "otherhead")))
+                self.assertIn(passes, self.verdict(root))
+                self.assertIn(passes, self.verdict(root, compat(3, "clean-break", "otherhead")))
                 broken = self.verdict(root, "<!-- coderails-compat-findings v1 pr=42 -->")
                 self.assertIn("compat_findings_malformed", broken)
                 mixed = self.verdict(root, compat(0, "clean-break"), compat(3, "clean-break"))
                 self.assertIn("compat_findings_nonzero", mixed)  # fail closed: any refusing line for this head wins
                 stale = "<!-- coderails-compat-findings v1 pr=42 head_sha=old count=bad -->"
                 self.assertIn(passes, self.verdict(root, stale, compat(0, "clean-break")))
+
+
+class DirectMergeTests(HookTestCase):
+    """Keep direct merge behavior aligned with the compatibility review result."""
+
+    def test_direct_merge_refuses_compat_findings(self) -> None:
+        """The direct gh merge hook enforces the same review refusal as merge.py."""
+        before = Path.cwd()
+        self.addCleanup(os.chdir, before)
+        with (
+            patch(MODULE + ".pr_field", return_value="head"),
+            patch(MODULE + ".gate_review_summary_for_pr", return_value=(3, "compat_findings_clean_break")),
+            patch(MODULE + ".gate_eval_summary_for_pr", return_value=EvalSummary(0, "1", "{}", "")),
+            patch(MODULE + ".smoke_verify", return_value=0),
+            patch(MODULE + ".integrity_reason", return_value=""),
+            patch(MODULE + ".publication_gate.evaluate", return_value=[]),
+        ):
+            self.assertIn("compat_findings_clean_break", merge_reason("1", str(self.directory)))
+
+    def test_direct_merge_keeps_existing_review_invocation_contract(self) -> None:
+        """An absent artifact is handled by the existing invocation gate; an invalid one is refused here."""
+        before = Path.cwd()
+        self.addCleanup(os.chdir, before)
+        with (
+            patch(MODULE + ".pr_field", return_value="head"),
+            patch(MODULE + ".gate_review_summary_for_pr", return_value=(1, "")),
+            patch(MODULE + ".gate_eval_summary_for_pr", return_value=EvalSummary(0, "1", "{}", "")),
+            patch(MODULE + ".smoke_verify", return_value=0),
+            patch(MODULE + ".integrity_reason", return_value=""),
+            patch(MODULE + ".publication_gate.evaluate", return_value=[]),
+        ):
+            self.assertEqual(merge_reason("1", str(self.directory)), "")
 
 
 if __name__ == "__main__":

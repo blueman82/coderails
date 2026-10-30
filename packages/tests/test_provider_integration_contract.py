@@ -36,6 +36,23 @@ class IntegrationContractTests(unittest.TestCase):
         base.mkdir()
         return Provider(base, name)
 
+    def begin_wave(self, provider: Provider, operation: str = "begin-wave") -> subprocess.CompletedProcess[str]:
+        """Bound the held-lock negative control even when the prefetch guard is absent."""
+        return subprocess.run(
+            [
+                sys.executable,
+                str(provider.plugin / "skills/agentic-loop/scripts/graph.py"),
+                operation,
+                str(provider.path),
+            ],
+            capture_output=True,
+            text=True,
+            env=provider.environment,
+            cwd=provider.checkout,
+            timeout=10,
+            check=False,
+        )
+
     def reason(self, provider: Provider) -> str:
         """Read the last refusal reason from the native trace."""
         rows = provider.path.with_name("recovery-trace.jsonl").read_text().splitlines()
@@ -160,7 +177,7 @@ class IntegrationContractTests(unittest.TestCase):
                 bad.write(failed)
                 (bad.path.parent.parent / "orders.json").write_text("{bad", encoding="utf-8")
                 before = bad.path.read_bytes()
-                result = bad.call("begin-wave")
+                result = self.begin_wave(bad)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("dispatch_lessons_unavailable", result.stderr)
                 self.assertEqual(bad.path.read_bytes(), before)
@@ -177,14 +194,142 @@ class IntegrationContractTests(unittest.TestCase):
                 lock = Path(f"{provider.path}.lock")
                 if name == "claude":
                     lock.mkdir()
-                    result = provider.call("begin-wave")
+                    result = self.begin_wave(provider)
                 else:
                     with lock.open("a+", encoding="utf-8") as stream:
                         fcntl.flock(stream, fcntl.LOCK_EX)
-                        result = provider.call("begin-wave")
+                        result = self.begin_wave(provider)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("dispatch_lessons_unavailable", result.stderr)
                 self.assertEqual(provider.path.read_bytes(), before)
+
+    def test_driver_wave_binds_the_same_current_lesson_contract(self) -> None:
+        """The retained driver adapters consume current lessons through both public CLIs."""
+        for name in ("claude", "codex"):
+            with self.subTest(provider=name):
+                provider = self.fresh(name)
+                state = provider.state()
+                state["work_units"] = {"1": {"manifest": ["src/**"]}}
+                provider.write(state)
+                provider.success("cutover-driver", "--session", provider.session)
+                provider.success("begin-driver-wave")
+                record = next(iter(provider.read()["graph"]["dispatches"].values()))
+                self.assertIsNotNone(record["contract"].get("lessons_sha256"))
+
+    def test_driver_authorization_checks_assigned_source_before_consuming_slot(self) -> None:
+        """Both public driver authorizers refuse a changed source assignment and keep progress unchanged."""
+        for name in ("claude", "codex"):
+            with self.subTest(provider=name):
+                provider = self.fresh(name)
+                assigned = provider.home / "assigned"
+                assigned.mkdir()
+                subprocess.run(["git", "init", "-q", str(assigned)], check=True)
+                subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(assigned),
+                        "-c",
+                        "user.name=Fixture",
+                        "-c",
+                        "user.email=fixture@test",
+                        "commit",
+                        "-q",
+                        "--allow-empty",
+                        "-m",
+                        "base",
+                    ],
+                    check=True,
+                )
+                unit: dict[str, Any] = {"worktree": str(assigned.resolve()), "manifest": ["docs/**"]}
+                unit.update(graph_contract.source_binding(str(assigned), unit["manifest"]))
+                state = provider.state()
+                state["work_units"] = {"1": unit}
+                provider.write(state)
+                provider.success("cutover-driver", "--session", provider.session)
+                wave = provider.success("begin-driver-wave")
+                issued = wave["dispatches"][0]
+                identifier = issued["dispatch_id"]
+                prompt = provider.path.parent / "driver-evidence" / identifier / "prompt.txt"
+                prompt.parent.mkdir(parents=True)
+                prompt.write_text(issued["prompt_prefix"] + "\n" + issued["prompt_sections"])
+                changed = provider.read()
+                changed["work_units"]["1"]["manifest"] = ["src/**"]
+                provider.write(changed)
+                before = provider.path.read_bytes()
+                result = provider.call(
+                    "authorize-driver",
+                    "--session",
+                    provider.session,
+                    "--dispatch-id",
+                    identifier,
+                    "--role",
+                    "loop-worker",
+                    "--driver-run-id",
+                    "fixture-attempt",
+                    "--prompt-file",
+                    str(prompt),
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("dispatch_source_mismatch", result.stderr)
+                self.assertEqual(provider.path.read_bytes(), before)
+
+    def test_late_worktree_assignment_binds_source_before_dispatch(self) -> None:
+        """The retained assignment CLI stores the source digest consumed by begin-wave."""
+        for name in ("claude", "codex"):
+            with self.subTest(provider=name):
+                provider = self.fresh(name)
+                assigned = provider.home / "assigned"
+                assigned.mkdir()
+                subprocess.run(["git", "init", "-q", str(assigned)], check=True)
+                subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(assigned),
+                        "-c",
+                        "user.name=Fixture",
+                        "-c",
+                        "user.email=fixture@test",
+                        "commit",
+                        "-q",
+                        "--allow-empty",
+                        "-m",
+                        "base",
+                    ],
+                    check=True,
+                )
+                state = provider.state()
+                state["work_units"] = {"1": {"status": "pending", "manifest": ["docs/**"]}}
+                provider.write(state)
+                provider.success(
+                    "assign-worktree",
+                    "--session",
+                    provider.session,
+                    "--loop-id",
+                    "fixture-loop",
+                    "--unit",
+                    "1",
+                    "--worktree",
+                    str(assigned.resolve()),
+                )
+                provider.success("begin-wave")
+
+    def test_erased_lesson_digest_cannot_disable_current_lesson_check(self) -> None:
+        """A changed issued contract cannot turn required current lessons into an opt-out."""
+        for name in ("claude", "codex"):
+            with self.subTest(provider=name):
+                provider = self.fresh(name)
+                state = provider.state()
+                state["work_units"] = {"1": {"manifest": ["docs/**"]}}
+                provider.write(state)
+                provider.success("begin-wave")
+                state = provider.read()
+                record = next(iter(state["graph"]["dispatches"].values()))
+                record["contract"]["lessons_sha256"] = None
+                record["prompt_sections_sha256"] = graph_contract.sections_sha256(record["contract"])
+                provider.write(state)
+                self.refuse(provider, provider.request(), "dispatch_lessons_stale")
 
     def test_old_muninn_refuses_before_worker_dispatch(self) -> None:
         """An old Muninn CLI cannot supply an empty-looking lesson contract."""
@@ -202,7 +347,7 @@ class IntegrationContractTests(unittest.TestCase):
                 state["work_units"] = {"1": {"manifest": ["src/**"]}}
                 provider.write(state)
                 before = provider.path.read_bytes()
-                result = provider.call("begin-wave")
+                result = self.begin_wave(provider)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("muninn_old_ledger", result.stderr)
                 self.assertIn("dispatch_lessons_unavailable", result.stderr)

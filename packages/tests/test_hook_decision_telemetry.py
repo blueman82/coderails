@@ -27,6 +27,7 @@ class HookDecisionTelemetryTests(unittest.TestCase):
         self.root = Path(scratch.name)
         self.telemetry = self.root / "telemetry"
         self.telemetry.mkdir()
+        (self.root / "workflow.config.yaml").write_text("memory:\n  backend: off\n")
 
     def rows(self) -> list[dict[str, Any]]:
         """Read rows written by the wrapped hook or direct record call."""
@@ -77,6 +78,7 @@ class HookDecisionTelemetryTests(unittest.TestCase):
                 }
                 env = {
                     **os.environ,
+                    "HOME": str(self.root),
                     "CODERAILS_HOOK_TELEMETRY_DIR": str(telemetry),
                     "CLAUDE_AGENTIC_LOOP_DIR": str(self.root / "graphs"),
                     "CODERAILS_AGENTIC_LOOP_DIR": str(self.root / "graphs"),

@@ -1,7 +1,7 @@
 """teardown.jsonl: the append-only record of which Phase 13 teardown steps really ran (provider-neutral).
 
 A sibling of progress.json, deliberately: it needs no progress.json lock and no graph code. One row per step,
-`{step, ts, session_id, loop_id, evidence_sha256}`, written with a single O_APPEND write. `proof.py run --all`,
+`{step, ts, session_id, loop_id, evidence_sha256}`, published under the shared teardown lock. `proof.py run --all`,
 `orders.py prepare`, `decision_record.flush_pending` and `retro.py assemble` each record their own step; `orders.py`
 `tick` records the post-completion apply observation. A step whose
 latest row carries the same evidence is not appended twice, so a repeat run is idempotent. Cooperating-agent safeguard:
@@ -12,11 +12,15 @@ carry, which `retro.py assemble` binds into the retro.
 from __future__ import annotations
 
 import datetime
+import fcntl
 import hashlib
 import json
 import math
 import os
 import runpy
+import stat
+import uuid
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
@@ -93,6 +97,25 @@ def read_rows(state_dir: Path) -> list[dict[str, Any]]:
         return []
     except OSError as error:
         raise ValueError("teardown_unreadable") from error
+    return _parse_rows(lines)
+
+
+def read_rows_fd(state_fd: int) -> list[dict[str, Any]]:
+    """Read receipt rows without following a path outside the held state directory."""
+    try:
+        data = _read_member(state_fd, NAME)
+    except FileNotFoundError:
+        return []
+    except OSError as error:
+        raise ValueError("teardown_unreadable") from error
+    try:
+        return _parse_rows(data.decode("utf-8").splitlines())
+    except UnicodeError as error:
+        raise ValueError("teardown_unreadable") from error
+
+
+def _parse_rows(lines: list[str]) -> list[dict[str, Any]]:
+    """Parse receipt lines from either a path read or an opened state directory."""
     rows: list[dict[str, Any]] = []
     for line in lines:
         try:
@@ -103,6 +126,73 @@ def read_rows(state_dir: Path) -> list[dict[str, Any]]:
             raise ValueError("teardown_unreadable")
         rows.append(cast("dict[str, Any]", value))
     return rows
+
+
+def open_state_dir(state_dir: Path) -> int:
+    """Open each directory component; allow only fixed root-owned system aliases."""
+    if ".." in state_dir.parts:
+        raise OSError("state directory traversal")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parts = list(state_dir.absolute().parts[1:])
+    descriptor = os.open("/", flags)
+    current = Path("/")
+    links = 0
+    try:
+        while parts:
+            part = parts.pop(0)
+            try:
+                child = os.open(part, flags, dir_fd=descriptor)
+            except OSError:
+                link = os.stat(part, dir_fd=descriptor, follow_symlinks=False)
+                parent = os.fstat(descriptor)
+                if (
+                    not stat.S_ISLNK(link.st_mode)
+                    or link.st_uid != 0
+                    or parent.st_uid != 0
+                    or parent.st_mode & 0o022
+                    or links >= 8
+                ):
+                    raise
+                target = os.readlink(part, dir_fd=descriptor)
+                alias = Path(target) if os.path.isabs(target) else current / target
+                parts = list(Path(os.path.abspath(alias)).parts[1:]) + parts
+                os.close(descriptor)
+                descriptor = os.open("/", flags)
+                current = Path("/")
+                links += 1
+                continue
+            os.close(descriptor)
+            descriptor = child
+            current /= part
+        return descriptor
+    except OSError:
+        os.close(descriptor)
+        raise
+
+
+def _read_member(state_fd: int, name: str) -> bytes:
+    """Read one regular, singly linked file relative to the held state directory."""
+    descriptor = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=state_fd)
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError("unsafe state file")
+        return stream.read()
+
+
+def _replace_receipt(state_fd: int, data: bytes) -> None:
+    """Replace the receipt inode so a newly added hard link cannot receive a write."""
+    temporary = f".{NAME}.{uuid.uuid4().hex}.tmp"
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=state_fd)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, NAME, src_dir_fd=state_fd, dst_dir_fd=state_fd)
+    finally:
+        with suppress(FileNotFoundError):
+            os.unlink(temporary, dir_fd=state_fd)
 
 
 def steps_done(rows: list[dict[str, Any]]) -> list[str]:
@@ -142,33 +232,57 @@ def _trace(step: str, session_id: str, loop_id: str | None) -> None:
 
 def record(state_dir: Path, step: str, session_id: str, loop_id: str | None, evidence_sha256: str | None) -> bool:
     """Append one row unless its matching receipt is current; never raises."""
-    if step not in STEPS or not (state_dir / "progress.json").is_file():
+    if step not in STEPS:
         return False
     try:
-        if loop_id is None:
-            loaded: object = json.loads((state_dir / "progress.json").read_text(encoding="utf-8"))
-            loop_id = str(cast("dict[str, Any]", loaded).get("loop_id")) if isinstance(loaded, dict) else None
-        rows = read_rows(state_dir)
-        latest = [r for r in rows if r["step"] == step]
-        if latest and latest[-1].get("evidence_sha256") == evidence_sha256:
-            proof_after_flush = step == "decisions_flushed" and max(
-                (i for i, row in enumerate(rows) if row["step"] == "proof_run"), default=-1
-            ) > max((i for i, row in enumerate(rows) if row["step"] == "decisions_flushed"), default=-1)
-            if not proof_after_flush:
-                return False
-        row = {
-            "step": step,
-            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-            "session_id": session_id,
-            "loop_id": loop_id,
-            "evidence_sha256": evidence_sha256,
-        }
-        descriptor = os.open(str(state_dir / NAME), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+            return False
+        state_fd = open_state_dir(state_dir)
         try:
-            os.write(descriptor, (json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
+            progress = _read_member(state_fd, "progress.json")
+            lock_fd = os.open(
+                NAME + ".lock", os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | os.O_NOFOLLOW, 0o644, dir_fd=state_fd
+            )
+            try:
+                lock_info = os.fstat(lock_fd)
+                if not stat.S_ISREG(lock_info.st_mode) or lock_info.st_nlink != 1:
+                    return False
+                fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                try:
+                    try:
+                        prior = _read_member(state_fd, NAME)
+                    except FileNotFoundError:
+                        prior = b""
+                    rows = _parse_rows(prior.decode("utf-8").splitlines())
+                    if loop_id is None:
+                        loaded: object = json.loads(progress.decode("utf-8"))
+                        loop_id = (
+                            str(cast("dict[str, Any]", loaded).get("loop_id")) if isinstance(loaded, dict) else None
+                        )
+                    latest = [r for r in rows if r["step"] == step]
+                    if latest and latest[-1].get("evidence_sha256") == evidence_sha256:
+                        proof_after_flush = step == "decisions_flushed" and max(
+                            (i for i, row in enumerate(rows) if row["step"] == "proof_run"), default=-1
+                        ) > max((i for i, row in enumerate(rows) if row["step"] == "decisions_flushed"), default=-1)
+                        if not proof_after_flush:
+                            return False
+                    row = {
+                        "step": step,
+                        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+                        "session_id": session_id,
+                        "loop_id": loop_id,
+                        "evidence_sha256": evidence_sha256,
+                    }
+                    separator = b"\n" if prior and not prior.endswith(b"\n") else b""
+                    row_bytes = (json.dumps(row, sort_keys=True) + "\n").encode("utf-8")
+                    _replace_receipt(state_fd, prior + separator + row_bytes)
+                finally:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            finally:
+                os.close(lock_fd)
         finally:
-            os.close(descriptor)
-    except (OSError, ValueError):
+            os.close(state_fd)
+    except (OSError, UnicodeError, ValueError):
         return False
     _trace(step, session_id, loop_id)
     return True

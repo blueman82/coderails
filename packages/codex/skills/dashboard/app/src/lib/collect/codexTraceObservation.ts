@@ -90,7 +90,7 @@ export function observeCodexSource(src: NativeSource, events: TraceEvent[]): voi
     for (const call of calls) {
       if (!isDirectRead(call.item.name)) continue;
       const input = args(call.item.arguments);
-      const path = target(input?.path ?? input?.uri);
+      const path = target(input?.path ?? input?.uri ?? input?.file_path);
       if (!path) continue;
       if (calls.length !== 1 || outputs.length !== 1 ||
         outputs[0].event.provenance.sourceOrdinal <= call.event.provenance.sourceOrdinal) {
@@ -101,7 +101,7 @@ export function observeCodexSource(src: NativeSource, events: TraceEvent[]): voi
       const output = outputs[0];
       const body = text(output.item.output ?? output.item.content);
       const result = resultKind(output.item);
-      observed(output.event, result === "read" && body === null ? "uncertain" : result, path, body);
+      observed(output.event, result === "read" && (body === null || path.kind === "skill") ? "uncertain" : result, path, body);
     }
   }
 }

@@ -13,7 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from integrity_http import JsonObject  # noqa: E402
 
 from scripts.lib.eval_integrity import IntegrityError as EvalIntegrityError  # noqa: E402
-from scripts.lib.eval_integrity import verify_suite  # noqa: E402
+from scripts.lib.eval_integrity import integrity_version, signed_freeze_timing, verify_suite  # noqa: E402
+from scripts.lib.eval_signing import VERIFIED  # noqa: E402
 
 
 def review_valid(body: str, number: int, sha: str) -> bool:
@@ -57,6 +58,32 @@ def _real_int(value: object) -> bool:
 
 def _text(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _bounded_json_depth(value: str, limit: int = 100) -> bool:
+    """Refuse deeply nested owner JSON before runtime-specific parser limits differ."""
+    depth = 0
+    quoted = False
+    escaped = False
+    for char in value:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char in "[{":
+            depth += 1
+            if depth > limit:
+                return False
+        elif char in "]}":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0 and not quoted
 
 
 def _eval_valid(item: object, level: int) -> bool:
@@ -107,6 +134,8 @@ def eval_valid(body: str, number: int, sha: str) -> bool:
     block = re.search(r"^```json\s*\n(.*?)^```\s*$", body, re.MULTILINE | re.DOTALL)
     if block is None:
         return False
+    if not _bounded_json_depth(block[1]):
+        return False
     try:
         data: object = json.loads(block[1])
     except (RecursionError, ValueError):
@@ -117,7 +146,7 @@ def eval_valid(body: str, number: int, sha: str) -> bool:
     if not _real_int(data.get("schema_version")) or data["schema_version"] != 1 or data.get("scope") != "pr":
         return False
     level = data.get("verification_level")
-    if not isinstance(level, int) or isinstance(level, bool) or str(level) != marker[1] or level < 1:
+    if not isinstance(level, int) or isinstance(level, bool) or str(level) != marker[1]:
         return False
     if not all(_text(data.get(key)) for key in ("task_ref", "verification_justification", "frozen_at")):
         return False
@@ -148,7 +177,12 @@ def eval_valid(body: str, number: int, sha: str) -> bool:
         if isinstance(chain_len, int) and not isinstance(chain_len, bool) and chain_len < 0:
             return False
     try:
-        verify_suite(data)
+        if verify_suite(data, trust_signer=False) != VERIFIED:
+            return False
+        if integrity_version(data) == 1 and not signed_freeze_timing(
+            data, str(data["frozen_sha"]), str(data["frozen_at"]), "unverifiable", trust_signer=False
+        ):
+            return False
     except (EvalIntegrityError, IndexError, RecursionError, TypeError, ValueError):
         return False
     return data.get("result") in (None, "GO")

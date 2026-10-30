@@ -190,7 +190,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 |---|---|---|---|---|---|
 | `project` | string/null | `null` | - | read_by_prose_only | Project name written by /coderails:init; read by command prose only. |
 | `wiki_path` | string/null | `null` | - | enforced_by_code | LLM wiki vault directory (relative to the project dir, or absolute). null disables the wiki gate and the wiki-debt merge gate. |
-| `wiki_stale_days` | integer | `30` | - | enforced_by_code | Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Age alone never makes a page stale (a source must also have moved). |
+| `wiki_stale_days` | integer | `30` | - | enforced_by_code | Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Without comparable repo sources, an old candidate is stale on a date-only basis. |
 | `wiki_supervision` | string/null | `"discuss"` | - | read_by_prose_only | wiki-ingest mode: discuss (pause before writing) or autonomous. |
 | `wiki_git_worktree` | boolean/null | `true` | - | read_by_prose_only | true = PR flow for wiki commits; false = commit directly to the vault. |
 | `wiki_git_bypass_flag` | string/null | `null` | - | read_by_prose_only | Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1. |
@@ -201,7 +201,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `jira` | object/null | `null` | - | read_by_prose_only | Jira settings (project, epic, component_name, component_id, epic_field, points_field, fix_version, mcp_namespace, transitions). Nested keys are not type-checked. |
 | `engineering_principles_paths` | array/null | `null` | - | read_by_prose_only | Glob patterns that trigger the engineering-principles pre-flight in /coderails:push. |
 | `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | - | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
-| `sandbox_workers` | boolean/null | `true` | `true` | enforced_by_code | Default ON. Claude graph_dispatch.plan() reports sandboxed or in-process-fallback:<reason> for U3 nodes. Codex refuses native U3 spawns while ON; its separate-process OAuth launcher must be bound to graph evidence before a U3 result can be accepted. OFF explicitly permits inherited parent sandbox behavior. |
+| `sandbox_workers` | boolean/null | `true` | `true` | enforced_by_code | Default ON. Claude graph_dispatch.plan() reports sandboxed or in-process-fallback:<reason> for U3 nodes. Codex refuses native U3 spawns while ON; use the existing OAuth graph driver and its sealed process evidence. Standalone worker output earns no graph completion credit. OFF explicitly permits inherited parent sandbox behavior. |
 | `subagent_identity_gate` | string | `"on"` | `"on"` | enforced_by_code | on (default) denies an untyped Bash subagent in a graph-bound Claude session; off disables that hook. |
 | `action_authority` | string/null | `"off"` | `"advisory"` | enforced_by_code | Absent = off; the shipped workflow uses advisory. Explicit enforce requires a signed receipt for guarded merges and pushes. Invalid values are rejected by strict config consumers. |
 | `diff_manifest` | string/null | `"enforce"` | `"enforce"` | enforced_by_code | Diff-manifest publication gate for push.py, merge.py and direct-merge hooks. Default enforce uses the shipped policy; invalid values are rejected by strict config consumers. |
@@ -283,3 +283,21 @@ code, trace `decision.sync/degraded/<code>`, local row kept), 2 refused (wrong s
 written). Teardown runs `flush-decisions` to retry pending and safely degraded rows. An in-flight or uncertain sync
 returns `decision_sync_unknown` and must be reconciled against Muninn before any manual retry. Trace commands: `decision.record`,
 `decision.sync` (counted by `memory_counters.memory_counts`).
+
+### Integrated dispatch inputs and counter summaries
+
+New nonempty unit manifests require an absolute clean Git checkout through
+`add-unit --worktree`. Both providers store the source manifest binding and include
+that binding, the checkout HEAD, and current typed lessons in the dispatch contract.
+The retained `assign-worktree` command binds the same source fields for pending units.
+`graph_lessons.py` reads the provider's `lessons.py query --format contract` against
+this loop's repo-key directory before the progress lock; `graph_dispatch_inputs.py`
+checks that the owner, loop, and revision did not change during the read. Native and
+local driver authorization recheck the source and lesson snapshot before consuming
+an attempt. Unavailable or stale lessons remain a coded refusal.
+
+The dispatch, spec, stop, and worker counter CLIs accept `--trace-json` on stdin from
+`measure_graph_alignment.py --json`. Each reads `trace.by_reason` and retains local
+recovery events. The worker counter also preserves its source-specific mapping of
+recorded decision events. Null or malformed summaries and `--since` with aggregate
+input are refused. The measurement script itself remains unchanged.

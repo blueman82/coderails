@@ -46,6 +46,17 @@ class ParityTests(unittest.TestCase):
             with self.subTest(file=relative):
                 self.assertEqual((ROOT / relative).read_bytes(), (PACKAGE / relative).read_bytes())
 
+    def test_quoted_command_substitutions_are_executed(self) -> None:
+        """Double quotes keep command substitutions live; single quotes do not."""
+        for command in ('echo "$(git push origin HEAD:main)"', 'echo "`git push origin HEAD:main`"'):
+            with self.subTest(command=command):
+                self.assertEqual([call.name for call in action_match.operations(command)], ["git_push"])
+        for command in ('echo "$(gh pr merge 519 --merge)"', 'echo "`gh pr merge 519 --merge`"'):
+            with self.subTest(command=command):
+                self.assertEqual([call.name for call in action_match.operations(command)], ["merge"])
+        for command in ("echo '$(git push origin HEAD:main)'", r'echo "\$(git push origin HEAD:main)"'):
+            self.assertEqual(action_match.operations(command), [])
+
     def test_merge_option_values_remain_real_operations(self) -> None:
         """The independent policy uses mandatory option arity and keeps genuine no-ops."""
         options = (

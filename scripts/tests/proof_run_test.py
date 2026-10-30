@@ -156,7 +156,7 @@ class ProofRunTests(unittest.TestCase):
         self.blocked(r"P1\(proof_stale_cmd\)")
         lines = self.results.read_text().splitlines()
         self.results.write_text("\n".join([lines[0], lines[2]]) + "\n")
-        self.blocked(r"P1\(proof_chain_broken\)")
+        self.blocked("proof_chain_broken")
 
     def test_disposition_forms(self) -> None:
         """(f) Bare none is rejected; none: reason, the typed dict, and the CLI-recorded row pass."""
@@ -188,6 +188,29 @@ class ProofRunTests(unittest.TestCase):
         self.assertEqual((row["verdict"], row["exit_code"]), ("refused", None))
         self.assertTrue(victim.is_dir())
         self.blocked(r"P1\(proof_cmd_destructive\)")
+
+    def test_proof_lease_push_does_not_run_git_from_path(self) -> None:
+        """Proof screening must reject a lease push without running Git before the sandbox."""
+        binary = self.dir / "git"
+        marker = self.dir / "git-canary"
+        binary.write_text(f"#!/bin/sh\nprintf attacked > {marker}\nexit 92\n")
+        binary.chmod(0o755)
+        self.doc({"id": "P1", "cmd": "git push origin --force-with-lease", "expect": {"exit_code": 0}})
+        self.assertEqual(self.cli("freeze", str(self.dir)).returncode, 0)
+        env = {**os.environ, "PATH": str(self.dir) + os.pathsep + os.environ["PATH"]}
+        for runner in (PROOF, REPO / "packages/codex/scripts/lib/proof.py"):
+            with self.subTest(runner=runner):
+                result = subprocess.run(
+                    [sys.executable, str(runner), "run", str(self.dir), "--all"],
+                    cwd=REPO,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertEqual(pr.read_rows(self.results)[-1]["verdict"], "refused")
+                self.assertFalse(marker.exists())
 
     def test_withdrawn_proofs_need_an_observed_failure_and_reason(self) -> None:
         """(h) A withdrawn proof passes only with a failed/timeout row and a reason; a satisfied row does not."""
@@ -233,7 +256,7 @@ class ProofRunTests(unittest.TestCase):
             session_id=SESSION,
             loop_id=LOOP,
         )
-        self.blocked("proof_no_proofs")
+        self.blocked("proof_withdrawn_unobserved")
 
     def test_empty_proofs_block_unless_a_disposition_exists(self) -> None:
         """An empty proofs array no longer passes the Claude gate; a valid disposition row releases it."""
@@ -279,7 +302,7 @@ class ProofRunTests(unittest.TestCase):
         self.freeze_run()
         self.assertEqual(self.gate(), "")
         self.state["loop_id"] = "other"
-        self.blocked(r"P1\((proof_stale_cmd|proof_unexecuted)\)")
+        self.blocked("proof.json loop_id")
 
     def test_every_reason_code_is_in_the_runbook(self) -> None:
         """Each proof reason code is named in docs/RUNBOOK.md."""

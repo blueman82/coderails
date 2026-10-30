@@ -119,13 +119,12 @@ export async function collectClaudeSessionTrace(sessionId: string, deps: TraceCo
             const target = block.type === "tool_use" ? toolRequests : toolResults;
             target.set(callId, [...(target.get(callId) ?? []), event]);
           }
-        } else {
-          const event = makeEvent(sessionId, native, ordinal, row, actor, childId,
-            parentSpanId, ownership, null, -1, parentSourceRef);
-          if (actor === "worker") event.attributes["coderails.actor.name"] = displayName;
-          markClaudeRequestOrMention(event, row, null);
-          events.push(event);
         }
+        const textEvent = makeEvent(sessionId, native, ordinal, row, actor, childId,
+          parentSpanId, ownership, null, -1, parentSourceRef);
+        if (actor === "worker") textEvent.attributes["coderails.actor.name"] = displayName;
+        markClaudeRequestOrMention(textEvent, row, null);
+        if (!items.length || textEvent.attributes["coderails.observation.kind"] === "mention") events.push(textEvent);
       }
       markClaudeReadPairs(readInputs, readOutputs, toolRequests, toolResults, errors);
       for (const [callId, matching] of toolResults) {

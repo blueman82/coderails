@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -166,6 +166,16 @@ class GraphConvertTests(unittest.TestCase):
             self.assertEqual(state["state_minor"], 3)
             self.assertEqual(state["graph"]["context_from_revision"], 3)
             case.backup.unlink()
+            historical = graph_contract.build_contract(old, "U3[1]", "main")
+            del historical["required_context"]
+            identifier, record = graph_contract.make_record(old, "U3[1]", "wave-2", 1, historical, None)
+            record["revision"] = 2
+            with_history = {**old, "graph": {**old["graph"], "dispatches": {identifier: record}}}
+            case.write(with_history)
+            result = case.graph("convert")
+            self.assertEqual(result.returncode, 0, (case.name, result.stderr))
+            self.assertEqual(case.read()["graph"]["dispatches"], with_history["graph"]["dispatches"])
+            case.backup.unlink()
             broken_cases: list[dict[str, Any]] = [
                 {**old, "graph": {**old["graph"], "dispatches": []}},
                 {**old, "graph": {**old["graph"], "dispatches": {"disp_torn": {}}}},
@@ -184,6 +194,25 @@ class GraphConvertTests(unittest.TestCase):
                                 "node_id": "U3[1]",
                                 "wave_id": "wave-3",
                                 "revision": old["revision"],
+                                "attempt": 1,
+                                "envelope_version": graph_contract.ENVELOPE_VERSION,
+                                "contract": contract,
+                                "prompt_sections_sha256": graph_contract.sections_sha256(contract),
+                            }
+                        },
+                    },
+                }
+            )
+            broken_cases.append(
+                {
+                    **old,
+                    "graph": {
+                        **old["graph"],
+                        "dispatches": {
+                            "disp_forged_attempt": {
+                                "node_id": "U3[1]",
+                                "wave_id": "wave-2",
+                                "revision": 2,
                                 "attempt": 1,
                                 "envelope_version": graph_contract.ENVELOPE_VERSION,
                                 "contract": contract,
@@ -284,7 +313,7 @@ class GraphConvertTests(unittest.TestCase):
             patch.object(claude_graph, "atomic_progress_update", side_effect=fail_after_transform),
             self.assertRaisesRegex(ValueError, "locked|unreadable|write"),
         ):
-            claude_graph.convert_state(case.path, SESSION, False)
+            cast(Any, claude_graph).convert_state(case.path, SESSION, False)
         self.assertEqual(case.path.read_bytes(), before)
         self.assertEqual(case.backup.read_bytes(), before)
         self.assertNotIn("convert_ok", case.reasons())

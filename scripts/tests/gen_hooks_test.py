@@ -40,6 +40,8 @@ class HookGenerationTests(unittest.TestCase):
         self.root = Path(self.scratch.name)
         catalog = json.loads((ROOT / "hooks/messages.json").read_text())
         reason_sources = {item["source"] for item in catalog["reasons"].values()}
+        for directory in ("hooks/scripts", "packages/codex/hooks/scripts"):
+            reason_sources.update(str(path.relative_to(ROOT)) for path in (ROOT / directory).glob("*.py"))
         for name in (*FILES, *sorted(reason_sources)):
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -79,6 +81,31 @@ class HookGenerationTests(unittest.TestCase):
         self.edit_json("hooks/messages.json", lambda data: data["hooks"].pop("inject_bootstrap"))
         self.assertEqual(self.check(), 2)
 
+    def test_omitted_emitted_reason_refuses(self) -> None:
+        """Deleting a source-emitted reason must invalidate the catalog."""
+        self.edit_json("hooks/messages.json", lambda data: data["reasons"].pop("authority_deny"))
+        self.assertEqual(self.check(), 2)
+
+    def test_explicit_hook_emitter_keeps_reason_coverage(self) -> None:
+        """The routed crack-on hook stays covered with either its local alias or explicit API name."""
+        path = self.root / "hooks/scripts/crack_on_gate.py"
+        source = path.read_text()
+        self.assertIn("import append_hook_row as append_row", source)
+        self.assertIn("authority_deny", gen_hooks.emitted_reasons(path))
+        path.write_text(
+            source.replace("append_hook_row as append_row", "append_hook_row").replace(
+                "append_row(", "append_hook_row("
+            )
+        )
+        self.assertIn("authority_deny", gen_hooks.emitted_reasons(path))
+        self.edit_json("hooks/messages.json", lambda data: data["reasons"].pop("authority_deny"))
+        self.assertEqual(self.check(), 2)
+
+    def test_registered_source_missing_refuses(self) -> None:
+        """A registered hook must have an actual implementation."""
+        (self.root / "hooks/scripts/inject_bootstrap.py").unlink()
+        self.assertEqual(self.check(), 2)
+
     def test_unemitted_reason_refuses(self) -> None:
         """The reason view cannot assert a code absent from its source."""
         self.edit_json(
@@ -105,6 +132,11 @@ class HookGenerationTests(unittest.TestCase):
             "hooks/overlays/codex.json",
             lambda data: data["hooks"]["Stop"][0]["hooks"][0].update({"timeout": 0}),
         )
+        self.assertEqual(self.check(), 2)
+
+    def test_unhashable_mode_refuses_without_crashing(self) -> None:
+        """Malformed structured fields return the documented refusal code."""
+        self.edit_json("hooks/registry.json", lambda data: data["controls"]["test_gate"].update({"mode": []}))
         self.assertEqual(self.check(), 2)
 
     def test_shell_text_after_command_refuses(self) -> None:

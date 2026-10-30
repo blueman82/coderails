@@ -22,7 +22,7 @@ class AddUnitManifestTests(ControllerCase):
             worktree = assigned_checkout(c.root)
             result = c.add("2", "--manifest", "src/**", "--manifest", "docs/*.md", "--worktree", worktree)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(c.read()["work_units"]["1"], {"status": "pending"})
+            self.assertEqual(c.read()["work_units"]["1"], {"status": "pending", "registered_revision": 2})
             self.assertEqual(c.read()["work_units"]["2"]["manifest"], ["src/**", "docs/*.md"])
             self.assertEqual(c.read()["work_units"]["2"]["worktree"], worktree)
 

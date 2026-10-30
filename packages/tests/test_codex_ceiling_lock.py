@@ -47,6 +47,123 @@ def owned_state(repo: Path) -> dict[str, object]:
 class CeilingLockTests(unittest.TestCase):
     """A dead-owner lock must not deny forever."""
 
+    def test_legacy_branch_count_is_carried_into_worktree_key(self) -> None:
+        """An upgrade cannot grant a third full run on the same branch."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, repo = Path(tmp) / "data", Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", "-b", "feature/old", str(repo)], check=True)
+            legacy = data / "verification-ceiling/feature-old__full-suite.count"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("2\n")
+            self.assertIn('"deny"', run_hook(data, repo))
+            key = hashlib.sha1((os.path.realpath(repo / ".git") + os.path.realpath(repo)).encode()).hexdigest()
+            self.assertEqual((legacy.parent / f"{key}__full-suite.count").read_text(), "3\n")
+            self.assertIn('"deny"', run_hook(data, repo))
+            self.assertEqual((legacy.parent / f"{key}__full-suite.count").read_text(), "4\n")
+            self.assertEqual((data.parent / "loops/s1/trace.jsonl").read_text().count("ceiling_legacy_migrated"), 1)
+
+    def test_rollback_reads_continued_legacy_count(self) -> None:
+        """A prior hook version must see runs charged after an upgrade."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, repo = Path(tmp) / "data", Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", "-b", "feature/old", str(repo)], check=True)
+            legacy = data / "verification-ceiling/feature-old__full-suite.count"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("1\n")
+            self.assertEqual(run_hook(data, repo), "")
+            self.assertEqual(legacy.read_text(), "2\n")
+            self.assertIn('"deny"', run_hook(data, repo))
+            self.assertEqual(legacy.read_text(), "3\n")
+
+    def test_quoted_merge_subcommand_reaches_publication_gate(self) -> None:
+        """Raw command spelling cannot bypass the parsed merge operation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, repo = Path(tmp) / "data", Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", "-b", "feature", str(repo)], check=True)
+            env = os.environ | {"PLUGIN_DATA": str(data), "CODERAILS_HOOK_TELEMETRY_DIR": tmp}
+            for command in ("gh pr 'mer'ge 519", r"gh pr m\erge 519", r"gh pr $'\x6derge' 519"):
+                payload = json.dumps({"session_id": "s1", "cwd": str(repo), "tool_input": {"command": command}})
+                result = subprocess.run(
+                    [sys.executable, str(HOOK.parent / "pr_publication_gate.py")],
+                    input=payload,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    check=False,
+                )
+                with self.subTest(command=command):
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn('"deny"', result.stdout)
+
+    def test_ansi_c_shell_body_cannot_hide_full_suite(self) -> None:
+        """Opaque shell forms cannot hide a full suite before its counter."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, repo = Path(tmp) / "data", Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", "-b", "feature", str(repo)], check=True)
+            for command in (
+                "bash -c $'python3 packages/tests/test_codex_hooks.py'",
+                "bash --rcfile /dev/null -c 'python3 packages/tests/test_codex_hooks.py'",
+            ):
+                with self.subTest(command=command):
+                    self.assertIn('"deny"', run_hook(data, repo, command))
+
+    def test_opaque_shell_forms_cannot_hide_merge(self) -> None:
+        """Publication, receipt, destructive and test hooks refuse the same opaque Bash bodies."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, repo = Path(tmp) / "data", Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", "-b", "feature", str(repo)], check=True)
+            env = os.environ | {"PLUGIN_DATA": str(data), "CODERAILS_HOOK_TELEMETRY_DIR": tmp}
+            for command in ("bash -c $'gh pr merge 7'", "bash --rcfile /dev/null -c 'gh pr merge 7'"):
+                payload = json.dumps({"session_id": "s1", "cwd": str(repo), "tool_input": {"command": command}})
+                for hook in ("pr_publication_gate", "action_authority_gate", "destructive_bash_gate", "test_gate"):
+                    with self.subTest(command=command, hook=hook):
+                        result = subprocess.run(
+                            [sys.executable, str(HOOK.parent / f"{hook}.py")],
+                            input=payload,
+                            capture_output=True,
+                            text=True,
+                            env=env,
+                            check=False,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertIn('"deny"', result.stdout)
+
+    def test_three_runs_in_one_command_are_denied(self) -> None:
+        """One tool call cannot hide the third run in later shell segments."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, repo = Path(tmp) / "data", Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", "-b", "b", str(repo)], check=True)
+            self.assertIn('"deny"', run_hook(data, repo, "; ".join((CMD, CMD, CMD))))
+            key = hashlib.sha1((os.path.realpath(repo / ".git") + os.path.realpath(repo)).encode()).hexdigest()
+            self.assertEqual((data / "verification-ceiling" / f"{key}__full-suite.count").read_text(), "3\n")
+
+    def test_one_command_counts_each_worktree(self) -> None:
+        """A local cd changes the counter selected for the next run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, first, second = Path(tmp) / "data", Path(tmp) / "first", Path(tmp) / "second"
+            for repo in (first, second):
+                subprocess.run(["git", "init", "-q", "-b", "b", str(repo)], check=True)
+            self.assertEqual(run_hook(data, first, f"{CMD}; cd {shlex.quote(str(second))}; {CMD}"), "")
+            for repo in (first, second):
+                key = hashlib.sha1((os.path.realpath(repo / ".git") + os.path.realpath(repo)).encode()).hexdigest()
+                self.assertEqual((data / "verification-ceiling" / f"{key}__full-suite.count").read_text(), "1\n")
+
+    def test_denied_command_does_not_charge_other_worktree(self) -> None:
+        """A third run blocks the command before its other worktree can run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data, first, second = Path(tmp) / "data", Path(tmp) / "first", Path(tmp) / "second"
+            for repo in (first, second):
+                subprocess.run(["git", "init", "-q", "-b", "b", str(repo)], check=True)
+            self.assertEqual(run_hook(data, first), "")
+            self.assertEqual(run_hook(data, first), "")
+            self.assertIn('"deny"', run_hook(data, first, f"{CMD}; cd {shlex.quote(str(second))}; {CMD}"))
+            key = hashlib.sha1((os.path.realpath(first / ".git") + os.path.realpath(first)).encode()).hexdigest()
+            self.assertEqual((data / "verification-ceiling" / f"{key}__full-suite.count").read_text(), "3\n")
+            second_key = hashlib.sha1(
+                (os.path.realpath(second / ".git") + os.path.realpath(second)).encode()
+            ).hexdigest()
+            self.assertFalse((data / "verification-ceiling" / f"{second_key}__full-suite.count").exists())
+
     def test_dead_owner_lock_is_recovered(self) -> None:
         """Lock dir with a dead owner pid is stolen, the run is counted, nothing is denied."""
         with tempfile.TemporaryDirectory() as tmp:

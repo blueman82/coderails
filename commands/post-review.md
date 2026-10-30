@@ -40,15 +40,15 @@ from the text (a bullet under `## Critical` fails the pass), never asserted by y
 ## Step 2 — Post
 
 Replace `<PR#>` with the validated number and run the one command. It validates every file,
-resolves the head, builds the marker and passes line, reuses an identical existing artifact,
-refuses if the head moved while posting, and writes the progress cache:
+resolves the head, posts the passes and a server compatible review summary as two comments,
+reuses an identical existing pair, refuses if the head moved while posting, and writes the progress cache:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/post_review.py" post <PR#> --summary /tmp/coderails-review-summary.md --compat-count <COUNT> --disposition <CHOICE> --pass security-review=/tmp/coderails-security-review.md
 ```
 
-Omit `--pass NAME=FILE` for passes the diff does not need. A non-zero exit means nothing was
-posted (or, for `stale`, the posted artifact belongs to an old head): fix the cause and re-run.
+Omit `--pass NAME=FILE` for passes the diff does not need. A non-zero exit can follow the first comment;
+the script resumes an incomplete pair on retry. For `stale`, review the new head before you post again.
 
 ## Step 3 — Report
 

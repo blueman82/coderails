@@ -58,6 +58,7 @@ The first table gives an action for each control category. The second table list
 | `hooks/scripts/crack_on_gate.py` | `authority_phrase_ignored` | Use the typed authority command, or continue after the authority expires. |
 | `hooks/scripts/subagent_identity_gate.py` | `bash_agent_type_absent` | Dispatch with a native agent type that the graph can identify. |
 | `hooks/scripts/verification_volume_ceiling.py` | `ceiling_exceeded` | Use focused tests after the allowed full-suite runs. |
+| `hooks/scripts/verification_volume_ceiling.py` | `ceiling_legacy_migrated` | Use focused tests after the allowed full-suite runs. |
 | `packages/codex/hooks/scripts/loop_dispatch_guard.py` | `codex_native_worker_uncontained` | Use a parent Codex sandbox that contains the worker. |
 | `hooks/scripts/check_confidence_labels.py` | `confidence_label_missing` | Add the correct confidence label to each claim that needs one. |
 | `hooks/scripts/subagent_identity_gate.py` | `config_rejected` | Fix .coderails/workflow.config.yaml and retry. |
@@ -72,6 +73,7 @@ The first table gives an action for each control category. The second table list
 | `hooks/scripts/lib/hook_state.py` | `nudge_first` | The first nudge was recorded; continue the required workflow. |
 | `hooks/scripts/lib/hook_state.py` | `nudge_suppressed` | The earlier nudge still applies; check the loop state. |
 | `hooks/scripts/action_authority_gate.py` | `receipt_consumed` | Use the configured authority path for the exact action and session. |
+| `hooks/scripts/loop_stall_guard.py` | `stale_stop_row` | Record the required stop and complete unresolved graph work. |
 | `packages/codex/hooks/scripts/graph_completion_guard.py` | `stop_row_missing` | Record the current Stop result before the loop completes. |
 | `hooks/scripts/check_verify_loop.py` | `verify_loop_missing` | Complete the verification section and mark each unresolved check. |
 | memory | `bad_record` | the record failed validation (type, scope, tag, date, empty claim, or loop scope without a loop id). |
@@ -178,16 +180,16 @@ The first table gives an action for each control category. The second table list
   `python3 scripts/lib/config_counters.py` (`config_rejected`, `config_bad_value`, `wiki_schema_fail_closed`).
 - Remediation: run `python3 scripts/lib/config.py resolve-config --json`, fix each finding (typo'd key, wrong type, value
   outside the enum), or restore `wiki.schema.json` (`page_types` non-empty list of directory names). Only the guarded
-  action is denied; every other command and tool passes. With NO config file nothing is read and every gate stays inert
-  (repos not using coderails), and an ambiguous wiki identity (no `wiki_path`, other repository, vault not a directory)
-  still allows.
-- Limit: the controls are only as strong as the config file. A same-user agent can `mv` it away (every gate goes inert)
-  or edit a control to `off` in place; no hook guards `.coderails/workflow.config.yaml`. Review config diffs like code
-  (the diff-manifest policy can list it as a protected path). `evals.require_signatures` fails closed: only an
-  explicit `false` turns it off. Malformed lines and duplicate keys are `config_unparseable_line` /
-  `config_duplicate_key` findings.
-- Defaults: an existing config with no other keys enables `sandbox_workers: true`,
-  `evals.require_signatures: true`, and `diff_manifest: enforce` (inert until `diff_manifest_policy` names a file).
+  action is denied; other commands and tools can continue. Without a config file, config-dependent gates do not run.
+  The diff-manifest check still uses its shipped policy. An ambiguous wiki identity (no `wiki_path`, another repository,
+  or a path that is not a vault) does not block a write.
+- Limit: a same-user agent can remove the config file or set a control to `off`; no hook guards
+  `.coderails/workflow.config.yaml`. Removing the file does not disable the default diff-manifest check. Review config
+  diffs like code. The diff-manifest policy can list the config file as a protected path. `evals.require_signatures`
+  fails closed: only an explicit `false` turns it off. Malformed lines and duplicate keys are
+  `config_unparseable_line` / `config_duplicate_key` findings.
+- Defaults: the diff-manifest check uses `enforce` mode and `policy/diff-policy.default.json` even without a config file.
+  An existing config with no other keys enables `sandbox_workers: true` and `evals.require_signatures: true`.
   `action_authority` defaults to `off`. The shipped config sets it to `advisory`, which warns about missing receipts
   without a passphrase. Set `enforce` only when signed receipts are required.
 
@@ -532,7 +534,58 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   `awaiting-input` or `approval-gate` row while graph work is pending. `complete` needs a resolved graph and its evidence.
   See `docs/graph-alignment-measurement.md` for limits and commands.
 
+## A routine run ended incomplete, aborted or refused
+
+- Symptom: the dashboard gate for `docs-sync` or `loop-retro-promotion` reads red; the run log's last marker is
+  `abort=incomplete-run`, `abort=<code>`, `refused=<gate>`, `incomplete=merged` or `incomplete=merge-unknown`.
+- Query: the JSONL beside the run log (`run-{date}.jsonl`, `promotion-runs.jsonl`): the last row for the newest
+  `run_id` gives `stage`, `outcome` (`stage_ok`, `run_ok`, `run_abort`, `run_refused`, `run_incomplete`) and
+  `reason_code`. Counters: `trace.by_reason` keys `routine/<outcome>/<reason_code>`, tallied by
+  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py` (key `routine`).
+- Codes: `incomplete-run` (the session ended after `begin`), `stage_out_of_order`, `runner_exit_no_terminal` (the runner
+  saw the child exit with no terminal row), `audit_failed`/`mining_failed`, the diff-manifest codes from the
+  `manifest_check` stage (`out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `special_file_type`,
+  `status_not_allowed`, `too_many_paths`, `manifest_unreadable`, `manifest_internal_error`), and a gate name
+  (`push`, `review`, `post_review`, `post_evals`, `merge`) for `run_refused`.
+- Remediation: `incomplete-run` and `runner_exit_no_terminal` mean the agent session stopped early; read the run
+  output under the runner's runs dir and fix the cause. `begin` refuses an open run even across midnight, or a same-day
+  abort/refusal. Use `begin --new` explicitly to replace it; an open previous run first gets `run_abort incomplete-run`.
+  A refusal names the gate that exited non-zero or could not start (`gate_spawn_failed` on stderr). Cleanup prints
+  `cleanup_failed: <step>` when a PR or local branch could not be closed; inspect the exact PR before any manual
+  cleanup. The remote branch is retained. `routine_unknown`/`reason_code_invalid`/`outcome_invalid` (exit 2)
+  mean a caller used a value outside the closed lists.
+- `merged_incomplete` means GitHub confirms the pinned PR merged but the local
+  run did not finish. Do not abort it or close its PR. `merge_state_unknown`
+  means GitHub could not confirm the pinned PR and head; restore that read
+  before you retry or clean up. A changed head also remains unknown.
+- `log_unwritable` refuses advancement or terminal state: inspect both event logs and the persisted state for partial
+  output from an interrupted/failed write, then repair the destination. `routine_mismatch` means the log belongs to a
+  different routine; select the correct routine log. Do not finish or replace another routine's state.
+- Limits: see `docs/routines.md` "Routine state machine and event log".
+
 ## Proof gate blocked a `complete` declaration
+
+If one frozen proof suite must be replaced within the same graph, keep the original `proof.json` intact. Obtain a
+pending schema-2 candidate and a separate author report from an isolated proof author. Keep both input files outside
+the active graph. Review them, then run:
+
+```bash
+python3 scripts/lib/proof.py supersede <state-dir> --candidate <candidate-path> \
+  --reason "<why the original cannot run>" --original-sha256 <raw-proof-json-sha256> \
+  --author-evidence <report-path>
+python3 scripts/lib/proof.py freeze <state-dir>
+python3 scripts/lib/proof.py run <state-dir> --all
+python3 scripts/lib/proof.py status <state-dir>
+```
+
+For each proof, the controller makes a private copy of committed `HEAD`. The proof runs there. It cannot read the original checkout. The controller uses fixed system paths for Git and Node. It refuses a committed tree that has a symlink. It starts the pinned sandbox from its cached absolute path. A missing or changed cached runtime records `sandbox_unavailable`.
+
+The command stores one candidate by content hash and appends a chained `supersede` row. It binds the original and
+candidate raw and canonical hashes, loop identity, report bytes, reason, and issuance HEAD. Both providers use the
+same selected suite. Only freeze and run rows after that binding count. The run HEAD must match the current checkout.
+A second replacement, changed original or candidate, missing report, or invalid chain blocks. Keep the report at
+its recorded path. An orphan candidate
+file has no effect. The CLI checks report bytes, not the author's identity or independence; review that separately.
 
 - Symptom: `loop_stall_guard` (Claude) or `graph.py complete` / `verify-completion` (Codex) names frozen proofs as
   `P1(proof_...)`. The gate reads only `proof_results.jsonl` beside `proof.json`, written by the controller via
@@ -544,11 +597,13 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   `proof_unexecuted`: run `proof.py run <state-dir> --all`. `proof_failed`: the latest run exited nonzero or timed
   out; fix the cause, re-run. `proof_expect_mismatch`: exit code or stdout did not match the frozen `expect`.
   `proof_stale_cmd`: proof.json changed after the freeze row, or the run row hashes a different cmd; run
-  `proof.py freeze` then `run`. `proof_stale_head`: the run belongs to another checkout or an earlier HEAD; run it
+  `proof.py freeze` then `run`. `proof_stale_head`: the run repository, HEAD, or source tree differs; run it
   again from the current repository checkout. `proof_chain_broken`: a retained row was edited or a nonfinal row was
   lost. Preserve `proof_results.jsonl` and start a new session and loop. `proof_cmd_destructive`: the cmd matches the
-  destructive classifier and was never executed; reword the proof. `proof_sandbox_unavailable`: the pinned sandbox did
-  not start. Prepare and check the pinned runtime, then run the proof again:
+  destructive classifier and was never executed; reword the proof. `proof_output_limit`: combined stdout and stderr
+  exceeded 1 MiB. The controller stopped the process group and recorded an `output_limit` row. Its output hashes cover
+  captured bytes only; the excerpt starts with `partial output`. Reduce output and run the proof again.
+  `proof_sandbox_unavailable`: the pinned sandbox did not start. Prepare and check the pinned runtime, then retry:
 
   ```bash
   npx --yes @anthropic-ai/sandbox-runtime@0.0.65 --help
@@ -580,35 +635,6 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
 - Off-switch: none, by design. The proof gate is intentionally non-disableable on both providers (default ON, no config
   key or env var); the previous transcript-based check was removed, so there is no earlier behaviour to fall back to.
 
-## A routine run ended incomplete, aborted or refused
-
-- Symptom: the dashboard gate for `docs-sync` or `loop-retro-promotion` reads red; the run log's last marker is
-  `abort=incomplete-run`, `abort=<code>`, `refused=<gate>`, `incomplete=merged` or `incomplete=merge-unknown`.
-- Query: the JSONL beside the run log (`run-{date}.jsonl`, `promotion-runs.jsonl`): the last row for the newest
-  `run_id` gives `stage`, `outcome` (`stage_ok`, `run_ok`, `run_abort`, `run_refused`, `run_incomplete`) and
-  `reason_code`. Counters: `trace.by_reason` keys `routine/<outcome>/<reason_code>`, tallied by
-  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py` (key `routine`).
-- Codes: `incomplete-run` (the session ended after `begin`), `stage_out_of_order`, `runner_exit_no_terminal` (the runner
-  saw the child exit with no terminal row), `audit_failed`/`mining_failed`, the diff-manifest codes from the
-  `manifest_check` stage (`out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `special_file_type`,
-  `status_not_allowed`, `too_many_paths`, `manifest_unreadable`, `manifest_internal_error`), and a gate name
-  (`push`, `review`, `post_review`, `post_evals`, `merge`) for `run_refused`.
-- Remediation: `incomplete-run` and `runner_exit_no_terminal` mean the agent session stopped early; read the run
-  output under the runner's runs dir and fix the cause. `begin` refuses an open run even across midnight, or a same-day
-  abort/refusal. Use `begin --new` explicitly to replace it; an open previous run first gets `run_abort incomplete-run`.
-  A refusal names the gate that exited non-zero or could not start (`gate_spawn_failed` on stderr). Cleanup prints
-  `cleanup_failed: <step>` when a PR or local branch could not be closed; inspect the exact PR before any manual
-  cleanup. The remote branch is retained. `routine_unknown`/`reason_code_invalid`/`outcome_invalid` (exit 2)
-  mean a caller used a value outside the closed lists.
-- `merged_incomplete` means GitHub confirms the pinned PR merged but the local
-  run did not finish. Do not abort it or close its PR. `merge_state_unknown`
-  means GitHub could not confirm the pinned PR and head; restore that read
-  before you retry or clean up. A changed head also remains unknown.
-- `log_unwritable` refuses advancement or terminal state: inspect both event logs and the persisted state for partial
-  output from an interrupted/failed write, then repair the destination. `routine_mismatch` means the log belongs to a
-  different routine; select the correct routine log. Do not finish or replace another routine's state.
-- Limits: see `docs/routines.md` "Routine state machine and event log".
-
 ## Diff-manifest check warned or refused
 
 For a graph unit's exact `push.py --unit N --progress PATH` command, the unit
@@ -616,7 +642,11 @@ record needs a nonempty manifest. Register `--base-branch <parent>` with
 `graph.py add-unit` before the first push of a stacked branch; once a PR exists,
 its live base must match that recorded branch. The command checks staged files
 and the complete PR diff, including both rename paths, against the unit manifest
-before transport. A recorded worktree must match the current checkout.
+before transport. Register an absolute worktree path with `add-unit --worktree`, or use
+`assign-worktree --session S --loop-id L --unit N --worktree ABS_PATH` after checkout setup.
+The latter fills an unassigned existing unit under the graph lock, even during an active wave;
+it preserves the revision and refuses a different assignment. The recorded path must match the Git checkout root at push time.
+Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their literal manifest names.
 
 - Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)
   refuses with `diff_manifest:<code>` and prints `! diff_manifest <code>: <path>` on stderr. The check is ON by default
@@ -650,7 +680,13 @@ before transport. A recorded worktree must match the current checkout.
   forms are supported; empty or repeated flag values refuse. A requested unit must exist and carry a string-list `manifest`
   and a nonblank absolute `worktree` whose real path equals the current Git repository root. The progress object must carry
   nonblank string `session_id` and `loop_id` fields. Missing, malformed or mismatched metadata refuses `manifest_unreadable`;
-  `manifest: []` allows no changed paths. A session that owns a graph unit in this worktree must supply both flags.
+  `push.py` reports `publication:graph_owner_missing` before transport when either owner field is blank or absent.
+  That refusal writes `publication/refused/graph_owner_missing` to the publication session trace.
+  A missing, relative or foreign checkout reports `publication:worktree_invalid` with a matching refusal trace.
+  A PR base that differs from the recorded base reports `publication:base_mismatch`. Staged or branch paths outside
+  the unit manifest report `diff_manifest:out_of_manifest`. These preflight refusals write `publication/refused/<code>`
+  before the later policy gate runs; `trace.by_reason` can count them.
+  `manifest: []` refuses publication. A session that owns a graph unit in this worktree must supply both flags.
   Without a matching graph unit, standalone publication uses the policy alone. Unit and policy
   manifests both apply, so a unit cannot widen policy scope. Custom policies retain the default denylist. An unreadable config
   refuses `manifest_internal_error` and emits its refusal trace. Direct-merge hooks parse
@@ -681,11 +717,16 @@ before transport. A recorded worktree must match the current checkout.
   the PR diff from its live `baseRefOid` to the checked head (renames count both sides). Config `review_passes: off` skips the check (absent or any other value
   enforces; `diff_manifest: off` does not touch it). The policy file is the control, and deleting or corrupting it
   refuses (`review_policy_unreadable`), it does not allow.
-- Artifact: line 1 is the unchanged v1 marker; line 2 is `<!-- coderails-review-passes v1 {"head_sha":...,"passes":[...]} -->`
-  with `{name, verdict, blocking, summary_sha256}` per pass. `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]`
-  validates each summary, derives each verdict from the text (a bullet under `## Critical` is `fail`) and posts it. A v1
-  artifact with no passes line counts as no passes: `review-pr` is satisfied by the marker, but a `hooks/` PR is refused
-  until it is re-posted. A passes line naming another `head_sha` is ignored.
+- Artifact: `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]` posts two comments for one head.
+  The first has the v1 marker, a passes line, an optional compat-findings line, and the review text. The passes line
+  gives the name, verdict, blocking value, and summary hash for each pass. The second has the same v1 marker, the
+  same optional compat-findings line, and the same general review text. It lets
+  the current server integrity check read the review. The local gate accepts the pair only when the comments are
+  adjacent and the general review text is identical. The script derives each verdict from the text. A Critical finding
+  fails the pass. A present passes line must include `review-pr` with a verdict bound to its summary. An old single
+  comment with no passes line can satisfy `review-pr` for a docs-only diff when its Critical section is clean. Once a
+  passes comment exists for that head,
+  a missing, malformed, or stale companion refuses the pair (`review_passes_malformed`).
 - Query: `trace.by_reason` for `review-passes/ok/review_passes_ok` and `review-passes/refused/<code>`, plus
   `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
 - Remediation: spawn the missing reviewer (`security-reviewer`, `deploy-safety-reviewer`; both providers ship them),
@@ -732,6 +773,13 @@ before transport. A recorded worktree must match the current checkout.
   `eval_artifact_unreadable` is a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
   `not_frozen` also rejects a missing, abbreviated or symbolic `frozen_sha` at level 1 or 2 on every merge route;
   stamping it late does not satisfy the full 40-hex commit requirement.
+  A retained version 1 suite has unverifiable freeze timing, even if its SHA resolves before the branch base. A new
+  version 2 suite binds `frozen_sha` and `frozen_at` in its signed hash. If its freeze SHA is late or missing, work on
+  a copy. Set `CODERAILS_KEYS_DIR` to the preserved signing directory. Run `post_evals.py amend <copy> <eval_id>
+  'frozen_sha <40-hex SHA> frozen_at <ISO8601> timing=late' <actor>`. For version 1, use `timing=unverifiable`.
+  The reason must match that token exactly and bind both fields.
+  The posting and merge gates check the signed amendment. A plain `freeze_disclosure` or justification does not
+  clear this refusal. Regrade and post the copy.
   `eval_head_mismatch` means the selected suite's head is absent or stale; `eval_result_mismatch` means its P0
   statuses contradict GO. Correct the head/evidence, rerun and regrade the evals, then re-post with
   `post_evals.py post <PR> <evals.json>`; the existing eval-level and publication trace rows/counters expose both codes.
@@ -743,7 +791,8 @@ before transport. A recorded worktree must match the current checkout.
   caught. `late_freeze` is attestation, not evidence: an empty, abbreviated or rev-expression `frozen_sha` counts as late
   (a level-0 suite may omit it) and level >= 1 needs a full 40-hex sha, but an honest-looking real sha cannot be proven to
   be the freeze commit, and the
-  disclosure requirement is a substring match for "freeze"/"frozen" in the justification or an amendment `why`. The surface
+  timing requirement for any version 1 suite, or a late or unresolved version 2 SHA, accepts only a verified signed
+  amendment with the exact SHA, timestamp and timing token. The surface
   classes are globs: irreversible wins, then the anchored docs and test directories (`none`), and every other path is
   outward (level 1), so a new control directory needs no entry to be covered, only an irreversible one does. The policy and
   `eval_level.py`/`publication_gate.py` are themselves irreversible (editing them forces level 2), but they are read from the
@@ -764,20 +813,33 @@ before transport. A recorded worktree must match the current checkout.
   paths and `bash [-o x] -c '...'`. Literal `cd`, `env --chdir` and shell-c directories are local to their
   shell scope; successive relative Git `-C` options compose. Repository-dependent test/workflow/receipt reads replay
   the original Git prefix (including separate/attached `--git-dir` and `--work-tree`) from the pre-Git directory.
+  For a protected push, Git directory options must select the payload's physical worktree and Git directory.
+  A selector for the same worktree reaches the normal review check; an unknown or different selection is denied.
   Help and dry-run flags exempt only their own operation. It recognises Git by subcommand (`-nm` decoded) and
   scripts by basename plus the first positional operation after supported leading `--progress` options. A path named
-  `post` in `validate-embed` does not count as a ceremony. Quoted text is one token, so `echo "git commit"` matches
-  nothing. If shlex cannot parse (unbalanced quote), whitespace splitting may over-match plain words, but a split `-c`
-  body is seen only as its first word.
+  `post` in `validate-embed` does not count as a ceremony. Plain quoted text such as `echo "git commit"` matches
+  nothing. Command substitutions inside double quotes are checked. If shlex cannot parse (unbalanced quote),
+  whitespace splitting may over-match plain words, but a split `-c`
+  body is seen only as its first word. Active Bash ANSI-C quotes and `-c` behind unsupported shell options are
+  refused as opaque execution by the hook consumers.
 - Ceiling key: `sha1(realpath(git common dir) + realpath(toplevel))` plus the target, in
   `<loop dir>/verification-ceiling/` (Codex `$PLUGIN_DATA/verification-ceiling/`). A renamed branch keeps its count; a
-  linked worktree or a second clone starts at zero. To reset, delete the one count file (the digest is printed in no
-  message; compute it, or list the directory by mtime). The count is mirrored into `progress.json`
+  linked worktree or a second clone starts at zero. To reset, delete the worktree count file and any existing current
+  branch legacy count file (the digest is printed in no message; compute it, or list the directory by mtime). Each
+  charge raises an existing legacy branch-keyed count under both file locks, so a rollback retains an upgraded count.
+  New legacy files are not created, preserving independent new worktree counters. The worktree key remains
+  authoritative for the current hook; branch renames retain its count. A crash between the two writes can leave a
+  conservative legacy overcount. A fresh worktree or renamed branch with no matching legacy file has no rollback
+  continuity to an older branch-keyed hook.
+  The count is mirrored into `progress.json`
   `work_units[u].verification{run_all,post_evals}` only when the actual payload session and existing `CLAUDE_LOOP_ID`
   exactly own a schema-3 in-progress loop, exactly one physical worktree unit matches, and that unit has a running
   `U3[<id>]` node registered in `active_wave.nodes`. Unknown, foreign or ambiguous input is left unchanged. Codex
   reuses the native progress file's persistent regular flock, nonblocking, and preserves its mode on atomic save;
   Claude retains its existing directory lock. A busy/erroring optional mirror cannot exempt the file counter.
+  One shell command can contain several counted runs. The hook locks all affected counters in a fixed order, then
+  computes each total. If any run exceeds the ceiling, it blocks the command and charges only the exceeded counters.
+  A disk write error can leave a partial count after an earlier counter was written; the command is still blocked.
   The native add-unit producer still supplies status/manifest without worktree registration; this integration is
   a separate producer dependency, so fixture mirroring alone does not prove native unit accounting.
 - `protected_paths_unreadable`: `policy/protected_paths.json` (both plugin copies) is missing, torn or ill-shaped, so
@@ -790,8 +852,8 @@ before transport. A recorded worktree must match the current checkout.
 - Query: `trace.by_reason` for `argv/denied/ceiling_exceeded` and `argv/denied/protected_paths_unreadable`
   (`python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`).
   See `docs/workflow-gates-measurement.md`.
-- Limits: still no full shell parser. Literal `eval` bodies are checked. Aliases, shell functions, ANSI-C quoted or run-time-built command names,
-  backticks inside double quotes and scripts that themselves run `git commit` or `run_all.py` are not seen. Wrapper
+- Limits: still no full shell parser. Literal `eval` bodies are checked. Aliases, shell functions, run-time-built command names,
+  and scripts that themselves run `git commit` or `run_all.py` are not seen. Wrapper
   options are only partly modelled; variable expansion and command-local `GIT_DIR`/`GIT_WORK_TREE` assignments are not
   evaluated. Merge-script matching retains its existing anchored source policy, including its interpreter-option
   boundary; Git/GH operations use the shared context. Abbreviated `--no-verify` flags are recognised.
@@ -917,19 +979,54 @@ before transport. A recorded worktree must match the current checkout.
 
 ## Graph refused with `spec_*`, or `instantiate` refused
 
-See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
+- Symptom: any graph command (`inspect`, `begin-wave`, `add-unit`, `complete`, ...) fails with `spec_edge_missing`,
+  `spec_unknown_node`, `spec_node_missing` or `spec_hash_mismatch`; or `graph.py instantiate` fails with
+  `instantiate_refused_<foreign|state|nonempty|bad_id>`.
+- Query: `python3 scripts/lib/spec_counters.py [--since <ISO ts>]` counts those codes plus `instantiate_ok`,
+  `instantiate_noop` and `skip_when_met` (one count per `plan` call in which a node's skip predicate held). Each refused
+  load also leaves a `load/refused/<code>` row in the loop's `recovery-trace.jsonl`.
+- Remediation: `spec_edge_missing` names the missing edge (for example `J2.8 -> U3[2]`): the spec requires it whenever both
+  nodes exist, so add the edge by registering units with `graph.py add-unit` (which wires it) rather than editing
+  `progress.json`. For a graph stamped by `instantiate`: `spec_hash_mismatch` means `graph-spec.yaml` changed after the
+  graph was built (finish that loop on the old spec checkout, or start a new loop); `spec_unknown_node` /
+  `spec_node_missing` mean nodes were added or removed by hand. `instantiate` builds only into an empty started loop
+  (`instantiate_refused_nonempty` otherwise); a re-run with the same profile and units is `instantiate_noop`.
+- Edit the graph structure in `packages/graph-semantics/graph-spec.yaml` / `policy.yaml` (JSON syntax) and run
+  `python3 scripts/gen_graph_docs.py`; `scripts/tests/gen_graph_docs_test.py` fails the run when the generated tables drift.
+  The installer materializes both files next to `graph_spec.py` in each provider's `agentic-loop/scripts`.
+- Off-switch: `CODERAILS_GRAPH_SPEC=off` (also `0` or `false`) in the environment skips the whole spec check on load
+  (default ON; unset to re-enable). Use it only to rescue a loop whose graph a spec change has stranded, then rebuild it.
+  `spec_join_inputs` (a stamped graph's join is missing or lacks a unit's input) and `spec_profile_downgrade` (the stamp is
+  below `policy.yaml` `graph.profile`) are the other refusal codes.
+- Limits: `policy.yaml` default `graph.profile` is `full`. Every spec node must belong to FULL; a spec
+  that removes one from FULL is refused with `spec_profile` before instantiate. `instantiate --profile units-only`
+  requires the owner to lower the policy floor to `units-only` first; the flag alone is refused. Spec edges are
+  enforced only between nodes that exist, so an unstamped (hand-built or `start`-built) graph that never creates `J2.8` or
+  the prep nodes is not refused: making `start` stamp via `instantiate`, or having `plan`/`begin-wave` refuse an unstamped
+  graph once `full` is chosen, is an open owner decision. Join inputs are enforced on stamped graphs only. Downgrade path:
+  a hand-editing agent can delete `graph.spec_sha256` (back to the weaker unstamped check) or rewrite `spec_profile` and drop
+  the extra nodes, edges and joins; the policy profile floor refuses the second only while `policy.yaml` says `full`.
+  `loop_evals_min_units` is documented but not read by any hook yet. Judgement skip rules (irreversible-surface triggers,
+  `no PR` units) stay prose: `skip_when_met` is only the machine predicate and is a hint, not a recorded skip. Same-user
+  boundary: the spec, policy and `progress.json` are plain files the session user can edit; this is drift detection for a
+  cooperating agent, not tamper evidence.
 
 ## A procedure script (wiki_lint, verify_merged, merge --describe, memory_dir, detect_test_command, check --json) answered unexpectedly
 
 - `wiki_lint.py stale --repo R --vault V`: typed `wiki_stale_days` (default 30; zero valid) sets candidate age.
-  A source commit more than 7 days after the page date proves potential drift. `data_gaps` names unresolvable sources,
+  A source commit more than 7 days after the page date proves potential drift. With no comparable repo source, an old
+  page is stale with `basis: date_only`; this weaker result also keeps a `no_repo_sources` gap. `data_gaps` names unresolvable sources,
   missing commit dates, missing `last_updated` and `no_repo_sources`. Missing directories exit 2 (`repo_unavailable`, `vault_unavailable`);
   bad thresholds report `wiki_stale_days_invalid`. Repair and rerun. Point-in-time/structural directories are excluded.
 - `verify_merged.py <PR> [--grep STR --path P]` exits 0 only when confirmed (`content` or `merge-commit-ancestry`).
-  Refusals: `gh_failed`, `not_merged`, `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`,
-  `content_preexisting` (needle predates merge), `content_check_failed` (Git error/missing parent), `content_check_required`
-  (no needle and no true two-parent ancestry). A squash needs `--grep`. Choose a new needle or restore missing history.
-  Rows `verify-merged/<ok|refused>/<reason>` feed `trace.by_reason` and the `verify-merged` counter.
+  Refusals: `pr_number_invalid` (PR is not a positive decimal number), `origin_repo_unresolved` (origin is not a supported
+  GitHub URL), `repo_mismatch` (`GH_REPO` names another host or repository), `gh_failed`, `not_merged`,
+  `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`, `content_preexisting` (needle predates
+  merge), `content_check_failed` (Git error or missing parent), and `content_check_required` (no needle and no true
+  two-parent ancestry). A squash needs `--grep`. Choose a new needle or restore missing history. For a parsed PR request,
+  the script attempts a `verify-merged/<ok|refused>/<reason>` trace row. An option-shaped PR such as `--comments` returns
+  a JSON `pr_number_invalid` refusal before parsing and does not write a trace row. Trace rows feed `trace.by_reason` and
+  the `verify-merged` counter.
 - `merge.py --describe` prints JSON from `VERIFY_STAGES` then `publication_gate.CHECKS`, without remote contact.
   Conditional stages may skip; earlier refusals stop execution. Target/auth/state/approval checks precede those stages.
 - `memory_dir.py [--provider claude|codex]` prints a path even if absent: realpath, every non-alphanumeric becomes `-`.
@@ -940,18 +1037,33 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   The Codex adapter runs built-in checks only; `external_ok: true` means no external tools were attempted.
 - Limits: skills choose these helpers; verification writes a trace. Same-user `gh`/clone/dates/sources/config are trusted.
   Wiki lint is advisory; presence on base and absence at the first parent do not prove PR authorship.
+
+See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
+
 ## Dispatch refused: `dispatch_*` or `role_mismatch`
 
-- Symptom: `loop_dispatch_guard` (Claude `Agent`, Codex `spawn_agent`) denies a spawn in a graph-bound session, or
+- Symptom: `loop_dispatch_guard` (Claude `Agent`, Codex `spawn_agent`, which this Codex host reports to hooks as
+  `collaborationspawn_agent`) denies a spawn in a graph-bound session, or
   `begin-wave` / `graph.py authorize-dispatch` fails. The hook message names the failure; the reason code is a row in the
   loop's `recovery-trace.jsonl` (`authorize-dispatch/refused/<code>`, allowed spawns are `authorized/dispatch_authorized`).
 - Query: `python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]` counts `dispatch_authorized` and every refusal code.
+- If the Codex hook cannot create or write its temporary message file, it denies the spawn with
+  `dispatch_message_unavailable` and records that code in `discipline.log`. Repair local scratch storage and retry.
+- If the hook input or its local check raises unexpectedly, the hook denies the spawn with `dispatch_hook_error`
+  and records that code in `discipline.log`. Plaintext envelope first lines over 8192 characters get the same denial.
+  Codex config discovery, graph discovery, and graph commands share a seven-second budget so a stalled Git lookup or
+  held graph lock cannot outlive the ten-second hook limit.
+  Config and graph discovery use strict reads for this hook. An ordinary spawn is free when config is valid or absent
+  and graph state is absent. Unsafe session IDs, completed graph state, lookup errors, and multiple fallback graphs deny
+  the spawn.
+  Inspect the hook input and local runtime; do not treat the spawn as authorized.
 - Codes and fixes: `dispatch_missing_envelope` (no/old/garbled first-line `CODERAILS_GRAPH_DISPATCH` envelope: paste the
-  `prompt_prefix` from `plan` or `begin-wave`; on Codex this includes a spawn with any `task_name` and no envelope),
+  `prompt_prefix` from `plan` or `begin-wave`; a plaintext Codex spawn needs it, while an opaque native hook message uses the exact issued `task_name` and call id),
   `dispatch_unknown_id` (the id was never issued: run `begin-wave`), `dispatch_foreign` (session, loop, node, wave or Codex
   `task_name` is not the record's), `dispatch_stale_revision` (the envelope predates the graph's current revision:
-  re-run `begin-wave` after `recover-wave`), `dispatch_replayed` (the id was already used: one spawn per id; a retry needs a
-  new wave), `dispatch_contract_altered` (the stored contract no longer matches its digest or lost a field: the state was
+  re-run `begin-wave` after `recover-wave`), `dispatch_attempt_mismatch` (the stored attempt does not match its dispatch id
+  or the node's next attempt: inspect state and recover the wave), `dispatch_replayed` (the id was already used: one spawn per id; a retry needs a
+  new wave), `dispatch_call_id_missing` (the opaque native hook message has no usable call id: check the native hook payload), `dispatch_contract_altered` (the stored contract no longer matches its digest or lost a field: the state was
   edited, restart the wave via `recover-wave`), `dispatch_sections_missing` (the pasted contract block was edited or left
   out: paste `prompt_sections` verbatim), `role_mismatch` (dispatch a guarded scout as `coderails:<role>` / Codex
   `agent_type: <role>`; other roles accept their own type or `general-purpose` on Claude, and their own type or omitted
@@ -992,15 +1104,20 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   substitution detection for a cooperating agent, not tamper evidence.
 - Limits, coverage: (1) the contract is advisory to the worker: the envelope proves the dispatch was authorized and the
   rendered block is present as a substring, not that the rest of the prompt is faithful; text before, after or around the
-  block is unconstrained and `write_scope` is prompt text only, not enforced. (2) Only the five capability-guarded roles
-  (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `source-auditor`) are role-contained;
+  block is unconstrained and `write_scope` is prompt text only, not enforced. (2) Only the six capability-guarded roles
+  (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `security-reviewer`, `source-auditor`) are role-contained;
   `spec-reviewer` (empty capability list), the `shell.raw` roles (`docs-auditor`, `wiki-writer`, `proof-author`) and nodes
   with no `agent_role` (default `loop-worker`) may run as explicit `general-purpose` on Claude, or with omitted or exact
-  role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent` and `spawn_agent` only, so `SendMessage` on
+  role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent`, `spawn_agent`, and
+  `collaborationspawn_agent` only, so `SendMessage` on
   Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
   (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
-  `spawn_agent` function-call message with its v2 record, role and consumed authorization; encrypted messages also require
-  the PreToolUse `tool_use_id` to equal the native function-call id, so off-mode receipts cannot bind them. A task-name-only legacy event
+  `spawn_agent` function-call message with its v2 record, role and consumed authorization.
+  Current Codex native calls give the hook an encrypted worker prompt.
+  The hook refuses them with `dispatch_prompt_unverifiable` before a worker starts.
+  Do not retry a native graph spawn.
+  Use the checked local Codex OAuth graph driver after it is installed.
+  Until then, stop graph dispatch. A task-name-only legacy event
   cannot bind a contract-era wave. Claude matches a non-null hook `tool_use_id` to the native Agent call; when the hook
   supplies no id, it retains the consumed flag and one-spawn-per-id check without claiming call-id proof. Historical
   pre-contract attempts retain their original evidence rules. Claude hooks can still fail open if the hook times out
@@ -1013,13 +1130,19 @@ See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
   unit is stored as `work_units[u].disposition = {kind, named_blocker?, removal_ticket?}` and is what the dispatch
   contract carries. `graph.py disposition-audit <state>` prints every unit's kind and exits 1 on a hand-edited unit that
   broke the rule; `complete` / `verify-completion` refuse the same unit on both providers (default ON, no switch).
+- For an existing pending unit with no choice, run `graph.py set-unit-disposition <state> --session S --loop-id L
+  --revision R --unit N --disposition preserve-compat --named-blocker TEXT --removal-ticket ISSUE
+  --source-ref URL` (or `clean-break` without blocker and ticket). The command requires the current revision and an
+  inactive wave. It records the source reference and a new revision. It refuses repeated disposition flags or a second stored choice. Inspect the source
+  and choose the value before this command; the command does not prove that a source supports the choice.
 - `/coderails:merge` says `compat_findings_nonzero`: the posted review artifact carries a second line
   `<!-- coderails-compat-findings v1 pr=N head_sha=S count=K disposition=D -->` (built by
   `post_review.py compat-line <pr> <sha> --count K --disposition D`) with `disposition=clean-break` and `K > 0`. Remove the
   retained compatibility code, creating a new head SHA, and post a fresh review; or register the unit `preserve-compat`
   with a blocker and ticket. Posting a passing review on the same SHA cannot override an earlier refusing compat line.
-  `compat_findings_malformed` means a line with that prefix is not exactly the typed form. `compat_findings_missing`
-  means no line matches this PR and head; post a fresh artifact including the line, even for a zero count.
+  `compat_findings_malformed` means a current line with that prefix is not exactly the typed form.
+  Legacy review artifacts may omit the compatibility line. The current-head v1 review artifact remains required.
+  The Codex direct merge hook applies the same compatibility check, including when required review passes are off.
   The v1 review marker the root-owned integrity daemon matches is unchanged. Any refusing line for the
   head wins; the merge refusal is a stderr reason code, not a trace row (merge.py has no loop session).
 - Limits: `K` and `D` are the reviewer's own judgement, not a measurement, and a same-user agent can write any line, so

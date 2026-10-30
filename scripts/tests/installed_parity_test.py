@@ -297,6 +297,39 @@ class InstalledParityTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_strict_refuses_missing_runtime_files_in_either_provider(self) -> None:
+        """Matching registration files cannot hide a missing skill or control data file."""
+        for bundle, installed, prefix in (
+            ("claude", self.claude, ""),
+            ("codex", self.codex, "packages/codex/"),
+        ):
+            for relative in ("policy/review_policy.json", "capabilities/profiles.json", "routines/docs-sync.json"):
+                write(self.source, prefix + relative, b"{}\n")
+                write(installed, relative, b"{}\n")
+            subprocess.run(["git", "-C", str(self.source), "add", "-A"], check=True)
+            for relative in (
+                "skills/x/a.py",
+                "policy/review_policy.json",
+                "capabilities/profiles.json",
+                "routines/docs-sync.json",
+            ):
+                with self.subTest(bundle=bundle, relative=relative):
+                    target = installed / relative
+                    original = target.read_bytes()
+                    target.unlink()
+                    result = parity(
+                        "--require-both",
+                        "--source-root",
+                        str(self.source),
+                        "--claude-installed",
+                        str(self.claude),
+                        "--codex-installed",
+                        str(self.codex),
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn(relative, result.stderr)
+                    target.write_bytes(original)
+
     def test_default_locations_are_discovered(self) -> None:
         """Defaults resolve the Claude installPath and the Codex plugin cache under HOME."""
         home = Path(self.temporary.name) / "home"

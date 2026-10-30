@@ -71,9 +71,10 @@ class AddUnitContractTests(ControllerCase):
             self.assertEqual(
                 c.read()["work_units"],
                 {
-                    "1": {"status": "pending"},
+                    "1": {"status": "pending", "registered_revision": 2},
                     "2": {
                         "status": "pending",
+                        "registered_revision": 3,
                         "manifest": ["src/**"],
                         "worktree": worktree,
                         "source_manifest_sha256": graph_contract.source_binding(worktree, ["src/**"])[

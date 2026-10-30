@@ -3,18 +3,51 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.tests.workflow_push_fixture import PushFixture
+from scripts.lib import source_manifest
+
+
+def owned_progress(fixture: PushFixture, unit: str, entry: dict[str, object]) -> Path:
+    """Create a session-owned progress fixture at the supported repository path."""
+    if isinstance(entry.get("worktree"), str) and isinstance(entry.get("manifest"), list):
+        entry = {
+            **entry,
+            "source_manifest_sha256": source_manifest.digest(
+                cast(str, entry["worktree"]), cast(list[str], entry["manifest"])
+            ),
+        }
+    root = fixture.root / "loops"
+    fixture.environment["CLAUDE_AGENTIC_LOOP_DIR"] = str(root)
+    fixture.environment["CODERAILS_PUBLICATION_SESSION_ID"] = "s"
+    common = fixture.git(fixture.repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    progress = root / common.replace("/", "-") / "s" / "progress.json"
+    progress.parent.mkdir(parents=True, exist_ok=True)
+    progress.write_text(json.dumps({"session_id": "s", "loop_id": "l", "work_units": {unit: entry}}))
+    return progress
 
 
 class PushUnitBindingTests(unittest.TestCase):
     """Use an isolated local bare origin; invalid bindings cannot commit or push."""
+
+    def test_missing_worktree_refuses_and_traces_before_transport(self) -> None:
+        """A registered unit must name its assigned checkout to publish."""
+        with tempfile.TemporaryDirectory() as scratch:
+            fixture = PushFixture(Path(scratch))
+            progress = owned_progress(fixture, "1", {"manifest": ["base.txt"]})
+            fixture.record_pushes()
+            result = fixture.push("--unit", "1", "--progress", str(progress))
+            self.assertIn("publication:worktree_invalid", result.stderr)
+            self.assertFalse(fixture.log.exists())
+            trace = fixture.root / "loops/s/trace.jsonl"
+            row = json.loads(trace.read_text().splitlines()[-1])
+            self.assertEqual((row["command"], row["reason_code"]), ("publication", "worktree_invalid"))
 
     def test_unit_flags_reject_foreign_unit_worktree_and_manifest(self) -> None:
         """Every refusal occurs before the source commit and transport."""
@@ -38,10 +71,7 @@ class PushUnitBindingTests(unittest.TestCase):
         """A registered unit in its assigned checkout can use the exact command."""
         with tempfile.TemporaryDirectory() as scratch:
             fixture = PushFixture(Path(scratch))
-            progress = fixture.root / "progress.json"
-            progress.write_text(
-                json.dumps({"work_units": {"1": {"manifest": ["base.txt"], "worktree": str(fixture.repo)}}})
-            )
+            progress = owned_progress(fixture, "1", {"manifest": ["base.txt"], "worktree": str(fixture.repo)})
             (fixture.repo / "base.txt").write_text("changed")
             result = fixture.push("--unit", "1", "--progress", str(progress))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -49,56 +79,29 @@ class PushUnitBindingTests(unittest.TestCase):
                 fixture.git(fixture.repo, "rev-parse", "HEAD"), fixture.git(fixture.repo, "rev-parse", "origin/feature")
             )
 
-    def test_owned_graph_push_passes_unit_to_the_global_gate(self) -> None:
-        """An active graph unit can publish only with its exact unit and progress flags."""
+    def test_utf8_staged_path_uses_literal_manifest_name(self) -> None:
+        """Git's display quoting cannot turn an allowed UTF-8 path into a false refusal."""
         with tempfile.TemporaryDirectory() as scratch:
             fixture = PushFixture(Path(scratch))
-            progress = fixture.root / "graphs/loop/S1/progress.json"
-            progress.parent.mkdir(parents=True)
-            progress.write_text(
-                json.dumps(
-                    {
-                        "session_id": "S1",
-                        "loop_id": "L1",
-                        "graph": {"nodes": {}},
-                        "work_units": {"1": {"manifest": ["base.txt"], "worktree": str(fixture.repo)}},
-                    }
-                )
+            progress = owned_progress(fixture, "1", {"manifest": ["café.txt"], "worktree": str(fixture.repo)})
+            (fixture.repo / "café.txt").write_text("source")
+            result = fixture.push("--unit", "1", "--progress", str(progress), "--add", "café.txt")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(
+                fixture.git(fixture.repo, "rev-parse", "HEAD"), fixture.git(fixture.repo, "rev-parse", "origin/feature")
             )
-            (fixture.repo / "base.txt").write_text("changed")
-            env = dict(
-                fixture.environment,
-                CLAUDE_AGENTIC_LOOP_DIR=str(fixture.root / "graphs"),
-                CODERAILS_PUBLICATION_SESSION_ID="S1",
-            )
-            script = Path(__file__).resolve().parents[3] / "scripts/push.py"
-            without = subprocess.run(
-                [sys.executable, str(script)], cwd=fixture.repo, env=env, capture_output=True, text=True
-            )
-            self.assertIn("graph unit requires --unit and --progress", without.stderr)
-            with_flags = subprocess.run(
-                [sys.executable, str(script), "--unit", "1", "--progress", str(progress)],
-                cwd=fixture.repo,
-                env=env,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(with_flags.returncode, 0, with_flags.stdout + with_flags.stderr)
 
     def test_prior_out_of_manifest_commit_cannot_be_published(self) -> None:
         """A clean index cannot hide an earlier unscoped commit from the push."""
         with tempfile.TemporaryDirectory() as scratch:
             fixture = PushFixture(Path(scratch))
-            progress = fixture.root / "progress.json"
-            progress.write_text(
-                json.dumps({"work_units": {"1": {"manifest": ["base.txt"], "worktree": str(fixture.repo)}}})
-            )
+            progress = owned_progress(fixture, "1", {"manifest": ["base.txt"], "worktree": str(fixture.repo)})
             (fixture.repo / "outside.txt").write_text("foreign")
             fixture.git(fixture.repo, "add", "outside.txt")
             fixture.git(fixture.repo, "commit", "-m", "preexisting foreign commit")
             fixture.record_pushes()
             result = fixture.push("--unit", "1", "--progress", str(progress))
-            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("diff_manifest:out_of_manifest", result.stderr)
             self.assertEqual(
                 fixture.git(fixture.repo, "rev-parse", "origin/main"), fixture.git(fixture.repo, "rev-parse", "main")
             )
@@ -122,8 +125,9 @@ class PushUnitBindingTests(unittest.TestCase):
                 f"    Path({str(pr_log)!r}).write_text(' '.join(sys.argv[1:]))\n"
                 "    print('https://github.com/fixture/repo/pull/1')\n",
             )
-            progress = fixture.root / "progress.json"
-            progress.write_text(json.dumps({"work_units": {"2": {"manifest": ["child.txt"], "base_branch": "parent"}}}))
+            progress = owned_progress(
+                fixture, "2", {"manifest": ["child.txt"], "base_branch": "parent", "worktree": str(fixture.repo)}
+            )
             (fixture.repo / "child.txt").write_text("child unit")
             result = fixture.push("--unit", "2", "--progress", str(progress), "--add", "child.txt")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -131,6 +135,15 @@ class PushUnitBindingTests(unittest.TestCase):
                 fixture.git(fixture.repo, "rev-parse", "HEAD"), fixture.git(fixture.repo, "rev-parse", "origin/child")
             )
             self.assertIn("-B parent", pr_log.read_text())
+            owned_progress(
+                fixture, "2", {"manifest": ["child.txt"], "base_branch": "main", "worktree": str(fixture.repo)}
+            )
+            fixture.record_pushes()
+            refused = fixture.push("--unit", "2", "--progress", str(progress))
+            self.assertIn("diff_manifest:out_of_manifest", refused.stderr)
+            self.assertFalse(fixture.log.exists())
+            row = json.loads((fixture.root / "loops/s/trace.jsonl").read_text().splitlines()[-1])
+            self.assertEqual((row["command"], row["reason_code"]), ("publication", "diff_manifest:out_of_manifest"))
 
     def test_out_of_manifest_rename_source_cannot_be_published(self) -> None:
         """The origin of a rename is part of the unit's publication scope."""
@@ -146,12 +159,24 @@ class PushUnitBindingTests(unittest.TestCase):
             (fixture.repo / "scope").mkdir()
             fixture.git(fixture.repo, "mv", "outside.txt", "scope/inside.txt")
             fixture.git(fixture.repo, "commit", "-m", "rename into unit")
-            progress = fixture.root / "progress.json"
-            progress.write_text(json.dumps({"work_units": {"1": {"manifest": ["scope/**"]}}}))
+            progress = owned_progress(fixture, "1", {"manifest": ["scope/**"], "worktree": str(fixture.repo)})
             fixture.record_pushes()
             result = fixture.push("--unit", "1", "--progress", str(progress))
-            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("diff_manifest:out_of_manifest", result.stderr)
             self.assertFalse(fixture.log.exists(), result.stdout + result.stderr)
+
+    def test_preflight_out_of_manifest_has_a_publication_trace(self) -> None:
+        """The local diff refusal is counted even when the policy gate is never reached."""
+        with tempfile.TemporaryDirectory() as scratch:
+            fixture = PushFixture(Path(scratch))
+            progress = owned_progress(fixture, "1", {"manifest": ["other.txt"], "worktree": str(fixture.repo)})
+            (fixture.repo / "base.txt").write_text("changed")
+            fixture.record_pushes()
+            result = fixture.push("--unit", "1", "--progress", str(progress))
+            self.assertIn("diff_manifest:out_of_manifest", result.stderr)
+            self.assertFalse(fixture.log.exists())
+            row = json.loads((fixture.root / "loops/s/trace.jsonl").read_text().splitlines()[-1])
+            self.assertEqual((row["command"], row["reason_code"]), ("publication", "diff_manifest:out_of_manifest"))
 
 
 if __name__ == "__main__":

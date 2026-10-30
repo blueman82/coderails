@@ -31,7 +31,7 @@ from hooks.scripts.lib.agentic_loop_path import resolve_path
 from hooks.scripts.lib.capability_scope import graph_bound
 from hooks.scripts.lib.graph_evidence import ENVELOPE_KEY
 from hooks.scripts.lib.loop_state_common import read_state
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 from scripts.lib import action_receipt as ar
 from scripts.lib.receipt_signing import resolve_trust_root
 from scripts.sandbox import containment

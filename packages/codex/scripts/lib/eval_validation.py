@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import re
 import subprocess
@@ -11,7 +12,7 @@ from typing import cast
 from .artifact_io import JsonObject, array_value, object_value, read_object
 from .eval_artifact import parse_verification_level
 from .eval_execution import is_environmental_rc, run_recorded, scripted_evals, validate_smoke, verify_execution
-from .eval_integrity import FIXTURE_FORMULA_NOT_IN_CMD, IntegrityError
+from .eval_integrity import FIXTURE_FORMULA_NOT_IN_CMD, IntegrityError, integrity_version, signed_freeze_timing
 from .eval_level import branch_base, check_suite, derive, late_freeze, load_policy, pr_changes, progress_units
 
 
@@ -20,26 +21,48 @@ def git_output(directory: Path, *arguments: str) -> subprocess.CompletedProcess[
     return subprocess.run(["git", "-C", str(directory), *arguments], capture_output=True, text=True, check=False)
 
 
+def require_freeze_timing(data: JsonObject, base: str, directory: Path) -> None:
+    """Require signed provenance for v1 and for any late or unavailable v2 freeze."""
+    frozen = str(data.get("frozen_sha") or "").strip()
+    level = str(data.get("verification_level", ""))
+    if level != "0" and not re.fullmatch(r"[0-9a-f]{40}", frozen):
+        raise ValueError("verification_level >= 1 requires a full 40-hex frozen_sha (the freeze commit)")
+    if level == "0" or not frozen:
+        return
+    version = integrity_version(data)
+    if version == 2:
+        check_suite(data, level)
+    frozen_at = str(data.get("frozen_at") or "")
+    try:
+        datetime.datetime.fromisoformat(frozen_at.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise IntegrityError("freeze_time_invalid") from error
+    missing = git_output(directory, "cat-file", "-e", f"{frozen}^{{commit}}").returncode != 0
+    late = bool(base) and late_freeze(frozen, base, str(directory))
+    if version == 2 and not missing and not late:
+        return
+    timings = ("unverifiable",) if version == 1 else ("late", "unverifiable")
+    if not any(signed_freeze_timing(data, frozen, frozen_at, timing) for timing in timings):
+        detail = (
+            f"v1 frozen_sha {frozen} has unverifiable timing"
+            if version == 1
+            else f"frozen_sha {frozen} does not resolve" if missing else f"frozen_sha {frozen} is late"
+        )
+        raise IntegrityError(
+            "freeze_timing_unverified", detail + " — disclose timing with a signed SHA and frozen_at token"
+        )
+
+
 def validate_freeze(path: str | Path, head: str = "HEAD", pr: str = "") -> None:
-    """Require a pre-branch freeze for the operation's target head or an explicit late-freeze disclosure."""
+    """Check freeze timing in the operation's repository using the same rule as publication."""
     data = read_object(path)
     frozen = str(data.get("frozen_sha") or "").strip()
-    directory = Path.cwd()
     if str(data.get("verification_level", "")) != "0" and not re.fullmatch(r"[0-9a-f]{40}", frozen):
         raise ValueError("verification_level >= 1 requires a full 40-hex frozen_sha (the freeze commit)")
-    if not frozen or git_output(directory, "rev-parse", "--is-inside-work-tree").returncode:
+    directory = Path.cwd()
+    if git_output(directory, "rev-parse", "--is-inside-work-tree").returncode:
         return
-    if git_output(directory, "cat-file", "-e", f"{frozen}^{{commit}}").returncode:
-        raise ValueError(f"frozen_sha {frozen} does not resolve to a commit in this repository")
-    base = branch_base(head, str(directory), pr)
-    if not base or not late_freeze(frozen, base, str(directory)):
-        return
-    disclosure = " ".join(
-        [str(data.get("verification_justification", ""))]
-        + [str(item.get("why", "")) for item in data.get("amendments", [])]
-    ).lower()
-    if "freeze" not in disclosure and "frozen" not in disclosure:
-        raise ValueError(f"frozen_sha {frozen} is not an ancestor of the branch base {base} — disclose the late freeze")
+    require_freeze_timing(data, branch_base(head, str(directory), pr), directory)
 
 
 def validate_level(data: JsonObject, level: str, pr: str, head: str, progress: str = "") -> None:

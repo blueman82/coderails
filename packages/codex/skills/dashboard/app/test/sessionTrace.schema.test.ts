@@ -22,6 +22,9 @@ describe("session trace contract", () => {
     const attrs = { ...event.attributes, "coderails.actor.kind": "worker", "coderails.actor.id": "child-one",
       "coderails.actor.name": "Builder" };
     expect(isTraceEvent({ ...event, attributes: attrs })).toBe(true);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.name": "Builder\n" } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.id": " " } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.kind": "orchestrator" } })).toBe(false);
     expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.name": "<img src=x>" } })).toBe(false);
     expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.name": "Secret\nbody" } })).toBe(false);
   });
@@ -41,6 +44,15 @@ describe("session trace contract", () => {
     expect(isTraceEvent({ ...event, attributes: { "tool.name": { raw: "secret" } } })).toBe(false);
     expect(isTraceEvent({ ...event, events: [{ ...event.events[0], resultBody: "secret" }] })).toBe(false);
     expect(() => serializeTraceEvent({ ...event, resultBody: "secret" } as TraceEvent)).toThrow();
+  });
+
+  it("admits only a hashed incremental usage identity", () => {
+    const attrs = { ...event.attributes, "coderails.usage.semantics": "incremental",
+      "coderails.usage.identity_sha256": "b".repeat(64) };
+    expect(isTraceEvent({ ...event, attributes: attrs })).toBe(true);
+    for (const identity of [null, "PRIVATE_ID", 12, "B".repeat(64)])
+      expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.usage.identity_sha256": identity } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.usage.semantics": "cumulative" } })).toBe(false);
   });
 
   it("accepts bounded observation metadata and rejects partial or raw observation fields", () => {

@@ -109,6 +109,38 @@ class ReleaseManifestTests(unittest.TestCase):
         (self.claude / "hooks/hooks.json").write_bytes(b"changed")
         self.assertIn("installed_file_changed", self.verify(manifest).stderr)
 
+    def test_complete_claude_root_keeps_nested_codex_provider_separate(self) -> None:
+        """A root bundle includes Codex without weakening either provider's runtime checks."""
+        self.write("packages/codex/agents/security-reviewer.toml", b"name = 'codex-only'\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "independent nested distribution")
+        for relative in self.git("ls-files").splitlines():
+            self.copy(relative, self.claude / relative)
+        self.copy("packages/codex/agents/security-reviewer.toml", self.codex / "agents/security-reviewer.toml")
+        manifest = self.snapshot()
+        accepted = self.verify(manifest)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        for installed in (self.claude, self.codex):
+            with self.subTest(provider=installed.name):
+                target = installed / "hooks/hooks.json"
+                content = target.read_bytes()
+                target.unlink()
+                self.assertIn("installed_file_missing", self.verify(manifest).stderr)
+                target.write_bytes(b"changed\n")
+                self.assertIn("installed_file_changed", self.verify(manifest).stderr)
+                target.write_bytes(content)
+                extra = installed / "capabilities/extra.json"
+                extra.parent.mkdir(parents=True, exist_ok=True)
+                extra.write_bytes(b"{}\n")
+                self.assertIn("installed_file_extra", self.verify(manifest).stderr)
+                extra.unlink()
+                target.unlink()
+                target.symlink_to(self.root / "hooks/hooks.json")
+                self.assertIn("installed_path_symlink", self.verify(manifest).stderr)
+                target.unlink()
+                target.write_bytes(content)
+        self.assertEqual(self.verify(manifest).returncode, 0)
+
     def test_manifest_file_or_hash_cannot_be_removed_or_changed(self) -> None:
         """The verifier recomputes the complete tracked runtime file list and hashes."""
         manifest = self.snapshot()
@@ -218,6 +250,43 @@ class ReleaseManifestTests(unittest.TestCase):
         cache.write_bytes(b"cache")
         result = self.run_cli("snapshot", "--source-root", str(self.root), "--config", str(self.config))
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_retained_control_files_are_required_and_hashed(self) -> None:
+        """Missing or changed policy, capability and routine data cannot pass a release check."""
+        paths = (
+            "policy/review_policy.json",
+            "capabilities/profiles.json",
+            "capabilities/mcp.json",
+            "routines/docs-sync.json",
+        )
+        for relative in paths:
+            self.write(relative, b"{}\n")
+            self.copy(relative, self.claude / relative)
+        self.git("add", ".")
+        self.git("commit", "-qm", "retained control data")
+        manifest = self.snapshot()
+        self.assertEqual(self.verify(manifest).returncode, 0)
+        for relative in paths:
+            with self.subTest(relative=relative):
+                target = self.claude / relative
+                target.unlink()
+                self.assertIn("installed_file_missing", self.verify(manifest).stderr)
+                target.write_bytes(b"changed\n")
+                self.assertIn("installed_file_changed", self.verify(manifest).stderr)
+                self.copy(relative, target)
+
+    def test_ignored_retained_control_data_refuses(self) -> None:
+        """Ignored files beside retained policy, capability and routine data remain runtime inputs."""
+        self.write(".gitignore", b"policy/extra.json\ncapabilities/extra.json\nroutines/extra.json\n")
+        self.git("add", ".gitignore")
+        self.git("commit", "-qm", "ignore retained control data")
+        for directory in ("policy", "capabilities", "routines"):
+            with self.subTest(directory=directory):
+                relative = f"{directory}/extra.json"
+                self.write(relative, b"{}\n")
+                result = self.run_cli("snapshot", "--source-root", str(self.root), "--config", str(self.config))
+                self.assertIn("source_runtime_untracked", result.stderr)
+                (self.root / relative).unlink()
 
 
 if __name__ == "__main__":

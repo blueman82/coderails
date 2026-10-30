@@ -6,8 +6,8 @@ Advisory warns on missing receipts; live authority denials and
 unbindable merges under a live merge cap still block.
 Enforce denies unless
 authority.permits() allows and a receipt verifies (scripts/lib/receipt_gate.py, shared with merge.py, which is
-independently fail-closed). A host-resource error reading the payload denies; unexpected errors deny under enforce
-or live authority and otherwise fail open. It does not touch
+independently fail-closed). Resource errors before policy and authority discovery deny; later unexpected errors deny
+under enforce or live authority and otherwise fail open. It does not touch
 pr_merge_gate, destructive_bash_gate or enforce_pr_workflow. Limits: the hash covers only the command text seen here
 (not aliases, functions, xargs, scripts that push; sudo/subshell/bash -c/eval/gh api wrappers, quoting and absolute
 program paths are normalised by guarded_segments, an env assignment prefix is kept and makes the command unbindable).
@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload_strict
+from hooks.scripts.hook_common import RESOURCE_ERRNOS, RESOURCE_MESSAGE, HostResourceError, deny, read_payload_strict
 from hooks.scripts.lib.destructive_patterns import git_output
 from hooks.scripts.lib.pr_workflow_match import (
     MERGE_SCRIPT,
@@ -37,7 +37,8 @@ from hooks.scripts.lib.pr_workflow_match import (
     repository,
     state_mutated_before_guard,
 )
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.shell_context import opaque_execution
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 from scripts.lib import advisory_merge, merge_budget
 from scripts.lib.action_binding import binding, merge_number
 from scripts.lib.action_receipt import proposed_action
@@ -132,7 +133,7 @@ def check_action_modes(
 
 
 def main() -> int:
-    """Check one Bash payload; deny unreadable input and errors under enforce or live authority."""
+    """Check Bash; refuse resource uncertainty, then apply the known mode and authority error policy."""
     try:
         payload = read_payload_strict()
     except HostResourceError:
@@ -143,12 +144,16 @@ def main() -> int:
     loop_id: str | None = None
     mode_ = "off"
     authority = None
+    policy_known = False
     try:
         data = payload.get("tool_input")
         command = data.get("command") if isinstance(data, dict) else None
         if not isinstance(command, str) or not command:
             return 0
         cwd = str(payload.get("cwd") or os.getcwd())
+        if opaque_execution(command, cwd):
+            deny("Blocked: executable shell body exceeds the guarded parser depth.")
+            return 0
         if not (calls := guarded_operations(command, cwd, implicit_push=True)):
             return 0
         source_mode, _ = resolve_mode(cwd)
@@ -176,6 +181,7 @@ def main() -> int:
             return 0
         mode_ = "enforce" if any(selected_mode == "enforce" for _, selected_mode in active) else "advisory"
         authority = read_authority(session)
+        policy_known = True
         loop_id = authority["loop_id"] if authority else None
         signers, tier = resolve_trust_root()
 
@@ -196,8 +202,13 @@ def main() -> int:
         need = "needs a bound PR and head" if code.startswith("budget_") else "needs an action receipt"
         deny(f"Blocked: {name.replace('_', ' ')} {need} ({code}). {how_to_proceed(code, session, name)}")
     except Exception as error:  # noqa: BLE001 - enforce and live grants must refuse unexpected hook errors
-        if mode_ == "enforce" or authority:
-            deny(f"Blocked: action authority gate error ({type(error).__name__}).")
+        resource = isinstance(error, OSError) and error.errno in RESOURCE_ERRNOS
+        if (resource and not policy_known) or mode_ == "enforce" or authority:
+            deny(
+                "Host resource exhaustion prevented action authority checks. Retry; the action is blocked."
+                if resource
+                else f"Blocked: action authority gate error ({type(error).__name__})."
+            )
             with suppress(Exception):  # trace is not required to deny the command
                 append_row("action_authority", "denied", "denied_gate_error", trace_id, loop_id)
         else:

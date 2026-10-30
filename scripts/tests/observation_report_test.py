@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import subprocess
@@ -27,6 +28,7 @@ class ObservationReportTests(unittest.TestCase):
         self.scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self.scratch.cleanup)
         self.root = Path(self.scratch.name)
+        (self.root / "workflow.config.yaml").write_text("memory:\n  backend: off\n")
         self.source = self.root / "native.jsonl"
         self.source.write_bytes(b'{"message":"SECRET BODY"}\n')
         self.event: dict[str, Any] = {
@@ -112,7 +114,11 @@ class ObservationReportTests(unittest.TestCase):
     def run_report(self) -> subprocess.CompletedProcess[str]:
         """Run the CLI without copying its source files to stdout."""
         return subprocess.run(
-            [sys.executable, str(SCRIPT), str(self.config_path)], capture_output=True, text=True, check=False
+            [sys.executable, str(SCRIPT), str(self.config_path)],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
     def test_report_counts_bound_observations_without_bodies_or_token_sums(self) -> None:
@@ -128,6 +134,110 @@ class ObservationReportTests(unittest.TestCase):
         self.assertNotIn("token_total", result.stdout)
         self.assertNotIn("SECRET BODY", result.stdout)
         self.assertNotIn(str(self.root), result.stdout)
+
+    def test_usage_counts_native_records_once_across_tool_events(self) -> None:
+        """Several tool events from one message share one native usage record."""
+        first = copy.deepcopy(self.event)
+        first["name"] = "tool_use"
+        first["attributes"] = {"coderails.usage.semantics": "incremental", "gen_ai.usage.input_tokens": 8}
+        first["provenance"]["sourceRef"]["recordId"] = "native.jsonl:1:item:0"
+        second = copy.deepcopy(first)
+        second.update(eventId="event-2", spanId="span-2")
+        second["provenance"]["sourceRef"]["recordId"] = "native.jsonl:1:item:1"
+        third = copy.deepcopy(first)
+        third.update(eventId="event-3", spanId="span-3")
+        third["provenance"]["sourceOrdinal"] = 2
+        third["provenance"]["sourceRef"].update(recordId="native.jsonl:2:item:0", ordinal=2)
+        self.write_inputs([first, second, third])
+        result = self.run_report()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["cohorts"]["baseline"]["usage_records"], 2)
+
+    def test_usage_deduplicates_native_message_identity_across_rows(self) -> None:
+        """Repeated Claude message snapshots count once, distinct identities remain distinct."""
+        first = copy.deepcopy(self.event)
+        first["attributes"] = {
+            "coderails.usage.semantics": "incremental",
+            "coderails.usage.identity_sha256": "b" * 64,
+            "gen_ai.usage.input_tokens": 8,
+        }
+        second = copy.deepcopy(first)
+        second.update(eventId="event-2", spanId="span-2")
+        second["provenance"]["sourceOrdinal"] = 2
+        second["provenance"]["sourceRef"].update(recordId="native.jsonl:2", ordinal=2)
+        third = copy.deepcopy(second)
+        third.update(eventId="event-3", spanId="span-3")
+        third["provenance"]["sourceOrdinal"] = 3
+        third["provenance"]["sourceRef"].update(recordId="native.jsonl:3", ordinal=3)
+        third["attributes"]["coderails.usage.identity_sha256"] = "c" * 64
+        self.write_inputs([first, second, third])
+        result = self.run_report()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["cohorts"]["baseline"]["usage_records"], 2)
+
+    def test_malformed_usage_identity_refuses(self) -> None:
+        """The metadata identity must be a digest, not retained native text."""
+        self.event["attributes"]["coderails.usage.identity_sha256"] = "PRIVATE_NATIVE_ID"
+        self.write_inputs()
+        result = self.run_report()
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_foreign_provider_source_reference_refuses(self) -> None:
+        """A Claude event cannot claim a Codex native record reference."""
+        self.event["provenance"]["sourceRef"]["kind"] = "codex_parent_record"
+        self.write_inputs()
+        result = self.run_report()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("foreign source reference", result.stderr)
+
+    def test_named_worker_metadata_keeps_public_report_counts(self) -> None:
+        """Safe display metadata cannot make a source-bound worker report unreadable."""
+        plain = self.run_report()
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        self.event["attributes"].update(
+            {
+                "coderails.actor.kind": "worker",
+                "coderails.actor.id": "child-one",
+                "coderails.actor.name": "Builder",
+            }
+        )
+        self.write_inputs()
+        named = self.run_report()
+        self.assertEqual(named.returncode, 0, named.stderr)
+        named_counts = json.loads(named.stdout)["cohorts"]["baseline"]
+        plain_counts = json.loads(plain.stdout)["cohorts"]["baseline"]
+        for field in ("eligible_sessions", "observations", "coverage", "usage_records"):
+            self.assertEqual(named_counts[field], plain_counts[field], field)
+        self.assertEqual(named_counts["usage_records"], 1)
+        self.assertEqual(named_counts["observations"]["read"], 1)
+        self.assertNotIn("Builder", named.stdout)
+        self.assertNotIn("SECRET BODY", named.stdout)
+
+    def test_worker_display_metadata_requires_safe_name_kind_and_identity(self) -> None:
+        """Hostile names and missing worker bindings cannot enter report metadata."""
+        attrs = dict(self.event["attributes"])
+        for change in (
+            {"coderails.actor.name": "<img src=x>"},
+            {"coderails.actor.name": "Builder\n"},
+            {"coderails.actor.name": "A" * 41},
+            {"coderails.actor.name": None},
+            {"coderails.actor.kind": "orchestrator"},
+            {"coderails.actor.id": ""},
+            {"coderails.actor.id": " "},
+            {"coderails.actor.id": None},
+        ):
+            with self.subTest(change=change):
+                self.event["attributes"] = {
+                    **attrs,
+                    "coderails.actor.kind": "worker",
+                    "coderails.actor.id": "child-one",
+                    "coderails.actor.name": "Builder",
+                    **change,
+                }
+                self.write_inputs()
+                result = self.run_report()
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("worker display", result.stderr)
 
     def test_changed_source_and_foreign_identity_refuse(self) -> None:
         """A changed source or foreign session cannot join a cohort."""

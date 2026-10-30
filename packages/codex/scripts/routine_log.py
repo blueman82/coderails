@@ -2,9 +2,9 @@
 """Append one routine event row (closed outcome enum, closed per-routine reason codes) and derive the legacy marker.
 
 `emit --log PATH --run-id ID --routine NAME --stage S --outcome O [--reason-code C] [--human-log PATH]` appends
-{v,ts,run_id,routine,stage,outcome,reason_code} to the JSONL log under a file lock, then appends the matching
-legacy marker line to the human run log (default: the JSONL path with a .log suffix) so the dashboard's last-marker
-predicate keeps working unchanged. An outcome or code outside the closed lists exits 2 and appends nothing.
+{v,ts,run_id,routine,stage,outcome,reason_code} to JSONL, then the legacy marker to the human log under
+a file lock. The dashboard's last-marker predicate keeps working unchanged. An outcome or code outside the closed lists
+exits 2 and appends nothing.
 Reason codes come from routines/<routine>.json beside this script's plugin root.
 """
 
@@ -42,7 +42,10 @@ def marker(outcome: str, stage: str, reason_code: str) -> str:
         "run_ok": "run=ok",
         "run_abort": f"abort={reason_code}",
         "run_refused": f"refused={reason_code}",
-        "run_incomplete": "incomplete=merged" if reason_code == "merged_incomplete" else "abort=incomplete-run",
+        "run_incomplete": {
+            "merged_incomplete": "incomplete=merged",
+            "merge_state_unknown": "incomplete=merge-unknown",
+        }.get(reason_code, "abort=incomplete-run"),
     }.get(outcome, f"stage={stage}")
 
 
@@ -101,7 +104,7 @@ def emit(
             fcntl.flock(lock, fcntl.LOCK_EX)
             with path.open("a", encoding="utf-8") as stream, human.open("a", encoding="utf-8") as human_stream:
                 stream.write(json.dumps(row, sort_keys=True) + "\n")
-                human_stream.write(f"{now} {marker(outcome, stage, reason_code)}\n")
+                human_stream.write(f"{now} run_id={run_id} {marker(outcome, stage, reason_code)}\n")
     except OSError:
         return "log_unwritable"
     trace(routine, outcome, reason_code)

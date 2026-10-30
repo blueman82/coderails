@@ -29,6 +29,8 @@ class ProofBoundaryTests(HookTestCase):
 
     def freeze(self, document: dict[str, Any], run: bool = True, verdict: str = "satisfied") -> None:
         """Write the document, a freeze row, and (optionally) a run row for each well-formed proof."""
+        document.setdefault("session_id", "s")
+        document.setdefault("loop_id", "l")
         self.proof.write_text(json.dumps(document))
         self.results.unlink(missing_ok=True)
         digest = pr.doc_sha(document)
@@ -49,6 +51,7 @@ class ProofBoundaryTests(HookTestCase):
                     verdict=verdict,
                     cwd=str(Path.cwd()),
                     head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+                    source_tree_sha=subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
                 )
 
     def test_missing_failed_and_untrusted_rows_do_not_pass(self) -> None:
@@ -86,7 +89,17 @@ class ProofBoundaryTests(HookTestCase):
         proofs = [{"id": f"P{index}", "cmd": "run proof"} for index in range(100)]
         self.freeze({"schema_version": 2, "proofs": proofs})
         self.assertEqual(validate_proofs(self.proof, self.state, ""), "")
-        self.proof.write_text(json.dumps({"schema_version": 1, "proofs": proofs, "withdrawn_proofs": [{}]}))
+        self.proof.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "session_id": "s",
+                    "loop_id": "l",
+                    "proofs": proofs,
+                    "withdrawn_proofs": [{}],
+                }
+            )
+        )
         with self.assertRaisesRegex(ValueError, "101.*100"):
             validate_proofs(self.proof, self.state, "")
         document = {
@@ -108,6 +121,88 @@ class ProofBoundaryTests(HookTestCase):
             validate_proofs(self.proof, self.state, "")
         self.assertIn("BAD", str(error.exception))
         self.assertNotIn("GOOD", str(error.exception))
+
+    def test_disposition_does_not_hide_unobserved_withdrawal(self) -> None:
+        """Even with no live proofs, a withdrawn proof needs a failed controller run."""
+        document = {
+            "schema_version": 2,
+            "proofs": [],
+            "withdrawn_proofs": [{"id": "W1", "cmd": "false", "withdrawn_reason": "unsupported"}],
+        }
+        self.freeze(document)
+        state = self.state | {"proof_disposition": "none: no executable surface"}
+        with self.assertRaisesRegex(ValueError, r"W1\(proof_withdrawn_unobserved\)"):
+            validate_proofs(self.proof, state)
+        pr.append(
+            self.results,
+            kind="run",
+            proof_id="W1",
+            cmd_sha256=pr.sha("false"),
+            proof_json_sha256=pr.doc_sha(document),
+            session_id="s",
+            loop_id="l",
+            verdict="failed",
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            source_tree_sha=subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
+        )
+        self.assertIn("W1: unsupported", validate_proofs(self.proof, state))
+
+    def test_proof_run_tree_must_match_current_source(self) -> None:
+        """A run for another committed tree cannot release this checkout."""
+        document = {"schema_version": 2, "proofs": [{"id": "P1", "cmd": "true"}]}
+        self.freeze(document)
+        self.assertEqual(validate_proofs(self.proof, self.state), "")
+        pr.append(
+            self.results,
+            kind="run",
+            proof_id="P1",
+            cmd_sha256=pr.sha("true"),
+            proof_json_sha256=pr.doc_sha(document),
+            session_id="s",
+            loop_id="l",
+            verdict="satisfied",
+            cwd=str(Path.cwd()),
+            head_sha=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+            source_tree_sha="0" * 40,
+        )
+        with self.assertRaisesRegex(ValueError, "P1\\(proof_stale_head\\)"):
+            validate_proofs(self.proof, self.state)
+
+    def test_present_proof_needs_nonblank_matching_identity(self) -> None:
+        """Claude proof validation requires the same nonblank loop identity as the graph."""
+        document = {"schema_version": 2, "proofs": [{"id": "P1", "cmd": "true"}]}
+        for field, value in (("session_id", ""), ("loop_id", " "), ("session_id", "other")):
+            with self.subTest(field=field, value=value):
+                self.freeze(document | {"session_id": "s", "loop_id": "l", field: value})
+                with self.assertRaisesRegex(ValueError, "identity|session_id|loop_id"):
+                    validate_proofs(self.proof, self.state)
+        self.freeze(document | {"session_id": "s"})
+        self.proof.write_text(json.dumps(document | {"session_id": "s"}))
+        with self.assertRaisesRegex(ValueError, "loop_id"):
+            validate_proofs(self.proof, self.state)
+
+    def test_hash_correct_missing_row_field_blocks_as_broken_chain(self) -> None:
+        """A valid hash cannot make a row with no kind into usable evidence."""
+        cases: tuple[tuple[str, object], ...] = (("kind", None), ("kind", []), ("proof_id", []))
+        for field, value in cases:
+            with self.subTest(field=field, value=value):
+                self.freeze({"schema_version": 2, "proofs": [{"id": "P1", "cmd": "true"}]})
+                rows = [json.loads(line) for line in self.results.read_text().splitlines()]
+                if value is None:
+                    rows[-1].pop(field)
+                else:
+                    rows[-1][field] = value
+                rows[-1]["row_sha256"] = pr.sha(
+                    json.dumps(
+                        {key: item for key, item in rows[-1].items() if key != "row_sha256"},
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    )
+                )
+                self.results.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+                with self.assertRaisesRegex(ValueError, "proof_chain_broken"):
+                    validate_proofs(self.proof, self.state)
 
     def test_independent_unit_shapes_reasons_and_compounded_diagnostics(self) -> None:
         """Malformed siblings cannot hide unfinished units; completed siblings stay out of diagnostics."""

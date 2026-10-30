@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -16,7 +16,6 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/hooks/scripts"))
-import graph
 from graph_artifacts import validate_completion_evidence, validate_evals
 from graph_identity import GraphError
 
@@ -24,11 +23,8 @@ from packages.tests.codex_completion_fixture import IDENTITY, CompletionFixture,
 from packages.tests.codex_completion_head_case import assert_changed_head, assert_empty_proof_disposition
 from packages.tests.codex_fixture import (
     complete,
-    done_result,
     frozen_evals,
     read_json,
-    spawn,
-    state,
     verify_completion,
     write_json,
 )
@@ -38,46 +34,6 @@ from scripts.lib import retro, retro_check, teardown_steps
 
 class CompletionTests(CompletionFixture):
     """Only current native evidence and successful observed proofs permit completion."""
-
-    def test_new_evidence_writer_can_turn_off_without_losing_reader(self) -> None:
-        """The reader verifies encoded A6 evidence after its writer is turned off."""
-        graded = read_json(self.evals)
-        write_json(self.path, state())
-        write_json(self.evals, frozen_evals())
-        self.parent.write_text(json.dumps({"type": "session_meta", "payload": {"id": "parent"}}) + "\n")
-        self.child.unlink()
-        graph.begin_wave(self.path)
-        spawn(self.parent, read_json(self.path))
-        lines = self.parent.read_text().splitlines()
-        call = json.loads(lines[1])
-        arguments = json.loads(call["payload"]["arguments"])
-        arguments["message"] = "encrypted_content"
-        call["payload"]["arguments"] = json.dumps(arguments)
-        lines[1] = json.dumps(call)
-        self.parent.write_text("\n".join(lines) + "\n")
-        current = read_json(self.path)
-        next(iter(current["graph"]["dispatches"].values()))["authorized"] = None
-        write_json(self.path, current)
-
-        with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": "on"}):
-            graph.reject_invalid_dispatch(self.path, "parent", "U3[1]", "wave-2")
-            graph.begin_wave(self.path)
-            spawn(self.parent, read_json(self.path))
-            lines = self.parent.read_text().splitlines()
-            call = json.loads(lines[3])
-            arguments = json.loads(call["payload"]["arguments"])
-            arguments["message"] = base64.urlsafe_b64encode(b"\x80" + b"\x00" * 72).decode("ascii")
-            call["payload"]["arguments"] = json.dumps(arguments)
-            lines[3] = json.dumps(call)
-            self.parent.write_text("\n".join(lines) + "\n")
-            graph.record_wave(self.path, json.dumps({"wave_id": "wave-4", "results": {"U3[1]": done_result()}}))
-
-        graded["revision"] = read_json(self.path)["revision"]
-        write_json(self.evals, graded)
-        assemble_test_retro(self.path.parent, "parent")
-        with patch.dict("os.environ", {"CODERAILS_A6_EVIDENCE_WRITE": ""}):
-            complete(*self.arguments)
-            verify_completion(*self.arguments)
 
     def test_success_and_revalidation(self) -> None:
         """A completed graph is revalidated against the latest run row."""
@@ -198,17 +154,24 @@ class CompletionTests(CompletionFixture):
         with self.assertRaisesRegex(GraphError, "retro_steps_missing"):
             verify_completion(*self.arguments)
 
-    def test_retro_in_a_scratch_directory_is_refused_and_control(self) -> None:
-        """A retro from another directory (decoy sources) is refused; the same retro beside the real files passes."""
+    def test_completion_files_must_share_progress_directory(self) -> None:
+        """A complete second state directory cannot hide a NO-GO eval beside progress.json."""
         self.decide()
-        scratch = self.directory / "scratch"
-        scratch.mkdir()
+        scratch = self.directory / "alternate" / "parent"
+        shutil.copytree(self.path.parent, scratch)
+        assemble_test_retro(scratch, "parent")
         real = self.arguments
-        decoy = scratch / "retro.json"
-        decoy.write_text(self.retro.read_text())
-        with self.assertRaisesRegex(GraphError, "one state directory"):
-            complete(real[0], real[1], real[2], real[3], decoy, real[5])
-        complete(*real)  # control: the genuine layout is accepted
+        original = read_json(self.evals)
+        write_json(self.evals, original | {"result": "NO-GO"})
+        assemble_test_retro(self.path.parent, "parent")
+        alternate = (real[0], real[1], scratch / "evals.json", scratch / "proof.json", scratch / "retro.json", real[5])
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(GraphError, "progress.json"):
+            complete(*alternate)
+        self.assertEqual(before, self.path.read_bytes())
+        write_json(self.evals, original)
+        assemble_test_retro(self.path.parent, "parent")
+        complete(*real)
         verify_completion(*real)
 
     def test_broken_decision_chain_is_refused_on_the_codex_gate(self) -> None:
@@ -240,6 +203,68 @@ class CompletionTests(CompletionFixture):
     def test_empty_proof_file_uses_a_valid_disposition(self) -> None:
         """An owned empty proof document follows the same disposition rule as Claude."""
         assert_empty_proof_disposition(self, assemble_test_retro)
+
+    def test_disposition_does_not_hide_unobserved_withdrawal(self) -> None:
+        """Codex completion requires an observed failed run for a withdrawn proof."""
+        self.document["withdrawn_proofs"] = [
+            {"id": "P1", "cmd": "true", "withdrawn_reason": "cannot satisfy the requirement"}
+        ]
+        self.document["proofs"] = []
+        write_json(self.proof, self.document)
+        self.results.unlink()
+        pr.append(self.results, kind="freeze", proof_json_sha256=pr.doc_sha(self.document), **IDENTITY)
+        current = read_json(self.path)
+        write_json(self.path, current | {"proof_disposition": "none: no executable surface"})
+        assemble_test_retro(self.path.parent, "parent")
+        with self.assertRaisesRegex(GraphError, r"P1\(proof_withdrawn_unobserved\)"):
+            complete(*self.arguments)
+        self.proof_result("failed")
+        assemble_test_retro(self.path.parent, "parent")
+        complete(*self.arguments)
+
+    def test_retro_identity_and_status_match_owned_graph(self) -> None:
+        """Codex completion rejects a retro copied from another loop or left incomplete."""
+        original = read_json(self.retro)
+        for field, value in (("session_id", "foreign"), ("loop_id", "other"), ("status", "in-progress")):
+            with self.subTest(field=field):
+                write_json(self.retro, original | {field: value})
+                with self.assertRaises(GraphError):
+                    complete(*self.arguments)
+        write_json(self.retro, original)
+
+    def test_proof_array_shape_and_combined_cap(self) -> None:
+        """Codex completion enforces both proof arrays and the shared count cap."""
+        cases: tuple[tuple[dict[str, Any], str], ...] = (
+            ({"withdrawn_proofs": {}}, "withdrawn_proofs"),
+            (
+                {
+                    "withdrawn_proofs": [
+                        {"id": f"W{i}", "cmd": "false", "withdrawn_reason": "failed"} for i in range(100)
+                    ]
+                },
+                "100",
+            ),
+        )
+        for change, reason in cases:
+            with self.subTest(change=reason):
+                write_json(self.proof, self.document | change)
+                with self.assertRaisesRegex(GraphError, reason):
+                    complete(*self.arguments)
+
+    def test_hash_correct_missing_row_field_blocks_as_broken_chain(self) -> None:
+        """Codex completion gives the named refusal for a malformed hash-correct row."""
+        rows = [json.loads(line) for line in self.results.read_text().splitlines()]
+        rows[-1].pop("session_id")
+        rows[-1]["row_sha256"] = pr.sha(
+            json.dumps(
+                {key: value for key, value in rows[-1].items() if key != "row_sha256"},
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        )
+        self.results.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        with self.assertRaisesRegex(GraphError, "proof_chain_broken"):
+            complete(*self.arguments)
 
     def test_eval_stamp_revision_and_identity(self) -> None:
         """Bind completion to the current suite, checksum, amendments, and loop."""
@@ -320,6 +345,45 @@ class CompletionTests(CompletionFixture):
             check=True,
         )
         self.assertEqual(result.stdout, "")
+
+    def test_malformed_retro_memory_blocks_native_stop(self) -> None:
+        """The Codex Stop hook denies a malformed memory count with a reason code."""
+        complete(*self.arguments)
+        retro = read_json(self.retro)
+        package = Path(__file__).resolve().parents[1] / "codex"
+        environment = os.environ | {
+            "HOME": str(self.directory),
+            "PLUGIN_ROOT": str(package),
+            "PLUGIN_DATA": str(self.directory / "data"),
+            "CODERAILS_AGENTIC_LOOP_DIR": str(self.directory / "loops"),
+        }
+        payload = {
+            "session_id": "parent",
+            "cwd": str(self.directory),
+            "hook_event_name": "Stop",
+            "last_assistant_message": "done",
+            "transcript_path": str(self.transcript),
+        }
+        for invalid in ({"order.record": "bad"}, {"order.record": True}, {"order.record": -1}, ["bad"]):
+            with self.subTest(invalid=invalid):
+                retro["memory"]["degraded"] = invalid
+                write_json(self.retro, retro)
+                result = subprocess.run(
+                    [sys.executable, str(package / "hooks/scripts/graph_completion_guard.py")],
+                    input=json.dumps(payload),
+                    text=True,
+                    capture_output=True,
+                    env=environment,
+                    check=True,
+                )
+                output: dict[str, Any] = json.loads(result.stdout)
+                self.assertEqual(output.get("decision"), "block")
+                self.assertIn("retro_memory_invalid", output.get("reason", ""))
+                self.assertNotIn("Traceback", result.stderr)
+                with self.assertRaisesRegex(GraphError, "retro_memory_invalid"):
+                    validate_completion_evidence(
+                        read_json(self.path), 3, self.evals, self.proof, self.retro, self.transcript
+                    )
 
 
 if __name__ == "__main__":

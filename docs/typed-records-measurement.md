@@ -138,4 +138,5 @@ Limits (written, not hidden): a same-user agent can forge rows and recompute the
 the gate checks the frozen command ran and matched `expect`, not that it is a good proof; the freeze hashes the canonical
 JSON, so a re-freeze after an edit is the sanctioned (and traced) way to change a proof; `graph.py complete --transcript`
 is accepted and ignored; schema 1 proofs are refused at freeze (they ignore structured `expect`); the destructive
-classifier is literal-pattern, not a sandbox; run rows are not bound to HEAD; the gate has no off-switch by design.
+classifier is literal-pattern, not a sandbox; each run row records HEAD, and the gate refuses a stale HEAD;
+the gate has no off-switch by design.
