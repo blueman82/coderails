@@ -23,6 +23,61 @@ async function fixture() {
 }
 
 describe("Claude native session trace detail and evidence", () => {
+  it("keeps worker names on mixed mentions with hashed native usage", async () => {
+    const { deps, child, children } = await fixture();
+    children[1].message = { ...(children[1].message as Record<string, unknown>), id: "PRIVATE_MESSAGE_ID",
+      usage: { input_tokens: 8 }, content: [
+        { type: "text", text: "See skills/wiki-query/SKILL.md before continuing." },
+        { type: "tool_use", name: "Bash", id: "child-tool", input: { command: "true" } },
+      ] };
+    await writeFile(child, children.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    const mention = page.events.find((event) => event.attributes["coderails.observation.kind"] === "mention")!;
+    const tool = page.events.find((event) => event.attributes["coderails.native.call_id"] === "child-tool")!;
+    expect(mention.attributes).toMatchObject({ "coderails.actor.kind": "worker", "coderails.actor.id": "a1",
+      "coderails.actor.name": "Worker", "coderails.usage.semantics": "incremental" });
+    expect(mention.attributes["coderails.usage.identity_sha256"]).toMatch(/^[a-f0-9]{64}$/);
+    expect(mention.attributes["coderails.usage.identity_sha256"]).toBe(tool.attributes["coderails.usage.identity_sha256"]);
+    expect(mention.parentSpanId).toBe(tool.parentSpanId);
+    expect(JSON.stringify(page)).not.toContain("PRIVATE_MESSAGE_ID");
+  });
+
+  it("names a validated worker from its graph job without changing native identity", async () => {
+    const { deps, parent, child, rows, children } = await fixture();
+    const call = (rows[0].message as { content: Array<Record<string, unknown>> }).content[0];
+    const input = call.input as Record<string, unknown>;
+    input.prompt = String(input.prompt).replaceAll('"node_id":"U1"', '"node_id":"U3[1]"');
+    (children[0].message as { content: string }).content = String(input.prompt);
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    await writeFile(child, children.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    const worker = page.events.find((event) => event.attributes["coderails.actor.id"] === "a1")!;
+    expect(worker.attributes).toMatchObject({ "coderails.actor.id": "a1", "coderails.actor.name": "Builder",
+      "coderails.node.id": "U3[1]" });
+    expect(worker.parentSpanId).toBe(page.events.find((event) => event.name === "tool_request" &&
+      event.attributes["coderails.native.call_id"] === "tool-1")?.spanId);
+  });
+
+  it.each([
+    ["coderails:source-auditor", "Source Auditor"],
+    ["<img src=x onerror=alert(1)>", "Worker"],
+  ])("uses a bounded native role for %s", async (role, expected) => {
+    const { deps, parent, child, rows, children } = await fixture();
+    const call = (rows[0].message as { content: Array<Record<string, unknown>> }).content[0];
+    const input = call.input as Record<string, unknown>;
+    input.prompt = "Native non-graph task";
+    input.subagent_type = role;
+    (children[0].message as { content: string }).content = "Native non-graph task";
+    children[1].attributionAgent = role;
+    await writeFile(parent, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    await writeFile(child, children.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    const worker = page.events.find((event) => event.attributes["coderails.actor.id"] === "a1")!;
+    expect(worker.attributes["coderails.actor.name"]).toBe(expected);
+    expect(worker.attributes["coderails.actor.id"]).toBe("a1");
+    expect(JSON.stringify(page)).not.toContain("<img");
+  });
+
   it("removes metadata generations when the native session is deleted", async () => {
     const { deps, parent } = await fixture();
     await collectClaudeSessionTrace("s1", deps);

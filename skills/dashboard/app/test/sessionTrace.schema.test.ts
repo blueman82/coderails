@@ -39,6 +39,17 @@ const event: TraceEvent = {
 };
 
 describe("session trace contract", () => {
+  it("keeps only bounded worker display names", () => {
+    const attrs = { ...event.attributes, "coderails.actor.kind": "worker", "coderails.actor.id": "a1",
+      "coderails.actor.name": "Builder" };
+    expect(isTraceEvent({ ...event, attributes: attrs })).toBe(true);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.name": "Builder\n" } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.id": " " } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.kind": "orchestrator" } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.name": "<img src=x>" } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.actor.name": "Secret\nbody" } })).toBe(false);
+  });
+
   it("has versioned metadata with nullable time and explicit provenance", () => {
     expect(TRACE_SCHEMA_VERSION).toBe(1);
     expect(isTraceEvent(event)).toBe(true);
