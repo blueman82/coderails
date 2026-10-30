@@ -151,6 +151,14 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_prepared_launcher_executes_c_with_authorized_stdin(self) -> None:
         """An inert npx boundary observes C and exact bytes; no provider or OS sandbox is qualified."""
+        self.check_prepared_launcher("loop-worker")
+
+    def test_prepared_guarded_launcher_has_only_its_role_capability_server(self) -> None:
+        """The prepared route must enforce the same role boundary as direct driver launch."""
+        self.check_prepared_launcher("security-reviewer")
+
+    def check_prepared_launcher(self, role: str) -> None:
+        """Capture actual prepared launch argv and stdin using an inert executable."""
         controller = importlib.import_module("graph_driver_controller")
         process = importlib.import_module("graph_driver_process")
         workspace_module = importlib.import_module("scripts.sandbox.driver_workspace")
@@ -181,17 +189,29 @@ class WorkspaceTests(unittest.TestCase):
         shim = tools / "npx"
         shim.write_text(
             f"#!{sys.executable}\nimport json,os,sys\nfrom pathlib import Path\n"
-            f"Path({str(observed)!r}).write_text(json.dumps({{'cwd':os.getcwd(),'stdin':sys.stdin.buffer.read().hex()}}))\n"
+            f"Path({str(observed)!r}).write_text(json.dumps("
+            "{'cwd':os.getcwd(),'stdin':sys.stdin.buffer.read().hex(),'argv':sys.argv[1:]}))\n"
         )
         shim.chmod(0o755)
         with (
             patch.dict(os.environ, PATH=f"{tools}:{os.environ['PATH']}"),
             patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO(expected))),
         ):
-            self.assertEqual(launcher.launch_prepared(attempt / "workspace.json", "fixture", "loop-worker"), 0)
+            self.assertEqual(launcher.launch_prepared(attempt / "workspace.json", "fixture", role), 0)
         result = json.loads(observed.read_text())
         self.assertEqual(result["cwd"], workspace["execution"])
         self.assertEqual(bytes.fromhex(result["stdin"]), expected)
+        argv = result["argv"]
+        if role == "security-reviewer":
+            self.assertIn("--tools", argv)
+            self.assertEqual(argv[argv.index("--tools") + 1], "")
+            self.assertIn("--strict-mcp-config", argv)
+            servers = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]
+            self.assertEqual(set(servers), {"plugin_coderails_cap-security-reviewer"})
+            self.assertIn("--agent", argv)
+        else:
+            self.assertNotIn("--tools", argv)
+            self.assertNotIn("--strict-mcp-config", argv)
 
     def test_dirty_destination_is_refused_without_overwriting(self) -> None:
         """An untracked destination file cannot become an implicit input or be erased."""

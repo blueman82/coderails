@@ -2,15 +2,62 @@
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from packages.tests.provider_fixture import Provider
-from scripts.lib import decision_record
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages/graph-semantics"))
+from graph_vocab import decision_sync_pending  # noqa: E402
+
+from packages.tests.provider_fixture import Provider  # noqa: E402
+from scripts.lib import decision_record  # noqa: E402
 
 NODE = "U3[1]"
+
+
+class FinalGenericDecisionSyncTests(unittest.TestCase):
+    """A final descriptive store degrade does not erase unresolved worker-answer gates."""
+
+    def row(self) -> dict[str, Any]:
+        """Build the real local hashed decision before any external sync."""
+        result = decision_record.add_decision(
+            {"session_id": "s1", "loop_id": "L1", "revision": 1},
+            "s1",
+            "implementation",
+            "Preserve explicit store degradation.",
+            "L1",
+            1,
+        )
+        return cast(dict[str, Any], result["state"])
+
+    def test_final_generic_degrade_releases_only_resolved_sync(self) -> None:
+        """A final generic degrade is disclosed; in-flight or malformed results still block."""
+        state = self.row()
+        self.assertTrue(decision_sync_pending(state))
+        row = state["decisions_absorbed"][0]
+        row["muninn"] = {"state": "degraded", "id": None, "reason_code": "cite_notfound"}
+        self.assertFalse(decision_sync_pending(state))
+        for invalid in (
+            {"state": "unknown", "id": None, "reason_code": "muninn_error"},
+            {"state": "syncing"},
+            {"state": "degraded", "id": None, "reason_code": ""},
+            {"state": "degraded", "id": "ambiguous", "reason_code": "cite_notfound"},
+            {"state": "degraded", "reason_code": "cite_notfound"},
+        ):
+            with self.subTest(invalid=invalid):
+                row["muninn"] = invalid
+                self.assertTrue(decision_sync_pending(state))
+
+    def test_degraded_worker_answer_stays_pending(self) -> None:
+        """A typed worker answer cannot release its gate through a descriptive store degrade."""
+        state = self.row()
+        row = state["decisions_absorbed"][0]
+        row.update(chosen="clean-break", worker_status_seq=1)
+        row["row_sha256"] = decision_record.row_digest(row)
+        row["muninn"] = {"state": "degraded", "id": None, "reason_code": "cite_notfound"}
+        self.assertTrue(decision_sync_pending(state))
 
 
 class DecisionSyncGateTests(unittest.TestCase):

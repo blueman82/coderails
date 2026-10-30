@@ -389,11 +389,6 @@ def flush_pending(
             return {"synced": synced, "reason_code": "decision_sync_unknown", "exit_code": 3}
         synced.append({"seq": row["seq"], "muninn": field})
     final = transition(path, lambda s: s)  # evidence = the rows as they stand after the retries
-    teardown_steps.record(
-        path.parent,
-        "decisions_flushed",
-        session,
-        final.get("loop_id"),
-        teardown_steps.sha_json(final.get("decisions_absorbed")),
-    )
+    evidence = teardown_steps.sha_json(final.get("decisions_absorbed"))
+    teardown_steps.record(path.parent, "decisions_flushed", session, final.get("loop_id"), evidence)
     return {"synced": synced, "exit_code": 3 if any(_exit_code(x["muninn"]) == 3 for x in synced) else 0}
