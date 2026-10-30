@@ -19,7 +19,7 @@ from scripts.lib import authority_object as ao
 
 REPO = Path(__file__).resolve().parents[3]
 CLI = REPO / "scripts" / "authority.py"
-CRACK_ON = REPO / "hooks" / "scripts" / "crack_on_gate.py"
+AUTONOMOUS_GATE = REPO / "hooks" / "scripts" / "autonomous_gate.py"
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
@@ -279,11 +279,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.run_cli("grant", "--session", "", "--max-prs", "1").returncode, 2)
 
     def test_phrase_never_creates_authority(self) -> None:
-        """Superseded E3 control: the prompt 'crack on' writes no authority object and no legacy flag."""
-        payload = {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "please crack on"}
+        """The prompt 'autonomous' writes no authority object and no legacy flag."""
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "please be autonomous"}
         env = {**self.env, "CLAUDE_DISCIPLINE_LOG": str(self.base / "d.log")}
         result = subprocess.run(
-            [sys.executable, str(CRACK_ON)], input=json.dumps(payload), capture_output=True, text=True, env=env
+            [sys.executable, str(AUTONOMOUS_GATE)], input=json.dumps(payload), capture_output=True, text=True, env=env
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.base / "s1" / "authority.json").exists())

@@ -37,7 +37,7 @@ class NativePackageTests(unittest.TestCase):
             self.assertRegex(match.group(1), r"(?m)^description:\s*\S.+$")
         for name in (
             "assumptions",
-            "authorize",
+            "authorise",
             "disconfirm",
             "init",
             "merge",

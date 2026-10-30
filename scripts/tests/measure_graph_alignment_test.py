@@ -352,19 +352,19 @@ class MeasureTests(unittest.TestCase):
         )
         self.assertEqual(receipts["by_outcome"], {"allowed": 1, "approved": 1, "denied": 2})
 
-    def test_trace_counts_crack_on_reason_codes(self) -> None:
-        """Each crack-on reason code is tallied under command/outcome/reason_code and deduped by event_id."""
+    def test_trace_counts_autonomous_authority_reason_codes(self) -> None:
+        """Autonomous authority traces keep their reason codes and event deduplication."""
         codes = (
             ("granted", "authority_granted"),
             ("blocked", "authority_deny"),
             ("allowed", "authority_expired_allow"),
-            ("blocked", "crack_on_legacy_flag"),
+            ("ignored", "authority_phrase_ignored"),
         )
-        text = "".join(self.row(f"c{i}", "crack_on", code, outcome) for i, (outcome, code) in enumerate(codes))
-        self.trace("s1", text + self.row("c0", "crack_on", "authority_granted", "granted"))
+        text = "".join(self.row(f"c{i}", "autonomous", code, outcome) for i, (outcome, code) in enumerate(codes))
+        self.trace("s1", text + self.row("c0", "autonomous", "authority_granted", "granted"))
         trace = self.measure()["trace"]
         self.assertEqual(trace["duplicates"], 1)
-        self.assertEqual(trace["by_reason"], {f"crack_on/{o}/{c}": 1 for o, c in codes})
+        self.assertEqual(trace["by_reason"], {f"autonomous/{o}/{c}": 1 for o, c in codes})
 
     def test_trace_outcome_separates_warned_from_blocked(self) -> None:
         """Same command and reason_code with different outcomes are different counters."""

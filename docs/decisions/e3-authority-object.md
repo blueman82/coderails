@@ -144,3 +144,13 @@ The phrase heuristics (`invoked()`, negation, question and quote handling, about
   `authority_refused_unsafe_session` and nothing written (`scripts/tests/authority_session_guard_test.py`). A failed substitution
   therefore fails loudly instead of reporting a grant no hook can see. Human action to close: run `/coderails:authorize` once in a
   live session and confirm the printed result names the real session id.
+
+## Current naming — PR #561
+
+[PR #561](https://github.com/blueman82/coderails/pull/561) renames the owner entrypoints to
+`/coderails:authorise` (`commands/authorise.md`) and `$coderails-codex:authorise`
+(`packages/codex/skills/authorise/SKILL.md`). The `autonomous` word only shows a hint through `autonomous_gate.py`;
+it never mints authority. The earlier authorize/crack-on descriptions above are historical.
+
+When the optional action-receipt gate is off, routine PR work needs no receipt, key or passphrase. Explicit enforce
+mode still requires its existing signed receipt. The separate review, eval and integrity gates remain in force.

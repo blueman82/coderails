@@ -283,7 +283,7 @@ class ContextManifestTests(unittest.TestCase):
         """Table-driven triggers; no match adds nothing; every output stays under the Codex cap."""
         cases = (
             ("/workflow ship it", "workflow"),
-            ("please crack on with the plan", "agentic-loop"),
+            ("please autonomous with the plan", "agentic-loop"),
             ("run a premortem on this", "premortem"),
             ("what is the weather", None),
         )
