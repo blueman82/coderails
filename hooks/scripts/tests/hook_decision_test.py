@@ -29,9 +29,9 @@ class HookDecisionTests(unittest.TestCase):
             json.dumps(
                 {
                     "hooks": {
-                        "crack_on_gate": {"reason_code": "authority_deny", "remediation": "Revoke the authority."}
+                        "autonomous_gate": {"reason_code": "authority_deny", "remediation": "Revoke the authority."}
                     },
-                    "aliases": {"crack_on": "crack_on_gate"},
+                    "aliases": {"autonomous": "autonomous_gate"},
                     "reasons": {"stop_row_missing": {"remediation": "Record the current Stop result."}},
                     "fallback": {"remediation": "Read the hook reason."},
                 }
@@ -41,11 +41,11 @@ class HookDecisionTests(unittest.TestCase):
     def test_record_uses_actual_reason_and_catalog_remediation(self) -> None:
         """An alias selects recovery text without replacing the emitted reason."""
         with patch.object(hook_decision, "CATALOG", self.catalog):
-            record = hook_decision.make_record("crack_on", "blocked", "crack_on_legacy_flag", {"cmd": "abc"})
+            record = hook_decision.make_record("autonomous", "blocked", "crack_on_legacy_flag", {"cmd": "abc"})
         self.assertEqual(
             record,
             {
-                "hook": "crack_on",
+                "hook": "autonomous",
                 "decision": "blocked",
                 "reason_code": "crack_on_legacy_flag",
                 "params": {"cmd": "abc"},
@@ -56,7 +56,7 @@ class HookDecisionTests(unittest.TestCase):
     def test_exact_reason_precedes_hook_action(self) -> None:
         """The emitted reason gives a more specific action than the hook name."""
         with patch.object(hook_decision, "CATALOG", self.catalog):
-            record = hook_decision.make_record("crack_on", "blocked", "stop_row_missing")
+            record = hook_decision.make_record("autonomous", "blocked", "stop_row_missing")
         self.assertEqual(record["reason_code"], "stop_row_missing")
         self.assertEqual(record["remediation"], "Record the current Stop result.")
 
@@ -84,7 +84,9 @@ class HookDecisionTests(unittest.TestCase):
         """The nested record reuses hashes rather than storing source text."""
         with patch.object(hook_decision, "CATALOG", self.catalog):
             self.assertTrue(
-                append_row("crack_on", "blocked", "authority_deny", "session", inputs={"cmd": "SECRET"}, base=self.base)
+                append_row(
+                    "autonomous", "blocked", "authority_deny", "session", inputs={"cmd": "SECRET"}, base=self.base
+                )
             )
         raw = (self.base / "session" / "trace.jsonl").read_text()
         self.assertNotIn("SECRET", raw)
