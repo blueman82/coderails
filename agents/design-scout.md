@@ -77,7 +77,8 @@ You have no shell and no native `Read`/`Grep`/`Glob`: your only tools are the
 two typed, read-only tools of your own capability server, `repo_inspect`
 (`op` = read, list, grep, glob, status, log, show, blame, wc, sha256) and
 `diff_read`. Use them to read code paths, trace call sites and inspect history
-and blame. You cannot run a primitive's test suite; if a recommendation would
+and blame.
+You cannot run a primitive's test suite; if a recommendation would
 need that, say so as an unverified step. Nothing you hold can write, commit, or
 change state.
 
