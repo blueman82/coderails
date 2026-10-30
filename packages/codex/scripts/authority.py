@@ -21,7 +21,6 @@ from hooks.scripts.lib.trace_row import append_row
 from scripts.lib.authority_object import (
     MERGE,
     authority_path,
-    clear_legacy_flags,
     read_authority,
     validate,
     write_authority,
@@ -84,7 +83,6 @@ def grant(args: argparse.Namespace, path: Path) -> int:
         return refuse("authority_refused_create_invalid", ",".join(problems), args.session, args.loop)
     if not write_authority(path, obj):
         return refuse("authority_refused_write_failed", "write failed", args.session, args.loop)
-    clear_legacy_flags(args.session)
     append_row("authority", "granted", "authority_granted_command", args.session, obj["loop_id"])
     print(json.dumps(obj, indent=2, sort_keys=True))
     return 0
@@ -123,7 +121,6 @@ def revoke(args: argparse.Namespace, current: dict[str, Any], path: Path) -> int
         path.unlink()
     except OSError:
         return refuse("authority_refused_write_failed", "delete failed", args.session, current["loop_id"])
-    clear_legacy_flags(args.session)
     append_row("authority", "revoked", "authority_revoked", args.session, current["loop_id"])
     print(json.dumps({"revoked": current["authority_id"]}))
     return 0
@@ -133,9 +130,9 @@ def main(argv: list[str] | None = None) -> int:
     """Dispatch one subcommand for one exact session id."""
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("grant", "create", "inspect", "narrow", "revoke"):  # create: one-release alias of grant
+    for name in ("grant", "inspect", "narrow", "revoke"):
         command = sub.add_parser(name)
-        minting = name in ("grant", "create")
+        minting = name == "grant"
         command.add_argument(
             "--session",
             required=not minting,
@@ -154,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--scope", action="append", default=None)
             command.add_argument("--max-prs", type=int, default=None)
     args = parser.parse_args(argv)
-    if args.command in ("grant", "create"):
+    if args.command == "grant":
         args.session = args.session or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
     path = authority_path(args.session)
     if path is None:
@@ -162,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             "authority_refused_unsafe_session",
             "session id must start with a letter or digit; use only ASCII letters, digits, '.', '_' or '-'; no '..'",
         )
-    if args.command in ("grant", "create"):
+    if args.command == "grant":
         return grant(args, path)
     current = read_authority(args.session)
     if args.command == "inspect":

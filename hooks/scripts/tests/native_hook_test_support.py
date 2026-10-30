@@ -76,10 +76,3 @@ class HookCase(unittest.TestCase):
     def branch(self, path: Path, branch: str) -> None:
         """Select a fixture branch without creating commits or changing source."""
         subprocess.run(["git", "-C", str(path), "symbolic-ref", "HEAD", f"refs/heads/{branch}"], check=True)
-
-    def flag(self, session: str) -> Path:
-        """Stamp only the session's legacy autonomy flag."""
-        directory = self.loop / session
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "crack_on_active").touch()
-        return directory
