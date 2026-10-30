@@ -36,6 +36,9 @@ def role_isolation(role: str, allowed: str) -> list[str]:
     """Disable built-ins and inherited MCP servers for capability-only roles."""
     root = Path(__file__).resolve().parents[2]
     caps = load_profiles(root)["agents"].get(role, [])
+    capability_role = any(tool.strip().startswith("mcp__") for tool in allowed.split(","))
+    if not caps or (capability_role and not guarded(caps)):
+        raise ValueError("driver role capability policy is missing or inconsistent")
     if not guarded(caps):
         return []
     if claude_errors(role, caps, [tool.strip() for tool in allowed.split(",")]):

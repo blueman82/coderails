@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.capability_profiles import load_profiles
@@ -79,6 +80,22 @@ class RoleIsolationTests(unittest.TestCase):
         """Implementation workers do not receive the guarded-role restriction."""
         allowed, _ = role_tools("loop-worker")
         self.assertEqual(role_isolation("loop-worker", allowed), [])
+
+    def test_incomplete_policy_cannot_turn_a_guarded_role_into_a_worker(self) -> None:
+        """Missing, empty or contradictory grants must never restore default CLI tools."""
+        allowed, _ = role_tools("security-reviewer")
+        for grants in (None, [], ["shell.raw"], ["worktree.write"]):
+            profiles = load_profiles(ROOT)
+            if grants is None:
+                profiles["agents"].pop("security-reviewer")
+            else:
+                profiles["agents"]["security-reviewer"] = grants
+            with (
+                self.subTest(grants=grants),
+                patch("scripts.sandbox.role_tools.load_profiles", return_value=profiles),
+                self.assertRaisesRegex(ValueError, "capability policy"),
+            ):
+                role_isolation("security-reviewer", allowed)
 
 
 if __name__ == "__main__":
