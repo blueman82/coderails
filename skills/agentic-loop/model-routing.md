@@ -1,9 +1,10 @@
 # Model routing — stamp reference
 
-Detail-carrier for Phase 2.8. The main skill keeps the imperative (assign a role to every Phase
-3/3a build task before any worker spawns, record the set once, use the role table); this file is
-the escalation and effort rules you consult **when writing a `Model:` stamp** or deciding whether
-a task justifies a stronger verification_level — plus a closing note on the orchestrator's own model (Phase 0.4).
+This file gives the model and effort rules for Phase 2.8. Before workers
+start, assign a role to each Phase 3 or 3a build task. Record the roles once
+and use the role table. Consult this file when you write a `Model:` stamp or
+decide if a task needs a higher verification_level. The last section explains
+the orchestrator's model (Phase 0.4).
 
 ## Contents
 

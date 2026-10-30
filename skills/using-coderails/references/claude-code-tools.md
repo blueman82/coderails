@@ -22,7 +22,7 @@ Skills speak in actions ("dispatch a subagent", "create a todo", "read a file").
 
 ## Instructions file
 
-When a skill mentions "your instructions file", on Claude Code this is **`CLAUDE.md`**. Claude Code walks up the directory tree from the current working directory and concatenates every `CLAUDE.md` and `CLAUDE.local.md` it finds along the way. Standard locations:
+On Claude Code, "your instructions file" means **`CLAUDE.md`**. Claude Code searches upward from the current directory. It combines the `CLAUDE.md` and `CLAUDE.local.md` files it finds. Standard locations are:
 
 | Scope | Location |
 |-------|----------|
@@ -47,4 +47,4 @@ For path-scoped rules and larger-project organization, see `.claude/rules/` (rul
 
 ## Personal skills directory
 
-User-level skills live at **`~/.claude/skills/`**. Each skill is a subdirectory containing a `SKILL.md` (with `name` and `description` frontmatter) plus any supporting files. Claude Code does not currently recognize the cross-runtime `~/.agents/skills/` path that Codex, Copilot CLI, and Gemini CLI read; if you're relying on cross-runtime support in the future, verify against the [official skills docs](https://code.claude.com/docs/en/skills).
+User-level skills live at **`~/.claude/skills/`**. Each skill has a `SKILL.md` with `name` and `description` frontmatter. It can have supporting files. Claude Code does not currently read the cross-runtime `~/.agents/skills/` path. Codex, Copilot CLI, and Gemini CLI do. Check the [official skills docs](https://code.claude.com/docs/en/skills) before relying on future cross-runtime support.

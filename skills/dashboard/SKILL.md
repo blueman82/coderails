@@ -6,10 +6,9 @@ model: sonnet
 
 # Dashboard
 
-Launch the local observability HUD for coderails: a live web view of what the
-agentic system is doing right now, backed by files already on disk (sessions,
-loop progress, wiki/memory, PR state, run history) — no new services, no
-telemetry leaving the machine.
+Launch the local Coderails dashboard. It shows current sessions, loop
+progress, wiki and memory activity, PR state, and run history. It reads
+files already on this machine. It uses no new services and sends no telemetry away.
 
 ## What it shows
 
@@ -69,10 +68,9 @@ DASHBOARD_PORT=4200 scripts/start_dashboard.py
 
 ## LAN access (opt-in)
 
-By default the dashboard binds to `127.0.0.1` and only accepts requests whose
-Host/Origin resolve to loopback — nothing on the network can reach it. Set
-`DASHBOARD_HOST` to your machine's LAN IP to allow other devices on the same
-network to reach it too:
+By default, the dashboard binds to `127.0.0.1`. It accepts only Host and
+Origin values that resolve to loopback. Set `DASHBOARD_HOST` to your machine's
+LAN IP to allow access from other devices on that network:
 
 ```
 DASHBOARD_HOST=192.168.50.140 scripts/start_dashboard.py

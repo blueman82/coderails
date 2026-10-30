@@ -1,8 +1,8 @@
 # Workflow-audit judge contract
 
-The prompt template handed to a fresh sonnet judge at the propose stage of the
-workflow-audit skill. The judge turns `cluster_ngrams.py` output into
-propose/reject verdicts for candidate skills.
+This is the prompt template for a new sonnet judge in the workflow-audit
+propose stage. The judge turns `cluster_ngrams.py` output into a propose or
+reject verdict for each candidate skill.
 
 ## What the judge receives
 

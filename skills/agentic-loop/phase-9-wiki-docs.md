@@ -16,7 +16,9 @@ acceptance evidence in `hooks/scripts/tests/graph_dependencies_test.py`.
 
 > "When running /workflow inside this agentic-loop, skip /workflow's wiki sub-steps (Phase 2 `/coderails:wiki-query` and Phase 5 `/coderails:wiki-ingest`/`/coderails:wiki-lint`). The orchestrator runs these at the loop boundary — running them per-PR causes redundant ingests and fragmented wiki context."
 
-**Why first-line, not just "include":** workers shortcut past mid-section process notes and treat anything that appears to constrain the workflow steps as "optional polish." **Scope-suppression instructions go above scope-additive instructions in worker prompts.**
+Put that instruction first. A worker can miss a process note in the middle of
+a prompt. Put instructions that restrict scope before instructions that add
+scope.
 
 The orchestrator handles both ends: Phase 2 (plan-level wiki read before coding starts) and Phase 9 (cluster ingest+lint after all PRs are merged).
 

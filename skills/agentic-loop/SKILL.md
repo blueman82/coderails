@@ -10,7 +10,11 @@ How to run an autonomous multi-agent / multi-PR session so the user doesn't have
 
 ## Why this skill exists
 
-In long agentic sessions the assistant drifts back into bad habits: running skills in main context instead of delegating; asking "want me to spawn an agent for X?" when X is obviously in scope; holding at human gates the session already removed; trusting an "idle" notification as proof-of-failure when the agent often finished silently; spawning fix workers without disproving the symptom premise. Each unnecessary stall is a manual prompt the user has to write — a stalled loop loses the autonomy the session was authorised for.
+In a long agentic session, the assistant can drift from the agreed workflow. It can run skills in the main context
+instead of delegating. It can ask whether to spawn an agent when that work is already in scope. It can stop at a
+human gate that the session has already removed. It can treat an "idle" notice as proof of failure even when the
+agent finished silently. It can assign a fix before it checks whether the reported symptom is real. Each avoidable
+stop makes the user write another prompt and reduces the autonomy the user authorised.
 
 Repo-agnostic lessons promoted from accumulated loop retros live in [learned-failure-modes.md](learned-failure-modes.md) — machine-maintained via the `loop-retro-promotion` pipeline; read it alongside this skill.
 
@@ -189,7 +193,7 @@ Deploy and push gotchas tied to a particular stack — skip-validation flags whe
 
 Delegate wiki ingest and lint to a spawned agent, `subagent_type: general-purpose` with explicit instructions from `agents/wiki-writer.md`, once at the end of the loop, with all related PRs as a cluster — not once per PR. Lint must always pair with ingest. **Include the wiki-writer instructions explicitly** — wiki authoring requires schema-aware vault ingestion and self-linting against the AGENTS-wiki-schema; the push/PR sequence and Phase 3a's shared-checkout isolation must still travel in the prompt explicitly. One source page covers the cluster; avoid one-per-PR sprawl. After the cluster ingest+lint, run `/sync-docs` ONCE at the loop boundary (delegated to `subagent_type: general-purpose` with explicit instructions from `agents/docs-auditor.md`) to audit the repo's own in-tree docs for drift — fix only drift this loop's own PRs introduced; surface pre-existing drift rather than folding it into scope.
 
-**Read [phase-9-wiki-docs.md](phase-9-wiki-docs.md) in full before running this phase** for: the required first-line wiki-step-suppression instruction for spawned `/workflow` agents, the wiki-delivery verification mechanics (commit SHA vs. merged PR, ruleset-protected `main`, the `--is-ancestor` squash-merge trap), and the docs-drift findings disposition rule.
+**Read [phase-9-wiki-docs.md](phase-9-wiki-docs.md) in full before running this phase** for: the required first-line wiki-step-suppression instruction for spawned `/workflow` agents, the wiki-delivery verification mechanics (commit SHA vs. merged PR, ruleset-protected `main`, the `--is-ancestor` squash-merge trap), and the rule for handling docs-drift findings.
 
 ### Phase 10 — Use v2/v3 names when respawning a stuck agent
 

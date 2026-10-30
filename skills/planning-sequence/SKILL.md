@@ -6,7 +6,9 @@ effort: high
 
 # Planning Sequence
 
-This skill runs three anticipatory planning techniques in sequence on a plan, idea, or decision. The goal is to surface structural gaps, execution failures, and adversarial weaknesses *before* commitment, while there's still time to act.
+Run three checks on the same plan, idea, or decision. First identify the
+conditions for success. Then identify credible failures. Last, test the
+plan against an opponent or constraint. Use facts about this plan.
 
 The three techniques are:
 1. **Pre-Parade** — what does success actually require?

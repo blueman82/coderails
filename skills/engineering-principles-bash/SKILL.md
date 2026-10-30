@@ -44,7 +44,7 @@ Coderails-owned hooks, workflow helpers, launchers, and tests are Python. The ru
 ### Function Decomposition Over Monolithic Scripts
 - **Break a script into named functions** for argument parsing, precondition validation, execution and reporting. A short `main` function should make their order visible.
 - **Namespace function names when a library is sourced by multiple callers**, such as `widget::create` and `widget::exists`, to avoid silent collisions.
-- **No monolithic "do everything inline" scripts** — if a script's body reads top-to-bottom as 100+ lines with no function boundaries, that's a KISS/decomposition violation, not a style preference. Extract steps into functions even if each is called exactly once; it makes the control flow (and the `set -e` failure points) legible.
+- **Avoid a monolithic script.** A body of 100 or more lines with no function boundaries hides its control flow and `set -e` failure points. Extract named steps even when each runs once.
 
 ### Avoiding Global Mutable State
 - **Prefer `local` for every function-scoped variable.** A bash function's variables are global by default; forgetting `local` on a loop counter or accumulator is a classic source of one function silently corrupting another's state. Declare function-scoped shell variables explicitly, for example `local force_with_lease=0 msg="" want_add=0`, at the top of the function body. Python modules use Python scoping instead.

@@ -56,15 +56,13 @@ git ls-files --error-unmatch <path>          # tracked, or
 git check-ignore -q <path> && echo IGNORED   # gitignored — EXCLUDE
 ```
 
-Any doc that is gitignored, or any file this routine has not actually
-read, is out of scope. **Never "fix" a doc to match code this routine has
-not read** — no guessing. If the audit is uncertain whether a section is
-actually stale, it reports the uncertainty rather than editing it.
+An ignored document or unread file is outside the fix scope. Read the code
+before changing a document to match it. If the audit cannot confirm drift,
+report the uncertainty and leave the file alone.
 
 ## 2. NO-DRIFT SHORT-CIRCUIT
 
-**This step runs BEFORE any branch or PR is created — it is the first
-thing this routine decides after the audit completes.**
+Run this step immediately after the audit, **BEFORE any branch or PR is created**.
 
 Run `RR begin` (writes the state file and a provisional `run_incomplete`
 row), then, if the audit finds nothing to fix, `RR finish no_drift`
