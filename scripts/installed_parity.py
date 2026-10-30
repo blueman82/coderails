@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Check that installed Claude and Codex coderails bundles are byte-identical to their source tree."""
+"""Check source/assets inventory parity for installed Claude and Codex coderails bundles.
+
+Compared files must match source bytes. Excludes every .pyc file, every path
+containing a __pycache__ component, and .DS_Store files. A passing check does not
+authenticate retained bytecode or prove executed-code integrity.
+"""
 
 from __future__ import annotations
 

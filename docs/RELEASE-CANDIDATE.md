@@ -31,7 +31,11 @@ python3 scripts/release_manifest.py verify ../coderails-candidate.json --source-
 python3 scripts/installed_parity.py --require-both --source-root . --claude-installed <claude-plugin-path> --codex-installed <codex-plugin-path>
 ```
 
-The manifest check refuses an absent provider, a changed source commit or branch, a changed configuration, a missing or changed tracked runtime file, and an extra runtime file. Runtime files include the policies, capability declarations and routine definitions used by the installed controls. It also refuses links inside an installed runtime path and ignored runtime files in the source checkout. This includes an ignored `node_modules` directory under a plugin runtime path. Python cache files in `__pycache__` are excluded; they can be rebuilt from the tracked source. Strict parity requires the same complete runtime inventory and reports extra installed files too. The manifest list excludes tests and non-runtime repository files; the Git tree hash binds the complete source checkout.
+The manifest check refuses an absent provider, a changed source commit or branch, a changed configuration, a missing or changed tracked runtime file, and an extra runtime file. Runtime files include the policies, capability declarations and routine definitions used by the installed controls. It also refuses links inside an installed runtime path and ignored runtime files in the source checkout. This includes an ignored `node_modules` directory under a plugin runtime path.
+
+Both checks exclude every `.pyc` file, every path containing a `__pycache__` component, and `.DS_Store` files. Strict parity requires the selected source/assets inventory to match and reports extra installed files too. Compared files must match source bytes. The manifest list excludes tests and non-runtime repository files; the Git tree hash binds the complete source checkout.
+
+A passing check does not authenticate retained bytecode or prove executed-code integrity. These checks do not remove or regenerate caches. Python can read valid retained bytecode even when its checked source file is unchanged.
 
 Run real allowed and denied control checks in fresh Claude and Codex sessions. Check a full loop, recovery, publication, and teardown. Capture real transcript observations only after the owner approves that capture. Run the Muninn restart and round-trip check with the owner. Record unavailable results as unavailable.
 
