@@ -2,12 +2,57 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from subprocess import CompletedProcess
 
 from packages.tests.provider_fixture import Provider
+
+
+def artifacts_with_orders_prepared(provider: Provider) -> None:
+    """Run the prepare CLI, then bind its receipt into the final retro assembly."""
+    provider.artifacts()
+    state_dir = provider.path.parent
+    prepared = subprocess.run(
+        [
+            sys.executable,
+            str(provider.plugin / "scripts/lib/orders.py"),
+            "--dir",
+            str(state_dir.parent),
+            "--session",
+            provider.session,
+            "prepare",
+            "--loop",
+            provider.read()["loop_id"],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=provider.environment,
+        cwd=provider.home,
+    )
+    if prepared.returncode:
+        raise AssertionError(prepared.stderr)
+    assembled = subprocess.run(
+        [
+            sys.executable,
+            str(provider.plugin / "scripts/lib/retro.py"),
+            "assemble",
+            str(state_dir),
+            "--session",
+            provider.session,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**provider.environment, "PATH": "/nonexistent"},
+        cwd=provider.home,
+    )
+    if assembled.returncode not in (0, 3):
+        raise AssertionError(assembled.stderr)
 
 
 class ProviderWorkUnitTransitionTests(unittest.TestCase):
@@ -73,7 +118,7 @@ class ProviderWorkUnitTransitionTests(unittest.TestCase):
             provider.finish_wave()
             result = self.request(provider, "1", "done", "verified completed wave")
             self.assertEqual(result.returncode, 0, result.stderr)
-            provider.artifacts()
+            artifacts_with_orders_prepared(provider)
             completion = provider.complete()
             self.assertEqual(completion.returncode, 0, completion.stderr)
 

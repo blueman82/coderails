@@ -11,19 +11,15 @@ will not retry it, so "synced to Muninn" is unauthenticated here; check the id a
 Entry point for both graph CLIs (`graph.py record-decision`), `transition(path, fn)` being the provider's lock wrapper
 (Claude `hooks.scripts.lib.graph_executor.transition`; Codex `graph_io.locked/load/write` wrapped to the same shape):
 
-    out = record(path, session, phase, decision, expected_loop_id=loop_id,
-                 expected_revision=revision, transition=transition, flip_condition=fc, unit=unit)
-    print(json.dumps(out))
-    return out["exit_code"]
+Call record with the provider transition, expected loop id and revision; use its exit_code.
 
 `record` appends a local `syncing` row first under the lock (the authoritative loop record is never lost), calls
 Muninn outside the lock, then patches `muninn` under the lock again. exit_code: 0 written or disabled, 3 degraded
 or unknown (reason code printed, local row kept), 2 refused (nothing written). `flush_pending` claims only pending
 or safely degraded rows under the lock before retry. A crash or ambiguous external result leaves `syncing`/`unknown`;
-automatic retry stops with `decision_sync_unknown` until a human reconciles the Muninn store. Muninn refuses an
-approval-only citation and an
-agent cannot cite itself, so the cite is a quote of `authorising_prompt_raw` unless the caller passes a substantive
-user `cite_quote`; a short prompt such as "yes" stays a visible degrade. Never falls back to Markdown.
+automatic retry stops with `decision_sync_unknown` until a human reconciles the Muninn store.
+Muninn refuses approval-only citations. An agent cannot cite itself; use `authorising_prompt_raw` or a substantive
+user `cite_quote`; short prompts such as "yes" stay a visible degrade. Never falls back to Markdown.
 """
 
 from __future__ import annotations
@@ -42,6 +38,7 @@ from typing import Any, Optional, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
 from scripts.lib import memory_adapter as ma  # noqa: E402
+from scripts.lib import teardown_steps  # noqa: E402
 
 GENESIS = "0" * 64
 HASH_EXCLUDED = ("row_sha256", "muninn")
@@ -397,4 +394,7 @@ def flush_pending(
             _trace("decision.flush", "degraded", "decision_sync_unknown", session, str(state.get("loop_id")))
             return {"synced": synced, "reason_code": "decision_sync_unknown", "exit_code": 3}
         synced.append({"seq": row["seq"], "muninn": field})
+    final = transition(path, lambda s: s)  # evidence = the rows as they stand after the retries
+    evidence = teardown_steps.sha_json(final.get("decisions_absorbed"))
+    teardown_steps.record(path.parent, "decisions_flushed", session, final.get("loop_id"), evidence)
     return {"synced": synced, "exit_code": 3 if any(_exit_code(x["muninn"]) == 3 for x in synced) else 0}

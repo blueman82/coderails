@@ -144,6 +144,15 @@ def decision_sync_pending(state: dict[str, Any]) -> bool:
         if not isinstance(raw_sync, dict):
             return True
         sync = cast(dict[str, Any], raw_sync)
-        if sync.get("state") not in {"written", "disabled"}:
-            return True
+        if sync.get("state") in {"written", "disabled"}:
+            continue
+        if (
+            sync.get("state") == "degraded"
+            and "worker_status_seq" not in row
+            and set(sync) == {"state", "id", "reason_code"}
+            and sync["id"] is None
+            and _filled(sync["reason_code"])
+        ):
+            continue
+        return True
     return False

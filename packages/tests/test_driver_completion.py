@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex/skills/agentic-loop/scripts"))
 from graph_completion import validate_completion_state
+from graph_identity import GraphError
 
 
 class DriverCompletionTests(unittest.TestCase):
@@ -24,7 +25,9 @@ class DriverCompletionTests(unittest.TestCase):
             path = Path(directory) / "owned-state.json"
             external = Path(directory) / "external"
             external.mkdir()
-            evals_path = external / "evals.json"
+            evals_path = path.with_name("evals.json")
+            proof_path = path.with_name("proof.json")
+            retro_path = path.with_name("retro.json")
             old: dict[str, Any] = {
                 "session_id": "S",
                 "loop_id": "L",
@@ -53,7 +56,12 @@ class DriverCompletionTests(unittest.TestCase):
                 patch("graph_completion.validate_worker_evidence") as native,
                 patch("graph_completion.validate_completion_evidence"),
             ):
-                validate_completion_state(path, state, "S", 3, evals_path, path, path, None)
+                with self.assertRaisesRegex(GraphError, "evals.json path is not canonical"):
+                    validate_completion_state(
+                        path, state, "S", 3, external / "evals.json", proof_path, retro_path, None
+                    )
+                native.assert_not_called()
+                validate_completion_state(path, state, "S", 3, evals_path, proof_path, retro_path, None)
             native.assert_called_once_with(old, require_complete=False)
 
 

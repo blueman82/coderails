@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import io
 import json
 import os
 import sys
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -18,7 +21,53 @@ from hooks.scripts.lib.loop_evals import read_loop_evals
 from hooks.scripts.lib.loop_proofs import validate_proofs
 from hooks.scripts.lib.loop_state_common import LoopState
 from hooks.scripts.tests.lib.hook_test_support import HookTestCase
+from scripts.lib import retro, retro_check, teardown_steps
 from scripts.lib.eval_artifact import grading_checksum
+
+
+def assemble_test_retro(state_dir: Path, session: str) -> dict[str, Any]:
+    """Build a fixture retro with the serialized D4 preparation receipt, without invoking live Muninn."""
+    path = state_dir / "progress.json"
+    state: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    loop_id = str(state.get("loop_id") or "")
+    teardown_steps.record(
+        state_dir, "proof_run", session, loop_id, teardown_steps.file_sha(state_dir / "proof_results.jsonl")
+    )
+    with patch.dict(os.environ, {"PATH": "/nonexistent"}):
+        retro.assemble(state_dir, session)
+        state = json.loads(path.read_text(encoding="utf-8"))
+        source = dict(state)
+        for key in ("status", "completion", "completed_marker"):
+            source.pop(key, None)
+        if isinstance(source.get("loop_stop_counts"), dict):
+            source["loop_stop_counts"].pop("complete", None)
+        binding = {
+            "repo_dir": str(state_dir.parent.resolve()),
+            "state_dir": str(state_dir.resolve()),
+            "session_id": session,
+            "loop_id": loop_id,
+            "revision": state["revision"],
+            "progress_sha256": teardown_steps.sha_json(source),
+        }
+        prepared: dict[str, Any] = {"schema": 1, "binding": binding, "records": []}
+        (state_dir / f"orders-prepared-{hashlib.sha256(loop_id.encode()).hexdigest()}.json").write_text(
+            json.dumps(prepared), encoding="utf-8"
+        )
+        row = {
+            "step": "orders_prepared",
+            "session_id": session,
+            "loop_id": loop_id,
+            "revision": state["revision"],
+            "binding": binding,
+            "evidence_sha256": teardown_steps.sha_json(prepared),
+            "ts": "2026-10-19T00:00:00+00:00",
+        }
+        with (state_dir / teardown_steps.NAME).open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(row) + "\n")
+        payload, code = retro.assemble(state_dir, session)
+    if code == 2:
+        raise AssertionError(payload)
+    return cast("dict[str, Any]", json.loads((state_dir / "retro.json").read_text()))
 
 
 def cost_message(retro: dict[str, Any]) -> str:
@@ -35,10 +84,70 @@ class CompletionTests(HookTestCase):
         self.path = self.progress(proof_disposition="none: no executable surface")
         self.state = LoopState(self.path, "S1", 1, json.loads(self.path.read_text()))
         self.retro = self.path.with_name("retro.json")
-        self.retro.write_text('{"schema_version":2}')
         self.proof = self.path.with_name("proof.json")
         self.trace = self.directory / "proof-transcript.jsonl"
         self.trace.write_text("")
+
+    def test_prepared_refresh_is_latest_after_old_retro(self) -> None:
+        """A refreshed preparation becomes current after an earlier retro receipt."""
+        assemble_test_retro(self.path.parent, "S1")
+        state = json.loads(self.path.read_text())
+        state["revision"] += 1
+        self.path.write_text(json.dumps(state))
+        fresh = assemble_test_retro(self.path.parent, "S1")
+        self.assertEqual(retro_check.check(state, fresh, self.path.parent), [])
+
+    def test_prepared_order_is_enforced(self) -> None:
+        """An out-of-order preparation receipt fails after retro assembly."""
+        assemble_test_retro(self.path.parent, "S1")
+        state = json.loads(self.path.read_text())
+        rows = teardown_steps.read_rows(self.path.parent)
+        prep = next(row for row in reversed(rows) if row["step"] == "orders_prepared")
+        rows = [prep, *(row for row in rows if row["step"] != "orders_prepared")]
+        (self.path.parent / teardown_steps.NAME).write_text("\n".join(map(json.dumps, rows)) + "\n")
+        _, code = retro.assemble(self.path.parent, "S1")
+        self.assertEqual(code, 0)
+        with self.assertRaisesRegex(retro_check.RetroError, "out of order"):
+            retro_check.check(state, json.loads(self.retro.read_text()), self.path.parent)
+
+    def test_tick_after_preparation_does_not_stale_retro(self) -> None:
+        """Post-completion application is outside the frozen preparation evidence."""
+        document = assemble_test_retro(self.path.parent, "S1")
+        state = json.loads(self.path.read_text())
+        teardown_steps.record(self.path.parent, "orders_ticked", "S1", state["loop_id"], "applied")
+        self.assertEqual(retro_check.check(state, document, self.path.parent), [])
+
+    def test_free_retro_section_is_unhashed(self) -> None:
+        """The free text section can change without changing evidence hashes."""
+        document = assemble_test_retro(self.path.parent, "S1")
+        document["free"] = {"raw_notes": "edited"}
+        self.assertEqual(retro_check.check(json.loads(self.path.read_text()), document, self.path.parent), [])
+
+    def test_preparation_binding_mutation_is_rejected(self) -> None:
+        """A copied receipt with a foreign revision is rejected."""
+        assemble_test_retro(self.path.parent, "S1")
+        state = json.loads(self.path.read_text())
+        rows = teardown_steps.read_rows(self.path.parent)
+        prep = next(row for row in rows if row["step"] == "orders_prepared")
+        changed = dict(prep, binding=prep["binding"] | {"revision": prep["revision"] + 1})
+        (self.path.parent / teardown_steps.NAME).write_text("\n".join(map(json.dumps, [*rows, changed])) + "\n")
+        _, code = retro.assemble(self.path.parent, "S1")
+        self.assertEqual(code, 0)
+        with self.assertRaisesRegex(retro_check.RetroError, "orders_prepared"):
+            retro_check.check(state, json.loads(self.retro.read_text()), self.path.parent)
+
+    def test_retro_assembly_refusals(self) -> None:
+        """Wrong sessions and malformed free files fail without writing a retro."""
+        out, code = retro.assemble(self.path.parent, "other")
+        self.assertEqual((code, out["reason_code"]), (2, "retro_wrong_session"))
+        bad = self.directory / "bad.json"
+        bad.write_text("[1]")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                retro.main(["assemble", str(self.path.parent), "--session", "S1", "--free-file", str(bad)]),
+                2,
+            )
+        self.assertFalse(self.retro.exists())
 
     def execution(self, identifier: str, command: str, error: object = False, background: bool = False) -> None:
         """Append native foreground or background execution and its paired result."""
@@ -66,9 +175,13 @@ class CompletionTests(HookTestCase):
 
     def test_absent_retro_and_proof_disposition(self) -> None:
         """Absent proof needs an explicit recorded skip; retro remains mandatory."""
+        assemble_test_retro(self.path.parent, "S1")
         self.assertEqual(
             validate_completion(self.state, str(self.trace)),
-            ["No-proof disposition: legacy: no executable surface", "cost not recorded"],
+            [
+                "No-proof disposition: legacy: no executable surface",
+                "cost recorded but incomplete (missing total_usd_estimate, total_tokens)",
+            ],
         )
         self.state.data.pop("proof_disposition")
         with self.assertRaisesRegex(ValueError, "no proof.json"):

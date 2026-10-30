@@ -88,7 +88,7 @@ against the graph's exact current revision and write beside the state:
 
 - graded `evals.json` for the current session, loop, and revision;
 - `proof.json` (schema_version 2: unique ids, nonblank `cmd`, structured `expect` `{exit_code, stdout_contains, stdout_not_contains}`, optional `timeout_s`) for the same session and loop, or, for a loop with no executable surface, no proof file and a typed disposition (below);
-- `retro.json` for the same session and loop, schema version 1 or newer, with `status: "complete"`.
+- `retro.json` assembled by `retro.py` for the same session and loop, at schema version 3, with `status: "complete"`.
 
 For a loop with no executable surface, record the reason in `decisions_absorbed`. Leave `proof.json` absent. Get the current revision from `inspect`. Then run:
 
@@ -100,7 +100,7 @@ python3 "$SKILL_DIR/scripts/graph.py" record-proof-disposition "$STATE" \
 
 The command saves `none: no executable surface`. It refuses a foreign owner, a stale revision, an active wave, an existing proof file, or a repeated decision.
 
-Prepare standing orders from the retro with code, never by editing Markdown. With `D` the repo-key dir (the grandparent of `$STATE`), `LOOP` the separate logical `loop_id` from owned progress, and `O="python3 $SKILL_DIR/../../scripts/lib/orders.py --dir $D --session $SESSION"`: run `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop "$LOOP" --quote "<verbatim words of the owner's own prompt, 12-300 chars>"` for each failure mode (add `--scope agnostic` for a lesson that applies to any repo). The native `complete` command runs `prepare` after final progress updates, including when none were recorded. Preparation binds the eligible owned source and records `orders_prepared`, with no recurrence or aging effect. Exit 3 prints a `reason_code`: report it and never write a Markdown fallback. `memory.backend: off` is the explicit opt-out. The current Muninn installation uses a newer API, so live lesson activation remains pending (see `docs/RUNBOOK.md`, "Standing order stored without a cite").
+Prepare standing orders with code, never by editing Markdown. With `D` the repo-key dir (the grandparent of `$STATE`), `LOOP` the separate logical `loop_id` from owned progress, and `O="python3 $SKILL_DIR/../../scripts/lib/orders.py --dir $D --session $SESSION"`: run `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop "$LOOP" --quote "<verbatim words of the owner's own prompt, 12-300 chars>"` for each failure mode (add `--scope agnostic` for a lesson that applies to any repo). Preparation binds the eligible owned source and records `orders_prepared`, with no recurrence or aging effect. The native `complete` command rechecks that prepared source. Exit 3 prints a `reason_code`: report it and never write a Markdown fallback. `memory.backend: off` is the explicit opt-out. The current Muninn installation uses a newer API, so live lesson activation remains pending (see `docs/RUNBOOK.md`, "Standing order stored without a cite").
 
 Flush and reload pending progress-source updates before final preparation. Changed sources are refused by default.
 For a legitimate incomplete-source retry, use `$O prepare --loop "$LOOP" --refresh-from-sha256 <CURRENT evidence_sha256>`
@@ -113,6 +113,8 @@ The controller runs the proofs. With `P="python3 $SKILL_DIR/../../scripts/lib/pr
 If one same-graph replacement is necessary, have an isolated proof author write a pending schema-2 candidate and report outside the active graph. After review, run `$P supersede "$D" --candidate <path> --reason "<text>" --original-sha256 <raw-sha> --author-evidence <report-path>`. The controller leaves `proof.json` unchanged and records one chained binding to the candidate and report bytes. Then freeze and run the selected candidate at the current HEAD. Old run rows cannot satisfy it. A second replacement, changed file, missing report, or broken chain blocks. The report hash binds bytes only; a reviewer must check author independence separately.
 
 The proof command starts in a private copy of committed `HEAD`. The controller refuses a committed tree that has a symlink. Use relative paths for repository files. The original checkout is not readable. The result records the source tree hash. The gate checks that hash against the current commit.
+
+After the proof run or typed no-proof disposition, make all final progress updates and flush decisions. Record one `complete` stop with `graph.py stop "$STATE" --session "$SESSION" --category complete --reason-code work_complete --reason "<reason>"`. Then run `$O prepare --loop "$LOOP"`, including when no orders were recorded. Run `python3 "$SKILL_DIR/../../scripts/lib/retro.py" assemble "${STATE%/*}" --session "$SESSION"`. Do not record a second stop on retry.
 
 Apply `superpowers:verification-before-completion` to the orchestrator's completion claim. Then run:
 

@@ -23,6 +23,12 @@ Generate two artefacts that allow a fresh Claude Code session to continue the cu
 ### Step 0: Read recorded state (Muninn authoritative)
 
 If a native loop graph exists for this session, first run
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/handoff_derive.py" <state> --session <session_id>`. It reads the recorded state
+read-only and prints a JSON skeleton `{goal, decisions[{id, cite, text}], done, recorded_proof_results, next_steps, open_questions, lessons,
+degraded[]}` (decisions carry their Muninn K-ids and cites; proof verdicts are recorded claims, not `done`). Use it for Goal, Decisions, Done
+and Next steps instead of reconstructing them from the conversation. **State `degraded[]` to the user in the handoff
+under a "Memory degraded" line**, reason code by reason code (exit 3 means it is non-empty); never skip it and never
+replace it with hand-written Markdown. The commands it wraps, for reference or when you need a field it does not print:
 `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" summarize <state>` (JSON: `phase`, `detail`, `done`,
 `active`, `ready`, `pending`) and `... graph.py inspect <state>` (JSON: `revision`, `active_wave`, `running`, `ready`,
 `hard_stop`), plus `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" list --type decision --scope loop --loop <session_id>`
