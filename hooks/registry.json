@@ -1,0 +1,306 @@
+{
+  "schema_version": 1,
+  "controls": {
+    "action_authority_gate": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "off by default; advisory warns; enforce checks signed receipts",
+      "category": "action authority gate"
+    },
+    "agent_model_routing_nudge": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "nudge",
+      "failure": "continue and record the failure",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "agent model routing nudge"
+    },
+    "agent_only_gate": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "nudge",
+      "failure": "continue and record the failure",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "nudge by default; AGENT_ONLY_GATE_ENFORCE=1 blocks",
+      "category": "agent only gate"
+    },
+    "check_confidence_labels": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "advisory",
+      "failure": "continue and record the failure",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "check confidence labels"
+    },
+    "check_verify_loop": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "advisory",
+      "failure": "continue and record the failure",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "check verify loop"
+    },
+    "comment_citation_gate": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "comment citation gate"
+    },
+    "crack_on_gate": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "the phrase grants nothing; a live typed authority can block questions",
+      "category": "crack on gate"
+    },
+    "destructive_bash_gate": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "destructive bash gate"
+    },
+    "enforce_pr_workflow": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "inactive without workflow config",
+      "category": "enforce pr workflow"
+    },
+    "graph_completion_guard": {
+      "providers": [
+        "codex"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "graph completion guard"
+    },
+    "inject_bootstrap": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "silent",
+      "failure": "continue and record the failure",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "inject bootstrap"
+    },
+    "inject_context": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "silent",
+      "failure": "continue and record the failure",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "inject context"
+    },
+    "loop_dispatch_guard": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "loop dispatch guard"
+    },
+    "loop_stall_guard": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "loop stall guard"
+    },
+    "loop_state_guard": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "loop state guard"
+    },
+    "no_edit_on_main": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "no edit on main"
+    },
+    "offload_push_guard": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "nudge",
+      "failure": "continue and record the failure",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "offload push guard"
+    },
+    "pr_publication_gate": {
+      "providers": [
+        "codex"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "applies to guarded Codex publication commands",
+      "category": "pr publication gate"
+    },
+    "quality_feedback": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "advisory",
+      "failure": "continue and record the failure",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "quality feedback"
+    },
+    "remember_inject_cap_guard": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "advisory",
+      "failure": "continue and record the failure",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "warns by default; auto-write requires explicit opt-in",
+      "category": "remember inject cap guard"
+    },
+    "reviewer_bash_allowlist": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "reviewer bash allowlist"
+    },
+    "subagent_identity_gate": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "subagent identity gate"
+    },
+    "test_gate": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "off unless test commands are configured",
+      "category": "test gate"
+    },
+    "unregistered_loop_guard": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "nudge",
+      "failure": "continue and record the failure",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "unregistered loop guard"
+    },
+    "verification_volume_ceiling": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "verification volume ceiling"
+    },
+    "voice_announce": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "observe",
+      "failure": "continue and record the failure",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "voice announce"
+    },
+    "wiki_taxonomy_gate": {
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "inactive without workflow config and a resolved wiki",
+      "category": "wiki taxonomy gate"
+    },
+    "worker_containment_gate": {
+      "providers": [
+        "claude"
+      ],
+      "mode": "block",
+      "failure": "deny or block with a visible reason",
+      "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
+      "activation": "registered for its provider event",
+      "category": "worker containment gate"
+    }
+  },
+  "protocols": {
+    "claude": "Claude hook event response: exit 0 JSON or exit 2 block",
+    "codex": "Codex hook event response: exit 0 JSON decision"
+  },
+  "provider_overlays": {
+    "claude": "hooks/overlays/claude.json",
+    "codex": "hooks/overlays/codex.json"
+  }
+}

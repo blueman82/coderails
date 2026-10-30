@@ -51,8 +51,8 @@ class TraceRowTests(unittest.TestCase):
 
     def test_event_ids_unique_and_append_only(self) -> None:
         """Two appends give two lines with different event ids."""
-        append_row("g", "o", "r", "s1", base=self.base)
-        append_row("g", "o", "r", "s1", base=self.base)
+        append_row("g", "allowed", "r", "s1", base=self.base)
+        append_row("g", "allowed", "r", "s1", base=self.base)
         rows = [json.loads(x) for x in (self.base / "s1" / "trace.jsonl").read_text().splitlines()]
         self.assertEqual(len(rows), 2)
         self.assertNotEqual(rows[0]["event_id"], rows[1]["event_id"])
@@ -61,13 +61,13 @@ class TraceRowTests(unittest.TestCase):
         """An unwritable base returns False without raising."""
         blocker = self.base / "file"
         blocker.write_text("x")
-        self.assertFalse(append_row("g", "o", "r", "s1", base=blocker / "sub"))
+        self.assertFalse(append_row("g", "allowed", "r", "s1", base=blocker / "sub"))
 
     def test_unsafe_session_id_refused_not_sanitised(self) -> None:
         """Ids with a slash or dotdot are refused so two ids never collide."""
         for bad in ("a/b", "..", "a..b", ""):
             with self.subTest(bad=bad):
-                self.assertFalse(append_row("g", "o", "r", bad, base=self.base))
+                self.assertFalse(append_row("g", "allowed", "r", bad, base=self.base))
         self.assertEqual(list(self.base.iterdir()), [])
 
     def test_env_dir_default(self) -> None:

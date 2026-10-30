@@ -59,7 +59,8 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual(tel.run("h", lambda: 0), 0)
         (row,) = rows(self.dir)
         self.assertEqual((row["hook"], row["cause"], row["exit"]), ("h", "ok", 0))
-        self.assertEqual(set(row), {"ts", "hook", "cause", "exit", "duration_ms", "open_fds", "pid"})
+        self.assertEqual(set(row), {"ts", "hook", "cause", "exit", "duration_ms", "open_fds", "pid", "decision_record"})
+        self.assertEqual(row["decision_record"]["reason_code"], "ok")
 
     def test_resource_exception_is_classified_not_swallowed(self) -> None:
         """Test resource exception is recorded then re-raised, never converted to success."""

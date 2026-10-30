@@ -25,7 +25,7 @@ from hooks.scripts.lib.pr_workflow_match import (
     transcript_entries,
 )
 from hooks.scripts.lib.shell_context import opaque_execution
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import git_common as git

@@ -259,6 +259,6 @@ def trace(command: str, outcome: str, reason: str, session_id: str, prefix: str 
         spec = importlib.util.spec_from_file_location("trace_row", Path(__file__).with_name("trace_row.py"))
         module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
         spec.loader.exec_module(module)  # type: ignore[union-attr]
-        return bool(module.append_row(command, outcome, reason, session_id, base=loop_root(prefix)))
+        return bool(module.append_hook_row(command, outcome, reason, session_id, base=loop_root(prefix)))
     except Exception:
         return False
