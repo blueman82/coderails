@@ -81,6 +81,11 @@ class RoleIsolationTests(unittest.TestCase):
         allowed, _ = role_tools("loop-worker")
         self.assertEqual(role_isolation("loop-worker", allowed), [])
 
+    def test_spec_reviewer_retains_its_intentional_empty_capability_policy(self) -> None:
+        """The existing native-read spec role is distinct from an empty guarded policy."""
+        allowed, _ = role_tools("spec-reviewer")
+        self.assertEqual(role_isolation("spec-reviewer", allowed), [])
+
     def test_incomplete_policy_cannot_turn_a_guarded_role_into_a_worker(self) -> None:
         """Missing, empty or contradictory grants must never restore default CLI tools."""
         allowed, _ = role_tools("security-reviewer")
