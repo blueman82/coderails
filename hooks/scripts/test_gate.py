@@ -21,6 +21,7 @@ except ImportError:  # telemetry must never be able to break the hook
         """Telemetry unavailable: no-op."""
 
 
+from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError
 from hooks.scripts.hook_common import output as hook_output
 from hooks.scripts.lib.argv_match import git_invocation, git_prefix
 from hooks.scripts.lib.destructive_patterns import git_output
@@ -84,7 +85,7 @@ def deny(command: str, output: str) -> None:
     )
 
 
-def main() -> int:
+def _main() -> int:
     """Deny a commit only when the configured project test command fails."""
     raw = read_payload()
     if not (command := command_from(raw)):
@@ -124,6 +125,15 @@ def main() -> int:
             deny(test_command, notice)
             return 0
     return 0
+
+
+def main() -> int:
+    """Block a commit if a host resource error prevents a required Git lookup."""
+    try:
+        return _main()
+    except HostResourceError:
+        deny("git commit", RESOURCE_MESSAGE)
+        return 0
 
 
 if __name__ == "__main__":

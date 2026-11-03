@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import errno
 import re
 import subprocess
 from pathlib import Path
 
 from . import argv_match, protected_paths
 from .shell_context import invocations
+
+RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.EAGAIN, errno.ENOMEM})
 
 
 def normalize_ifs(command: str) -> str:
@@ -21,10 +24,12 @@ def normalize_ifs(command: str) -> str:
 
 
 def git_output(cwd: str, *arguments: str) -> str:
-    """Read a Git property, returning empty on repository or command failures."""
+    """Read a Git property; distinguish host exhaustion from an ordinary Git failure."""
     try:
         result = subprocess.run(["git", "-C", cwd, *arguments], capture_output=True, text=True, check=False)
-    except OSError:
+    except OSError as error:
+        if error.errno in RESOURCE_ERRNOS:
+            raise
         return ""
     return result.stdout.strip() if result.returncode == 0 else ""
 

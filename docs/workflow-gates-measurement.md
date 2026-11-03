@@ -1,7 +1,7 @@
 # Workflow gates: measurement note
 
-What is measured for the publication gate (`scripts/lib/publication_gate.py`) and the diff manifest it runs, how to read
-it, and what the numbers cannot tell you.
+What is measured for publication gates, hook outcomes and Stop checks, how to read the observations,
+and what the numbers cannot tell you.
 
 ## Rows
 
@@ -88,6 +88,100 @@ or `content_check_required` means claims of "merged" are not being backed by con
 or absence (for example, a shallow clone lacks the first parent). Neither is a merge-failure count. Restore history or
 choose a new needle before retrying. Wiki candidate/data-gap counts and quality feedback are advisory output, not
 installed-call or enforcement measurements; the Codex quality adapter attempts no external tools.
+
+## Hook and Stop measurements (F2)
+
+Use the [resource and Stop runbook](RUNBOOK.md#host-resource-errors-or-bounded-stop-checks) to diagnose these observations.
+Hook telemetry and graph trace counters are separate records.
+
+### Hook telemetry
+
+Both providers use `hook_telemetry.jsonl`. Directory selection uses this precedence; it does not test writability:
+
+1. `CODERAILS_HOOK_TELEMETRY_DIR`.
+2. The parent of `CLAUDE_DISCIPLINE_LOG`, then the parent of `CODERAILS_DISCIPLINE_LOG`.
+3. `PLUGIN_DATA`.
+4. `~/.claude` for Claude, or `~/.coderails/codex` for Codex.
+
+Before an append, a file larger than 1,000,000 bytes replaces `hook_telemetry.jsonl.1`.
+Only one rotated generation is retained. Rows contain no prompt, payload or exception text.
+
+| Field | Meaning |
+|---|---|
+| `ts` | UTC timestamp, to whole seconds |
+| `hook` | Instrumented hook or child-call label |
+| `cause` | Outcome classification below |
+| `exit` | Hook exit code, negative child return code, or `null` when unspecified |
+| `duration_ms` | Integer elapsed milliseconds inside `run`; direct records default to zero |
+| `open_fds` | Open descriptors in the recording process, excluding the listing handle; `null` if unavailable |
+| `pid` | Recording process ID; a child-signal row still names its recording parent |
+| Optional extras | Only `errno`, `signal`, `error` (exception class) and `diagnostic_hint`; no exception message |
+
+Classification uses typed markers set where output is emitted. `mark_deny` marks a denial;
+`mark_block` marks a Stop block. It does not search message prose or load an external Sentinel component.
+
+| Result seen by `hook_telemetry.run` or `note_child` | `cause` |
+|---|---|
+| Exit 0 with a block marker | `block` |
+| Exit 0 with a deny marker and no block marker | `deny` |
+| Exit 0 without either marker | `ok` |
+| Exit 2 | `block` |
+| Other explicit exit | `exit` |
+| Uncaught `EMFILE`, `ENFILE`, `EAGAIN` or `ENOMEM` exception | `resource` |
+| Other uncaught exception | `exception` |
+| Handled SIGTERM | `sigterm`, exit 143 |
+| Negative child return code | `native_signal`, with signal name and negative `exit` |
+
+A caught resource fault that emits typed deny/block records `deny`/`block`, rather than necessarily `resource`.
+An emitted `request_human_approval` block records `block`; there is no separate approval cause enum.
+Exit 0 alone does not mean an action was allowed. Refusal words alone do not mean an action was blocked.
+A `native_signal` row describes child termination, not the guarded action's result.
+On macOS it adds a crash-report location hint. SIGTERM warns that the action was not gated;
+neither that warning nor a signal row proves enforcement. SIGKILL and crashes can prevent any final row.
+
+### Stop traces and counters
+
+`graph_completion_guard/blocked/stop_row_missing` is a graph trace row, not a hook telemetry cause.
+It records failed completion verification without a consumable stop row. A current typed stop row lives in
+`progress.json.stops[]`; consumption does not itself write that refusal row or prove graph completion.
+
+From the repository root, run the maintained read-only counter:
+
+```sh
+python3 scripts/lib/stop_counters.py --since 2026-11-03T00:00:00+00:00
+```
+
+Omit `--since` for all available rows. The counter uses `CLAUDE_AGENTIC_LOOP_DIR`, or `~/.coderails/agentic-loop`.
+It reads `<root>/*/trace.jsonl` and `<root>/*/*/recovery-trace.jsonl`.
+Output includes `stop_row_missing`, `stale_stop_row`, `convert_ok` and each `convert_refused_<code>` total.
+These are reason-code occurrences, deduplicated by `event_id` within each file. Rows without an event ID can count
+separately; malformed or unreadable rows are skipped. They are not counts of unique actions, completed loops or elapsed time.
+`--since` selects timestamps at or after the supplied ISO string. Use consistent timestamp formats.
+`--trace-json` instead consumes `measure_graph_alignment.py` JSON on stdin and still reads recovery traces.
+It cannot be combined with `--since`; an aggregate cannot be filtered afterward.
+
+### Timing and coverage limits
+
+Codex starts a nine-second aggregate Stop deadline before input reading, under a ten-second hook registration.
+Lookup, inspection, stop consumption, completion verification, status and recovery share that deadline.
+The status helper further caps each child at two seconds and all status work at four seconds, within the earlier deadline.
+Measure the entire entrypoint's wall time, not the sum of independent per-call allowances.
+For each trial, record the exact head/version, provider, input conditions, command, output, exit and wall time.
+One trial below ten seconds does not guarantee every host finishes within that time.
+`duration_ms` excludes process startup and teardown; it is not that full wall-clock measurement.
+
+Telemetry writes fail open and can be lost, rotated or interleaved. Descriptor counts can be unavailable.
+Missing rows do not prove that a hook allowed an action or did not run.
+Correlate typed output, telemetry, graph traces/state and active registration before interpreting a result.
+All files are same-user observations and non-authoritative. Source-only or synthetic checks do not establish installed
+trust, native-provider use, real-account operation, server enforcement or successful native worker recovery.
+The existing integrity opt-in and enforcing publication callers remain separate; see [integrity setup](INTEGRITY-GATE.md#turn-on-the-gate)
+and [publication limits](#limits).
+
+Source: [telemetry implementation](../hooks/scripts/lib/hook_telemetry.py),
+[Stop counter](../scripts/lib/stop_counters.py), [Codex Stop guard](../packages/codex/hooks/scripts/graph_completion_guard.py),
+[Codex hook primitives](../packages/codex/hooks/scripts/hook_common.py),
+[notice timing](../hooks/scripts/lib/stall_notice.py) and [hook registration](../packages/codex/hooks/hooks.json).
 
 ## Limits
 

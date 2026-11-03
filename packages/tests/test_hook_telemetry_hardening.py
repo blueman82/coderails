@@ -212,6 +212,25 @@ class RunBehaviourTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(rows(self.dir)[0]["cause"], "deny")
 
+    def test_codex_stop_block_is_not_recorded_as_ok(self) -> None:
+        """A native Stop decision blocks through JSON while the hook returns zero."""
+        scripts = ROOT / "packages/codex/hooks/scripts"
+        code = (
+            f"import sys;sys.path.insert(0,{str(scripts)!r})\n"
+            "import hook_common as h\n"
+            "from lib import hook_telemetry as t\n"
+            "t.run('stop', lambda: (h.continue_turn('retry'), 0)[1])\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "CODERAILS_HOOK_TELEMETRY_DIR": self.dir},
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout)["decision"], "block")
+        self.assertEqual(rows(self.dir)[0]["cause"], "block")
+
     def test_exit_codes_pass_through_unchanged(self) -> None:
         """Test 0, 1, 2, 3 and None all pass through run() and get a matching cause."""
         for value, cause in ((0, "ok"), (1, "exit"), (2, "block"), (3, "exit"), (None, "ok")):

@@ -7,6 +7,8 @@ import subprocess
 from contextlib import suppress
 from pathlib import Path
 
+from hooks.scripts.hook_common import RESOURCE_ERRNOS, HostResourceError
+
 try:
     from hooks.scripts.lib.hook_telemetry import note_child
 except ImportError:  # telemetry must never be able to break the hook
@@ -34,10 +36,12 @@ def normalize_ifs(command: str) -> str:
 
 
 def git_output(cwd: str, *arguments: str, hook: str = "destructive_patterns") -> str:
-    """Read a Git property, returning empty on repository or command failures."""
+    """Read a Git property; distinguish host exhaustion from an ordinary Git failure."""
     try:
         result = subprocess.run(["git", "-C", cwd, *arguments], capture_output=True, text=True, check=False)
-    except OSError:
+    except OSError as error:
+        if error.errno in RESOURCE_ERRNOS:
+            raise HostResourceError(error.errno, str(error)) from error
         return ""
     note_child(hook, result.returncode)
     return result.stdout.strip() if result.returncode == 0 else ""
