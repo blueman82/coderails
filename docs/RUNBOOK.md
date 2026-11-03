@@ -699,8 +699,8 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
   One shell command can contain several counted runs. The hook locks all affected counters in a fixed order, then
   computes each total. If any run exceeds the ceiling, it blocks the command and charges only the exceeded counters.
   A disk write error can leave a partial count after an earlier counter was written; the command is still blocked.
-  The native add-unit producer still supplies status/manifest without worktree registration; this integration is
-  a separate producer dependency, so fixture mirroring alone does not prove native unit accounting.
+  Both native `add-unit --worktree` CLIs register and persist the unit worktree. Fixture mirroring alone does not
+  prove installed unit accounting.
 - `protected_paths_unreadable`: `policy/protected_paths.json` (both plugin copies) is missing, torn or ill-shaped, so
   `no_edit_on_main` and the in-Bash source-write check refuse every non-owner edit on main/master until it is repaired.
   Owner permission files stay denied on every branch. Keys: `source_extensions`, `plugin_source_globs`, `doc_extensions`,
