@@ -28,7 +28,7 @@ LIST_FIELDS = ("manifest", "lessons", "write_scope", "skip_phases")
 ENVELOPE_FIELDS = ("envelope_version", "dispatch_id", "session_id", "loop_id", "revision", "wave_id", "node_id")
 LEGACY_FIELDS = ("session_id", "loop_id", "revision", "wave_id", "node_id")
 CODES = (  # noqa: SIM905 - keep the shared counter vocabulary compact
-    "dispatch_missing_envelope dispatch_call_id_missing dispatch_unknown_id dispatch_foreign "
+    "dispatch_missing_envelope dispatch_call_id_missing dispatch_unknown_id dispatch_foreign dispatch_foreign_owner "
     "dispatch_stale_revision dispatch_attempt_mismatch dispatch_replayed dispatch_contract_altered "
     "dispatch_sections_missing dispatch_state_unconverted role_mismatch dispatch_unauthorized "
     "dispatch_publication_mismatch dispatch_source_mismatch dispatch_lessons_unavailable dispatch_lessons_stale"
