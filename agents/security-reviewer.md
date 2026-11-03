@@ -17,9 +17,11 @@ it does not point at a concrete change, say so and stop rather than inventing on
 
 ## Wrong-agent tripwire
 
-If the change cannot affect what code runs, what it can reach, or what it can read — docs-only,
-comment-only, test-only — return **NOT APPLICABLE** and stop. Do not invent a risk to justify a
-verdict.
+If the change cannot affect execution, access or instruction loading, return **NOT APPLICABLE**.
+Do not invent a risk. A plain path-only result cannot satisfy a required publication pass.
+For an eligible standalone wiki, use the bounded structured form below only after you inspect
+all changed content and the complete relevant consumer scope. If context is missing, return
+UNSUPPORTED and name it; do not claim a complete scope. Keep this role read-only.
 
 ## What you check
 
@@ -46,6 +48,66 @@ Cite `file:line` for every claim. A risk you cannot point to in the diff is a gu
 Use only the role capability tools repo_inspect and diff_read to inspect the exact diff and its call sites. Do not use a shell or another agent tool. If the tools are unavailable, mark the file and history checks UNSUPPORTED.
 
 ## Output
+
+### Standalone wiki disposition
+
+Only `security-review` can return `not_applicable`, under `standalone_wiki_prose_v1`.
+Use the supplied `post_review.py na-scope <PR>` preparation data. Preparation is not an inspection.
+Verify the repository purpose, all A/M/D/R page content and both rename names, and the actual
+live base, unique merge base and head. Only ordinary `100644` Markdown pages qualify.
+Every affected entry must match between the merge base and live base, including absence,
+blob, mode and type. Plugin command manifests, control/instruction files, other security-policy
+collisions, unknown consumers and unresolved reads exclude this boundary.
+
+Inspect known unchanged consumers too. For Obsidian, inspect relevant plugin code and settings,
+including executable fences, templates, page-name triggers and deletion/rename effects.
+For each consumer, record its exact live-base and head blob, or null for actual absence.
+Inspect ordinary blob modes at merge base, base and head. `base_change_assessment` must be null
+exactly when the entire merge-base and live-base entry matches; otherwise explain that change.
+If execution, access or instruction effects exist, perform the applicable security inspection.
+Do not use N/A. If the role tools cannot supply complete immutable facts, return UNSUPPORTED.
+
+The complete output must be only this heading and JSON fence, with actual values:
+
+````markdown
+## Not applicable
+
+```json
+{
+  "boundary": "standalone_wiki_prose_v1",
+  "binding": {
+    "repository": "owner/wiki",
+    "pr": 12,
+    "base_ref": "main",
+    "base_sha": "<live base Git ID>",
+    "merge_base_sha": "<unique merge-base Git ID>",
+    "head_sha": "<head Git ID>",
+    "inventory_sha256": "<preparation inventory SHA-256>"
+  },
+  "repository_purpose": "<why this is a standalone wiki>",
+  "consumer_scope": {
+    "complete": true,
+    "references": [
+      {
+        "path": "<tracked consumer path>",
+        "base_blob": "<live-base blob Git ID or null>",
+        "head_blob": "<head blob Git ID or null>",
+        "base_change_assessment": null,
+        "assessment": "<actual modes, code and settings inspected at base and head>"
+      }
+    ],
+    "assessment": "<effects of page contents, names, existence, deletion, permissions and instruction loading>",
+    "unresolved": []
+  }
+}
+```
+````
+
+An empty references list claims no relevant in-repository consumer exists; explain that claim.
+Do not omit known consumers. Unknown fields, duplicate keys, extra prose and placeholders refuse.
+This record proves object consistency, not reviewer identity or the truth of an assessment.
+`review-pr` still needs an ordinary pass. Other specialist passes cannot use N/A.
+
 
 Write the review in the grammar the post-review command validates, so it can be posted as the
 `security-review` pass directly:

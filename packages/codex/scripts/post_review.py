@@ -13,12 +13,12 @@ from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.lib import git_common as git
-from scripts.lib import review_artifact, review_passes
+from scripts.lib import review_artifact, review_na, review_passes
 
 
-def validate_summary(path: str | Path) -> None:
+def validate_summary(path: str | Path, name: str = "review-pr") -> None:
     """Require no-findings or all populated severity sections without ambiguity."""
-    review_passes.validate_summary_text(Path(path).read_text())
+    review_passes.validate_summary_text(Path(path).read_text(), name=name)
 
 
 def pr_number(text: str) -> int:
@@ -37,8 +37,8 @@ def sections(summary: Path, extra: list[str]) -> list[tuple[str, str]]:
             raise ValueError(f"--pass must be NAME=FILE with a new lowercase name, got {item!r}")
         found.append((name, Path(filename)))
     texts = [(name, source.read_text()) for name, source in found]
-    for _, text in texts:
-        review_passes.validate_summary_text(text)
+    for name, text in texts:
+        review_passes.validate_summary_text(text, name=name)
     return texts
 
 
@@ -79,10 +79,16 @@ def post(
     if not head:
         raise ValueError("could not resolve the PR head SHA")
     passes = [
-        {"name": n, "verdict": (v := review_passes.verdict_from_summary(t)), "blocking": v == "fail",
+        {"name": n, "verdict": (v := review_passes.verdict_from_summary(t, name=n)), "blocking": v == "fail",
          "summary_sha256": review_passes.summary_sha256(t)}
         for n, t in texts
     ]  # fmt: skip
+    na_passes = [
+        {**item, "scope": review_na.summary(text, name)}
+        for item, (name, text) in zip(passes, texts)
+        if item["verdict"] == "not_applicable"
+    ]
+    review_na.validate_passes(na_passes, str(number), head)
     top = [review_artifact.marker(str(number), head), review_passes.render(head, passes)]
     if compat_count is not None and disposition is not None:
         top.append(review_artifact.compat_line(str(number), head, compat_count, disposition))
@@ -104,12 +110,15 @@ def post(
         print(f"Artifact already posted for SHA {head} — skipping duplicate post.\nExisting: {comments[last]['url']}")
     else:
         for body in ([companion_body] if pending else [pass_body, companion_body]):
+            review_na.validate_passes(na_passes, str(number), head)
             if git.pr_field(str(number), "headRefOid") != head:
                 raise ValueError(f"stale: PR head moved from {head} before posting; review the new head")
             comment = post_body(repo, number, body)
             print(f"Posted: {comment['url']}")
+            review_na.validate_passes(na_passes, str(number), head)
             if git.pr_field(str(number), "headRefOid") != head:
                 raise ValueError(f"stale: PR head moved from {head} during posting; this artifact must not be used")
+    review_na.validate_passes(na_passes, str(number), head)
     if git.pr_field(str(number), "headRefOid") != head:
         raise ValueError(f"stale: PR head moved from {head} during posting; this artifact must not be used")
     return 0  # the Codex copy keeps no provider-local review cache
@@ -139,12 +148,25 @@ def post_main(arguments: list[str]) -> int:
 def main(arguments: list[str] | None = None) -> int:
     """Validate a summary, or post the artifact, without creating provider-local review caches."""
     arguments = sys.argv[1:] if arguments is None else arguments
+    if arguments[:1] == ["na-scope"]:
+        parser = argparse.ArgumentParser(prog="post_review.py na-scope")
+        parser.add_argument("pr", type=pr_number)
+        try:
+            args = parser.parse_args(arguments[1:])
+            print(json.dumps(review_na.prepare(str(args.pr)), sort_keys=True, indent=2))
+            return 0
+        except SystemExit as error:
+            return int(bool(error.code))
+        except (OSError, ValueError, KeyError, git.WorkflowError) as error:
+            print(f"na-scope: {error}", file=sys.stderr)
+            return 1
     if arguments[:1] == ["post"]:
         return post_main(arguments[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=("validate", "compat-line"))
     parser.add_argument("path", help="summary path; the PR number for compat-line")
     parser.add_argument("arguments", nargs="*")
+    parser.add_argument("--pass-name", default="review-pr", help="validate: the summary pass name")
     parser.add_argument("--count", type=int, help="compat-line: compat findings the reviewer reported")
     parser.add_argument("--disposition", help="compat-line: clean-break | preserve-compat")
     try:
@@ -157,7 +179,7 @@ def main(arguments: list[str] | None = None) -> int:
                 raise ValueError("compat-line requires <pr> <sha> --count K --disposition D")
             print(review_artifact.compat_line(args.path, args.arguments[0], args.count, args.disposition))
             return 0
-        validate_summary(Path(args.path))
+        validate_summary(Path(args.path), name=args.pass_name)
     except (OSError, ValueError) as error:
         print(f"validate_summary: {error}", file=sys.stderr)
         return 1

@@ -62,3 +62,46 @@ Omit `--pass NAME=FILE` for passes the diff does not need. Set `COUNT` to the re
 The GitHub PR comment is authoritative. Do not read or write local review caches.
 
 Report the PR number, reviewed SHA, spawned reviewer names and counts, and the posted comment URL.
+
+## Standalone wiki security applicability
+
+The shipped path policy stays in force. Only `security-review` can use the typed
+`not_applicable` result for `standalone_wiki_prose_v1`. `review-pr` must pass.
+Other required specialists must pass. A plain NOT APPLICABLE message is not a pass.
+
+Use the same resolved helper as the posting command:
+
+```bash
+python3 <resolved post_review.py> na-scope <PR>
+python3 <resolved post_review.py> validate <security-summary-file> --pass-name security-review
+```
+
+`na-scope` prints the current binding and complete inventory. It supplies no inspection or authority.
+Give this data and approved source context to `security-reviewer`. The role's structured
+`## Not applicable` JSON form records repository purpose, complete consumer references,
+base/head blobs, base-change assessments, a complete assessment and no unresolved items.
+Do not convert this result into `## No findings`. Post it with the ordinary general summary:
+`post <PR> --summary <general-file> --pass security-review=<security-summary-file>`.
+
+The writer and publication gate independently read the actual remote base branch tip,
+unique merge base and head. Every affected entry must match between merge base and live base.
+Both rename names, deletion sources, added-path absence, blobs, types and modes count.
+Only nonempty A/M/D/R ordinary `100644` Markdown inventories qualify. Control files,
+plugin command manifests and security matches outside root hooks/commands collisions refuse.
+Known unchanged code and settings need consumer assessment too. Consumer base changes need
+an explicit assessment. Missing objects, unresolved context and moved bindings refuse.
+A stale scope needs a new complete inspection. The writer checks before/after each post and reuse.
+The same shared publication gate checks merge helpers and direct publication hooks.
+
+Old readers reject this result. Keep installation on HOLD until the merged release passes
+[Check a release candidate](../../../../docs/RELEASE-CANDIDATE.md) and
+[Installing coderails](../../../../INSTALLATION.md), using paths relative to the release checkout.
+Select explicit new provider versions and matching manifest/marketplace metadata.
+Stop new graph work and drain affected sessions with their owners. Preserve old runtime,
+state/config/eval/proof/retro/Muninn backups with hashes. Unknown quiescence keeps the HOLD.
+Use `release_manifest.py snapshot`, both maintained installer dry runs, then those installers.
+Start new sessions; complete Codex `/hooks` trust. Verify explicit installed paths with
+`release_manifest.py verify` and `installed_parity.py --require-both`; check allowed/refused routes.
+Do not copy helper files into an active version. A new inspection must use both the new writer
+and reader. Preserve old runtime/state together for rollback; these checks do not prove all
+installed behavior or bytecode authenticity. No current wiki pass or install follows from this change.

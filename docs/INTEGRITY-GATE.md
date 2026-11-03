@@ -4,6 +4,15 @@ The gate reads review and eval comments for the exact pull request head. A trust
 
 The workflow uses the built-in `GITHUB_TOKEN`. You do not need a second account, a personal access token, a Mac service, or sudo.
 
+The local publication gate also supports the bounded `security-review` disposition
+`not_applicable` for standalone wiki prose. Its scope binds the actual live base, unique merge
+base, head, complete page inventory and assessed consumers. Base-only affected entry changes refuse.
+The trusted Actions reader still checks the ordinary general-review companion. An `integrity-review`
+status does not prove that N/A scope is valid or that an assessment is true. Old local readers
+reject N/A. Use the qualified release-candidate and maintained installation steps before relying
+on the new writer and reader. Keep installation on HOLD until affected sessions stop and new
+sessions pass installed checks. Do not patch an active reader or disable a gate.
+
 ## What the workflow checks
 
 - The review and eval markers name the current PR and head SHA. GitHub attributes both comments to the live repository owner login.
