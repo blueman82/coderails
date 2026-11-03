@@ -4,7 +4,9 @@ Use this procedure after the source PRs merge. A draft PR and a local test do no
 
 ## Save the old state
 
-Stop new graph work. Record the installed Claude and Codex plugin versions. Save the matching plugin files, workflow configuration, graph state, evaluation and proof files, retrospective files, and Muninn database. Keep the files in one dated backup. Record a SHA-256 hash for each backup file.
+Stop new graph work. Stop all existing Claude and Codex sessions and workers, or wait for them to finish. Before backup or reinstall, confirm that none are running or writing; otherwise, stop the cutover.
+
+Record the installed Claude and Codex plugin versions. Save the matching plugin files, workflow configuration, graph state, evaluation and proof files, retrospective files, and Muninn database. Keep the files in one dated backup. Record a SHA-256 hash for each backup file.
 
 Keep the old plugin code with the old state. A code rollback alone cannot make a converted state readable by an older plugin.
 
