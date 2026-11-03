@@ -13,7 +13,7 @@ from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny,
 from hooks.scripts.lib.destructive_patterns import normalize_ifs, permanent_pattern, source_write, workflow_substitution
 from hooks.scripts.lib.destructive_routes import ROUTES
 from hooks.scripts.lib.shell_context import opaque_execution
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 from scripts.lib.authority_permits import permits
 
 LEASE = re.compile(r"\bgit\b.*\bpush\b.*--force-with-lease\b", re.I)  # the one family permanent_pattern can allow

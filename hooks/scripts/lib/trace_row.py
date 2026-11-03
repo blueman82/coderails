@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
+import importlib.util
 import json
 import os
 import uuid
 from datetime import datetime, timezone
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import Any
 
@@ -34,12 +37,17 @@ def append_row(
     loop_id: str | None = None,
     inputs: dict[str, Any] | None = None,
     base: Path | None = None,
+    *,
+    _hook: bool = False,
 ) -> bool:
     """Append one JSON row with a single O_APPEND write; never raises. Inputs are stored only as sha256."""
     path = trace_path(session_id, base)
     if path is None:
         return False
-    row = {
+    hashed = {
+        k: hashlib.sha256(str(v).encode("utf-8", "backslashreplace")).hexdigest() for k, v in (inputs or {}).items()
+    }
+    row: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "event_id": str(uuid.uuid4()),
         "session_id": session_id,
@@ -48,10 +56,23 @@ def append_row(
         "command": command,
         "outcome": outcome,
         "reason_code": reason_code,
-        "inputs": {
-            k: hashlib.sha256(str(v).encode("utf-8", "backslashreplace")).hexdigest() for k, v in (inputs or {}).items()
-        },
+        "inputs": hashed,
     }
+    if _hook:
+        try:
+            if __package__:
+                hook_decision = importlib.import_module(f"{__package__}.hook_decision")
+            else:
+                spec = importlib.util.spec_from_file_location(
+                    "hook_decision", Path(__file__).with_name("hook_decision.py")
+                )
+                if spec is None or not isinstance(spec.loader, SourceFileLoader):
+                    return False
+                hook_decision = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(hook_decision)
+            row["decision_record"] = hook_decision.make_record(command, outcome, reason_code, hashed)
+        except Exception:  # noqa: BLE001 - malformed or unavailable telemetry never changes a hook decision
+            return False
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
@@ -62,3 +83,16 @@ def append_row(
     except (OSError, UnicodeError):
         return False
     return True
+
+
+def append_hook_row(
+    command: str,
+    outcome: str,
+    reason_code: str,
+    session_id: str,
+    loop_id: str | None = None,
+    inputs: dict[str, Any] | None = None,
+    base: Path | None = None,
+) -> bool:
+    """Append a closed typed hook decision; generic application events use append_row."""
+    return append_row(command, outcome, reason_code, session_id, loop_id, inputs, base, _hook=True)

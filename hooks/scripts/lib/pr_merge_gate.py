@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 from scripts.lib import merge_target, publication_gate
 from scripts.lib.artifact_io import array_value
 from scripts.lib.config import config_path, integrity_enabled, integrity_status_login

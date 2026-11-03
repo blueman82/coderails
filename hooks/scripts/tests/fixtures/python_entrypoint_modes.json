@@ -229,5 +229,8 @@
   "skills/dashboard/scripts/start_dashboard.py": "100755",
   "skills/dashboard/scripts/stop_dashboard.py": "100755",
   "uninstall.py": "100755",
-  "scripts/lib/source_manifest.py": "100644"
+  "scripts/lib/source_manifest.py": "100644",
+  "hooks/scripts/lib/hook_decision.py": "100644",
+  "packages/codex/hooks/scripts/lib/hook_decision.py": "100644",
+  "scripts/gen_hooks.py": "100755"
 }

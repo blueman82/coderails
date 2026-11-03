@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload
 from hooks.scripts.lib.destructive_patterns import git_output
 from hooks.scripts.lib.loop_state_common import log
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 from scripts.lib.config import load_config, wiki_page_types
 from scripts.lib.config_strict import ConfigRejected, strict_settings
 

@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, log, read_payload
 from hooks.scripts.lib.capability_scope import graph_bound, has_text
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 from scripts.lib.config import config_path
 from scripts.lib.config_strict import ConfigRejected, strict_settings
 
@@ -60,4 +60,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        from hooks.scripts.lib.hook_telemetry import run
+    except ImportError:
+        raise SystemExit(main()) from None
+    raise SystemExit(run("subagent_identity_gate", main))
