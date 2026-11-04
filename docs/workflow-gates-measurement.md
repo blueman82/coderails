@@ -1,7 +1,14 @@
-# Workflow gates: measurement note
+# Workflow gate measurement
 
-What is measured for the publication gate (`scripts/lib/publication_gate.py`) and the diff manifest it runs, how to read
-it, and what the numbers cannot tell you.
+This note defines the rows from the publication gate (`scripts/lib/publication_gate.py`) and its diff manifest. It
+also states what these rows cannot prove. The rows come from the same user account as the agent.
+
+| Evidence | Status |
+|---|---|
+| Source | The publication checks, trace writers, and hook reason catalog exist in the candidate plugin. |
+| Local | Focused tests can prove an allowed or refused result for a fixed command and state. |
+| Installed | A fresh trusted provider session must show that the hook ran and refused a negative control. |
+| Server | The GitHub `integrity-review` rule must be activated and checked separately. Source code does not activate it. |
 
 ## Rows
 
@@ -49,6 +56,11 @@ prints `{command: {outcome/reason_code: count}}` for `diff-manifest`, `review-pa
 `COMMANDS` in that file when a unit adds a new row family; `measure_graph_alignment.py` is at its line limit and is not
 edited.
 
+The retained hook telemetry includes a typed decision record with the hook, observed decision, reason code,
+parameters, and repair action. A trace row keeps the detailed emitted reason when one exists. A telemetry cause such
+as `deny` is a coarse observed result, not a second detailed reason. `scripts/gen_hooks.py --check` checks generated
+hook registrations and reason tables. It does not prove that an installed hook ran.
+
 ## How to read it
 
 - Healthy: `ok` rows dominate and `refused` rows are rare and each traceable to a real out-of-scope diff.
@@ -59,7 +71,7 @@ edited.
   `refused/eval_result_mismatch` means a GO artifact contains a P0 that did not pass. Correct the head/evidence,
   rerun and regrade the evals, then re-post with `post_evals.py post <PR> <evals.json>`. These use the existing
   `eval-level/refused/<code>` and `publication/refused/<code>` rows and counters.
-- `warned` rows with no `refused` rows mean the install is on `advisory` (the pre-default behaviour).
+- `warned` rows with no `refused` rows mean the install is on `advisory` (the earlier default behavior).
 - No `publication/*` rows at all proves nothing: it is also what a disabled hook, an untrusted Codex plugin or
   `diff_manifest: off` look like. Push emits `diff-manifest` rows without `publication` rows. Confirm active registration
   and observe a denial through the relevant installed consumer before claiming installed enforcement.
