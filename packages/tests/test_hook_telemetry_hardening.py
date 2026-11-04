@@ -32,7 +32,7 @@ FAIL_OPEN_CALLERS = (
     "check_confidence_labels",
     "check_verify_loop",
     "comment_citation_gate",
-    "crack_on_gate",
+    "autonomous_gate",
     "loop_stall_guard",
     "loop_state_guard",
     "offload_push_guard",

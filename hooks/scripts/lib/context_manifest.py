@@ -42,7 +42,7 @@ ROUTES = (
     ("kw", "git push", ("push",)),
     ("kw", "agentic loop", ("agentic-loop",)),
     ("kw", "spawn a team", ("agentic-loop",)),
-    ("kw", "crack on", ("agentic-loop",)),
+    ("kw", "autonomous", ("agentic-loop",)),
     ("kw", "premortem", ("premortem",)),
     ("kw", "hand off", ("handoff",)),
     ("kw", "ingest", ("wiki-ingest",)),
