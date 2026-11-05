@@ -192,10 +192,30 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `memory_backend_off` | memory.backend is off in the workflow config; set it to muninn (or remove the key) to write typed memory. |
 | `memory_backend_invalid` | memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml. |
 | `muninn_absent` | muninn is not on PATH; install it (the Markdown path is not a fallback). |
-| `muninn_old_ledger` | the D4 adapter expects retired Muninn flags. Keep the result degraded until a current request-bound adapter is designed. |
+| `muninn_old_ledger` | Current consumers require task requests and retained R-id bindings. The standalone legacy CLI still requires retired schema-v2 flags. |
 | `muninn_timeout` | muninn hung past 10s; run `muninn know list` by hand and check store locks. |
 | `muninn_error` | muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and read stderr. |
-| `muninn_bad_output` | the retired D4 write protocol returned no numeric K-id. Inspect current Muninn records without a legacy scope flag. |
+| `muninn_bad_output` | The public request, receipt or current Note response does not match the supported model. Inspect the exact retained request. |
+| `learning_pending` | Muninn has accepted the task request. Keep its R_ ID and check the same request later. |
+| `learning_request_unknown` | Muninn may have accepted a request without returning its R_ ID. Inspect `muninn learn list`; do not submit again. |
+| `learning_request_failed` | The saved Muninn request failed or was cancelled. Inspect it with `muninn learn show R_ID`. |
+| `learning_no_matching_record` | The completed request produced no active note with this exact task and text. Inspect its receipt and notes. |
+| `learning_no_change` | The saved request completed without applying knowledge. It is not a written Note. |
+| `learning_request_mismatch` | Request project, task, source window or receipt identity differs from its binding. |
+| `learning_receipt_unavailable` | The request has no supported committed receipt; acceptance alone is not a save. |
+| `learning_record_changed` | Listed and shown current revisions differ. Read again with the same binding. |
+| `learning_record_expired` | The current Note has reached its timed expiry and cannot be used. |
+| `learning_record_ambiguous` | Several receipts match the exact K-id/revision. No request identity was selected. |
+| `learning_form_unsupported` | This reader supports Notes only; Guide use remains unsupported. |
+| `learning_conditional_use_unsupported` | The Note is saved with conditions or conditional expiry. Legacy dispatch/promotion/render cannot evaluate those conditions; retain its metadata and do not use it unconditionally. |
+| `learning_selection_unavailable` | A required E-id/ref/hash/selected excerpt is unavailable; no cite is asserted. |
+| `learning_evidence_mismatch` | The retained evidence identity, selector, scope or source window does not match. |
+| `learning_source_changed` | A physical source or its exact retained provenance changed; no cite is asserted. |
+| `learning_source_unavailable` | A required live physical original is unavailable; no cite is asserted. |
+| `learning_source_authority` | The complete support set must be live, primary, unflagged, unredacted direct-owner user prompts. Current Muninn has no normal/restricted classification; do not infer one. |
+| `learning_quote_mismatch` | A retained selected excerpt did not pass public quote-check; no cite is asserted. |
+| `learning_read_limit` | The read exceeded a time, reply, record or support limit; results are incomplete. |
+| `learning_project_unavailable` | The calling project directory is unavailable; do not use the graph key. |
 | `muninn_store_missing` | no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once. |
 | `muninn_schema_old` | the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2. |
 | `muninn_schema_incomplete` | the D4 adapter expects retired v2 columns or tables. Inspect the current store with `muninn doctor`, then redesign the adapter. |
@@ -248,11 +268,11 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `order_pending_teardown` | completion saved but local apply or observation failed; retry tick with the same bound source. |
 | `order_retro_validator_unavailable` | schema3 retros need the matching retro_check.py validator; reconcile that source dependency before graduation. |
 | `order_already_ticked` | this session and logical loop were already counted; the tick was skipped (informational). |
-| `no_user_cite` | the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner prompt text>`. |
-| `legacy_uncited` | an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`. |
+| `no_user_cite` | The local diagnostic has no verified current owner citation. A caller quote cannot establish request evidence. |
+| `legacy_uncited` | The legacy import has no retained current request selection; keep it explicitly uncited. |
 | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
 | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
-| `lesson_not_current` | no unambiguous current cited claim exists; inspect conflicting current evidence, or explicitly re-record a retracted/expired lesson with a fresh quote. |
+| `lesson_not_current` | The saved request has no exact eligible current Note. Inspect its retained receipt; a caller quote cannot repair authority. |
 | `retro_not_assembled` | For a new loop, assemble schema-3 retro.json with `retro.py assemble` after the final stop and orders preparation. Preserve the source artifacts. For an old completed loop, see the recovery rule below. |
 | `retro_source_mismatch` | A named source changed after assembly; finish that source and re-assemble. |
 | `retro_decisions_chain_broken` | Restore the damaged decision row; record decisions through the graph CLI. |
@@ -273,6 +293,41 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   `by_reason_code` before and after a change; a rising `muninn_absent` or `refused_approval_needs_reply` is the signal.
   See `docs/decisions/2026-10-05-memory-authoritative.md`.
 
+## Current request and citation boundary
+
+Run decision, order, lesson and handoff commands from the actual mapped project repository.
+The graph-state key directory and plugin checkout are separate paths. Current reads never use `--all-projects`.
+A local saved result needs its retained R-id, source window and project, the same request receipt, and one exact
+current K-id/revision with the expected kind, task and content. Submission or acceptance is not a save.
+
+The reader retains the Note body, reason, conditions, expiry and complete selected support mapping.
+It verifies every required E-id, ref, hash and selection using public `open` and `quote-check` calls.
+The supported citation boundary requires primary, unflagged, unredacted direct-owner user prompts for every support.
+Missing selection, changed originals, wrong scope/authority and blank quotes produce explicit degradation.
+Current Muninn has no normal/restricted classification. `privacy_classification: unknown` states that limit;
+the reported scope, source, redaction and authority checks do not establish semantic privacy classification.
+The standalone legacy adapter keeps its separate normal-only schema-v2 boundary.
+
+Changing only local lesson text does not make an unknown submission safe to repeat.
+If task and source session are unchanged, the earlier unknown observation and claim hash remain intact.
+The result adds `reconciliation_reason: learning_request_unknown`. No window or request is guessed from text.
+A genuinely new authored task or source session can establish its own marker before submission.
+
+A conditional Note can be saved and displayed with its conditions. No free-text condition is assumed true.
+Dispatch, promotion and generated order views return `learning_conditional_use_unsupported` until their consumer
+can retain and enforce conditional use. Guides return `learning_form_unsupported`.
+
+Handoff reads retained local requests first. For extra exact-task decisions, it can read completed RequestView
+metadata through `learn list --state completed`, then filter exact project/task before reading request details.
+The public API has no project/task filter or pagination for that list. Foreign metadata is neither logged nor
+shown. Only an exact K-id/revision receipt join selects a request. Ambiguous joins refuse.
+Each decoded reply is limited to 2 MiB; scans are limited to 100 requests, 100 current records and 100 supports.
+Current request/extra-record reads have a 30-second external-call budget, with individual calls limited to 10 seconds.
+A limit returns `learning_read_limit`; it never becomes an empty successful read. Handoff never enqueues or retries.
+
+Source checks do not close original I native/live/installed/release acceptance. Codex live qualification remains
+separate, and Claude live qualification remains incomplete.
+
 ## Decision recorded locally but Muninn sync degraded
 
 - Symptom: `graph.py record-decision` printed `"exit_code": 3` and a `muninn.reason_code`. The decision was appended
@@ -282,15 +337,16 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
 - Query: `python3 -c "import json;[print(r['seq'],r['muninn']) for r in json.load(open('progress.json'))['decisions_absorbed']]"`,
   or `grep '"command": "decision\.' <agentic-loop dir>/<session_id>/trace.jsonl`. Chain check:
   `python3 -c "import json,sys;sys.path.insert(0,'.');from scripts.lib import decision_record as d;print(d.verify_chain(json.load(open('progress.json'))['decisions_absorbed']))"`.
-- Fix: read the reason in the table above. An authorising prompt of "yes" (`cite_too_short`) is expected to degrade: at
-  teardown run `flush_pending(path, session, transition=..., cite_quote="<a substantive sentence the owner typed>")`;
-  the same `seq` is patched to `written`. Rows are never deleted or rewritten to clear a degrade.
+- Fix: inspect the retained `request_id` with `muninn learn show R_ID` from the mapped project repository.
+  A pending request remains pending until its own committed receipt identifies one exact current Note.
+  `flush-decisions` inspects a retained R-id, source window and project. An unknown result without that binding
+  cannot be submitted again automatically. A caller quote cannot replace selected evidence.
 - Limits: the chain is a cooperating-agent safeguard (a same-user agent can rewrite file and chain), and dropping the
   last row is detected only by the in-file head anchor, which the same agent can also rewrite. Measurement note: `docs/typed-records-measurement.md`.
 
 ## Standing order stored without a cite, or a lesson missing from dispatch
 
-- Symptom: `orders.py record` exited 3 with `muninn.reason_code` (`no_user_cite`, `muninn_absent`, `cite_*`), or
+- Symptom: `orders.py record` exited 3 with `muninn.reason_code` (`learning_pending`, `learning_request_unknown`, `muninn_absent`), or
   `lessons.py query` / `orders.py lessons` exited 3 with `{"degraded": ...}`, or an order you recorded is absent from the
   list. Before completion, `record` stages bound inputs and syncs the cited claim without lifecycle effects. After
   owned progress is durably complete, local apply records recurrence and aging in `orders.json`. A degraded store
@@ -301,11 +357,10 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   is retracted, expired or superseded, reason `lesson_not_current`), or
   `grep -E '"command": "(order|lesson)\.' <agentic-loop dir>/<session_id>/trace.jsonl`. A hand edit of `orders.json` is
   refused with `order_chain_broken` naming the order.
-- Fix: read the reason in the table above. For `no_user_cite` / `legacy_uncited` run
-  `orders.py --dir <repo-key dir> cite <id> --quote "<verbatim words the owner typed>"` from the owning session. To
-  adopt the old hand-written file run `orders.py import-legacy`. It archives an exact byte copy under the next free
-  `standing-orders.legacy*.md` name and retains the source (`archived_to`, `source_retained: true`). Check the ledger
-  and archive; retire the hand-written `standing-orders.md` before `orders.py render`. Use typed orders thereafter.
+- Fix: run `orders.py --dir <repo-key dir> --session <native session> cite <id>` from the mapped project repository.
+  This inspects the retained task request. The deprecated `--quote` input is ignored and disclosed as `quote_ignored`.
+  A timeout without a retained R-id stays unknown across restarts; do not submit it again.
+  Legacy imports remain uncited local diagnostics. They do not create a current request binding.
 - Apply contract: use `--dir <repo-key dir> --session <provider session>` with the separate logical `--loop` copied
   from `<repo-key dir>/<session>/progress.json`. Stage `record` inputs before completion. The native `graph.py
   complete` command prepares orders before the progress lock, rechecks the prepared source under that lock, saves
@@ -317,8 +372,8 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   that lock. If they differ, completion stays pending; repeat the native completion command to render again.
   The Claude Stop guard and Codex `verify-completion` block when the tick or bound generated views are incomplete.
   If render fails on the installed Muninn API, the pending result and later verifier show its actual reason code.
-  The installed Muninn uses a current request-bound API that this D4 adapter does not support. Treat live lesson
-  activation as pending; do not use ledger text as a substitute for a current cited claim.
+  Source support for the current request API does not qualify native dispatch, installed operation or a real memory
+  round trip. Those acceptance checks remain separate. Do not substitute ledger text for a current cited claim.
 - Pre-D4 complete loop: review its retained evidence before the exact-hash admission. The receipt then follows only
   completion bookkeeping; other graph changes still block. See `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 - Completed text replacement: when this session/loop observation already exists, explicit `record` captures

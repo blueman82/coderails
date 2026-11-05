@@ -127,7 +127,7 @@ Never write those files by hand (`render` refuses an unmarked file with `handwri
 orchestrator session (`O="python3 ${CLAUDE_PLUGIN_ROOT}/scripts/lib/orders.py --dir <repo-key dir> --session <session_id>"`).
 Pass the separate logical `loop_id` copied from owned `progress.json`; it is not the session directory name.
 
-1. For each failure mode in this loop's retro, `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop <loop_id> --quote "<verbatim words of the owner's own prompt, 12-300 chars>"`. Add `--scope agnostic` for a lesson that applies
+1. For each failure mode in this loop's retro, `$O record --failure-mode "<mode>" --lesson "<imperative lesson>" --loop <loop_id>`. Add `--scope agnostic` for a lesson that applies
    to any repo. Before completion this stages the observation and any cited sync; it changes no lifecycle counters.
    An id must name the same failure mode and scope. A claim over 500 collapsed characters is refused, never truncated.
 2. After final progress updates and decision flush, record one `graph.py stop --category complete` row. Then run `$O prepare --loop <loop_id>` before assembling the retro. It validates the
@@ -157,18 +157,22 @@ It does not age orders. New loops cannot use it.
 The graduation predicate and the promotion selection are `$O predicate` and `lessons.py predicate`. This step is
 additive-or-recurrence-only: no metric-based removal anywhere.
 
-**Typed lessons (Muninn authoritative).** The cited claim of each order lives in Muninn as a `lesson` tagged `order` and
-`ord-<id>`; the one orders lock covers currentness lookup, tagged-claim reconciliation, bounded sync and local save.
-Current claims are reconciled even for degraded/pending local rows; a failed lookup retains a prior K-id and reports
-degradation. The cite must anchor in a user prompt (`--quote`): with none, the staged or completed local row has
-`muninn.state=degraded` and reason `no_user_cite`, exit 3, and
-`$O cite <id> --quote "<owner's words>"` attaches it later. Exit 3 prints `{"muninn": {... "reason_code": ...}}`:
-**report that reason code in the retro; never skip it silently and never write the lesson to Markdown instead.**
-`memory.backend: off` (reason `memory_backend_off`, exit 0) is the only explicit opt-out. A first-time adoption of an old
-hand-written file is `$O import-legacy` (it archives a byte copy and retains the original). Verify the archive and
-ledger, then retire the hand-written source before generating `standing-orders.md`. Runbook:
-`docs/RUNBOOK.md`, "Standing order stored without a cite"; decision records:
-`docs/decisions/2026-10-05-memory-authoritative.md`, `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
+**Typed lessons (Muninn authoritative).** Run `$O` from the mapped project repository.
+The single orders lock covers its callback and local save; the teardown receipt uses a distinct short lock.
+`record` persists an unknown-before-submit marker, then retains the returned R-id, source window, project and task.
+Pending acceptance is not a written lesson. Current reads require that request's committed receipt and exact current Note.
+`$O cite <id>` inspects the original retained source request even when a different session calls recovery.
+A newly authored task/source session gets its own marker and request. An unknown submission without an R-id is never
+submitted again automatically. A claim-only edit cannot clear that fence; keep the original unknown claim hash
+and report `reconciliation_reason: learning_request_unknown`. The deprecated `--quote` input is ignored and disclosed; it cannot replace selected evidence.
+
+Current lesson output retains revision, conditions, expiry, selected quotes and every support mapping.
+Conditional dispatch/promotion/render remains `learning_conditional_use_unsupported`; do not assume conditions are true.
+Current classification is unknown. Scope, physical source, redaction and owner-authority checks do not supply a classifier.
+Exit 3 carries an explicit reason: **report that reason in the retro; never substitute Markdown or an uncited local claim.**
+`memory.backend: off` is the explicit opt-out. Legacy imports remain local uncited diagnostics.
+Source support does not establish original I native/live/installed/release acceptance. Codex live qualification is separate;
+Claude live remains incomplete. See `docs/RUNBOOK.md`, "Current request and citation boundary".
 
 ## Steps 4 and 5
 

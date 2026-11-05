@@ -5,8 +5,8 @@
 
 Prints one JSON object `{goal, decisions[{id, cite, ...}], done, next_steps, open_questions[], lessons[], degraded[]}`
 that the handoff skill (Step 0) uses instead of re-deriving from conversation memory. Inputs: the provider graph.py
-`summarize` and `inspect` (subprocess), the typed decisions (progress rows plus Muninn's `list`), the standing-order
-lessons (`lessons.joined`) and the proof results. Nothing is written. A source that cannot answer is listed in
+`summarize` and `inspect` (subprocess), exact request-bound current decisions, standing-order lessons and proofs.
+Only diagnostic tracing can append; authoritative inputs and memory are unchanged. An unavailable source is listed in
 `degraded[]` as `{source, reason}` with a reason code from docs/RUNBOOK.md; it is never skipped silently. Exit 0 when
 nothing degraded (or only the explicit `memory_backend_off` opt-out), 3 when a source degraded (the skeleton is still
 printed with everything that could be read), 2 when the state file itself is unreadable.
@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))  # plugin root, so `scripts.lib` resolves as a script
 from scripts.lib import decision_record, lessons, proof_results, proof_suite, teardown_steps  # noqa: E402
 from scripts.lib import memory_adapter as ma  # noqa: E402
+from scripts.lib import memory_request as mr  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
 
 GRAPH = ROOT / "skills/agentic-loop/scripts/graph.py"  # the same relative path in both provider layouts
@@ -61,12 +62,6 @@ def decisions(
     state: dict[str, Any], loop_id: str, session: str, degraded: list[dict[str, str]]
 ) -> list[dict[str, Any]]:
     """Progress rows (with the K-id and cite when Muninn holds them) plus Muninn decisions the rows do not name."""
-    listed = ma.list_records("loop", loop_id, type="decision", session_id=session)
-    records: dict[str, ma.Record] = {}
-    if isinstance(listed, ma.Degraded):
-        degraded.append({"source": "decisions", "reason": listed.reason})
-    else:
-        records = {str(r.id): r for r in listed}
     rows: object = state.get("decisions_absorbed")
     try:
         decision_record.ensure_chain(state)
@@ -75,34 +70,72 @@ def decisions(
         rows = []
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
+    details: dict[str, dict[str, Any]] = {}
     for index, item in enumerate(teardown_steps.as_list(rows), start=1):
         row = cast("dict[str, Any]", item) if isinstance(item, dict) else {"decision": str(item)}
-        muninn: object = row.get("muninn")
-        kid: object = cast("dict[str, Any]", muninn).get("id") if isinstance(muninn, dict) else None
-        found = records.get(str(kid)) if kid else None
-        if not isinstance(listed, ma.Degraded):
-            field = cast("dict[str, Any]", muninn) if isinstance(muninn, dict) else {}
-            if field.get("state") != "written":
-                reason = field.get("reason_code")
-                degraded.append({"source": "decisions", "reason": str(reason) if reason else "decision_not_cited"})
-            elif not kid or not found or not found.cite:
-                degraded.append({"source": "decisions", "reason": "decision_cite_missing"})
-        seen.update([str(kid)] if kid else [])
+        field = cast("dict[str, Any]", row["muninn"]) if isinstance(row.get("muninn"), dict) else {}
+        kid = field.get("id")
+        rid, window, project = (field.get(key) for key in ("request_id", "request_window", "project_id"))
+        observed: mr.Note | mr.Pending | ma.Degraded
+        if isinstance(rid, str) and isinstance(window, dict) and isinstance(project, str):
+            observed = mr.inspect(
+                rid,
+                loop_id,
+                "decision",
+                " ".join(f"{row.get('phase')}: {row.get('decision')}".split()),
+                expected_window=cast("dict[str, Any]", window),
+                expected_project=project,
+                details=details,
+            )
+        else:
+            observed = ma.Degraded(str(field.get("reason_code") or "decision_not_cited"))
+        note = observed if isinstance(observed, mr.Note) else None
+        reason = (
+            "learning_pending"
+            if isinstance(observed, mr.Pending)
+            else observed.reason if isinstance(observed, ma.Degraded) else "ok"
+        )
+        if note is None:
+            degraded.append({"source": "decisions", "reason": reason})
+        if kid:
+            seen.add(str(kid))
         out.append(
             {
-                "id": str(kid) if kid else None,
-                "cite": found.cite if found else None,
+                "id": note.id if note else kid,
+                "cite": note.cite if note else None,
+                "quote": note.quote if note else None,
                 "seq": row.get("seq", index),
                 "phase": row.get("phase"),
                 "text": row.get("decision"),
                 "source": "progress",
+                "reason_code": reason,
+                **(
+                    note.metadata()
+                    if note
+                    else {"state": "pending" if isinstance(observed, mr.Pending) else field.get("state", "degraded")}
+                ),
             }
         )
-    out += [
-        {"id": k, "cite": r.cite, "seq": None, "phase": None, "text": r.claim, "source": "muninn"}
-        for k, r in sorted(records.items())
-        if k not in seen
-    ]
+    refusals: list[str] = []
+    extras = mr.task_notes(loop_id, "decision", details=details, exclude=seen, refusals=refusals)
+    degraded.extend({"source": "decisions", "reason": reason} for reason in refusals)
+    if isinstance(extras, ma.Degraded):
+        if not any(d["reason"] == extras.reason and d["source"] == "decisions" for d in degraded):
+            degraded.append({"source": "decisions", "reason": extras.reason})
+    else:
+        out.extend(
+            {
+                "id": note.id,
+                "cite": note.cite,
+                "quote": note.quote,
+                "seq": None,
+                "phase": None,
+                "text": note.claim,
+                "source": "muninn",
+                **note.metadata(),
+            }
+            for note in extras
+        )
     return out
 
 
@@ -122,7 +155,10 @@ def lesson_rows(repo_dir: Path, degraded: list[dict[str, str]]) -> list[dict[str
     if "degraded" in got:
         degraded.append({"source": "lessons", "reason": str(got["degraded"])})
         return []
-    return cast("list[dict[str, Any]]", lessons.contract(got)["lessons"])
+    rows = cast("list[dict[str, Any]]", got["lessons"])
+    if any(row.get("use_allowed") is False for row in rows):
+        degraded.append({"source": "lessons", "reason": "learning_conditional_use_unsupported"})
+    return [row for row in rows if row["cited"]]
 
 
 def proof_lines(state_dir: Path, state: dict[str, Any], degraded: list[dict[str, str]]) -> tuple[list[str], list[str]]:
@@ -214,6 +250,8 @@ def derive(state_path: Path, session: str) -> tuple[dict[str, Any], int]:
         "lessons": lesson_rows(state_path.parent.parent, degraded),
         "degraded": degraded,
     }
+    degraded = list({(d["source"], d["reason"]): d for d in degraded}.values())
+    skeleton["degraded"] = degraded
     blocking = [d for d in degraded if d["reason"] != "memory_backend_off"]
     ol.trace(
         "handoff.derive",
