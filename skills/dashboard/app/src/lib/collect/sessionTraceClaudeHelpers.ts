@@ -9,7 +9,7 @@ import { mkdir, readdir, rename, rmdir, stat as nodeStat, unlink, writeFile as n
 import { basename, dirname, join, relative, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-export const CLAUDE_PARSER_VERSION = 4;
+export const CLAUDE_PARSER_VERSION = 6;
 const MAX_SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
 export function safeReadError(error: unknown): string {
   if (error instanceof Error && error.message.startsWith("source exceeds trace scan limit:"))
@@ -252,7 +252,8 @@ export function makeEvent(sessionId: string, src: Source, ordinal: number, row: 
     attributes["coderails.parent_join.parent_source_ref"] = JSON.stringify(parentSourceRef);
     attributes["coderails.parent_join.child_source_ref"] = JSON.stringify(sourceRef);
   }
-  if (firstTool?.type === "tool_use" && typeof firstTool.name === "string") attributes["tool.name"] = firstTool.name;
+  if (firstTool?.type === "tool_use" && typeof firstTool.name === "string" &&
+    /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(firstTool.name)) attributes["tool.name"] = firstTool.name;
   const callId = firstTool?.id ?? firstTool?.tool_use_id;
   if (typeof callId === "string") attributes["coderails.native.call_id"] = callId;
   if (ownership) {
@@ -267,6 +268,17 @@ export function makeEvent(sessionId: string, src: Source, ordinal: number, row: 
   const usage = obj(message?.usage);
   if (typeof usage?.input_tokens === "number") attributes["gen_ai.usage.input_tokens"] = usage.input_tokens;
   if (typeof usage?.output_tokens === "number") attributes["gen_ai.usage.output_tokens"] = usage.output_tokens;
+  const cacheRead = usage?.cache_read_input_tokens;
+  const cacheCreated = usage?.cache_creation_input_tokens;
+  if (typeof cacheRead === "number" && Number.isSafeInteger(cacheRead) && cacheRead >= 0)
+    attributes["gen_ai.usage.cache_read_input_tokens"] = cacheRead;
+  if (typeof cacheCreated === "number" && Number.isSafeInteger(cacheCreated) && cacheCreated >= 0)
+    attributes["gen_ai.usage.cache_creation_input_tokens"] = cacheCreated;
+  if (usage) {
+    attributes["coderails.usage.semantics"] = "incremental";
+    if (typeof message?.id === "string" && message.id.trim())
+      attributes["coderails.usage.identity_sha256"] = hash(message.id);
+  }
   const id = hash(`claude:${sessionId}:${src.id}:${ordinal}:${itemIndex}:${name}`);
   const time = nano(row.timestamp);
   attributes["coderails.start_time.basis"] = time === null ? "unavailable" : "source";

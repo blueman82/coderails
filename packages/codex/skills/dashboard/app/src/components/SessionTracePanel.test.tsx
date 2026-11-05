@@ -31,6 +31,27 @@ function response(value: unknown): Response {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("SessionTracePanel", () => {
+  it("shows observation counts for loaded events and the safe source fields", async () => {
+    const digest = "a".repeat(64);
+    const observed = event("function_call_output", 1, { attributes: {
+      "coderails.actor.kind": "orchestrator", "coderails.observation.kind": "read",
+      "coderails.observation.target_kind": "skill", "coderails.observation.target_sha256": digest,
+      "coderails.observation.bytes": 9, "coderails.usage.semantics": "cumulative" } });
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const path = new URL(input, "http://localhost");
+      if (path.pathname === "/api/sessions") return response({ sessions: [{ nativeSessionId: FIRST,
+        provider: "codex", projectLabel: "p", displayLabel: "first",
+        lastActivity: { value: null, basis: "unavailable" } }] });
+      return response({ events: [observed], nextCursor: null, complete: true });
+    }));
+    render(<SessionTracePanel token="secret" />);
+    await screen.findByRole("option", { name: /first/ });
+    fireEvent.change(screen.getByLabelText("Native session"), { target: { value: FIRST } });
+    await screen.findByText(/Observations in loaded events: invocation 0 · read 1 · failed read 0 · mention 0 · uncertain 0/);
+    expect(screen.getByText(/Observation: read; target: skill;/)).toBeTruthy();
+    expect(screen.getByText(new RegExp(digest))).toBeTruthy();
+  });
+
   it("shows the named graph job beside its stable node ID", async () => {
     const traceEvent = event("worker_turn", 1, { attributes: {
       "coderails.actor.kind": "worker", "coderails.node.name": "Builder",

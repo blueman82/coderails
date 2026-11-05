@@ -4,7 +4,7 @@ import { basename, join, relative, sep } from "node:path";
 import { TRACE_SCHEMA_VERSION, record, type SourceRef, type TraceAttribute, type TraceCollectionDeps, type TraceEvent } from "./traceSchema";
 import { nodeAttributes } from "./nodeDisplay";
 
-export const CODEX_PARSER_VERSION = 5;
+export const CODEX_PARSER_VERSION = 7;
 export const MAX_SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
 export function safeReadError(error: unknown): string {
   return error instanceof Error && error.message.startsWith("source exceeds trace scan limit:")
@@ -242,6 +242,15 @@ export function nativeEvent(sessionId: string, src: NativeSource, ordinal: numbe
   const usage = obj(obj(item.info)?.total_token_usage);
   if (typeof usage?.input_tokens === "number") attributes["gen_ai.usage.input_tokens"] = usage.input_tokens;
   if (typeof usage?.output_tokens === "number") attributes["gen_ai.usage.output_tokens"] = usage.output_tokens;
+  if (usage && item.type === "token_count") {
+    attributes["coderails.usage.semantics"] = "cumulative";
+    const cacheRead = usage.cached_input_tokens ?? usage.cache_read_input_tokens;
+    if (typeof cacheRead === "number" && Number.isSafeInteger(cacheRead) && cacheRead >= 0)
+      attributes["gen_ai.usage.cache_read_input_tokens"] = cacheRead;
+    const cacheCreated = usage.cache_creation_input_tokens;
+    if (typeof cacheCreated === "number" && Number.isSafeInteger(cacheCreated) && cacheCreated >= 0)
+      attributes["gen_ai.usage.cache_creation_input_tokens"] = cacheCreated;
+  }
   const duration = item.duration_ms ?? nested?.duration_ms;
   if (typeof duration === "number" && Number.isFinite(duration)) {
     attributes["coderails.duration_ms"] = duration;
