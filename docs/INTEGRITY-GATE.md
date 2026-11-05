@@ -6,7 +6,10 @@ The workflow uses the built-in `GITHUB_TOKEN`. You do not need a second account,
 
 The local publication gate also supports the bounded `security-review` disposition
 `not_applicable` for standalone wiki prose. Its scope binds the actual live base, unique merge
-base, head, complete page inventory and assessed consumers. Base-only affected entry changes refuse.
+base, head, complete page inventory and the full tracked context digest. Explicit path groups must cover
+all context outside authored endpoints, including unchanged Markdown and plugin files. A missing
+consumer path refuses even if other groups remain correct. These are cooperating-agent checks;
+coverage does not prove that the inspection text is true. Base-only affected entry changes refuse.
 The trusted Actions reader still checks the ordinary general-review companion. An `integrity-review`
 status does not prove that N/A scope is valid or that an assessment is true. Old local readers
 reject N/A. Use the qualified release-candidate and maintained installation steps before relying

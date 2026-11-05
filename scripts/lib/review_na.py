@@ -14,37 +14,45 @@ from collections.abc import Sequence
 from typing import Any, cast
 from urllib.parse import quote
 
-BOUNDARY = "standalone_wiki_prose_v1"
+from . import review_na_context
+
+BOUNDARY = "standalone_wiki_prose_v2"
+MAX_INPUT_BYTES = 131072
+MAX_COMMENT_CHARS = 65536
 OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
-CONTROL_DIRS = {
-    ".git",
-    ".claude",
-    ".codex",
-    ".agents",
-    ".claude-plugin",
-    ".codex-plugin",
-    ".coderails",
-    ".github",
-    ".obsidian",
-    "agents",
-    "capabilities",
-    "policy",
-    "instructions",
-}
-CONTROL_NAMES = {
-    "agents.md",
-    "claude.md",
-    "skill.md",
-    ".mcp.json",
-    "hooks.json",
-    "plugin.json",
-    "marketplace.json",
-    "config.schema.json",
-    "workflow.config.yaml",
-    "workflow.config.yml",
-    "workflow.config.json",
-    "workflow.config.toml",
-}
+CONTROL_DIRS = frozenset(
+    [
+        ".git",
+        ".claude",
+        ".codex",
+        ".agents",
+        ".claude-plugin",
+        ".codex-plugin",
+        ".coderails",
+        ".github",
+        ".obsidian",
+        "agents",
+        "capabilities",
+        "policy",
+        "instructions",
+    ]
+)
+CONTROL_NAMES = frozenset(
+    [
+        "agents.md",
+        "claude.md",
+        "skill.md",
+        ".mcp.json",
+        "hooks.json",
+        "plugin.json",
+        "marketplace.json",
+        "config.schema.json",
+        "workflow.config.yaml",
+        "workflow.config.yml",
+        "workflow.config.json",
+        "workflow.config.toml",
+    ]
+)
 PLUGINS = (".claude-plugin/plugin.json", ".codex-plugin/plugin.json")
 
 
@@ -89,6 +97,8 @@ def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def summary(text: str, name: str) -> dict[str, Any]:
     """Parse the only publishable N/A summary, for security-review alone."""
+    if len(text.encode("utf-8")) > MAX_INPUT_BYTES:
+        raise ValueError("N/A summary exceeds input byte limit")
     match = re.fullmatch(r"\s*## Not applicable\r?\n\s*```json\r?\n(.*?)\r?\n```\s*", text, re.S)
     if name != "security-review" or match is None:
         raise ValueError("N/A requires the exact security-review summary")
@@ -103,7 +113,17 @@ def validate_schema(value: object) -> None:
     if scope["boundary"] != BOUNDARY or not _text(scope["repository_purpose"]):
         raise ValueError("N/A boundary or purpose invalid")
     binding = _object(
-        scope["binding"], {"repository", "pr", "base_ref", "base_sha", "merge_base_sha", "head_sha", "inventory_sha256"}
+        scope["binding"],
+        {
+            "repository",
+            "pr",
+            "base_ref",
+            "base_sha",
+            "merge_base_sha",
+            "head_sha",
+            "inventory_sha256",
+            "context_inventory_sha256",
+        },
     )
     if (
         not isinstance(binding["repository"], str)
@@ -112,8 +132,10 @@ def validate_schema(value: object) -> None:
         or binding["pr"] < 1
         or not _text(binding["base_ref"])
         or not all(_oid(binding[field]) for field in ("base_sha", "merge_base_sha", "head_sha"))
-        or not isinstance(binding["inventory_sha256"], str)
-        or re.fullmatch(r"[0-9a-f]{64}", binding["inventory_sha256"]) is None
+        or any(
+            not isinstance(binding[field], str) or re.fullmatch(r"[0-9a-f]{64}", binding[field]) is None
+            for field in ("inventory_sha256", "context_inventory_sha256")
+        )
     ):
         raise ValueError("N/A binding invalid")
     consumers = _object(scope["consumer_scope"], {"complete", "references", "assessment", "unresolved"})
@@ -126,17 +148,19 @@ def validate_schema(value: object) -> None:
         raise ValueError("N/A consumer scope incomplete")
     paths: set[str] = set()
     for raw in cast(list[object], consumers["references"]):
-        ref = _object(raw, {"path", "base_blob", "head_blob", "base_change_assessment", "assessment"})
-        path = unicodedata.normalize("NFC", _path(ref["path"])).casefold()
-        if path in paths or not _text(ref["assessment"]):
-            raise ValueError("N/A consumer reference invalid")
-        paths.add(path)
+        ref = _object(raw, {"paths", "base_change_assessment", "assessment"})
         if (
-            not any(ref[field] is not None for field in ("base_blob", "head_blob"))
-            or any(ref[field] is not None and not _oid(ref[field]) for field in ("base_blob", "head_blob"))
+            not isinstance(ref["paths"], list)
+            or not ref["paths"]
+            or not _text(ref["assessment"])
             or (ref["base_change_assessment"] is not None and not _text(ref["base_change_assessment"]))
         ):
-            raise ValueError("N/A consumer facts invalid")
+            raise ValueError("N/A consumer group invalid")
+        for value in cast(list[object], ref["paths"]):
+            path = unicodedata.normalize("NFC", _path(value)).casefold()
+            if path in paths:
+                raise ValueError("N/A consumer path duplicate or ambiguous")
+            paths.add(path)
 
 
 def inventory(raw: str) -> list[dict[str, Any]]:
@@ -218,8 +242,8 @@ def _eligible(rows: list[dict[str, Any]]) -> None:
                     raise ValueError("N/A security policy collision ineligible: " + path)
 
 
-def prepare(number: str, head: str = "") -> dict[str, Any]:
-    """Resolve live remote identity and complete authored scope; preparation supplies no inspection."""
+def _resolve(number: str, head: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Resolve current remote identity and read each unique immutable tree one time."""
     from . import git_common as git
 
     if re.fullmatch(r"[1-9][0-9]*", number) is None:
@@ -259,9 +283,26 @@ def prepare(number: str, head: str = "") -> dict[str, Any]:
     if len(bases) != 1 or not _oid(bases[0]):
         raise ValueError("N/A unique merge base unavailable")
     merge_base = bases[0]
-    trees = {sha: _trees(sha) for sha in {merge_base, base, head}}
+    binding: dict[str, Any] = {
+        "repository": repository,
+        "pr": int(number),
+        "base_ref": pr["base_ref"],
+        "base_sha": base,
+        "merge_base_sha": merge_base,
+        "head_sha": head,
+    }
+    unique = {sha: _trees(sha) for sha in {merge_base, base, head}}
+    trees = {name: unique[binding[name + "_sha"]] for name in ("merge_base", "base", "head")}
     if any(path in tree for tree in trees.values() for path in PLUGINS):
         raise ValueError("N/A command plugin repository ineligible")
+    return binding, trees
+
+
+def _facts(number: str, head: str = "") -> dict[str, Any]:
+    """Complete current facts shared by preparation and every live N/A check."""
+    from . import git_common as git
+
+    binding, trees = _resolve(number, head)
     raw = git.run(
         "git",
         "--no-replace-objects",
@@ -274,61 +315,68 @@ def prepare(number: str, head: str = "") -> dict[str, Any]:
         "--no-textconv",
         "--ignore-submodules=none",
         "--no-relative",
-        merge_base,
-        head,
+        binding["merge_base_sha"],
+        binding["head_sha"],
         check=True,
     ).stdout
     rows = inventory(raw)
     _eligible(rows)
+    objects: set[str] = set()
     for row in rows:
         for endpoint in (row["old"], row["new"]):
-            if endpoint is None:
-                continue
-            path = endpoint["path"]
-            if trees[base].get(path) != trees[merge_base].get(path):
-                raise ValueError("N/A affected entry changed on live base: " + path)
-            git.run("git", "--no-replace-objects", "cat-file", "-e", endpoint["blob"] + "^{blob}", check=True)
-    canonical = json.dumps(rows, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    return {
-        "binding": {
-            "repository": repository,
-            "pr": int(number),
-            "base_ref": pr["base_ref"],
-            "base_sha": base,
-            "merge_base_sha": merge_base,
-            "head_sha": head,
-            "inventory_sha256": hashlib.sha256(canonical).hexdigest(),
-        },
-        "inventory": rows,
-    }
+            if endpoint:
+                path = endpoint["path"]
+                if trees["base"].get(path) != trees["merge_base"].get(path):
+                    raise ValueError("N/A affected entry changed on live base: " + path)
+                objects.add(endpoint["blob"])
+    context = review_na_context.inventory(trees, rows)
+    for row in context:
+        _path(row["path"])
+    objects.update(entry["blob"] for row in context for name, entry in row.items() if name != "path" and entry)
+    review_na_context.check_blobs(objects)
+    for name, data in (("inventory_sha256", rows), ("context_inventory_sha256", context)):
+        canonical = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        binding[name] = hashlib.sha256(canonical).hexdigest()
+    return {"boundary": BOUNDARY, "binding": binding, "inventory": rows, "context_inventory": context}
+
+
+def prepare(number: str, head: str = "") -> dict[str, Any]:
+    """Return complete context metadata without supplying inspection text."""
+    facts = _facts(number, head)
+    facts["context_inventory"] = review_na_context.compact(facts["context_inventory"])
+    return facts
+
+
+def preparation_json(number: str) -> str:
+    """Bound compact metadata plus the CLI's final LF without truncating its context inventory."""
+    text = json.dumps(prepare(number), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    if len(text.encode("utf-8")) + 1 > MAX_INPUT_BYTES:
+        raise ValueError("N/A preparation exceeds input byte limit")
+    return text
+
+
+def check_comment_bodies(*bodies: str) -> None:
+    """Refuse oversized complete comment bodies before a write or reuse."""
+    if any(len(body) > MAX_COMMENT_CHARS for body in bodies):
+        raise ValueError("review comment exceeds 65536-character limit")
 
 
 def validate(scope: object, number: str, head: str) -> None:
-    """Re-derive every binding and consumer fact; fetch, parse and object errors propagate closed."""
-    from . import git_common as git
-
+    """Require exact context coverage, actual immutable entries and base-change group semantics."""
     validate_schema(scope)
     data = cast(dict[str, Any], scope)
-    facts = prepare(number, head)
+    facts = _facts(number, head)
     if data["binding"] != facts["binding"]:
         raise ValueError("stale: N/A binding differs from current PR facts")
-    binding = facts["binding"]
-    trees = {key: _trees(binding[key]) for key in ("merge_base_sha", "base_sha", "head_sha")}
-    for ref in data["consumer_scope"]["references"]:
-        path = ref["path"]
-        for tree in trees.values():
-            entry = tree.get(path)
-            if entry:
-                if entry["type"] != "blob" or entry["mode"] not in ("100644", "100755"):
-                    raise ValueError("N/A consumer type or mode invalid: " + path)
-                git.run("git", "--no-replace-objects", "cat-file", "-e", entry["blob"] + "^{blob}", check=True)
-        for side, key in (("base", "base_sha"), ("head", "head_sha")):
-            actual = trees[key].get(path)
-            if ref[side + "_blob"] != (actual["blob"] if actual else None):
-                raise ValueError("N/A consumer blob differs: " + path)
-        changed = trees["base_sha"].get(path) != trees["merge_base_sha"].get(path)
-        if changed != (ref["base_change_assessment"] is not None):
-            raise ValueError("N/A consumer base change assessment invalid: " + path)
+    context = {row["path"]: row for row in facts["context_inventory"]}
+    refs = data["consumer_scope"]["references"]
+    covered = {path for ref in refs for path in ref["paths"]}
+    if covered != set(context):
+        raise ValueError("N/A context coverage differs from complete tracked inventory")
+    for ref in refs:
+        changed = {context[path]["base"] != context[path]["merge_base"] for path in ref["paths"]}
+        if changed != {ref["base_change_assessment"] is not None}:
+            raise ValueError("N/A consumer base change assessment invalid")
 
 
 def validate_passes(passes: Sequence[dict[str, Any]], number: str, head: str) -> None:

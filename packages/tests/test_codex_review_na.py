@@ -13,6 +13,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from packages.tests import test_codex_review_passes as fixture  # noqa: E402
+from packages.tests.eval_artifact_fixture import write_comment  # noqa: E402
 from packages.tests.test_codex_review_passes import (  # noqa: E402
     CLEAN,
     CODEX,
@@ -24,6 +25,24 @@ from packages.tests.test_codex_review_passes import (  # noqa: E402
     review_valid,
     shim,
 )
+
+
+def add_context(repo: fixture.Repo) -> None:
+    """Build an independent unchanged access-input canary below the authored page addition."""
+    git_cmd(repo.dir, "checkout", "-q", "main")
+    (repo.dir / "access-input.py").write_text("INERT_INPUT = 'page names control access'\n")
+    git_cmd(repo.dir, "add", ".")
+    git_cmd(repo.dir, "commit", "-qm", "context baseline")
+    repo.base = git_cmd(repo.dir, "rev-parse", "HEAD").strip()
+    git_cmd(repo.dir, "update-ref", "refs/remotes/origin/main", repo.base)
+    git_cmd(repo.dir, "checkout", "-qb", "context-pages")
+    target = repo.dir / repo.touched
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("Only explanatory prose changes.\n")
+    git_cmd(repo.dir, "add", ".")
+    git_cmd(repo.dir, "commit", "-qm", "page addition")
+    repo.sha = git_cmd(repo.dir, "rev-parse", "HEAD").strip()
+    repo.eval_file = write_comment(repo.tmp, repo.sha, repo.eval_level, signing_keys=repo.keys, frozen_sha=repo.base)
 
 
 class WikiPostTests(fixture.Repo):
@@ -52,12 +71,18 @@ class WikiPostTests(fixture.Repo):
         self.assertEqual(prepared["binding"]["base_sha"], self.base)
         self.assertEqual(prepared["inventory"][0]["status"], "A")
         scope: dict[str, Any] = {
-            "boundary": "standalone_wiki_prose_v1",
+            "boundary": "standalone_wiki_prose_v2",
             "binding": prepared["binding"],
             "repository_purpose": "Standalone prose wiki.",
             "consumer_scope": {
                 "complete": True,
-                "references": [],
+                "references": [
+                    {
+                        "paths": ["README.md"],
+                        "base_change_assessment": None,
+                        "assessment": "The unchanged README only displays explanatory prose.",
+                    }
+                ],
                 "unresolved": [],
                 "assessment": "No code, config or instruction consumer exists here; all page operations are inert.",
             },
@@ -129,6 +154,92 @@ class WikiPostTests(fixture.Repo):
                         sum("-F" in json.loads(line) for line in log.read_text().splitlines()), posted_count
                     )
 
+    def test_both_writers_refuse_partial_context_omission(self) -> None:
+        """The API is never written when one context path is removed from an otherwise complete claim."""
+        add_context(self)
+        clean = self.tmp / "clean.md"
+        clean.write_text(CLEAN)
+        for provider in ("claude", "codex"):
+            na = self.scope_file(provider)
+            claim = json.loads(na.read_text().split("```json\n")[1].split("\n```")[0])
+            claim["consumer_scope"]["references"][0]["paths"].append("access-input.py")
+            na.write_text("## Not applicable\n```json\n" + json.dumps(claim) + "\n```\n")
+            positive, _, _ = self.post(
+                "12", "--summary", str(clean), "--pass", f"security-review={na}", provider=provider
+            )
+            self.assertEqual(positive.returncode, 0, positive.stderr)
+            claim["consumer_scope"]["references"][0]["paths"].remove("access-input.py")
+            na.write_text("## Not applicable\n```json\n" + json.dumps(claim) + "\n```\n")
+            denied, log, _ = self.post(
+                "12", "--summary", str(clean), "--pass", f"security-review={na}", provider=provider
+            )
+            self.assertNotEqual(denied.returncode, 0)
+            self.assertIn("context coverage", denied.stderr)
+            self.assertFalse(any("-F" in json.loads(line) for line in log.read_text().splitlines()))
+
+    def test_both_writers_refuse_the_complete_oversized_body_before_posting(self) -> None:
+        """A valid large general summary cannot exceed the API body limit when paired with N/A."""
+        general = self.tmp / "large.md"
+        general.write_text("## Critical\nNone\n## Important\n- " + "x" * 65536 + "\n## Suggestions\nNone\n")
+        for provider in ("claude", "codex"):
+            na = self.scope_file(provider)
+            denied, log, _ = self.post(
+                "12", "--summary", str(general), "--pass", f"security-review={na}", provider=provider
+            )
+            self.assertNotEqual(denied.returncode, 0)
+            self.assertIn("65536", denied.stderr)
+            self.assertFalse(any("-F" in json.loads(line) for line in log.read_text().splitlines()))
+
+    def test_preparation_limit_includes_the_actual_cli_line_ending(self) -> None:
+        """Both actual entrypoints bound emitted UTF-8 bytes, not just their upstream JSON string."""
+        driver = """import json,runpy,sys
+from pathlib import Path
+from unittest.mock import patch
+script, payload = Path(sys.argv[1]), Path(sys.argv[2])
+sys.path.insert(0, str(script.parent.parent))
+from scripts.lib import review_na
+with patch.object(review_na, 'prepare', return_value=json.loads(payload.read_text())):
+    sys.argv = [str(script), 'na-scope', '12']
+    runpy.run_path(str(script), run_name='__main__')
+"""
+        # Only the upstream metadata producer is controlled; serialization and CLI output remain real.
+        row: dict[str, Any] = {
+            "path": "ctx/0000.md",
+            "mode": "100644",
+            "type": "blob",
+            "blob": "a" * 40,
+            "at": ["merge_base", "base", "head"],
+        }
+
+        def encode(value: object) -> bytes:
+            """Encode controlled metadata independently of the production helper."""
+            return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+        for target in (131071, 131072, 131073):
+            count = (target - len(encode({"context_inventory": []})) + 1) // (len(encode(row)) + 1)
+            rows = [{**row, "path": f"ctx/{index:04d}.md"} for index in range(count)]
+            payload = {"context_inventory": rows}
+            padding = target - len(encode(payload))
+            rows[-1]["path"] += "é" * (padding // 2) + "x" * (padding % 2)
+            raw = encode(payload)
+            self.assertEqual(len(raw), target)
+            path = self.tmp / "bounded-metadata.json"
+            path.write_bytes(raw)
+            for provider in (ROOT, CODEX):
+                with self.subTest(provider=provider, target=target):
+                    result = subprocess.run(
+                        [sys.executable, "-c", driver, str(provider / "scripts/post_review.py"), str(path)],
+                        capture_output=True,
+                    )
+                    if target == 131071:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(len(result.stdout), 131072)
+                        self.assertEqual(json.loads(result.stdout), payload)
+                    else:
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertEqual(result.stdout, b"")
+                        self.assertIn(b"input byte limit", result.stderr)
+
 
 class WikiHookTests(fixture.Repo):
     """The actual Codex direct publication hook independently reads a posted N/A pair."""
@@ -136,6 +247,31 @@ class WikiHookTests(fixture.Repo):
     touched = "hooks/page.md"
     reason = fixture.HookTests.reason
     scope_file = WikiPostTests.scope_file
+
+    def test_direct_hook_refuses_partial_context_omission(self) -> None:
+        """The real full gate recomputes coverage after a correctly hashed claim omits one consumer."""
+        add_context(self)
+        path = self.scope_file("codex")
+        claim = json.loads(path.read_text().split("```json\n")[1].split("\n```")[0])
+        claim["binding"]["pr"] = 7
+        group = claim["consumer_scope"]["references"][0]
+        group["paths"].append("access-input.py")
+        for omit in (False, True):
+            if omit:
+                group["paths"].remove("access-input.py")
+            text = "## Not applicable\n```json\n" + json.dumps(claim) + "\n```\n"
+            digest = hashlib.sha256(text.strip().encode()).hexdigest()
+            na = {"name": "security-review", "verdict": "not_applicable", "blocking": False, "summary_sha256": digest}
+            given = {
+                **artifact(entry("review-pr")),
+                "FAKE_PASSES": json.dumps([entry("review-pr"), na]),
+                "FAKE_TAIL": CLEAN + "\n<!-- coderails-review-pass security-review -->\n" + text,
+            }
+            reason = self.reason(**given)
+            self.assertTrue(
+                reason.startswith("required_review_not_applicable_invalid:security-review") if omit else not reason,
+                reason,
+            )
 
     def test_direct_hook_accepts_bound_na_and_refuses_stale_or_nonsecurity_na(self) -> None:
         """Extending the enum alone must not turn unknown dispositions into publication permission."""

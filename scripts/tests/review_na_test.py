@@ -92,18 +92,15 @@ class WikiNaTests(unittest.TestCase):
     def scope(self) -> dict[str, Any]:
         """Use the real preparation output, then supply the independent consumer assessment."""
         facts = review_na.prepare("7", self.head)
-        blob = self.git("rev-parse", self.base + ":.obsidian/plugins/view/main.js").strip()
         return {
-            "boundary": "standalone_wiki_prose_v1",
+            "boundary": "standalone_wiki_prose_v2",
             "binding": facts["binding"],
             "repository_purpose": "Standalone prose wiki.",
             "consumer_scope": {
                 "complete": True,
                 "references": [
                     {
-                        "path": ".obsidian/plugins/view/main.js",
-                        "base_blob": blob,
-                        "head_blob": blob,
+                        "paths": [".obsidian/plugins/view/main.js"],
                         "base_change_assessment": None,
                         "assessment": "Both ordinary blob modes and code display prose only.",
                     }
@@ -202,7 +199,6 @@ class WikiNaTests(unittest.TestCase):
             review_na.validate(fresh, "7", self.head)
         # Literal edits model a reviewer who read the new base consumer, not a writer waiver.
         reference = fresh["consumer_scope"]["references"][0]
-        reference["base_blob"] = self.git("rev-parse", self.live_base + ":.obsidian/plugins/view/main.js").strip()
         reference["base_change_assessment"] = "Base change only changes display text; page operations remain inert."
         review_na.validate(fresh, "7", self.head)
         with self.assertRaisesRegex(ValueError, "stale"):
@@ -324,10 +320,10 @@ class WikiNaTests(unittest.TestCase):
         """Case aliases cannot describe two independent consumers on supported case-insensitive checkouts."""
         scope = self.scope()
         reference = scope["consumer_scope"]["references"][0]
-        scope["consumer_scope"]["references"].append({**reference, "path": reference["path"].upper()})
+        scope["consumer_scope"]["references"].append({**reference, "paths": [reference["paths"][0].upper()]})
         with self.assertRaises(ValueError):
             review_na.validate_schema(scope)
-        scope["consumer_scope"]["references"] = [{**reference, "path": "nested/.GIT/config"}]
+        scope["consumer_scope"]["references"] = [{**reference, "paths": ["nested/.GIT/config"]}]
         with self.assertRaises(ValueError):
             review_na.validate_schema(scope)
 

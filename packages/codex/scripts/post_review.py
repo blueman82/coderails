@@ -96,6 +96,7 @@ def post(
     login = git.output("gh", "api", "user", "-q", ".login", check=True)
     pass_body = "\n".join(top + [review_passes.tail(texts)])
     companion_body = "\n".join([top[0], *top[2:], texts[0][1]])
+    review_na.check_comment_bodies(pass_body, companion_body)
     comments = comments_for(repo, number, login)
     positions = [
         index
@@ -153,7 +154,7 @@ def main(arguments: list[str] | None = None) -> int:
         parser.add_argument("pr", type=pr_number)
         try:
             args = parser.parse_args(arguments[1:])
-            print(json.dumps(review_na.prepare(str(args.pr)), sort_keys=True, indent=2))
+            print(review_na.preparation_json(str(args.pr)))
             return 0
         except SystemExit as error:
             return int(bool(error.code))

@@ -66,7 +66,7 @@ Report the PR number, reviewed SHA, spawned reviewer names and counts, and the p
 ## Standalone wiki security applicability
 
 The shipped path policy stays in force. Only `security-review` can use the typed
-`not_applicable` result for `standalone_wiki_prose_v1`. `review-pr` must pass.
+`not_applicable` result for `standalone_wiki_prose_v2`. `review-pr` must pass.
 Other required specialists must pass. A plain NOT APPLICABLE message is not a pass.
 
 Use the same resolved helper as the posting command:
@@ -76,10 +76,16 @@ python3 <resolved post_review.py> na-scope <PR>
 python3 <resolved post_review.py> validate <security-summary-file> --pass-name security-review
 ```
 
-`na-scope` prints the current binding and complete inventory. It supplies no inspection or authority.
+`na-scope` prints compact current binding, authored inventory and complete context metadata.
+It supplies no inspection or authority. All tracked non-tree paths at merge base, live base and
+head count as context, except the authored page endpoints. Include unchanged Markdown and assets;
+filenames do not prove inertness. Identical path/entry facts may share explicit tree-membership tags.
 Give this data and approved source context to `security-reviewer`. The role's structured
-`## Not applicable` JSON form records repository purpose, complete consumer references,
-base/head blobs, base-change assessments, a complete assessment and no unresolved items.
+`## Not applicable` JSON form records repository purpose, the complete context digest and
+explicit assessment path groups. Every context path must occur in one group, with no omissions,
+duplicates, foreign paths or glob selectors. Each group must contain only unchanged base entries
+or only changed base entries; the latter need a nonempty base-change assessment. Exact immutable
+mode/type/blob facts at all three trees enter the digest. Keep complete=true and unresolved=[].
 Do not convert this result into `## No findings`. Post it with the ordinary general summary:
 `post <PR> --summary <general-file> --pass security-review=<security-summary-file>`.
 
@@ -88,8 +94,11 @@ unique merge base and head. Every affected entry must match between merge base a
 Both rename names, deletion sources, added-path absence, blobs, types and modes count.
 Only nonempty A/M/D/R ordinary `100644` Markdown inventories qualify. Control files,
 plugin command manifests and security matches outside root hooks/commands collisions refuse.
-Known unchanged code and settings need consumer assessment too. Consumer base changes need
-an explicit assessment. Missing objects, unresolved context and moved bindings refuse.
+Known unchanged code, pages, data and settings need actual inspection. Unknown context refuses.
+Complete path coverage binds the statement to objects, not to semantic truth or reviewer identity.
+The helper uses batched tree/blob reads, never a process loop over context paths.
+The complete final comment must fit 65536 characters. Compact preparation must fit 131072 bytes;
+refuse oversized output, do not truncate it or raise the cap. Both bounds include all serialized data. Missing objects, unresolved context and moved bindings refuse.
 A stale scope needs a new complete inspection. The writer checks before/after each post and reuse.
 The same shared publication gate checks merge helpers and direct publication hooks.
 
