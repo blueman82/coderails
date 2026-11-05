@@ -100,7 +100,7 @@ Required reviewers (default ON, part of the one publication gate that `merge.py`
 Derived eval level (default ON, the third check of the same publication gate): `verification_level` is a floor computed from the PR diff, not a choice. `policy/surface_policy.json` classifies paths `irreversible` (`install.py`, `uninstall.py`, `launchd/`, `scripts/integrity-gate/`, `scripts/installer/`, `.github/workflows/`, both `hooks.json`), `outward` (`commands/`, `skills/`, `hooks/`, `scripts/`, `agents/`, `packages/codex/`, `policy/`, `capabilities/`) or none (only the anchored docs and test directories; every unlisted path such as `AGENTS.md` is outward; the policy and its reader are irreversible); `scripts/lib/eval_level.py` turns that plus work units into the minimum (0 only for one unit and no outward surface, 1 for outward or two units, 2 for irreversible or three units). `scripts/post_evals.py post <PR> <evals.json> [--progress PATH]` (the only supported way to post; the old `$ARGUMENTS` shell recipe is gone) validates the PR number in code (`pr_number_invalid`), runs structure (including `verify_suite` and `not_frozen`), discriminating and embed validation, and writes the body: the unchanged v1 marker as line 1, a `coderails-eval-facts v1` line (`derived_min_level`, `late_freeze`, `suite`) as line 2, the summary, and the embed with a code-stamped `gate_facts`. Refusals: `level_below_derived`, `suite_hash_mismatch`, `chain_broken`, `integrity_stripped`, `not_frozen`, `late_freeze_unstamped`, `suite_hash_marker_mismatch`, `eval_facts_missing` (a v1 artifact with no facts line is refused for outward diffs until re-posted). Merge side (`merge.py`, Claude `enforce_pr_workflow`, Codex `pr_publication_gate`) recomputes everything from the live diff and ignores the stamped level. Limits: a cooperating-agent safeguard; a diff alone cannot show how many work units produced it, so without `--progress` or a declared lower bound it counts one. The suite hash and chain are unkeyed (a same-user agent can recompute them and post with `gh api`) and `late_freeze` is attestation, not evidence; the check detects naive edits only. Config `eval_level: off` skips it. See the RUNBOOK entry "Eval level or suite integrity refused a merge" and `docs/workflow-gates-measurement.md` (counters prefix `eval-level/`).
 
 Bounded standalone-wiki applicability: only `security-review` may use `not_applicable`, with boundary
-`standalone_wiki_prose_v2`. `review-pr` must pass. `post_review.py na-scope <PR>` prepares complete immutable
+`standalone_wiki_prose_v3`. `review-pr` must pass. `post_review.py na-scope <PR>` prepares complete immutable
 inventory data; it supplies no inspection. The exact `## Not applicable` JSON summary binds repository, PR,
 base branch, actual remote base tip, unique merge base, head and inventory digest. Each affected page entry
 must match between merge base and live base, including both rename names and absence. Controls, command
@@ -108,7 +108,13 @@ plugin manifests, nonordinary modes and non-page changes refuse. The context dig
 tracked non-tree entries across merge base/live base/head outside authored page endpoints, including
 unchanged Markdown. Explicit assessment groups must cover that complete path set one time each;
 missing, duplicate, foreign or glob-selected paths refuse. Group base-change state must be uniform,
-with nonempty text only for changed base entries. Unknown context refuses. Tree/blob reads are batched.
+with nonempty text only for changed base entries. Whole consumer_scope and each group need explicit
+`effect_state=effect_free`. States are `effect_free`, `active` or `unknown`; start at `unknown`.
+Known execution/access/instruction effects, unknown or missing states refuse, even with complete coverage
+and unresolved=[]. The whole state covers all M/B/H facts and authored M-to-H operations combined with
+live-B context and group interactions; each group covers its members in that combination. Do not infer
+an affirmative state from filenames, modes or unchanged files. Version 1 and 2 records refuse.
+Unknown context refuses. Tree/blob reads are batched.
 Compact preparation is bounded at 131072 bytes; the complete final comment at 65536 characters. Both writers and the shared
 publication reader recheck the facts. Invalid scope returns `required_review_not_applicable_invalid:security-review`.
 Malformed summaries still return `review_passes_malformed`. Same-user assessments do not prove semantic

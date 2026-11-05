@@ -93,15 +93,17 @@ class WikiNaTests(unittest.TestCase):
         """Use the real preparation output, then supply the independent consumer assessment."""
         facts = review_na.prepare("7", self.head)
         return {
-            "boundary": "standalone_wiki_prose_v2",
+            "boundary": "standalone_wiki_prose_v3",
             "binding": facts["binding"],
             "repository_purpose": "Standalone prose wiki.",
             "consumer_scope": {
                 "complete": True,
+                "effect_state": "effect_free",
                 "references": [
                     {
                         "paths": [".obsidian/plugins/view/main.js"],
                         "base_change_assessment": None,
+                        "effect_state": "effect_free",
                         "assessment": "Both ordinary blob modes and code display prose only.",
                     }
                 ],

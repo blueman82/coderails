@@ -66,7 +66,7 @@ Report the PR number, reviewed SHA, spawned reviewer names and counts, and the p
 ## Standalone wiki security applicability
 
 The shipped path policy stays in force. Only `security-review` can use the typed
-`not_applicable` result for `standalone_wiki_prose_v2`. `review-pr` must pass.
+`not_applicable` result for `standalone_wiki_prose_v3`. `review-pr` must pass.
 Other required specialists must pass. A plain NOT APPLICABLE message is not a pass.
 
 Use the same resolved helper as the posting command:
@@ -86,6 +86,16 @@ explicit assessment path groups. Every context path must occur in one group, wit
 duplicates, foreign paths or glob selectors. Each group must contain only unchanged base entries
 or only changed base entries; the latter need a nonempty base-change assessment. Exact immutable
 mode/type/blob facts at all three trees enter the digest. Keep complete=true and unresolved=[].
+The v3 form needs `effect_state` at `consumer_scope` and in each reference group.
+The closed states are `effect_free`, `active` and `unknown`. The initial state is `unknown`;
+only explicit `effect_free` at both levels permits N/A. Known execution, access-control or
+instruction-loading effects use `active` and need the ordinary applicable inspection, even
+with complete coverage and unresolved=[]. Unknown, missing, malformed and other states refuse.
+The whole declaration covers repository purpose, all authored operations, all merge-base/live-base/head
+facts, and authored merge-base-to-head operations combined with live-base context and group interactions.
+Each group covers its members at all three trees and their role in that whole combination.
+Do not infer `effect_free` from suffixes, modes, unchanged files or an empty unresolved list.
+Version 1 and 2 records refuse. Do not add affirmative declarations to them automatically.
 Do not convert this result into `## No findings`. Post it with the ordinary general summary:
 `post <PR> --summary <general-file> --pass security-review=<security-summary-file>`.
 

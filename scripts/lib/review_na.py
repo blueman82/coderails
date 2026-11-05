@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 from . import review_na_context
 
-BOUNDARY = "standalone_wiki_prose_v2"
+BOUNDARY = "standalone_wiki_prose_v3"
 MAX_INPUT_BYTES = 131072
 MAX_COMMENT_CHARS = 65536
 OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
@@ -69,7 +69,6 @@ def _text(value: object) -> bool:
 
 
 def _oid(value: object) -> bool:
-    """A full lowercase Git object identifier."""
     return isinstance(value, str) and OID.fullmatch(value) is not None
 
 
@@ -138,24 +137,26 @@ def validate_schema(value: object) -> None:
         )
     ):
         raise ValueError("N/A binding invalid")
-    consumers = _object(scope["consumer_scope"], {"complete", "references", "assessment", "unresolved"})
+    consumers = _object(scope["consumer_scope"], {"complete", "references", "assessment", "unresolved", "effect_state"})
     if (
         consumers["complete"] is not True
+        or consumers["effect_state"] != "effect_free"
         or consumers["unresolved"] != []
         or not isinstance(consumers["references"], list)
         or not _text(consumers["assessment"])
     ):
-        raise ValueError("N/A consumer scope incomplete")
+        raise ValueError("N/A consumer scope incomplete or effect not free")
     paths: set[str] = set()
     for raw in cast(list[object], consumers["references"]):
-        ref = _object(raw, {"paths", "base_change_assessment", "assessment"})
+        ref = _object(raw, {"paths", "base_change_assessment", "assessment", "effect_state"})
         if (
-            not isinstance(ref["paths"], list)
+            ref["effect_state"] != "effect_free"
+            or not isinstance(ref["paths"], list)
             or not ref["paths"]
             or not _text(ref["assessment"])
             or (ref["base_change_assessment"] is not None and not _text(ref["base_change_assessment"]))
         ):
-            raise ValueError("N/A consumer group invalid")
+            raise ValueError("N/A consumer group invalid or effect not free")
         for value in cast(list[object], ref["paths"]):
             path = unicodedata.normalize("NFC", _path(value)).casefold()
             if path in paths:

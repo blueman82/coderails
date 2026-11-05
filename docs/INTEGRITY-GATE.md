@@ -8,7 +8,13 @@ The local publication gate also supports the bounded `security-review` dispositi
 `not_applicable` for standalone wiki prose. Its scope binds the actual live base, unique merge
 base, head, complete page inventory and the full tracked context digest. Explicit path groups must cover
 all context outside authored endpoints, including unchanged Markdown and plugin files. A missing
-consumer path refuses even if other groups remain correct. These are cooperating-agent checks;
+consumer path refuses even if other groups remain correct. The v3 form needs explicit `effect_free`
+at whole `consumer_scope` and each reference group. States are `effect_free`, `active` and `unknown`;
+the initial state is `unknown`. Known execution, access-control or instruction effects, unknown states
+and missing declarations refuse, even with complete coverage and unresolved=[]. The whole declaration
+covers all M/B/H facts, authored M-to-H operations combined with live-B context and group interactions.
+Each group covers its members at all three trees and their role in that combination. Version 1 and 2
+records refuse; the reader does not insert affirmative declarations. These are cooperating-agent checks;
 coverage does not prove that the inspection text is true. Base-only affected entry changes refuse.
 The trusted Actions reader still checks the ordinary general-review companion. An `integrity-review`
 status does not prove that N/A scope is valid or that an assessment is true. Old local readers

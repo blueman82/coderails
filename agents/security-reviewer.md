@@ -51,7 +51,7 @@ Use only the role capability tools repo_inspect and diff_read to inspect the exa
 
 ### Standalone wiki disposition
 
-Only `security-review` can return `not_applicable`, under `standalone_wiki_prose_v2`.
+Only `security-review` can return `not_applicable`, under `standalone_wiki_prose_v3`.
 Use the supplied `post_review.py na-scope <PR>` preparation data. Preparation is not an inspection.
 Verify the repository purpose, all A/M/D/R page content and both rename names, and the actual
 live base, unique merge base and head. Only ordinary `100644` Markdown pages qualify.
@@ -71,6 +71,21 @@ otherwise all group entries must have changed and the text must assess those act
 If execution, access or instruction effects exist, perform the applicable security inspection.
 Do not use N/A. If the role tools cannot supply complete immutable facts, return UNSUPPORTED.
 
+Declare `effect_state` for the whole `consumer_scope` and for each reference group.
+The closed states are `effect_free`, `active` and `unknown`. Start with `unknown`.
+Only an explicit `effect_free` at both levels permits N/A. Missing or other states refuse.
+Use `active` for known execution, access-control or instruction-loading effects, even when
+all context is read and `unresolved` is empty. Use the ordinary applicable security inspection.
+Use `unknown` if you cannot establish those effects, including interactions between groups.
+The whole state covers repository purpose, all authored operations, all actual merge-base/live-base/head
+entries, and the combination of authored merge-base-to-head page operations with live-base context.
+A group state covers all its members at all three trees and their role in that whole combination.
+`effect_free` does not say that context code never runs. It says these page operations have no
+execution, access-control or instruction-loading effect through that context or its interactions.
+Do not infer it from filenames, modes, unchanged blobs or the absence of unresolved reads.
+The example below needs an actual inspection before either affirmative state can be used.
+Version 1 and 2 records do not supply these declarations. Do not convert them automatically.
+
 The complete output must be only this heading and JSON fence, with actual values:
 
 ````markdown
@@ -78,7 +93,7 @@ The complete output must be only this heading and JSON fence, with actual values
 
 ```json
 {
-  "boundary": "standalone_wiki_prose_v2",
+  "boundary": "standalone_wiki_prose_v3",
   "binding": {
     "repository": "owner/wiki",
     "pr": 12,
@@ -92,10 +107,12 @@ The complete output must be only this heading and JSON fence, with actual values
   "repository_purpose": "<why this is a standalone wiki>",
   "consumer_scope": {
     "complete": true,
+    "effect_state": "effect_free",
     "references": [
       {
         "paths": ["<exact tracked context path>", "<another exact context path>"],
         "base_change_assessment": null,
+        "effect_state": "effect_free",
         "assessment": "<actual modes, code and settings inspected at base and head>"
       }
     ],

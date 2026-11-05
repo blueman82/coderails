@@ -27,10 +27,10 @@ from packages.tests.test_codex_review_passes import (  # noqa: E402
 )
 
 
-def add_context(repo: fixture.Repo) -> None:
+def add_context(repo: fixture.Repo, text: str = "INERT_INPUT = 'page names control access'\n") -> None:
     """Build an independent unchanged access-input canary below the authored page addition."""
     git_cmd(repo.dir, "checkout", "-q", "main")
-    (repo.dir / "access-input.py").write_text("INERT_INPUT = 'page names control access'\n")
+    (repo.dir / "access-input.py").write_text(text)
     git_cmd(repo.dir, "add", ".")
     git_cmd(repo.dir, "commit", "-qm", "context baseline")
     repo.base = git_cmd(repo.dir, "rev-parse", "HEAD").strip()
@@ -71,15 +71,17 @@ class WikiPostTests(fixture.Repo):
         self.assertEqual(prepared["binding"]["base_sha"], self.base)
         self.assertEqual(prepared["inventory"][0]["status"], "A")
         scope: dict[str, Any] = {
-            "boundary": "standalone_wiki_prose_v2",
+            "boundary": "standalone_wiki_prose_v3",
             "binding": prepared["binding"],
             "repository_purpose": "Standalone prose wiki.",
             "consumer_scope": {
                 "complete": True,
+                "effect_state": "effect_free",
                 "references": [
                     {
                         "paths": ["README.md"],
                         "base_change_assessment": None,
+                        "effect_state": "effect_free",
                         "assessment": "The unchanged README only displays explanatory prose.",
                     }
                 ],

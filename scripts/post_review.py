@@ -193,7 +193,14 @@ def main(arguments: list[str] | None = None) -> int:
     """Dispatch summary validation, posting and best-effort cache writes."""
     arguments = sys.argv[1:] if arguments is None else arguments
     if arguments[:1] == ["na-scope"]:
-        parser = argparse.ArgumentParser(prog="post_review.py na-scope")
+        parser = argparse.ArgumentParser(
+            prog="post_review.py na-scope",
+            description="Prepare standalone_wiki_prose_v3 immutable facts only. Effect states default to unknown.",
+            epilog=(
+                "N/A needs effect_state=effect_free in consumer_scope and each reference group. "
+                "active and unknown refuse."
+            ),
+        )
         parser.add_argument("pr", type=pr_number)
         try:
             args = parser.parse_args(arguments[1:])
