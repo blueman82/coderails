@@ -27,6 +27,26 @@ PROFILES = load_profiles(ROOT)
 ROLES = sorted(guarded_agents(PROFILES))
 FORBIDDEN = {"Bash", "Write", "Edit", "NotebookEdit", "Agent", "Task", "Read", "Grep", "Glob", "WebFetch", "MultiEdit"}
 CHILD_MARKER = "CHILD_PROBE_MARKER"
+DEFERRED_PLACEHOLDER: dict[str, Any] = {
+    "name": "DeferredToolPlaceholder",
+    "defer_loading": True,
+    "description": "Reserved placeholder that keeps deferred tool loading active; never call this tool.",
+    "input_schema": {"properties": {}, "type": "object"},
+}
+
+
+def callable_names(tools: list[dict[str, Any]]) -> list[str]:
+    """Exclude at most one complete reserved CLI placeholder, rejecting changed metadata."""
+    names: list[str] = []
+    seen = False
+    for tool in tools:
+        if tool.get("name") == "DeferredToolPlaceholder":
+            if seen or tool != DEFERRED_PLACEHOLDER or tool.get("defer_loading") is not True:
+                raise AssertionError("Malformed or duplicate deferred placeholder")
+            seen = True
+        else:
+            names.append(tool["name"])
+    return names
 
 
 def expected(role: str) -> set[str]:
@@ -78,16 +98,16 @@ class RecordingFixture(NativeAPIFixture):
             "usage": {"input_tokens": 1, "output_tokens": 1},
         }
 
-    def child_tools(self) -> list[str] | None:
-        """Tool names of the request whose first message is the dispatched child's prompt."""
+    def child_tools(self) -> list[dict[str, Any]] | None:
+        """Raw tool definitions from the request whose first message is the child's prompt."""
         for body in self.bodies:
             if body.get("tools") and CHILD_MARKER in json.dumps(body.get("messages", [])[:1]):
-                return [t["name"] for t in body.get("tools", [])]
+                return list(body["tools"])
         return None
 
-    def parent_tools(self) -> list[str]:
-        """Tool names of the first request (the session's own agent)."""
-        return [t["name"] for t in self.bodies[0].get("tools", [])]
+    def parent_tools(self) -> list[dict[str, Any]]:
+        """Raw tool definitions of the first request (the session's own agent)."""
+        return list(self.bodies[0].get("tools", []))
 
 
 @unittest.skipUnless(shutil.which("claude"), "real Claude CLI is required for the tool-binding probe")
@@ -116,13 +136,14 @@ class ReviewerToolsProbeTest(unittest.TestCase):
         self.assertFalse(fixture.errors, fixture.errors)
         return done
 
-    def assert_bound(self, role: str, tools: list[str] | None, route: str) -> None:
+    def assert_bound(self, role: str, tools: list[dict[str, Any]] | None, route: str) -> None:
         """Exactly the profile-derived tools, no shell, no edit tool, no native read tool, no nested agents."""
         self.assertIsNotNone(tools, f"{route}: no request carried the {role} prompt")
         assert tools is not None
-        self.assertEqual(sorted(tools), sorted(expected(role)), f"{route} {role}")
-        self.assertEqual(FORBIDDEN & set(tools), set(), f"{route} {role}")
-        self.assertTrue(all(len(name) <= 64 for name in tools))
+        raw_names = [tool["name"] for tool in tools]
+        self.assertEqual(FORBIDDEN & set(raw_names), set(), f"{route} {role}: forbidden raw tools")
+        self.assertEqual(sorted(callable_names(tools)), sorted(expected(role)), f"{route} {role}")
+        self.assertTrue(all(len(name) <= 64 for name in raw_names))
 
     def test_agent_session_has_only_its_mcp_tools(self) -> None:
         """`claude --agent coderails:<role>`: the reviewer session has no shell (the tools array lists none)."""
@@ -147,7 +168,7 @@ class ReviewerToolsProbeTest(unittest.TestCase):
         fixture = RecordingFixture(None)
         self.addCleanup(fixture.close)
         self.run_cli(fixture, "--agent", "coderails:design-scout")
-        tools = fixture.parent_tools()
+        tools = [tool["name"] for tool in fixture.parent_tools()]
         self.assertFalse([t for t in tools if "cap-source-auditor" in t], tools)
         self.assertFalse([t for t in tools if t.endswith(("__tests_run", "__cmd_run", "__pr_comment"))], tools)
 
@@ -165,7 +186,54 @@ class ReviewerToolsProbeTest(unittest.TestCase):
             self.addCleanup(fixture.close)
             with patch.object(sys.modules[__name__], "ROOT", plugin):
                 self.run_cli(fixture, "--agent", "coderails:bashy")
-            self.assertIn("Bash", fixture.parent_tools())
+            self.assertIn("Bash", [tool["name"] for tool in fixture.parent_tools()])
+
+
+class PlaceholderBoundaryTest(unittest.TestCase):
+    """Exercise the actual probe assertions with deterministic raw tool definitions and no CLI."""
+
+    def check_tools(self, *extra: dict[str, Any]) -> None:
+        """Use literal design-scout capability controls through the same live-probe assertion."""
+        tools = [
+            {"name": "mcp__plugin_coderails_cap-design-scout__repo_inspect"},
+            {"name": "mcp__plugin_coderails_cap-design-scout__diff_read"},
+            *extra,
+        ]
+        probe = ReviewerToolsProbeTest("test_agent_session_has_only_its_mcp_tools")
+        probe.assert_bound("design-scout", tools, "deterministic")
+
+    def test_absent_or_one_complete_placeholder_is_accepted(self) -> None:
+        """Only the exact reserved object may be excluded from the capability comparison."""
+        self.check_tools()
+        self.check_tools(DEFERRED_PLACEHOLDER)
+
+    def test_malformed_placeholder_is_rejected(self) -> None:
+        """Changed fields, missing fields, extra fields and numeric true are not the reserved object."""
+        for change in (
+            {"defer_loading": False}, {"defer_loading": 1}, {"description": "callable"},
+            {"input_schema": {"type": "object"}}, {"extra": True},
+        ):  # fmt: skip
+            with self.subTest(change=change), self.assertRaises(AssertionError):
+                self.check_tools({**DEFERRED_PLACEHOLDER, **change})
+        for missing in DEFERRED_PLACEHOLDER:
+            with self.subTest(missing=missing), self.assertRaises((AssertionError, KeyError)):
+                self.check_tools({key: value for key, value in DEFERRED_PLACEHOLDER.items() if key != missing})
+
+    def test_duplicate_placeholder_is_rejected(self) -> None:
+        """Two otherwise valid reserved objects cannot be normalized away."""
+        with self.assertRaises(AssertionError):
+            self.check_tools(DEFERRED_PLACEHOLDER, DEFERRED_PLACEHOLDER)
+
+    def test_extra_callable_and_foreign_metadata_are_rejected(self) -> None:
+        """Every other extra tool, including a deferred one, fails the exact capability comparison."""
+        for name in (
+            "UnexpectedTool", "mcp__plugin_coderails_cap-design-scout__tests_run",
+            "mcp__plugin_coderails_cap-design-scout__repo_inspect", "OtherPlaceholder",
+        ):  # fmt: skip
+            with self.subTest(name=name), self.assertRaises(AssertionError):
+                self.check_tools(DEFERRED_PLACEHOLDER, {"name": name, "defer_loading": True})
+        with self.assertRaisesRegex(AssertionError, "forbidden raw tools"):
+            self.check_tools(DEFERRED_PLACEHOLDER, {"name": "Bash", "defer_loading": True})
 
 
 class LiveServerRefusalTest(unittest.TestCase):

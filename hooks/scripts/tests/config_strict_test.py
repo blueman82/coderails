@@ -83,17 +83,14 @@ class ControlsTests(ScratchCase):
         self.assertEqual(sorted(resolved), sorted(found))
         for key, spec in found.items():
             self.assertIn("on_value", spec, key)
-            if key == "action_authority":
-                self.assertEqual(resolved[key], "off")
-            else:
-                self.assertEqual(resolved[key], spec["on_value"], key)
-                self.assertNotIn("blocked_on", spec, f"{key} is ON but still claims to be blocked")
+            self.assertEqual(resolved[key], spec["on_value"], key)
+            self.assertNotIn("blocked_on", spec, f"{key} is ON but still claims to be blocked")
 
     def test_defaults_that_were_off_are_on(self) -> None:
-        """Worker, signing, and diff controls default ON; optional receipts default off."""
+        """Worker, signing, receipt and diff controls default ON."""
         resolved = controls_resolved(load_config(self.write(""))[0])
         self.assertIs(resolved["sandbox_workers"], True)
-        self.assertEqual(resolved["action_authority"], "off")
+        self.assertEqual(resolved["action_authority"], "enforce")
         self.assertIs(resolved["evals.require_signatures"], True)
         self.assertEqual(resolved["diff_manifest"], "enforce")
 
@@ -259,7 +256,7 @@ class GuardedActionTests(HookCase):
         self.assertEqual(self.invoke("action_authority_gate", self.payload("ls -la")).stdout, "")
         self.config.unlink()
         absent = self.invoke("action_authority_gate", self.payload("gh pr merge 12"))
-        self.assertEqual(absent.stdout, "")
+        self.assertEqual(json.loads(absent.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
 
 
 class ParityTests(unittest.TestCase):

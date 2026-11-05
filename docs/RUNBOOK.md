@@ -51,8 +51,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `config_unparseable_line` / `config_duplicate_key` findings.
 - Defaults: the diff-manifest check uses `enforce` mode and `policy/diff-policy.default.json` even without a config file.
   An existing config with no other keys enables `sandbox_workers: true` and `evals.require_signatures: true`.
-  `action_authority` defaults to `off`. The shipped config sets it to `advisory`, which warns about missing receipts
-  without a passphrase. Set `enforce` only when signed receipts are required.
+  `action_authority` defaults to `enforce`, including without a config file. Shipped example and init presets also
+  use `enforce`. Explicit `advisory` warns about missing receipts; explicit `off` disables this receipt gate.
+  Invalid configuration refuses guarded actions. Preserve intentional project settings when migrating.
 
 ## Discipline lint advisories climbing
 
@@ -722,9 +723,9 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
-- Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a
-  stderr "action_authority (advisory)" warning appears. The gate is off unless config explicitly sets
-  `action_authority: enforce` or `action_authority: advisory`.
+- Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (default
+  enforce), or a stderr "action_authority (advisory)" warning appears under explicit advisory. Only explicit
+  `action_authority: off` disables this receipt gate. Invalid configuration denies with `config_rejected`.
 - Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
@@ -752,9 +753,12 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
   `marker_cleanup_failed` means cleanup failed: consumed markers stay in place if execution state is uncertain.
   Fix the file fault and mint a new receipt. A killed hook can leave a partial spend; confirm the command did not
   run before any manual recovery.
-- Remediation for optional enforce mode: one-time `python3 scripts/authority_keys.py init` (passphrase-protected
-  key; `show` prints fingerprints), then mint for the exact command:
+- Remediation for default enforce mode: the owner runs one-time `python3 scripts/authority_keys.py init` at their
+  terminal (`ssh-keygen` accepts an empty passphrase; `show` prints fingerprints), then approves the exact command:
   `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge|git_push --command '<exact command>' --cwd <directory it runs in>`
+  Signatures remain required. A usable unprotected key needs no passphrase; `--key <public-key-path>` can select an
+  available agent-backed key. The approval CLI still requires the owner's controlling terminal. An autonomy grant
+  does not replace this action receipt. An agent must not create a PTY or call the signer to impersonate approval.
   (single-use, 1h by default; the CLI computes repository+ref+SHA itself, signs, and refuses without a tty with
   `receipt_refused_no_tty`; add `--loop <loop id>` when the session authority has a loop; `inspect-receipt` /
   `revoke-receipt` take `--receipt-id`). `signer_unknown` / `trust_root_missing`
