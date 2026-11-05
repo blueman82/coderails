@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
+import sys
 import unittest
 from typing import Any
 
+from hooks.scripts.tests.lib import claude_transcript_fixture as graph_fixture
 from scripts.lib import decision_record as dr
 from scripts.lib import handoff_derive
 from scripts.lib import memory_adapter as ma
 from scripts.lib import memory_request as mr
 from scripts.tests import fake_muninn_current as fc
-from scripts.tests.current_consumers_test import CurrentFixture
+from scripts.tests.current_consumers_test import ROOT, CurrentFixture
 
 
 class CurrentReader(CurrentFixture):
@@ -254,6 +257,107 @@ class CurrentReader(CurrentFixture):
         result = handoff_derive.decisions(state, "L1", "s1", degraded)
         self.assertEqual({row["id"] for row in result}, {fc.KID, extra["id"]})
         self.assertIn({"source": "decisions", "reason": "learning_form_unsupported"}, degraded)
+
+
+class HandoffBinding(CurrentFixture):
+    """Local request assertions cannot gain a second, weaker route into handoff."""
+
+    def test_rejected_local_binding_keeps_only_independently_supported_extras(self) -> None:
+        """Actual provider flush and handoff preserve rejection without hiding valid task decisions."""
+        text = "Use the bronze queue for this routing decision."
+        claim = "routing: " + text
+        for provider in (ROOT, ROOT / "packages/codex"):
+            for case in ("changed_window", "multiple_notes", "unknown_binding"):
+                with self.subTest(provider=provider, case=case):
+                    self.data = fc.fixture(self.root, self.project, claim=claim)
+                    retained = copy.deepcopy(self.data["request"]["window"])
+                    extra = copy.deepcopy(self.data["notes"][0])
+                    extra["id"] = "K_" + "a" * 32
+                    extra["body"]["content"] = "Preserve the other decision from this receipt."
+                    self.data["notes"].append(extra)
+                    self.data["receipt"]["applied"].append({"knowledge_id": extra["id"], "revision": 3})
+                    if case == "changed_window":
+                        retained["boundary_hash"] = "b" * 64
+                    elif case == "multiple_notes":
+                        duplicate = copy.deepcopy(self.data["notes"][0])
+                        duplicate["id"] = "K_" + "c" * 32
+                        self.data["notes"].append(duplicate)
+                        self.data["receipt"]["applied"].append({"knowledge_id": duplicate["id"], "revision": 3})
+                    standalone = copy.deepcopy(self.data["notes"][0])
+                    standalone["id"] = "K_" + "d" * 32
+                    detail = {
+                        key: copy.deepcopy(self.data[key])
+                        for key in (
+                            "request",
+                            "receipt",
+                            "attempts",
+                            "calls",
+                            "evidence",
+                            "correction_status",
+                            "diagnostics",
+                        )
+                    }
+                    detail["request"]["id"] = "R_" + "e" * 32
+                    detail["receipt"].update(
+                        request_id=detail["request"]["id"],
+                        applied=[{"knowledge_id": standalone["id"], "revision": 3}],
+                    )
+                    self.data["notes"].append(standalone)
+                    self.data["requests"] = [self.data["request"], detail["request"]]
+                    self.data["extra_details"] = {detail["request"]["id"]: detail}
+                    self.save()
+                    state: dict[str, Any] = {**graph_fixture.state(), "session_id": "s1", "loop_id": "L1"}
+                    state = dr.add_decision(state, "s1", "routing", text, "L1", state["revision"])["state"]
+                    field = {
+                        "state": "unknown" if case == "unknown_binding" else "pending",
+                        "id": None,
+                        "request_id": fc.RID,
+                        "request_window": retained,
+                        "project_id": str(self.project),
+                        "reason_code": "learning_request_unknown",
+                    }
+                    if case == "unknown_binding":
+                        field.pop("request_window")
+                    state["decisions_absorbed"][0]["muninn"] = field
+                    path = self.root / f"{provider.name}-{case}" / "s1/progress.json"
+                    path.parent.mkdir(parents=True)
+                    path.write_text(json.dumps(state))
+                    flushed = subprocess.run(
+                        [
+                            sys.executable,
+                            str(provider / "skills/agentic-loop/scripts/graph.py"),
+                            "flush-decisions",
+                            str(path),
+                            "--session",
+                            "s1",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    self.assertEqual(flushed.returncode, 3, flushed.stdout + flushed.stderr)
+                    before = path.read_bytes(), (self.root / "data.json").read_bytes()
+                    run = subprocess.run(
+                        [sys.executable, str(provider / "scripts/lib/handoff_derive.py"), str(path), "--session", "s1"],
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    payload = json.loads(run.stdout)
+                    self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
+                    rows = payload["decisions"]
+                    local = [row for row in rows if row["source"] == "progress"]
+                    self.assertEqual(len(local), 1)
+                    self.assertIsNone(local[0]["cite"])
+                    self.assertIsNone(local[0]["quote"])
+                    self.assertIn({"source": "decisions", "reason": local[0]["reason_code"]}, payload["degraded"])
+                    self.assertEqual(
+                        {row["id"] for row in rows if row["source"] == "muninn"}, {extra["id"], standalone["id"]}
+                    )
+                    self.assertTrue(all(row["quote"] for row in rows if row["source"] == "muninn"))
+                    self.assertEqual((path.read_bytes(), (self.root / "data.json").read_bytes()), before)
+        calls = [json.loads(line)["args"] for line in (self.root / "calls.jsonl").read_text().splitlines()]
+        self.assertFalse(any(args[:2] == ["learn", "request"] for args in calls))
 
 
 if __name__ == "__main__":

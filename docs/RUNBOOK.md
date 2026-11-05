@@ -199,7 +199,7 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 | `learning_pending` | Muninn has accepted the task request. Keep its R_ ID and check the same request later. |
 | `learning_request_unknown` | Muninn may have accepted a request without returning its R_ ID. Inspect `muninn learn list`; do not submit again. |
 | `learning_request_failed` | The saved Muninn request failed or was cancelled. Inspect it with `muninn learn show R_ID`. |
-| `learning_no_matching_record` | The completed request produced no active note with this exact task and text. Inspect its receipt and notes. |
+| `learning_no_matching_record` | The completed request has no unique eligible current Note for this exact task and text. Zero or multiple matching records cause this result. Inspect its receipt and notes. |
 | `learning_no_change` | The saved request completed without applying knowledge. It is not a written Note. |
 | `learning_request_mismatch` | Request project, task, source window or receipt identity differs from its binding. |
 | `learning_receipt_unavailable` | The request has no supported committed receipt; acceptance alone is not a save. |

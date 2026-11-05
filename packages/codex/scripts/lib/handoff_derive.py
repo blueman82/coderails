@@ -70,19 +70,23 @@ def decisions(
         rows = []
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
+    local_bindings: set[tuple[str, str]] = set()
     details: dict[str, dict[str, Any]] = {}
     for index, item in enumerate(teardown_steps.as_list(rows), start=1):
         row = cast("dict[str, Any]", item) if isinstance(item, dict) else {"decision": str(item)}
         field = cast("dict[str, Any]", row["muninn"]) if isinstance(row.get("muninn"), dict) else {}
         kid = field.get("id")
         rid, window, project = (field.get(key) for key in ("request_id", "request_window", "project_id"))
+        claim = " ".join(f"{row.get('phase')}: {row.get('decision')}".split())
+        if isinstance(rid, str):
+            local_bindings.add((rid, claim))
         observed: mr.Note | mr.Pending | ma.Degraded
         if isinstance(rid, str) and isinstance(window, dict) and isinstance(project, str):
             observed = mr.inspect(
                 rid,
                 loop_id,
                 "decision",
-                " ".join(f"{row.get('phase')}: {row.get('decision')}".split()),
+                claim,
                 expected_window=cast("dict[str, Any]", window),
                 expected_project=project,
                 details=details,
@@ -135,6 +139,7 @@ def decisions(
                 **note.metadata(),
             }
             for note in extras
+            if (note.request_id, note.claim) not in local_bindings
         )
     return out
 
