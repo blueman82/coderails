@@ -14,7 +14,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.lib.graph_executor import graph_semantics
 from packages.tests.provider_fixture import Provider
-from scripts.lib.decision_record import add_decision
+from scripts.lib.decision_record import add_decision, row_digest
 
 
 def artifacts_with_orders_prepared(provider: Provider) -> None:
@@ -109,7 +109,7 @@ class ProviderLifecycleTests(unittest.TestCase):
             state["graph"].pop("wave_history")  # a graph written by the old `start`, before the key existed
             provider.write(state)
             provider.freeze()
-            provider.artifacts()
+            artifacts_with_orders_prepared(provider)
             result = provider.complete()
             self.assertEqual(result.returncode, 0, (provider.name, result.stderr))
             self.assertEqual(provider.read()["status"], "complete")
@@ -118,12 +118,12 @@ class ProviderLifecycleTests(unittest.TestCase):
         """Both native completion commands preserve state until decisions are resolved."""
         for provider in self.providers:
             provider.finish_wave()
+            artifacts_with_orders_prepared(provider)
             state = provider.read()
             state = add_decision(
                 state, provider.session, "2.5", "Use the selected design", state["loop_id"], state["revision"]
             )["state"]
             provider.write(state)
-            provider.artifacts()
             for sync in ("syncing", "unknown"):
                 state["decisions_absorbed"][0]["muninn"] = {"state": sync}
                 provider.write(state)
@@ -197,6 +197,7 @@ class ProviderLifecycleTests(unittest.TestCase):
                 self.assertIn("decision_sync_pending", graph_semantics.can_complete(state)["blockers"])
             row["muninn"] = valid
             row["worker_status_seq"] = 7
+            row["row_sha256"] = row_digest(row)
             self.assertIn("decision_sync_pending", graph_semantics.can_complete(state)["blockers"])
 
     def test_empty_graph_rejects_orphan_pending_worker_status(self) -> None:
@@ -223,6 +224,7 @@ class ProviderLifecycleTests(unittest.TestCase):
             self.assertEqual(provider.path.read_bytes(), before)
             state.pop("worker_statuses")
             provider.write(state)
+            artifacts_with_orders_prepared(provider)
             released = provider.complete()
             self.assertEqual(provider.read()["status"], "complete", (provider.name, released.stdout, released.stderr))
 

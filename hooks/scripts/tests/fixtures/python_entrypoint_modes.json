@@ -243,5 +243,7 @@
   "skills/dashboard/scripts/start_dashboard.py": "100755",
   "skills/dashboard/scripts/stop_dashboard.py": "100755",
   "uninstall.py": "100755",
-  "scripts/lib/source_manifest.py": "100644"
+  "scripts/lib/source_manifest.py": "100644",
+  "skills/agentic-loop/scripts/decision_chain.py": "100644",
+  "packages/codex/skills/agentic-loop/scripts/decision_chain.py": "100644"
 }
