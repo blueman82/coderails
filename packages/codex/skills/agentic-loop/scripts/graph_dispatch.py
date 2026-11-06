@@ -77,7 +77,13 @@ def begin_wave(path: Path) -> dict[str, Any]:
         transition = graph_semantics.begin_wave(state)
         proposed = cast(dict[str, Any], transition["state"])
         wave = cast(dict[str, Any], transition["wave"])
-        proposed["graph"]["active_wave"]["transcript_cursor"] = transcript_cursor(proposed["session_id"])
+        cursor = transcript_cursor(proposed["session_id"])
+        proposed["graph"]["active_wave"]["transcript_cursor"] = cursor
+        proposed["graph"].setdefault("wave_history", {})[wave["wave_id"]] = {
+            "cursor": cursor,
+            "nodes": list(wave["nodes"]),
+            "revision": wave["revision"],
+        }
         task_names = {
             node_id: task_name(proposed["loop_id"], node_id, next_attempt(proposed["graph"]["nodes"][node_id]))
             for node_id in wave["nodes"]
@@ -158,11 +164,7 @@ def authorize_driver(
 
 
 def apply_record(state: dict[str, Any], raw_results: str, typed: bool = False) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Bind native evidence and compute the post-record state for exactly the active wave; writes nothing.
-
-    `typed` (record-wave only) first runs worker_status.prepare: typed worker statuses and final reports are validated,
-    statuses become core `failed` results, and the extracted rows ride back in the returned transition.
-    """
+    """Bind native or typed worker results, retain statuses/reports, and compute the next state without writes."""
     try:
         parsed_results: JsonValue = cast(JsonValue, json.loads(raw_results))
     except json.JSONDecodeError as error:
@@ -192,7 +194,13 @@ def apply_record(state: dict[str, Any], raw_results: str, typed: bool = False) -
     )
     stale_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "stale")
     failed_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "failed")
-    references, identifiers = bind_worker_evidence(state, active, stale_nodes, failed_nodes)
+    skip_evidence = {
+        node: result["evidence"]
+        for node, result in results.items()
+        if result["outcome"] == "skipped"
+        and result["evidence"].startswith(("no_design_fork:", "no_retired_path:", "non_independent:"))
+    }
+    references, identifiers = bind_worker_evidence(state, active, stale_nodes, failed_nodes, skip_evidence)
     if any(
         classify_worker_evidence(cast(dict[str, Any], result).get("evidence"), identifiers)[0]
         for result in results.values()

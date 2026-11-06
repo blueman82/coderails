@@ -115,6 +115,13 @@ transcript parser and independently installed pure graph semantics.
    transcripts, role attribution and harness terminal notifications. Every
    child in a fan-out must qualify. Worker claims and echoed notification text
    cannot establish completion.
+   When a design fork does not exist, record `S2.5` as `skipped` with
+   `no_design_fork: <reason>`. When no existing path is retired, use
+   `no_retired_path: <reason>` for `S2.6`. Each record gets a typed skip reference
+   for this wave. It cannot replace a prior scout attempt. A `non_independent`
+   fallback needs a prior refused scout call, an exact assistant request naming
+   this loop and retry, and the next direct user reply `approve`. The native
+   approval check refuses a missing, changed or foreign reply.
 5. The sole locked read/validate/write applies the whole wave, retry bounds and
    every newly satisfied all-input join. Partial, extra, stale or foreign results
    leave state unchanged. Never edit joins or increment retry counts yourself.
