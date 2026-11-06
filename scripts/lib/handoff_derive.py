@@ -101,8 +101,8 @@ def decisions(
         )
         if note is None:
             degraded.append({"source": "decisions", "reason": reason})
-        if kid:
-            seen.add(str(kid))
+        if note is not None:
+            seen.add(note.id)
         out.append(
             {
                 "id": note.id if note else kid,

@@ -70,18 +70,18 @@ def submit(session: object, task: str) -> Pending | ma.Degraded:
     down = probe()
     if down is not None:
         return down
-    response = _json(ma.run_cli(["learn", "request", "--session", session, "--task", task]))
-    if isinstance(response, ma.Degraded):
-        return response
-    ident = response.get("id")
-    if not isinstance(ident, str) or REQUEST_ID.fullmatch(ident) is None:
-        return ma.Degraded("muninn_bad_output")
     mapped = current.project()
     if isinstance(mapped, ma.Degraded):
         return mapped
+    response = _json(ma.run_cli(["learn", "request", "--session", session, "--task", task]))
+    if isinstance(response, ma.Degraded):
+        return ma.Degraded("learning_request_unknown", response.reason)
+    ident = response.get("id")
+    if not isinstance(ident, str) or REQUEST_ID.fullmatch(ident) is None:
+        return ma.Degraded("learning_request_unknown", "muninn_bad_output")
     request = _request({"request": response}, ident, task, mapped)
     if isinstance(request, ma.Degraded):
-        return request
+        return ma.Degraded("learning_request_unknown", request.reason)
     return Pending(ident, request["window"], request["scope"]["project_id"])
 
 
