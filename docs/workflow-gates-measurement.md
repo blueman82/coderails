@@ -71,7 +71,8 @@ edited.
   authority, the trace rows only tally denials. Optional `work_units[u].verification{run_all,post_evals}` mirrors require
   an exact payload session and existing `CLAUDE_LOOP_ID`, schema-3 in-progress state, one physical worktree match and
   its running `U3[<id>]` registration in `active_wave.nodes`. A skipped mirror does not change the ceiling decision.
-  Native producer worktree registration is a separate dependency; supplied fixtures do not prove installed integration.
+  Both native `add-unit --worktree` CLIs register and persist the unit worktree. Supplied fixtures alone do not prove
+  installed integration.
 - Any `argv/denied/protected_paths_unreadable` means `policy/protected_paths.json` is broken in the installed plugin:
   edits on main are refused until it is repaired. Commit, push and merge recognition rows are not written; a drop in
   gated commits after the classifier shipped cannot be told apart from fewer commits.

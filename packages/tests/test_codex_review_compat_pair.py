@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import cast
 
 from packages.tests.test_codex_review_passes import PostTests, Repo, review_valid
-from scripts.lib import review_artifact
+from scripts.lib import review_artifact, review_passes
 
 
 class CompatPairPostTests(Repo):
@@ -34,6 +34,7 @@ class CompatPairPostTests(Repo):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 compat = review_artifact.compat_line("12", self.sha, 1, "preserve-compat")
                 self.assertEqual(posted.read_text().splitlines()[2], compat)
+                self.assertIsNotNone(review_passes.parse(posted.read_text(), "12", self.sha))
                 companion = posted.with_name(posted.name + ".companion").read_text()
                 self.assertEqual(companion, review_artifact.marker("12", self.sha) + "\n" + compat + "\n" + summary)
                 self.assertTrue(review_valid(companion, 12, self.sha))

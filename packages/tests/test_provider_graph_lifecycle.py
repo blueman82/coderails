@@ -173,6 +173,32 @@ class ProviderLifecycleTests(unittest.TestCase):
             provider.write(state)
             self.assertTrue(graph_semantics.can_complete(state)["eligible"])
 
+    def test_only_final_generic_degraded_decision_releases_graph(self) -> None:
+        """A failed generic memory write is final; a worker answer still needs a successful sync."""
+        for provider in self.providers:
+            provider.finish_wave()
+            state = provider.read()
+            state = add_decision(state, provider.session, "2.5", "Choose design", state["loop_id"], state["revision"])[
+                "state"
+            ]
+            row = state["decisions_absorbed"][0]
+            valid = {"state": "degraded", "id": None, "reason_code": "muninn_absent"}
+            row["muninn"] = valid
+            self.assertTrue(graph_semantics.can_complete(state)["eligible"], provider.name)
+            for bad in (
+                {"state": "degraded"},
+                {"state": "degraded", "id": "K1", "reason_code": "muninn_absent"},
+                {"state": "degraded", "id": None, "reason_code": " "},
+                {"state": "pending"},
+                {"state": "syncing"},
+                {"state": "unknown"},
+            ):
+                row["muninn"] = bad
+                self.assertIn("decision_sync_pending", graph_semantics.can_complete(state)["blockers"])
+            row["muninn"] = valid
+            row["worker_status_seq"] = 7
+            self.assertIn("decision_sync_pending", graph_semantics.can_complete(state)["blockers"])
+
     def test_empty_graph_rejects_orphan_pending_worker_status(self) -> None:
         """A pending worker answer must block completion even if its node is absent."""
         for provider in self.providers:

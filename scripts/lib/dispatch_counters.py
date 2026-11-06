@@ -1,6 +1,7 @@
 """Count dispatch-envelope authorizations and refusals from per-session trace rows (read-only, counts only).
 
 Usage: python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]   (loop dir: CLAUDE_AGENTIC_LOOP_DIR or default)
+Pass --trace-json to read measure_graph_alignment JSON on stdin; recovery traces are still read from the loop dir.
 `dispatch_authorized` is a spawn the guard let through (and consumed); every other code is a refused spawn named by the
 closed vocabulary in packages/graph-semantics/graph_contract.py (`dispatch_*`, `role_mismatch`). Rows live in each
 loop's recovery-trace.jsonl, written by `authorize-dispatch` on both providers.
@@ -17,13 +18,21 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages/graph-semantics"))
 from graph_contract import CODES
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.lib.trace_counters import measured_reasons  # noqa: E402
+
 REASONS = (*CODES, "dispatch_authorized", "dispatch_check_off")
 
 
-def count_reasons(root: Path, since: str = "") -> dict[str, int]:
+def count_reasons(root: Path, since: str = "", measurement: object = None) -> dict[str, int]:
     """Occurrences of each reason code, once per (file, event_id), rows with ts >= since when given."""
-    counts: dict[str, int] = dict.fromkeys(REASONS, 0)
-    for trace in sorted([*root.glob("*/trace.jsonl"), *root.glob("*/*/recovery-trace.jsonl")]):
+    counts: dict[str, int] = (
+        measured_reasons(measurement, REASONS) if measurement is not None else dict.fromkeys(REASONS, 0)
+    )
+    files = [*root.glob("*/*/recovery-trace.jsonl")]
+    if measurement is None:
+        files += [*root.glob("*/trace.jsonl")]
+    for trace in sorted(files):
         try:
             lines = trace.read_text(encoding="utf-8").splitlines()
         except (OSError, ValueError):
@@ -51,7 +60,12 @@ def main() -> int:
     """Print the counts as JSON."""
     since = sys.argv[sys.argv.index("--since") + 1] if "--since" in sys.argv[:-1] else ""
     root = Path(os.environ.get("CLAUDE_AGENTIC_LOOP_DIR", str(Path.home() / ".coderails/agentic-loop")))
-    print(json.dumps(count_reasons(root, since), sort_keys=True))
+    measurement = json.load(sys.stdin) if "--trace-json" in sys.argv else None
+    if "--trace-json" in sys.argv and measurement is None:
+        raise ValueError("missing trace summary")
+    if measurement is not None and since:
+        raise ValueError("--since cannot filter an aggregated trace summary")
+    print(json.dumps(count_reasons(root, since, measurement), sort_keys=True))
     return 0
 
 

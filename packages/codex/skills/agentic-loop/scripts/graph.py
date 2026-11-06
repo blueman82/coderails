@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+import graph_contract
 import graph_dispatch
 import graph_driver_cutover
 import graph_invalid_dispatch
@@ -369,7 +370,7 @@ def main() -> int:
             output = complete(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)
         else:
             output = verify_completion(args.state, args.session, args.evals, args.proof, args.retro, args.transcript)
-    except (GraphError, graph_semantics.GraphSemanticError) as error:
+    except (GraphError, graph_semantics.GraphSemanticError, graph_contract.DispatchDeniedError) as error:
         print(f"graph: {error}", file=sys.stderr)
         return 1
     print(json.dumps(output, sort_keys=True))

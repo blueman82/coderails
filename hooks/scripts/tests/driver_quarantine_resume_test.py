@@ -91,6 +91,30 @@ class QuarantineResumeTests(unittest.TestCase):
         )
         environment.start()
         self.addCleanup(environment.stop)
+        control = self.base / "control"
+        controller_fixture.DriverControllerTests.checkout(control)
+        config = control / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
+        config.write_text("memory:\n  backend: off\n")
+        subprocess.run(["git", "-C", str(control), "add", str(config)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(control),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@test",
+                "commit",
+                "-qm",
+                "fixture config",
+            ],
+            check=True,
+        )
+        previous = Path.cwd()
+        os.chdir(control)
+        self.addCleanup(os.chdir, previous)
         self.addCleanup(self._finish_children)
 
     def _finish_children(self) -> None:

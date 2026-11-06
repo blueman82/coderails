@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
 import graph_contract  # noqa: E402
 
 from packages.tests.provider_fixture import Provider  # noqa: E402
+from packages.tests.test_provider_add_unit_contract import assigned_checkout  # noqa: E402
 from packages.tests.test_provider_controller_commands import Controller  # noqa: E402
 
 
@@ -59,10 +60,10 @@ class PublicationContractTests(unittest.TestCase):
             with self.subTest(provider=name), tempfile.TemporaryDirectory() as scratch:
                 c = Controller(Path(scratch), name)
                 self.assertEqual(c.start().returncode, 0)
-                checkout = c.root / "assigned"
+                checkout = Path(assigned_checkout(c.root))
                 self.assertEqual(c.add("1", "--manifest", "README.md", "--worktree", str(checkout)).returncode, 0)
                 self.assertEqual(c.read()["work_units"]["1"]["worktree"], str(checkout.resolve()))
-                self.assertEqual(c.add("2", "--manifest", "other.md").returncode, 0)
+                self.assertEqual(c.add("2").returncode, 0)
                 assigned = c.run(
                     "assign-worktree",
                     "--session",
@@ -88,6 +89,7 @@ class PublicationContractTests(unittest.TestCase):
                 provider.write(state)
                 provider.success("begin-wave")
                 before = provider.read()
+                checkout = assigned_checkout(provider.home)
                 result = provider.call(
                     "assign-worktree",
                     "--session",
@@ -97,14 +99,14 @@ class PublicationContractTests(unittest.TestCase):
                     "--unit",
                     "1",
                     "--worktree",
-                    str(provider.home),
+                    checkout,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 after = provider.read()
                 self.assertEqual(after["revision"], before["revision"])
                 self.assertEqual(after["graph"]["active_wave"], before["graph"]["active_wave"])
                 self.assertEqual(after["graph"]["dispatches"], before["graph"]["dispatches"])
-                self.assertEqual(after["work_units"]["1"]["worktree"], str(provider.home.resolve()))
+                self.assertEqual(after["work_units"]["1"]["worktree"], checkout)
 
 
 if __name__ == "__main__":

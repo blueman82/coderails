@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import graph_convert
+import graph_dispatch_inputs
 import graph_driver_control
 import graph_driver_controller
 import graph_driver_dispatch
@@ -124,11 +125,13 @@ def run_scope_command(args: argparse.Namespace) -> dict[str, Any]:
 def begin_wave(path: Path) -> dict[str, Any]:
     """Open the full ready set under the Claude graph lock and frozen eval gate."""
     output: dict[str, Any] = {}
+    preview, lesson_snapshot = graph_dispatch_inputs.prefetch(path, ROOT / "scripts/push.py", load)
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
+        graph_dispatch_inputs.check_revision(preview, state, lesson_snapshot)
         for node_id in graph_semantics.ready(state):
             validate_dispatch_evals(path, state, node_id)
-        report = graph_driver_dispatch.begin_wave(state, path, ROOT / "scripts/push.py")
+        report = graph_driver_dispatch.begin_wave(state, path, ROOT / "scripts/push.py", lesson_snapshot)
         output.update(report["wave"])
         output["dispatches"] = report["dispatches"]
         return object_value(report["state"], "driver wave state")
@@ -141,10 +144,20 @@ def authorize(
     path: Path, session: str, dispatch_id: str, prompt_file: Path, role: str, driver_run_id: str
 ) -> dict[str, Any]:
     """Consume one Claude driver slot under the graph lock."""
+    preview, lesson_snapshot = graph_dispatch_inputs.prefetch(path, ROOT / "scripts/push.py", load, True)
 
     def update(state: dict[str, Any]) -> dict[str, Any]:
+        graph_dispatch_inputs.check_revision(preview, state, lesson_snapshot)
         proposed = graph_driver_dispatch.authorize(
-            state, path, ROOT / "scripts/push.py", session, dispatch_id, prompt_file, role, driver_run_id
+            state,
+            path,
+            ROOT / "scripts/push.py",
+            session,
+            dispatch_id,
+            prompt_file,
+            role,
+            driver_run_id,
+            lesson_snapshot,
         )
         node_id = proposed["graph"]["dispatches"][dispatch_id]["node_id"]
         validate_dispatch_evals(path, state, node_id, worker=True)

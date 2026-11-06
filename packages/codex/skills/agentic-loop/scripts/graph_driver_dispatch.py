@@ -14,7 +14,9 @@ import graph_semantics
 import graph_spec
 
 
-def begin_wave(state: dict[str, Any], progress: Path, push_script: Path) -> dict[str, Any]:
+def begin_wave(
+    state: dict[str, Any], progress: Path, push_script: Path, lesson_snapshot: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Prepare all ready nodes and one unconsumed driver record for each."""
     if state["graph"].get("dispatch_mode") != "driver":
         raise ValueError("begin-driver-wave requires a cutover graph")
@@ -33,7 +35,7 @@ def begin_wave(state: dict[str, Any], progress: Path, push_script: Path) -> dict
             continue
         node = proposed["graph"]["nodes"][node_id]
         attempt = node["retry"]["attempts"] + node["respawn"]["generation"] + 1
-        contract = graph_contract.build_contract(proposed, node_id, base, progress, push_script)
+        contract = graph_contract.build_contract(proposed, node_id, base, progress, push_script, lesson_snapshot)
         dispatch_id, record = graph_contract.make_record(
             proposed, node_id, active["wave_id"], attempt, contract, "driver"
         )
@@ -61,6 +63,7 @@ def authorize(
     prompt_file: Path,
     role: str,
     driver_run_id: str,
+    lesson_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Consume one exact driver dispatch slot before the worker process starts."""
     if state["graph"].get("dispatch_mode") != "driver" or state["session_id"] != session:
@@ -77,6 +80,9 @@ def authorize(
         raise ValueError("driver prompt names another dispatch")
     record = graph_contract.check_dispatch(state, envelope, prompt, live=True)
     graph_contract.require_publication(record, progress, push_script)
+    graph_contract.require_source_binding(state, record)
+    if lesson_snapshot is not None:
+        graph_contract.require_current_lessons(record, lesson_snapshot)
     if record.get("dispatch_mode") != "driver" or record.get("authorized") is not None:
         raise ValueError("driver dispatch mode is wrong or already authorized")
     if role != record["contract"]["role"]:
