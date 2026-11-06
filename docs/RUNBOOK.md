@@ -415,8 +415,11 @@ separate, and Claude live qualification remains incomplete.
 - Limits: the one same-user orders lock covers currentness, reconciliation, bounded sync and direct atomic ledger
   save; it provides no exactly-once network guarantee. Current tagged claims are reconciled even for degraded/pending
   local records. Only a new completed session+loop recurrence resets a counter or revives a tombstone; replaying the
-  same observation cannot rejuvenate it. Authoritative dispatch, promotion and views use current, normal, live,
-  verified user-cited claims. Diagnostic `orders.py lessons` may show uncited rows (`cited: false`); contract queries,
+  same observation cannot rejuvenate it. Current lesson consumers verify project/task and revision bindings, live
+  sources, owner authority, redaction status and selected user quotes. These checks do not establish semantic
+  privacy classification. Current Notes report `privacy_classification: unknown`. The standalone legacy schema-v2
+  CLI keeps its separate normal-only boundary. Original I graph metadata and native integration remain unqualified.
+  Diagnostic `orders.py lessons` may show uncited rows (`cited: false`); contract queries,
   promotion and views exclude them. Owner-cited lesson text is legitimate typed memory; advisory transcript
   observations remain metadata only. Failed reads exit 3, with no ledger-text fallback. A fresh cited claim can
   supersede prior text. Legacy import retains full source text and first-seen provenance, preserves decayed counters,
