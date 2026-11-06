@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -30,6 +31,22 @@ def _id(prefix: str, text: str) -> str:
     return prefix + hashlib.sha256(text.encode()).hexdigest()[:32]
 
 
+def _project() -> str:
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+    )
+    first = result.stdout.splitlines()[0] if result.stdout else ""
+    return (
+        str(Path(first.removeprefix("worktree ")).resolve())
+        if result.returncode == 0 and first.startswith("worktree ")
+        else str(Path.cwd().resolve())
+    )
+
+
 def request(home: Path, args: list[str]) -> tuple[int, dict[str, Any]]:
     """Create a pending request from a source-backed test session."""
     try:
@@ -39,7 +56,7 @@ def request(home: Path, args: list[str]) -> tuple[int, dict[str, Any]]:
         return 2, {"error": "bad_usage"}
     if not fs.load_events(fs.roots_from_env()).get(session):
         return 2, {"error": "source_unavailable"}
-    project = os.path.realpath(os.getcwd())
+    project = _project()
     data = _load(home)
     rid = _id("R_", f"{session}|{project}|{task}")
     row = data["requests"].setdefault(
@@ -149,7 +166,7 @@ def complete(home: Path, args: list[str]) -> tuple[int, dict[str, Any]]:
 
 def list_current(home: Path, task: str) -> tuple[int, dict[str, Any]]:
     """Return active task notes and broad project notes, like Muninn."""
-    project = os.path.realpath(os.getcwd())
+    project = _project()
     notes = [
         note
         for note in _load(home)["knowledge"].values()

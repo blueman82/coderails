@@ -203,7 +203,7 @@ no script does) or `unused`. Regenerate the table with `python3 scripts/lib/conf
 | `engineering_principles_skill` | string/null | `"/engineering-principles-python"` | - | read_by_prose_only | Slash command run by the pre-flight; null skips it. |
 | `sandbox_workers` | boolean/null | `true` | `true` | enforced_by_code | Default ON. Claude graph_dispatch.plan() reports sandboxed or in-process-fallback:<reason> for U3 nodes. Codex refuses native U3 spawns while ON; use the existing OAuth graph driver and its sealed process evidence. Standalone worker output earns no graph completion credit. OFF explicitly permits inherited parent sandbox behavior. |
 | `subagent_identity_gate` | string | `"on"` | `"on"` | enforced_by_code | on (default) denies an untyped Bash subagent in a graph-bound Claude session; off disables that hook. |
-| `action_authority` | string/null | `"off"` | `"advisory"` | enforced_by_code | Absent = off; the shipped workflow uses advisory. Explicit enforce requires a signed receipt for guarded merges and pushes. Invalid values are rejected by strict config consumers. |
+| `action_authority` | string/null | `"enforce"` | `"enforce"` | enforced_by_code | Default enforce requires signed receipts for guarded merges and pushes. Explicit advisory warns; explicit off disables this receipt gate. Invalid configuration is rejected. |
 | `diff_manifest` | string/null | `"enforce"` | `"enforce"` | enforced_by_code | Diff-manifest publication gate for push.py, merge.py and direct-merge hooks. Default enforce uses the shipped policy; invalid values are rejected by strict config consumers. |
 | `review_passes` | string | `"enforce"` | - | enforced_by_code | Required-reviewer check in the publication gate (policy/review_policy.json): off skips it; enforce (default) and any other value apply it. |
 | `eval_level` | string | `"enforce"` | - | enforced_by_code | Derived-eval-level and suite-integrity check in the publication gate (policy/surface_policy.json): off skips it; enforce (default) and any other value apply it. |
@@ -283,3 +283,21 @@ code, trace `decision.sync/degraded/<code>`, local row kept), 2 refused (wrong s
 written). Teardown runs `flush-decisions` to retry pending and safely degraded rows. A retained R-id is inspected again during recovery. Unknown without that binding and in-flight syncing remain
 `decision_sync_unknown`; no automatic resubmission occurs. Trace commands: `decision.record`,
 `decision.sync` (counted by `memory_counters.memory_counts`).
+
+### Integrated dispatch inputs and counter summaries
+
+New nonempty unit manifests require an absolute clean Git checkout through
+`add-unit --worktree`. Both providers store the source manifest binding and include
+that binding, the checkout HEAD, and current typed lessons in the dispatch contract.
+The retained `assign-worktree` command binds the same source fields for pending units.
+`graph_lessons.py` reads the provider's `lessons.py query --format contract` against
+this loop's repo-key directory before the progress lock; `graph_dispatch_inputs.py`
+checks that the owner, loop, and revision did not change during the read. Native and
+local driver authorization recheck the source and lesson snapshot before consuming
+an attempt. Unavailable or stale lessons remain a coded refusal.
+
+The dispatch, spec, stop, and worker counter CLIs accept `--trace-json` on stdin from
+`measure_graph_alignment.py --json`. Each reads `trace.by_reason` and retains local
+recovery events. The worker counter also preserves its source-specific mapping of
+recorded decision events. Null or malformed summaries and `--since` with aggregate
+input are refused. The measurement script itself remains unchanged.

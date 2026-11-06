@@ -1,6 +1,7 @@
 """Count typed worker results and recorded decisions from per-loop trace rows and state (read-only, counts only).
 
 Usage: python3 scripts/lib/worker_counters.py [--since <ISO ts>]   (loop dir: provider override or default)
+Pass --trace-json to read measure_graph_alignment JSON on stdin; local decision mapping remains source-specific.
 Worker rows come from `record-wave` in each loop's recovery-trace.jsonl; locally recorded decisions come from
 `decision.record/recorded/ok` in the session's trace.jsonl on both providers:
 `worker_status_<reason>` and `final_report_invalid` are whole-report refusals, `worker_status_<status>` a recorded typed
@@ -20,6 +21,9 @@ from typing import Any, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/agentic-loop/scripts"))
 from worker_status import REASONS, STATUSES
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.lib.trace_counters import measured_reasons  # noqa: E402
+
 REASON_CODES = (
     *(f"worker_status_{reason}" for reason in REASONS[1:]),
     "final_report_invalid",
@@ -29,11 +33,17 @@ REASON_CODES = (
 )
 
 
-def count_reasons(root: Path, since: str = "") -> dict[str, int]:
+def count_reasons(root: Path, since: str = "", measurement: object = None) -> dict[str, int]:
     """Occurrences of each reason code, once per (file, event_id), rows with ts >= since when given; plus pending."""
-    counts: dict[str, int] = {**dict.fromkeys(REASON_CODES, 0), "pending_statuses": 0}
+    base = measured_reasons(measurement, REASON_CODES) if measurement is not None else dict.fromkeys(REASON_CODES, 0)
+    if measurement is not None:
+        summary = cast("dict[str, Any]", measurement)["trace"]["by_reason"]
+        base["decision_recorded"] += summary.get("decision.record/recorded/ok", 0)
+    counts: dict[str, int] = {**base, "pending_statuses": 0}
     traces = [*root.glob("*/recovery-trace.jsonl"), *root.glob("*/*/recovery-trace.jsonl")]
-    traces += [*root.glob("*/trace.jsonl"), *root.glob("*/*/trace.jsonl")]
+    traces += [*root.glob("*/*/trace.jsonl")]
+    if measurement is None:
+        traces += [*root.glob("*/trace.jsonl")]
     for trace in sorted(traces):
         try:
             lines = trace.read_text(encoding="utf-8").splitlines()
@@ -88,7 +98,12 @@ def main() -> int:
         or os.environ.get("CODERAILS_AGENTIC_LOOP_DIR")
         or Path.home() / ".coderails/agentic-loop"
     )
-    print(json.dumps(count_reasons(root, since), sort_keys=True))
+    measurement = json.load(sys.stdin) if "--trace-json" in sys.argv else None
+    if "--trace-json" in sys.argv and measurement is None:
+        raise ValueError("missing trace summary")
+    if measurement is not None and since:
+        raise ValueError("--since cannot filter an aggregated trace summary")
+    print(json.dumps(count_reasons(root, since, measurement), sort_keys=True))
     return 0
 
 

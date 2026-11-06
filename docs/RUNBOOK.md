@@ -51,8 +51,9 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
   `config_unparseable_line` / `config_duplicate_key` findings.
 - Defaults: the diff-manifest check uses `enforce` mode and `policy/diff-policy.default.json` even without a config file.
   An existing config with no other keys enables `sandbox_workers: true` and `evals.require_signatures: true`.
-  `action_authority` defaults to `off`. The shipped config sets it to `advisory`, which warns about missing receipts
-  without a passphrase. Set `enforce` only when signed receipts are required.
+  `action_authority` defaults to `enforce`, including without a config file. Shipped example and init presets also
+  use `enforce`. Explicit `advisory` warns about missing receipts; explicit `off` disables this receipt gate.
+  Invalid configuration refuses guarded actions. Preserve intentional project settings when migrating.
 
 ## Discipline lint advisories climbing
 
@@ -577,9 +578,18 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
   `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`
   (`manifest_counters.py` still tallies only `diff-manifest`). See `docs/workflow-gates-measurement.md`.
 - Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink), `mode_change`, `status_not_allowed` (policy `statuses`), `too_many_paths` (policy `max_paths`), `manifest_unreadable`, `manifest_internal_error`, `diff_manifest_mode_invalid` (unknown mode, treated as enforce).
-- Remediation: a real violation means the diff left its declared scope; fix the diff, or widen `unit.manifest`
-  (re-register with `add-unit --manifest`) or the policy file on purpose. `push.py`/`merge.py --unit N --progress PATH`
-  bound the diff to that unit's manifest. `manifest_unreadable` means the policy file, progress.json or diff (or an
+- Remediation: a real violation means the diff left its declared scope. Keep the refused unit and its history;
+  remove out-of-scope changes from the proposed publication through the usual worktree workflow.
+  `add-unit` registers only a new unit ID; it cannot change an existing unit's manifest.
+  `assign-worktree` can bind only a pending unit to an unassigned or identical recorded checkout path,
+  using its existing manifest. It cannot widen that manifest or repair an active assignment.
+  If only the assigned checkout is unavailable, restore it at its recorded path without changing the stored binding.
+  If the required binding or scope cannot be restored, keep publication on HOLD and preserve progress, proofs and
+  dispatch history. A different manifest needs a separately validated new-graph plan and source registration;
+  this procedure does not migrate the refused unit or transfer its authority and proof results.
+  Do not hand-add hashes, reset status or treat `convert` as a source-binding repair.
+  `push.py`/`merge.py --unit N --progress PATH` bind publication to the registered manifest.
+  `manifest_unreadable` means the policy file, progress.json or diff (or an
   unresolved PR head) could not be read: it refuses under enforce (fails open only under advisory); fix the path.
   `manifest_internal_error` refuses under enforce; advisory records `failed_open` and continues, including when repository
   metadata lookup fails. Set `diff_manifest: off` to disable. Invalid modes, including an empty mode, enforce and report
@@ -826,8 +836,8 @@ validate this scope. Get a new applicable inspection or complete eligible scope 
   One shell command can contain several counted runs. The hook locks all affected counters in a fixed order, then
   computes each total. If any run exceeds the ceiling, it blocks the command and charges only the exceeded counters.
   A disk write error can leave a partial count after an earlier counter was written; the command is still blocked.
-  The native add-unit producer still supplies status/manifest without worktree registration; this integration is
-  a separate producer dependency, so fixture mirroring alone does not prove native unit accounting.
+  Both native `add-unit --worktree` CLIs register and persist the unit worktree. Fixture mirroring alone does not
+  prove installed unit accounting.
 - `protected_paths_unreadable`: `policy/protected_paths.json` (both plugin copies) is missing, torn or ill-shaped, so
   `no_edit_on_main` and the in-Bash source-write check refuse every non-owner edit on main/master until it is repaired.
   Owner permission files stay denied on every branch. Keys: `source_extensions`, `plugin_source_globs`, `doc_extensions`,
@@ -849,9 +859,9 @@ validate this scope. Get a new applicable inspection or complete eligible scope 
 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
-- Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a
-  stderr "action_authority (advisory)" warning appears. The gate is off unless config explicitly sets
-  `action_authority: enforce` or `action_authority: advisory`.
+- Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (default
+  enforce), or a stderr "action_authority (advisory)" warning appears under explicit advisory. Only explicit
+  `action_authority: off` disables this receipt gate. Invalid configuration denies with `config_rejected`.
 - Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
@@ -879,9 +889,12 @@ validate this scope. Get a new applicable inspection or complete eligible scope 
   `marker_cleanup_failed` means cleanup failed: consumed markers stay in place if execution state is uncertain.
   Fix the file fault and mint a new receipt. A killed hook can leave a partial spend; confirm the command did not
   run before any manual recovery.
-- Remediation for optional enforce mode: one-time `python3 scripts/authority_keys.py init` (passphrase-protected
-  key; `show` prints fingerprints), then mint for the exact command:
+- Remediation for default enforce mode: the owner runs one-time `python3 scripts/authority_keys.py init` at their
+  terminal (`ssh-keygen` accepts an empty passphrase; `show` prints fingerprints), then approves the exact command:
   `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge|git_push --command '<exact command>' --cwd <directory it runs in>`
+  Signatures remain required. A usable unprotected key needs no passphrase; `--key <public-key-path>` can select an
+  available agent-backed key. The approval CLI still requires the owner's controlling terminal. An autonomy grant
+  does not replace this action receipt. An agent must not create a PTY or call the signer to impersonate approval.
   (single-use, 1h by default; the CLI computes repository+ref+SHA itself, signs, and refuses without a tty with
   `receipt_refused_no_tty`; add `--loop <loop id>` when the session authority has a loop; `inspect-receipt` /
   `revoke-receipt` take `--receipt-id`). `signer_unknown` / `trust_root_missing`
@@ -1025,6 +1038,42 @@ validate this scope. Get a new applicable inspection or complete eligible scope 
   Wiki lint is advisory; presence on base and absence at the first parent do not prove PR authorship.
 
 See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
+
+## Source-bound dispatch upgrade and rollback
+
+This boundary applies to both provider installs. Before activating the source-bound dispatch and publication
+runtime, finish active loops with the runtime that created them, including worker publication and completion.
+Do not upgrade an in-flight implementation or publication wave. Existing assigned units can lack
+`source_manifest_sha256`; the new publication check refuses them with `publication:source_manifest_mismatch`.
+`assign-worktree` only accepts pending units, so it cannot repair an already active assignment. Readability of an
+old dispatch record does not establish that its unit can publish under this runtime.
+
+Start new loops on the new runtime only after the old loops have drained. Keep each loop's matching runtime
+available in an isolated checkout with its progress, dispatch history, proof, orders and retro artifacts preserved
+together. Historical state can also require an older completion/retro reader, as described above; do not assume
+all retained histories can be checked by the pre-upgrade runtime.
+
+Once a new loop stores expanded source/lesson dispatch contracts, reverting code alone is not a safe resume or
+verification procedure: older closed-field readers can reject those contracts. Retain the matching newer runtime
+for that loop through publication, completion and any later verification or retry. A rollback for future work does
+not convert existing records. Do not hand-add hashes, relabel units, reset status, edit frozen evidence, or treat
+`graph.py convert` as an automatic migration for missing source bindings. There is no automatic migration in this
+rollout procedure and no publication bypass is authorized.
+
+Native/global installation remains on HOLD until operational qualification separately verifies this drain and
+runtime-retention procedure. Source review, local tests and a successful commit gate do not establish that an
+installed upgrade, rollback or live-provider loop has been qualified.
+
+Assigned-source inspection refuses effective Git `filter` attributes before status can invoke a clean/process
+helper. Unused filter/LFS configuration alone is permitted. It does not disable a conversion and silently treat
+raw file bytes as the filtered HEAD representation. The refusal also covers explicit `-filter`: Git's attribute
+output cannot distinguish that value from the literal driver name `unset`. An actual `!filter` reset has no
+effective filter row. Inspection does not change attributes, filter configuration or index metadata. Keep the
+trusted assigned checkout and its configuration stable during inspection; these reads are not an atomic snapshot
+or a boundary against concurrent same-user filesystem changes. A refused filtered checkout needs an owner-reviewed
+source workflow; this reader provides no automatic filter migration or bypass.
+It also refuses checkouts containing Git submodule entries before status can inspect a nested checkout and run
+that checkout's filters. It does not ignore submodule dirtiness or claim that nested source has been validated.
 
 ## Dispatch refused: `dispatch_*` or `role_mismatch`
 

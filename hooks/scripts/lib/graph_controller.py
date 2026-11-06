@@ -204,6 +204,7 @@ def add_unit(
             given.get("base_branch"),
             given.get("worktree"),
         )
+        fields.update(graph_contract.source_assignment(fields.get("worktree"), manifest or []))
     except ValueError as error:
         coded = RecoveryRefusedError("add_unit_refused_bad_field", str(error))
         raise _refused("add-unit", path, ident, coded, inputs) from error
@@ -283,7 +284,7 @@ def assign_worktree(path: Path, session: str, loop_id: str, unit: str, worktree:
         if record.get("worktree") not in (None, assigned):
             refusal.append(RecoveryRefusedError("assign_worktree_refused", "unit already has another worktree"))
             raise refusal[0]
-        record["worktree"] = assigned
+        record.update(graph_contract.source_assignment(assigned, record.get("manifest", [])))
         return state
 
     try:

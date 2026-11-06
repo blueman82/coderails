@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_contract
+import graph_dispatch_inputs
 import graph_driver_control
 import graph_driver_controller
 import graph_driver_dispatch
@@ -61,8 +62,11 @@ def append_scope_note(
 def begin_wave(path: Path) -> dict[str, Any]:
     """Start one core wave under the native state lock and frozen eval gate; store one dispatch record per node."""
     base = graph_contract.base_ref()
+    push_script = Path(__file__).resolve().parents[3] / "scripts/push.py"
+    preview, lesson_snapshot = graph_dispatch_inputs.prefetch(path, push_script, _load)
     with _locked(path):
         state = _load(path)
+        graph_dispatch_inputs.check_revision(preview, state, lesson_snapshot)
         if state["graph"].get("dispatch_mode") == "driver":
             raise GraphError("driver graph refuses native begin-wave")
         try:
@@ -80,9 +84,10 @@ def begin_wave(path: Path) -> dict[str, Any]:
         }
         dispatches: list[dict[str, Any]] = []
         for node_id in wave["nodes"]:
-            contract = graph_contract.build_contract(
-                proposed, node_id, base, path, Path(__file__).resolve().parents[3] / "scripts/push.py"
-            )
+            try:
+                contract = graph_contract.build_contract(proposed, node_id, base, path, push_script, lesson_snapshot)
+            except graph_contract.DispatchDeniedError as error:
+                raise GraphError(str(error)) from error
             mode = "native" if contract["role"] == "loop-worker" else None
             attempt = next_attempt(proposed["graph"]["nodes"][node_id])
             identifier, record = graph_contract.make_record(proposed, node_id, wave["wave_id"], attempt, contract, mode)
@@ -111,10 +116,13 @@ def begin_wave(path: Path) -> dict[str, Any]:
 
 def begin_driver_wave(path: Path) -> dict[str, Any]:
     """Issue the entire ready set through the driver route under the Codex lock."""
+    push_script = Path(__file__).resolve().parents[3] / "scripts/push.py"
+    preview, lesson_snapshot = graph_dispatch_inputs.prefetch(path, push_script, _load)
     with _locked(path):
         state = _load(path)
+        graph_dispatch_inputs.check_revision(preview, state, lesson_snapshot)
         validate_evals(state, None, path.with_name("evals.json"))
-        report = graph_driver_dispatch.begin_wave(state, path, Path(__file__).resolve().parents[3] / "scripts/push.py")
+        report = graph_driver_dispatch.begin_wave(state, path, push_script, lesson_snapshot)
         proposed = cast(dict[str, Any], report["state"])
         _write(path, proposed)
         return {**report["wave"], "dispatches": report["dispatches"]}
@@ -124,19 +132,23 @@ def authorize_driver(
     path: Path, session: str, dispatch_id: str, prompt_file: Path, role: str, driver_run_id: str
 ) -> dict[str, Any]:
     """Consume one Codex driver slot under the graph lock and frozen eval gate."""
+    push_script = Path(__file__).resolve().parents[3] / "scripts/push.py"
+    preview, lesson_snapshot = graph_dispatch_inputs.prefetch(path, push_script, _load, True)
     with _locked(path):
         state = _load(path)
+        graph_dispatch_inputs.check_revision(preview, state, lesson_snapshot)
         validate_evals(state, None, path.with_name("evals.json"))
         try:
             proposed = graph_driver_dispatch.authorize(
                 state,
                 path,
-                Path(__file__).resolve().parents[3] / "scripts/push.py",
+                push_script,
                 session,
                 dispatch_id,
                 prompt_file,
                 role,
                 driver_run_id,
+                lesson_snapshot,
             )
         except (ValueError, OSError) as error:
             trace(path, state, "refused", "driver_authorization_refused", {"session": session}, [], "authorize-driver")
@@ -290,8 +302,11 @@ def authorize_dispatch(
     tool_use_id: str = "",
 ) -> dict[str, Any]:
     """Authorize one native spawn under the graph lock; refusal leaves state unchanged and writes a coded trace."""
+    push_script = Path(__file__).resolve().parents[3] / "scripts/push.py"
+    preview, lesson_snapshot = graph_dispatch_inputs.prefetch(path, push_script, _load, True)
     with _locked(path):
         state = _load(path)
+        graph_dispatch_inputs.check_revision(preview, state, lesson_snapshot)
         if state["graph"].get("dispatch_mode") == "driver":
             trace(path, state, "refused", "driver_native_dispatch", {"session": session}, [], "authorize-dispatch")
             raise GraphError("driver graph refuses native authorization")
@@ -310,9 +325,10 @@ def authorize_dispatch(
                         "dispatch_unknown_id", "--dispatch-id is not the envelope's"
                     )
                 record = graph_contract.check_ownership(state, request, live=True)
-                graph_contract.require_publication(
-                    record, path, Path(__file__).resolve().parents[3] / "scripts/push.py"
-                )
+                graph_contract.require_publication(record, path, push_script)
+                graph_contract.require_source_binding(state, record)
+                if lesson_snapshot is not None:
+                    graph_contract.require_current_lessons(record, lesson_snapshot)
                 if record.get("task_name") != task:
                     raise graph_contract.DispatchDeniedError(
                         "dispatch_foreign", "task_name is not the record's task name"
@@ -349,6 +365,9 @@ def authorize_dispatch(
                 raise graph_contract.DispatchDeniedError("dispatch_unknown_id", "--dispatch-id is not the envelope's")
             record = graph_contract.check_dispatch(state, request, message, live=True)
             graph_contract.require_publication(record, path, Path(__file__).resolve().parents[3] / "scripts/push.py")
+            graph_contract.require_source_binding(state, record)
+            if lesson_snapshot is not None:
+                graph_contract.require_current_lessons(record, lesson_snapshot)
             if record.get("task_name") != task:
                 raise graph_contract.DispatchDeniedError("dispatch_foreign", "task_name is not the record's task name")
             graph_contract.assert_role(record["contract"], agent_type, "", None)
