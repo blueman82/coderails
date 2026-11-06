@@ -368,6 +368,13 @@ def decision_field(row: dict[str, Any], loop_id: str, session_id: str) -> dict[s
     elif isinstance(res, Pending):
         field = {"state": "pending", "id": None, "request_id": res.request_id, "reason_code": "learning_pending"}
     else:
+        if (
+            res.reason == "muninn_absent"
+            and previous.get("state") in {"syncing", "degraded"}
+            and not previous.keys() - {"state", "id", "request_id", "reason_code"}
+            and previous.get("id") is request_id is None
+        ):
+            return {"state": "degraded", "id": None, "reason_code": res.reason}
         off = res.reason == "memory_backend_off"
         uncertain = (
             res.reason == "learning_request_unknown"

@@ -80,10 +80,54 @@ def unit_manifest(unit: str | None, progress: str | None) -> tuple[list[str], st
     return cast(list[str], manifest), base if isinstance(base, str) else None
 
 
+def _diff(*arguments: str) -> str:
+    root = git.output("git", "rev-parse", "--show-toplevel", check=True)
+    return git.run(
+        "git",
+        "-C",
+        root,
+        "diff",
+        "--no-relative",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "--ignore-submodules=none",
+        *arguments,
+        check=True,
+    ).stdout
+
+
+def _nul_paths(output: str) -> list[str]:
+    return [path for path in output.split("\0") if path]
+
+
 def commit(message: str, jira_key: str, paths: list[str], manifest: list[str] | None = None) -> None:
     """Stage tracked modifications plus explicit paths without sweeping untracked files."""
     if not git.dirty():
         return
+    if manifest is not None:
+        pending = _nul_paths(_diff("--cached", "--no-renames", "--name-only", "-z"))
+        pending.extend(_nul_paths(_diff("--no-renames", "--name-only", "-z")))
+        if paths:
+            pending.extend(
+                _nul_paths(
+                    git.run(
+                        "git",
+                        "ls-files",
+                        "--others",
+                        "--exclude-standard",
+                        "--full-name",
+                        "-z",
+                        "--",
+                        *paths,
+                        check=True,
+                    ).stdout
+                )
+            )
+        if any(not manifest_policy.matches(path, manifest) for path in pending):
+            refuse_publication(
+                "diff_manifest:out_of_manifest", "publication paths exceed the unit manifest before staging"
+            )
     git.run("git", "add", "-u", check=True)
     if paths:
         git.run("git", "add", "--", *paths, check=True)
@@ -92,13 +136,7 @@ def commit(message: str, jira_key: str, paths: list[str], manifest: list[str] | 
         print("! Untracked files not staged (run 'git add' explicitly to include them):")
         for path in untracked:
             print(f"!   {path}")
-    staged = [
-        path
-        for path in git.run("git", "diff", "--cached", "--no-renames", "--name-only", "-z", check=True).stdout.split(
-            "\0"
-        )
-        if path
-    ]
+    staged = _nul_paths(_diff("--cached", "--no-renames", "--name-only", "-z"))
     if manifest is not None and any(not manifest_policy.matches(path, manifest) for path in staged):
         refuse_publication("diff_manifest:out_of_manifest", "publication staged paths exceed the unit manifest")
     if not staged:
@@ -117,7 +155,7 @@ def check_publication_diff(manifest: list[str], recorded_base: str | None) -> No
     base = git.pr_field(number, "baseRefName", "") if number else recorded_base or git.main()
     if not base or (recorded_base and base != recorded_base):
         refuse_publication("publication:base_mismatch", "publication base branch does not match the unit")
-    raw = git.output("git", "diff", "--raw", "-z", "-M", f"origin/{base}...HEAD", check=True)
+    raw = _diff("--raw", "-z", "-M", f"origin/{base}...HEAD")
     violations = manifest_policy.check(manifest_policy.parse_raw_z(raw), {}, manifest)["violations"]
     if violations:
         refuse_publication("diff_manifest:out_of_manifest", "publication branch diff exceeds the unit manifest")

@@ -578,9 +578,18 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
   `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`
   (`manifest_counters.py` still tallies only `diff-manifest`). See `docs/workflow-gates-measurement.md`.
 - Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink), `mode_change`, `status_not_allowed` (policy `statuses`), `too_many_paths` (policy `max_paths`), `manifest_unreadable`, `manifest_internal_error`, `diff_manifest_mode_invalid` (unknown mode, treated as enforce).
-- Remediation: a real violation means the diff left its declared scope; fix the diff, or widen `unit.manifest`
-  (re-register with `add-unit --manifest`) or the policy file on purpose. `push.py`/`merge.py --unit N --progress PATH`
-  bound the diff to that unit's manifest. `manifest_unreadable` means the policy file, progress.json or diff (or an
+- Remediation: a real violation means the diff left its declared scope. Keep the refused unit and its history;
+  remove out-of-scope changes from the proposed publication through the usual worktree workflow.
+  `add-unit` registers only a new unit ID; it cannot change an existing unit's manifest.
+  `assign-worktree` can bind only a pending unit to an unassigned or identical recorded checkout path,
+  using its existing manifest. It cannot widen that manifest or repair an active assignment.
+  If only the assigned checkout is unavailable, restore it at its recorded path without changing the stored binding.
+  If the required binding or scope cannot be restored, keep publication on HOLD and preserve progress, proofs and
+  dispatch history. A different manifest needs a separately validated new-graph plan and source registration;
+  this procedure does not migrate the refused unit or transfer its authority and proof results.
+  Do not hand-add hashes, reset status or treat `convert` as a source-binding repair.
+  `push.py`/`merge.py --unit N --progress PATH` bind publication to the registered manifest.
+  `manifest_unreadable` means the policy file, progress.json or diff (or an
   unresolved PR head) could not be read: it refuses under enforce (fails open only under advisory); fix the path.
   `manifest_internal_error` refuses under enforce; advisory records `failed_open` and continues, including when repository
   metadata lookup fails. Set `diff_manifest: off` to disable. Invalid modes, including an empty mode, enforce and report

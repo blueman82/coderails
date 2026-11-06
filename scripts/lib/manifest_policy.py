@@ -175,7 +175,16 @@ def diff_changes(head: str, fetch: str = "", base: str = "") -> Changes | None:
             git.run("git", "fetch", "-q", "origin", base)
         if git.run("git", "cat-file", "-e", base).returncode:
             return None
-    result = git.run("git", "diff", "--raw", "-z", "-M", f"{base or f'origin/{git.main()}'}...{head}")
+    prefix = (
+        "git",
+        "diff",
+        "--no-relative",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+        "--ignore-submodules=none",
+    )
+    result = git.run(*prefix, "--raw", "-z", "-M", f"{base or f'origin/{git.main()}'}...{head}")
     return None if result.returncode else parse_raw_z(result.stdout)
 
 
