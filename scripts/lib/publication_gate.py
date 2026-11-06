@@ -8,6 +8,8 @@ from pathlib import Path
 
 from . import eval_artifact, eval_level, eval_validation, manifest_policy, review_na, review_passes
 from . import git_common as git
+from ._publication_preflight import push_preflight as push_preflight
+from ._publication_preflight import trace_preflight as trace_preflight
 from .artifact_io import object_value
 from .config import config_path, load_config
 from .eval_integrity import IntegrityError, suite_hash
@@ -143,11 +145,6 @@ def remediation(code: str) -> str:
     if code.startswith(("eval_", "level_", "late_freeze", "suite_", "chain_", "integrity_", "not_frozen")):
         return "Re-run and re-post the evals: post_evals.py post <PR> <evals.json> (record an oracle edit with amend)."
     return "Resolve the reported publication-check refusal, then retry."
-
-
-def trace_preflight(code: str) -> None:
-    """Count a repository or base retarget refusal before PR evidence can be trusted."""
-    manifest_policy.trace("merge-preflight", "refused", code, command="publication")
 
 
 def evaluate(number: str, sha: str, unit: str = "", progress: str = "") -> list[Violation]:

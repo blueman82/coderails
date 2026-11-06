@@ -179,9 +179,9 @@ def diff_changes(head: str, fetch: str = "", base: str = "") -> Changes | None:
     return None if result.returncode else parse_raw_z(result.stdout)
 
 
-def publication_session() -> str:
+def publication_session(session: str | None = None) -> str:
     """Session identity supplied by the active provider or publication hook."""
-    session = os.environ.get("CODERAILS_PUBLICATION_SESSION_ID")
+    session = os.environ.get("CODERAILS_PUBLICATION_SESSION_ID") if session is None else session
     if session is None:
         session = (
             os.environ.get("CLAUDE_CODE_SESSION_ID")
@@ -194,19 +194,20 @@ def publication_session() -> str:
     return session
 
 
-def _graph_path(session: str) -> Path | None:
+def _graph_path(session: str, cwd: str = "") -> Path | None:
     """Return the current repository's supported graph-state path."""
     plugin = Path(__file__).resolve().parents[2]
     root_key = (
         "CODERAILS_AGENTIC_LOOP_DIR" if (plugin / ".codex-plugin/plugin.json").is_file() else "CLAUDE_AGENTIC_LOOP_DIR"
     )
     root = Path(os.environ.get(root_key) or Path.home() / ".coderails/agentic-loop")
-    common = git.output("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
-    current = git.output("git", "rev-parse", "--show-toplevel")
+    prefix = ["git", "-C", cwd] if cwd else ["git"]
+    common = git.output(*prefix, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    current = git.output(*prefix, "rev-parse", "--show-toplevel")
     return root / common.replace("/", "-") / session / "progress.json" if common and current and session else None
 
 
-def unit_manifest(progress: str, unit: str) -> list[str]:
+def unit_manifest(progress: str, unit: str, *, cwd: str = "", session: str | None = None) -> list[str]:
     """Read a unit manifest from this repository's supported, session-owned graph state."""
     state = load_json(progress)
     units = (state or {}).get("work_units")
@@ -215,8 +216,8 @@ def unit_manifest(progress: str, unit: str) -> list[str]:
     if any(not isinstance(state.get(key), str) or not str(state[key]).strip() for key in ("session_id", "loop_id")):
         raise ValueError("progress ownership missing")
     owner = str(state["session_id"]).replace("/", "_").replace("..", "")
-    expected = _graph_path(owner)
-    session = publication_session()
+    expected = _graph_path(owner, cwd)
+    session = publication_session(session)
     if not session:
         raise ValueError("publication session missing")
     if not expected or not Path(progress).is_absolute() or Path(progress).resolve() != expected.resolve():
@@ -232,16 +233,18 @@ def unit_manifest(progress: str, unit: str) -> list[str]:
     worktree = cast(dict[str, Any], entry).get("worktree")
     if not isinstance(worktree, str) or not worktree.strip() or not Path(worktree).is_absolute():
         raise ValueError("unit worktree invalid")
+    if cwd and Path(worktree).resolve() != Path(git.output("git", "-C", cwd, "rev-parse", "--show-toplevel")).resolve():
+        raise ValueError("unit worktree mismatch")
     source_manifest.validate(cast(dict[str, Any], entry))
     return strings(cast(list[object], manifest))
 
 
-def active_graph_unit() -> bool:
+def active_graph_unit(*, cwd: str = "", session: str | None = None) -> bool:
     """True when the current repository has graph units for this session."""
-    session = publication_session()
+    session = publication_session(session)
     if not session:
         return False
-    path = _graph_path(session)
+    path = _graph_path(session, cwd)
     if not path:
         return False
     if not path.is_file():

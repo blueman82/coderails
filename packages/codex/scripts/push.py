@@ -27,8 +27,10 @@ def refuse_publication(code: str, message: str) -> None:
 def unit_manifest(unit: str | None, progress: str | None) -> tuple[list[str], str | None] | None:
     """Bind an optional publication request to a registered unit and its assigned checkout."""
     if (unit is None) != (progress is None):
-        raise git.WorkflowError("--unit and --progress must be provided together")
+        refuse_publication("diff_manifest:manifest_unreadable", "--unit and --progress must be provided together")
     if unit is None or progress is None:
+        if manifest_policy.active_graph_unit():
+            refuse_publication("diff_manifest:manifest_unreadable", "graph unit requires --unit and --progress")
         return None
     try:
         state: object = json.loads(Path(progress).resolve().read_text(encoding="utf-8"))
@@ -39,7 +41,7 @@ def unit_manifest(unit: str | None, progress: str | None) -> tuple[list[str], st
     units: object = cast(dict[str, Any], state).get("work_units")
     entry: object = cast(dict[str, Any], units).get(unit) if isinstance(units, dict) else None
     if not isinstance(entry, dict):
-        raise git.WorkflowError("publication unit is not registered")
+        refuse_publication("diff_manifest:manifest_unreadable", "publication unit is not registered")
     record = cast(dict[str, Any], entry)
     manifest: object = record.get("manifest")
     if (
@@ -69,6 +71,12 @@ def unit_manifest(unit: str | None, progress: str | None) -> tuple[list[str], st
         for key in ("session_id", "loop_id")
     ):
         refuse_publication("publication:graph_owner_missing", "publication graph owner is missing")
+    if not manifest_policy.publication_session():
+        refuse_publication("publication:session_missing", "publication session is missing")
+    try:
+        manifest_policy.unit_manifest(progress, unit)
+    except ValueError as error:
+        refuse_publication("diff_manifest:manifest_unreadable", str(error))
     return cast(list[str], manifest), base if isinstance(base, str) else None
 
 
@@ -85,7 +93,11 @@ def commit(message: str, jira_key: str, paths: list[str], manifest: list[str] | 
         for path in untracked:
             print(f"!   {path}")
     staged = [
-        path for path in git.run("git", "diff", "--cached", "--name-only", "-z", check=True).stdout.split("\0") if path
+        path
+        for path in git.run("git", "diff", "--cached", "--no-renames", "--name-only", "-z", check=True).stdout.split(
+            "\0"
+        )
+        if path
     ]
     if manifest is not None and any(not manifest_policy.matches(path, manifest) for path in staged):
         refuse_publication("diff_manifest:out_of_manifest", "publication staged paths exceed the unit manifest")
