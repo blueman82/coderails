@@ -57,6 +57,18 @@ class Derive(StoreCase):
                 transition=claude_transition,
             )
 
+        for row in json.loads(self.path.read_text())["decisions_absorbed"]:
+            self.muninn(
+                "learn",
+                "complete",
+                row["muninn"]["request_id"],
+                "--kind",
+                "decision",
+                "--content",
+                f"{row['phase']}: {row['decision']}",
+            )
+        self.assertEqual(dr.flush_pending(self.path, SESSION, transition=claude_transition)["exit_code"], 0)
+
     def derive(self) -> tuple[dict[str, Any], int]:
         """Run the CLI path and parse its JSON."""
         out = io.StringIO()
@@ -106,7 +118,7 @@ class Derive(StoreCase):
         self.assertEqual(code, 3)
         self.assertEqual([d["reason"] for d in got["degraded"] if d["source"] == "decisions"], ["muninn_absent"])
         self.assertEqual([d["text"] for d in got["decisions"]], ["adopt shape A", "clean-break"])
-        self.assertTrue(all(d["id"] for d in got["decisions"]))  # the K-ids recorded earlier stay printed
+        self.assertTrue(all(d["id"] for d in got["decisions"]))  # retained observations stay visible
         self.assertTrue(all(d["cite"] is None for d in got["decisions"]))  # but without the store the cite is unknown
 
     def test_recorded_degraded_decision_is_disclosed_with_reachable_store(self) -> None:
@@ -185,7 +197,7 @@ class Derive(StoreCase):
         with contextlib.redirect_stdout(io.StringIO()):
             argv = ["--dir", str(self.repo_dir), "--session", SESSION]
             rec = ["record", "--failure-mode", "skipped tests", "--lesson", "Run the tests.", "--loop", "L1"]
-            self.assertEqual(orders.main([*argv, *rec, "--quote", PROMPT]), 0)
+            self.assertEqual(orders.main([*argv, *rec, "--quote", PROMPT]), 3)
         got, code = self.derive()
         self.assertEqual(got["lessons"], [])
         self.assertEqual(code, 0, got["degraded"])
