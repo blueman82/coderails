@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from typing import Any, cast
 
-from . import review_artifact
+from . import review_artifact, review_na
 
 POLICY = Path(__file__).resolve().parents[2] / "policy" / "review_policy.json"
 PREFIX = "<!-- coderails-review-passes v1 "
@@ -71,20 +71,26 @@ def critical_lines(text: str) -> list[str]:
     return [line for line in section if line]
 
 
-def verdict_from_summary(text: str) -> str:
+def verdict_from_summary(text: str, name: str = "review-pr") -> str:
     """`pass` iff the summary says `## No findings` or its Critical section is exactly the token `None`; else `fail`.
 
     Any other Critical line is a finding whatever its bullet style, so prose cannot hide one.
     """
+    if "## Not applicable" in text.splitlines():
+        review_na.summary(text, name)
+        return "not_applicable"
     if "## No findings" in text.splitlines():
         headings = ("## Critical", "## Important", "## Suggestions")
         return "fail" if any(heading in text.splitlines() for heading in headings) else "pass"
     return "pass" if critical_lines(text) == ["None"] else "fail"
 
 
-def validate_summary_text(text: str) -> None:
+def validate_summary_text(text: str, name: str = "review-pr") -> None:
     """Require one unambiguous no-findings summary or all populated severity sections."""
     lines = text.splitlines()
+    if "## Not applicable" in lines:
+        review_na.summary(text, name)
+        return
     headings = ("## Critical", "## Important", "## Suggestions")
     if any(lines.count(heading) > 1 for heading in (*headings, "## No findings")):
         raise ValueError("duplicate summary heading")
@@ -136,14 +142,14 @@ def _bound(rest: str, passes: Passes) -> bool:
     if set(texts) != {"review-pr", *declared}:
         return False
     try:
-        for text in texts.values():
-            validate_summary_text(text)
+        for name, text in texts.items():
+            validate_summary_text(text, name=name)
     except ValueError:
         return False
     return all(
         p["name"] in texts
         and p["summary_sha256"] == summary_sha256(texts[p["name"]])
-        and p["verdict"] == verdict_from_summary(texts[p["name"]])
+        and p["verdict"] == verdict_from_summary(texts[p["name"]], name=p["name"])
         for p in passes
     )
 
@@ -161,7 +167,15 @@ def _valid(item: object) -> bool:
     return (
         isinstance(entry.get("name"), str)
         and re.fullmatch(r"[a-z][a-z0-9-]*", entry["name"]) is not None
-        and entry.get("verdict") in ("pass", "fail")
+        and entry.get("verdict") in ("pass", "fail", "not_applicable")
+        and (
+            entry.get("verdict") != "not_applicable"
+            or (
+                entry.get("name") == "security-review"
+                and entry.get("blocking") is False
+                and set(entry) == {"name", "verdict", "blocking", "summary_sha256"}
+            )
+        )
         and isinstance(entry.get("blocking"), bool)
         and isinstance(entry.get("summary_sha256"), str)
         and re.fullmatch(r"[0-9a-f]{64}", entry["summary_sha256"]) is not None
@@ -185,4 +199,11 @@ def parse(body: str, pr: str, head_sha: str) -> Passes | None:
         return None
     passes = cast(Passes, cast(dict[str, Any], data)["passes"])
     rest = "\n".join(lines[marker + 2 :])
-    return passes if all(_valid(item) for item in passes) and _bound(rest, passes) else None
+    if not all(_valid(item) for item in passes) or not _bound(rest, passes):
+        return None
+    parts = re.split(r"^<!-- coderails-review-pass ([a-z][a-z0-9-]*) -->\r?\n", rest, flags=re.MULTILINE)
+    texts = dict(zip(["review-pr", *parts[1::2]], [parts[0], *parts[2::2]]))
+    for entry in passes:
+        if entry["verdict"] == "not_applicable":
+            entry["scope"] = review_na.summary(texts[entry["name"]], entry["name"])
+    return passes

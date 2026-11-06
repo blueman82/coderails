@@ -41,6 +41,7 @@ MERGE_DRIVER = (
     "from scripts import merge\n"
     "merge.verify_gates = lambda number: merge.git.pr_field(number, 'headRefOid')\n"
     "from scripts.lib import git_common\n"
+    "git_common.gate_review_summary_for_pr = lambda number, sha: (0, '')  # manifest under test\n"
     "git_common.review_passes_for_pr = lambda number, sha: git_common.ReviewPasses(0, ())  # manifest under test\n"
     "git_common.gate_eval_summary_for_pr = lambda number, sha: git_common.EvalSummary(\n"
     '    0, \'0\', \'{"verification_level": 0, "task_ref": "1", "evals": []}\')  # eval level has its own tests\n'

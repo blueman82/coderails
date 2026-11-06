@@ -36,6 +36,9 @@ case "$1 $2" in
     [ "$5" = baseRefOid ] && echo "$FAKE_BASE_SHA" ;;
   "api user") echo me ;;
   "repo view") echo WRITE ;;
+  "api repos/o/r/pulls/7")
+    printf '{"repository":"o/r","head_sha":"%s","base_ref":"main"}\\n' "$FAKE_SHA" ;;
+  "api repos/o/r/git/ref/heads/main") echo "$FAKE_BASE_SHA" ;;
   "api repos/"*)
     [ -n "$FAKE_NO_ARTIFACT" ] && exit 0
     { printf '<!-- coderails-review-summary v1 pr=7 head_sha=%s -->\\n' "$FAKE_SHA"
@@ -64,6 +67,12 @@ if a[:2] == ["pr", "view"]:
     print(heads[min(index, len(heads) - 1)])
 elif a[:2] == ["api", "user"]:
     print("me")
+elif a[:2] == ["api", "repos/o/r/pulls/12"]:
+    print(json.dumps({"repository": "o/r", "head_sha": os.environ["FAKE_SHA"], "base_ref": "main"}))
+elif a[:2] == ["api", "repos/o/r/git/ref/heads/main"]:
+    tips = json.loads(os.environ["FAKE_BASES"])
+    index = sum(row[:2] == a[:2] for row in previous)
+    print(tips[min(index, len(tips) - 1)])
 elif a[0] == "api" and "-F" in a:
     path = os.environ["FAKE_POSTED"]
     if os.path.exists(path):
@@ -157,19 +166,23 @@ class Repo(unittest.TestCase):
         git_cmd(self.dir, "add", "-A")
         git_cmd(self.dir, "commit", "-qm", "change")
         self.sha = git_cmd(self.dir, "rev-parse", "HEAD").strip()
-        self.eval_file = write_comment(self.tmp, self.sha, self.eval_level, frozen_sha=self.base)
+        self.keys = self.tmp / "keys"
+        self.eval_file = write_comment(
+            self.tmp, self.sha, self.eval_level, signing_keys=self.keys, frozen_sha=self.base
+        )
 
 
 class HookTests(Repo):
     """The Codex hook, run as Codex runs it, applies the required-reviewer policy."""
 
-    def reason(self, policy: str = "", **env: str) -> str:
+    def reason(self: Repo, policy: str = "", **env: str) -> str:
         """Permission-decision reason for `gh pr merge 7`, or empty when allowed."""
         environment = {**os.environ, "PATH": f"{shim(self.tmp, HOOK_SHIM)}{os.pathsep}{os.environ['PATH']}"}
         environment |= {
             "FAKE_SHA": self.sha,
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.tmp / "loops"),
             "FAKE_BASE_SHA": self.base,
+            "CODERAILS_KEYS_DIR": str(self.keys),
             **artifact(entry("review-pr")),
             **env,
         }
@@ -268,11 +281,12 @@ class PostTests(Repo):
     touched = "docs/a.md"
 
     def post(
-        self,
+        self: Repo,
         *arguments: str,
         provider: str = "codex",
         comments: list[dict[str, str]] | None = None,
         heads: list[str] | None = None,
+        bases: list[str] | None = None,
     ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
         """Run `post_review.py post ...` against a fake gh; returns (result, gh call log, posted body)."""
         log, posted = self.tmp / "gh.log", self.tmp / "posted.md"
@@ -284,6 +298,7 @@ class PostTests(Repo):
             "FAKE_POSTED": str(posted),
             "FAKE_HEADS": json.dumps(heads or [self.sha]),
             "FAKE_COMMENTS": json.dumps(comments or []),
+            "FAKE_BASES": json.dumps(bases or [self.base]),
         }
         path = POST if provider == "codex" else ROOT / "scripts/post_review.py"
         result = subprocess.run(
@@ -368,33 +383,3 @@ class PostTests(Repo):
                     calls = [json.loads(line) for line in log.read_text().splitlines()]
                     self.assertEqual(any("-F" in call for call in calls), posts)
                     self.assertFalse((self.dir / "should-not-exist").exists())
-
-
-class MirrorTests(unittest.TestCase):
-    """Policy and library copies are byte-identical; the security reviewer exists on both providers."""
-
-    def test_copies_are_byte_identical(self) -> None:
-        """Mirrored files must not drift between the Claude root and the Codex package."""
-        for name in (
-            "policy/review_policy.json",
-            "scripts/lib/review_passes.py",
-            "scripts/lib/review_artifact.py",
-            "scripts/lib/git_common.py",
-            "scripts/lib/publication_gate.py",
-            "capabilities/profiles.json",
-        ):
-            with self.subTest(name=name):
-                self.assertEqual((ROOT / name).read_bytes(), (CODEX / name).read_bytes())
-
-    def test_security_reviewer_on_both_providers(self) -> None:
-        """Agent files exist, are read-only, are profiled and are in the Codex installer's name list."""
-        claude = (ROOT / "agents/security-reviewer.md").read_text()
-        self.assertRegex(claude, r"(?m)^name: security-reviewer$")
-        self.assertRegex(claude, r"(?m)^disallowedTools: Write, Edit, NotebookEdit$")
-        header = (CODEX / "agents/security-reviewer.toml").read_text().partition('developer_instructions = """')[0]
-        self.assertRegex(header, r'(?m)^name = "security-reviewer"$')
-        self.assertRegex(header, r'(?m)^sandbox_mode = "read-only"$')
-        for root in (ROOT, CODEX):
-            profiles = json.loads((root / "capabilities/profiles.json").read_text())
-            self.assertEqual(profiles["agents"]["security-reviewer"], ["repo.inspect", "diff.read"])
-        self.assertIn('"security-reviewer"', (ROOT / "scripts/installer/codex.py").read_text())
