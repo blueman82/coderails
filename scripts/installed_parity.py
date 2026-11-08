@@ -18,25 +18,12 @@ from collections.abc import Iterator
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.release_manifest import source_files  # noqa: E402
+from scripts.release_manifest import CODEX_PREFIX, ROOT_FILES, RUNTIME_DIRS, source_files  # noqa: E402
 
 IGNORED_DIRS = {"__pycache__"}
 IGNORED_NAMES = {".DS_Store"}
 IGNORED_SUFFIXES = (".pyc",)
-RUNTIME_PATHS = (
-    "hooks",
-    "skills",
-    "scripts",
-    "commands",
-    "agents",
-    "capabilities",
-    "instructions",
-    "policy",
-    "routines",
-    ".claude-plugin",
-    "packages/graph-semantics",
-    "packages/codex",
-)
+RUNTIME_PATHS = (*RUNTIME_DIRS, *sorted(ROOT_FILES), CODEX_PREFIX)
 REQUIRED_FILES = {
     "claude": (".claude-plugin/plugin.json", "hooks/hooks.json"),
     "codex": (".codex-plugin/plugin.json", "hooks/hooks.json"),
