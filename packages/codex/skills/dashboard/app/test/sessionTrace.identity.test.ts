@@ -1,6 +1,32 @@
 import { expect, it } from "vitest";
+import { join } from "node:path";
 import { collectCodexSessionTrace, readCodexTracePage } from "../src/lib/collect/sessionTrace";
 import { fixture } from "./sessionTraceFixture";
+
+it("keeps the spawning worker's name while its child has a separate name", async () => {
+  const { deps, child, children, save } = await fixture();
+  const path = "/root/loop_worker_6c6f6f70_55335b315d/researcher";
+  await save(child, [...children,
+    { type: "response_item", payload: { type: "function_call", name: "spawn_agent", namespace: "collaboration",
+      call_id: "nested-call", arguments: JSON.stringify({ task_name: "researcher", message: "Nested task" }) } },
+    { type: "event_msg", payload: { item: { type: "SubAgentActivity", kind: "started", id: "nested-call",
+      agent_thread_id: "grandchild", agent_path: path } } },
+  ]);
+  await save(join(deps.sourceRoot, "2026/09/28/rollout-grandchild.jsonl"), [
+    { type: "session_meta", payload: { id: "grandchild", session_id: "parent", parent_thread_id: "child-one",
+      thread_source: "subagent", agent_role: null, agent_path: path,
+      source: { subagent: { thread_spawn: { parent_thread_id: "child-one", depth: 2,
+        agent_role: null, agent_path: path } } } } },
+  ]);
+  const page = await readCodexTracePage("parent", null, 50, deps);
+  const spawn = page.events.find((event) => event.attributes["coderails.native.call_id"] === "nested-call");
+  expect(spawn?.attributes).toMatchObject({ "coderails.actor.id": "child-one", "coderails.actor.name": "Builder",
+    "coderails.child.id": "grandchild" });
+  expect(page.events.filter((event) => event.attributes["coderails.actor.id"] === "child-one")
+    .every((event) => event.attributes["coderails.actor.name"] === "Builder")).toBe(true);
+  expect(page.events.find((event) => event.attributes["coderails.actor.id"] === "grandchild")
+    ?.attributes["coderails.actor.name"]).toBe("Researcher");
+});
 
 it("names the native worker from its bound graph job and keeps its child identity", async () => {
   const { deps } = await fixture();

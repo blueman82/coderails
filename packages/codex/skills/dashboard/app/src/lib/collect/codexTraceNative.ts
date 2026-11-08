@@ -5,7 +5,7 @@ import { TRACE_SCHEMA_VERSION, record, type SourceRef, type TraceAttribute, type
 import { nodeAttributes } from "./nodeDisplay";
 import { actorDisplayName } from "./actorDisplay";
 
-export const CODEX_PARSER_VERSION = 9;
+export const CODEX_PARSER_VERSION = 10;
 export const MAX_SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
 export function safeReadError(error: unknown): string {
   return error instanceof Error && error.message.startsWith("source exceeds trace scan limit:")
@@ -216,7 +216,8 @@ export function terminalTurn(src: NativeSource): string | null {
   return starts.length === 1 && terminals.length === 1 && lifecycle.filter((item) => item.type === "task_started").at(-1) === starts[0] ? last.turn_id : null;
 }
 export function nativeEvent(sessionId: string, src: NativeSource, ordinal: number, row: Row,
-  actor: "orchestrator" | "worker", actorId: string | null, dispatch: Dispatch | null, parentSpanId: string | null): TraceEvent {
+  actor: "orchestrator" | "worker", actorId: string | null, dispatch: Dispatch | null, parentSpanId: string | null,
+  actorDispatch: Dispatch | null = dispatch): TraceEvent {
   const item = payload(row), nested = eventItem(row);
   const nativeName = row.type === "event_msg" ? nested?.type ?? item.type : item.type ?? row.type;
   const name = typeof nativeName === "string" && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(nativeName) ? nativeName : "record";
@@ -239,10 +240,10 @@ export function nativeEvent(sessionId: string, src: NativeSource, ordinal: numbe
   }
   if (actor === "worker" && actorId) {
     attributes["coderails.actor.id"] = actorId;
-    const identity = dispatch?.task ? canonicalTask(dispatch.task) : null;
+    const identity = actorDispatch?.task ? canonicalTask(actorDispatch.task) : null;
     const job = identity ? nodeAttributes(identity.nodeId)["coderails.node.name"] :
-      dispatch?.task && !task(dispatch.task) ? dispatch.task : null;
-    attributes["coderails.actor.name"] = actorDisplayName(dispatch?.nickname, job, dispatch?.role);
+      actorDispatch?.task && !task(actorDispatch.task) ? actorDispatch.task : null;
+    attributes["coderails.actor.name"] = actorDisplayName(actorDispatch?.nickname, job, actorDispatch?.role);
   }
   const model = obj(item.info)?.model ?? item.model;
   if (typeof model === "string") attributes["gen_ai.response.model"] = model;
