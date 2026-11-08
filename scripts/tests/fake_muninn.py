@@ -202,6 +202,9 @@ def main(argv: list[str]) -> int:
         return cmd_search(home, rest)
     elif cmd == "learn" and rest:
         sub, args = rest[0], rest[1:]
+        if sub == "list":
+            code, payload = review.list_requests(home, args)
+            return out(payload, code)
         if sub == "request":
             code, payload = review.request(home, args)
             return out(payload, code)
@@ -211,6 +214,9 @@ def main(argv: list[str]) -> int:
         if sub == "complete" and args:
             code, payload = review.complete(home, args)
             return out(payload, code)
+    elif cmd in {"open", "quote-check"} and rest:
+        code, payload = review.physical(home, rest[0], rest[1] if cmd == "quote-check" else None)
+        return out(payload, code)
     elif cmd == "session" and rest:
         evs = fs.load_events(fs.roots_from_env()).get(rest[0], [])
         return out(

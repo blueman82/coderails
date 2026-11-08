@@ -246,6 +246,8 @@ def cmd_render(a: argparse.Namespace, repo_dir: Path) -> Result:
         if "degraded" in got:  # no ledger-text fallback: with Muninn down the view could resurrect retracted orders
             ol.trace("order.render", "degraded", got["degraded"], a.session)
             return {"degraded": got["degraded"]}, 3
+        if any(r.get("use_allowed") is False for r in got["lessons"]):
+            return {"degraded": "learning_conditional_use_unsupported", "lessons": got["lessons"]}, 3
         keep = got["state"] == "memory_backend_off"
         rows = {r["id"]: r for r in got["lessons"] if keep or r["cited"]}
         shown: ol.Ledger = {
@@ -311,14 +313,15 @@ def cmd_cite(a: argparse.Namespace, repo_dir: Path) -> Result:
         if order is None:
             raise ValueError("order_not_found")
         task = order["evidence"][-1]["loop_id"]
-        order = request_sync.recover(order, repo_dir, a.session, task)
-        issue = request_sync.needs_submit(order, task, a.session)
-        field = sync_order(order, a.session, repo_dir, ledger, task)
+        source = order["muninn"].get("source_session") or a.session
+        order = request_sync.recover(order, repo_dir, source, task)
+        issue = request_sync.needs_submit(order, task, source)
+        field = sync_order(order, source, repo_dir, ledger, task)
         if issue:
             ledger = ol.set_muninn(ledger, a.order_id, field)
             ol.save(repo_dir / "orders.json", ledger)
-            field = sync_order({**order, "muninn": field}, a.session, repo_dir, ledger, task, issue=True)
-            request_sync.save_response(order, repo_dir, a.session, task, field)
+            field = sync_order({**order, "muninn": field}, source, repo_dir, ledger, task, issue=True)
+            request_sync.save_response(order, repo_dir, source, task, field)
         return ol.set_muninn(ledger, a.order_id, field), {"id": a.order_id, "muninn": field}
 
     payload, rc = update(repo_dir, change)
