@@ -18,6 +18,7 @@ SHARED_MODULES = (  # packages/graph-semantics/<file>: shared modules plus the s
     "graph_semantics.py",
     "node_metadata.py",
     "graph_vocab.py",
+    "decision_chain.py",
     "graph_convert.py",
     "graph_spec.py",
     "graph_contract.py",

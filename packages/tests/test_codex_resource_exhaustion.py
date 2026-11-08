@@ -6,6 +6,7 @@ import contextlib
 import errno
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ sys.path.insert(0, str(HOOKS))
 import graph_completion_guard  # noqa: E402
 import hook_common  # noqa: E402
 import loop_dispatch_guard  # noqa: E402
+import verification_volume_ceiling  # noqa: E402
 
 
 def run_hook(module: ModuleType, payload: Mapping[str, object], **patches: object) -> str:
@@ -150,6 +152,34 @@ class ResourceExhaustionTests(unittest.TestCase):
         ):
             reason = run_hook(loop_dispatch_guard, payload, **base)
         self.assertIn("not known to be invalid", reason)
+
+    def test_ceiling_denies_when_optional_state_lookup_exhausts_resources(self) -> None:
+        """A failed progress mirror cannot suppress the third full-suite denial."""
+        payload: dict[str, object] = {
+            "cwd": str(HOOKS.parents[3]),
+            "tool_input": {"command": "python3 packages/tests/test_codex_hooks.py"},
+        }
+        with patch.dict(os.environ, {"PLUGIN_DATA": str(self.state.parent / "data")}):
+            for _ in range(2):
+                output = io.StringIO()
+                with patch("sys.stdin", io.StringIO(json.dumps(payload))), contextlib.redirect_stdout(output):
+                    self.assertEqual(verification_volume_ceiling.main(), 0)
+                self.assertEqual(output.getvalue(), "")
+            payload["session_id"] = "s"
+            output = io.StringIO()
+            with (
+                patch("sys.stdin", io.StringIO(json.dumps(payload))),
+                patch.object(
+                    verification_volume_ceiling,
+                    "loop_state_path",
+                    side_effect=hook_common.HostResourceError(errno.EMFILE, "x"),
+                ),
+                contextlib.redirect_stdout(output),
+            ):
+                self.assertEqual(verification_volume_ceiling.main(), 0)
+            decision = json.loads(output.getvalue())["hookSpecificOutput"]
+            self.assertEqual(decision["permissionDecision"], "deny")
+            self.assertIn("run 3", decision["permissionDecisionReason"])
 
 
 if __name__ == "__main__":

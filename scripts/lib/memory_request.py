@@ -8,9 +8,15 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
+import time
 from typing import Any, cast
 
 from scripts.lib import memory_adapter as ma
+from scripts.lib import memory_current as current
+from scripts.lib import memory_support as support
+
+Note = current.Note
+MAX_REQUESTS = 100
 
 REQUEST_ID = re.compile(r"R_[0-9a-f]{32}")
 KNOWLEDGE_ID = re.compile(r"K_[0-9a-f]{32}")
@@ -40,10 +46,6 @@ def _object(value: object) -> dict[str, Any] | None:
     return cast("dict[str, Any]", value) if isinstance(value, dict) else None
 
 
-def _array(value: object) -> list[Any] | None:
-    return cast("list[Any]", value) if isinstance(value, list) else None  # type: ignore[redundant-cast]
-
-
 def probe() -> ma.Degraded | None:
     """Check that Muninn supports task-scoped review requests."""
     backend = ma.backend()
@@ -61,35 +63,145 @@ def probe() -> ma.Degraded | None:
     return None
 
 
-def submit(session: str, task: str) -> Pending | ma.Degraded:
+def submit(session: object, task: str) -> Pending | ma.Degraded:
     """Submit one bounded request.  Never repeat this call after an uncertain result."""
-    if not session or TASK.fullmatch(task) is None:
+    if not isinstance(session, str) or not session or TASK.fullmatch(task) is None:
         return ma.Degraded("bad_record")
     down = probe()
     if down is not None:
         return down
+    mapped = current.project()
+    if isinstance(mapped, ma.Degraded):
+        return mapped
     response = _json(ma.run_cli(["learn", "request", "--session", session, "--task", task]))
     if isinstance(response, ma.Degraded):
-        return response
-    scope = _object(response.get("scope"))
-    window = _object(response.get("window"))
+        return ma.Degraded("learning_request_unknown", response.reason)
     ident = response.get("id")
-    if not isinstance(ident, str) or REQUEST_ID.fullmatch(ident) is None or scope is None:
-        return ma.Degraded("muninn_bad_output")
-    source = _object(window.get("source")) if window is not None else None
+    if not isinstance(ident, str) or REQUEST_ID.fullmatch(ident) is None:
+        return ma.Degraded("learning_request_unknown", "muninn_bad_output")
+    request = _request({"request": response}, ident, task, mapped)
+    if isinstance(request, ma.Degraded):
+        return ma.Degraded("learning_request_unknown", request.reason)
+    return Pending(ident, request["window"], request["scope"]["project_id"])
+
+
+def _request(
+    detail: dict[str, Any], request_id: str, task: str, project: str, window: dict[str, Any] | None = None
+) -> dict[str, Any] | ma.Degraded:
+    request = _object(detail.get("request"))
+    required = {
+        "schema_version",
+        "id",
+        "window",
+        "scope",
+        "policy_digest",
+        "state",
+        "current_attempt_id",
+        "created_at",
+        "retry_at",
+        "accepted",
+    }
     if (
-        not isinstance(scope.get("project_id"), str)
-        or scope.get("task") != task
-        or window is None
-        or source is None
-        or not isinstance(source.get("provider"), str)
-        or not isinstance(source.get("thread_id"), str)
-        or type(window.get("from_line")) is not int
-        or type(window.get("through_line")) is not int
-        or not isinstance(window.get("boundary_hash"), str)
+        request is None
+        or not required <= request.keys()
+        or type(request.get("schema_version")) is not int
+        or request["schema_version"] != 1
+        or type(request.get("accepted")) is not bool
+        or not support.seconds(request.get("created_at"))
+        or request.get("retry_at") is not None
+        and not support.seconds(request["retry_at"])
+        or not isinstance(request.get("policy_digest"), str)
+        or support.DIGEST.fullmatch(request["policy_digest"]) is None
+        or request.get("current_attempt_id") is not None
+        and (
+            not isinstance(request["current_attempt_id"], str)
+            or re.fullmatch(r"A_[0-9a-f]{32}", request["current_attempt_id"]) is None
+        )
     ):
         return ma.Degraded("muninn_bad_output")
-    return Pending(ident, window, scope["project_id"])
+    if (
+        request.get("id") != request_id
+        or request.get("scope") != {"project_id": project, "task": task}
+        or window is not None
+        and request.get("window") != window
+    ):
+        return ma.Degraded("learning_request_mismatch")
+    actual = _object(request.get("window"))
+    source = _object(actual.get("source")) if actual is not None else None
+    if (
+        actual is None
+        or source is None
+        or type(actual.get("from_line")) is not int
+        or type(actual.get("through_line")) is not int
+        or not 1 <= actual["from_line"] <= actual["through_line"]
+        or not isinstance(actual.get("boundary_hash"), str)
+        or support.DIGEST.fullmatch(actual["boundary_hash"]) is None
+        or source.get("provider") not in {"claude", "codex", "cursor"}
+        or not isinstance(source.get("thread_id"), str)
+        or not source["thread_id"]
+    ):
+        return ma.Degraded("muninn_bad_output")
+    return request
+
+
+def _receipt(detail: dict[str, Any], request: dict[str, Any]) -> list[dict[str, Any]] | Pending | ma.Degraded:
+    ident = request["id"]
+    if request.get("state") in {"pending", "running", "waiting"}:
+        return Pending(ident, request["window"], request["scope"]["project_id"])
+    if request.get("state") != "completed":
+        return ma.Degraded("learning_request_failed")
+    receipt = _object(detail.get("receipt"))
+    if receipt is None:
+        return ma.Degraded("learning_receipt_unavailable")
+    required = {
+        "schema_version",
+        "request_id",
+        "attempt_id",
+        "applied",
+        "unresolved_ids",
+        "committed_at",
+        "outcome",
+        "no_change_reason",
+    }
+    if (
+        not required <= receipt.keys()
+        or type(receipt.get("schema_version")) is not int
+        or receipt["schema_version"] != 1
+        or not isinstance(receipt.get("attempt_id"), str)
+        or re.fullmatch(r"A_[0-9a-f]{32}", receipt["attempt_id"]) is None
+        or request.get("current_attempt_id") not in (None, receipt["attempt_id"])
+        or not support.seconds(receipt.get("committed_at"))
+        or not isinstance(receipt.get("unresolved_ids"), list)
+        or any(
+            not isinstance(item, str) or re.fullmatch(r"U_[0-9a-f]{32}", item) is None
+            for item in cast("list[object]", receipt["unresolved_ids"])
+        )
+    ):
+        return ma.Degraded("muninn_bad_output")
+    if receipt.get("request_id") != ident:
+        return ma.Degraded("learning_request_mismatch")
+    applied = support.objects(receipt.get("applied"))
+    if applied is None:
+        return ma.Degraded("muninn_bad_output")
+    if receipt.get("outcome") == "no_change":
+        return (
+            ma.Degraded("learning_no_change")
+            if not applied and not receipt["unresolved_ids"]
+            else ma.Degraded("muninn_bad_output")
+        )
+    if receipt.get("no_change_reason") is not None:
+        return ma.Degraded("muninn_bad_output")
+    if receipt.get("outcome") not in {"completed", "completed_unresolved"}:
+        return ma.Degraded("muninn_bad_output")
+    if any(
+        not isinstance(row.get("knowledge_id"), str)
+        or KNOWLEDGE_ID.fullmatch(row["knowledge_id"]) is None
+        or type(row.get("revision")) is not int
+        or row["revision"] < 1
+        for row in applied
+    ):
+        return ma.Degraded("muninn_bad_output")
+    return applied
 
 
 def inspect(
@@ -100,94 +212,131 @@ def inspect(
     *,
     expected_window: dict[str, Any] | None = None,
     expected_project: str | None = None,
-) -> ma.Record | Pending | ma.Degraded:
-    """Accept only a completed receipt and one eligible, exact current note."""
+    details: dict[str, dict[str, Any]] | None = None,
+) -> Note | Pending | ma.Degraded:
+    """Accept one exact receipt-bound current Note after checking every support."""
     backend = ma.backend()
     if backend != "muninn":
         return ma.Degraded("memory_backend_off" if backend == "off" else "memory_backend_invalid")
     if REQUEST_ID.fullmatch(request_id) is None or TASK.fullmatch(task) is None:
         return ma.Degraded("bad_record")
-    detail = _json(ma.run_cli(["learn", "show", request_id]))
+    mapped = current.project()
+    if isinstance(mapped, ma.Degraded):
+        return mapped
+    if expected_project is None or expected_window is None or mapped != expected_project:
+        return ma.Degraded("learning_request_mismatch")
+    deadline = time.monotonic() + 30
+    detail = support.read(["learn", "show", request_id], deadline=deadline)
     if isinstance(detail, ma.Degraded):
         return detail
-    request = _object(detail.get("request"))
-    if request is None or request.get("id") != request_id:
-        return ma.Degraded("muninn_bad_output")
-    scope = _object(request.get("scope"))
-    if scope is None or not isinstance(scope.get("project_id"), str) or scope.get("task") != task:
-        return ma.Degraded("muninn_bad_output")
-    if expected_project is not None and scope["project_id"] != expected_project:
-        return ma.Degraded("muninn_bad_output")
-    if expected_window is not None and request.get("window") != expected_window:
-        return ma.Degraded("muninn_bad_output")
-    if request.get("state") in {"pending", "running", "waiting"}:
-        return Pending(request_id, _object(request.get("window")), scope["project_id"])
-    if request.get("state") != "completed":
-        return ma.Degraded("learning_request_failed")
-    receipt = _object(detail.get("receipt"))
-    if receipt is None or receipt.get("request_id") != request_id:
-        return ma.Degraded("muninn_bad_output")
-    applied = _array(receipt.get("applied"))
-    if applied is None:
-        return ma.Degraded("muninn_bad_output")
-    listed = _json(ma.run_cli(["know", "list", "--task", task]))
+    if details is not None:
+        details[request_id] = detail
+    request = _request(detail, request_id, task, expected_project, expected_window)
+    if isinstance(request, ma.Degraded):
+        return request
+    applied = _receipt(detail, request)
+    if not isinstance(applied, list):
+        return applied
+    listed = current.current(task, kind, expected_project)
     if isinstance(listed, ma.Degraded):
         return listed
-    current = _array(listed.get("knowledge"))
-    if current is None:
-        return ma.Degraded("muninn_bad_output")
-    current_ids: set[tuple[str, int]] = set()
-    for value in current:
-        note = _object(value)
-        if note is not None and isinstance(note.get("id"), str) and type(note.get("revision")) is int:
-            current_ids.add((note["id"], note["revision"]))
-    matches: list[ma.Record] = []
-    for value in applied:
-        affected = _object(value)
-        if affected is None:
-            return ma.Degraded("muninn_bad_output")
-        kid, revision = affected.get("knowledge_id"), affected.get("revision")
-        if type(revision) is not int or revision < 1:
-            return ma.Degraded("muninn_bad_output")
-        if not isinstance(kid, str) or KNOWLEDGE_ID.fullmatch(kid) is None or (kid, revision) not in current_ids:
-            continue
-        shown = _json(ma.run_cli(["know", "show", kid]))
-        if isinstance(shown, ma.Degraded):
-            return shown
-        body = _object(shown.get("body"))
-        note_scope = _object(body.get("scope")) if body is not None else None
-        if (shown.get("id"), shown.get("revision"), shown.get("state")) != (kid, revision, "active"):
-            continue
-        if body is None or body.get("form") != "note" or note_scope is None:
-            continue
-        if (body.get("kind"), body.get("content")) != (kind, claim):
-            continue
-        if note_scope != scope:
-            continue
-        sources = _array(shown.get("evidence_sources"))
-        if sources is None:
-            continue
-        refs = [
-            source["ref"]
-            for value in sources
-            if (source := _object(value)) is not None and isinstance(source.get("ref"), str) and source["ref"]
-        ]
-        if not refs:
-            continue
-        matches.append(
-            ma.Record(
-                scope="loop",
-                type=kind,
-                claim=claim,
-                cite=refs[0],
-                quote="",
-                loop_id=task,
-                id=kid,
-            )
-        )
-    if len(matches) != 1:
+    bound = [
+        note
+        for affected in applied
+        for note in listed
+        if (note.get("id"), note.get("revision")) == (affected["knowledge_id"], affected["revision"])
+    ]
+    matching = [note for note in bound if (_object(note.get("body")) or {}).get("content") == claim]
+    if not matching and any((_object(note.get("body")) or {}).get("form") == "guide" for note in bound):
+        return ma.Degraded("learning_form_unsupported")
+    if len(matching) != 1:
         return ma.Degraded("learning_no_matching_record")
-    return matches[0]
+    return current.read(matching[0], detail, request_id, request["scope"], request["window"], deadline=deadline)
+
+
+def task_notes(
+    task: str,
+    kind: str,
+    *,
+    details: dict[str, dict[str, Any]] | None = None,
+    exclude: set[str] | None = None,
+    refusals: list[str] | None = None,
+) -> list[Note] | ma.Degraded:
+    """Read extra task Notes by exact receipt joins, using retained request details first.
+
+    Public learn list exposes metadata without task/project filtering or pagination.
+    Bound its completed-request scan and filter before reading any request detail.
+    Foreign metadata is neither retained nor included in diagnostics.
+    """
+    if ma.backend() != "muninn":
+        return ma.Degraded("memory_backend_off" if ma.backend() == "off" else "memory_backend_invalid")
+    project = current.project()
+    if isinstance(project, ma.Degraded):
+        return project
+    deadline = time.monotonic() + 30
+    listed = current.current(task, kind, project)
+    if isinstance(listed, ma.Degraded):
+        return listed
+    notes = [row for row in listed if row.get("id") not in (exclude or set())]
+    if not notes:
+        return []
+    known = dict(details or {})
+    joined: list[tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]] = []
+    for rid, detail in known.items():
+        request = _request(detail, rid, task, project)
+        if isinstance(request, ma.Degraded):
+            continue
+        affected = _receipt(detail, request)
+        if isinstance(affected, list):
+            joined.append((detail, request, affected))
+    covered = {(item["knowledge_id"], item["revision"]) for _, _, applied in joined for item in applied}
+    if any((note.get("id"), note.get("revision")) not in covered for note in notes):
+        fetched = support.read(["learn", "list", "--state", "completed"], deadline=deadline)
+        if isinstance(fetched, ma.Degraded):
+            return fetched
+        rows = support.objects(fetched.get("requests"))
+        if rows is None:
+            return ma.Degraded("muninn_bad_output")
+        if len(rows) > MAX_REQUESTS:
+            return ma.Degraded("learning_read_limit")
+        eligible = [row for row in rows if row.get("scope") == {"project_id": project, "task": task}]
+        for row in eligible:
+            discovered = row.get("id")
+            if not isinstance(discovered, str) or REQUEST_ID.fullmatch(discovered) is None:
+                return ma.Degraded("muninn_bad_output")
+            if discovered in known:
+                continue
+            fetched_detail = support.read(["learn", "show", discovered], deadline=deadline)
+            if isinstance(fetched_detail, ma.Degraded):
+                return fetched_detail
+            checked = _request(fetched_detail, discovered, task, project, _object(row.get("window")))
+            if isinstance(checked, ma.Degraded):
+                return checked
+            affected = _receipt(fetched_detail, checked)
+            if isinstance(affected, list):
+                joined.append((fetched_detail, checked, affected))
+    result: list[Note] = []
+    for note in notes:
+        matches = [
+            (detail, request)
+            for detail, request, applied in joined
+            if any(
+                (item["knowledge_id"], item["revision"]) == (note.get("id"), note.get("revision")) for item in applied
+            )
+        ]
+        record: Note | ma.Degraded
+        if len(matches) != 1:
+            record = ma.Degraded("learning_selection_unavailable" if not matches else "learning_record_ambiguous")
+        else:
+            detail, request = matches[0]
+            record = current.read(note, detail, request["id"], request["scope"], request["window"], deadline=deadline)
+        if isinstance(record, ma.Degraded):
+            if refusals is None:
+                return record
+            refusals.append(record.reason)
+            continue
+        result.append(record)
+    return result
 
 
 def decision_field(row: dict[str, Any], loop_id: str, session_id: str) -> dict[str, Any]:
@@ -214,11 +363,18 @@ def decision_field(row: dict[str, Any], loop_id: str, session_id: str) -> dict[s
     else:
         res = submit(session_id, loop_id)
     field: dict[str, Any]
-    if isinstance(res, ma.Record):
-        field = {"state": "written", "id": res.id, "request_id": request_id, "reason_code": "ok"}
+    if isinstance(res, Note):
+        field = {"state": "written", "id": res.id, "request_id": request_id, "reason_code": "ok", **res.metadata()}
     elif isinstance(res, Pending):
         field = {"state": "pending", "id": None, "request_id": res.request_id, "reason_code": "learning_pending"}
     else:
+        if (
+            res.reason == "muninn_absent"
+            and previous.get("state") in {"syncing", "degraded"}
+            and not previous.keys() - {"state", "id", "request_id", "reason_code"}
+            and previous.get("id") is request_id is None
+        ):
+            return {"state": "degraded", "id": None, "reason_code": res.reason}
         off = res.reason == "memory_backend_off"
         uncertain = (
             res.reason == "learning_request_unknown"

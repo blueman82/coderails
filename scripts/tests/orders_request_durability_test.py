@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import subprocess
@@ -54,11 +55,14 @@ ledger = ol.record(ol.empty(), 'order-1', claim, session_id=session, loop_id=tas
                    now='2026-10-30T00:00:00+00:00')['ledger']
 ol.save(repo/'orders.json', ol.set_muninn(ledger, 'order-1', field))
 args = argparse.Namespace(order_id='order-1', session=session, quote='')
-detail = {'request': {'id': rid, 'state': 'running', 'window': window,
-                     'scope': {'project_id': 'project-1', 'task': task}}, 'receipt': None}
+detail = {'request': {'schema_version': 1, 'id': rid, 'state': 'running', 'window': window,
+                     'scope': {'project_id': 'project-1', 'task': task}, 'policy_digest': 'b' * 64,
+                     'current_attempt_id': None, 'created_at': 1793318400,
+                     'retry_at': None, 'accepted': True}, 'receipt': None}
 observations = []
 with mock.patch.object(orders.dir_lock, 'process_start', return_value='private-test-process'), \
      mock.patch.object(req.lifecycle, 'check_staged_identity'), \
+     mock.patch.object(mr.current, 'project', return_value='project-1'), \
      mock.patch.object(mr, 'submit', return_value=mr.Pending(rid, window, 'project-1')) as submit, \
      mock.patch.object(ma, 'run_cli', return_value=json.dumps(detail)) as wire:
     for mode in ('muninn', 'off', 'muninn'):
@@ -79,7 +83,8 @@ with mock.patch.object(orders.dir_lock, 'process_start', return_value='private-t
         else:
             assert observation['field']['request_id'] == rid
             assert observation['code'] == (0 if observation['mode'] == 'off' else 3)
-    assert wire.call_args_list == ([mock.call(['learn', 'show', rid])] * 2 if known else [])
+    assert [call.args for call in wire.call_args_list] == ([(['learn', 'show', rid],)] * 2 if known else [])
+    assert all(0 < call.kwargs['timeout'] <= ma.TIMEOUT for call in wire.call_args_list)
 """
 
 
@@ -229,7 +234,11 @@ class DurableRequestTests(unittest.TestCase):
 
     def test_journal_rejects_a_foreign_session(self) -> None:
         """A reply file for a different caller cannot restore this marker."""
-        order = {"id": "order-1", "lesson": LESSON, "muninn": {"state": "unknown"}}
+        order = {
+            "id": "order-1",
+            "lesson": LESSON,
+            "muninn": {"state": "unknown", "claim_sha256": hashlib.sha256(LESSON.encode()).hexdigest()},
+        }
         field = {"request_id": RID, "request_window": WINDOW, "project_id": "project-1"}
         request_sync.save_response(order, self.repo, "s1", "loop-1", field)
         path = next(self.repo.glob("order-request-*.json"))

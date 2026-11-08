@@ -26,7 +26,7 @@ class IntegrationContractTests(unittest.TestCase):
         """Create a separate temporary provider home for each case."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.count = 0
 
     def fresh(self, name: str) -> Provider:

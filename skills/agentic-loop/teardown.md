@@ -155,19 +155,22 @@ It does not age orders. New loops cannot use it.
 The graduation predicate and the promotion selection are `$O predicate` and `lessons.py predicate`. This step is
 additive-or-recurrence-only: no metric-based removal anywhere.
 
-**Typed lessons (Muninn authoritative).** Each order requests a task-scoped Muninn review of the source session.
-The one orders lock covers local staging, request submission and later inspection. An unknown marker is saved before
-submission. A bound `order-request-*.json` journal saves a returned R_ ID before the final order save. If the reply
-is lost and no journal exists, do not submit again; inspect `muninn learn list` and the source window.
-A saved R_ ID stays pending until its completed receipt yields one exact active K_ note. The old `--quote` option is
-accepted for compatibility, ignored, and reported as `quote_ignored`; it does not supply evidence to this request.
-Exit 3 prints `{"muninn": {... "reason_code": ...}}`:
-**report that reason code in the retro; never skip it silently and never write the lesson to Markdown instead.**
-`memory.backend: off` (reason `memory_backend_off`, exit 0) is the only explicit opt-out. A first-time adoption of an old
-hand-written file is `$O import-legacy` (it archives a byte copy and retains the original). Verify the archive and
-ledger, then retire the hand-written source before generating `standing-orders.md`. Runbook:
-`docs/RUNBOOK.md`, "Standing order stored without a cite"; decision records:
-`docs/decisions/2026-10-05-memory-authoritative.md`, `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
+**Typed lessons (Muninn authoritative).** Run `$O` from the mapped project repository.
+The single orders lock covers its callback and local save; the teardown receipt uses a distinct short lock.
+`record` persists an unknown-before-submit marker, then retains the returned R-id, source window, project and task.
+Pending acceptance is not a written lesson. Current reads require that request's committed receipt and exact current Note.
+`$O cite <id>` inspects the original retained source request even when a different session calls recovery.
+A newly authored task/source session gets its own marker and request. An unknown submission without an R-id is never
+submitted again automatically. A claim-only edit cannot clear that fence; keep the original unknown claim hash
+and report `reconciliation_reason: learning_request_unknown`. The deprecated `--quote` input is ignored and disclosed; it cannot replace selected evidence.
+
+Current lesson output retains revision, conditions, expiry, selected quotes and every support mapping.
+Conditional dispatch/promotion/render remains `learning_conditional_use_unsupported`; do not assume conditions are true.
+Current classification is unknown. Scope, physical source, redaction and owner-authority checks do not supply a classifier.
+Exit 3 carries an explicit reason: **report that reason in the retro; never substitute Markdown or an uncited local claim.**
+`memory.backend: off` is the explicit opt-out. Legacy imports remain local uncited diagnostics.
+Source support does not establish original I native/live/installed/release acceptance. Codex live qualification is separate;
+Claude live remains incomplete. See `docs/RUNBOOK.md`, "Current request and citation boundary".
 
 ## Steps 4 and 5
 

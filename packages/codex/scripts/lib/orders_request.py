@@ -18,9 +18,20 @@ def _claim(order: dict[str, Any]) -> str:
     return lessons.claim_text(str(order["lesson"]))
 
 
+def _unknown(previous: dict[str, Any], task: str, session: str) -> bool:
+    return (
+        previous.get("state") == "unknown"
+        and not isinstance(previous.get("request_id"), str)
+        and previous.get("task") in (None, task)
+        and previous.get("source_session") in (None, session)
+    )
+
+
 def needs_submit(order: dict[str, Any], task: str, session: str) -> bool:
     """Reuse a request only in its original task and source session."""
     previous = order.get("muninn", {})
+    if _unknown(previous, task, session):
+        return False
     digest = hashlib.sha256(_claim(order).encode()).hexdigest()
     if previous.get("claim_sha256") != digest or previous.get("task") not in (None, task):
         return True
@@ -44,6 +55,12 @@ def _journal(repo_dir: Path, order: dict[str, Any], session: str, task: str) -> 
 def recover(order: dict[str, Any], repo_dir: Path, session: str, task: str) -> dict[str, Any]:
     """Use only the exact R_ ID that this process saved before its final local save."""
     if isinstance(order.get("muninn", {}).get("request_id"), str):
+        return order
+    previous = cast("dict[str, Any]", order.get("muninn", {}))
+    if (
+        _unknown(previous, task, session)
+        and previous.get("claim_sha256") != hashlib.sha256(_claim(order).encode()).hexdigest()
+    ):
         return order
     path, binding = _journal(repo_dir, order, session, task)
     if not path.exists():
@@ -107,6 +124,12 @@ def sync_order(
         return {**previous, "state": "disabled", "id": previous.get("id"), "reason_code": "memory_backend_off"}
     claim = _claim(order)
     digest = hashlib.sha256(claim.encode()).hexdigest()
+    if not issue and _unknown(previous, task, session):
+        return (
+            dict(previous)
+            if previous.get("claim_sha256") == digest
+            else {**previous, "reconciliation_reason": "learning_request_unknown"}
+        )
     same_claim = (
         previous.get("claim_sha256") == digest
         and previous.get("task") == task
@@ -154,6 +177,7 @@ def sync_order(
     else:
         result = mr.submit(session, task)
     field = lessons.metadata(result, previous.get("id"))
+    field.setdefault("request_id", None)
     field.update(task=task, source_session=session, claim_sha256=digest)
     if isinstance(result, mr.Pending):
         field["request_id"] = result.request_id

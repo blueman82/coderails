@@ -10,7 +10,6 @@ import sys
 import tempfile
 import unittest
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -148,22 +147,6 @@ class ContextManifestTests(unittest.TestCase):
             self.assertIn("authority: none", text)
             self.assertNotIn("fixture-loop", text)
             self.assertNotIn(provider.session, text)
-
-    def test_authority_state(self) -> None:
-        """Valid authority shows active; foreign-embedded, expired and torn files show none."""
-        for provider in self.providers:
-            path = self.session_dir(provider) / "authority.json"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            expires = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            body = {"authority_id": "A1", "session_id": provider.session, "scope": ["push"], "expires_at": expires}
-            for value, expected in (
-                (body, "authority: active id=A1 scope=push"),
-                ({**body, "session_id": "other"}, "authority: none"),
-                ({**body, "expires_at": "2000-01-01T00:00:00+00:00"}, "authority: none"),
-                ("{torn", "authority: none"),
-            ):
-                path.write_text(value if isinstance(value, str) else json.dumps(value), encoding="utf-8")
-                self.assertIn(expected, context(provider, self.payload(provider)), (provider.name, value))
 
     def test_torn_state_fails_open_with_reason_code_and_trace_row(self) -> None:
         """A torn progress.json yields the static fallback, exit 0, and one reason-coded trace row."""

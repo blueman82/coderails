@@ -14,7 +14,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import Any, cast
 
@@ -213,16 +213,21 @@ def route(prompt: str, loop_active: bool, prefix: str, required: tuple[str, ...]
 
 
 def authority_line(root: Path, session_id: str) -> str:
-    """Summarise this exact session's unexpired authority.json; anything else (foreign, expired, torn) is none."""
+    """Summarise only authority accepted by this provider's shared reader."""
     try:
-        data = json.loads((root / session_id / "authority.json").read_text(encoding="utf-8"))
-        expires = datetime.fromisoformat(str(data["expires_at"]).replace("Z", "+00:00"))
-        if data["session_id"] != session_id or expires <= datetime.now(timezone.utc):
+        path = Path(__file__).resolve().parents[3] / "scripts/lib/authority_object.py"
+        spec = importlib.util.spec_from_file_location("context_authority_object", path)
+        if spec is None or not isinstance(spec.loader, SourceFileLoader):
+            return "authority: none"
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data = module.read_authority(session_id, base=root)
+        if data is None:
             return "authority: none"
         return (
             f"authority: active id={data['authority_id']} scope={','.join(data['scope'])} expires={data['expires_at']}"
         )
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, ImportError, RecursionError):
         return "authority: none"
 
 
