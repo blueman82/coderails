@@ -19,7 +19,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/merge.py" 42 --unit 1 --progress /absolut
 
 The publication gate checks the frozen unit manifest when both work-unit flags are present. It checks the PR's head diff against the shipped policy by default. A direct merge receives the same publication check from `enforce_pr_workflow`.
 
-For `action_authority: enforce`, fetch the current PR head and use `python3 <absolute helper path> <target> --expected-head <40-hex SHA>`. Mint the receipt for that exact command. Direct executable invocation is unsupported in enforce mode because its command hash differs.
+`action_authority` defaults to `enforce`. Fetch the current PR head and use `python3 <absolute helper path> <target> --expected-head <40-hex SHA>`. The owner must issue `approve-action` at their terminal for that exact command; a usable unprotected or agent-backed key does not require a passphrase. A session autonomy grant does not replace this receipt. Do not create a PTY or call the signing function to impersonate owner approval. Explicit project settings `advisory` and `off` remain available. Direct executable invocation is unsupported in enforce mode because its command hash differs.
 
 The gate list above is printed by `merge.py --describe` from the registries the script actually runs (`VERIFY_STAGES`, then `publication_gate.CHECKS`), so it cannot drift from the code: run `merge.py --describe` again to re-read it. Any failed gate blocks the merge. Do not reconstruct the checks by hand or bypass a failure.
 

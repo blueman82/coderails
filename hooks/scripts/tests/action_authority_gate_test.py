@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pin the opt-in action-authority hook: modes, signed receipts, and error policy."""
+"""Pin the default-on action-authority hook: modes, signed receipts, and error policy."""
 
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ ROOT = Path(__file__).resolve().parents[3]
 class GateTests(ReceiptHookCase):
     """Drive the hook as a subprocess against the shared receipt fixture."""
 
-    def test_only_explicit_modes_run_the_gate(self) -> None:
-        """Absent config, off, and invalid values do not require a receipt."""
+    def test_only_explicit_off_skips_the_gate(self) -> None:
+        """Explicit off skips receipts; absent or empty settings enforce them."""
         self.configure("off")
         result = self.invoke("action_authority_gate", self.payload(MERGE))
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
@@ -34,14 +34,14 @@ class GateTests(ReceiptHookCase):
                 self.configure(value if value is not None else "")
                 if value is None:
                     (self.repo / ".coderails/workflow.config.yaml").unlink()
-                self.assertFalse(self.denied("action_authority_gate", self.payload(MERGE)))
-        self.assertEqual(self.reasons(), [])
+                self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
+        self.assertEqual(self.reasons(), ["denied_no_receipt", "denied_no_receipt"])
 
-    def test_default_is_off_without_any_config_file(self) -> None:
-        """No .coderails directory: ordinary merge and push do not require receipts."""
+    def test_default_enforces_without_any_config_file(self) -> None:
+        """No .coderails directory: protected merge and push still require receipts."""
         self.assertFalse((self.repo / ".coderails").exists())
-        self.assertFalse(self.denied("action_authority_gate", self.payload(PUSH)))
-        self.assertFalse(self.denied("action_authority_gate", self.payload(MERGE)))
+        self.assertTrue(self.denied("action_authority_gate", self.payload(PUSH)))
+        self.assertTrue(self.denied("action_authority_gate", self.payload(MERGE)))
 
     def test_advisory_warns_and_traces_never_denies(self) -> None:
         """Advisory without a receipt: stderr warning plus a trace row, no denial."""
@@ -229,7 +229,7 @@ class GateTests(ReceiptHookCase):
         self.assertEqual(self.reasons("_no_session"), ["denied_no_session"])
 
     def test_deny_hint_names_the_owner_run_mint(self) -> None:
-        """The denial gives the optional receipt command."""
+        """The denial gives the owner-run receipt command."""
         self.configure("enforce")
         out = self.invoke("action_authority_gate", self.payload(PUSH)).stdout
         self.assertIn("sign one at a terminal", out)

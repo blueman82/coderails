@@ -77,7 +77,6 @@ class GitResourceTests(unittest.TestCase):
                     patch.object(gate, reader, return_value=value),
                     patch.object(gate, "guarded_operations", return_value=[call]),
                     patch.object(gate, "repository", return_value="/tmp"),
-                    patch.object(gate, "config_path", return_value=None),
                     patch.object(gate, "resolve_mode", return_value=(mode, False)),
                     patch.object(gate, "read_authority", return_value={"loop_id": "inert"} if live else None),
                     patch.object(gate, "resolve_trust_root", return_value=(None, "user")),
