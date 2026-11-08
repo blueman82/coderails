@@ -111,7 +111,7 @@ def _tracked_source(source: Path) -> set[str]:
         raise ValueError("Git source root is unavailable or does not match --source-root")
     tracked = _git_paths(source, "ls-files", "--cached")
     for mode in (("--others", "--exclude-standard"), ("--others", "--ignored", "--exclude-standard")):
-        for path in sorted(_git_paths(source, "ls-files", *mode, "--directory", "--", *RUNTIME_PATHS)):
+        for path in sorted(_git_paths(source, "ls-files", *mode, "--", *RUNTIME_PATHS)):
             if not (
                 IGNORED_DIRS & set(Path(path).parts)
                 or Path(path).name in IGNORED_NAMES

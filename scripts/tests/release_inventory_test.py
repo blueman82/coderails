@@ -118,6 +118,34 @@ class ReleaseInventoryTests(unittest.TestCase):
                 snapshot["schema_version"] = version
                 self.assertIn("manifest_invalid", self.manifest.verify(snapshot).stderr)
 
+    def test_manifest_requires_shared_graph_dependencies(self) -> None:
+        """Canonical graph modules used by installed scripts are runtime files."""
+        case = self.manifest
+        relative = "packages/graph-semantics/graph_contract.py"
+        case.write(relative, b"value = 1\n")
+        case.git("add", ".")
+        case.git("commit", "-qm", "canonical graph module")
+        target = case.claude / relative
+        case.copy(relative, target)
+        snapshot = case.snapshot()
+        self.assertEqual(case.verify(snapshot).returncode, 0)
+        target.unlink()
+        self.assertIn("installed_file_missing", case.verify(snapshot).stderr)
+        target.write_bytes(b"changed\n")
+        self.assertIn("installed_file_changed", case.verify(snapshot).stderr)
+
+    def test_parity_excludes_cache_only_untracked_directories(self) -> None:
+        """Directory collapsing cannot turn excluded cache files into runtime inputs."""
+        case = self.parity
+        installed_parity_test.write(case.source, ".gitignore", b"*.pyc\n")
+        installed_parity_test.write(case.source, "scripts/orphan/module.pyc")
+        result = self.strict()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        installed_parity_test.write(case.source, "scripts/orphan/module.py")
+        result = self.strict()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("untracked runtime source", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

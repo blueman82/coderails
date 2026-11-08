@@ -24,6 +24,7 @@ RUNTIME_DIRS = (
     "commands/",
     "hooks/",
     "instructions/",
+    "packages/graph-semantics/",
     "policy/",
     "routines/",
     "scripts/",
