@@ -18,19 +18,25 @@ from scripts.lib.config import load_config  # noqa: E402
 from scripts.lib.git_common import repo_from_url  # noqa: E402
 
 RUNTIME_DIRS = (
+    ".agents/",
     ".claude-plugin/",
     "agents/",
     "capabilities/",
     "commands/",
+    "examples/",
     "hooks/",
     "instructions/",
+    "launchd/",
     "packages/graph-semantics/",
     "policy/",
     "routines/",
     "scripts/",
     "skills/",
+    "starter-memory/",
 )
-ROOT_FILES = frozenset({"AGENTS.md", "config.schema.json", "install.py", "wiki.schema.json"})
+ROOT_FILES = frozenset(
+    {"AGENTS.md", "config.schema.json", "install.py", "uninstall.py", "pyproject.toml", "wiki.schema.json"}
+)
 CODEX_PREFIX = "packages/codex/"
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 

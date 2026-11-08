@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import socket
 import subprocess
 import unittest
+from pathlib import Path
+from typing import cast
 
 from scripts.tests import installed_parity_test, release_manifest_test
 
@@ -121,18 +124,33 @@ class ReleaseInventoryTests(unittest.TestCase):
     def test_manifest_requires_shared_graph_dependencies(self) -> None:
         """Canonical graph modules used by installed scripts are runtime files."""
         case = self.manifest
-        relative = "packages/graph-semantics/graph_contract.py"
-        case.write(relative, b"value = 1\n")
+        module = ast.parse((Path(__file__).resolve().parents[1] / "installer/files.py").read_text())
+        declaration = next(
+            node
+            for node in module.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "SHARED_MODULES" for target in node.targets)
+        )
+        values: object = ast.literal_eval(declaration.value)
+        assert isinstance(values, tuple)
+        names = cast("tuple[object, ...]", values)
+        assert all(isinstance(name, str) for name in names)
+        paths = [f"packages/graph-semantics/{name}" for name in names]
+        for relative in paths:
+            case.write(relative, b"value = 1\n")
+            case.copy(relative, case.claude / relative)
         case.git("add", ".")
         case.git("commit", "-qm", "canonical graph module")
-        target = case.claude / relative
-        case.copy(relative, target)
         snapshot = case.snapshot()
         self.assertEqual(case.verify(snapshot).returncode, 0)
-        target.unlink()
-        self.assertIn("installed_file_missing", case.verify(snapshot).stderr)
-        target.write_bytes(b"changed\n")
-        self.assertIn("installed_file_changed", case.verify(snapshot).stderr)
+        for relative in paths:
+            with self.subTest(relative=relative):
+                target = case.claude / relative
+                target.unlink()
+                self.assertIn("installed_file_missing", case.verify(snapshot).stderr)
+                target.write_bytes(b"changed\n")
+                self.assertIn("installed_file_changed", case.verify(snapshot).stderr)
+                case.copy(relative, target)
 
     def test_parity_excludes_cache_only_untracked_directories(self) -> None:
         """Directory collapsing cannot turn excluded cache files into runtime inputs."""
@@ -145,6 +163,53 @@ class ReleaseInventoryTests(unittest.TestCase):
         result = self.strict()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("untracked runtime source", result.stderr)
+
+    def test_manifest_requires_lifecycle_scripts_and_memory_seeds(self) -> None:
+        """Installed setup, cleanup and seed inputs must be present and unchanged."""
+        case = self.manifest
+        paths = (
+            "launchd/install_dashboard_agent.py",
+            "starter-memory/feedback_example.md",
+            "uninstall.py",
+            "examples/dashboard-config.json",
+            ".agents/plugins/marketplace.json",
+            "pyproject.toml",
+        )
+        for relative in paths:
+            case.write(relative, b"lifecycle input\n")
+            case.copy(relative, case.claude / relative)
+        case.git("add", ".")
+        case.git("commit", "-qm", "lifecycle inputs")
+        snapshot = case.snapshot()
+        self.assertEqual(case.verify(snapshot).returncode, 0)
+        for relative in paths:
+            with self.subTest(relative=relative):
+                target = case.claude / relative
+                target.unlink()
+                self.assertIn("installed_file_missing", case.verify(snapshot).stderr)
+                target.write_bytes(b"changed\n")
+                self.assertIn("installed_file_changed", case.verify(snapshot).stderr)
+                case.copy(relative, target)
+
+    def test_parity_refuses_untracked_lifecycle_inputs(self) -> None:
+        """Source inventory must cover setup assets as well as ordinary hook files."""
+        case = self.parity
+        for relative in (
+            "launchd/new.py",
+            "starter-memory/feedback_new.md",
+            "uninstall.py",
+            "examples/dashboard-config.json",
+            ".agents/plugins/marketplace.json",
+            "pyproject.toml",
+        ):
+            with self.subTest(relative=relative):
+                installed_parity_test.write(case.source, relative)
+                try:
+                    result = self.strict()
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("untracked runtime source", result.stderr)
+                finally:
+                    (case.source / relative).unlink()
 
 
 if __name__ == "__main__":
