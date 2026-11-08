@@ -107,7 +107,9 @@ def source_files(root: Path) -> dict[str, dict[str, str]]:
         raise ValueError("source_path_invalid") from error
     if any(_runtime_file(path) is not None for path in ignored_paths):
         raise ValueError("source_runtime_untracked")
-    raw = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=False, timeout=10)
+    raw = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "--stage", "-z"], capture_output=True, check=False, timeout=10
+    )
     if raw.returncode:
         raise ValueError("source_git_unavailable")
     files: dict[str, dict[str, str]] = {"claude": {}, "codex": {}}
@@ -115,7 +117,9 @@ def source_files(root: Path) -> dict[str, dict[str, str]]:
         tracked = [item.decode("utf-8") for item in raw.stdout.split(b"\0") if item]
     except UnicodeError as error:
         raise ValueError("source_path_invalid") from error
-    for relative in tracked:
+    for entry in tracked:
+        metadata, relative = entry.split("\t", 1)
+        mode, _, stage = metadata.split()
         selected = _runtime_file(relative)
         if selected is None:
             continue
@@ -123,6 +127,12 @@ def source_files(root: Path) -> dict[str, dict[str, str]]:
         source = root / relative
         if source.is_symlink() or not source.is_file():
             raise ValueError("source_file_missing")
+        if (
+            stage != "0"
+            or mode not in {"100644", "100755"}
+            or bool(source.stat().st_mode & stat.S_IXUSR) != (mode == "100755")
+        ):
+            raise ValueError("source_file_mode")
         files[bundle][path] = digest(source.read_bytes())
     if not all(
         required in files[bundle]
