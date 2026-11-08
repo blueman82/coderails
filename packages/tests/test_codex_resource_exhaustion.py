@@ -6,6 +6,7 @@ import contextlib
 import errno
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ sys.path.insert(0, str(HOOKS))
 import graph_completion_guard  # noqa: E402
 import hook_common  # noqa: E402
 import loop_dispatch_guard  # noqa: E402
+import verification_volume_ceiling  # noqa: E402
 
 
 def run_hook(module: ModuleType, payload: Mapping[str, object], **patches: object) -> str:
@@ -50,7 +52,7 @@ class ResourceExhaustionTests(unittest.TestCase):
     def collaborators(self) -> dict[str, Any]:
         """Patch values pointing the hooks at the fake state and helper."""
 
-        def state_path(*_: object, **__: object) -> Path:
+        def state_path(*_: object, **_options: object) -> Path:
             return self.state
 
         def graph_path() -> Path:
@@ -81,6 +83,32 @@ class ResourceExhaustionTests(unittest.TestCase):
                 self.assertEqual(codes, expected)
             codes.clear()
 
+    def test_state_lookup_resource_error_blocks_stop(self) -> None:
+        """EMFILE in the path lookup must not appear to mean no active graph."""
+        payload = {"session_id": "s", "cwd": "/x"}
+        with patch.object(
+            graph_completion_guard,
+            "loop_state_path",
+            side_effect=hook_common.HostResourceError(errno.EMFILE, "x"),
+        ):
+            reason = json.loads(run_hook(graph_completion_guard, payload))["reason"]
+        self.assertIn("Host resource exhaustion", reason)
+        with (
+            patch("hook_common.subprocess.run", side_effect=OSError(errno.EMFILE, "x")),
+            self.assertRaises(hook_common.HostResourceError),
+        ):
+            hook_common.loop_state_path("/x", "s")
+
+    def test_state_scan_resource_error_is_distinct_from_absence(self) -> None:
+        """An exhausted directory scan must not turn into a missing state file."""
+        with (
+            patch.dict("os.environ", {"CODERAILS_AGENTIC_LOOP_DIR": str(self.state.parent)}),
+            patch("hook_common.subprocess.run", side_effect=OSError(errno.ENOENT, "git absent")),
+            patch.object(Path, "iterdir", side_effect=OSError(errno.EMFILE, "x")),
+            self.assertRaises(hook_common.HostResourceError),
+        ):
+            hook_common.loop_state_path("/x", "s")
+
     def test_stop_hook_reports_resource_exhaustion_not_invalid_state(self) -> None:
         """Both inspect and verify-completion failures yield the resource message."""
         payload = {"session_id": "s", "cwd": "/x", "last_assistant_message": "done"}
@@ -94,7 +122,7 @@ class ResourceExhaustionTests(unittest.TestCase):
         self.assertNotIn("is invalid", reason)
         calls = iter([{"session_id": "s", "hard_stop": None}])
 
-        def second_call(*_: object, **__: object) -> object:
+        def second_call(*_: object, **_options: object) -> object:
             try:
                 return next(calls)
             except StopIteration:
@@ -120,10 +148,38 @@ class ResourceExhaustionTests(unittest.TestCase):
             patch.object(
                 loop_dispatch_guard, "graph_output", side_effect=hook_common.HostResourceError(errno.EMFILE, "x")
             ),
-            patch.object(loop_dispatch_guard, "config_path", return_value=""),
+            patch.object(loop_dispatch_guard, "strict_config_path", return_value=None),
         ):
             reason = run_hook(loop_dispatch_guard, payload, **base)
         self.assertIn("not known to be invalid", reason)
+
+    def test_ceiling_denies_when_optional_state_lookup_exhausts_resources(self) -> None:
+        """A failed progress mirror cannot suppress the third full-suite denial."""
+        payload: dict[str, object] = {
+            "cwd": str(HOOKS.parents[3]),
+            "tool_input": {"command": "python3 packages/tests/test_codex_hooks.py"},
+        }
+        with patch.dict(os.environ, {"PLUGIN_DATA": str(self.state.parent / "data")}):
+            for _ in range(2):
+                output = io.StringIO()
+                with patch("sys.stdin", io.StringIO(json.dumps(payload))), contextlib.redirect_stdout(output):
+                    self.assertEqual(verification_volume_ceiling.main(), 0)
+                self.assertEqual(output.getvalue(), "")
+            payload["session_id"] = "s"
+            output = io.StringIO()
+            with (
+                patch("sys.stdin", io.StringIO(json.dumps(payload))),
+                patch.object(
+                    verification_volume_ceiling,
+                    "loop_state_path",
+                    side_effect=hook_common.HostResourceError(errno.EMFILE, "x"),
+                ),
+                contextlib.redirect_stdout(output),
+            ):
+                self.assertEqual(verification_volume_ceiling.main(), 0)
+            decision = json.loads(output.getvalue())["hookSpecificOutput"]
+            self.assertEqual(decision["permissionDecision"], "deny")
+            self.assertIn("run 3", decision["permissionDecisionReason"])
 
 
 if __name__ == "__main__":

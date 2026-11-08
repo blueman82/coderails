@@ -15,7 +15,7 @@ from typing import Any, Callable, cast
 
 LEASE_SECONDS = 900  # graph.py recover-wave default lease; passed explicitly so the bucket and the lease agree
 TIMEOUT = 2  # per graph.py call cap
-DEADLINE = 4  # all status calls together; Codex Stop budget is 10s, its inspect/verify-completion are unbounded
+DEADLINE = 4  # all status calls together; Codex Stop can pass its earlier deadline
 TIMED_OUT = "timed out"
 NOT_RUN = "status deadline reached"
 
@@ -128,20 +128,22 @@ def _names(summary: dict[str, Any], key: str) -> str:
     return ", ".join(rendered) or "-"
 
 
-def status_notice(graph: Path, state: Path, session: str, log: Callable[[str], None] = _quiet) -> str:
+def status_notice(
+    graph: Path, state: Path, session: str, log: Callable[[str], None] = _quiet, *, deadline: float | None = None
+) -> str:
     """Compact status from `graph.py summarize`; a lost-worker wave gets one bounded `recover-wave` attempt.
 
     Never raises. Hooks cannot spawn agents, so a ready node only gets the exact dispatch command.
     """
     try:
-        return _status(graph, state, session, log)
+        return _status(graph, state, session, log, deadline)
     except Exception as error:  # noqa: BLE001 - the required human notice must survive any failure here
         log(f"stall_notice session={session} status_failed={type(error).__name__}")
         return "Graph status unavailable: internal error; run graph.py summarize."
 
 
-def _status(graph: Path, state: Path, session: str, log: Callable[[str], None]) -> str:
-    deadline = time.monotonic() + DEADLINE
+def _status(graph: Path, state: Path, session: str, log: Callable[[str], None], deadline: float | None) -> str:
+    deadline = min(time.monotonic() + DEADLINE, deadline) if deadline is not None else time.monotonic() + DEADLINE
     ok, text = _graph(graph, deadline, "summarize", str(state))
     summary = json_object(ok, text)
     if summary is None:

@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from hooks.scripts.hook_common import deny, read_payload
+from hooks.scripts.hook_common import RESOURCE_MESSAGE, HostResourceError, deny, read_payload
 from hooks.scripts.lib.destructive_patterns import git_output
 from hooks.scripts.lib.loop_state_common import log
 from hooks.scripts.lib.trace_row import append_row
@@ -33,7 +33,11 @@ def main() -> int:
     probe = path.parent
     while not probe.is_dir() and probe != probe.parent:
         probe = probe.parent
-    root = git_output(str(probe), "rev-parse", "--show-toplevel", hook="wiki_taxonomy_gate")
+    try:
+        root = git_output(str(probe), "rev-parse", "--show-toplevel", hook="wiki_taxonomy_gate")
+    except HostResourceError:
+        deny(RESOURCE_MESSAGE)
+        return 0
     if not root:
         return 0
     absolute = probe.resolve() / path.relative_to(probe)

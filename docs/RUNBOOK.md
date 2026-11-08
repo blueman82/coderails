@@ -452,6 +452,53 @@ separate, and Claude live qualification remains incomplete.
   `awaiting-input` or `approval-gate` row while graph work is pending. `complete` needs a resolved graph and its evidence.
   See `docs/graph-alignment-measurement.md` for limits and commands.
 
+## Host resource errors or bounded Stop checks
+
+`EMFILE`, `ENFILE`, `EAGAIN` and `ENOMEM` during required Git reads indicate host resource exhaustion.
+`destructive_patterns.git_output` raises `HostResourceError` for these errors. Both providers' destructive-command gates
+then deny the unchecked action. This does not establish that the action is destructive or that graph state is invalid.
+Ordinary nonzero Git exits still return an empty lookup. Other Git failures are not all classified as resource faults.
+
+The Codex `graph_completion_guard` starts one **nine-second aggregate budget** before reading its input.
+State lookup, `inspect`, `consume-stop`, `verify-completion`, status and recovery calls share the remaining time.
+The hook registration allows ten seconds, leaving time to emit its response. A lookup or graph-check timeout emits
+`decision: block`: graph state was not verified. Status or recovery failure cannot establish completion.
+This is a configured deadline, not a universal wall-clock guarantee; see the [measurement limits](workflow-gates-measurement.md#hook-and-stop-measurements-f2).
+
+An unresolved graph can call `request_human_approval`. Codex emits `decision: block` and a human-approval
+`systemMessage`; Claude emits the notice and blocks Stop with exit 2. Notices use a key containing loop, revision,
+session, active wave and hard stop. A repeated notice is suppressed for 900 seconds, while Stop remains blocked.
+After that lease, a persistent stall can notify and attempt recovery again. A status check can attempt `recover-wave`
+for a waiting worker; a timeout leaves its outcome unknown. Codex does not record the notice marker after its deadline
+expires, so an exhausted deadline does not suppress the next notice. Never treat a notice as successful worker recovery.
+
+A valid `approval-gate` stop row with reason code `needs_approval` can be consumed once while graph work remains.
+The typed row permits that Stop; its reason text does not decide the result. Consumption neither grants action authority
+nor completes the graph. Follow [the recorded-stop procedure](#a-stop-has-no-recorded-row) for the current provider.
+`request_human_approval` is a function, not a telemetry cause: a blocked request records `block`.
+
+To diagnose a refusal:
+
+1. Record the provider, hook, source version or commit, session ID, and active hook registration.
+2. Open its matching `hook_telemetry.jsonl` row. Compare `ts`, `pid`, typed output and the scoped session trace.
+   The [measurement note](workflow-gates-measurement.md#hook-and-stop-measurements-f2) defines paths, causes and counters.
+3. Read the named graph state and evidence without changing them. For resource faults, correct host resource pressure.
+   For a graph or evidence refusal, correct the named fault through its maintained workflow.
+4. Retry the refused action and inspect its new output and rows. Keep the prior refusal evidence.
+
+Do not remove graph state, disable checks or raise limits to clear an unexplained refusal.
+Change the interpreter only after evidence shows an interpreter fault.
+These same-user hooks and file-based observations are non-authoritative cooperating-agent safeguards.
+Source checks and synthetic inputs do not prove installed hook trust, native-provider execution, real-account operation,
+server rules or successful native worker recovery. Integrity activation and publication checks remain separate;
+see [the integrity setup](INTEGRITY-GATE.md#turn-on-the-gate) and [publication measurement limits](workflow-gates-measurement.md#limits).
+
+Source: [Git lookup](../hooks/scripts/lib/destructive_patterns.py),
+[Claude gate](../hooks/scripts/destructive_bash_gate.py), [Codex gate](../packages/codex/hooks/scripts/destructive_bash_gate.py),
+[Codex Stop guard](../packages/codex/hooks/scripts/graph_completion_guard.py),
+[Stop registration](../packages/codex/hooks/hooks.json), [Claude Stop guard](../hooks/scripts/loop_stall_guard.py)
+and [shared notice helper](../hooks/scripts/lib/stall_notice.py).
+
 ## A routine run ended incomplete, aborted or refused
 
 - Symptom: the dashboard gate for `docs-sync` or `loop-retro-promotion` reads red; the run log's last marker is
