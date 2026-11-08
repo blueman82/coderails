@@ -76,7 +76,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("results_json")
         if name in {"record-decision", "flush-decisions"}:
             command.add_argument("--session", required=True)
-            command.add_argument("--cite-quote")
+            command.add_argument("--cite-quote", help="deprecated compatibility input; ignored by task review")
         if name == "record-decision":
             command.add_argument("--loop-id", required=True)
             command.add_argument("--revision", required=True, type=int)
@@ -333,6 +333,8 @@ def main() -> int:
             output = _record_unit(args)
         elif args.command in {"record-decision", "flush-decisions"}:
             output = _decision(args)
+            if args.cite_quote is not None:
+                output["quote_ignored"] = True
         elif args.command == "record-repair":
             output = graph_controller.record_repair(
                 args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis
