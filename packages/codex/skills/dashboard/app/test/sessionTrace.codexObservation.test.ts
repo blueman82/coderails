@@ -6,6 +6,22 @@ import { readCodexTracePage } from "../src/lib/collect/sessionTrace";
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
 describe("Codex transcript observations", () => {
+  it.each(["See /repo/notAGENTS.md.", "See ./CLAUDE.mdx."])("rejects a partial filename in %s", async (body) => {
+    const { deps, parent, rows, save } = await fixture();
+    await save(parent, [...rows, { type: "response_item", payload: { type: "message", role: "assistant",
+      content: [{ type: "output_text", text: body }] } }]);
+    const page = await readCodexTracePage("parent", null, 30, deps);
+    expect(page.events.some((event) => event.attributes["coderails.observation.kind"] === "mention")).toBe(false);
+  });
+
+  it.each(["See /repo/AGENTS.md.", "See ./CLAUDE.md."])("retains a full filename in %s", async (body) => {
+    const { deps, parent, rows, save } = await fixture();
+    await save(parent, [...rows, { type: "response_item", payload: { type: "message", role: "assistant",
+      content: [{ type: "output_text", text: body }] } }]);
+    const page = await readCodexTracePage("parent", null, 30, deps);
+    expect(page.events.some((event) => event.attributes["coderails.observation.kind"] === "mention")).toBe(true);
+  });
+
   it("does not establish installation from an arbitrary skill path", async () => {
     const { deps, parent, rows, save } = await fixture();
     await save(parent, [...rows,
