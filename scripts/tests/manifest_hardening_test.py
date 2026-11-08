@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -15,7 +16,7 @@ sys.path.insert(0, str(REPO))
 from packages.tests.graph_manifest_fixture import graph_progress  # noqa: E402
 from scripts import merge  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
-from scripts.lib import manifest_policy, publication_gate  # noqa: E402
+from scripts.lib import manifest_policy, publication_gate, receipt_gate  # noqa: E402
 from scripts.tests import manifest_default_test as base  # noqa: E402
 
 SECRET = ".en" + "v"  # two parts so no source line spells the secret-file name
@@ -177,6 +178,15 @@ class UnitMismatchTests(base.DefaultGateTests):
         self.assertIn(("failed_open", "manifest_internal_error"), [(r["outcome"], r["reason_code"]) for r in rows])
 
 
+def receipt_off_config(test: unittest.TestCase) -> str:
+    """Create an explicit scratch off control for tests that isolate publication ordering or head pinning."""
+    temporary = tempfile.TemporaryDirectory()
+    test.addCleanup(temporary.cleanup)
+    config = Path(temporary.name) / "workflow.config.yaml"
+    config.write_text("action_authority: off\n")
+    return str(config)
+
+
 class MergePinTests(unittest.TestCase):
     """merge.py pins the merge to the head the gate checked."""
 
@@ -197,6 +207,7 @@ class MergePinTests(unittest.TestCase):
             mock.patch.object(git, "gate_eval_summary_for_pr", return_value=git.EvalSummary(0, "0", "{}")),
             mock.patch.object(merge, "smoke_verify", return_value=0),
             mock.patch.object(merge, "config_path", return_value=""),
+            mock.patch.object(receipt_gate, "config_path", return_value=receipt_off_config(self)),
             mock.patch.object(merge, "has_wiki_ingest_for_merged_prs"),
             mock.patch.object(git, "require_repo"),
             mock.patch.object(git, "main", return_value="main"),

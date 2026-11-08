@@ -35,26 +35,36 @@ class WorkspaceTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.base = Path(temporary.name).resolve()
-        self.case = Case("claude", self.base)
-        fixture.DriverControllerTests.scoped(self.case)
-        state = self.case.read()
-        state["work_units"]["1"].update(manifest=["allowed.txt"], write_scope=["allowed.txt"])
-        self.case.write(state)
-        self.assertEqual(self.case.graph("convert").returncode, 0)
-        self.assertEqual(self.case.graph("cutover-driver").returncode, 0)
-        self.case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
-        opened = subprocess.run(
-            [sys.executable, str(SCRIPTS["claude"]), "begin-driver-wave", str(self.case.path)], capture_output=True
-        )
-        self.assertEqual(opened.returncode, 0, opened.stderr)
-        self.state = self.case.read()
-        self.identifier, self.record = next(iter(self.state["graph"]["dispatches"].items()))
         self.destination = self.base / "destination"
         fixture.DriverControllerTests.checkout(self.destination)
         subprocess.run(["git", "-C", str(self.destination), "switch", "-qc", "feature/probe"], check=True)
+        config = self.destination / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
+        config.write_text("memory:\n  backend: off\n")
+        subprocess.run(["git", "-C", str(self.destination), "add", str(config)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.destination),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@test",
+                "commit",
+                "-qm",
+                "fixture config",
+            ],
+            check=True,
+        )
+        previous = Path.cwd()
+        os.chdir(self.destination)
+        self.addCleanup(os.chdir, previous)
         self.home = self.base / "home"
+        config = self.home / ".coderails/workflow.config.yaml"
+        config.parent.mkdir(parents=True)
+        config.write_text("memory:\n  backend: off\n")
         credential = self.home / ".coderails/worker_credential"
-        credential.parent.mkdir(parents=True)
         credential.write_text("CLAUDE_CODE_OAUTH_TOKEN=synthetic-dedicated-secret\n")
         credential.chmod(0o600)
         environment = patch.dict(os.environ, {"HOME": str(self.home), "TMPDIR": str(self.base)})
@@ -63,6 +73,25 @@ class WorkspaceTests(unittest.TestCase):
         runtime = patch("scripts.sandbox.containment.runtime_present", return_value=True)
         runtime.start()
         self.addCleanup(runtime.stop)
+
+        self.case = Case("claude", self.base)
+        fixture.DriverControllerTests.scoped(self.case)
+        state = self.case.read()
+        state["work_units"]["1"].update(manifest=["allowed.txt"], write_scope=["allowed.txt"])
+        self.case.write(state)
+        self.assertEqual(self.case.graph("convert").returncode, 0)
+        self.assertEqual(self.case.graph("cutover-driver").returncode, 0)
+        assigned = self.case.graph(
+            "assign-worktree", "--loop-id", "L", "--unit", "1", "--worktree", str(self.destination)
+        )
+        self.assertEqual(assigned.returncode, 0, assigned.stderr)
+        self.case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+        opened = subprocess.run(
+            [sys.executable, str(SCRIPTS["claude"]), "begin-driver-wave", str(self.case.path)], capture_output=True
+        )
+        self.assertEqual(opened.returncode, 0, opened.stderr)
+        self.state = self.case.read()
+        self.identifier, self.record = next(iter(self.state["graph"]["dispatches"].items()))
 
     def prepare(self) -> dict[str, Any]:
         """Load the new consumer only after confirming it exists."""

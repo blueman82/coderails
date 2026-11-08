@@ -163,16 +163,16 @@ class LoadConfigTests(ConfigCase):
         )
 
     def test_action_authority_enum(self) -> None:
-        """The schema defaults to off; the runtime ignores unknown optional modes."""
+        """The schema defaults to enforce and reports unknown receipt modes."""
         for value in ("enforce", "advisory", "off"):
             values, findings = load_config(self.write(f"action_authority: {value}\n"))
             self.assertEqual((values["action_authority"], findings), (value, []))
         values, findings = load_config(self.write("project: x\n"))
-        self.assertEqual((values["action_authority"], findings), ("off", []))
+        self.assertEqual((values["action_authority"], findings), ("enforce", []))
         values, findings = load_config(self.write("action_authority: bogus\n"))
         self.assertEqual((values["action_authority"], self.codes(findings)), ("bogus", ["config_bad_value"]))
         schema = json.loads((ROOT / "config.schema.json").read_text())["properties"]["action_authority"]
-        self.assertEqual((schema["status"], schema["default"]), ("enforced_by_code", "off"))
+        self.assertEqual((schema["status"], schema["default"]), ("enforced_by_code", "enforce"))
 
     def test_unreadable_never_raises(self) -> None:
         """Missing, torn (non-UTF-8) and directory paths fall back to defaults with one finding."""

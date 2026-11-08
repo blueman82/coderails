@@ -16,7 +16,8 @@ sys.path.insert(0, str(REPO))
 from packages.tests.graph_manifest_fixture import graph_progress  # noqa: E402
 from scripts import merge  # noqa: E402
 from scripts.lib import git_common as git  # noqa: E402
-from scripts.lib import manifest_policy, publication_gate  # noqa: E402
+from scripts.lib import manifest_policy, publication_gate, receipt_gate  # noqa: E402
+from scripts.tests.manifest_hardening_test import receipt_off_config  # noqa: E402
 from scripts.tests.manifest_policy_test import RepoCase, git_cmd  # noqa: E402
 
 SECRET = ".en" + "v"  # two parts so no source line spells the secret-file name
@@ -133,7 +134,7 @@ class MergeCallTests(unittest.TestCase):
     """merge.py calls publication_gate.enforce after verify_gates and before gh pr merge."""
 
     def run_merge(self, effect: Exception | None, arguments: list[str] | None = None) -> tuple[int, list[str]]:
-        """Run merge.main for PR 7 with the evidence gates stubbed; return status and the call order."""
+        """Run merge.main with explicit receipt off to isolate publication-call ordering."""
         order: list[str] = []
 
         def fake_run(*argv: str, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -154,6 +155,7 @@ class MergeCallTests(unittest.TestCase):
             return "sha7"
 
         with (
+            mock.patch.object(receipt_gate, "config_path", return_value=receipt_off_config(self)),
             mock.patch.object(merge, "verify_gates", side_effect=evidence),
             mock.patch.object(git, "require_repo"),
             mock.patch.object(git, "main", return_value="main"),
@@ -279,11 +281,10 @@ class HeadlessTests(RepoCase):
     def test_merge_off_control_merges(self) -> None:
         """Negative control: diff_manifest off lets the same diff reach gh pr merge.
 
-        The config file is itself a committed control file (.coderails/** needs security-review), so the review
-        check and the eval-level check (the stubbed level-0 artifact is below the derived level of those paths) are
-        switched off too; this test is about the manifest only.
+        The committed .coderails/** control file needs security-review and an eval above the stubbed level 0,
+        so review passes, eval level and action_authority are explicitly off to isolate this manifest control.
         """
-        self.config("diff_manifest: off\nreview_passes: off\neval_level: off\n")
+        self.config("diff_manifest: off\nreview_passes: off\neval_level: off\naction_authority: off\n")
         result = self.merge(self.commit_secret())
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(self.ghlog.exists())

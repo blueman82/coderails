@@ -21,8 +21,8 @@ class TransferCLITests(unittest.TestCase):
     def test_public_drive_transfers_before_root_publication_and_resumes_fixed_receipt(self) -> None:
         """Public drive transfers before root publication and resumes fixed receipt."""
         context = fixture.WorkspaceTests("test_preparation_is_owned_idempotent_and_leaves_destination_clean")
-        context.setUp()
         self.addCleanup(context.doCleanups)
+        context.setUp()
         tools = context.base / "bin"
         tools.mkdir()
         pin = context.home / ".npm/_npx/fixture/node_modules/@anthropic-ai/sandbox-runtime/package.json"

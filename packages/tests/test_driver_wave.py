@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
@@ -18,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "packages/graph-semantics"))
 sys.path.insert(0, str(ROOT / "skills/agentic-loop/scripts"))
 import graph_driver_controller  # noqa: E402
+import graph_driver_dispatch  # noqa: E402
 import graph_driver_evidence  # noqa: E402
 
 from hooks.scripts.tests.graph_convert_test import SCRIPTS, Case  # noqa: E402
@@ -152,31 +152,39 @@ class DriverWaveTests(unittest.TestCase):
                 case = Case(provider, base)
                 self.assertEqual(case.graph("convert").returncode, 0)
                 self.assertEqual(case.graph("cutover-driver").returncode, 0)
-                state: dict[str, Any] = case.read()
-                state["revision"] += 1
-                wave_id = f"wave-{state['revision']}"
+                case.path.with_name("evals.json").write_text(json.dumps(frozen_evals()))
+                opened = subprocess.run(
+                    [sys.executable, str(SCRIPTS[provider]), "begin-driver-wave", str(case.path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                self.assertEqual(opened.returncode, 0, opened.stderr)
+                issued = json.loads(opened.stdout)
+                wave_id = issued["wave_id"]
                 node_id = "U3[1]"
-                dispatch_id = "disp_test_" + provider
-                state["graph"]["active_wave"] = {"wave_id": wave_id, "revision": state["revision"], "nodes": [node_id]}
-                state["graph"]["nodes"][node_id].update(status="running", outcome="running")
-                state["graph"]["dispatches"][dispatch_id] = {
-                    "node_id": node_id,
-                    "wave_id": wave_id,
-                    "revision": state["revision"],
-                    "attempt": 1,
-                    "task_name": "test-worker",
-                    "dispatch_mode": "driver",
-                    "final_report_required": True,
-                    "authorized": {
-                        "driver_run_id": "test-run",
-                        "prompt_sha256": hashlib.sha256(b"CODERAILS_GRAPH_DISPATCH=test\n").hexdigest(),
-                    },
-                }
-                case.write(state)
+                dispatch_id = issued["dispatches"][0]["dispatch_id"]
+                state = case.read()
+                record = state["graph"]["dispatches"][dispatch_id]
+                prompt = graph_driver_dispatch.write_prompt(
+                    case.path, state, dispatch_id, record, checkout.resolve(), provider, SCRIPTS[provider]
+                )
+                authorized = case.graph(
+                    "authorize-driver",
+                    "--dispatch-id",
+                    dispatch_id,
+                    "--prompt-file",
+                    str(prompt),
+                    "--role",
+                    record["contract"]["role"],
+                    "--driver-run-id",
+                    "test-run",
+                )
+                self.assertEqual(authorized.returncode, 0, authorized.stderr)
+                state = case.read()
                 result = {"outcome": "done", "evidence": "worker result"}
-                artifact = case.path.parent / "driver-evidence" / dispatch_id
-                artifact.mkdir(parents=True)
-                (artifact / "prompt.txt").write_text("CODERAILS_GRAPH_DISPATCH=test\n")
+                artifact = prompt.parent
                 (artifact / "output.jsonl").write_text('{"type":"turn.completed"}\n')
                 if provider == "codex":
                     (artifact / "final.json").write_text(json.dumps(result))
@@ -186,34 +194,31 @@ class DriverWaveTests(unittest.TestCase):
                         case.path, state, node_id, dispatch_id, checkout, provider, 0, result
                     )
                 report = {"wave_id": wave_id, "results": {node_id: result}, "references": {node_id: ref}}
+
+                def collect(
+                    raw: str, script: Path = SCRIPTS[provider], path: Path = case.path
+                ) -> subprocess.CompletedProcess[str]:
+                    return subprocess.run(
+                        [sys.executable, str(script), "record-driver-wave", str(path), raw],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=False,
+                    )
+
                 missing = json.dumps({**report, "references": {}})
                 before = case.path.read_bytes()
-                denied = subprocess.run(
-                    [sys.executable, str(SCRIPTS[provider]), "record-driver-wave", str(case.path), missing],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
+                denied = collect(missing)
                 self.assertNotEqual(denied.returncode, 0)
                 self.assertEqual(case.path.read_bytes(), before)
                 backup = case.path.with_name("progress.json.pre-driver")
                 original_backup = backup.read_bytes()
                 backup.write_bytes(original_backup + b" ")
-                corrupted = subprocess.run(
-                    [sys.executable, str(SCRIPTS[provider]), "record-driver-wave", str(case.path), json.dumps(report)],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
+                corrupted = collect(json.dumps(report))
                 self.assertNotEqual(corrupted.returncode, 0, (provider, corrupted.stderr))
                 self.assertEqual(case.path.read_bytes(), before)
                 backup.write_bytes(original_backup)
-                unreviewed = subprocess.run(
-                    [sys.executable, str(SCRIPTS[provider]), "record-driver-wave", str(case.path), json.dumps(report)],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
+                unreviewed = collect(json.dumps(report))
                 self.assertNotEqual(unreviewed.returncode, 0, (provider, unreviewed.stderr))
                 self.assertIn("final_report_invalid", unreviewed.stderr)
                 self.assertEqual(case.path.read_bytes(), before)

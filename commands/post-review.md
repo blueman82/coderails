@@ -103,15 +103,35 @@ refuse oversized output, do not truncate it or raise the cap. Both bounds includ
 A stale scope needs a new complete inspection. The writer checks before/after each post and reuse.
 The same shared publication gate checks merge helpers and direct publication hooks.
 
-Old readers reject this result. Keep installation on HOLD until the merged release passes
-[Check a release candidate](../docs/RELEASE-CANDIDATE.md) and
-[Installing coderails](../INSTALLATION.md), using paths relative to the release checkout.
+Old readers reject this result. Keep installation on HOLD until release qualification is complete.
+Use [Installing coderails](../INSTALLATION.md) for maintained installer options, with paths
+relative to the selected release checkout. That document alone does not qualify this transition.
 Select explicit new provider versions and matching manifest/marketplace metadata.
 Stop new graph work and drain affected sessions with their owners. Preserve old runtime,
 state/config/eval/proof/retro/Muninn backups with hashes. Unknown quiescence keeps the HOLD.
-Use `release_manifest.py snapshot`, both maintained installer dry runs, then those installers.
-Start new sessions; complete Codex `/hooks` trust. Verify explicit installed paths with
-`release_manifest.py verify` and `installed_parity.py --require-both`; check allowed/refused routes.
+Run both maintained previews from that checkout:
+
+```bash
+python3 install.py --dry-run
+python3 install.py --provider codex --dry-run
+```
+
+These previews do not install or clear the HOLD. Complete expected-file and link inventories,
+hashed runtime/state backups and a checked coordinated restore procedure are required.
+The maintained tools do not supply a release manifest or qualified rollback procedure.
+Keep installation on HOLD until release qualification supplies and checks those missing parts.
+After the HOLD clears, use the maintained installers for the selected versions.
+Start new sessions and complete Codex `/hooks` trust. Compare explicit installed roots:
+
+```bash
+python3 scripts/installed_parity.py --source-root /path/to/release-checkout --claude-installed /path/to/selected-claude-version --codex-installed /path/to/selected-codex-version
+```
+
+Replace all three paths with the selected directories. This helper compares existing installed
+regular files to source. It skips symlinks and does not detect missing expected source files.
+It is not a complete installation inventory. Check allowed and refused writer/reader routes.
+Account-free checks for both providers remain required. For a Codex-only live release, keep
+Claude live checks recorded as not complete; a Claude account is not required for that scope.
 Do not copy helper files into an active version. A new inspection must use both the new writer
 and reader. Preserve old runtime/state together for rollback; these checks do not prove all
 installed behavior or bytecode authenticity. No current wiki pass or install follows from this change.
