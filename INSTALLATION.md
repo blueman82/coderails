@@ -9,7 +9,7 @@ invoke GitHub's `gh` CLI.
 
 - macOS
 - Python 3.9 or newer; runtime code uses only the standard library
-- Claude Code 2.1.x for the default provider, or the Codex CLI for `--provider codex`
+- Claude Code 2.1.x for the default provider. The terminal marketplace command in step 3 requires **2.1.292 or newer**; upgrade older versions before that step. The Python installer does not run that command. For `--provider codex`, use the Codex CLI.
 - `git` and `gh` on your PATH for workflow operations (checked by the Claude installer); `jq` is not required by the Python runtime
 - An authenticated GitHub CLI (`gh auth login`). For enterprise GitHub: `gh auth login --hostname <your-git-host>` (e.g. `git.example.com`)
 - `pr-review-toolkit@claude-plugins-official` installed — required for the review stage of `/workflow`
@@ -112,19 +112,23 @@ machine-user token and installs the independent root-owned launchd validator.
 To select the prompt non-interactively, use `python3 install.py --integrity-gate`;
 to suppress it, use `python3 install.py --no-integrity-gate`.
 
-**3. Restart Claude Code, then run in order:**
+**3. Install Coderails from the local marketplace in a terminal (Claude Code 2.1.292 or newer):**
 
 ```
-/plugin marketplace add ~/Documents/Github/coderails
-/plugin install coderails@coderails
+claude plugin install coderails --marketplace ~/Documents/Github/coderails
+```
+
+Then restart Claude Code and run:
+
+```
 /plugin install pr-review-toolkit@claude-plugins-official
 /plugin install superpowers@claude-plugins-official
 /reload-plugins
 ```
 
-The installer already wrote the settings entry, so `marketplace add` resolves the
-local directory instead of trying to clone it as a git URL. `marketplace add` first,
-then `install`.
+The `--marketplace` option adds the local directory to Claude Code and installs
+Coderails in one command. It [requires Claude Code 2.1.292 or newer](https://code.claude.com/docs/en/plugins/cli-reference#plugin-install).
+Use the path where you cloned this repository.
 
 **4. Per project (run once per repo):**
 
