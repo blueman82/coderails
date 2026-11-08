@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
-from .graph_evidence import child_identity, notifications, object_value, spawns, transcript
-from .graph_evidence_bind import check_record, provenance, terminal, used_references
+from .graph_evidence import child_identity, notifications, object_value, spawns, transcript, validate_reference
+from .graph_evidence_bind import SKIP_PREFIXES, check_skip_wave, provenance, terminal, used_references
+from .graph_scout_approval import approval
 
 
 def revalidate_all(state: dict[str, Any]) -> None:
@@ -26,6 +28,12 @@ def revalidate_all(state: dict[str, Any]) -> None:
             raise ValueError(f"node {node_id} has missing or forged native attempt history")
         ordering: dict[int, set[str]] = {}
         for ref in refs:
+            if ref.get("kind") == "graph_skip":
+                if sum(item.get("attempt") == ref.get("attempt") for item in refs) != 1:
+                    raise ValueError(f"node {node_id} has missing or forged native attempt history")
+                validate_skip_reference(state, node_id, node, ref, rows, history)
+                ordering.setdefault(ref["attempt"], set()).add(ref["wave_id"])
+                continue
             row = validate_reference(state, node_id, ref, rows, history)
             ordering.setdefault(ref["attempt"], set()).add(row["wave_id"])
             completed = ref["outcome"] == "done"
@@ -45,31 +53,51 @@ def revalidate_all(state: dict[str, Any]) -> None:
             raise ValueError(f"node {node_id} lacks successful final native evidence")
 
 
-def validate_reference(
-    state: dict[str, Any], node_id: str, ref: dict[str, Any], rows: list[dict[str, Any]], history: dict[str, Any]
-) -> dict[str, Any]:
-    """Recheck original role, wave ownership, cursor and raw spawn UUID."""
-    required = {"kind", "attempt", "wave_id", "tool_use_id", "record_uuid", "subagent_type", "outcome"}
-    if set(ref) not in (required, required | {"agent_id"}) or ref.get("kind") != "claude_agent":
-        raise ValueError("native evidence does not have the bound object shape")
-    if ref["outcome"] not in {"done", "skipped", "failed", "stale"}:
-        raise ValueError("invalid native attempt outcome")
-    matches = [row for row in rows if row["tool_use_id"] == ref["tool_use_id"]]
-    if len(matches) != 1:
-        raise ValueError("native bound spawn no longer resolves uniquely")
-    row = matches[0]
-    if row["node_id"] != node_id or any(row[key] != state[key] for key in ("session_id", "loop_id")):
-        raise ValueError("native bound spawn belongs to another node or session")
-    for key in ("wave_id", "record_uuid", "subagent_type"):
-        if row[key] != ref[key]:
-            raise ValueError(f"native bound spawn {key} no longer matches")
-    wave = object_value(history.get(row["wave_id"]), "native wave history entry")
+def validate_skip_reference(
+    state: dict[str, Any],
+    node_id: str,
+    node: dict[str, Any],
+    ref: dict[str, Any],
+    rows: list[dict[str, Any]],
+    history: dict[str, Any],
+) -> None:
+    """Recheck a scoped no-work or owner-approved scout skip."""
+    approved = ref.get("reason") == "non_independent"
+    prefix = "non_independent:" if approved else SKIP_PREFIXES.get(node_id)
+    fields = {"kind", "attempt", "wave_id", "reason", "evidence_sha256", "cursor"}
+    if approved:
+        fields |= {"request_line", "request_sha256", "approval_line", "approval_sha256"}
     if (
-        type(wave.get("cursor")) is not int
-        or row["line"] <= wave["cursor"]
-        or node_id not in wave.get("nodes", [])
-        or wave.get("revision") != row["revision"]
+        prefix is None
+        or set(ref) != fields
+        or type(ref.get("attempt")) is not int
+        or ref["attempt"] != node["retry"]["attempts"] + 1
+        or (not approved and ref["attempt"] != 1)
+        or (approved and (node_id != "S2.5" or ref["attempt"] < 2))
+        or ref.get("reason") != prefix[:-1]
+        or node["status"] != "skipped"
+        or node["respawn"]["generation"] != 0
+        or type(ref.get("cursor")) is not int
+        or ref["cursor"] < 0
     ):
-        raise ValueError("native bound spawn is outside its original wave cursor or node set")
-    check_record(state, row)
-    return row
+        raise ValueError("invalid scout skip evidence")
+    check_skip_wave(state, node_id, ref["attempt"], ref["wave_id"], ref["cursor"])
+    wave = object_value(history.get(ref["wave_id"]), "native wave history entry")
+    if any(
+        row["node_id"] == node_id and row["wave_id"] == ref["wave_id"] and row["line"] > wave["cursor"] for row in rows
+    ):
+        raise ValueError("scout skip no longer matches its native wave")
+    matching = [
+        item
+        for item in node["evidence"]
+        if isinstance(item, str)
+        and item.startswith(prefix)
+        and item[len(prefix) :].strip()
+        and hashlib.sha256(item.encode()).hexdigest() == ref["evidence_sha256"]
+    ]
+    if len(matching) != 1:
+        raise ValueError("scout skip reason no longer matches its evidence")
+    if approved:
+        expected_approval = approval(state, node_id, ref["attempt"], rows, ref["wave_id"], ref["cursor"])
+        if any(ref.get(key) != value for key, value in expected_approval.items()):
+            raise ValueError("scout skip approval reference changed")

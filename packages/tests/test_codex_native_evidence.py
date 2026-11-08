@@ -110,6 +110,10 @@ class NativeEvidenceTests(unittest.TestCase):
                 "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
             )
 
+    def write_transcripts(self) -> None:
+        """Expose fixture records to related native evidence tests."""
+        self._write_transcripts()
+
     def _bind(self) -> dict[str, Any]:
         self._write_transcripts()
         return bind_worker_evidence(self.state, self.wave)[0]["U3[1]"]

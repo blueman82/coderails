@@ -2,36 +2,53 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any, cast
 
-from .graph_evidence import child_identity, notifications, object_value, spawns, transcript
+from .graph_evidence import check_record, child_identity, notifications, object_value, spawns, transcript
 from .graph_executor import graph_contract
+from .graph_scout_approval import approval
+
+SKIP_PREFIXES = {"S2.5": "no_design_fork:", "S2.6": "no_retired_path:"}
 
 
-def check_record(state: dict[str, Any], row: dict[str, Any]) -> None:
-    """A spawn in a wave at or after contract_from_revision must match its begin-wave record and sections digest."""
-    start = state["graph"].get("contract_from_revision")
-    if type(start) is not int or row["revision"] < start:
-        return  # history from before the dispatch contract (the converter stamps the first contract revision)
-    if "dispatch_id" not in row:
-        raise graph_contract.DispatchDeniedError(
-            "dispatch_missing_envelope", "native spawn lacks a v2 dispatch envelope"
-        )
-    if graph_contract.dispatch_off():
-        graph_contract.check_ownership(state, row, live=False)
-        return
-    record = graph_contract.check_dispatch(state, row, row["prompt"], live=False)
-    graph_contract.assert_role(record["contract"], row["subagent_type"], "coderails:", graph_contract.CLAUDE_TYPES)
-    authorized: object = record.get("authorized")
-    authorized = cast(dict[str, Any], authorized) if isinstance(authorized, dict) else None
-    if not isinstance(authorized, dict) or (
-        authorized.get("tool_use_id") is not None and authorized.get("tool_use_id") != row["tool_use_id"]
+def check_skip_wave(state: dict[str, Any], node_id: str, attempt: int, wave_id: str, cursor: int) -> None:
+    """Require one unused issued scout slot and its independently captured wave boundary."""
+    graph = state["graph"]
+    dispatches = object_value(graph.get("dispatches"), "scout skip dispatches")
+    records = ((identifier, object_value(record, "scout dispatch")) for identifier, record in dispatches.items())
+    issued = [
+        (identifier, record)
+        for identifier, record in records
+        if record.get("node_id") == node_id and record.get("wave_id") == wave_id
+    ]
+    if len(issued) != 1:
+        raise ValueError("scout skip needs exactly one issued dispatch")
+    identifier, record = issued[0]
+    if (
+        record.get("attempt") != attempt
+        or type(record.get("attempt")) is not int
+        or record.get("authorized") is not None
+        or "authorized" not in record
+        or identifier != graph_contract.dispatch_id(state["loop_id"], wave_id, node_id, attempt)
     ):
-        raise graph_contract.DispatchDeniedError(
-            "dispatch_unauthorized", "native spawn does not match its consumed dispatch authorization"
-        )
+        raise ValueError("scout skip needs its unconsumed issued dispatch")
+    history = object_value(graph.get("wave_history"), "native wave history")
+    wave = object_value(history.get(wave_id), "native wave history entry")
+    if (
+        type(cursor) is not int
+        or cursor < 0
+        or type(wave.get("cursor")) is not int
+        or wave["cursor"] != cursor
+        or not isinstance(wave.get("nodes"), list)
+        or node_id not in wave.get("nodes", [])
+        or type(wave.get("revision")) is not int
+        or type(record.get("revision")) is not int
+        or wave["revision"] != record.get("revision")
+    ):
+        raise ValueError("scout skip no longer matches its native wave cursor or revision")
 
 
 def provenance(value: object, depth: int = 0) -> bool:
@@ -46,7 +63,7 @@ def provenance(value: object, depth: int = 0) -> bool:
         return any(provenance(item, depth + 1) for item in cast(list[object], value))
     if isinstance(value, str):
         normalized = re.sub(r"[^a-z_]", "", value.lower())
-        if "claude_agent" in normalized or "toolu_" in value:
+        if "claude_agent" in normalized or "graph_skip" in normalized or "toolu_" in value:
             return True
         try:
             decoded: object = json.loads(value)
@@ -76,6 +93,8 @@ def used_references(state: dict[str, Any]) -> tuple[set[str], set[str]]:
                     raise ValueError("stored evidence contains malformed native provenance")
                 continue
             item = cast(dict[str, Any], item)
+            if item.get("kind") == "graph_skip":
+                continue
             if item.get("kind") != "claude_agent" or any(
                 provenance(cast(object, value)) for value in item.values() if isinstance(value, (dict, list))
             ):
@@ -104,6 +123,7 @@ def bind_wave(state: dict[str, Any], results: dict[str, Any]) -> dict[str, list[
     bound: dict[str, list[dict[str, Any]]] = {}
     ids: set[str] = set()
     for node_id, result in results.items():
+        result = object_value(result, "wave result")
         if provenance(result.get("evidence")):
             raise ValueError("caller evidence must not assert native worker provenance")
         candidates = [
@@ -111,9 +131,47 @@ def bind_wave(state: dict[str, Any], results: dict[str, Any]) -> dict[str, list[
             for row in rows
             if row["node_id"] == node_id and row["wave_id"] == active["wave_id"] and row["line"] > boundary
         ]
+        node = state["graph"]["nodes"][node_id]
+        evidence = result["evidence"]
+        if result["outcome"] == "skipped" and isinstance(evidence, str):
+            approved = evidence.startswith("non_independent:")
+            prefix = "non_independent:" if approved else SKIP_PREFIXES.get(node_id)
+            if prefix and evidence.startswith(prefix):
+                if not evidence[len(prefix) :].strip() or node["respawn"]["generation"]:
+                    raise ValueError("scout skip needs a reason and no stale attempt")
+                if candidates:
+                    raise ValueError("scout skip cannot reuse a native spawn")
+                attempt = node["retry"]["attempts"] + 1
+                if approved:
+                    if not evidence.startswith("non_independent: human approved") or attempt < 2:
+                        raise ValueError("non-independent skip needs a prior refusal and explicit approval")
+                    approval_ref = approval(state, node_id, attempt, rows, active["wave_id"], boundary)
+                else:
+                    if attempt != 1:
+                        raise ValueError("no-work scout skip must precede any scout attempt")
+                    approval_ref = {}
+                check_skip_wave(state, node_id, attempt, active["wave_id"], boundary)
+                wave = state["graph"]["wave_history"][active["wave_id"]]
+                if (
+                    active.get("revision") != state["revision"]
+                    or wave["revision"] != active["revision"]
+                    or wave["nodes"] != active["nodes"]
+                ):
+                    raise ValueError("scout skip does not own the active wave")
+                bound[node_id] = [
+                    {
+                        "kind": "graph_skip",
+                        "attempt": attempt,
+                        "wave_id": active["wave_id"],
+                        "reason": prefix[:-1],
+                        "evidence_sha256": hashlib.sha256(evidence.encode()).hexdigest(),
+                        "cursor": boundary,
+                        **approval_ref,
+                    }
+                ]
+                continue
         if not candidates:
             raise ValueError(f"node {node_id} has no native spawn after the wave cursor")
-        node = state["graph"]["nodes"][node_id]
         attempt = node["retry"]["attempts"] + node["respawn"]["generation"] + 1
         references: list[dict[str, Any]] = []
         for row in candidates:

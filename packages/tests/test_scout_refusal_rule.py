@@ -19,12 +19,12 @@ COMMON = (
     "do not silently downgrade to the orchestrator's or a worker's own read.",
     "Without an independent scout the loop HALTS for the human: do not continue past the refusal.",
     "A `non_independent` fallback requires explicit human approval.",
-    "Only after the human approves, record `S2.5` as `skipped` with evidence beginning "
-    "`non_independent: human approved`",
+    "The next direct user reply must be `approve`.",
+    "The native record command checks both transcript messages and refuses a missing or different reply.",
+    "Only then record `S2.5` as `skipped` with evidence beginning `non_independent: human approved`",
     "run `graph.py record-decision` with that phase and decision text.",
-    "That `skipped` record is the only exit that lets `J2` release without an independent scout;",
-    "a `non_independent` read never counts as an independent review or as `done`.",
-    "no gate reads `non_independent`, so this is an orchestrator rule, not a hook-enforced one.",
+    "A `non_independent` read never counts as an independent review or as `done`.",
+    "A no-fork skip uses `no_design_fork: <reason>` and needs no scout spawn.",
 )
 CODEX_ONLY = (
     "Retry the spawn with the same `task_name`;",
@@ -78,8 +78,10 @@ class ScoutRefusalRuleTests(unittest.TestCase):
             self.assertNotIn("expose none", text)
 
     def test_graph_has_exit(self) -> None:
-        """The graph table defines the non_independent exit."""
-        self.assertIn("human approved a `non_independent` fallback", GRAPH.read_text())
+        """The graph contract names the machine-readable no-fork exit and the approval limit."""
+        text = GRAPH.read_text()
+        self.assertIn("no_design_fork: <reason>", text)
+        self.assertIn("approval check refuses", text)
 
     def test_codex_rule_beside_retry_rule(self) -> None:
         """Codex rule sits after the retry rule, before review."""
