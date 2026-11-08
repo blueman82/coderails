@@ -22,6 +22,7 @@ from graph_identity import (
     task_name,
 )
 from graph_recovery import RecoveryRefusedError
+from graph_scout_prior import verify_dispatch as _verify_dispatch
 from graph_scout_skip import bind as bind_skip
 from graph_scout_skip import parse_reference as _reference
 from graph_scout_skip import verify as verify_skip
@@ -46,55 +47,6 @@ def _legacy_refusal(node_id: str, attempt: object) -> RecoveryRefusedError:
         f"node {node_id} attempt {attempt} carries a pre-loop-scoped task name; re-dispatch under the loop-scoped name"
     )
     return RecoveryRefusedError(LEGACY_REFUSED, message, (node_id,), attempt if isinstance(attempt, int) else None)
-
-
-def _verify_dispatch(
-    state: dict[str, Any], node_id: str, attempt: int, wave_id: str, call_id: str, requests: Requests
-) -> None:
-    if not is_contract_wave(state, wave_id):
-        return
-    calls = requests.get(call_id, [])
-    if len(calls) != 1 or not isinstance(calls[0], dict):
-        raise graph_contract.DispatchDeniedError("dispatch_missing_envelope", "native spawn has no unique request")
-    request = calls[0]
-    message = request.get("message")
-    if not isinstance(message, str):
-        raise graph_contract.DispatchDeniedError("dispatch_missing_envelope", "native spawn has no message")
-    if request.get("task_name") != task_name(state["loop_id"], node_id, attempt):
-        raise graph_contract.DispatchDeniedError("dispatch_foreign", "native spawn task name differs from its attempt")
-    issued = [
-        record
-        for record in state["graph"].get("dispatches", {}).values()
-        if record.get("node_id") == node_id and record.get("attempt") == attempt and record.get("wave_id") == wave_id
-    ]
-    if (
-        len(issued) == 1
-        and isinstance(issued[0].get("authorized"), dict)
-        and "ciphertext_sha256" in issued[0]["authorized"]
-    ):
-        raise graph_contract.DispatchDeniedError(
-            "dispatch_prompt_unverifiable", "encrypted native prompt has no verifiable instructions"
-        )
-    envelope = graph_contract.parse_envelope(message)
-    record = graph_contract.check_ownership(state, envelope, live=False)
-    if not (graph_contract.dispatch_off() or record.get("authorized") == {"tool_use_id": None, "mode": "off"}):
-        record = graph_contract.check_dispatch(state, envelope, message, live=False)
-    if (
-        record.get("task_name") != request["task_name"]
-        or record.get("attempt") != attempt
-        or record["wave_id"] != wave_id
-    ):
-        raise graph_contract.DispatchDeniedError("dispatch_foreign", "native spawn does not own this graph attempt")
-    if graph_contract.dispatch_off() or record.get("authorized") == {"tool_use_id": None, "mode": "off"}:
-        return
-    agent_type = request.get("agent_type", "")
-    if not isinstance(agent_type, str):
-        raise graph_contract.DispatchDeniedError("role_mismatch", "native spawn has an invalid agent type")
-    graph_contract.assert_role(record["contract"], agent_type, "", None)
-    if record.get("authorized") not in ({"tool_use_id": None}, {"tool_use_id": call_id}):
-        raise graph_contract.DispatchDeniedError(
-            "dispatch_unauthorized", "native spawn has no consumed dispatch authorization"
-        )
 
 
 def verify_reference(

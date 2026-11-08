@@ -41,6 +41,15 @@ Execute the push workflow script. Remove `--quick` from arguments if present.
 If this session owns a graph unit in this worktree, pass its exact `--unit <id> --progress <absolute state path>`
 to the script. Read both values from the active graph. Do not guess them.
 
+The `enforce_pr_workflow` hook checks the trusted push helper before action authority. For a graph unit,
+run from its canonical assigned worktree with the exact unit ID and absolute progress path owned by this session.
+If the hook refuses the binding, read the active graph and correct the directory or arguments before retrying.
+Without an active graph unit, omit both flags. This read-only preflight does not consume a receipt;
+the existing authority and receipt checks still apply.
+The hook recognizes the documented `${CLAUDE_PLUGIN_ROOT}` form and direct Python script options.
+Python `-c`/`-m`, arbitrary shell variables and custom execution trampolines are outside this preflight;
+invoke the helper directly for graph publication.
+
 `push.py` stages tracked-modified files automatically (`git add -u`) but never sweeps up new, untracked files — that's deliberate, to avoid dragging unrelated working-tree files into the PR. If you (the actor running this command) created NEW files that belong in this PR, list them explicitly and pass each one via a repeatable `--add <path>` flag. You know what you created; don't stage new files with a separate `git add` sweep — name them to push.py instead.
 
 Use a separate `--add` flag per file, one path per occurrence — never a space-separated variable like `--add $FILES`. `--add` consumes exactly one token, so `--add $FILES` would stage only the first file and the rest would be silently misparsed as extra arguments (the next token becomes part of the commit message). Name individual files, not directories or globs — a directory would stage everything under it, including files that aren't yours. Example shape:

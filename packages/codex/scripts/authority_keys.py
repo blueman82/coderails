@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Optional user-tier key setup for signed action receipts.
+"""Owner terminal setup for user-tier signed action receipt keys.
 
-init          create the PASSPHRASE-PROTECTED ed25519 receipt key (ssh-keygen prompts on /dev/tty; refuses when
+init          create the ed25519 receipt key (ssh-keygen accepts an empty passphrase on /dev/tty; refuses when
               there is no tty) and write the user-tier signers file (a cooperating-agent safeguard: the same user,
               hence an agent, can edit that file).
 show          print the fingerprints of the key and user-tier signers file.

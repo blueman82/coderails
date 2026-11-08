@@ -14,7 +14,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
-from hook_common import append_trace_row, loop_state_path
+from hook_common import HostResourceError, append_trace_row, loop_state_path
 from lib import argv_match
 from lib.ceiling_key import legacy_key, mirror, worktree_key
 from lib.dir_lock import acquire_dir_lock, release_dir_lock
@@ -79,7 +79,10 @@ def count_for(count_path: Path) -> int:
 
 def mirror_count(cwd: str, session: str, top: str, target: str, total: int) -> None:
     """Best-effort copy of the count into the matching progress.json work unit, under that file's lock."""
-    path = loop_state_path(cwd, session) if session else None
+    try:
+        path = loop_state_path(cwd, session) if session else None
+    except HostResourceError:
+        return
     if path is None or not path.is_file():
         return
     temporary = ""

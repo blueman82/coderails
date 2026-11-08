@@ -9,7 +9,7 @@
       "mode": "block",
       "failure": "deny or block with a visible reason",
       "ceiling": "Runs in the caller trust domain; server policy remains the release boundary.",
-      "activation": "off by default; advisory warns; enforce checks signed receipts",
+      "activation": "enforce by default; advisory warns; off requires explicit configuration",
       "category": "action authority gate"
     },
     "agent_model_routing_nudge": {
