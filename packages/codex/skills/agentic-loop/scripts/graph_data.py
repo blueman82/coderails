@@ -60,3 +60,13 @@ def event_payload(record: dict[str, Any]) -> dict[str, Any]:
     """Extract a native transcript event payload."""
     payload = record.get("payload", record)
     return cast(dict[str, Any], payload) if isinstance(payload, dict) else {}
+
+
+def error_shaped(output: object) -> bool:
+    """Codex spawn errors are plain text; a success result is a JSON object such as {"task_name": ...}."""
+    if not isinstance(output, str) or not output.strip():
+        return False
+    try:
+        return not isinstance(json.loads(output), dict)
+    except ValueError:
+        return True

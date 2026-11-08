@@ -13,6 +13,7 @@ import { createTraceDetailHandler } from "../src/app/api/sessions/[sessionId]/tr
 const ID = "7847a501-d2d5-41f4-bbab-4076ff00d09f";
 const calls = ["toolu_01Y8HLWiqtQuhGK3JXSuJHTD", "toolu_01ULvGbe6uVMCwer1UnRYj5e"];
 const workers = ["aad253f6db58af8d0", "a81745d33aebf8d45"];
+const actorLabels = ["Actor: Comment Analyzer (aad253f6…f8d0)", "Actor: Source Auditor (a81745d3…8d45)"] as const;
 const fixture = join(import.meta.dirname, "fixtures/session-trace/real-parallel/projects");
 
 async function setup() {
@@ -69,13 +70,13 @@ describe("sanitized real Claude parallel session", () => {
     const { container } = render(<SessionTracePanel token="test-token" dashboardRunId="separate-run" />);
     await screen.findByRole("option", { name: new RegExp(ID.slice(0, 8)) });
     fireEvent.change(screen.getByLabelText("Native session"), { target: { value: ID } });
-    expect(await screen.findAllByText(`Actor: Worker ${workers[0]}`)).not.toHaveLength(0);
-    expect(screen.getAllByText(`Actor: Worker ${workers[1]}`)).not.toHaveLength(0);
+    expect(await screen.findAllByText(actorLabels[0])).not.toHaveLength(0);
+    expect(screen.getAllByText(actorLabels[1])).not.toHaveLength(0);
     expect(screen.getByText(/separate-run/)).toBeTruthy();
     expect(env.details).toBe(0);
     const workerEvent = page.events.find((event) => event.attributes["coderails.actor.id"] === workers[0])!;
     const workerRow = within(screen.getByRole("list", { name: "Trace timeline" })).getAllByRole("listitem")
-      .find((row) => row.textContent?.includes(`Actor: Worker ${workers[0]}`))!;
+      .find((row) => row.textContent?.includes(actorLabels[0]))!;
     const parentText = within(workerRow).getByText(/^parent:/).textContent;
     expect(parentText).toContain("derived");
     for (const key of ["method", "parent_source_ref", "child_source_ref"]) {
@@ -87,7 +88,7 @@ describe("sanitized real Claude parallel session", () => {
     expect(screen.getAllByText(/start time: .*\(observed in source; ref:/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/end time: time unavailable; source order only \(unavailable\)/).length).toBeGreaterThan(0);
     const assistantRow = within(screen.getByRole("list", { name: "Trace timeline" })).getAllByRole("listitem")
-      .find((row) => row.textContent?.startsWith("assistant") && row.textContent?.includes(`Actor: Worker ${workers[0]}`))!;
+      .find((row) => row.textContent?.startsWith("assistant") && row.textContent?.includes(actorLabels[0]))!;
     fireEvent.click(within(assistantRow).getByRole("button", { name: /Source detail for assistant/ }));
     await waitFor(() => expect(env.details).toBe(1));
     expect(env.fetcher.mock.calls.filter(([url]) => String(url).includes("/detail?") && String(url).includes("token=test-token"))).toHaveLength(1);

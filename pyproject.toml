@@ -21,7 +21,7 @@ executionEnvironments = [
   { root = "skills/workflow-audit/scripts", extraPaths = ["skills/workflow-audit/scripts", "skills/workflow-audit/scripts/tests", "skills/dashboard/scripts", "."] },
   { root = "packages/codex/hooks/scripts", extraPaths = ["packages/codex/hooks/scripts", "packages/codex/skills/agentic-loop/scripts", "packages/codex"] },
   { root = "packages/codex/skills/agentic-loop/scripts", extraPaths = ["packages/codex/skills/agentic-loop/scripts", "packages/codex/hooks/scripts", "packages/codex"] },
-  { root = "packages/codex", extraPaths = ["packages/codex"] },
+  { root = "packages/codex", extraPaths = ["packages/codex", "packages/codex/skills/agentic-loop/scripts"] },
   { root = "packages/tests", extraPaths = ["packages/codex", "packages/codex/hooks/scripts", "packages/codex/skills/agentic-loop/scripts", "."] },
   { root = "hooks/scripts/tests", extraPaths = ["hooks/scripts/tests/lib", "hooks/scripts/tests", "hooks/scripts", "skills/agentic-loop/scripts", "scripts/integrity-gate", "launchd", "."] },
   { root = "hooks/scripts", extraPaths = ["hooks/scripts", "skills/agentic-loop/scripts", "."] },

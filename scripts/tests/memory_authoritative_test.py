@@ -289,6 +289,15 @@ class MirrorsCountersReasons(Base):
             "scripts/lib/memory_cite.py",
             "scripts/lib/memory_reasons.py",
             "scripts/lib/memory_schema.py",
+            "scripts/lib/memory_request.py",
+            "scripts/lib/memory_current.py",
+            "scripts/lib/memory_support.py",
+            "scripts/lib/orders_request.py",
+            "scripts/lib/decision_record.py",
+            "scripts/lib/orders.py",
+            "scripts/lib/orders_lifecycle.py",
+            "scripts/lib/lessons.py",
+            "scripts/lib/handoff_derive.py",
             "config.schema.json",
         ):
             mirror = REPO / "packages/codex" / rel
@@ -325,7 +334,7 @@ class MirrorsCountersReasons(Base):
 
     def test_markdown_is_written_only_through_write_view(self) -> None:
         """No memory module opens/writes a file outside write_view; the scanner does catch a violator."""
-        for name in ("adapter", "cite", "reasons", "counters", "schema"):
+        for name in ("adapter", "cite", "reasons", "counters", "schema", "request", "current", "support"):
             self.assertEqual(writers((REPO / f"scripts/lib/memory_{name}.py").read_text()), set(), name)
         self.assertEqual(writers("def sneaky(p):\n    open(p, 'w')\n"), {"sneaky"})
 

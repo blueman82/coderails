@@ -20,7 +20,7 @@ from typing import cast
 
 from hook_common import deny, payload_object, read_input, text_field
 from lib.action_match import guarded_segments
-from lib.shell_context import opaque_execution
+from lib.shell_context import invocations, opaque_execution, payload_cwd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.lib import git_common as git  # noqa: E402
@@ -40,6 +40,11 @@ def main() -> int:
     try:
         if opaque_execution(command, cwd):
             deny("shell_depth_exceeded: Blocked: executable shell body exceeds the guarded parser depth.")
+            return 0
+        if reason := publication_gate.push_preflight(
+            invocations(command, payload_cwd(payload)), session if isinstance(session, str) else ""
+        ):
+            deny(reason)
             return 0
         for name, segment, where in guarded_segments(command, cwd):
             if name != "merge":
