@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -17,19 +18,27 @@ from scripts.lib.config import load_config  # noqa: E402
 from scripts.lib.git_common import repo_from_url  # noqa: E402
 
 RUNTIME_DIRS = (
+    ".agents/",
     ".claude-plugin/",
     "agents/",
     "capabilities/",
     "commands/",
+    "examples/",
     "hooks/",
     "instructions/",
+    "launchd/",
+    "packages/graph-semantics/",
     "policy/",
     "routines/",
     "scripts/",
     "skills/",
+    "starter-memory/",
 )
-ROOT_FILES = frozenset({"AGENTS.md", "config.schema.json", "install.py", "wiki.schema.json"})
+ROOT_FILES = frozenset(
+    {"AGENTS.md", "config.schema.json", "install.py", "uninstall.py", "pyproject.toml", "wiki.schema.json"}
+)
 CODEX_PREFIX = "packages/codex/"
+MODULE_SUFFIXES = (".py", ".pyw", ".pyi", ".so", ".pyd")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -68,9 +77,20 @@ def identity(root: Path) -> dict[str, str]:
     }
 
 
+def ignored(relative: Path) -> bool:
+    """Keep cache and Finder exclusions independent of entry type and runtime selection."""
+    return "__pycache__" in relative.parts or relative.name.endswith(".pyc") or relative.name == ".DS_Store"
+
+
+def runtime_module(relative: str) -> bool:
+    """Select module files reachable through ordinary import package components."""
+    path = Path(relative)
+    return path.name.endswith(MODULE_SUFFIXES) and all(part.isidentifier() for part in path.parts[:-1])
+
+
 def _runtime_file(relative: str) -> tuple[str, str] | None:
     """Name tracked plugin files that an installed bundle must contain."""
-    if "__pycache__" in Path(relative).parts or relative.endswith(".pyc") or Path(relative).name == ".DS_Store":
+    if ignored(Path(relative)):
         return None
     if relative.startswith(CODEX_PREFIX):
         bundle, path = "codex", relative[len(CODEX_PREFIX) :]
@@ -78,7 +98,7 @@ def _runtime_file(relative: str) -> tuple[str, str] | None:
         bundle, path = "claude", relative
     if not path or "tests" in Path(path).parts or path.endswith(("_test.py", ".test.ts", ".spec.ts")):
         return None
-    if bundle == "claude" and path not in ROOT_FILES and not path.startswith(RUNTIME_DIRS):
+    if bundle == "claude" and path not in ROOT_FILES and not path.startswith(RUNTIME_DIRS) and not runtime_module(path):
         return None
     return bundle, path
 
@@ -99,7 +119,9 @@ def source_files(root: Path) -> dict[str, dict[str, str]]:
         raise ValueError("source_path_invalid") from error
     if any(_runtime_file(path) is not None for path in ignored_paths):
         raise ValueError("source_runtime_untracked")
-    raw = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=False, timeout=10)
+    raw = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "--stage", "-z"], capture_output=True, check=False, timeout=10
+    )
     if raw.returncode:
         raise ValueError("source_git_unavailable")
     files: dict[str, dict[str, str]] = {"claude": {}, "codex": {}}
@@ -107,7 +129,9 @@ def source_files(root: Path) -> dict[str, dict[str, str]]:
         tracked = [item.decode("utf-8") for item in raw.stdout.split(b"\0") if item]
     except UnicodeError as error:
         raise ValueError("source_path_invalid") from error
-    for relative in tracked:
+    for entry in tracked:
+        metadata, relative = entry.split("\t", 1)
+        mode, indexed_oid, stage = metadata.split()
         selected = _runtime_file(relative)
         if selected is None:
             continue
@@ -115,7 +139,20 @@ def source_files(root: Path) -> dict[str, dict[str, str]]:
         source = root / relative
         if source.is_symlink() or not source.is_file():
             raise ValueError("source_file_missing")
-        files[bundle][path] = digest(source.read_bytes())
+        if (
+            stage != "0"
+            or mode not in {"100644", "100755"}
+            or bool(source.stat().st_mode & stat.S_IXUSR) != (mode == "100755")
+        ):
+            raise ValueError("source_file_mode")
+        data = source.read_bytes()
+        if len(indexed_oid) not in (40, 64):
+            raise ValueError("source_git_unavailable")
+        algorithm = "sha1" if len(indexed_oid) == 40 else "sha256"
+        blob = f"blob {len(data)}\0".encode() + data
+        if hashlib.new(algorithm, blob).hexdigest() != indexed_oid:
+            raise ValueError("source_file_uncommitted")
+        files[bundle][path] = digest(data)
     if not all(
         required in files[bundle]
         for bundle, required in (("claude", ".claude-plugin/plugin.json"), ("codex", ".codex-plugin/plugin.json"))
@@ -167,7 +204,11 @@ def verify(manifest: object, root: Path, config: Path, claude: Path, codex: Path
     if not isinstance(manifest, dict):
         raise ValueError("manifest_invalid")
     record = cast("dict[str, object]", manifest)
-    if record.get("schema_version") != 1 or record.get("status") != "candidate":
+    if (
+        type(record.get("schema_version")) is not int
+        or record["schema_version"] != 1
+        or record.get("status") != "candidate"
+    ):
         raise ValueError("manifest_invalid")
     fresh_identity = identity(root)
     for field, current in fresh_identity.items():
@@ -201,11 +242,16 @@ def verify(manifest: object, root: Path, config: Path, claude: Path, codex: Path
         for candidate in installed.rglob("*"):
             relative = candidate.relative_to(installed).as_posix()
             source_relative = f"{CODEX_PREFIX}{relative}" if bundle == "codex" else relative
-            selected = _runtime_file(source_relative)
-            if selected is None:
+            if ignored(Path(relative)):
                 continue
             if candidate.is_symlink():
                 raise ValueError("installed_path_symlink")
+            mode = candidate.lstat().st_mode
+            if not stat.S_ISREG(mode) and not stat.S_ISDIR(mode):
+                raise ValueError("installed_path_type")
+            selected = _runtime_file(source_relative)
+            if selected is None:
+                continue
             if candidate.is_file() and selected[0] == bundle and selected[1] not in current_files[bundle]:
                 raise ValueError("installed_file_extra")
         for relative, expected_sha in current_files[bundle].items():
@@ -218,6 +264,9 @@ def verify(manifest: object, root: Path, config: Path, claude: Path, codex: Path
                 raise ValueError("installed_file_missing")
             if digest(target.read_bytes()) != expected_sha:
                 raise ValueError("installed_file_changed")
+            source_relative = f"{CODEX_PREFIX}{relative}" if bundle == "codex" else relative
+            if target.stat().st_mode & 0o111 != (root / source_relative).stat().st_mode & 0o111:
+                raise ValueError("installed_file_mode")
 
 
 def main(arguments: list[str] | None = None) -> int:

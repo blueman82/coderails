@@ -59,6 +59,10 @@ def validate_completion_state(
     transcript_path: Path | None,
 ) -> list[str]:
     """Check graph, native or driver history, and current canonical completion artifacts."""
+    if state.get("proof_disposition") is not None and (
+        proof_path.absolute() != state_path.with_name("proof.json").absolute()
+    ):
+        raise GraphError("proof path must be beside progress.json for a no-proof decision")
     state_dir = state_path.resolve().parent
     for artifact, name in ((evals_path, "evals.json"), (proof_path, "proof.json"), (retro_path, "retro.json")):
         if artifact.resolve() != (state_dir / name).resolve():

@@ -14,7 +14,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.lib.graph_executor import graph_semantics
 from packages.tests.provider_fixture import Provider
-from scripts.lib.decision_record import add_decision
+from scripts.lib.decision_record import add_decision, row_digest
 
 
 def artifacts_with_orders_prepared(provider: Provider) -> None:
@@ -197,6 +197,7 @@ class ProviderLifecycleTests(unittest.TestCase):
                 self.assertIn("decision_sync_pending", graph_semantics.can_complete(state)["blockers"])
             row["muninn"] = valid
             row["worker_status_seq"] = 7
+            row["row_sha256"] = row_digest(row)
             self.assertIn("decision_sync_pending", graph_semantics.can_complete(state)["blockers"])
 
     def test_empty_graph_rejects_orphan_pending_worker_status(self) -> None:

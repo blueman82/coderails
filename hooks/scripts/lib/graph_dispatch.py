@@ -173,8 +173,13 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
         except worker_status.WorkerResultError as error:
             refusal.append(error)
             raise
-        proposal = graph_semantics.record_wave(state, report["wave_id"], core)
+        active = state["graph"]["active_wave"]
+        if active is None or report["wave_id"] != active["wave_id"]:
+            raise ValueError("no active wave or result wave id does not match the active wave")
+        if set(core) != set(active["nodes"]):
+            raise ValueError("result keys must exactly match the active wave")
         references = bind_wave(state, core)
+        proposal = graph_semantics.record_wave(state, report["wave_id"], core)
         proposed = object_value(proposal["state"], "proposed graph")
         worker_status.retain_decision_slot(proposed, statuses)
         status_nodes = {status["node"] for status in statuses}
@@ -190,13 +195,8 @@ def record_wave(path: Path, report: dict[str, Any]) -> dict[str, Any]:
                 record_stop(proposed, state["session_id"], category, code, reason)["state"], "stops"
             )
         recorded.append(statuses + [{"node": node, "status": "FINAL_REPORT"} for node in reports])
-        response.update(
-            {
-                "revision": proposed["revision"],
-                "released_joins": proposal["released_joins"],
-                "ready": graph_semantics.ready(proposed),
-            }
-        )
+        response.update(revision=proposed["revision"], released_joins=proposal["released_joins"])
+        response["ready"] = graph_semantics.ready(proposed)
         return proposed
 
     try:

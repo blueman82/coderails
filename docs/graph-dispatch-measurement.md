@@ -1,23 +1,37 @@
-# Dispatch envelope measurement note
+# Dispatch contract measurement
 
 [Graph alignment measurement](graph-alignment-measurement.md).
 
+This note describes the source contract in the candidate plugin. It does not show that an installed hook ran.
+
+| Evidence | Status |
+|---|---|
+| Source | Both providers use the same graph contract and source check modules. |
+| Local | Focused contract and dispatch tests exercise allowed and refused requests. |
+| Installed | A new Claude session and a new Codex session still need allowed and refused dispatch checks. |
+| Operation | Trace counts need a named session and its native records before they can describe use. |
+
 ## Structured dispatch envelope and role assertion (measurement note)
 
-The first-line-only five-field envelope (Claude) and the `TASK_NAME` regex plus `CODERAILS_GRAPH_TASK` marker (Codex, which
-let any spawn through whose task name and agent type looked non-graph) are replaced by one record. `begin-wave` stores
-`graph.dispatches[dispatch_id]` (node, wave, revision, attempt, the closed contract `role, model_role, base_ref, manifest,
-disposition, lessons, write_scope, skip_phases, scope`, its sections digest, a single-use `authorized` slot) and prints the
-first-line v2 envelope plus the rendered sections to paste. The shared `packages/graph-semantics/graph_contract.py`
-(materialized byte-for-byte into both script dirs by `scripts/installer/files.py`) validates the contract, renders it
-deterministically, cross-checks a prompt against the stored record and asserts the role against `capabilities/profiles.json`.
-Claude's `Agent` guard and Codex's `spawn_agent` guard (now enforcing for every spawn of a graph-bound session) both call it
-through `authorize_dispatch` / `graph.py authorize-dispatch`; Claude's completion revalidation re-checks each bound spawn's
-record and digest for waves at or after `graph.contract_from_revision`. Current conversion reaches `state_minor` 3.
-It adds `graph.context_from_revision`; new records from that revision bind required skills and checks to task facts.
-Conversion refuses while a wave is open. Rows go to `recovery-trace.jsonl` as `authorize-dispatch/refused/<code>` and
-`authorize-dispatch/authorized/dispatch_authorized`; `python3 scripts/lib/dispatch_counters.py` tallies them (own module
-because `scripts/measure_graph_alignment.py` is at its line limit; folding it in is handoff H1). Flip condition:
+`begin-wave` saves one record in `graph.dispatches[dispatch_id]`. The record binds the node, wave, revision, attempt,
+one authorization use, and a digest of the rendered prompt sections. Its closed contract binds the role, model role,
+base reference, source checkout, source manifest and hashes, publication command, lesson digest, write scope, phase
+choices, and required context. `graph_contract_render.py` defines the exact field order. One machine field records
+whether old code is kept or removed.
+
+The shared contract code checks the prompt, record, role and required skills and checks. Both providers use copies of
+the shared code. A source-bound item also checks its assigned Git checkout and current commit before a worker starts.
+The checkout must be clean for tracked and ordinary untracked files. Git-ignored files are outside this check.
+
+Graph state minor 3 sets `context_from_revision`. A new dispatch at or after that revision must bind required context
+from the registered node and item facts. Older saved prompt hashes remain readable before the cutoff. Conversion
+refuses an open wave or damaged old dispatch record. The Claude and Codex guards check new requests. Completion checks
+the saved native record again.
+
+Authorization writes `authorize-dispatch/refused/<code>` or `authorize-dispatch/authorized/dispatch_authorized` to
+`recovery-trace.jsonl`. `scripts/lib/dispatch_counters.py` counts these rows. Its `--trace-json` option also reads a
+graph measurement from standard input. JSON `null` is refused. These are event counts, not unique worker counts.
+Flip condition:
 `role_mismatch` above zero means a prompt names the wrong agent type (a scout dispatched as `general-purpose`);
 `dispatch_replayed` above zero means a spawn was retried or a prompt was reused; `dispatch_sections_missing` means
 orchestrators are not pasting `prompt_sections` verbatim; `dispatch_authorized` against the loop's wave count shows the

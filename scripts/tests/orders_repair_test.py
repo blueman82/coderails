@@ -107,19 +107,26 @@ class Cli(StoreCase):
         text = p.stdout.strip()
         return p.returncode, json.loads(text) if text.startswith("{") else {"raw": text, "stderr": p.stderr}
 
-    def rec(self, *extra: str, fm: str = FM, session: str = SESSION) -> tuple[int, dict[str, Any]]:
-        """orders.py record as the given session."""
-        progress(self.dir, session, "L1")
-        args = ["--session", session, "record", "--failure-mode", fm, "--lesson", LESSON, "--loop", "L1", *extra]
-        return self.run_cli(ORDERS, *args)
+    def rec(self, *extra: str, fm: str = FM, session: str = SESSION, loop: str = "L1") -> tuple[int, dict[str, Any]]:
+        """Queue a real scratch request; a quoted fixture explicitly completes its controlled review."""
+        (self.tmp / "projects/p" / f"{session}.jsonl").write_text("\n".join(map(json.dumps, LINES)) + "\n")
+        progress(self.dir, session, loop)
+        args = ["--session", session, "record", "--failure-mode", fm, "--lesson", LESSON, "--loop", loop, *extra]
+        code, result = self.run_cli(ORDERS, *args)
+        if "--quote" in extra and code == 3 and result.get("muninn", {}).get("state") == "pending":
+            self.muninn("learn", "complete", result["muninn"]["request_id"], "--kind", "lesson", "--content", LESSON)
+            return self.run_cli(ORDERS, *args)
+        return code, result
 
-    def test_retract_then_rerecord_recovers(self) -> None:
-        """After a retract, re-recording with a fresh quote writes a new entry and `lessons` serves it again."""
+    def test_retract_requires_new_authored_source_before_recovery(self) -> None:
+        """A quote cannot recreate a retracted receipt; a new authored source gets a separate request."""
         _, first = self.rec("--quote", PROMPT)
         kid = first["muninn"]["id"]
         self.assertEqual(self.muninn("know", "retract", kid, "--reason", "test")[0], 0)
-        self.assertEqual(self.run_cli(ORDERS, "lessons")[1]["lessons"], [])  # control: the retract excluded it
-        rc, again = self.rec("--quote", LATER)
+        self.assertEqual(self.run_cli(ORDERS, "lessons")[1]["lessons"], [])
+        rc, unchanged = self.rec("--quote", LATER)
+        self.assertEqual((rc, unchanged["muninn"]["id"]), (3, kid))
+        rc, again = self.rec("--quote", PROMPT, session="s2", loop="L2")
         self.assertEqual((rc, again["muninn"]["state"]), (0, "written"))
         self.assertNotEqual(again["muninn"]["id"], kid)
         rc, got = self.run_cli(ORDERS, "lessons")
@@ -152,10 +159,10 @@ class Cli(StoreCase):
         """Three sessions recording with no quote yield no candidate; with quotes they do, with Muninn's text."""
         self.sessions("s2", "s3")
         for s in ("s1", "s2", "s3"):
-            self.rec("--scope", "agnostic", fm="uncited-mode", session=s)
+            self.rec("--scope", "agnostic", fm="uncited-mode", session=s, loop="uncited")
         self.assertEqual(self.run_cli(LESSONS, "predicate")[1]["candidates"], [])
         for s in ("s1", "s2", "s3"):
-            self.rec("--scope", "agnostic", "--quote", PROMPT, fm="cited-mode", session=s)
+            self.rec("--scope", "agnostic", "--quote", PROMPT, fm="cited-mode", session=s, loop="cited")
         got = self.run_cli(LESSONS, "predicate")[1]["candidates"]
         self.assertEqual([(c["id"], c["lesson"], len(c["sessions"])) for c in got], [("cited-mode", LESSON, 3)])
 
@@ -195,91 +202,92 @@ class Reconciliation(StoreCase):
     rec = cast("Callable[..., tuple[int, dict[str, Any]]]", Cli.rec)
 
     def count(self) -> int:
-        """Count durable store entries rather than calls to a double."""
-        return int(self.muninn("know", "list", "--status", "all")[1]["count"])
+        """Count durable current requests instead of retired numeric-K adds."""
+        path = self.home / "requests.json"
+        return len(json.loads(path.read_text())["requests"]) if path.exists() else 0
 
-    def test_degraded_or_pending_record_reconciles_a_prior_successful_add(self) -> None:
-        """Ambiguous local state must recover the existing tagged K-id before any additional add."""
+    def test_degraded_or_pending_record_recovers_exact_retained_request(self) -> None:
+        """Mutable cached status cannot erase the retained request's committed identity."""
         _, first = self.rec("--quote", PROMPT)
         path = self.dir / "orders.json"
         for state in ("degraded", "pending"):
             data = json.loads(path.read_text())
-            data["orders"][0]["muninn"] = {"id": None, "state": state, "reason_code": "muninn_error"}
+            data["orders"][0]["muninn"].update(id=None, state=state, reason_code="muninn_error")
             path.write_text(json.dumps(data))
-            rc, out = self.rec("--quote", PROMPT)
+            rc, out = self.run_cli(ORDERS, "cite", FM)
             self.assertEqual((rc, out["muninn"]["id"], self.count()), (0, first["muninn"]["id"], 1))
 
-    def test_failed_currentness_read_degrades_and_retains_prior_kid(self) -> None:
-        """A known claim is explicitly degraded when exclusion reads fail, with its recoverable prior id retained."""
+    def test_failed_currentness_read_retains_prior_kid_and_request(self) -> None:
+        """A failed exact current-list read retains prior observations without claiming a save."""
         _, first = self.rec("--quote", PROMPT)
-        exe = self.tmp / "bin" / "muninn"
+        exe = self.tmp / "bin/muninn"
         delegate = exe.read_text().split("exec ", 1)[1].split(' "$@"', 1)[0]
         exe.write_text(
-            '#!/bin/sh\nif [ "$1 $2 $3 $4" = "know list --status current" ]; then exit 1; fi\n'
+            '#!/bin/sh\nif [ "$1 $2" = "know list" ] && [ "$3" != "--help" ]; then exit 1; fi\n'
             f'exec {delegate} "$@"\n'
         )
-        rc, out = self.rec("--quote", LATER)
-        self.assertEqual(
-            (rc, out["muninn"]), (3, {"id": first["muninn"]["id"], "state": "degraded", "reason_code": "muninn_error"})
-        )
+        rc, out = self.run_cli(ORDERS, "cite", FM)
+        self.assertEqual((rc, out["muninn"]["state"], out["muninn"]["reason_code"]), (3, "unknown", "muninn_error"))
+        for key in ("id", "request_id", "request_window", "project_id"):
+            self.assertEqual(out["muninn"][key], first["muninn"][key])
 
-    def test_ambiguous_add_and_failed_ledger_save_recover_without_another_add(self) -> None:
-        """A real add with a lost answer or failed local save is reconciled on retry before any new network write."""
-        exe = self.tmp / "bin" / "muninn"
+    def test_unknown_submission_and_failed_local_save_do_not_duplicate_requests(self) -> None:
+        """A lost submission answer stays fenced; a retained journal survives final local-save failure."""
+        exe = self.tmp / "bin/muninn"
         original = exe.read_text()
         delegate = original.split("exec ", 1)[1].split(' "$@"', 1)[0]
         exe.write_text(
-            '#!/bin/sh\nif [ "$1 $2" = "know add" ] && [ "$3" != "--help" ]; then\n'
+            '#!/bin/sh\nif [ "$1 $2" = "learn request" ] && [ "$3" != "--help" ]; then\n'
             f'  {delegate} "$@" >/dev/null\n  exit 1\nfi\nexec {delegate} "$@"\n'
         )
         rc, first = self.rec("--quote", PROMPT)
-        self.assertEqual((rc, first["muninn"]["state"], self.count()), (3, "degraded", 1))
+        self.assertEqual((rc, first["muninn"]["state"], self.count()), (3, "unknown", 1))
         exe.write_text(original)
-        self.assertEqual((self.rec("--quote", PROMPT)[1]["muninn"]["id"], self.count()), ("K1", 1))
+        self.assertEqual((self.rec("--quote", PROMPT)[1]["muninn"]["state"], self.count()), ("unknown", 1))
         save = ol.save
 
         def fail_ledger(path: Path, value: ol.Ledger) -> None:
-            """Fail only the final ledger save; preparation and the real fake-store add succeed."""
             if path.name == "orders.json":
                 raise OSError("disk-full")
             save(path, value)
 
+        (self.tmp / "projects/p/s2.jsonl").write_text("\n".join(map(json.dumps, LINES)) + "\n")
+        progress(self.dir, "s2", "L2")
         argv = [
             "--dir",
             str(self.dir),
             "--session",
-            SESSION,
+            "s2",
             "record",
             "--failure-mode",
             "new-mode",
             "--lesson",
             "A new cited lesson.",
             "--loop",
-            "L1",
-            "--quote",
-            PROMPT,
+            "L2",
         ]
         with (
             mock.patch.object(ol, "save", side_effect=fail_ledger),
             contextlib.redirect_stdout(io.StringIO()) as output,
         ):
             self.assertEqual(orders.main(argv), 3)
-        self.assertTrue(json.loads(output.getvalue())["pending_teardown"])
+        failed = json.loads(output.getvalue())
+        self.assertTrue(failed["pending_teardown"])
         self.assertEqual(self.count(), 2)
-        self.assertEqual(self.run_cli(ORDERS, *argv[4:])[0], 0)
+        journal = next(
+            json.loads(path.read_text())
+            for path in self.dir.glob("order-request-*.json")
+            if json.loads(path.read_text())["session"] == "s2"
+        )
+        self.muninn("learn", "complete", journal["request_id"], "--kind", "lesson", "--content", "A new cited lesson.")
+        self.assertEqual(self.run_cli(ORDERS, *argv[2:])[0], 0)
         self.assertEqual(self.count(), 2)
 
-    def test_parallel_record_and_cite_reconcile_one_current_add(self) -> None:
-        """Concurrent record/cite over the non-reentrant lock finish boundedly with one durable tagged claim."""
-        self.rec()
-        exe = self.tmp / "bin" / "muninn"
-        delegate = exe.read_text().split("exec ", 1)[1].split(' "$@"', 1)[0]
-        exe.write_text('#!/bin/sh\nif [ "$1 $2" = "know add" ]; then sleep 0.2; fi\n' f'exec {delegate} "$@"\n')
+    def test_parallel_record_and_cite_reconcile_one_retained_request(self) -> None:
+        """Concurrent callbacks over the non-reentrant order lock finish with one request and current Note."""
+        _, first = self.rec("--quote", PROMPT)
         prefix = [sys.executable, str(ORDERS), "--dir", str(self.dir), "--session", SESSION]
-        argv = [
-            [*prefix, "record", "--failure-mode", FM, "--lesson", LESSON, "--loop", "L1", "--quote", PROMPT],
-            [*prefix, "cite", FM, "--quote", PROMPT],
-        ]
+        argv = [[*prefix, "record", "--failure-mode", FM, "--lesson", LESSON, "--loop", "L1"], [*prefix, "cite", FM]]
         with (
             subprocess.Popen(argv[0], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as one,
             subprocess.Popen(argv[1], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as two,
@@ -287,7 +295,7 @@ class Reconciliation(StoreCase):
             outs = [one.communicate(timeout=15), two.communicate(timeout=15)]
             self.assertEqual((one.returncode, two.returncode), (0, 0), outs)
         self.assertEqual(self.count(), 1)
-        self.assertEqual([json.loads(out)["muninn"]["id"] for out, _ in outs], ["K1", "K1"])
+        self.assertEqual([json.loads(out)["muninn"]["id"] for out, _ in outs], [first["muninn"]["id"]] * 2)
 
     def test_long_claim_is_refused_without_silent_truncation(self) -> None:
         """The 500-character store limit cannot silently alter an authoritative lesson."""
@@ -296,35 +304,27 @@ class Reconciliation(StoreCase):
         )
         self.assertEqual((rc, out.get("reason_code"), self.count()), (2, "order_lesson_too_long", 0))
 
-    def test_render_uses_current_cited_claim_and_excludes_uncited_text(self) -> None:
-        """Views used by preflight must reflect superseding owner-cited text and hide uncited diagnostics."""
-        _, first = self.rec("--quote", PROMPT)
-        self.assertEqual(
-            self.muninn(
-                "know",
-                "add",
-                "--kind",
-                "lesson",
-                "--text",
-                "Replacement cited lesson.",
-                "--cite",
-                f"claude:{SESSION}:4.1",
-                "--quote",
-                LATER,
-                "--tag",
-                "order",
-                "--tag",
-                "ord-" + FM,
-                "--supersedes",
-                first["muninn"]["id"],
-            )[0],
-            0,
-        )
-        self.rec(fm="diagnostic-only")
+    def test_render_uses_request_bound_claim_and_excludes_pending_text(self) -> None:
+        """A different request cannot replace an active order, and pending text cannot enter its view."""
+        self.rec("--quote", PROMPT)
+        (self.tmp / "projects/p/s2.jsonl").write_text("\n".join(map(json.dumps, LINES)) + "\n")
+        progress(self.dir, "s2", "L2")
+        args = [
+            "--session",
+            "s2",
+            "record",
+            "--failure-mode",
+            "diagnostic-only",
+            "--lesson",
+            "Unreviewed diagnostic.",
+            "--loop",
+            "L2",
+        ]
+        self.assertEqual(self.run_cli(ORDERS, *args)[0], 3)
         self.assertEqual(self.run_cli(ORDERS, "render")[0], 0)
         view = (self.dir / "standing-orders.md").read_text()
-        self.assertIn("Replacement cited lesson.", view)
-        self.assertNotIn(LESSON, view)
+        self.assertIn(LESSON, view)
+        self.assertNotIn("Unreviewed diagnostic.", view)
         self.assertNotIn("diagnostic-only", view)
 
     def test_legacy_collision_and_external_source_refusal_preserve_inputs(self) -> None:
@@ -348,7 +348,7 @@ class Callers(unittest.TestCase):
         """Codex agentic-loop SKILL.md carries the step (it did not); each names record, tick and render."""
         for rel in ("skills/agentic-loop/teardown.md", "packages/codex/skills/agentic-loop/SKILL.md"):
             text = (REPO / rel).read_text()
-            for needle in ("orders.py", "record --failure-mode", "tick --loop", "render", "advisory"):
+            for needle in ("orders.py", "record --failure-mode", "tick --loop", "render"):
                 self.assertIn(needle, text, f"{rel}: {needle}")
 
     def test_mirrors_match(self) -> None:

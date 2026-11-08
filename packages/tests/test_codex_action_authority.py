@@ -195,8 +195,8 @@ class HookTests(unittest.TestCase):
                 self.assertTrue(self.denied(command))
 
     def test_off_and_advisory(self) -> None:
-        """No config and off are silent; invalid config denies; advisory warns."""
-        self.assertFalse(self.denied(MERGE))  # no config at all
+        """No config enforces; explicit off is silent; invalid config denies; advisory warns."""
+        self.assertTrue(self.denied(MERGE, "default"))
         self.configure("off")
         result = self.run_hook(MERGE)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
@@ -379,7 +379,7 @@ class HookTests(unittest.TestCase):
         self.assertFalse(self.denied("git push origin main"))
 
     def test_missing_session_and_owner_hint(self) -> None:
-        """No session_id: a traced no_session denial; the hint gives the optional receipt command."""
+        """No session_id: a traced no_session denial; the hint gives the owner-run receipt command."""
         self.configure("enforce")
         result = self.run_hook("git push origin main", session="")
         self.assertIn("no_session", result.stdout)

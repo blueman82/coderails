@@ -84,7 +84,7 @@ a consumer. Those four lines are superseded by the next section; the user direct
   Receipts are v2: signed, bound to repository+ref+SHA (`artifact_sha` is mandatory), always single-use; v1/unsigned receipts
   are rejected with no downgrade path. See [p3-human-only-minting.md](p3-human-only-minting.md).
 - Hook `action_authority_gate.py` (Claude, appended to the Bash group; Codex imports the byte-identical mirrored
-  `scripts/lib/{action_receipt,receipt_signing,action_binding}.py`): opt-in via config `action_authority` (enforce | advisory | off, default off); it does not touch
+  `scripts/lib/{action_receipt,receipt_signing,action_binding}.py`): config `action_authority` (enforce | advisory | off, default enforce); it does not touch
   `pr_merge_gate`, the destructive gate or `enforce_pr_workflow`.
 - What a receipt proves: a key listed in the user-tier signers file signed this command text, cwd, branch,
   repository, ref and SHA for this session and loop. It expires and can be used once. `approve-action` refuses
@@ -101,9 +101,11 @@ a consumer. Those four lines are superseded by the next section; the user direct
   the same locked write. A `done` result with `final_report_required` needs a valid `final_report`; its content remains
   worker supplied. Orchestrator confidence and verify lints remain advisory.
 
-### Owner revision, 24 October 2026
+### Passphrases and default enforcement
 
-The shipped workflow config sets `advisory`. With no config or an unknown value, the gate is off. Routine pushes and merges do not need a key or passphrase. Explicit `enforce` requires a signed receipt. A direct `merge.py` call also needs `--expected-head <sha>` to bind that receipt. PR review, eval, and integrity gates still govern merges.
+The 24 October owner revision removed required passphrases. It did not waive signed action receipts or default enforcement. The gate and shipped example/init presets default to `enforce`, including without a config file. Invalid configuration refuses guarded actions. Explicit `advisory` warns; explicit `off` disables this receipt gate. Existing project overrides remain explicit choices.
+
+The owner issues each `approve-action` at their controlling terminal. A usable unprotected key or an available agent-backed key can sign without a passphrase. An autonomy grant does not replace that action receipt. A direct `merge.py` call also needs `--expected-head <sha>` to bind the receipt. PR review, eval, and integrity gates still govern merges.
 
 ## Superseded again: grant moves off prose matching to a typed command
 
