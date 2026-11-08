@@ -235,7 +235,8 @@ class DurableRequestTests(unittest.TestCase):
     def test_journal_rejects_a_foreign_session(self) -> None:
         """A reply file for a different caller cannot restore this marker."""
         order = {
-            "id": "order-1", "lesson": LESSON,
+            "id": "order-1",
+            "lesson": LESSON,
             "muninn": {"state": "unknown", "claim_sha256": hashlib.sha256(LESSON.encode()).hexdigest()},
         }
         field = {"request_id": RID, "request_window": WINDOW, "project_id": "project-1"}
