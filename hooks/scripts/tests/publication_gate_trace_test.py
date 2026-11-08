@@ -20,6 +20,7 @@ class ReviewTraceTests(unittest.TestCase):
         with (
             patch("scripts.lib.publication_gate.config_path", return_value="config"),
             patch("scripts.lib.publication_gate.load_config", return_value=({}, "")),
+            patch("scripts.lib.publication_gate.git.gate_review_summary_for_pr", return_value=(0, "")) as review,
             patch(
                 "scripts.lib.publication_gate.git.review_passes_for_pr", return_value=ReviewPasses(2, None, "missing")
             ),
@@ -27,6 +28,7 @@ class ReviewTraceTests(unittest.TestCase):
             patch("scripts.lib.publication_gate.manifest_policy.trace") as trace,
         ):
             result = publication_gate.review_passes_check("517", "head", "", "")
+            review.assert_called_once_with("517", "head")
             self.assertEqual(result[0]["code"], "review_artifact_missing")
             trace.assert_called_with("owner/repo@pr-517", "refused", "review_artifact_missing", command="review-passes")
 
@@ -35,6 +37,7 @@ class ReviewTraceTests(unittest.TestCase):
         with (
             patch("scripts.lib.publication_gate.config_path", return_value="config"),
             patch("scripts.lib.publication_gate.load_config", return_value=({}, "")),
+            patch("scripts.lib.publication_gate.git.gate_review_summary_for_pr", return_value=(0, "")) as review,
             patch("scripts.lib.publication_gate.git.review_passes_for_pr", return_value=ReviewPasses(0, (), "")),
             patch("scripts.lib.publication_gate.git.pr_field", return_value="base"),
             patch(
@@ -46,4 +49,5 @@ class ReviewTraceTests(unittest.TestCase):
             patch("scripts.lib.publication_gate.manifest_policy.trace"),
         ):
             result = publication_gate.review_passes_check("518", "head", "", "")
+            review.assert_called_once_with("518", "head")
             self.assertEqual(result[0]["code"], "review_policy_modified")

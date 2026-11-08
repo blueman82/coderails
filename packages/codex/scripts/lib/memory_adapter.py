@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Authoritative typed-memory adapter over the `muninn` CLI (subprocess only; muninn needs py3.12, Coderails is py3.9).
+"""Legacy schema-v2 adapter and shared bounded Muninn CLI transport.
 
-Muninn is the default and only store: `memory.backend: muninn|off` (config key `memory`, default muninn). A missing,
-old or refusing muninn never falls back to Markdown; every failure returns `Degraded(reason)` (CLI exit 3, reason
-printed as JSON) and appends a fail-open trace row (command `memory.<op>`). Reason codes and remediations:
-memory_reasons.REASONS. A muninn refusal (rc 2, {"error": c}) becomes `refused_<c>`. Cites must anchor in a user prompt
-(memory_cite). Markdown is only ever a generated view written through `write_view`.
+The standalone add/list/render/probe commands require the retired numeric-K,
+normal-only schema-v2 interface. They deliberately refuse incompatible current
+Muninn. Current decision, order, lesson and handoff consumers use memory_request
+and never call this legacy probe or SQL schema reader. Degraded, backend,
+run_cli and write_view remain shared utilities. There is no Markdown fallback.
 """
 
 from __future__ import annotations
@@ -136,12 +136,14 @@ def _refusal(stdout: str) -> Degraded | None:
     return Degraded(f"refused_{code}", code) if isinstance(code, str) and CODE.fullmatch(code) else None
 
 
-def _run(args: list[str], help_probe: bool = False) -> str | Degraded:
+def _run(args: list[str], help_probe: bool = False, *, timeout: float | None = None) -> str | Degraded:
     exe = shutil.which("muninn")
     if exe is None:
         return Degraded("muninn_absent")
     try:
-        p = subprocess.run([exe, *args], capture_output=True, text=True, timeout=TIMEOUT)
+        p = subprocess.run(
+            [exe, *args], capture_output=True, text=True, timeout=TIMEOUT if timeout is None else timeout
+        )
     except subprocess.TimeoutExpired:
         return Degraded("muninn_timeout")
     except OSError:
@@ -151,6 +153,13 @@ def _run(args: list[str], help_probe: bool = False) -> str | Degraded:
     if p.returncode == 0:
         return p.stdout
     return (_refusal(p.stdout) if p.returncode == 2 else None) or Degraded("muninn_error")
+
+
+def run_cli(args: list[str], help_probe: bool = False, *, timeout: float | None = None) -> str | Degraded:
+    """Run Muninn with this adapter's bounded timeout and refusal handling."""
+    if timeout is not None:
+        return _run(args, help_probe, timeout=timeout)
+    return _run(args, True) if help_probe else _run(args)
 
 
 def probe() -> Degraded | None:

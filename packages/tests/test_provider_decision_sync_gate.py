@@ -2,15 +2,62 @@
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from packages.tests.provider_fixture import Provider
-from scripts.lib import decision_record
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages/graph-semantics"))
+from graph_vocab import decision_sync_pending  # noqa: E402
+
+from packages.tests.provider_fixture import Provider  # noqa: E402
+from scripts.lib import decision_record, retro_check  # noqa: E402
 
 NODE = "U3[1]"
+
+
+class FinalGenericDecisionSyncTests(unittest.TestCase):
+    """A final descriptive store degrade does not erase unresolved worker-answer gates."""
+
+    def row(self) -> dict[str, Any]:
+        """Build the real local hashed decision before any external sync."""
+        result = decision_record.add_decision(
+            {"session_id": "s1", "loop_id": "L1", "revision": 1},
+            "s1",
+            "implementation",
+            "Preserve explicit store degradation.",
+            "L1",
+            1,
+        )
+        return cast(dict[str, Any], result["state"])
+
+    def test_final_generic_degrade_releases_only_resolved_sync(self) -> None:
+        """A final generic degrade is disclosed; in-flight or malformed results still block."""
+        state = self.row()
+        self.assertTrue(decision_sync_pending(state))
+        row = state["decisions_absorbed"][0]
+        row["muninn"] = {"state": "degraded", "id": None, "reason_code": "cite_notfound"}
+        self.assertFalse(decision_sync_pending(state))
+        for invalid in (
+            {"state": "unknown", "id": None, "reason_code": "muninn_error"},
+            {"state": "syncing"},
+            {"state": "degraded", "id": None, "reason_code": ""},
+            {"state": "degraded", "id": "ambiguous", "reason_code": "cite_notfound"},
+            {"state": "degraded", "reason_code": "cite_notfound"},
+        ):
+            with self.subTest(invalid=invalid):
+                row["muninn"] = invalid
+                self.assertTrue(decision_sync_pending(state))
+
+    def test_degraded_worker_answer_stays_pending(self) -> None:
+        """A typed worker answer cannot release its gate through a descriptive store degrade."""
+        state = self.row()
+        row = state["decisions_absorbed"][0]
+        row.update(chosen="clean-break", worker_status_seq=1)
+        row["row_sha256"] = decision_record.row_digest(row)
+        row["muninn"] = {"state": "degraded", "id": None, "reason_code": "cite_notfound"}
+        self.assertTrue(decision_sync_pending(state))
 
 
 class DecisionSyncGateTests(unittest.TestCase):
@@ -56,6 +103,72 @@ class DecisionSyncGateTests(unittest.TestCase):
                 {"state": state, "reason_code": "ok", "id": "K1" if state == "written" else None},
             )
         )
+
+    def test_absent_cli_finalizes_only_a_never_submitted_generic_decision(self) -> None:
+        """Actual flush keeps request-bound and unknown decisions blocked when the CLI is absent."""
+        for name in ("claude", "codex"):
+            with self.subTest(provider=name):
+                provider = self.provider(name, name + "-absent")
+                config = provider.home / ".coderails/workflow.config.yaml"
+                config.write_text("memory:\n  backend: muninn\nsandbox_workers: false\n")
+                binary = provider.home / "no-muninn"
+                binary.mkdir()
+                (binary / "git").symlink_to("/usr/bin/git")
+                provider.environment["PATH"] = str(binary)
+                current = provider.read()
+                recorded = provider.call(
+                    "record-decision",
+                    "--session",
+                    provider.session,
+                    "--loop-id",
+                    current["loop_id"],
+                    "--revision",
+                    str(current["revision"]),
+                    "--phase",
+                    "implementation",
+                    "--decision",
+                    "Preserve explicit unavailable memory.",
+                )
+                self.assertEqual(recorded.returncode, 3, recorded.stdout + recorded.stderr)
+                state = provider.read()
+                row = state["decisions_absorbed"][0]
+                self.assertEqual(row["muninn"], {"state": "degraded", "id": None, "reason_code": "muninn_absent"})
+                result = provider.call("flush-decisions", "--session", provider.session)
+                self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+                state = provider.read()
+                self.assertEqual(state["decisions_absorbed"][0]["muninn"], row["muninn"])
+                self.assertFalse(decision_sync_pending(state))
+                self.assertIn("muninn_absent", " ".join(retro_check.memory_disclosure(state, {})))
+                request = {
+                    "state": "pending",
+                    "id": None,
+                    "request_id": "R_" + "a" * 32,
+                    "request_window": {
+                        "source": {"provider": name, "thread_id": "fixture"},
+                        "from_line": 1,
+                        "through_line": 2,
+                        "boundary_hash": "b" * 64,
+                    },
+                    "project_id": str(provider.checkout),
+                    "reason_code": "learning_pending",
+                }
+                state["decisions_absorbed"][0]["muninn"] = request
+                provider.write(state)
+                result = provider.call("flush-decisions", "--session", provider.session)
+                self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+                state = provider.read()
+                field = state["decisions_absorbed"][0]["muninn"]
+                for key in ("request_id", "request_window", "project_id"):
+                    self.assertEqual(field[key], request[key])
+                self.assertTrue(decision_sync_pending(state))
+                unknown = {"state": "unknown", "id": None, "request_id": None, "reason_code": "muninn_error"}
+                state["decisions_absorbed"][0]["muninn"] = unknown
+                provider.write(state)
+                result = provider.call("flush-decisions", "--session", provider.session)
+                self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+                state = provider.read()
+                self.assertEqual(state["decisions_absorbed"][0]["muninn"], unknown)
+                self.assertTrue(decision_sync_pending(state))
 
     def test_pending_sync_refuses_authorization_without_mutation(self) -> None:
         """Normal and off-mode dispatch both refuse the issued native request."""

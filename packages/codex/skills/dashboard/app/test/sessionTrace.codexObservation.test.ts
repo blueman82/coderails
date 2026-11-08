@@ -2,10 +2,45 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { fixture } from "./sessionTraceFixture";
 import { readCodexTracePage } from "../src/lib/collect/sessionTrace";
+import { observeCodexSource } from "../src/lib/collect/codexTraceObservation";
+import type { NativeSource } from "../src/lib/collect/codexTraceNative";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
 describe("Codex transcript observations", () => {
+  it.each(["See /repo/notAGENTS.md.", "See ./CLAUDE.mdx.", "See AGENTS.md.backup", "See CLAUDE.md.template"])("rejects a partial filename in %s", async (body) => {
+    const { deps, parent, rows, save } = await fixture();
+    await save(parent, [...rows, { type: "response_item", payload: { type: "message", role: "assistant",
+      content: [{ type: "output_text", text: body }] } }]);
+    const page = await readCodexTracePage("parent", null, 30, deps);
+    expect(page.events.some((event) => event.attributes["coderails.observation.kind"] === "mention")).toBe(false);
+  });
+
+  it("bounds synchronous scanning of unmatched slash-separated paths", async () => {
+    const { deps } = await fixture();
+    const page = await readCodexTracePage("parent", null, 30, deps);
+    const event = { ...page.events[0], attributes: {},
+      provenance: { ...page.events[0].provenance, sourceOrdinal: 1 } };
+    const source: NativeSource = { path: "fixture.jsonl", id: event.provenance.sourceId,
+      text: "", fingerprint: "fixture", cursor: "1", errors: [], ordinals: [1], rows: [
+        { type: "response_item", payload: { type: "message", content: [
+          { type: "output_text", text: `See /${"segment/".repeat(26)}notes.txt.` },
+        ] } },
+      ] };
+    const started = performance.now();
+    observeCodexSource(source, [event]);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(event.attributes).not.toHaveProperty("coderails.observation.kind");
+  });
+
+  it.each(["See /repo/AGENTS.md.", "See ./CLAUDE.md."])("retains a full filename in %s", async (body) => {
+    const { deps, parent, rows, save } = await fixture();
+    await save(parent, [...rows, { type: "response_item", payload: { type: "message", role: "assistant",
+      content: [{ type: "output_text", text: body }] } }]);
+    const page = await readCodexTracePage("parent", null, 30, deps);
+    expect(page.events.some((event) => event.attributes["coderails.observation.kind"] === "mention")).toBe(true);
+  });
+
   it("does not establish installation from an arbitrary skill path", async () => {
     const { deps, parent, rows, save } = await fixture();
     await save(parent, [...rows,

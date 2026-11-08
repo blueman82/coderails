@@ -25,3 +25,22 @@ The command rehashes every file. It checks the provider, session, parser, trace,
 Usage-record counts deduplicate Claude message usage by a hashed native message ID within each session/source. When that ID is absent, only events from the same physical record are deduplicated; cross-row identity is unavailable. The native ID and message body are not stored. Separate cumulative Codex snapshots remain separate records, not token totals to add.
 
 The report describes the enrolled sessions. It does not measure an effect of Coderails. The report trusts observation labels that the native reader produced from the bound sources; it does not parse the native text a second time. A real post-install capture from each provider is required for installed acceptance.
+
+## Trust and count limits
+
+The same user can edit source files, caches, cohort metadata and reader code, then recompute the unkeyed hashes.
+A hash match binds the report to the declared bytes. It does not authenticate the capture or its author.
+It does not prove installation or complete historical coverage. A source hash does not establish trusted installed origin
+for a skill-file read.
+
+Coverage describes the enrolled sessions and declared sources. Files absent from that set do not enter the counts.
+The report cannot use the present files to establish how many historical sources are missing.
+
+Observation counts describe eligible sessions and their reader events. Usage-record counts describe provider records,
+not token totals or report-command attempts. The report has no command-attempt or refusal ledger, so those counts are unavailable.
+Publication counters describe emitted events from the named publication checks. They do not count observation reports,
+native observations or report-validation refusals.
+
+Use the [Native observation report runbook](RUNBOOK.md#native-observation-report) for command results and input errors.
+The [workflow gate measurements](workflow-gates-measurement.md) and [integrity gate instructions](INTEGRITY-GATE.md)
+describe the separate publication controls and their limits.

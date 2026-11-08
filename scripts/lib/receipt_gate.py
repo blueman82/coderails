@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Receipt gate for the hook and merge.py, with session-wide merge-budget locking.
 
-Plain gh merges count as executed; absent or unknown config is off.
+Plain gh merges count as executed; omitted configuration enforces signed receipts.
 """
 
 from __future__ import annotations
@@ -19,25 +19,23 @@ from scripts.lib import advisory_merge, merge_budget, merge_hook_note
 from scripts.lib.action_binding import binding, git_out
 from scripts.lib.authority_object import append_row, authority_path, read_authority
 from scripts.lib.authority_permits import executed_merges, permits
-from scripts.lib.config import config_path, config_value
+from scripts.lib.config import config_path
+from scripts.lib.config_strict import ConfigRejected, strict_settings
 from scripts.lib.receipt_signing import resolve_trust_root
 
 HOOK_WINDOW_S = 300
 SESSION_ENV = ("CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID")
-MODES = ("enforce", "advisory", "off")
 
 
 class ReceiptRefusedError(ValueError):
     """A stable reason code; merge.py's main() prints it and exits 1."""
 
 
-def resolve_mode(cwd: str) -> tuple[str, bool]:
-    """(mode, bad): only explicit supported values enable the gate."""
+def resolve_mode(cwd: str, session: str = "") -> tuple[str, bool]:
+    """Resolve a supported mode, enforcing by default and rejecting invalid configuration."""
     path = config_path(cwd)
-    value = config_value(path, "action_authority") if path else ""
-    if value in MODES:
-        return value, False
-    return "off", False
+    values = strict_settings(path, session) if path else {}
+    return str(values.get("action_authority") or "enforce"), False
 
 
 def _check_and_consume(
@@ -107,10 +105,14 @@ def require_merge_receipt(
     cwd = cwd or os.getcwd()
     if expected_sha is not None and expected_sha != verified_sha:
         raise ReceiptRefusedError("expected_head_mismatch")
-    mode, _ = resolve_mode(cwd)
+    session = next((os.environ[name] for name in SESSION_ENV if os.environ.get(name)), "")
+    try:
+        mode, _ = resolve_mode(cwd, session)
+    except ConfigRejected as error:
+        append_row("action_authority", "denied", "config_rejected", session or "_no_session")
+        raise ReceiptRefusedError(str(error)) from error
     if mode == "off":
         return None
-    session = next((os.environ[name] for name in SESSION_ENV if os.environ.get(name)), "")
     code = _claim_merge(session, number, cwd, now, command)
     if code == "ok":
         return None
