@@ -115,12 +115,14 @@ describe("sweepOnce with routine artifact gating", () => {
     // so it never reached its own terminal-marker-writing step — the run
     // log this artifactPath resolves to (see docs-sync SKILL.md) has stage
     // lines but no run=ok/abort=/refused= line.
-    const runCodexImpl = vi.fn().mockResolvedValue({
-      exitCode: 1,
-      stdout: "",
-      stderr: "",
-      spawnFailure: "timeout",
-      spawnFailureReason: "codex process exceeded timeout of 1800000ms and was killed",
+    const runCodexImpl = vi.fn().mockImplementation(async (_argv: string[], _cwd: string, opts: { routineRunId?: string }) => {
+      writeFileSync(join(root, "run-active.state.json"), JSON.stringify({
+        v: 1, run_id: opts.routineRunId, routine: "wiki-lint", merge_attempt: null,
+      }));
+      return {
+        exitCode: 1, stdout: "", stderr: "", spawnFailure: "timeout" as const,
+        spawnFailureReason: "codex process exceeded timeout of 1800000ms and was killed",
+      };
     });
     const result = await sweepOnce({
       queueDir, processingDir, archiveDir, quarantineDir,
