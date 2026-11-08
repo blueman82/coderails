@@ -13,7 +13,7 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hooks.scripts.hook_common import deny, log, output, read_payload
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 from scripts.lib.authority_object import authority_path, read_authority, safe_session, validate
 
 CRACK_ON = re.compile(r"(^|[^a-z0-9])crack[\s-]+on([^a-z0-9]|$)", re.IGNORECASE)

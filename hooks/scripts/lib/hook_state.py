@@ -18,7 +18,8 @@ from typing import Any, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.loop_state_common import LoopState, atomic_progress_update, log
-from hooks.scripts.lib.trace_row import append_row, trace_path
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
+from hooks.scripts.lib.trace_row import trace_path
 
 SCHEMA_VERSION = 1
 

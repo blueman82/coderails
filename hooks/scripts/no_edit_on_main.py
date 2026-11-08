@@ -18,7 +18,7 @@ from hooks.scripts.hook_common import (
     read_payload_strict,
 )
 from hooks.scripts.lib import protected_paths
-from hooks.scripts.lib.trace_row import append_row
+from hooks.scripts.lib.trace_row import append_hook_row as append_row
 
 try:
     from hooks.scripts.lib.hook_telemetry import note_child

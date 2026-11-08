@@ -7,6 +7,7 @@ Rows carry ts, hook, cause, exit, duration_ms, open_fds and pid, plus allow-list
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import os
 import signal
@@ -72,6 +73,13 @@ def mark_block() -> None:
 def record(hook: str, cause: str, duration_ms: int = 0, exit_code: int | None = None, **extra: object) -> None:
     """Append one row; never raises, so telemetry can never break a hook."""
     try:
+        from .hook_decision import make_record
+
+        params = {
+            key: hashlib.sha256(str(value).encode("utf-8", "backslashreplace")).hexdigest()
+            for key, value in extra.items()
+            if key in ALLOWED_EXTRA and value is not None
+        }
         row = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "hook": hook,
@@ -80,6 +88,7 @@ def record(hook: str, cause: str, duration_ms: int = 0, exit_code: int | None = 
             "duration_ms": duration_ms,
             "open_fds": open_fds(),
             "pid": os.getpid(),
+            "decision_record": make_record(hook, cause, cause, params),
             **{key: value for key, value in extra.items() if key in ALLOWED_EXTRA and value is not None},
         }
         directory = telemetry_dir()
