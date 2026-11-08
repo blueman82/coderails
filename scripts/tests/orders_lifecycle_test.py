@@ -95,18 +95,13 @@ class OwnedCli(StoreCase):
 
     def stage_record(self, *extra: str) -> tuple[int, dict[str, Any]]:
         """Stage one source-bound order."""
-        return self.cli(
-            "record",
-            "--failure-mode",
-            "stable-mode",
-            "--lesson",
-            "Keep the whole cited lesson.",
-            "--loop",
-            "logical-loop",
-            "--quote",
-            PROMPT,
-            *extra,
-        )
+        args = ("record", "--failure-mode", "stable-mode", "--lesson", "Keep the whole cited lesson.",
+                "--loop", "logical-loop", "--quote", PROMPT, *extra)  # fmt: skip
+        code, result = self.cli(*args)
+        if code == 3 and result.get("muninn", {}).get("state") == "pending":
+            rid = result["muninn"]["request_id"]
+            self.muninn("learn", "complete", rid, "--kind", "lesson", "--content", "Keep the whole cited lesson.")
+        return code, result
 
     def ledger(self) -> dict[str, Any]:
         """Read actual durable ledger contents, including absent-ledger empty state."""
@@ -124,10 +119,11 @@ class OwnedCli(StoreCase):
     def test_running_record_only_prepares_without_recurrence(self) -> None:
         """A prospective completion may synchronize a claim but cannot create lifecycle evidence or ages."""
         rc, out = self.stage_record()
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 3, out)
+        self.assertEqual(out["muninn"]["state"], "pending")
         self.assertEqual(self.ledger()["orders"], [])
         self.assertEqual(self.cli("prepare", "--loop", "logical-loop")[0], 0)
-        self.assertEqual([r["step"] for r in self.rows()], ["orders_prepared"])
+        self.assertEqual([r["step"] for r in self.rows()], ["orders_prepared", "orders_prepared"])
         self.assertEqual(self.cli("tick", "--loop", "logical-loop")[0], 2)
         self.assertEqual(self.ledger()["ticked_loops"], [])
 
@@ -146,7 +142,7 @@ class OwnedCli(StoreCase):
         self.assertEqual(len(self.ledger()["orders"][0]["evidence"]), 1)
         self.assertEqual(self.cli("tick", "--loop", "logical-loop")[1]["ticked"], False)
         self.assertEqual(len(self.ledger()["orders"][0]["evidence"]), 1)
-        self.assertEqual([r["step"] for r in self.rows()], ["orders_prepared", "orders_ticked"])
+        self.assertEqual([r["step"] for r in self.rows()], ["orders_prepared", "orders_prepared", "orders_ticked"])
 
     def test_foreign_malformed_and_ineligible_sources_are_refused(self) -> None:
         """Only the genuine directory owner and a finished valid graph authorize preparing or ticking."""
@@ -205,7 +201,7 @@ class OwnedCli(StoreCase):
         rc, out = self.cli("tick", "--loop", "logical-loop")
         self.assertEqual((rc, out["ticked"]), (0, False))
         self.assertEqual(len(self.ledger()["orders"][0]["evidence"]), 1)
-        self.assertEqual([r["step"] for r in self.rows()], ["orders_prepared", "orders_ticked"])
+        self.assertEqual([r["step"] for r in self.rows()], ["orders_prepared", "orders_prepared", "orders_ticked"])
 
     def test_failed_ledger_save_emits_no_tick_receipt(self) -> None:
         """An actual ledger-save exception must not emit orders_ticked or claim a successful lifecycle effect."""

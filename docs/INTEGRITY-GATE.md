@@ -4,6 +4,24 @@ The gate reads review and eval comments for the exact pull request head. A trust
 
 The workflow uses the built-in `GITHUB_TOKEN`. You do not need a second account, a personal access token, a Mac service, or sudo.
 
+The local publication gate also supports the bounded `security-review` disposition
+`not_applicable` for standalone wiki prose. Its scope binds the actual live base, unique merge
+base, head, complete page inventory and the full tracked context digest. Explicit path groups must cover
+all context outside authored endpoints, including unchanged Markdown and plugin files. A missing
+consumer path refuses even if other groups remain correct. The v3 form needs explicit `effect_free`
+at whole `consumer_scope` and each reference group. States are `effect_free`, `active` and `unknown`;
+the initial state is `unknown`. Known execution, access-control or instruction effects, unknown states
+and missing declarations refuse, even with complete coverage and unresolved=[]. The whole declaration
+covers all M/B/H facts, authored M-to-H operations combined with live-B context and group interactions.
+Each group covers its members at all three trees and their role in that combination. Version 1 and 2
+records refuse; the reader does not insert affirmative declarations. These are cooperating-agent checks;
+coverage does not prove that the inspection text is true. Base-only affected entry changes refuse.
+The trusted Actions reader still checks the ordinary general-review companion. An `integrity-review`
+status does not prove that N/A scope is valid or that an assessment is true. Old local readers
+reject N/A. Use the qualified release-candidate and maintained installation steps before relying
+on the new writer and reader. Keep installation on HOLD until affected sessions stop and new
+sessions pass installed checks. Do not patch an active reader or disable a gate.
+
 ## What the workflow checks
 
 - The review and eval markers name the current PR and head SHA. GitHub attributes both comments to the live repository owner login.

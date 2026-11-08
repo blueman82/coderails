@@ -93,21 +93,41 @@ The first table gives an action for each control category. The second table list
 | memory | `graph_unavailable` | graph.py summarize or inspect failed for this state, so the done and next-step lists are empty; run the command by hand and read stderr. |
 | memory | `handoff_state_unreadable` | handoff_derive could not read the loop's progress.json; pass the real state path. |
 | memory | `handwritten_protected` | the render target is hand-written (no generator marker); render to a new path. |
+| memory | `learning_conditional_use_unsupported` | The Note is saved with conditions or conditional expiry. Legacy dispatch/promotion/render cannot evaluate those conditions; retain its metadata and do not use it unconditionally. |
+| memory | `learning_evidence_mismatch` | The retained evidence identity, selector, scope or source window does not match. |
+| memory | `learning_form_unsupported` | This reader supports Notes only; Guide use remains unsupported. |
+| memory | `learning_no_change` | The saved request completed without applying knowledge. It is not a written Note. |
+| memory | `learning_no_matching_record` | The completed request produced no active note with this exact task and text. Inspect its receipt and notes. |
+| memory | `learning_pending` | Muninn has accepted the task request. Keep its R_ ID and check the same request later. |
+| memory | `learning_project_unavailable` | The calling project directory is unavailable; do not use the graph key. |
+| memory | `learning_quote_mismatch` | A retained selected excerpt did not pass public quote-check; no cite is asserted. |
+| memory | `learning_read_limit` | The read exceeded a time, reply, record or support limit; results are incomplete. |
+| memory | `learning_receipt_unavailable` | The request has no supported committed receipt; acceptance alone is not a save. |
+| memory | `learning_record_ambiguous` | Several receipts match the exact K-id/revision. No request identity was selected. |
+| memory | `learning_record_changed` | Listed and shown current revisions differ. Read again with the same binding. |
+| memory | `learning_record_expired` | The current Note has reached its timed expiry and cannot be used. |
+| memory | `learning_request_failed` | The saved Muninn request failed or was cancelled. Inspect it with `muninn learn show R_ID`. |
+| memory | `learning_request_mismatch` | Request project, task, source window or receipt identity differs from its binding. |
+| memory | `learning_request_unknown` | Muninn may have accepted a request without returning its R_ ID. Inspect `muninn learn list`; do not submit again. |
+| memory | `learning_selection_unavailable` | A required E-id/ref/hash/selected excerpt is unavailable; no cite is asserted. |
+| memory | `learning_source_authority` | The complete support set must be live, primary, unflagged, unredacted direct-owner user prompts. Current Muninn has no normal/restricted classification; do not infer one. |
+| memory | `learning_source_changed` | A physical source or its exact retained provenance changed; no cite is asserted. |
+| memory | `learning_source_unavailable` | A required live physical original is unavailable; no cite is asserted. |
 | memory | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
 | memory | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix the named entry and rerun import-legacy, preserving the original. |
-| memory | `legacy_uncited` | an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`. |
-| memory | `lesson_not_current` | the order has no unambiguous current cited Muninn claim (retracted, expired, superseded or conflicting current claims); inspect the current evidence and explicitly record the intended lesson with a fresh quote. |
+| memory | `legacy_uncited` | The legacy import has no retained current request selection; keep it explicitly uncited. |
+| memory | `lesson_not_current` | The saved request has no exact eligible current Note. Inspect its retained receipt; a caller quote cannot repair authority. |
 | memory | `memory_backend_invalid` | memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml. |
 | memory | `memory_backend_off` | memory.backend is off in the workflow config; set it to muninn (or remove the key) to write typed memory. |
 | memory | `muninn_absent` | muninn is not on PATH; install it (the Markdown path is not a fallback). |
-| memory | `muninn_bad_output` | the retired D4 write protocol returned no numeric K-id; inspect current Muninn records without a legacy scope flag. |
+| memory | `muninn_bad_output` | Muninn returned a reply that does not match the task request or current-note contract; inspect its output. |
 | memory | `muninn_error` | muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and read stderr. |
-| memory | `muninn_old_ledger` | the D4 adapter expects retired Muninn flags; keep this degraded until a current request-bound adapter is designed. |
+| memory | `muninn_old_ledger` | the installed Muninn command lacks task requests, or this record has only an old K-id; legacy bindings cannot establish current request provenance. |
 | memory | `muninn_schema_incomplete` | the D4 adapter expects retired v2 columns or tables; inspect the current store with `muninn doctor`, then redesign the adapter. |
 | memory | `muninn_schema_old` | the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2. |
 | memory | `muninn_store_missing` | no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once. |
 | memory | `muninn_timeout` | muninn hung past 10s; run `muninn know list` by hand and check store locks. |
-| memory | `no_user_cite` | the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner prompt text>`. |
+| memory | `no_user_cite` | The local diagnostic has no verified current owner citation. A caller quote cannot establish request evidence. |
 | memory | `order_already_ticked` | this session and logical loop were already counted; the tick was skipped (informational). |
 | memory | `order_bad_id` | an explicit order id must match [a-z0-9][a-z0-9_-]{0,119}; use a canonical id. |
 | memory | `order_blank_field` | an order needs a non-blank failure mode and lesson; nothing was written. |
@@ -190,8 +210,9 @@ The first table gives an action for each control category. The second table list
   `config_unparseable_line` / `config_duplicate_key` findings.
 - Defaults: the diff-manifest check uses `enforce` mode and `policy/diff-policy.default.json` even without a config file.
   An existing config with no other keys enables `sandbox_workers: true` and `evals.require_signatures: true`.
-  `action_authority` defaults to `off`. The shipped config sets it to `advisory`, which warns about missing receipts
-  without a passphrase. Set `enforce` only when signed receipts are required.
+  `action_authority` defaults to `enforce`, including without a config file. Shipped example and init presets also
+  use `enforce`. Explicit `advisory` warns about missing receipts; explicit `off` disables this receipt gate.
+  Invalid configuration refuses guarded actions. Preserve intentional project settings when migrating.
 
 ## Discipline lint advisories climbing
 
@@ -333,10 +354,30 @@ The first table gives an action for each control category. The second table list
 | `memory_backend_off` | memory.backend is off in the workflow config; set it to muninn (or remove the key) to write typed memory. |
 | `memory_backend_invalid` | memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml. |
 | `muninn_absent` | muninn is not on PATH; install it (the Markdown path is not a fallback). |
-| `muninn_old_ledger` | the D4 adapter expects retired Muninn flags. Keep the result degraded until a current request-bound adapter is designed. |
+| `muninn_old_ledger` | Current consumers require task requests and retained R-id bindings. The standalone legacy CLI still requires retired schema-v2 flags. |
 | `muninn_timeout` | muninn hung past 10s; run `muninn know list` by hand and check store locks. |
 | `muninn_error` | muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and read stderr. |
-| `muninn_bad_output` | the retired D4 write protocol returned no numeric K-id. Inspect current Muninn records without a legacy scope flag. |
+| `muninn_bad_output` | The public request, receipt or current Note response does not match the supported model. Inspect the exact retained request. |
+| `learning_pending` | Muninn has accepted the task request. Keep its R_ ID and check the same request later. |
+| `learning_request_unknown` | Muninn may have accepted a request without returning its R_ ID. Inspect `muninn learn list`; do not submit again. |
+| `learning_request_failed` | The saved Muninn request failed or was cancelled. Inspect it with `muninn learn show R_ID`. |
+| `learning_no_matching_record` | The completed request has no unique eligible current Note for this exact task and text. Zero or multiple matching records cause this result. Inspect its receipt and notes. |
+| `learning_no_change` | The saved request completed without applying knowledge. It is not a written Note. |
+| `learning_request_mismatch` | Request project, task, source window or receipt identity differs from its binding. |
+| `learning_receipt_unavailable` | The request has no supported committed receipt; acceptance alone is not a save. |
+| `learning_record_changed` | Listed and shown current revisions differ. Read again with the same binding. |
+| `learning_record_expired` | The current Note has reached its timed expiry and cannot be used. |
+| `learning_record_ambiguous` | Several receipts match the exact K-id/revision. No request identity was selected. |
+| `learning_form_unsupported` | This reader supports Notes only; Guide use remains unsupported. |
+| `learning_conditional_use_unsupported` | The Note is saved with conditions or conditional expiry. Legacy dispatch/promotion/render cannot evaluate those conditions; retain its metadata and do not use it unconditionally. |
+| `learning_selection_unavailable` | A required E-id/ref/hash/selected excerpt is unavailable; no cite is asserted. |
+| `learning_evidence_mismatch` | The retained evidence identity, selector, scope or source window does not match. |
+| `learning_source_changed` | A physical source or its exact retained provenance changed; no cite is asserted. |
+| `learning_source_unavailable` | A required live physical original is unavailable; no cite is asserted. |
+| `learning_source_authority` | The complete support set must be live, primary, unflagged, unredacted direct-owner user prompts. Current Muninn has no normal/restricted classification; do not infer one. |
+| `learning_quote_mismatch` | A retained selected excerpt did not pass public quote-check; no cite is asserted. |
+| `learning_read_limit` | The read exceeded a time, reply, record or support limit; results are incomplete. |
+| `learning_project_unavailable` | The calling project directory is unavailable; do not use the graph key. |
 | `muninn_store_missing` | no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once. |
 | `muninn_schema_old` | the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2. |
 | `muninn_schema_incomplete` | the D4 adapter expects retired v2 columns or tables. Inspect the current store with `muninn doctor`, then redesign the adapter. |
@@ -389,11 +430,11 @@ The first table gives an action for each control category. The second table list
 | `order_pending_teardown` | completion saved but local apply or observation failed; retry tick with the same bound source. |
 | `order_retro_validator_unavailable` | schema3 retros need the matching retro_check.py validator; reconcile that source dependency before graduation. |
 | `order_already_ticked` | this session and logical loop were already counted; the tick was skipped (informational). |
-| `no_user_cite` | the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner prompt text>`. |
-| `legacy_uncited` | an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`. |
+| `no_user_cite` | The local diagnostic has no verified current owner citation. A caller quote cannot establish request evidence. |
+| `legacy_uncited` | The legacy import has no retained current request selection; keep it explicitly uncited. |
 | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
 | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
-| `lesson_not_current` | no unambiguous current cited claim exists; inspect conflicting current evidence, or explicitly re-record a retracted/expired lesson with a fresh quote. |
+| `lesson_not_current` | The saved request has no exact eligible current Note. Inspect its retained receipt; a caller quote cannot repair authority. |
 | `retro_not_assembled` | For a new loop, assemble schema-3 retro.json with `retro.py assemble` after the final stop and orders preparation. Preserve the source artifacts. For an old completed loop, see the recovery rule below. |
 | `retro_source_mismatch` | A named source changed after assembly; finish that source and re-assemble. |
 | `retro_decisions_chain_broken` | Restore the damaged decision row; record decisions through the graph CLI. |
@@ -414,6 +455,41 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   `by_reason_code` before and after a change; a rising `muninn_absent` or `refused_approval_needs_reply` is the signal.
   See `docs/decisions/2026-10-05-memory-authoritative.md`.
 
+## Current request and citation boundary
+
+Run decision, order, lesson and handoff commands from the actual mapped project repository.
+The graph-state key directory and plugin checkout are separate paths. Current reads never use `--all-projects`.
+A local saved result needs its retained R-id, source window and project, the same request receipt, and one exact
+current K-id/revision with the expected kind, task and content. Submission or acceptance is not a save.
+
+The reader retains the Note body, reason, conditions, expiry and complete selected support mapping.
+It verifies every required E-id, ref, hash and selection using public `open` and `quote-check` calls.
+The supported citation boundary requires primary, unflagged, unredacted direct-owner user prompts for every support.
+Missing selection, changed originals, wrong scope/authority and blank quotes produce explicit degradation.
+Current Muninn has no normal/restricted classification. `privacy_classification: unknown` states that limit;
+the reported scope, source, redaction and authority checks do not establish semantic privacy classification.
+The standalone legacy adapter keeps its separate normal-only schema-v2 boundary.
+
+Changing only local lesson text does not make an unknown submission safe to repeat.
+If task and source session are unchanged, the earlier unknown observation and claim hash remain intact.
+The result adds `reconciliation_reason: learning_request_unknown`. No window or request is guessed from text.
+A genuinely new authored task or source session can establish its own marker before submission.
+
+A conditional Note can be saved and displayed with its conditions. No free-text condition is assumed true.
+Dispatch, promotion and generated order views return `learning_conditional_use_unsupported` until their consumer
+can retain and enforce conditional use. Guides return `learning_form_unsupported`.
+
+Handoff reads retained local requests first. For extra exact-task decisions, it can read completed RequestView
+metadata through `learn list --state completed`, then filter exact project/task before reading request details.
+The public API has no project/task filter or pagination for that list. Foreign metadata is neither logged nor
+shown. Only an exact K-id/revision receipt join selects a request. Ambiguous joins refuse.
+Each decoded reply is limited to 2 MiB; scans are limited to 100 requests, 100 current records and 100 supports.
+Current request/extra-record reads have a 30-second external-call budget, with individual calls limited to 10 seconds.
+A limit returns `learning_read_limit`; it never becomes an empty successful read. Handoff never enqueues or retries.
+
+Source checks do not close original I native/live/installed/release acceptance. Codex live qualification remains
+separate, and Claude live qualification remains incomplete.
+
 ## Decision recorded locally but Muninn sync degraded
 
 - Symptom: `graph.py record-decision` printed `"exit_code": 3` and a `muninn.reason_code`. The decision was appended
@@ -423,15 +499,16 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
 - Query: `python3 -c "import json;[print(r['seq'],r['muninn']) for r in json.load(open('progress.json'))['decisions_absorbed']]"`,
   or `grep '"command": "decision\.' <agentic-loop dir>/<session_id>/trace.jsonl`. Chain check:
   `python3 -c "import json,sys;sys.path.insert(0,'.');from scripts.lib import decision_record as d;print(d.verify_chain(json.load(open('progress.json'))['decisions_absorbed']))"`.
-- Fix: read the reason in the table above. An authorising prompt of "yes" (`cite_too_short`) is expected to degrade: at
-  teardown run `flush_pending(path, session, transition=..., cite_quote="<a substantive sentence the owner typed>")`;
-  the same `seq` is patched to `written`. Rows are never deleted or rewritten to clear a degrade.
+- Fix: inspect the retained `request_id` with `muninn learn show R_ID` from the mapped project repository.
+  A pending request remains pending until its own committed receipt identifies one exact current Note.
+  `flush-decisions` inspects a retained R-id, source window and project. An unknown result without that binding
+  cannot be submitted again automatically. A caller quote cannot replace selected evidence.
 - Limits: the chain is a cooperating-agent safeguard (a same-user agent can rewrite file and chain), and dropping the
   last row is detected only by the in-file head anchor, which the same agent can also rewrite. Measurement note: `docs/typed-records-measurement.md`.
 
 ## Standing order stored without a cite, or a lesson missing from dispatch
 
-- Symptom: `orders.py record` exited 3 with `muninn.reason_code` (`no_user_cite`, `muninn_absent`, `cite_*`), or
+- Symptom: `orders.py record` exited 3 with `muninn.reason_code` (`learning_pending`, `learning_request_unknown`, `muninn_absent`), or
   `lessons.py query` / `orders.py lessons` exited 3 with `{"degraded": ...}`, or an order you recorded is absent from the
   list. Before completion, `record` stages bound inputs and syncs the cited claim without lifecycle effects. After
   owned progress is durably complete, local apply records recurrence and aging in `orders.json`. A degraded store
@@ -442,11 +519,10 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   is retracted, expired or superseded, reason `lesson_not_current`), or
   `grep -E '"command": "(order|lesson)\.' <agentic-loop dir>/<session_id>/trace.jsonl`. A hand edit of `orders.json` is
   refused with `order_chain_broken` naming the order.
-- Fix: read the reason in the table above. For `no_user_cite` / `legacy_uncited` run
-  `orders.py --dir <repo-key dir> cite <id> --quote "<verbatim words the owner typed>"` from the owning session. To
-  adopt the old hand-written file run `orders.py import-legacy`. It archives an exact byte copy under the next free
-  `standing-orders.legacy*.md` name and retains the source (`archived_to`, `source_retained: true`). Check the ledger
-  and archive; retire the hand-written `standing-orders.md` before `orders.py render`. Use typed orders thereafter.
+- Fix: run `orders.py --dir <repo-key dir> --session <native session> cite <id>` from the mapped project repository.
+  This inspects the retained task request. The deprecated `--quote` input is ignored and disclosed as `quote_ignored`.
+  A timeout without a retained R-id stays unknown across restarts; do not submit it again.
+  Legacy imports remain uncited local diagnostics. They do not create a current request binding.
 - Apply contract: use `--dir <repo-key dir> --session <provider session>` with the separate logical `--loop` copied
   from `<repo-key dir>/<session>/progress.json`. Stage `record` inputs before completion. The native `graph.py
   complete` command prepares orders before the progress lock, rechecks the prepared source under that lock, saves
@@ -458,8 +534,8 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   that lock. If they differ, completion stays pending; repeat the native completion command to render again.
   The Claude Stop guard and Codex `verify-completion` block when the tick or bound generated views are incomplete.
   If render fails on the installed Muninn API, the pending result and later verifier show its actual reason code.
-  The installed Muninn uses a current request-bound API that this D4 adapter does not support. Treat live lesson
-  activation as pending; do not use ledger text as a substitute for a current cited claim.
+  Source support for the current request API does not qualify native dispatch, installed operation or a real memory
+  round trip. Those acceptance checks remain separate. Do not substitute ledger text for a current cited claim.
 - Pre-D4 complete loop: review its retained evidence before the exact-hash admission. The receipt then follows only
   completion bookkeeping; other graph changes still block. See `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 - Completed text replacement: when this session/loop observation already exists, explicit `record` captures
@@ -501,8 +577,11 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
 - Limits: the one same-user orders lock covers currentness, reconciliation, bounded sync and direct atomic ledger
   save; it provides no exactly-once network guarantee. Current tagged claims are reconciled even for degraded/pending
   local records. Only a new completed session+loop recurrence resets a counter or revives a tombstone; replaying the
-  same observation cannot rejuvenate it. Authoritative dispatch, promotion and views use current, normal, live,
-  verified user-cited claims. Diagnostic `orders.py lessons` may show uncited rows (`cited: false`); contract queries,
+  same observation cannot rejuvenate it. Current lesson consumers verify project/task and revision bindings, live
+  sources, owner authority, redaction status and selected user quotes. These checks do not establish semantic
+  privacy classification. Current Notes report `privacy_classification: unknown`. The standalone legacy schema-v2
+  CLI keeps its separate normal-only boundary. Original I graph metadata and native integration remain unqualified.
+  Diagnostic `orders.py lessons` may show uncited rows (`cited: false`); contract queries,
   promotion and views exclude them. Owner-cited lesson text is legitimate typed memory; advisory transcript
   observations remain metadata only. Failed reads exit 3, with no ledger-text fallback. A fresh cited claim can
   supersede prior text. Legacy import retains full source text and first-seen provenance, preserves decayed counters,
@@ -533,6 +612,53 @@ After this version writes a schema-3 retro, a code rollback to the preceding pro
   unresolved graph on `complete` needs a source correction. A valid row is consumed once. Codex can release an
   `awaiting-input` or `approval-gate` row while graph work is pending. `complete` needs a resolved graph and its evidence.
   See `docs/graph-alignment-measurement.md` for limits and commands.
+
+## Host resource errors or bounded Stop checks
+
+`EMFILE`, `ENFILE`, `EAGAIN` and `ENOMEM` during required Git reads indicate host resource exhaustion.
+`destructive_patterns.git_output` raises `HostResourceError` for these errors. Both providers' destructive-command gates
+then deny the unchecked action. This does not establish that the action is destructive or that graph state is invalid.
+Ordinary nonzero Git exits still return an empty lookup. Other Git failures are not all classified as resource faults.
+
+The Codex `graph_completion_guard` starts one **nine-second aggregate budget** before reading its input.
+State lookup, `inspect`, `consume-stop`, `verify-completion`, status and recovery calls share the remaining time.
+The hook registration allows ten seconds, leaving time to emit its response. A lookup or graph-check timeout emits
+`decision: block`: graph state was not verified. Status or recovery failure cannot establish completion.
+This is a configured deadline, not a universal wall-clock guarantee; see the [measurement limits](workflow-gates-measurement.md#hook-and-stop-measurements-f2).
+
+An unresolved graph can call `request_human_approval`. Codex emits `decision: block` and a human-approval
+`systemMessage`; Claude emits the notice and blocks Stop with exit 2. Notices use a key containing loop, revision,
+session, active wave and hard stop. A repeated notice is suppressed for 900 seconds, while Stop remains blocked.
+After that lease, a persistent stall can notify and attempt recovery again. A status check can attempt `recover-wave`
+for a waiting worker; a timeout leaves its outcome unknown. Codex does not record the notice marker after its deadline
+expires, so an exhausted deadline does not suppress the next notice. Never treat a notice as successful worker recovery.
+
+A valid `approval-gate` stop row with reason code `needs_approval` can be consumed once while graph work remains.
+The typed row permits that Stop; its reason text does not decide the result. Consumption neither grants action authority
+nor completes the graph. Follow [the recorded-stop procedure](#a-stop-has-no-recorded-row) for the current provider.
+`request_human_approval` is a function, not a telemetry cause: a blocked request records `block`.
+
+To diagnose a refusal:
+
+1. Record the provider, hook, source version or commit, session ID, and active hook registration.
+2. Open its matching `hook_telemetry.jsonl` row. Compare `ts`, `pid`, typed output and the scoped session trace.
+   The [measurement note](workflow-gates-measurement.md#hook-and-stop-measurements-f2) defines paths, causes and counters.
+3. Read the named graph state and evidence without changing them. For resource faults, correct host resource pressure.
+   For a graph or evidence refusal, correct the named fault through its maintained workflow.
+4. Retry the refused action and inspect its new output and rows. Keep the prior refusal evidence.
+
+Do not remove graph state, disable checks or raise limits to clear an unexplained refusal.
+Change the interpreter only after evidence shows an interpreter fault.
+These same-user hooks and file-based observations are non-authoritative cooperating-agent safeguards.
+Source checks and synthetic inputs do not prove installed hook trust, native-provider execution, real-account operation,
+server rules or successful native worker recovery. Integrity activation and publication checks remain separate;
+see [the integrity setup](INTEGRITY-GATE.md#turn-on-the-gate) and [publication measurement limits](workflow-gates-measurement.md#limits).
+
+Source: [Git lookup](../hooks/scripts/lib/destructive_patterns.py),
+[Claude gate](../hooks/scripts/destructive_bash_gate.py), [Codex gate](../packages/codex/hooks/scripts/destructive_bash_gate.py),
+[Codex Stop guard](../packages/codex/hooks/scripts/graph_completion_guard.py),
+[Stop registration](../packages/codex/hooks/hooks.json), [Claude Stop guard](../hooks/scripts/loop_stall_guard.py)
+and [shared notice helper](../hooks/scripts/lib/stall_notice.py).
 
 ## A routine run ended incomplete, aborted or refused
 
@@ -660,9 +786,18 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
   `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`
   (`manifest_counters.py` still tallies only `diff-manifest`). See `docs/workflow-gates-measurement.md`.
 - Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink), `mode_change`, `status_not_allowed` (policy `statuses`), `too_many_paths` (policy `max_paths`), `manifest_unreadable`, `manifest_internal_error`, `diff_manifest_mode_invalid` (unknown mode, treated as enforce).
-- Remediation: a real violation means the diff left its declared scope; fix the diff, or widen `unit.manifest`
-  (re-register with `add-unit --manifest`) or the policy file on purpose. `push.py`/`merge.py --unit N --progress PATH`
-  bound the diff to that unit's manifest. `manifest_unreadable` means the policy file, progress.json or diff (or an
+- Remediation: a real violation means the diff left its declared scope. Keep the refused unit and its history;
+  remove out-of-scope changes from the proposed publication through the usual worktree workflow.
+  `add-unit` registers only a new unit ID; it cannot change an existing unit's manifest.
+  `assign-worktree` can bind only a pending unit to an unassigned or identical recorded checkout path,
+  using its existing manifest. It cannot widen that manifest or repair an active assignment.
+  If only the assigned checkout is unavailable, restore it at its recorded path without changing the stored binding.
+  If the required binding or scope cannot be restored, keep publication on HOLD and preserve progress, proofs and
+  dispatch history. A different manifest needs a separately validated new-graph plan and source registration;
+  this procedure does not migrate the refused unit or transfer its authority and proof results.
+  Do not hand-add hashes, reset status or treat `convert` as a source-binding repair.
+  `push.py`/`merge.py --unit N --progress PATH` bind publication to the registered manifest.
+  `manifest_unreadable` means the policy file, progress.json or diff (or an
   unresolved PR head) could not be read: it refuses under enforce (fails open only under advisory); fix the path.
   `manifest_internal_error` refuses under enforce; advisory records `failed_open` and continues, including when repository
   metadata lookup fails. Set `diff_manifest: off` to disable. Invalid modes, including an empty mode, enforce and report
@@ -740,6 +875,74 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
   pass. The same user can write any summary, so this is a cooperating-agent safeguard. `blocking` is derived and never waives a
   required pass. The Codex hook only sees merges `guarded_segments` can match and needs `/hooks` trust. Row-9 wording in
   the closure matrix (`.json` policy file) is not recorded in this repo: the matrix lives outside it.
+
+
+### Standalone wiki security applicability
+
+The shipped path policy stays in force. Only `security-review` can use the typed
+`not_applicable` result for `standalone_wiki_prose_v3`. `review-pr` must pass.
+Other required specialists must pass. A plain NOT APPLICABLE message is not a pass.
+
+Use the same resolved helper as the posting command:
+
+```bash
+python3 <resolved post_review.py> na-scope <PR>
+python3 <resolved post_review.py> validate <security-summary-file> --pass-name security-review
+```
+
+`na-scope` prints compact current binding, authored inventory and complete context metadata.
+It supplies no inspection or authority. All tracked non-tree paths at merge base, live base and
+head count as context, except the authored page endpoints. Include unchanged Markdown and assets;
+filenames do not prove inertness. Identical path/entry facts may share explicit tree-membership tags.
+Give this data and approved source context to `security-reviewer`. The role's structured
+`## Not applicable` JSON form records repository purpose, the complete context digest and
+explicit assessment path groups. Every context path must occur in one group, with no omissions,
+duplicates, foreign paths or glob selectors. Each group must contain only unchanged base entries
+or only changed base entries; the latter need a nonempty base-change assessment. Exact immutable
+mode/type/blob facts at all three trees enter the digest. Keep complete=true and unresolved=[].
+The v3 form needs `effect_state` at `consumer_scope` and in each reference group.
+The closed states are `effect_free`, `active` and `unknown`. The initial state is `unknown`;
+only explicit `effect_free` at both levels permits N/A. Known execution, access-control or
+instruction-loading effects use `active` and need the ordinary applicable inspection, even
+with complete coverage and unresolved=[]. Unknown, missing, malformed and other states refuse.
+The whole declaration covers repository purpose, all authored operations, all merge-base/live-base/head
+facts, and authored merge-base-to-head operations combined with live-base context and group interactions.
+Each group covers its members at all three trees and their role in that whole combination.
+Do not infer `effect_free` from suffixes, modes, unchanged files or an empty unresolved list.
+Version 1 and 2 records refuse. Do not add affirmative declarations to them automatically.
+Do not convert this result into `## No findings`. Post it with the ordinary general summary:
+`post <PR> --summary <general-file> --pass security-review=<security-summary-file>`.
+
+The writer and publication gate independently read the actual remote base branch tip,
+unique merge base and head. Every affected entry must match between merge base and live base.
+Both rename names, deletion sources, added-path absence, blobs, types and modes count.
+Only nonempty A/M/D/R ordinary `100644` Markdown inventories qualify. Control files,
+plugin command manifests and security matches outside root hooks/commands collisions refuse.
+Known unchanged code, pages, data and settings need actual inspection. Unknown context refuses.
+Complete path coverage binds the statement to objects, not to semantic truth or reviewer identity.
+The helper uses batched tree/blob reads, never a process loop over context paths.
+The complete final comment must fit 65536 characters. Compact preparation must fit 131072 bytes;
+refuse oversized output, do not truncate it or raise the cap. Both bounds include all serialized data. Missing objects, unresolved context and moved bindings refuse.
+A stale scope needs a new complete inspection. The writer checks before/after each post and reuse.
+The same shared publication gate checks merge helpers and direct publication hooks.
+
+Old readers reject this result. Keep installation on HOLD until the merged release passes
+[Installing coderails](../INSTALLATION.md), using paths relative to the release checkout.
+Select explicit new provider versions and matching manifest/marketplace metadata.
+Stop new graph work and drain affected sessions with their owners. Preserve old runtime,
+state/config/eval/proof/retro/Muninn backups with hashes. Unknown quiescence keeps the HOLD.
+Use `release_manifest.py snapshot`, both maintained installer dry runs, then those installers.
+Start new sessions; complete Codex `/hooks` trust. Verify explicit installed paths with
+`release_manifest.py verify` and `installed_parity.py --require-both`; check allowed/refused routes.
+Do not copy helper files into an active version. A new inspection must use both the new writer
+and reader. Preserve old runtime/state together for rollback; these checks do not prove all
+installed behavior or bytecode authenticity. No current wiki pass or install follows from this change.
+
+The finite path list is not proof that unlisted prose is inert. Scope checks prove consistency
+with selected objects, not substantive inspection or independent authorship. A same-user author
+can issue an assessment. The Actions status reads only the ordinary companion and does not
+validate this scope. Get a new applicable inspection or complete eligible scope for
+`required_review_not_applicable_invalid:security-review`; never fabricate a no-findings pass.
 
 ## Eval level or suite integrity refused a merge
 
@@ -840,8 +1043,8 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
   One shell command can contain several counted runs. The hook locks all affected counters in a fixed order, then
   computes each total. If any run exceeds the ceiling, it blocks the command and charges only the exceeded counters.
   A disk write error can leave a partial count after an earlier counter was written; the command is still blocked.
-  The native add-unit producer still supplies status/manifest without worktree registration; this integration is
-  a separate producer dependency, so fixture mirroring alone does not prove native unit accounting.
+  Both native `add-unit --worktree` CLIs register and persist the unit worktree. Fixture mirroring alone does not
+  prove installed unit accounting.
 - `protected_paths_unreadable`: `policy/protected_paths.json` (both plugin copies) is missing, torn or ill-shaped, so
   `no_edit_on_main` and the in-Bash source-write check refuse every non-owner edit on main/master until it is repaired.
   Owner permission files stay denied on every branch. Keys: `source_extensions`, `plugin_source_globs`, `doc_extensions`,
@@ -863,9 +1066,9 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
 
 ## Action-authority hook denied a merge or push (or warned in advisory)
 
-- Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (enforce), or a
-  stderr "action_authority (advisory)" warning appears. The gate is off unless config explicitly sets
-  `action_authority: enforce` or `action_authority: advisory`.
+- Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (default
+  enforce), or a stderr "action_authority (advisory)" warning appears under explicit advisory. Only explicit
+  `action_authority: off` disables this receipt gate. Invalid configuration denies with `config_rejected`.
 - Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
   or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
   event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
@@ -893,9 +1096,12 @@ Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their 
   `marker_cleanup_failed` means cleanup failed: consumed markers stay in place if execution state is uncertain.
   Fix the file fault and mint a new receipt. A killed hook can leave a partial spend; confirm the command did not
   run before any manual recovery.
-- Remediation for optional enforce mode: one-time `python3 scripts/authority_keys.py init` (passphrase-protected
-  key; `show` prints fingerprints), then mint for the exact command:
+- Remediation for default enforce mode: the owner runs one-time `python3 scripts/authority_keys.py init` at their
+  terminal (`ssh-keygen` accepts an empty passphrase; `show` prints fingerprints), then approves the exact command:
   `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge|git_push --command '<exact command>' --cwd <directory it runs in>`
+  Signatures remain required. A usable unprotected key needs no passphrase; `--key <public-key-path>` can select an
+  available agent-backed key. The approval CLI still requires the owner's controlling terminal. An autonomy grant
+  does not replace this action receipt. An agent must not create a PTY or call the signer to impersonate approval.
   (single-use, 1h by default; the CLI computes repository+ref+SHA itself, signs, and refuses without a tty with
   `receipt_refused_no_tty`; add `--loop <loop id>` when the session authority has a loop; `inspect-receipt` /
   `revoke-receipt` take `--receipt-id`). `signer_unknown` / `trust_root_missing`

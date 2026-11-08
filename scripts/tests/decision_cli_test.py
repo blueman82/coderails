@@ -136,7 +136,7 @@ class DecisionCliTests(StoreCase):
                     "--decision",
                     "adopt shape A",
                 )
-                self.assertEqual((code, out.get("recorded"), out.get("seq")), (0, True, 1))
+                self.assertEqual((code, out.get("recorded"), out.get("seq")), (3, True, 1))
                 rows = self.state()["decisions_absorbed"]
                 self.assertEqual((len(rows), dr.verify_chain(rows)), (1, []))
                 rows[0]["decision"] = "tampered"
@@ -175,8 +175,8 @@ class DecisionCliTests(StoreCase):
                 self.assertEqual((code, out.get("reason_code")), (2, "decision_wrong_session"))
                 self.assertEqual(self.path.read_bytes(), before)
 
-    def test_degraded_record_can_flush_with_valid_user_quote(self) -> None:
-        """A short approval degrades, then the native flush command syncs the same row."""
+    def test_pending_record_flushes_only_its_completed_request(self) -> None:
+        """A short approval does not supply request evidence; flush inspects the saved completed request."""
         for script in GRAPH_SCRIPTS:
             with self.subTest(provider=script):
                 self.put({**fixture.state(), "session_id": SESSION, "loop_id": "L1", "authorising_prompt_raw": "yes"})
@@ -195,7 +195,12 @@ class DecisionCliTests(StoreCase):
                     "--decision",
                     "adopt shape A",
                 )
-                self.assertEqual((code, out.get("muninn", {}).get("state")), (3, "degraded"))
+                self.assertEqual((code, out.get("muninn", {}).get("state")), (3, "pending"))
+                rid = out["muninn"]["request_id"]
+                self.assertEqual(
+                    self.muninn("learn", "complete", rid, "--kind", "decision", "--content", "2.5: adopt shape A")[0],
+                    0,
+                )
                 code, out = self.run_graph(
                     script,
                     "flush-decisions",

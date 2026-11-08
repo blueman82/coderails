@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_spec
+from graph_data import error_shaped as error_shaped
 from graph_data import event_payload, object_value, read_records
 from graph_identity import GraphError, is_legacy_task_name, task_node
 from graph_vocab import disposition_offenders
@@ -359,42 +360,39 @@ def parent_indexes(
     return spawns
 
 
-def _error_shaped(output: object) -> bool:
-    """Codex spawn errors are plain text; a success result is a JSON object such as {"task_name": ...}."""
-    if not isinstance(output, str) or not output.strip():
-        return False
-    try:
-        return not isinstance(json.loads(output), dict)
-    except ValueError:
-        return True
+def launch_observations(
+    records: list[tuple[int, dict[str, Any]]],
+) -> dict[str, dict[str, list[tuple[int, dict[str, Any]]]]]:
+    """Retain every native call, result and activity occurrence with its source position."""
+    observed: dict[str, dict[str, list[tuple[int, dict[str, Any]]]]] = {}
+    for line, record in records:
+        item = event_payload(record)
+        key, group = item.get("call_id"), ""
+        if record.get("type") == "response_item":
+            if item.get("type") == "function_call":
+                group = "calls"
+            elif item.get("type") == "function_call_output":
+                group = "outputs"
+        elif record.get("type") == "event_msg" and isinstance(item.get("item"), dict):
+            nested = cast(dict[str, Any], item["item"])
+            if nested.get("type") == "SubAgentActivity":
+                key, group = str(nested.get("id")), "activities"
+        if group and isinstance(key, str):
+            observed.setdefault(key, {"calls": [], "outputs": [], "activities": []})[group].append((line, record))
+    return observed
 
 
 def refused_launches(records: list[tuple[int, dict[str, Any]]]) -> dict[str, tuple[int, str]]:
-    """Index native spawn_agent calls answered by an output but never backed by any SubAgentActivity."""
-    calls: dict[str, list[tuple[int, str]]] = {}
-    call_counts: dict[str, int] = {}
-    outputs: dict[str, int] = {}
-    activities: set[str] = set()
-    for line_number, record in records:
-        item = event_payload(record)
-        if record.get("type") == "response_item" and item.get("type") == "function_call":
-            call_id = item.get("call_id")
-            if isinstance(call_id, str):
-                call_counts[call_id] = call_counts.get(call_id, 0) + 1
-            if call := _native_function_call(record):
-                calls.setdefault(call[0], []).append((line_number, call[1]))
-        elif record.get("type") == "response_item" and item.get("type") == "function_call_output":
-            if isinstance(item.get("call_id"), str) and _error_shaped(item.get("output")):
-                outputs.setdefault(item["call_id"], line_number)
-        elif record.get("type") == "event_msg":
-            nested = item.get("item")
-            if isinstance(nested, dict) and cast(dict[str, Any], nested).get("type") == "SubAgentActivity":
-                activities.add(str(cast(dict[str, Any], nested).get("id")))
-    return {
-        call_id: rows[0]
-        for call_id, rows in calls.items()
-        if len(rows) == 1
-        and call_counts[call_id] == 1
-        and call_id not in activities
-        and outputs.get(call_id, 0) > rows[0][0]
-    }
+    """Project ordinary refusal audit tuples without discarding facts from the raw observer."""
+    refused: dict[str, tuple[int, str]] = {}
+    for call_id, observation in launch_observations(records).items():
+        calls = observation["calls"]
+        if len(calls) != 1 or observation["activities"]:
+            continue
+        line, record = calls[0]
+        call = _native_function_call(record)
+        if call and any(
+            number > line and error_shaped(event_payload(row).get("output")) for number, row in observation["outputs"]
+        ):
+            refused[call_id] = (line, call[1])
+    return refused

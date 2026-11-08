@@ -13,8 +13,8 @@ REASONS: dict[str, str] = {
     "memory_backend_invalid": "memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml.",
     "muninn_absent": "muninn is not on PATH; install it (the Markdown path is not a fallback).",
     "muninn_old_ledger": (
-        "the D4 adapter expects retired Muninn flags; keep this degraded until a current request-bound adapter "
-        "is designed."
+        "the installed Muninn command lacks task requests, or this record has only an old K-id; "
+        "legacy bindings cannot establish current request provenance."
     ),
     "muninn_timeout": "muninn hung past 10s; run `muninn know list` by hand and check store locks.",
     "muninn_error": (
@@ -22,9 +22,41 @@ REASONS: dict[str, str] = {
         "read stderr."
     ),
     "muninn_bad_output": (
-        "the retired D4 write protocol returned no numeric K-id; inspect current Muninn records without a legacy "
-        "scope flag."
+        "Muninn returned a reply that does not match the task request or current-note contract; inspect its output."
     ),
+    "learning_pending": "Muninn has accepted the task request. Keep its R_ ID and check the same request later.",
+    "learning_request_unknown": (
+        "Muninn may have accepted a request without returning its R_ ID. "
+        "Inspect `muninn learn list`; do not submit again."
+    ),
+    "learning_request_failed": (
+        "The saved Muninn request failed or was cancelled. Inspect it with `muninn learn show R_ID`."
+    ),
+    "learning_no_matching_record": (
+        "The completed request produced no active note with this exact task and text. Inspect its receipt and notes."
+    ),
+    "learning_no_change": "The saved request completed without applying knowledge. It is not a written Note.",
+    "learning_request_mismatch": "Request project, task, source window or receipt identity differs from its binding.",
+    "learning_receipt_unavailable": "The request has no supported committed receipt; acceptance alone is not a save.",
+    "learning_record_changed": "Listed and shown current revisions differ. Read again with the same binding.",
+    "learning_record_expired": "The current Note has reached its timed expiry and cannot be used.",
+    "learning_record_ambiguous": "Several receipts match the exact K-id/revision. No request identity was selected.",
+    "learning_form_unsupported": "This reader supports Notes only; Guide use remains unsupported.",
+    "learning_conditional_use_unsupported": (
+        "The Note is saved with conditions or conditional expiry. Legacy dispatch/promotion/render cannot evaluate "
+        "those conditions; retain its metadata and do not use it unconditionally."
+    ),
+    "learning_selection_unavailable": "A required E-id/ref/hash/selected excerpt is unavailable; no cite is asserted.",
+    "learning_evidence_mismatch": "The retained evidence identity, selector, scope or source window does not match.",
+    "learning_source_changed": "A physical source or its exact retained provenance changed; no cite is asserted.",
+    "learning_source_unavailable": "A required live physical original is unavailable; no cite is asserted.",
+    "learning_source_authority": (
+        "The complete support set must be live, primary, unflagged, unredacted direct-owner user prompts. "
+        "Current Muninn has no normal/restricted classification; do not infer one."
+    ),
+    "learning_quote_mismatch": "A retained selected excerpt did not pass public quote-check; no cite is asserted.",
+    "learning_read_limit": "The read exceeded a time, reply, record or support limit; results are incomplete.",
+    "learning_project_unavailable": "The calling project directory is unavailable; do not use the graph key.",
     "muninn_store_missing": "no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once.",
     "muninn_schema_old": (
         "the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2."
@@ -138,10 +170,9 @@ REASONS: dict[str, str] = {
     ),
     "order_already_ticked": "this session and logical loop were already counted; the tick was skipped (informational).",
     "no_user_cite": (
-        "the order was stored without a user quote; attach it with `orders.py cite <id> --quote <verbatim owner "
-        "prompt text>`."
+        "The local diagnostic has no verified current owner citation. A caller quote cannot establish request evidence."
     ),
-    "legacy_uncited": "an imported hand-written order has no cite yet; attach one with `orders.py cite <id> --quote`.",
+    "legacy_uncited": "The legacy import has no retained current request selection; keep it explicitly uncited.",
     "legacy_parse_error": (
         "the local legacy input has an incomplete, ambiguous or colliding entry; fix the named entry and "
         "rerun import-legacy, preserving the original."
@@ -172,7 +203,7 @@ REASONS: dict[str, str] = {
         "command by hand and read stderr."
     ),
     "lesson_not_current": (
-        "the order has no unambiguous current cited Muninn claim (retracted, expired, superseded or conflicting "
-        "current claims); inspect the current evidence and explicitly record the intended lesson with a fresh quote."
+        "The saved request has no exact eligible current Note. Inspect its retained receipt; "
+        "a caller quote cannot repair authority."
     ),
 }

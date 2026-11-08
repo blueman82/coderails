@@ -1,39 +1,60 @@
 #!/usr/bin/env python3
-"""Write hash-chained loop decisions and sync them to Muninn for either provider.
+"""Write hash-chained loop decisions and request Muninn review for either provider.
 
 Each row keeps phase and decision for the dashboard. Its hash covers all fields except
 the hash itself and `muninn`. A prior hash links the rows. `verify_chain` finds edits,
 missing middle rows, and changed order. A same-user agent can rewrite the whole chain
-or remove its last row. It can also set `muninn.state` to `written`; verify a claimed
-Muninn id with `list_records`. This check does not authenticate the writer.
+or remove its last row. It can also set `muninn.state` to `written`; verify the saved
+R_ receipt and active K_ note. This check does not authenticate the writer.
 
 Both graph CLIs call `record` with a provider transition function. The function first
 writes a `syncing` row under the graph lock. It calls Muninn outside that lock, then
 writes the result under the lock. Exit code 0 means written or disabled; 3 means
-degraded or unknown; 2 means refused. `flush_pending` retries pending and safe
-degraded rows. An ambiguous result stays `syncing` or `unknown` until it is resolved.
-A citation needs a user prompt or quote. Short approval text can degrade the sync.
+pending, degraded or unknown; 2 means refused. `flush_pending` retries pending and
+safe degraded rows. An ambiguous result stays `syncing` or `unknown` until resolved.
+The request reads a source window and task scope. Prompt and quote inputs remain
+accepted for compatibility but do not supply its evidence. Never falls back to Markdown.
 """
 
 from __future__ import annotations
 
 import copy
 import datetime
-import hashlib
-import json
 import re
 import runpy
 import sys
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # plugin root, so `scripts.lib` resolves as a script
-from scripts.lib import memory_adapter as ma  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/agentic-loop/scripts"))
+from decision_chain import (  # noqa: E402
+    GENESIS as GENESIS,
+)
+from decision_chain import (
+    HASH_EXCLUDED as HASH_EXCLUDED,
+)
+from decision_chain import (
+    as_row as _as_row,
+)
+from decision_chain import (
+    ensure_chain as ensure_chain,
+)
+from decision_chain import (
+    row_digest as row_digest,
+)
+from decision_chain import (
+    rows as _rows,
+)
+from decision_chain import (
+    verify_chain as verify_chain,
+)
+
+from scripts.lib import memory_request as mr  # noqa: E402
 from scripts.lib import teardown_steps  # noqa: E402
 
-GENESIS, HASH_EXCLUDED = "0" * 64, ("row_sha256", "muninn")
 QUOTE_MIN, QUOTE_MAX, CLAIM_MAX = 12, 300, 500  # muninn's quote and claim length rules
 REFUSALS = ("wrong_session", "wrong_loop", "wrong_revision", "blank_phase", "blank_decision", "invalid_chain")
 Transition = Callable[[Path, Callable[[dict[str, Any]], dict[str, Any]]], dict[str, Any]]
@@ -42,25 +63,6 @@ StatusResolver = Callable[[dict[str, Any], Optional[int], Optional[str], bool, i
 
 def _collapse(text: str) -> str:
     return " ".join(text.split())
-
-
-def row_digest(row: dict[str, Any]) -> str:
-    """sha256 over the canonical JSON of the row minus `muninn` and `row_sha256`."""
-    body = {k: v for k, v in row.items() if k not in HASH_EXCLUDED}
-    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-
-
-def _rows(state: dict[str, Any]) -> list[Any]:
-    value: Any = state.get("decisions_absorbed", [])
-    if not isinstance(value, list):
-        raise ValueError("invalid_chain")
-    rows: list[Any] = list(value)  # pyright: ignore[reportUnknownArgumentType]
-    return rows
-
-
-def _as_row(value: Any) -> dict[str, Any]:  # noqa: ANN401
-    """A decision row as a dict; anything else (a hand-written string, null) is an empty row."""
-    return cast("dict[str, Any]", value) if isinstance(value, dict) else {}
 
 
 def add_decision(
@@ -121,43 +123,6 @@ def add_decision(
     return {"state": new, "decision": row}
 
 
-def verify_chain(rows: list[Any], chain_start: int | None = None) -> list[dict[str, Any]]:
-    """Return offenders `{seq, reason}`; empty means clean. Rows before the first hashed row are legacy and ignored.
-
-    Pass the state's `chain_started_seq` as `chain_start` so unhashed rows at or after it are offenders even when every
-    hash was stripped; without it an all-unhashed list verifies clean (the marker lives in the same file, so a
-    same-user agent that also deletes it is the documented boundary).
-    """
-    bad: list[dict[str, Any]] = []
-    hashed = False
-    prev = GENESIS
-    for index, item in enumerate(rows, start=1):
-        row = _as_row(item)
-        if not row.get("row_sha256"):
-            if hashed or (chain_start is not None and index >= chain_start):
-                bad.append({"seq": index, "reason": "unhashed_row"})
-            prev = GENESIS
-            continue
-        hashed = True
-        if row.get("seq") != index:
-            bad.append({"seq": row.get("seq", index), "reason": "bad_seq"})
-        if row.get("prev_sha256") != prev:
-            bad.append({"seq": row.get("seq", index), "reason": "bad_prev"})
-        if row_digest(row) != row["row_sha256"]:
-            bad.append({"seq": row.get("seq", index), "reason": "bad_hash"})
-        prev = str(row["row_sha256"])
-    return bad
-
-
-def ensure_chain(state: dict[str, Any]) -> None:
-    """Refuse a damaged decision chain before another local or external write."""
-    marker = state.get("chain_started_seq")
-    if marker is not None and (type(marker) is not int or marker < 1):
-        raise ValueError("invalid_chain")
-    if verify_chain(_rows(state), marker):
-        raise ValueError("invalid_chain")
-
-
 def pick_quote(prompt_raw: str) -> str:
     """The first line, else first sentence, of 12-300 chars from the prompt (whitespace-collapsed, still verbatim)."""
     lines = [_collapse(x) for x in prompt_raw.splitlines() if x.strip()]
@@ -180,24 +145,8 @@ def _trace(command: str, outcome: str, reason: str, session: str, loop_id: str |
 def sync_row(
     row: dict[str, Any], loop_id: str, session_id: str, prompt_raw: str, cite_quote: str | None = None
 ) -> dict[str, Any]:
-    """Write one decision to Muninn; return the muninn field {state: written|degraded|disabled, id, reason_code}."""
-    quote = _collapse(cite_quote) if cite_quote and cite_quote.strip() else pick_quote(prompt_raw or "")
-    tag = "run-" + re.sub(r"[^a-z0-9_-]", "-", loop_id.lower())[:28]
-    claim = _collapse(f"{row['phase']}: {row['decision']}")
-    rec = ma.Record("loop", "decision", claim[:CLAIM_MAX], "", quote, [tag], loop_id, "inferred")
-    refused = ma.resolve_cite(rec, False, session_id)
-    res: ma.Degraded | ma.Written = refused or ma.add(rec, session_id)
-    field: dict[str, Any]
-    if isinstance(res, ma.Written):
-        field = {"state": "written", "id": res.id, "reason_code": "ok"}
-    else:
-        off = res.reason == "memory_backend_off"
-        uncertain = refused is None and res.reason in {"muninn_error", "muninn_timeout", "muninn_bad_output"}
-        field = {
-            "state": "disabled" if off else "unknown" if uncertain else "degraded",
-            "id": None,
-            "reason_code": res.reason,
-        }
+    """Queue or inspect task review; prompt and quote inputs are old, ignored inputs."""
+    field = mr.decision_field(row, loop_id, session_id)
     _trace("decision.sync", field["state"], field["reason_code"], session_id, loop_id)
     return field
 
@@ -233,9 +182,20 @@ def claim_sync(state: dict[str, Any], session: str, loop_id: str, row_sha256: st
     ensure_chain(state)
     new = copy.deepcopy(state)
     row = _owned_row(new, session, loop_id, row_sha256)
-    if _as_row(row.get("muninn")).get("state") not in {"pending", "degraded"}:
+    if _as_row(row.get("muninn")).get("state") not in {"pending", "degraded", "unknown"}:
         raise ValueError("sync_unavailable")
-    row["muninn"] = {"state": "syncing", "id": None, "reason_code": "sync_in_flight"}
+    previous = _as_row(row.get("muninn"))
+    if previous.get("state") == "unknown" and not all(
+        previous.get(k) for k in ("request_id", "request_window", "project_id")
+    ):
+        raise ValueError("sync_unavailable")
+    row["muninn"] = {
+        "state": "syncing",
+        "id": None,
+        "request_id": previous.get("request_id"),
+        "reason_code": "sync_in_flight",
+    }
+    row["muninn"].update({key: previous[key] for key in ("request_window", "project_id") if key in previous})
     return new
 
 
@@ -249,7 +209,8 @@ def _sync_safely(
         return sync_row(row, loop_id, session, str(raw or ""), cite)
     except Exception:  # noqa: BLE001
         _trace("decision.sync", "degraded", "muninn_error", session, loop_id)
-        return {"state": "unknown", "id": None, "reason_code": "muninn_error"}
+        previous = _as_row(row.get("muninn"))
+        return {**previous, "state": "unknown", "id": None, "reason_code": "muninn_error"}
 
 
 def record(
@@ -355,14 +316,19 @@ def flush_pending(
         reason = refused["reason"]
         _trace("decision.flush", "refused", reason, session, refused["loop_id"])
         return {"synced": [], "reason_code": reason, "exit_code": 2}
-    if any(_as_row(row.get("muninn")).get("state") in {"syncing", "unknown"} for row in map(_as_row, _rows(state))):
+    if any(
+        (m := _as_row(row.get("muninn"))).get("state") == "syncing"
+        or m.get("state") == "unknown"
+        and not all(m.get(k) for k in ("request_id", "request_window", "project_id"))
+        for row in map(_as_row, _rows(state))
+    ):
         _trace("decision.flush", "degraded", "decision_sync_unknown", session, str(state.get("loop_id")))
         return {"synced": [], "reason_code": "decision_sync_unknown", "exit_code": 3}
     synced: list[dict[str, Any]] = []
     for row in map(_as_row, _rows(state)):
         if not row.get("row_sha256") or not isinstance(row.get("seq"), int):
             continue  # legacy or hand-written row: not ours to sync
-        if _as_row(row.get("muninn")).get("state", "pending") not in ("pending", "degraded"):
+        if _as_row(row.get("muninn")).get("state", "pending") not in ("pending", "degraded", "unknown"):
             continue
         try:
             transition(

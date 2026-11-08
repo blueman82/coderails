@@ -148,16 +148,16 @@
         "string",
         "null"
       ],
-      "default": "off",
+      "default": "enforce",
       "enum": [
         "enforce",
         "advisory",
         "off"
       ],
       "status": "enforced_by_code",
-      "description": "Absent = off; the shipped workflow uses advisory. Explicit enforce requires a signed receipt for guarded merges and pushes. Invalid values are rejected by strict config consumers.",
+      "description": "Default enforce requires signed receipts for guarded merges and pushes. Explicit advisory warns; explicit off disables this receipt gate. Invalid configuration is rejected.",
       "control": true,
-      "on_value": "advisory"
+      "on_value": "enforce"
     },
     "diff_manifest": {
       "type": [

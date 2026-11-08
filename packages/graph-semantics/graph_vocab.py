@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from decision_chain import ensure_chain
+
 STOP_CATEGORIES = ("hard-stop", "approval-gate", "awaiting-input", "complete")
 STOP_REASON_CODES = (
     "work_complete",
@@ -79,8 +81,19 @@ def disposition_report(units: object) -> dict[str, Any]:
     return {"units": kinds, "offenders": disposition_offenders(units)}
 
 
+def _decision_chain_invalid(state: dict[str, Any]) -> bool:
+    """Keep immutable row integrity separate from the mutable memory-sync state."""
+    try:
+        ensure_chain(state)
+    except (TypeError, ValueError):
+        return True
+    return False
+
+
 def decision_pending(state: dict[str, Any], node_id: str) -> bool:
     """Block unanswered statuses and their unresolved hash-chained memory sync."""
+    if _decision_chain_invalid(state):
+        return True
     rows = state.get("worker_statuses", [])
     if not isinstance(rows, list):
         return True
@@ -131,6 +144,8 @@ def completion_pending_nodes(state: dict[str, Any], nodes: dict[str, Any]) -> li
 
 def decision_sync_pending(state: dict[str, Any]) -> bool:
     """Block any hashed decision whose Muninn write has not reached a final accepted state."""
+    if _decision_chain_invalid(state):
+        return True
     rows = state.get("decisions_absorbed", [])
     if not isinstance(rows, list):
         return True

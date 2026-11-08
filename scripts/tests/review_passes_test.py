@@ -236,6 +236,7 @@ class CheckTests(unittest.TestCase):
     def codes(self, reply: git.ReviewPasses, changes: manifest_policy.Changes | None = HOOKS) -> list[str]:
         """Run the check against a canned artifact and diff."""
         with (
+            mock.patch.object(git, "gate_review_summary_for_pr", return_value=(0, "")),
             mock.patch.object(git, "review_passes_for_pr", return_value=reply),
             mock.patch.object(git, "pr_field", return_value="base-sha"),
             mock.patch.object(manifest_policy, "diff_changes", return_value=changes),
@@ -253,6 +254,7 @@ class CheckTests(unittest.TestCase):
             return HOOKS if base == "release-sha" else DOCS
 
         with (
+            mock.patch.object(git, "gate_review_summary_for_pr", return_value=(0, "")),
             mock.patch.object(git, "pr_field", return_value="release-sha"),
             mock.patch.object(git, "review_passes_for_pr", return_value=found([entry("review-pr")])),
             mock.patch.object(manifest_policy, "diff_changes", side_effect=changes),
@@ -275,9 +277,9 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(self.codes(reply), ["required_review_failed:security-review"])
 
     def test_docs_only_needs_review_pr_only(self) -> None:
-        """A docs-only PR with the bare review-pr pass, or an old v1 artifact, is accepted."""
+        """A docs-only PR still needs its synthesized or explicit general pass, never an empty result."""
         self.assertEqual(self.codes(found([entry("review-pr")]), DOCS), [])
-        self.assertEqual(self.codes(found([]), DOCS), [])
+        self.assertEqual(self.codes(found([]), DOCS), ["required_review_missing:review-pr"])
 
     def test_old_v1_artifact_on_hooks_pr_is_refused(self) -> None:
         """No passes line counts as passes=[]; a hooks/ PR is refused until re-posted (old behaviour: accepted)."""
@@ -285,7 +287,7 @@ class CheckTests(unittest.TestCase):
             self.assertEqual(git.gate_review_summary_for_pr("7", SHA), (0, ""))  # the pre-change gate: accepted
             self.assertEqual(git.review_passes_for_pr("7", SHA), found([entry("review-pr")]))
         self.assertEqual(OLD_BEHAVIOUR_REQUIRED_NAMES, [])
-        self.assertEqual(self.codes(found([])), ["required_review_missing:security-review"])
+        self.assertEqual(self.codes(found([entry("review-pr")])), ["required_review_missing:security-review"])
 
     def test_legacy_critical_review_fails_docs_only(self) -> None:
         """An old marker cannot hide a Critical general review finding."""
@@ -356,6 +358,9 @@ class PathTests(unittest.TestCase):
         """merge.py publishes through publication_gate.enforce; a hooks/ PR without the pass is refused."""
         reply = found([entry("review-pr")])
         with (
+            mock.patch.object(manifest_policy, "publication_session", return_value="fixture"),
+            mock.patch.object(git, "gate_review_summary_for_pr", return_value=(0, "")),
+            mock.patch.object(git, "pr_field", return_value="base-sha"),
             mock.patch.object(git, "review_passes_for_pr", return_value=reply),
             mock.patch.object(git, "gate_eval_summary_for_pr", return_value=git.EvalSummary(1)),
             mock.patch.object(manifest_policy, "diff_changes", return_value=HOOKS),
@@ -372,6 +377,7 @@ class PathTests(unittest.TestCase):
         violation = [{"code": "required_review_missing:security-review", "detail": "x"}]
         with (
             mock.patch.object(pr_merge_gate, "pr_field", return_value=SHA),
+            mock.patch.object(pr_merge_gate, "gate_review_summary_for_pr", return_value=(0, "")),
             mock.patch.object(pr_merge_gate, "gate_eval_summary_for_pr", return_value=git.EvalSummary(0, "0", "{}")),
             mock.patch.object(pr_merge_gate, "smoke_verify", return_value=0),
             mock.patch.object(publication_gate, "evaluate", return_value=violation),

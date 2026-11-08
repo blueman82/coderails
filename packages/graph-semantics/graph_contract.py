@@ -19,6 +19,7 @@ from graph_contract_render import END as END
 from graph_contract_render import render_sections as render_sections
 from graph_contract_render import sections_sha256 as sections_sha256
 from graph_lessons import query as query_lessons
+from graph_lessons import valid_row, validate_snapshot
 from graph_required_context import required_context as required_context
 from graph_required_context import validate_context
 from graph_source import base_ref as base_ref
@@ -99,14 +100,13 @@ def validate_contract(contract: object, require_context: bool = False) -> dict[s
     for key in LIST_FIELDS:
         items = value[key]
         if not isinstance(items, list) or not all(
-            isinstance(item, str)
-            or (key == "lessons" and isinstance(item, dict) and isinstance(cast(dict[str, Any], item).get("text"), str))
-            for item in cast(list[object], items)
+            isinstance(item, str) or (key == "lessons" and valid_row(item)) for item in cast(list[object], items)
         ):
             raise ValueError(f"contract {key} must be an array of strings")
     digest = value.get("lessons_sha256")
-    if digest is not None and (not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
-        raise ValueError("contract lessons_sha256 must be a SHA256 or null")
+    lesson_rows = [cast(object, item) for item in value["lessons"] if isinstance(item, dict)]
+    if lesson_rows or digest is not None:
+        validate_snapshot(lesson_rows, digest)
     if value["disposition"] is not None and not isinstance(value["disposition"], dict):
         raise ValueError("contract disposition must be an object or null")
     if value.get("publication_command") is not None and (
