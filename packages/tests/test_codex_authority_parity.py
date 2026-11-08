@@ -134,8 +134,8 @@ class CodexAutonomousGateTests(unittest.TestCase):
         self.grant("live")
         self.assertEqual(self.prompt("autonomous", "live"), {})
 
-    def test_grant_then_hook_denies_double_grant_refused_legacy_honoured(self) -> None:
-        """Typed grant writes granted_by=command; the hook denies; a second grant is refused; fieldless is honoured."""
+    def test_grant_then_hook_denies_double_grant_refused_legacy_ignored(self) -> None:
+        """Typed grant denies; the hook ignores old fieldless files."""
         self.grant("g1")
         path = self.loop / "g1/authority.json"
         obj = json.loads(path.read_text())
@@ -146,7 +146,7 @@ class CodexAutonomousGateTests(unittest.TestCase):
         self.assertEqual(self.reasons("g1"), expected)
         del obj["granted_by"]
         path.write_text(json.dumps(obj))
-        self.assertTrue(self.asks("g1"))
+        self.assertFalse(self.asks("g1"))
         obj["expires_at"] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         path.write_text(json.dumps(obj))
         self.assertFalse(self.asks("g1"))

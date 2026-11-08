@@ -139,10 +139,6 @@
       "source": "hooks/scripts/autonomous_gate.py",
       "remediation": "Use the typed authority command, or continue after the authority expires."
     },
-    "crack_on_legacy_flag": {
-      "source": "hooks/scripts/autonomous_gate.py",
-      "remediation": "Use the typed authority command, or continue after the authority expires."
-    },
     "confidence_label_missing": {
       "source": "hooks/scripts/check_confidence_labels.py",
       "remediation": "Add the correct confidence label to each claim that needs one."

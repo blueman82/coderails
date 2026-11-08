@@ -28,23 +28,12 @@ DENIAL = (
     "so AskUserQuestion is mechanically denied: make the call yourself using the authority scope, or end the "
     "turn with a report if genuinely outside it. Merge still needs explicit approval."
 )
-LEGACY_DENIAL = (
-    "Autonomous authority is active (old flag, no expiry; support ends next release): "
-    "AskUserQuestion is denied. "
-    "Clear it with: rm {flag}  -- or grant an expiring, revocable authority with /coderails:authorise."
-)
 
 
 def text(payload: dict[str, Any], name: str) -> str:
     """Return a string payload field or the established empty default."""
     value = payload.get(name)
     return value if isinstance(value, str) else ""
-
-
-def legacy_flag(session_id: str) -> Path | None:
-    """Return the pre-authority flag path for a path-safe exact session id (migration only)."""
-    path = authority_path(session_id)
-    return path.with_name("crack_on_active") if path else None
 
 
 def expired(session_id: str) -> bool:
@@ -94,10 +83,6 @@ def main() -> int:
             deny(DENIAL.format(expires=obj["expires_at"], session=session_id))
         elif expired(session_id):
             append_row("autonomous", "allowed", "authority_expired_allow", session_id, loop_id)
-        elif (flag := legacy_flag(session_id)) is not None and flag.is_file():
-            append_row("autonomous", "blocked", "crack_on_legacy_flag", session_id, loop_id)
-            log(f"hook=autonomous_gate event=PreToolUse session={session_id} tool=AskUserQuestion denied=1 legacy=1")
-            deny(LEGACY_DENIAL.format(flag=flag))
     return 0
 
 

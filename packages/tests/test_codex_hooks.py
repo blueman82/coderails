@@ -298,16 +298,17 @@ class HookTests(unittest.TestCase):
         self.assertEqual(found, sorted([self.authority("src"), self.authority("dst"), self.authority("t1")]))
         self.assertFalse((self.loop / "a").exists())
 
-    def test_autonomous_legacy_flag_denies_with_traced_code(self) -> None:
-        """A pre-existing Codex crack_on_active flag still denies, never silently."""
+    def test_autonomous_legacy_flag_is_ignored(self) -> None:
+        """An old Codex flag grants nothing and stays on disk."""
         legacy = self.directory / "data/sessions/old"
         legacy.mkdir(parents=True)
-        (legacy / "crack_on_active").touch()
-        self.assertTrue(self.asks("old"))
-        self.assertEqual(self.reasons("old"), ["crack_on_legacy_flag"])
+        (legacy / "crack_on_active").write_bytes(b"retained legacy fixture\n")
+        self.assertFalse(self.asks("old"))
+        self.assertEqual(self.reasons("old"), [])
+        self.assertEqual((legacy / "crack_on_active").read_bytes(), b"retained legacy fixture\n")
 
-    def test_autonomous_corrupt_authority_traced_and_legacy_flag_honoured(self) -> None:
-        """Corrupt authority = no valid authority: allowed alone, legacy-denied with a flag; traced, no crash."""
+    def test_autonomous_corrupt_authority_traced_and_legacy_flag_ignored(self) -> None:
+        """A corrupt object grants nothing, even when an old flag exists."""
         (self.loop / "c1").mkdir(parents=True)
         self.authority("c1").write_text("{not json")
         self.assertFalse(self.asks("c1"))
@@ -317,8 +318,8 @@ class HookTests(unittest.TestCase):
         legacy = self.directory / "data/sessions/c2"
         legacy.mkdir(parents=True)
         (legacy / "crack_on_active").touch()
-        self.assertTrue(self.asks("c2"))
-        self.assertEqual(self.reasons("c2"), ["authority_corrupt_ignored", "crack_on_legacy_flag"])
+        self.assertFalse(self.asks("c2"))
+        self.assertEqual(self.reasons("c2"), ["authority_corrupt_ignored"])
 
     def test_prose_gate_retired(self) -> None:
         """Negative control: no Stop prose gate is registered or shipped."""

@@ -28,9 +28,8 @@ FIELDS = (
     "expires_at",
     "revocable",
     "approval_required_for",
+    "granted_by",
 )
-OPTIONAL_FIELDS = ("granted_by",)
-GRANTED_BY = ("command", "legacy_phrase")  # objects without the field read as legacy_phrase
 MERGE = "merge"
 
 
@@ -83,7 +82,7 @@ def validate(obj: object, now: datetime) -> list[str]:
         return ["not_an_object"]
     data = cast("dict[str, Any]", obj)
     errors = [f"missing:{name}" for name in FIELDS if name not in data]
-    errors += [f"unknown:{name}" for name in data if name not in FIELDS + OPTIONAL_FIELDS]
+    errors += [f"unknown:{name}" for name in data if name not in FIELDS]
     if errors:
         return errors
     if not isinstance(data["authority_id"], str) or not data["authority_id"]:
@@ -98,7 +97,7 @@ def validate(obj: object, now: datetime) -> list[str]:
     max_prs = data["max_prs"]
     if isinstance(max_prs, bool) or not isinstance(max_prs, int) or max_prs < 0:
         errors.append("max_prs")
-    if "granted_by" in data and data["granted_by"] not in GRANTED_BY:
+    if data["granted_by"] != "command":
         errors.append("granted_by")
     if not isinstance(data["revocable"], bool):
         errors.append("revocable")
@@ -149,14 +148,3 @@ def read_authority(session_id: str, base: Path | None = None, now: datetime | No
         append_row("authority", "refused", "authority_refused_foreign", session_id, base=base)
         return None
     return None if validate(data, now or datetime.now(timezone.utc)) else data
-
-
-def clear_legacy_flags(session_id: str) -> None:
-    """Remove the pre-authority crack_on_active flags (Claude loop dir and Codex PLUGIN_DATA) for a safe session id."""
-    path = authority_path(session_id)
-    if path is None:
-        return
-    codex = Path(os.environ.get("PLUGIN_DATA", str(Path.home() / ".coderails" / "codex")))
-    for flag in (path.with_name("crack_on_active"), codex / "sessions" / session_id / "crack_on_active"):
-        with suppress(OSError):
-            flag.unlink()
