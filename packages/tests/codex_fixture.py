@@ -45,7 +45,7 @@ def state() -> dict[str, Any]:
         "status": "in-progress",
         "created": "2026-10-24T10:00:00+00:00",
         "authorising_prompt_raw": "Run this bounded Codex graph test.",
-        "state_minor": 2,
+        "state_minor": 3,
         "graph": {
             "nodes": {"U3[1]": node()},
             "edges": [],
@@ -54,6 +54,7 @@ def state() -> dict[str, Any]:
             "hard_stop": None,
             "dispatches": {},
             "contract_from_revision": 1,
+            "context_from_revision": 1,
         },
     }
 

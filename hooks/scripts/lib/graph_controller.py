@@ -1,7 +1,4 @@
-"""Controller commands `start` and `add-unit`: the only writers of a loop's initial state and work units.
-
-Each is one lock and one atomic replace. Every outcome carries a closed reason code and a non-authoritative trace row.
-"""
+"""Controller commands create initial loop state and work units under one atomic lock, with coded traced outcomes."""
 
 from __future__ import annotations
 
@@ -63,6 +60,7 @@ def _stub(session: str, loop_id: str, prompt: str, marker: object) -> dict[str, 
             "wave_history": {},
             "dispatches": {},
             "contract_from_revision": 1,
+            "context_from_revision": 1,
         },
     }
 

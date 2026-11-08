@@ -7,13 +7,27 @@ from pathlib import Path
 from typing import Any, cast
 
 import graph_spec
+from graph_data import error_shaped as error_shaped
 from graph_data import event_payload, object_value, read_records
 from graph_identity import GraphError, is_legacy_task_name, task_node
 from graph_vocab import disposition_offenders
 
 
-def assigned_worktree(state: dict[str, Any], node_id: str) -> str | None:
-    """Return the checkout assigned to a concrete unit, when present."""
+def assigned_worktree(state: dict[str, Any], node_id: str, attempt: int | None = None) -> str | None:
+    """Use an attempt's issued checkout before consulting current unit metadata."""
+    if attempt is not None:
+        issued = [
+            record
+            for record in state["graph"].get("dispatches", {}).values()
+            if record.get("node_id") == node_id and record.get("attempt") == attempt
+        ]
+        if len(issued) > 1:
+            raise GraphError(f"node {node_id} has ambiguous dispatch worktrees")
+        if issued and "worktree" in issued[0].get("contract", {}):
+            value = issued[0]["contract"]["worktree"]
+            if value is not None and not isinstance(value, str):
+                raise GraphError(f"node {node_id} has an invalid dispatch worktree")
+            return value
     unit = graph_spec.split_id(node_id)[1]
     units = state.get("work_units")
     if unit is None or not isinstance(units, dict):
@@ -269,10 +283,9 @@ def child_terminal(
     turn_id: str | None = None,
     expected_cwd: str | None = None,
 ) -> str:
-    """Require a uniquely started successful turn, and a successful latest child activity.
+    """Require a uniquely started task_complete and a successful latest child lifecycle event.
 
-    Without `turn_id` the final terminal turn is returned. With it, that earlier recorded turn is accepted
-    only if it is a uniquely started task_complete and the child's latest lifecycle event is a task_complete.
+    Return the final terminal turn, or verify the supplied earlier turn against the same conditions.
     """
     records = child_read_records(
         parent_session, agent_thread_id, agent_nickname, expected_path, expected_role, expected_cwd
@@ -345,16 +358,6 @@ def parent_indexes(
                 (call_line, observed_task, agent_thread_id, None, agent_path, expected_role)
             )
     return spawns
-
-
-def error_shaped(output: object) -> bool:
-    """Codex spawn errors are plain text; a success result is a JSON object such as {"task_name": ...}."""
-    if not isinstance(output, str) or not output.strip():
-        return False
-    try:
-        return not isinstance(json.loads(output), dict)
-    except ValueError:
-        return True
 
 
 def launch_observations(

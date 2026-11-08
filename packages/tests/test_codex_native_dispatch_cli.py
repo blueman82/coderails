@@ -36,7 +36,7 @@ def seeded_state(progress: Path) -> dict[str, Any]:
         "loop_id": "loop",
         "revision": 2,
         "status": "in-progress",
-        "state_minor": 2,
+        "state_minor": 3,
         "graph": {
             "nodes": {"U3[7]": node},
             "edges": [],
@@ -45,6 +45,7 @@ def seeded_state(progress: Path) -> dict[str, Any]:
             "active_wave": {"wave_id": "wave-2", "revision": 2, "nodes": ["U3[7]"]},
             "dispatches": {},
             "contract_from_revision": 1,
+            "context_from_revision": 1,
         },
     }
     contract = graph_contract.build_contract(state, "U3[7]", "main", progress, ROOT / "packages/codex/scripts/push.py")

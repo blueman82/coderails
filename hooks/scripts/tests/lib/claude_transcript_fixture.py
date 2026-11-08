@@ -45,7 +45,7 @@ def state(count: int = 1) -> dict[str, Any]:
         "revision": 1,
         "status": "in-progress",
         "work_units": {},
-        "state_minor": 2,
+        "state_minor": 3,
         "graph": {
             "nodes": nodes,
             "edges": [],
@@ -54,6 +54,7 @@ def state(count: int = 1) -> dict[str, Any]:
             "hard_stop": None,
             "dispatches": {},
             "contract_from_revision": 1,
+            "context_from_revision": 1,
         },
     }
 

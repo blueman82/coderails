@@ -59,7 +59,7 @@ def native_state(provider: Provider, fixture: dict[str, Any]) -> dict[str, Any]:
         "session_id": provider.session,
         "loop_id": "fixture-loop",
         "status": "in-progress",
-        "state_minor": 1 if fixture["state"]["graph"].get("active_wave") is not None else 2,
+        "state_minor": 1 if fixture["state"]["graph"].get("active_wave") is not None else 3,
     }
     if isinstance(state.get("graph"), dict):
         # a hand-built state with a wave already open predates the contract minor
@@ -67,6 +67,7 @@ def native_state(provider: Provider, fixture: dict[str, Any]) -> dict[str, Any]:
         state["graph"]["dispatches"] = {}
         if not opened:
             state["graph"]["contract_from_revision"] = 1
+            state["graph"]["context_from_revision"] = 1
     return state
 
 
@@ -77,6 +78,7 @@ def semantic_graph(state: dict[str, Any]) -> dict[str, Any]:
     graph.pop("wave_history", None)
     graph.pop("dispatches", None)
     graph.pop("contract_from_revision", None)
+    graph.pop("context_from_revision", None)
     wave = graph["active_wave"]
     if wave is not None:
         wave.pop("transcript_cursor", None)

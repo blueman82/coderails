@@ -126,9 +126,9 @@ class StartTests(ControllerCase):
             self.assertEqual(state["authorising_prompt_raw"], PROMPT)
             self.assertEqual(state["work_units"], {})
             expected: dict[str, Any] = {"nodes": {}, "edges": [], "joins": {}, "active_wave": None, "hard_stop": None}
-            expected.update(wave_history={}, dispatches={}, contract_from_revision=1)
+            expected.update(wave_history={}, dispatches={}, contract_from_revision=1, context_from_revision=1)
             self.assertEqual(state["graph"], expected)
-            self.assertEqual((state["stops"], state["state_minor"]), ([], 2))
+            self.assertEqual((state["stops"], state["state_minor"]), ([], 3))
             self.assertEqual(("completed_marker" in state), c.name == "claude")
             self.assertEqual(c.codes("start"), ["start_created"])
 

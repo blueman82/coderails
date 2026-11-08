@@ -104,7 +104,7 @@ def verify_reference(
         expected_path,
         expected_role,
         reference["task_complete_turn_id"],
-        assigned_worktree(state, node_id),
+        assigned_worktree(state, node_id, reference["attempt"]),
     )
     return spawn_line
 
@@ -179,7 +179,7 @@ def _validate_missing_attempts(
                     )
             else:
                 _verify_dispatch(state, node_id, attempt, issued[0]["wave_id"], call, requests)
-            worktree = assigned_worktree(state, node_id)
+            worktree = assigned_worktree(state, node_id, attempt)
             child_read_records(state["session_id"], child, nickname, path, role, worktree)
             used.update({call, child})
         if line <= previous_line:
@@ -297,7 +297,7 @@ def bind_worker_evidence(
         call_id, (_, _, agent_thread_id, nickname, expected_path, expected_role) = matching[0]
         _verify_dispatch(state, node_id, attempt, active_wave["wave_id"], call_id, requests)
         child_args = (state["session_id"], agent_thread_id, nickname, expected_path, expected_role)
-        worktree = assigned_worktree(state, node_id)
+        worktree = assigned_worktree(state, node_id, attempt)
         if node_id in stale_nodes:
             child_read_records(*child_args, worktree)
             continue

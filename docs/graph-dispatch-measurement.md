@@ -13,8 +13,9 @@ first-line v2 envelope plus the rendered sections to paste. The shared `packages
 deterministically, cross-checks a prompt against the stored record and asserts the role against `capabilities/profiles.json`.
 Claude's `Agent` guard and Codex's `spawn_agent` guard (now enforcing for every spawn of a graph-bound session) both call it
 through `authorize_dispatch` / `graph.py authorize-dispatch`; Claude's completion revalidation re-checks each bound spawn's
-record and digest for waves at or after `graph.contract_from_revision`. `graph.py convert` takes `state_minor` 1 to 2 and
-refuses while a wave is open. Rows go to `recovery-trace.jsonl` as `authorize-dispatch/refused/<code>` and
+record and digest for waves at or after `graph.contract_from_revision`. Current conversion reaches `state_minor` 3.
+It adds `graph.context_from_revision`; new records from that revision bind required skills and checks to task facts.
+Conversion refuses while a wave is open. Rows go to `recovery-trace.jsonl` as `authorize-dispatch/refused/<code>` and
 `authorize-dispatch/authorized/dispatch_authorized`; `python3 scripts/lib/dispatch_counters.py` tallies them (own module
 because `scripts/measure_graph_alignment.py` is at its line limit; folding it in is handoff H1). Flip condition:
 `role_mismatch` above zero means a prompt names the wrong agent type (a scout dispatched as `general-purpose`);

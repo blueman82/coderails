@@ -17,6 +17,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "skills/agentic-loop/scripts"))
 import graph as claude_graph
+import graph_contract
 import graph_convert
 
 from hooks.scripts.tests.lib import claude_transcript_fixture as claude
@@ -115,10 +116,11 @@ class GraphConvertTests(unittest.TestCase):
             result = case.graph("convert")
             self.assertEqual(result.returncode, 0, (case.name, result.stderr))
             report = json.loads(result.stdout)
-            self.assertEqual((report["changed"], report["from"], report["to"]), (True, 0, 2))
+            self.assertEqual((report["changed"], report["from"], report["to"]), (True, 0, 3))
             state = case.read()
-            self.assertEqual((state["state_minor"], state["stops"], state["graph"]["wave_history"]), (2, [], {}))
+            self.assertEqual((state["state_minor"], state["stops"], state["graph"]["wave_history"]), (3, [], {}))
             self.assertEqual((state["graph"]["dispatches"], state["graph"]["contract_from_revision"]), ({}, 1))
+            self.assertEqual(state["graph"]["context_from_revision"], 1)
             self.assertIn("updated_at", state)
             self.assertEqual(case.backup.read_bytes(), original)
             self.assertEqual(case.inspect().returncode, 0, case.name)  # the real reader still accepts it
@@ -136,10 +138,11 @@ class GraphConvertTests(unittest.TestCase):
             case.write(v1_state(revision=3))
             result = case.graph("convert")
             self.assertEqual(result.returncode, 0, (case.name, result.stderr))
-            self.assertEqual(json.loads(result.stdout)["steps"], ["v1->v2"])
+            self.assertEqual(json.loads(result.stdout)["steps"], ["v1->v2", "v2->v3"])
             state = case.read()
-            self.assertEqual((state["state_minor"], state["graph"]["dispatches"]), (2, {}))
+            self.assertEqual((state["state_minor"], state["graph"]["dispatches"]), (3, {}))
             self.assertEqual(state["graph"]["contract_from_revision"], 3)
+            self.assertEqual(state["graph"]["context_from_revision"], 3)
             case.backup.unlink()
             case.write(v1_state(active=True))
             before = case.path.read_bytes()
@@ -149,6 +152,83 @@ class GraphConvertTests(unittest.TestCase):
             self.assertEqual(case.path.read_bytes(), before)
             self.assertFalse(case.backup.exists())
             self.assertEqual(case.reasons()[-1], "convert_refused_active_wave_in_flight")
+
+    def test_v2_context_conversion_refuses_torn_or_open_dispatch_state(self) -> None:
+        """Only an idle, valid v2 state gets a context cutoff; refusals preserve its bytes."""
+        for case in self.cases:
+            old = v1_state(revision=3)
+            old["state_minor"] = 2
+            old["graph"].update(dispatches={}, contract_from_revision=2)
+            case.write(old)
+            result = case.graph("convert")
+            self.assertEqual(result.returncode, 0, (case.name, result.stderr))
+            state = case.read()
+            self.assertEqual(state["state_minor"], 3)
+            self.assertEqual(state["graph"]["context_from_revision"], 3)
+            case.backup.unlink()
+            historical = graph_contract.build_contract(old, "U3[1]", "main")
+            del historical["required_context"]
+            identifier, record = graph_contract.make_record(old, "U3[1]", "wave-2", 1, historical, None)
+            record["revision"] = 2
+            with_history = {**old, "graph": {**old["graph"], "dispatches": {identifier: record}}}
+            case.write(with_history)
+            result = case.graph("convert")
+            self.assertEqual(result.returncode, 0, (case.name, result.stderr))
+            self.assertEqual(case.read()["graph"]["dispatches"], with_history["graph"]["dispatches"])
+            case.backup.unlink()
+            broken_cases: list[dict[str, Any]] = [
+                {**old, "graph": {**old["graph"], "dispatches": []}},
+                {**old, "graph": {**old["graph"], "dispatches": {"disp_torn": {}}}},
+                {**old, "graph": {**old["graph"], "contract_from_revision": "2"}},
+                {**old, "graph": {**old["graph"], "active_wave": {"wave_id": "wave-3", "nodes": []}}},
+            ]
+            contract = graph_contract.build_contract(old, "U3[1]", "main")
+            del contract["required_context"]
+            broken_cases.append(
+                {
+                    **old,
+                    "graph": {
+                        **old["graph"],
+                        "dispatches": {
+                            "disp_equal_revision": {
+                                "node_id": "U3[1]",
+                                "wave_id": "wave-3",
+                                "revision": old["revision"],
+                                "attempt": 1,
+                                "envelope_version": graph_contract.ENVELOPE_VERSION,
+                                "contract": contract,
+                                "prompt_sections_sha256": graph_contract.sections_sha256(contract),
+                            }
+                        },
+                    },
+                }
+            )
+            broken_cases.append(
+                {
+                    **old,
+                    "graph": {
+                        **old["graph"],
+                        "dispatches": {
+                            "disp_forged_attempt": {
+                                "node_id": "U3[1]",
+                                "wave_id": "wave-2",
+                                "revision": 2,
+                                "attempt": 1,
+                                "envelope_version": graph_contract.ENVELOPE_VERSION,
+                                "contract": contract,
+                                "prompt_sections_sha256": graph_contract.sections_sha256(contract),
+                            }
+                        },
+                    },
+                }
+            )
+            for broken in broken_cases:
+                case.write(broken)
+                before = case.path.read_bytes()
+                refused = case.graph("convert")
+                self.assertNotEqual(refused.returncode, 0, (case.name, refused.stderr))
+                self.assertEqual(case.path.read_bytes(), before)
+                self.assertFalse(case.backup.exists())
 
     def test_check_never_writes(self) -> None:
         """--check reports the pending conversion and leaves the file and the backup alone."""
