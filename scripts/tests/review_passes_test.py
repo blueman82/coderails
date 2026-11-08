@@ -368,7 +368,9 @@ class PathTests(unittest.TestCase):
             self.assertRaises(git.WorkflowError) as caught,
         ):
             publication_gate.enforce("7", SHA)
-        self.assertTrue(str(caught.exception).startswith("required_review_missing:security-review"))
+        self.assertTrue(
+            str(caught.exception).startswith("required_review_missing:security-review"), str(caught.exception)
+        )
         self.assertIn(publication_gate.review_passes_check, publication_gate.CHECKS)
         self.assertTrue(hasattr(merge, "publication_gate"))
 
