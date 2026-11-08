@@ -296,9 +296,9 @@ class HardeningTests(Base):
     def test_codex_handoff_resolves_paths(self) -> None:
         """The Codex handoff names resolvable paths and where state and session come from."""
         text = (REPO / "packages/codex/skills/handoff/SKILL.md").read_text()
-        self.assertIn("muninn learn show <R_ID>", text)
-        self.assertIn("muninn know show <K_ID>", text)
-        self.assertIn("$SKILL_DIR/../agentic-loop/scripts/graph.py", text)
+        self.assertIn("$SKILL_DIR/../../scripts/lib/handoff_derive.py", text)
+        self.assertIn("retained R-id/window/project bindings", text)
+        self.assertIn("provider `graph.py summarize`, `inspect`", text)
         self.assertIn("bootstrap", text)
 
 

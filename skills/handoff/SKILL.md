@@ -28,20 +28,15 @@ read-only and prints a JSON skeleton `{goal, decisions[{id, cite, text}], done, 
 degraded[]}` (decisions carry their Muninn K-ids and cites; proof verdicts are recorded claims, not `done`). Use it for Goal, Decisions, Done
 and Next steps instead of reconstructing them from the conversation. **State `degraded[]` to the user in the handoff
 under a "Memory degraded" line**, reason code by reason code (exit 3 means it is non-empty); never skip it and never
-replace it with hand-written Markdown. The commands it wraps, for reference or when you need a field it does not print:
-`python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" summarize <state>` (JSON: `phase`, `detail`, `done`,
-`active`, `ready`, `pending`) and `... graph.py inspect <state>` (JSON: `revision`, `active_wave`, `running`, `ready`,
-`hard_stop`). Honor `memory.backend: off`: do not call Muninn in that mode. Otherwise, each decision needs its saved
-`muninn.request_id`, `request_window`, and `project_id`; missing binding stays unknown and supplies no cited text.
-The expected note kind is `decision`, task is `loop_id`, and content is whitespace-collapsed `<phase>: <decision>`.
-Run `muninn learn show <R_ID>` and require the same request ID, saved source window, project and task, a completed
-request, and its receipt naming that same R_ID. Run `muninn know list --task <TASK>` to establish current eligibility.
-Intersect its exact `(knowledge_id, revision)` pairs with the receipt's applied revisions, then inspect those notes
-with `muninn know show <K_ID>`. Require that same revision, active state, exact project/task/kind/text, and nonempty
-retained `evidence_sources` refs. Require exactly one matching note; a cached K_ID alone grants no authority. A retained
-active show result absent from the current list is ineligible. Report pending, failed, unknown, missing or ambiguous
-matches under "Memory degraded" with the saved request ID. Do not treat request completion as note admission.
-A missing loop graph drops only the graph commands; Step 1 still supplies the rest.
+replace it with hand-written Markdown. Run these commands from the actual mapped project repository.
+The state-key directory and plugin checkout do not establish project scope.
+The skeleton uses retained R-id/window/project bindings for local decisions and exact current task receipts for extras.
+Keep revision, real selected quote, complete supports, conditions and expiry in the handoff. Do not assume a condition
+is true. Keep unknown/pending and unsupported-use reasons visible. Current Muninn has no normal/restricted classifier;
+its physical source, scope, redaction and owner-authority checks do not establish semantic privacy classification.
+For graph fields, use the provider `graph.py summarize`, `inspect` and supported `collection` commands as applicable.
+If one graph read fails, omit only its result. Do not use the standalone legacy adapter list as a modern fallback.
+A missing graph drops only its graph-derived fields. Then continue with Step 1.
 
 When reporting graph work, use `inspect`/`summarize`'s `node_names` entry to show each node's one-word job name and lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.
 
