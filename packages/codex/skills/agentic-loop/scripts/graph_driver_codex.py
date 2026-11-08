@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -59,6 +60,31 @@ SCHEMA = {
 }
 
 
+def guarded_role(root: Path, role: str) -> bool:
+    """Require policy and the installed shell-off role contract to select the same route."""
+    if re.fullmatch(r"[a-z][a-z0-9-]{0,60}", role) is None:
+        raise ValueError("driver role capability policy has an invalid role")
+    try:
+        raw: object = json.loads((root / "capabilities/profiles.json").read_text())["agents"][role]
+        if not isinstance(raw, list) or any(not isinstance(item, str) for item in cast(list[object], raw)):
+            raise ValueError("capability grants must be a list of strings")
+        capabilities = set(cast(list[str], raw))
+        contract = (root / "agents" / f"{role}.toml").read_text()
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ValueError("driver role capability profile is invalid") from error
+    if not capabilities and role != "spec-reviewer":
+        raise ValueError("driver role capability policy is empty")
+    guarded = bool(capabilities & {"repo.inspect", "diff.read", "tests.run", "pr.comment", "cmd.run"}) and not bool(
+        capabilities & {"shell.raw", "worktree.write"}
+    )
+    contract = re.sub(r'(?s)""".*?"""|\'\'\'.*?\'\'\'', '""', contract)
+    features = re.search(r"(?ms)^\[features\]\s*\n(.*?)(?=^\[|\Z)", contract)
+    shell_off = bool(features and re.search(r"(?m)^shell_tool\s*=\s*false\s*$", features.group(1)))
+    if guarded != shell_off:
+        raise ValueError("driver role capability policy conflicts with its agent contract")
+    return guarded
+
+
 def command(
     prompt: Path,
     checkout: Path,
@@ -85,15 +111,7 @@ def command(
         with schema_path.open("x", encoding="utf-8") as stream:
             stream.write(data)
     root = Path(__file__).resolve().parents[3]
-    try:
-        agents: dict[str, list[str]] = json.loads((root / "capabilities/profiles.json").read_text())["agents"]
-        capabilities = set(agents[role])
-    except (OSError, ValueError, KeyError, TypeError) as error:
-        raise ValueError("driver role capability profile is invalid") from error
-    guarded = bool(capabilities & {"repo.inspect", "diff.read", "tests.run", "pr.comment", "cmd.run"}) and not bool(
-        capabilities & {"shell.raw", "worktree.write"}
-    )
-    if guarded:
+    if guarded_role(root, role):
         wrapper = root / "scripts/codex_role_session.py"
         if not wrapper.is_file():
             raise ValueError("guarded Codex role launcher is missing")

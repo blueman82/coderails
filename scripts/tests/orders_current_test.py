@@ -13,9 +13,8 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts.lib import orders_ledger as ol  # noqa: E402
 from scripts.lib import orders_lifecycle as lifecycle  # noqa: E402
-from scripts.tests import lessons_test as lesson_cases  # noqa: E402
 from scripts.tests import orders_recovery_test as recovery  # noqa: E402
-from scripts.tests.fake_muninn_case import PROMPT  # noqa: E402
+from scripts.tests.fake_muninn_case import FAKE, PROMPT  # noqa: E402
 from scripts.tests.orders_lifecycle_test import progress  # noqa: E402
 
 PATH_PROBE = r"""
@@ -47,10 +46,10 @@ class CitationChronology(recovery.RecoveryCase):
     """Store currentness is separate from a sealed lifecycle snapshot and cached write metadata."""
 
     def record_text(self, session: str, text: str, quote: str = PROMPT) -> tuple[int, dict[str, Any]]:
-        """Use a genuine eligible source and the explicit lesson-authoring frontdoor."""
+        """Complete a controlled review only when this test asks for a saved fixture."""
         if not (self.repo / session / "progress.json").exists():
             self.owner(session)
-        return self.cli(
+        args = (
             "record",
             "--id",
             "stable-mode",
@@ -64,7 +63,35 @@ class CitationChronology(recovery.RecoveryCase):
             "logical-" + session,
             "--quote",
             quote,
-            session=session,
+        )
+        code, result = self.cli(*args, session=session)
+        if quote and code == 3 and result.get("muninn", {}).get("state") == "pending":
+            self.muninn(
+                "learn",
+                "complete",
+                result["muninn"]["request_id"],
+                "--kind",
+                "lesson",
+                "--content",
+                text,
+                extra_env=self.native_env,
+            )
+            return self.cli(*args, session=session)
+        return code, result
+
+    def store_rows(self) -> list[tuple[Any, ...]]:
+        """Inspect the controlled current store, not the separate legacy SQLite ledger."""
+        path = self.home / "requests.json"
+        data: dict[str, Any] = json.loads(path.read_text()) if path.exists() else {"knowledge": {}}
+        return sorted((note["id"], note["body"]["content"], note["state"]) for note in data["knowledge"].values())
+
+    def unavailable_current(self) -> None:
+        """Fail the actual current-list read, preserving all request metadata."""
+        exe = self.tmp / "bin/muninn"
+        exe.write_text(
+            f"#!{sys.executable}\nimport runpy, sys\n"
+            "if sys.argv[1:3] == ['know','list'] and '--task' in sys.argv: raise SystemExit(1)\n"
+            f"sys.argv[0] = {str(FAKE)!r}\nrunpy.run_path(sys.argv[0], run_name='__main__')\n"
         )
 
     def apply(self, session: str) -> dict[str, Any]:
@@ -75,7 +102,7 @@ class CitationChronology(recovery.RecoveryCase):
         return cast("dict[str, Any]", ol.open_ledger(self.repo)["orders"][0])
 
     def test_cite_reconciles_newer_staged_claim_without_authoring_old_ledger_text(self) -> None:
-        """Cite of applied A never supersedes a legitimate later current B; explicit record may author C."""
+        """The active order keeps A until the separately prepared B is actually applied."""
         for codex in (False, True):
             self.configure(codex, "chronology")
             self.assertEqual(self.record_text("s1", "Lesson A")[0], 0)
@@ -86,65 +113,52 @@ class CitationChronology(recovery.RecoveryCase):
             rc, out = self.cli("cite", "stable-mode", "--quote", PROMPT)
             with self.subTest(codex=codex, boundary="cite"):
                 self.assertEqual(rc, 0, out)
-                self.assertNotEqual(out["muninn"]["id"], first["muninn"]["id"])
+                self.assertEqual(out["muninn"]["id"], first["muninn"]["id"])
                 self.assertEqual(self.store_rows(), prior)
             with self.subTest(codex=codex, boundary="current-query"):
                 current = self.cli("query", script="lessons.py")[1]["lessons"]
-                self.assertEqual([r["text"] for r in current], ["Lesson B"])
+                self.assertEqual([r["text"] for r in current], ["Lesson A"])
             self.apply("s2")
             with self.subTest(codex=codex, boundary="after-apply"):
                 self.assertEqual(self.cli("query", script="lessons.py")[1]["lessons"][0]["text"], "Lesson B")
             self.assertEqual(self.record_text("s3", "Lesson C")[0], 0)
-            self.assertEqual(self.cli("query", script="lessons.py")[1]["lessons"][0]["text"], "Lesson C")
+            self.assertEqual(self.cli("query", script="lessons.py")[1]["lessons"][0]["text"], "Lesson B")
 
     def test_completed_tick_preserves_later_good_citation_over_old_prepared_metadata(self) -> None:
-        """No-id and old-id preparations cannot erase a later saved current citation, including read failure."""
+        """A pending preparation retains its own request across a failed current read and retry."""
         exe = self.tmp / "bin/muninn"
         original = exe.read_bytes()
         for codex in (False, True):
-            for old_id in (False, True):
-                for unavailable in (False, True):
-                    exe.write_bytes(original)
-                    self.configure(codex, f"provenance{old_id}{unavailable}")
-                    self.assertIn(self.record_text("s1", "Stable lesson", PROMPT if old_id else "")[0], (0, 3))
-                    self.apply("s1")
-                    if old_id:
-                        lesson_cases.SessionAttribution.unavailable_list(self)
-                    self.assertEqual(self.record_text("s2", "Stable lesson", "")[0], 3)
-                    exe.write_bytes(original)
-                    if old_id:
-                        self.sql("UPDATE knowledge SET status = 'retracted'")
-                        self.assertEqual(self.record_text("s3", "Stable lesson")[0], 0)
-                    rc, cited = self.cli("cite", "stable-mode", "--quote", PROMPT)
-                    self.assertEqual(rc, 0, cited)
-                    known = cited["muninn"]["id"]
-                    if unavailable:
-                        lesson_cases.SessionAttribution.unavailable_list(self)
-                    self.complete("s2")
-                    reads = sum(r["command"] == "memory.list" for r in self.trace_rows())
-                    store = self.store_rows()
-                    rc, applied = self.cli("tick", "--loop", "logical-s2", session="s2")
-                    order = ol.open_ledger(self.repo)["orders"][0]
-                    with self.subTest(codex=codex, old_id=old_id, unavailable=unavailable, boundary="provenance"):
-                        self.assertEqual(order["muninn"]["id"], known, applied)
-                    with self.subTest(codex=codex, old_id=old_id, unavailable=unavailable, boundary="state"):
-                        self.assertEqual(order["muninn"]["state"], "degraded" if unavailable else "written")
-                    with self.subTest(codex=codex, old_id=old_id, unavailable=unavailable, boundary="exit"):
-                        self.assertEqual(rc, 3 if unavailable else 0, applied)
-                    if unavailable:
-                        with self.subTest(codex=codex, old_id=old_id, boundary="fresh-read-counter"):
-                            self.assertGreater(sum(r["command"] == "memory.list" for r in self.trace_rows()), reads)
-                    self.assertEqual(self.store_rows(), store)
-                    exe.write_bytes(original)
-                    saved = ol.open_ledger(self.repo)
-                    rc, retry = self.cli("tick", "--loop", "logical-s2", session="s2")
-                    after = ol.open_ledger(self.repo)
-                    with self.subTest(codex=codex, old_id=old_id, unavailable=unavailable, boundary="retry"):
-                        self.assertEqual((rc, retry["ticked"]), (0, False), retry)
-                        self.assertEqual(after["orders"][0]["muninn"]["id"], known)
-                        self.assertEqual(after["orders"][0]["muninn"]["state"], "written")
-                        self.assertEqual(after["ticked_loops"], saved["ticked_loops"])
-                        self.assertEqual(after["orders"][0]["evidence"], saved["orders"][0]["evidence"])
+            for unavailable in (False, True):
+                exe.write_bytes(original)
+                self.configure(codex, f"provenance{unavailable}")
+                self.assertEqual(self.record_text("s1", "Stable lesson")[0], 0)
+                first = self.apply("s1")
+                self.assertEqual(self.record_text("s2", "Stable lesson")[0], 0)
+                prepared_path = next((self.repo / "s2").glob("orders-prepared-*.json"))
+                preparation = json.loads(prepared_path.read_text())
+                field = preparation["records"][0]["muninn"]
+                expected = field["id"]
+                field.update(id=None, state="pending")
+                prepared_path.write_text(json.dumps(preparation))
+                self.assertEqual(self.cli("prepare", "--loop", "logical-s2", session="s2")[0], 0)
+                self.complete("s2")
+                if unavailable:
+                    self.unavailable_current()
+                before = self.store_rows()
+                rc, applied = self.cli("tick", "--loop", "logical-s2", session="s2")
+                order = ol.open_ledger(self.repo)["orders"][0]
+                with self.subTest(codex=codex, unavailable=unavailable):
+                    self.assertEqual(rc, 3 if unavailable else 0, applied)
+                    self.assertEqual(order["muninn"]["id"], first["muninn"]["id"] if unavailable else expected)
+                    self.assertEqual(order["muninn"]["request_id"], field["request_id"])
+                    self.assertEqual(self.store_rows(), before)
+                exe.write_bytes(original)
+                rc, retry = self.cli("tick", "--loop", "logical-s2", session="s2")
+                after = ol.open_ledger(self.repo)
+                self.assertEqual((rc, retry["ticked"]), (0, False), retry)
+                self.assertEqual(after["orders"][0]["muninn"]["id"], expected)
+                self.assertEqual(after["orders"][0]["evidence"], order["evidence"])
 
     def test_promotion_uses_current_join_despite_cached_degraded_or_pending(self) -> None:
         """Recovered current citations authorize promotion without an extra write to fix cached state."""
@@ -156,10 +170,10 @@ class CitationChronology(recovery.RecoveryCase):
             for sid in ("s1", "s2", "s3"):
                 self.assertEqual(self.record_text(sid, "Current promotion lesson")[0], 0)
                 self.apply(sid)
-            lesson_cases.SessionAttribution.unavailable_list(self)
+            self.unavailable_current()
             self.assertEqual(self.cli("cite", "stable-mode", "--quote", PROMPT)[0], 3)
             exe.write_bytes(original)
-            for state in ("degraded", "pending"):
+            for state in ("unknown", "pending"):
                 if state == "pending":
                     ledger = ol.open_ledger(self.repo)
                     order = ledger["orders"][0]
@@ -174,42 +188,33 @@ class CitationChronology(recovery.RecoveryCase):
                     self.assertEqual([r["lesson"] for r in out["candidates"]], ["Current promotion lesson"])
                     self.assertEqual(self.store_rows(), before)
 
-    def test_different_valid_current_claims_refuse_instead_of_numeric_or_cached_choice(self) -> None:
-        """The actual store allows tagged adds without supersession; differing current claims are ambiguous."""
+    def test_foreign_current_claim_does_not_replace_exact_request(self) -> None:
+        """Another saved task Note cannot replace the active order's exact receipt binding."""
         for codex in (False, True):
-            self.configure(codex, "ambiguous")
+            self.configure(codex, "foreign-current")
             self.assertEqual(self.record_text("s1", "First valid claim")[0], 0)
-            self.apply("s1")
+            first = self.apply("s1")
             self.owner("s2")
-            rc, added = self.muninn(
-                "know",
-                "add",
+            code, request = self.muninn(
+                "learn", "request", "--session", "s2", "--task", "logical-s1", extra_env=self.native_env
+            )
+            self.assertEqual(code, 0, request)
+            self.muninn(
+                "learn",
+                "complete",
+                request["id"],
                 "--kind",
                 "lesson",
-                "--text",
+                "--content",
                 "Different valid claim",
-                "--cite",
-                "claude:s2:1.1",
-                "--quote",
-                PROMPT,
-                "--tag",
-                "order",
-                "--tag",
-                "ord-stable-mode",
                 extra_env=self.native_env,
             )
-            self.assertEqual(rc, 0, added)
-            prior = self.store_rows()
-            for script, command in (
-                ("lessons.py", ("query",)),
-                ("orders.py", ("cite", "stable-mode", "--quote", PROMPT)),
-            ):
-                with self.subTest(codex=codex, script=script):
-                    rc, out = self.cli(*command, script=script)
-                    self.assertIn(rc, (2, 3), out)
-                    reason = out.get("reason_code") or out.get("degraded") or out.get("muninn", {}).get("reason_code")
-                    self.assertEqual(reason, "lesson_not_current", out)
-                    self.assertEqual(self.store_rows(), prior)
+            before = self.store_rows()
+            rc, result = self.cli("cite", "stable-mode", "--quote", PROMPT)
+            self.assertEqual((rc, result["muninn"]["id"]), (0, first["muninn"]["id"]))
+            current = self.cli("query", script="lessons.py")[1]["lessons"]
+            self.assertEqual([row["text"] for row in current], ["First valid claim"])
+            self.assertEqual(self.store_rows(), before)
 
     def test_uncited_first_attachment_ignores_divergent_advanced_historical_text(self) -> None:
         """Historical rows bind immutable identity; they cannot permanently veto the active ledger's first cite."""
@@ -221,6 +226,17 @@ class CitationChronology(recovery.RecoveryCase):
                     self.apply(sid)
                 progress(self.repo, "s1", "next-logical-loop", "in-progress")
                 self.assertEqual(self.store_rows(), [])
+                order = ol.open_ledger(self.repo)["orders"][0]
+                self.muninn(
+                    "learn",
+                    "complete",
+                    order["muninn"]["request_id"],
+                    "--kind",
+                    "lesson",
+                    "--content",
+                    "Active B",
+                    extra_env=self.native_env,
+                )
                 rc, out = self.cli("cite", "stable-mode", "--quote", PROMPT)
                 self.assertEqual(rc, 0, out)
                 self.assertEqual([row[1] for row in self.store_rows()], ["Active B"])
@@ -232,12 +248,14 @@ class CitationChronology(recovery.RecoveryCase):
             self.configure(codex, "absent-current")
             self.assertEqual(self.record_text("s1", "Former claim")[0], 0)
             known = self.apply("s1")["muninn"]["id"]
-            self.sql("UPDATE knowledge SET status = 'retracted'")
+            self.muninn("know", "retract", known, "--reason", "test", extra_env=self.native_env)
             before = self.store_rows()
             rc, out = self.cli("cite", "stable-mode", "--quote", PROMPT)
             with self.subTest(codex=codex, boundary="refusal"):
                 self.assertIn(rc, (2, 3), out)
-                self.assertEqual(out.get("reason_code", out.get("muninn", {}).get("reason_code")), "lesson_not_current")
+                self.assertEqual(
+                    out.get("reason_code", out.get("muninn", {}).get("reason_code")), "learning_no_matching_record"
+                )
             with self.subTest(codex=codex, boundary="no-knowledge-write"):
                 self.assertEqual(self.store_rows(), before)
                 self.assertEqual(ol.open_ledger(self.repo)["orders"][0]["muninn"]["id"], known)

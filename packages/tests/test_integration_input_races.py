@@ -42,6 +42,29 @@ with patch.object(graph_dispatch_inputs, 'prefetch', side_effect=racing):
     runpy.run_path(str(script), run_name='__main__')
 """
 
+REVISION_RACE = """import json, runpy, subprocess, sys
+from pathlib import Path
+from unittest.mock import patch
+plugin, operation, progress, expected = sys.argv[1:]
+script = Path(plugin) / 'skills/agentic-loop/scripts/graph.py'
+sys.path.insert(0, str(script.parent))
+sys.path.insert(0, plugin)
+original = subprocess.run
+def racing(argv, *args, **kwargs):
+    result = original(argv, *args, **kwargs)
+    if len(argv) > 1 and str(argv[1]).endswith('/lib/lessons.py'):
+        assert result.returncode == 0, result.stderr
+        assert len(json.loads(result.stdout)['lessons']) == 1
+        state = json.loads(Path(progress).read_text())
+        state['revision'] += 1
+        Path(progress).write_text(json.dumps(state))
+        Path(expected).write_bytes(Path(progress).read_bytes())
+    return result
+sys.argv = [str(script), operation, progress]
+with patch.object(subprocess, 'run', side_effect=racing):
+    runpy.run_path(str(script), run_name='__main__')
+"""
+
 
 class InputRaceTests(unittest.TestCase):
     """Exercise both the shared transaction check and the actual provider transactions."""
@@ -122,6 +145,40 @@ class InputRaceTests(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0, result.stdout)
                     self.assertIn("dispatch_lessons_stale", result.stderr)
                     self.assertEqual(provider.path.read_bytes(), expected.read_bytes())
+
+    def test_revision_change_during_current_note_read_refuses_before_wave_write(self) -> None:
+        """An actual complete Note prefetch outside the lock cannot authorize a newer graph revision."""
+        for name in ("claude", "codex"):
+            for operation in ("begin-wave", "begin-driver-wave"):
+                with self.subTest(provider=name, operation=operation), tempfile.TemporaryDirectory() as temporary:
+                    provider = Provider(Path(temporary).resolve(), name)
+                    provider.current_note()
+                    if operation == "begin-driver-wave":
+                        provider.success("cutover-driver", "--session", provider.session)
+                    expected = provider.home / "concurrent-progress.json"
+                    runner = provider.home / "race.py"
+                    runner.write_text(REVISION_RACE)
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            str(runner),
+                            str(provider.plugin),
+                            operation,
+                            str(provider.path),
+                            str(expected),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=20,
+                        env=provider.environment,
+                        cwd=provider.checkout,
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn("dispatch_lessons_stale", result.stderr)
+                    self.assertEqual(provider.path.read_bytes(), expected.read_bytes())
+                    calls = [json.loads(line) for line in (provider.home / "calls.jsonl").read_text().splitlines()]
+                    self.assertTrue(all(call["cwd"] == str(provider.checkout) for call in calls))
 
 
 if __name__ == "__main__":
