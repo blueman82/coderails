@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -167,7 +168,11 @@ def verify(manifest: object, root: Path, config: Path, claude: Path, codex: Path
     if not isinstance(manifest, dict):
         raise ValueError("manifest_invalid")
     record = cast("dict[str, object]", manifest)
-    if record.get("schema_version") != 1 or record.get("status") != "candidate":
+    if (
+        type(record.get("schema_version")) is not int
+        or record["schema_version"] != 1
+        or record.get("status") != "candidate"
+    ):
         raise ValueError("manifest_invalid")
     fresh_identity = identity(root)
     for field, current in fresh_identity.items():
@@ -206,6 +211,9 @@ def verify(manifest: object, root: Path, config: Path, claude: Path, codex: Path
                 continue
             if candidate.is_symlink():
                 raise ValueError("installed_path_symlink")
+            mode = candidate.lstat().st_mode
+            if not stat.S_ISREG(mode) and not stat.S_ISDIR(mode):
+                raise ValueError("installed_path_type")
             if candidate.is_file() and selected[0] == bundle and selected[1] not in current_files[bundle]:
                 raise ValueError("installed_file_extra")
         for relative, expected_sha in current_files[bundle].items():
@@ -218,6 +226,9 @@ def verify(manifest: object, root: Path, config: Path, claude: Path, codex: Path
                 raise ValueError("installed_file_missing")
             if digest(target.read_bytes()) != expected_sha:
                 raise ValueError("installed_file_changed")
+            source_relative = f"{CODEX_PREFIX}{relative}" if bundle == "codex" else relative
+            if target.stat().st_mode & 0o111 != (root / source_relative).stat().st_mode & 0o111:
+                raise ValueError("installed_file_mode")
 
 
 def main(arguments: list[str] | None = None) -> int:

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -42,11 +43,18 @@ REQUIRED_FILES = {
 }
 
 
+def ignored(relative: Path) -> bool:
+    """Apply the same unconditional cache exclusions before inspecting entry types."""
+    return bool(
+        IGNORED_DIRS & set(relative.parts) or relative.name in IGNORED_NAMES or relative.name.endswith(IGNORED_SUFFIXES)
+    )
+
+
 def installed_files(root: Path) -> Iterator[Path]:
     """Yield regular files under root as relative paths, skipping ignored cache and Finder files."""
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
-        if IGNORED_DIRS & set(relative.parts) or path.name in IGNORED_NAMES or path.name.endswith(IGNORED_SUFFIXES):
+        if ignored(relative):
             continue
         if path.is_file() and not path.is_symlink():
             yield relative
@@ -61,6 +69,8 @@ def compare(bundle: str, installed: Path, source: Path) -> list[str]:
             found.append(f"DIFF {bundle}: {relative} (extra: absent from source {source})")
         elif counterpart.read_bytes() != (installed / relative).read_bytes():
             found.append(f"DIFF {bundle}: {relative} (differs from source)")
+        elif counterpart.stat().st_mode & 0o111 != (installed / relative).stat().st_mode & 0o111:
+            found.append(f"DIFF {bundle}: {relative} (executable mode differs from source)")
     return found
 
 
@@ -155,16 +165,27 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 2
             try:
-                linked = next((path for path in installed.rglob("*") if path.is_symlink()), None)
+                for path in installed.rglob("*"):
+                    if ignored(path.relative_to(installed)):
+                        continue
+                    mode = path.lstat().st_mode
+                    if stat.S_ISLNK(mode):
+                        raise ValueError(f"installed tree contains a symlink: {path}")
+                    if not stat.S_ISREG(mode) and not stat.S_ISDIR(mode):
+                        raise ValueError(f"installed tree contains a special entry: {path}")
+            except ValueError as error:
+                print(f"installed_parity: {bundle}: {error}", file=sys.stderr)
+                return 2
             except OSError as error:
                 print(f"installed_parity: {bundle}: cannot inspect installed tree: {error}", file=sys.stderr)
                 return 2
-            if linked is not None:
-                print(f"installed_parity: {bundle}: installed tree contains a symlink: {linked}", file=sys.stderr)
-                return 2
             prefix = "packages/codex/" if bundle == "codex" else ""
-            expected = {path[len(prefix) :] for path in tracked if path.startswith(prefix)}
-            for required in (*REQUIRED_FILES[bundle], *runtime[bundle]):
+            expected = {
+                path[len(prefix) :]
+                for path in tracked
+                if path.startswith(prefix) and not ignored(Path(path[len(prefix) :]))
+            }
+            for required in sorted(expected | set(REQUIRED_FILES[bundle]) | set(runtime[bundle])):
                 if required not in expected or not (installed / required).is_file():
                     print(f"installed_parity: {bundle}: required installed file missing: {required}", file=sys.stderr)
                     return 2
