@@ -100,6 +100,63 @@ class ReleaseInventoryTests(unittest.TestCase):
         (case.codex / "hooks/line\nname.py").unlink()
         self.assertIn("installed_file_missing", case.verify(snapshot).stderr)
 
+    def test_hidden_index_flags_cannot_bind_uncommitted_runtime_bytes(self) -> None:
+        """A clean status with index suppression is not proof of committed source bytes."""
+        case = self.manifest
+        relative = "hooks/hooks.json"
+        original = (case.root / relative).read_bytes()
+        for flag in ("assume-unchanged", "skip-worktree"):
+            with self.subTest(flag=flag):
+                case.git("update-index", f"--{flag}", relative)
+                try:
+                    preserved = case.run_cli("snapshot", "--source-root", str(case.root), "--config", str(case.config))
+                    self.assertEqual(preserved.returncode, 0, preserved.stderr)
+                    (case.root / relative).write_bytes(b"changed\n")
+                    (case.claude / relative).write_bytes(b"changed\n")
+                    self.assertEqual(case.git("status", "--porcelain"), "")
+                    result = case.run_cli("snapshot", "--source-root", str(case.root), "--config", str(case.config))
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("source_file_uncommitted", result.stderr)
+                finally:
+                    (case.root / relative).write_bytes(original)
+                    (case.claude / relative).write_bytes(original)
+                    case.git("update-index", f"--no-{flag}", relative)
+
+    def test_importable_modules_outside_known_directories_are_runtime(self) -> None:
+        """Root modules, packages and extension modules cannot bypass extra-file checks."""
+        snapshot = self.manifest.snapshot()
+        for relative in ("argparse.py", "argparse/__init__.py", "argparse.so"):
+            with self.subTest(relative=relative):
+                target = self.manifest.claude / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b"unverified module\n")
+                try:
+                    self.assertIn("installed_file_extra", self.manifest.verify(snapshot).stderr)
+                finally:
+                    target.unlink()
+
+    def test_untracked_root_modules_refuse_strict_parity(self) -> None:
+        """Source selection must also reject untracked root import-shadow modules."""
+        installed_parity_test.write(self.parity.source, "argparse.py", b"unverified module\n")
+        result = self.strict()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("untracked runtime source", result.stderr)
+
+    def test_source_binding_accepts_git_sha256_object_format(self) -> None:
+        """Object verification uses the selected repository's native object hash."""
+        case = self.manifest
+        (case.root / ".git").rename(case.root.parent / "original-git")
+        case.git("init", "-q", "--object-format=sha256")
+        case.git("config", "user.email", "test@example.com")
+        case.git("config", "user.name", "Test")
+        case.git("remote", "add", "origin", "git@github.com:blueman82/coderails.git")
+        case.git("add", ".")
+        case.git("commit", "-qm", "SHA256 fixture")
+        snapshot = case.snapshot()
+        self.assertEqual(len(str(snapshot["commit"])), 64)
+        result = case.verify(snapshot)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_strict_requires_tracked_nonruntime_assets(self) -> None:
         """A tracked document must exist even when all runtime files remain."""
         case = self.parity
