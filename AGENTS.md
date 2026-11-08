@@ -120,7 +120,7 @@ publication reader recheck the facts. Invalid scope returns `required_review_not
 Malformed summaries still return `review_passes_malformed`. Same-user assessments do not prove semantic
 non-execution or reviewer independence. Actions still reads the ordinary general-review companion; its status
 does not validate N/A scope. See the RUNBOOK entry below for complete limits and release steps. Old readers
-reject the new result. Follow `docs/RELEASE-CANDIDATE.md` and `INSTALLATION.md`: select reviewed new versions,
+reject the new result. Follow `INSTALLATION.md`: select reviewed new versions,
 drain affected sessions, preserve old runtime/state backups, run maintained installer dry runs, install, start
 new sessions, trust Codex hooks and verify installed parity. Unknown quiescence or incomplete qualification
 keeps installation on HOLD. Never hotpatch an active installed reader or bypass an old gate.
