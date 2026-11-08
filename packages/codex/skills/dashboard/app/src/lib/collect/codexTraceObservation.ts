@@ -4,7 +4,7 @@ import type { TraceAttribute, TraceEvent } from "./traceSchema";
 type Candidate = { event: TraceEvent; item: Row };
 type Target = { kind: "skill" | "context"; id: string };
 type Observation = "invocation" | "read" | "failed_read" | "mention" | "uncertain";
-const targetPattern = /(?<![A-Za-z0-9_./-])(?:(?:[./A-Za-z0-9_-]+\/)*skills\/[a-z][a-z0-9-]{0,40}\/SKILL\.md|(?:[./A-Za-z0-9_-]+\/)*(?:AGENTS|CLAUDE)\.md)(?![A-Za-z0-9_/-])/;
+const targetPattern = /(?<![A-Za-z0-9_./-])\/?(?:[.A-Za-z0-9_-]+\/)*(?:skills\/[a-z][a-z0-9-]{0,40}\/SKILL\.md|(?:AGENTS|CLAUDE)\.md)(?![A-Za-z0-9_/-]|\.[A-Za-z0-9_.-])/;
 
 function text(value: unknown): string | null {
   if (typeof value === "string") return value;

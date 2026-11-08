@@ -52,7 +52,7 @@ export function markClaudeRequestOrMention(event: TraceEvent, row: NativeRecord,
   }
   if (block !== null || (row.type !== "assistant" && row.type !== "user")) return;
   for (const text of textFields(obj(row.message)?.content)) {
-    const mention = /(?:^|[\s`])((?:[^\s`]+\/)?(?:skills\/[a-z][a-z0-9-]{0,40}\/SKILL\.md|AGENTS\.md|CLAUDE\.md))(?=$|[\s`,.;:])/i.exec(text);
+    const mention = /(?<![A-Za-z0-9_./-])(\/?(?:[.A-Za-z0-9_-]+\/)*(?:skills\/[a-z][a-z0-9-]{0,40}\/SKILL\.md|(?:AGENTS|CLAUDE)\.md))(?![A-Za-z0-9_/-]|\.[A-Za-z0-9_.-])/.exec(text);
     const item = mention ? target(mention[1]) : null;
     if (item) {
       mark(event, "mention", item, Buffer.byteLength(text, "utf8"));

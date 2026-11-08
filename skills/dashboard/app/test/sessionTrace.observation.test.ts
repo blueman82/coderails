@@ -38,7 +38,7 @@ describe("Claude transcript observations", () => {
     expect(page.events[0].attributes["coderails.observation.target_sha256"]).toBe(digest(identity));
   });
 
-  it.each(["See /repo/notAGENTS.md.", "See ./CLAUDE.mdx."])("rejects a partial filename in %s", async (text) => {
+  it.each(["See /repo/notAGENTS.md.", "See ./CLAUDE.mdx.", "See AGENTS.md.backup", "See CLAUDE.md.template"])("rejects a partial filename in %s", async (text) => {
     const { deps } = await fixture([{ type: "assistant", sessionId: "s1", message: {
       content: [{ type: "text", text }],
     } }]);
