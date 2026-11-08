@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -24,12 +25,54 @@ def base_ref() -> str:
     return "origin/main" if "origin" in done.stdout.split() else "main"
 
 
-def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run a bounded Git read and convert process failures to a typed source refusal."""
+def _git(root: Path, *args: str, input_data: str | None = None) -> subprocess.CompletedProcess[str]:
+    """Run bounded reads with isolated selectors, hooks and fsmonitor disabled."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_NO_REPLACE_OBJECTS="1")
     try:
-        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=5, check=False)
+        return subprocess.run(
+            [
+                "git",
+                "--no-optional-locks",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "core.fsmonitor=false",
+                "-C",
+                str(root),
+                *args,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
+            input=input_data,
+            env=env,
+            timeout=5,
+            check=False,
+        )
     except (OSError, subprocess.SubprocessError) as error:
         raise ValueError(f"cannot inspect assigned checkout: {error}") from error
+
+
+def _refuse_attribute_filters(root: Path) -> None:
+    """Refuse conversion attributes and nested checkouts before status can run helpers."""
+    index = _git(root, "ls-files", "--stage", "-z")
+    if index.returncode:
+        raise ValueError("cannot inspect assigned checkout index")
+    if any(row.startswith("160000 ") for row in index.stdout.split("\0")):
+        raise ValueError("--worktree Git submodules are unsupported before worker launch")
+    paths = _git(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+    if paths.returncode:
+        raise ValueError("cannot list assigned checkout paths")
+    attributes = _git(root, "check-attr", "-z", "--all", "--stdin", input_data=paths.stdout)
+    fields = attributes.stdout.split("\0")
+    if attributes.returncode or fields[-1] != "" or len(fields) % 3 != 1:
+        raise ValueError("cannot inspect assigned checkout attributes")
+    # --all omits truly unspecified attributes; named queries alias literal driver names
+    # with set/unset/unspecified sentinels. Refuse even ambiguous explicit -filter rows.
+    if "filter" in fields[1::3]:
+        raise ValueError("--worktree Git attribute filters are unsupported before worker launch")
 
 
 def source_binding(worktree: str, manifest: list[str]) -> dict[str, str]:
@@ -44,6 +87,7 @@ def source_binding(worktree: str, manifest: list[str]) -> dict[str, str]:
     top = _git(root, "rev-parse", "--show-toplevel")
     if top.returncode or Path(top.stdout.strip()).resolve() != root:
         raise ValueError("--worktree must name the Git checkout root")
+    _refuse_attribute_filters(root)
     status = _git(root, "status", "--porcelain", "--untracked-files=all")
     if status.returncode or status.stdout.strip():
         raise ValueError("--worktree must be clean before worker launch")

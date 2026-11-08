@@ -1,6 +1,6 @@
-# P3: optional signed action receipts
+# P3: signed action receipts
 
-Status: built in draft PR #513. Scope: how an optional action receipt for `gh pr merge` or `git push` to main is
+Status: introduced in draft PR #513. Scope: how an action receipt for `gh pr merge` or `git push` to main is
 signed and bound to the action. Same-user minting remains possible.
 
 ## Question
@@ -33,16 +33,19 @@ So the Keychain-plus-dialog design is neither confirmed feasible nor ruled out. 
 
 ## Chosen design
 
-Optional receipt minting uses a key with a passphrase:
+Receipt minting uses a signing key; a passphrase is optional:
 
-1. `python3 scripts/authority_keys.py init` (owner, at a terminal) creates a passphrase-protected ed25519 key
+1. `python3 scripts/authority_keys.py init` (owner, at a terminal) creates an ed25519 key
    `~/.coderails/keys/receipt_ed25519` and a signers file. `ssh-keygen` prompts on `/dev/tty`; the tool refuses
-   (`receipt_refused_no_tty`) when there is no terminal and never overwrites an existing key.
+   (`receipt_refused_no_tty`) when there is no terminal and never overwrites an existing key. The owner can leave
+   the passphrase empty; encryption is not required by the tool.
 2. `python3 scripts/action_receipt_cli.py approve-action ...` computes the binding itself
    (`scripts/lib/action_binding.py`: repository, destination ref, SHA; the owner never types a SHA), signs the
    canonical receipt body with `ssh-keygen -Y sign` (namespace `coderails-receipt`), and refuses without a
-   controlling terminal (`receipt_refused_no_tty`). An agent without the passphrase cannot sign with that key,
-   but a same-user agent can replace the user-tier signers file and use another key.
+   controlling terminal (`receipt_refused_no_tty`). A usable unprotected key or `--key <public-key-path>` backed
+   by an available signing agent can avoid a passphrase prompt. The owner still issues the approval command; an
+   autonomy grant is separate and cannot replace it. Agents must not create a PTY or call the signer to impersonate
+   owner approval. A same-user agent can replace the user-tier signers file and use another key.
 3. The hook verifies the signature against a trust root, then the binding, then consumes the receipt atomically
    (`O_CREAT|O_EXCL`). Unsigned, wrongly signed, edited, stale, replayed, v1 and unbound receipts are all refused.
 4. The trust root is `~/.coderails/keys/receipt_signers`. The agent runs as the same user and can write this file, so
@@ -87,8 +90,10 @@ Optional receipt minting uses a key with a passphrase:
 
 ## Binding rules and mode
 
-The gate is off unless config sets `action_authority: enforce` or `action_authority: advisory`. Thus a normal PR
-workflow does not require a key or passphrase. To keep the repository+ref+SHA binding honest, a guarded command is
+The gate defaults to `action_authority: enforce`, including when there is no configuration file. Shipped example
+and init presets also enforce. Invalid configuration denies guarded actions. Explicit `advisory` warns without a
+receipt; explicit `off` disables this receipt gate. Signed receipts require an owner approval command, not a
+passphrase. To keep the repository+ref+SHA binding honest, a guarded command is
 unbindable (`binding_unknown`, denied) when it:
 
 - carries an env assignment prefix (`GIT_DIR=`, `GIT_CONFIG_*=`, `GH_REPO=`, any `NAME=value`), `git -c`, `--git-dir` or

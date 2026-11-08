@@ -166,7 +166,7 @@ class HookGenerationTests(unittest.TestCase):
         """The catalog preserves optional controls and advisory modes."""
         registry = json.loads((self.root / "hooks/registry.json").read_text())
         controls = registry["controls"]
-        self.assertIn("off by default", controls["action_authority_gate"]["activation"])
+        self.assertIn("enforce by default", controls["action_authority_gate"]["activation"])
         self.assertIn("off unless", controls["test_gate"]["activation"])
         self.assertEqual(controls["check_confidence_labels"]["mode"], "advisory")
         self.assertEqual(controls["check_verify_loop"]["mode"], "advisory")

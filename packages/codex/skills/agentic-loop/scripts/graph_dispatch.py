@@ -25,7 +25,6 @@ from graph_io import object_value as _object
 from graph_io import write as _write
 from graph_recovery import RecoveryRefusedError, trace, traced_refusal
 from graph_transcript import transcript_cursor
-from json_types import JsonValue
 
 
 def assign_scope(path: Path, session: str, unit: str, scope: str) -> dict[str, Any]:
@@ -166,17 +165,17 @@ def authorize_driver(
 def apply_record(state: dict[str, Any], raw_results: str, typed: bool = False) -> tuple[dict[str, Any], dict[str, Any]]:
     """Bind native or typed worker results, retain statuses/reports, and compute the next state without writes."""
     try:
-        parsed_results: JsonValue = cast(JsonValue, json.loads(raw_results))
+        parsed_results = json.loads(raw_results)
     except json.JSONDecodeError as error:
         raise GraphError(f"results are not valid JSON: {error}") from error
-    graph = state["graph"]
-    if graph["active_wave"] is None:
+    if (active := state["graph"]["active_wave"]) is None:
         raise GraphError("no active wave exists")
-    active = cast(dict[str, Any], graph["active_wave"])
-    envelope = _object(cast(object, parsed_results), "results")
+    envelope = _object(parsed_results, "results")
     if set(envelope) != {"wave_id", "results"}:
         raise GraphError("results must contain exactly wave_id and results")
     results = _object(envelope.get("results"), "results.results")
+    for node in results:
+        results[node] = _object(results[node], f"result {node}")
     statuses: list[dict[str, Any]] = []
     reports: dict[str, Any] = {}
     if typed:
@@ -185,28 +184,29 @@ def apply_record(state: dict[str, Any], raw_results: str, typed: bool = False) -
         except worker_status.WorkerResultError as error:
             nodes = (error.node,) if error.node else ()
             raise RecoveryRefusedError(error.code, error.message, nodes) from error
-    transition = graph_semantics.record_wave(state, envelope.get("wave_id"), results)
-    proposed = cast(dict[str, Any], transition["state"])
-    worker_status.retain_decision_slot(proposed, statuses)
-    status_nodes = {status["node"] for status in statuses}
-    graph_repair.apply_failed_gates(
-        transition, {node: result for node, result in results.items() if node not in status_nodes}
-    )
-    stale_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "stale")
-    failed_nodes = frozenset(node for node, result in results.items() if result["outcome"] == "failed")
+    if envelope.get("wave_id") != active["wave_id"] or set(results) != set(active["nodes"]):
+        raise GraphError("result wave id and keys must match the active wave")
+    stale_nodes = frozenset(node for node, result in results.items() if result.get("outcome") == "stale")
+    failed_nodes = frozenset(node for node, result in results.items() if result.get("outcome") == "failed")
     skip_evidence = {
         node: result["evidence"]
         for node, result in results.items()
-        if result["outcome"] == "skipped"
+        if result.get("outcome") == "skipped"
+        and isinstance(result.get("evidence"), str)
         and result["evidence"].startswith(("no_design_fork:", "no_retired_path:", "non_independent:"))
     }
     references, identifiers = bind_worker_evidence(state, active, stale_nodes, failed_nodes, skip_evidence)
     if any(
         classify_worker_evidence(cast(dict[str, Any], result).get("evidence"), identifiers)[0]
         for result in results.values()
-        if isinstance(result, dict)
     ):
         raise GraphError("result evidence must not contain worker evidence")
+    transition = graph_semantics.record_wave(state, envelope.get("wave_id"), results)
+    proposed = cast(dict[str, Any], transition["state"])
+    worker_status.retain_decision_slot(proposed, statuses)
+    status_nodes = {status["node"] for status in statuses}
+    gate_results = {node: result for node, result in results.items() if node not in status_nodes}
+    graph_repair.apply_failed_gates(transition, gate_results)
     for node_id, reference in references.items():
         proposed["graph"]["nodes"][node_id]["evidence"].append(reference)
     worker_status.record_into(proposed, active["wave_id"], statuses, reports)

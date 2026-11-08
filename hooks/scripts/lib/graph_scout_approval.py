@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any, cast
 
-from .graph_evidence import parent_records, transcript
+from .graph_evidence import check_record, object_value, parent_records, transcript, validate_reference
+from .graph_executor import graph_contract
 
 
 def _text(record: dict[str, Any], role: str) -> str | None:
@@ -30,8 +31,12 @@ def _text(record: dict[str, Any], role: str) -> str | None:
     return None
 
 
-def approval(state: dict[str, Any], node_id: str, attempt: int, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def approval(
+    state: dict[str, Any], node_id: str, attempt: int, rows: list[dict[str, Any]], wave_id: str, cursor: int
+) -> dict[str, Any]:
     """Find one assistant request followed by the next direct user reply."""
+    if type(attempt) is not int or attempt < 2:
+        raise ValueError("non-independent skip needs adjacent exact positive attempts")
     node = state["graph"]["nodes"][node_id]
     prior: list[dict[str, Any]] = []
     for value in cast(list[object], node["evidence"]):
@@ -54,16 +59,41 @@ def approval(state: dict[str, Any], node_id: str, attempt: int, rows: list[dict[
     ]
     if len(failed) != 1:
         raise ValueError("non-independent skip has no native refused scout call")
+    history = object_value(state["graph"].get("wave_history", {}), "native wave history")
+    row = validate_reference(state, node_id, prior[0], rows, history)
+    issued = check_record(state, row)
+    issued_records = (
+        object_value(value, "issued scout dispatch") for value in state["graph"].get("dispatches", {}).values()
+    )
+    candidates = [
+        value for value in issued_records if value.get("node_id") == node_id and value.get("wave_id") == row["wave_id"]
+    ]
+    if issued is None or len(candidates) != 1 or issued.get("authorized") != {"tool_use_id": row["tool_use_id"]}:
+        raise ValueError("non-independent skip has no safely bound consumed prior dispatch")
+    graph_contract.check_dispatch(state, row, row["prompt"], live=False)
+    graph_contract.assert_role(issued["contract"], row["subagent_type"], "coderails:", graph_contract.CLAUDE_TYPES)
+    current = object_value(history.get(wave_id), "current fallback history")
+    original = object_value(history.get(row["wave_id"]), "prior refusal history")
+    result_lines = row["native_result_lines"]
+    if (
+        len(row["native_call_lines"]) != 1
+        or len(result_lines) != 1
+        or not row["line"] < result_lines[0] < cursor
+        or row["wave_id"] == wave_id
+        or type(original.get("revision")) is not int
+        or type(current.get("revision")) is not int
+        or original["revision"] >= current["revision"]
+        or row["native_result"].get("agentId") is not None
+        or row["native_result"].get("status") in {"async_launched", "teammate_spawned"}
+    ):
+        raise ValueError("non-independent skip needs one earlier childless native failure result")
     request = (
         "Coderails: Approve a non-independent design-scout fallback for loop "
         f"{state['loop_id']}, node S2.5, attempt {attempt}? Reply approve or deny."
     )
     records = parent_records(transcript(state["session_id"]), state["session_id"])
     requests = [
-        (line, text)
-        for line, row in records
-        if line > failed[0]["line"]
-        if (text := _text(row, "assistant")) == request
+        (line, text) for line, row in records if line > result_lines[0] if (text := _text(row, "assistant")) == request
     ]
     if len(requests) != 1:
         raise ValueError("non-independent skip has no unique native approval request")

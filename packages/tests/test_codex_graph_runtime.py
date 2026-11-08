@@ -299,7 +299,8 @@ class GraphRuntimeTests(RuntimeFixture):
 
     def test_staging_fault_has_recovery_trace_and_fresh_retry(self) -> None:
         """The hook traces a temporary-message failure before a valid retry consumes the dispatch."""
-        config = self.directory / "workflow.config.yaml"
+        config = self.directory / ".coderails/workflow.config.yaml"
+        config.parent.mkdir()
         config.write_text("sandbox_workers: false\n")
         opened = graph.begin_wave(self.path)["dispatches"][0]
         payload = {
