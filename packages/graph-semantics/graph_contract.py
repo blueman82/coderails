@@ -349,7 +349,7 @@ def check_dispatch(state: dict[str, Any], env: dict[str, Any], prompt: str, live
         cutoff = state["graph"].get("context_from_revision") if state.get("state_minor", 0) >= 3 else None
         needs_context = type(cutoff) is int and record["revision"] >= cutoff
         contract = validate_contract(record.get("contract"), require_context=needs_context)
-        if needs_context and contract["required_context"] != required_context(state, record["node_id"]):
+        if live and needs_context and contract["required_context"] != required_context(state, record["node_id"]):
             raise DispatchDeniedError("dispatch_context_mismatch", "required context differs from task facts")
         altered = record.get("envelope_version") != ENVELOPE_VERSION
         altered = altered or sections_sha256(contract) != record.get("prompt_sections_sha256")
