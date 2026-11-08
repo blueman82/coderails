@@ -8,9 +8,7 @@ If you were dispatched as a subagent to execute a specific task, skip this skill
 </SUBAGENT-STOP>
 
 <EXTREMELY-IMPORTANT>
-IF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.
-
-This is not negotiable. This is not optional. You cannot rationalize your way out of this.
+If a skill applies to the task, invoke it.
 </EXTREMELY-IMPORTANT>
 
 ## Instruction Priority
@@ -31,13 +29,15 @@ If `AGENTS.md` says "don't use TDD" and a skill says "always use TDD," follow th
 
 ## Platform Adaptation
 
-Skills speak in actions ("dispatch a subagent", "create a todo", "read a file") rather than naming runtime tools. Use [codex-tools.md](references/codex-tools.md) for the native Codex mapping.
+Skills describe actions such as dispatch, task tracking, and file reads.
+Use [codex-tools.md](references/codex-tools.md) to find the Codex tools.
 
 # Using Skills
 
 ## The Rule
 
-**Invoke relevant or requested skills BEFORE any response or action.** If an invoked skill turns out to be wrong for the situation, you don't need to use it.
+Invoke a relevant or requested skill before a response or action. If it does
+not apply after invocation, stop using it.
 
 ```dot
 digraph skill_flow {
@@ -75,10 +75,10 @@ These thoughts mean STOP—you're rationalizing:
 
 | Thought | Reality |
 |---------|---------|
-| "This is just a simple question" | Questions are tasks. Check for skills. |
+| "This is just a simple question" | Check for a skill before you answer. |
 | "I need more context first" | Skill check comes BEFORE clarifying questions. |
 | "Let me explore the codebase first" | Skills tell you HOW to explore. Check first. |
-| "I can check git/files quickly" | Files lack conversation context. Check for skills. |
+| "I can check git/files quickly" | Check for skills before you read. |
 | "Let me gather information first" | Skills tell you HOW to gather information. |
 | "This doesn't need a formal skill" | If a skill exists, use it. |
 | "I remember this skill" | Skills evolve. Read current version. |
@@ -92,11 +92,14 @@ These thoughts mean STOP—you're rationalizing:
 
 When multiple skills could apply, use this order:
 
-1. **Process skills first** (`$coderails-codex:planning-sequence`, `$coderails-codex:task-evals`, `$coderails-codex:cite-check`) - these determine HOW to approach the task
-2. **Implementation skills second** (frontend-design, mcp-builder) - these guide execution
+1. **Process skills first.** Examples are `$coderails-codex:planning-sequence`,
+   `$coderails-codex:task-evals`, and `$coderails-codex:cite-check`. These
+   determine how to approach the task.
+2. **Implementation skills second.** Examples are frontend-design and
+   mcp-builder. These guide execution.
 
-"Let's build X" → planning and task evals first, then implementation skills.
-"Verify this claim" → cite-check first, then any domain-specific skill.
+For a build request, run planning and task evals before implementation guidance.
+For a request to verify a claim, use cite-check before a domain-specific skill.
 
 ## Skill Types
 
@@ -108,4 +111,4 @@ The skill itself tells you which.
 
 ## User Instructions
 
-Instructions say WHAT, not HOW. "Add X" or "Fix Y" doesn't mean skip workflows.
+A task request does not cancel an applicable workflow.

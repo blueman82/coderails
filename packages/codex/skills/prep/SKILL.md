@@ -14,7 +14,9 @@ Identify:
 - A required branch named `feature/...`, `bug/...`, or `bugfix/...`.
 - An optional issue type, summary, and description.
 
-If the branch is missing or ambiguous, use `request_user_input` to ask only for the branch name. Infer `Task` for feature branches and `Bug` for bug branches. When absent, generate a plain summary from the branch suffix and a short description that includes `Branch: <branch>`.
+If the branch is missing or ambiguous, use `request_user_input` to ask only for the branch name.
+Infer `Task` for feature branches and `Bug` for bug branches.
+When absent, generate a plain summary from the branch suffix and a short description that includes `Branch: <branch>`.
 
 ## Read project configuration
 
@@ -26,7 +28,7 @@ git add -A
 git commit --allow-empty -m "Initial project"
 ```
 
-Stop and report the exact failing command if any command fails (for example, Git author identity is not configured). Do not add a remote, create a hosted repository, push, or create a pull request.
+If a command fails, stop and report the exact command. Git author identity may need configuration. Do not add a remote, create a hosted repository, push, or create a pull request.
 
 Resolve the nearest `.coderails/workflow.config.yaml` by walking from the current directory upward to the Git root. The first file found wins. Otherwise use:
 

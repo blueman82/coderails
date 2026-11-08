@@ -5,10 +5,9 @@ description: Use on demand to consolidate a project's memory directory — dedup
 
 # Memory Consolidation
 
-On request, health-check and consolidate a project's persistent memory
-directory (`~/.codex/projects/<slug>/memory/`), the same directory the
-memory system documented in `~/.codex/AGENTS.md` writes to during normal
-sessions.
+On request, check and consolidate the project's persistent memory directory:
+`~/.codex/projects/<slug>/memory/`. The memory system in
+`~/.codex/AGENTS.md` writes there during normal sessions.
 
 ## When to Use
 
@@ -34,17 +33,15 @@ Read each file the index points to. Each memory has YAML frontmatter
 
 ### Step 3: Find consolidation candidates
 
-- **Overlapping memories**: two or more files describing the same fact,
-  decision, or ongoing project state. Merge into the most recent/complete
-  one; delete the superseded file(s).
-- **Stale memories**: a `project` or `feedback` memory whose content is
-  contradicted by a newer memory, or that references work explicitly
-  marked complete elsewhere. Flag for the user rather than silently
-  deleting — memory of type `feedback` in particular represents a
-  standing instruction and must not be dropped without the user's
-  awareness.
-- **Contradicted memories**: two memories asserting incompatible facts.
-  Flag both; do not silently pick a winner.
+- **Overlapping memories:** Two or more files describe the same fact,
+  decision, or project state. Merge them into the most recent or complete
+  file. Delete the superseded files.
+- **Stale memories:** A newer memory contradicts a `project` or `feedback`
+  record, or another record marks its work complete. Flag it for the user.
+  Do not delete it silently. A `feedback` record can contain a standing
+  instruction.
+- **Contradicted memories:** Two records assert incompatible facts. Flag
+  both. Do not silently choose a winner.
 
 ### Step 4: Apply merges, update MEMORY.md
 
@@ -122,6 +119,5 @@ check. Its content:
 Updated: yes|no
 ```
 
-This report is this skill's own durable artifact, written natively by the
-skill itself — the property that lets an external caller gate on the report's
-existence.
+The skill writes this durable report itself. An external caller can gate on
+its existence.

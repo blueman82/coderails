@@ -5,32 +5,37 @@ description: 'Run the full three-stage planning sequence — Pre-Parade, Premort
 
 # Planning Sequence
 
-This skill runs three anticipatory planning techniques in sequence on a plan, idea, or decision. The goal is to surface structural gaps, execution failures, and adversarial weaknesses *before* commitment, while there's still time to act.
+Run three planning checks on the same plan, idea, or decision. Find missing
+success conditions, likely failures, and weaknesses before commitment.
 
 The three techniques are:
 1. **Pre-Parade** — what does success actually require?
 2. **Premortem** — what's the most credible story of failure?
 3. **Red Team** — does this survive a genuine adversary?
 
-They are always run in this order, on the same subject.
+Run them in this order on the same subject.
 
 ---
 
 ## Step 0: Extract the subject
 
-If the user passed an explicit subject (e.g., `/planning-sequence "migrate to Kubernetes"`), use it directly.
+If the user gave a subject, use it directly. For example:
+`/planning-sequence "migrate to Kubernetes"`.
 
-If not, read the current conversation and extract the plan, idea, or decision being discussed. If genuinely ambiguous, ask one question: "What should I run the planning sequence on?"
+Otherwise, read the conversation. Identify the plan, idea, or decision.
+If the subject is unclear, ask one question:
+"What should I run the planning sequence on?"
 
-State clearly at the top what you're analysing. One sentence.
+State the subject at the top in one sentence.
 
 ---
 
 ## Stage 1: Pre-Parade
 
-Pre-Parade is the success-first pass. You imagine it's a year from now and this worked brilliantly. Then you ask: what had to be true for that to happen?
+Imagine that the plan succeeded one year from now. Ask what had to be
+true for that result.
 
-This surfaces the *conditions for success* — the things that must be in place, the assumptions that must hold, the decisions that must go right. It's not optimism; it's forensic reverse-engineering of a good outcome.
+List the conditions, assumptions, and decisions that made success possible.
 
 **Run this stage as follows:**
 
@@ -60,16 +65,20 @@ What success actually required — focus on the least obvious conditions, what t
 
 ## Stage 2: Premortem
 
-Run the premortem skill logic here. Do not call the skill separately — execute its process inline.
+Run the premortem process here. Do not call its skill separately.
 
-You assume the plan has already failed. You work backwards to find out why. The goal is the most *credible* failure story, not a comprehensive list of everything that could go wrong.
+Assume the plan failed. Work backward to find the most credible causes.
 
 **Run this stage as follows:**
 
 1. State the failure scenario in one sentence: "It's [timeframe] from now. This failed."
-2. Reason adversarially through: assumption failures, execution failures, people failures (who resists, disengages, or behaves differently than expected), dependency failures, optimism bias, unknown unknowns, timing failures.
-3. Surface 2–4 failure modes. Each needs: what goes wrong, why it's credible, likelihood (low/medium/high), impact, and a concrete mitigation.
-4. Give a verdict: is the plan sound with specific risks to address, or does it have structural problems?
+2. Check assumptions, execution, people, dependencies, timing, optimism
+   bias, and unknown factors. For people, consider resistance, disengagement,
+   and behavior that differs from the plan.
+3. Give 2–4 failure modes. For each, state what goes wrong, why it is credible,
+   likelihood (low/medium/high), impact, and a concrete mitigation.
+4. Give a verdict. State whether the plan is sound with specific risks to
+   address, or has structural problems.
 
 **Output format:**
 
@@ -95,16 +104,22 @@ What does this plan assume that's almost certainly wrong? Where is the optimism?
 
 ## Stage 3: Red Team
 
-Red Team is the adversarial challenge. You take the strongest possible position *against* the plan and attack it directly. This is not a balanced critique — it's an intentional one-sided assault on the weakest points.
+For Red Team, take the strongest position against the plan. Attack its
+weakest points directly. Make the challenge one-sided.
 
-The difference from premortem: premortem imagines accidental failure. Red Team imagines a motivated opponent — a competitor, a sceptic, a regulator, a hostile stakeholder — who wants this to fail and is actively working against it.
+Premortem considers accidental failure. Red Team considers an opponent
+who acts against the plan. The opponent can be a competitor, sceptic,
+regulator, or hostile stakeholder.
 
 **Run this stage as follows:**
 
-1. Identify the most credible adversary for this specific plan (competitor, internal sceptic, technical constraint, market force — whatever is most realistic).
-2. Attack the plan from that adversary's position. Find 2–3 specific vectors of attack — the weakest assumptions, the most exploitable gaps, the points where the plan is most exposed.
-3. For each attack: what is the adversary doing or saying, and what damage does it cause?
-4. End with a challenge to the plan owner: what would you need to change or prove to survive this attack?
+1. Identify the most credible opponent or constraint for this plan.
+   Consider a competitor, internal sceptic, technical constraint, or
+   market force.
+2. From that position, find 2–3 specific attacks. Use weak assumptions,
+   exposed gaps, and points where the plan can fail.
+3. For each attack, state what the opponent does or says. State the damage.
+4. Tell the plan owner what to change or prove to withstand the attack.
 
 **Output format:**
 
@@ -130,7 +145,7 @@ Who specifically would want this to fail, and why? What do they know that the pl
 
 After all three stages, write a short synthesis (3–5 sentences):
 
-- What do all three stages agree on? (These are your highest-confidence risks or gaps)
+- What risks or gaps appear in all three stages? These are the highest-confidence risks or gaps.
 - What did Pre-Parade surface that the other two missed?
 - What is the single most important thing to address before committing?
 
@@ -145,9 +160,10 @@ After all three stages, write a short synthesis (3–5 sentences):
 ## What good looks like
 
 - All three stages are specific to *this plan*, not generic.
-- Pre-Parade conditions are concrete and checkable, not vague ("clear ownership" → "Alice owns the API contract, confirmed").
+- Pre-Parade conditions are concrete and checkable. For example: "Alice
+  owns the API contract, confirmed."
 - Premortem failure modes are credible, not catastrophist.
-- Red Team is genuinely adversarial — it should sting a little.
+- Red Team presents a credible attack, even if it is uncomfortable.
 - Synthesis converges on one clear priority, not a hedged list.
 
 ## What to avoid

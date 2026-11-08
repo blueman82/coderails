@@ -5,10 +5,9 @@ description: "Launch the coderails observability dashboard — a live local web 
 
 # Dashboard
 
-Launch the local observability HUD for coderails: a live web view of what the
-agentic system is doing right now, backed by files already on disk (sessions,
-loop progress, wiki/memory, PR state, run history) — no new services, no
-telemetry leaving the machine.
+Launch the local Coderails dashboard. It reads session, loop, wiki, memory,
+PR, and run files on this machine. It shows live activity in a web page.
+It uses no new services and sends no telemetry away from this machine.
 
 ## What it shows
 
@@ -42,10 +41,10 @@ Seven panels:
    artifact) / stale (SHA mismatch).
 6. **Bottom-centre hero** — the active loop's primary directive with a big
    numeral (e.g. work units 2/7) and a micro ticker.
-7. **ASSISTANT.LINK** — pending workflow-audit approvals awaiting a
-   decision (Approve/Deny), plus build status for approved
-   `workflow-audit:propose-skill` entries as they claim, build locally, and
-   become ready for human review and delivery.
+7. **ASSISTANT.LINK** — Shows workflow-audit proposals that need Approve or
+   Deny. It also shows status for approved
+   `workflow-audit:propose-skill` entries as they are claimed, built locally,
+   and made ready for human review and delivery.
 
 ## Starting
 
@@ -71,10 +70,9 @@ DASHBOARD_PORT=4200 "$SKILL_DIR/scripts/start_dashboard.py"
 
 ## LAN access (opt-in)
 
-By default the dashboard binds to `127.0.0.1` and only accepts requests whose
-Host/Origin resolve to loopback — nothing on the network can reach it. Set
-`DASHBOARD_HOST` to your machine's LAN IP to allow other devices on the same
-network to reach it too:
+By default, the dashboard binds to `127.0.0.1`. Its Host and Origin guard
+accepts only loopback. Set `DASHBOARD_HOST` to this machine's LAN IP to
+allow devices on the same network to connect:
 
 ```
 DASHBOARD_HOST=192.168.50.140 "$SKILL_DIR/scripts/start_dashboard.py"
@@ -108,8 +106,8 @@ fail to bind on next start rather than break silently.
 "$SKILL_DIR/scripts/stop_dashboard.py"
 ```
 
-Kills the process recorded in the pidfile and removes it. The dashboard keeps
-no state of its own outside the config and run-history files below.
+The script stops the process in the PID file and removes that file. The
+dashboard keeps state only in its config and run-history files.
 
 ## First run without a config
 
@@ -122,10 +120,9 @@ reload.
 
 ## Configuration
 
-Config lives at `~/.codex/coderails-dashboard.json` (per-user; the watch
-scope is machine-wide): which repos to poll, wiki paths, and the
-button declarations for the COMMAND DECK.
+Config lives at `~/.codex/coderails-dashboard.json` for each user. It names
+the repos to poll, wiki paths, and COMMAND DECK buttons. The watch scope is
+machine-wide.
 
-Buttons only ever run what this config declares. `POST /run` takes a button
-name, looks it up in the config, and refuses anything undeclared — there is
-no path from the dashboard to an arbitrary command.
+Buttons run only commands declared in this config. `POST /run` looks up a
+button name and rejects undeclared names. It cannot run an arbitrary command.

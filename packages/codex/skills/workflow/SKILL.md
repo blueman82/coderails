@@ -21,7 +21,9 @@ Pause while the user implements and tests the change. Continue only when they sa
 
 ## 2. Preflight and push
 
-Inspect the cumulative diff against the base branch. Invoke `$coderails-codex:engineering-principles` when configured paths are touched or any changed file has at least 20 changed lines. Treat architectural violations as blocking and style-only advice as non-blocking.
+Inspect the cumulative diff against the base branch.
+Invoke `$coderails-codex:engineering-principles` when configured paths are touched or any changed file has at least 20 changed lines.
+Treat architectural violations as blocking and style-only advice as non-blocking.
 
 Invoke `$coderails-codex:push`. Capture the pull request number and URL. Stop if push, tests, or pull-request creation fails.
 
@@ -38,9 +40,11 @@ Run `source-auditor` and `deploy-safety-reviewer` with `python3 "$SKILL_DIR/../.
 
 Give each agent the pull-request number, exact head SHA, relevant requirements, and a distinct review focus. Cap a review wave at three concurrent agents.
 
-Apply blocking and worthwhile findings, add or update tests where the public contract changed, then push the follow-up commit. Skip only cosmetic or subjective findings and record why. If the head changes, re-run the affected review and verification against the new exact head.
+Apply blocking and worthwhile findings, add or update tests where the public contract changed, then push the follow-up commit.
+Skip only cosmetic or subjective findings and record why.
+If the head changes, re-run the affected review and verification against the new exact head.
 
-Post a pull-request ledger listing every finding and its disposition. Invoke `$coderails-codex:post-review` with the pull-request number only after fixes are pushed so the review artifact is bound to the final head SHA.
+Post a pull-request ledger listing every finding and how it was handled. Invoke `$coderails-codex:post-review` with the pull-request number only after fixes are pushed so the review artifact is bound to the final head SHA.
 
 Invoke `$coderails-codex:task-evals` if graded evals were not already frozen, run the frozen checks and negative controls, then invoke `$coderails-codex:post-evals` with the pull-request number. Missing, stale, failing, or unverified evidence is a hard stop; never hand-write a passing result.
 
@@ -50,12 +54,14 @@ Report the pull-request URL, final head SHA, review summary, and eval result. Pa
 
 After approval, invoke `$coderails-codex:merge` with the pull-request number. The merge must remain fail-closed on current-head review evidence, eval evidence, required status checks, or remote fetch failures.
 
-If a wiki is configured, invoke `$coderails-codex:wiki-ingest`. Invoke `$coderails-codex:wiki-lint` immediately only for direct-write wiki mode; for wiki pull-request mode, defer lint until the ingest pull request has merged.
+If a wiki is configured, invoke `$coderails-codex:wiki-ingest`.
+Invoke `$coderails-codex:wiki-lint` immediately only for direct-write wiki mode; for wiki pull-request mode, defer lint until the ingest pull request has merged.
 
 Report the merge commit SHA, wiki source path when applicable, and any follow-up lint work.
 
 ## 5. Cleanup
 
-After confirming the pull request is merged and local main is current, remove the feature worktree and delete the local branch. If normal branch deletion refuses, investigate; do not force-delete it merely to silence the refusal.
+After confirming the pull request is merged and local main is current, remove the feature worktree and delete the local branch.
+If normal branch deletion refuses, investigate; do not force-delete it merely to silence the refusal.
 
 The user may explicitly skip or revisit a phase. Otherwise preserve the order: prepare, code, push, native Codex review, post review and eval evidence, merge, then wiki.

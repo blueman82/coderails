@@ -10,7 +10,8 @@ description: Bash/shell-specific coding standards and idioms. Invoked by enginee
 
 ---
 
-Coderails-owned hooks, workflow helpers, launchers, and tests are Python. The rules below apply when working on shell code in another project or integration; they do not describe the implementation of Coderails Python modules.
+Coderails-owned hooks, workflow helpers, launchers, and tests are Python.
+The rules below apply when working on shell code in another project or integration; they do not describe the implementation of Coderails Python modules.
 
 ## Bash Idioms (MANDATORY)
 
@@ -20,7 +21,8 @@ Coderails-owned hooks, workflow helpers, launchers, and tests are Python. The ru
 - **PreToolUse/hook scripts are a second deliberate exception.** A hook invoked by the Codex harness in a shell-based integration must degrade gracefully and almost always `exit 0` even on internal failure — a hook that aborts hard can break the calling harness rather than just failing its own check. These scripts intentionally skip `set -e` and guard every risky read with `|| true` or an explicit fallback. This is not sloppiness; it is a documented tradeoff for a different execution context. Don't "fix" a hook script by bolting on `set -euo pipefail` without checking whether that changes its failure mode from "degrade" to "abort."
 
 ### Quoting & Expansion
-- **Quote every variable expansion** unless you specifically want word-splitting or globbing (`"$var"`, not `$var`). Unquoted expansions are the single most common source of bugs when a value contains spaces, globs, or is empty.
+- **Quote every variable expansion** unless you specifically want word-splitting or globbing (`"$var"`, not `$var`).
+  Unquoted expansions are the single most common source of bugs when a value contains spaces, globs, or is empty.
 - **Quote command substitutions too**: `local x="$(cmd)"`, not `local x=$(cmd)` used later unquoted.
 - **Prefer `"${arr[@]}"` over `${arr[*]}`** when iterating or passing an array — `[@]` preserves element boundaries, `[*]` flattens to one word.
 - **Use `printf '%s\n'` instead of `echo`** for arbitrary/untrusted content — `echo` interprets some sequences differently across shells (`echo -n`, `-e`) and can misbehave if the string starts with a flag-like token (e.g. `echo "$user_input"` where the input is literally `-n`).
@@ -37,16 +39,24 @@ Coderails-owned hooks, workflow helpers, launchers, and tests are Python. The ru
 ### Fail-Fast Argument & Precondition Validation
 - **Validate arguments before doing any work**, and fail with a clear message on stderr. Check required parameters, repository identity and branch constraints before mutating Git state.
 - **A helper that can fail must say why it failed**, not just return non-zero. Centralize the stderr format while preserving the caller's exit-status contract.
-- **No silent `|| true` without a reason.** `|| true` (or `|| :`) suppresses a command's failure — sometimes correct (a best-effort cleanup step, a check where "not found" and "lookup failed" are both fine to treat as absent), but it hides a real bug just as often. When you use it, say in a comment *why* this particular failure is safe to ignore.
+- **Explain each `|| true`.** `|| true` (or `|| :`) suppresses a command failure.
+  This can be safe for best-effort cleanup, or a check where both "not found"
+  and "lookup failed" are acceptable as absent. State in a comment why this
+  particular failure is safe to ignore.
 
 ### Function Decomposition Over Monolithic Scripts
 - **Break a script into named functions** for argument parsing, precondition validation, execution and reporting. A short `main` function should make their order visible.
 - **Namespace function names when a library is sourced by multiple callers**, such as `widget::create` and `widget::exists`, to avoid silent collisions.
-- **No monolithic "do everything inline" scripts** — if a script's body reads top-to-bottom as 100+ lines with no function boundaries, that's a KISS/decomposition violation, not a style preference. Extract steps into functions even if each is called exactly once; it makes the control flow (and the `set -e` failure points) legible.
+- **Divide long scripts into functions.** A body of 100 or more inline lines with no function boundaries violates this rule.
+  Extract steps into functions even if each is called exactly once; it makes the control flow (and the `set -e` failure points) legible.
 
 ### Avoiding Global Mutable State
-- **Prefer `local` for every function-scoped variable.** A bash function's variables are global by default; forgetting `local` on a loop counter or accumulator is a classic source of one function silently corrupting another's state. Declare function-scoped shell variables explicitly, for example `local force_with_lease=0 msg="" want_add=0`, at the top of the function body. Python modules use Python scoping instead.
-- **Command substitution runs in a subshell.** A variable assigned inside `$(...)` does not survive in the caller. Capture stdout when only a value is needed; invoke the function directly when its variable assignments must remain visible.
+- **Prefer `local` for each function variable.** Bash variables are global by default.
+  An omitted `local` can let one function change another function's state.
+  Declare function-scoped shell variables explicitly, for example `local force_with_lease=0 msg="" want_add=0`, at the top of the function body.
+  Python modules use Python scoping instead.
+- **Command substitution runs in a subshell.** A variable assigned inside `$(...)` does not survive in the caller.
+  Capture stdout when only a value is needed; invoke the function directly when its variable assignments must remain visible.
 - **A subshell-local cache does not persist across calls.** Make the lifetime explicit. Do not describe a variable set by a command-substituted helper as a script-wide cache.
 
 ### `shellcheck`-Clean Patterns

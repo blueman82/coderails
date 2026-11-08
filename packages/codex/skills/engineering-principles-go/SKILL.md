@@ -47,7 +47,8 @@ description: Go-specific coding standards and idioms. Invoked by engineering-pri
 
 ## Imperative → Idiomatic Patterns (MANDATORY)
 
-Go is intentionally imperative — no map/filter/reduce. Instead, enforce Go-specific idioms that reduce verbosity and improve clarity.
+Go uses imperative code. Do not import map/filter/reduce habits from other
+languages. Apply the Go idioms below to reduce repetition and improve clarity.
 
 ### Loop Anti-Patterns
 
