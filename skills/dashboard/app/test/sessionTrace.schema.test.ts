@@ -58,6 +58,28 @@ describe("session trace contract", () => {
     expect(() => serializeTraceEvent({ ...event, resultBody: "secret" } as TraceEvent)).toThrow();
   });
 
+  it("accepts bounded observation metadata and rejects partial or raw observation fields", () => {
+    const attrs = { ...event.attributes, "coderails.observation.kind": "read",
+      "coderails.observation.target_kind": "skill",
+      "coderails.observation.target_sha256": "a".repeat(64), "coderails.observation.bytes": 7,
+      "gen_ai.usage.cache_read_input_tokens": 3, "coderails.usage.semantics": "incremental" };
+    expect(isTraceEvent({ ...event, attributes: attrs })).toBe(true);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.observation.kind": "guessed" } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.observation.bytes": -1 } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.observation.target_sha256": "raw path" } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.observation.target_kind": undefined } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.usage.semantics": "unknown" } })).toBe(false);
+  });
+
+  it("admits only a hashed incremental usage identity", () => {
+    const attrs = { ...event.attributes, "coderails.usage.semantics": "incremental",
+      "coderails.usage.identity_sha256": "b".repeat(64) };
+    expect(isTraceEvent({ ...event, attributes: attrs })).toBe(true);
+    for (const identity of [null, "PRIVATE_ID", 12, "B".repeat(64)])
+      expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.usage.identity_sha256": identity } })).toBe(false);
+    expect(isTraceEvent({ ...event, attributes: { ...attrs, "coderails.usage.semantics": "cumulative" } })).toBe(false);
+  });
+
   it("accepts decimal nanosecond timing and rejects invented time", () => {
     expect(isTraceEvent({ ...event, startTimeUnixNano: "1727524800000000000",
       attributes: { ...event.attributes, "coderails.start_time.basis": "source" } })).toBe(true);

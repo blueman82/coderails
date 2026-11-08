@@ -6,11 +6,28 @@ Trace rows are NON-AUTHORITATIVE: fail-open, append-only, one `event_id` per eve
 (null outside a loop), `ts`, `command`, `outcome`, `reason_code` and sha256-hashed `inputs`. No gate decision
 reads them. Counters dedupe by `event_id`, skip torn lines, and key tallies as `command/outcome/reason_code`.
 
-Query every entry below with:
+Query hook trace records with:
 
 ```
 python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['trace'])"
 ```
+
+## Native observation report
+
+- Command: `python3 scripts/observation_report.py <cohorts.json>`. Use the cohort fields and count definitions in
+  [Native session observations](OBSERVATION-REPORT.md).
+- Result: exit 0 prints a JSON metadata report. Exit 2 prints an input or file error on stderr.
+  The report does not change the cohort, source files or trace cache.
+- On a hash or link error, preserve the input files and the stderr reason. Check the declared file hashes,
+  provider, session, parser version and source references. Restore the original bound files or prepare a new declared
+  cohort from the new source files. Do not change a hash only to suppress the refusal.
+- Observation counts come from the report's eligible sessions and their native reader events. Inspect the bound
+  event IDs and source references when a count differs from the dashboard. The report command emits no command-attempt
+  or refusal ledger. Its stderr reasons do not have separate trace counters.
+- Publication checks have their own callers, rows and counters. Use [Workflow gates: measurement note](workflow-gates-measurement.md)
+  for the default-ON publication checks. Use [Integrity gate](INTEGRITY-GATE.md) for the opt-in integrity status,
+  activation steps and trust limits. Those records describe the named publication control. They do not prove that
+  the observation report ran or count its validation refusals.
 
 ## Generated hook and memory reasons
 
