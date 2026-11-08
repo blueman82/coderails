@@ -28,15 +28,15 @@ read-only and prints a JSON skeleton `{goal, decisions[{id, cite, text}], done, 
 degraded[]}` (decisions carry their Muninn K-ids and cites; proof verdicts are recorded claims, not `done`). Use it for Goal, Decisions, Done
 and Next steps instead of reconstructing them from the conversation. **State `degraded[]` to the user in the handoff
 under a "Memory degraded" line**, reason code by reason code (exit 3 means it is non-empty); never skip it and never
-replace it with hand-written Markdown. The commands it wraps, for reference or when you need a field it does not print:
-`python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" summarize <state>` (JSON: `phase`, `detail`, `done`,
-`active`, `ready`, `pending`) and `... graph.py inspect <state>` (JSON: `revision`, `active_wave`, `running`, `ready`,
-`hard_stop`), plus `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory_adapter.py" list --type decision --scope loop --loop <session_id>`
-(JSON records with `cite`). Use them for Goal, Decisions, Done and Next steps. If the adapter exits nonzero it prints
-`{"degraded": "<reason_code>"}`: put that reason code in the handoff under a "Memory degraded" line (see `docs/RUNBOOK.md`,
-"Memory degraded (Muninn authoritative)"); never skip the read silently and never substitute hand-written Markdown for
-the typed decisions. A missing loop graph (`graph.py` unavailable) only drops the graph commands; Step 1 still supplies
-the rest.
+replace it with hand-written Markdown. Run these commands from the actual mapped project repository.
+The state-key directory and plugin checkout do not establish project scope.
+The skeleton uses retained R-id/window/project bindings for local decisions and exact current task receipts for extras.
+Keep revision, real selected quote, complete supports, conditions and expiry in the handoff. Do not assume a condition
+is true. Keep unknown/pending and unsupported-use reasons visible. Current Muninn has no normal/restricted classifier;
+its physical source, scope, redaction and owner-authority checks do not establish semantic privacy classification.
+For graph fields, use the provider `graph.py summarize`, `inspect` and supported `collection` commands as applicable.
+If one graph read fails, omit only its result. Do not use the standalone legacy adapter list as a modern fallback.
+A missing graph drops only its graph-derived fields. Then continue with Step 1.
 
 When reporting graph work, use `inspect`/`summarize`'s `node_names` entry to show each node's one-word job name and lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Action-receipt gate: the shipped advisory mode warns; explicit enforce needs a signed receipt.
+"""Action-receipt gate: default enforce needs a signed receipt; explicit advisory warns.
 
-Config `action_authority`: advisory | enforce | off; absent or unknown config is off.
+Config `action_authority`: enforce | advisory | off; absent config enforces; invalid config denies.
 Advisory warns on missing receipts; live authority denials and
 unbindable merges under a live merge cap still block.
 Enforce denies unless
@@ -43,14 +43,13 @@ from scripts.lib import advisory_merge, merge_budget
 from scripts.lib.action_binding import binding, merge_number
 from scripts.lib.action_receipt import proposed_action
 from scripts.lib.authority_object import read_authority
-from scripts.lib.config import config_path
-from scripts.lib.config_strict import ConfigRejected, strict_settings
+from scripts.lib.config_strict import ConfigRejected
 from scripts.lib.receipt_gate import check_and_consume, resolve_mode
 from scripts.lib.receipt_signing import USER_TIER, resolve_trust_root
 
 
 def mode(cwd: str) -> str:
-    """Return advisory, enforce or off, never raising."""
+    """Return advisory, enforce or off; reject invalid configuration."""
     return resolve_mode(cwd)[0]
 
 
@@ -77,7 +76,7 @@ def how_to_proceed(code: str, session: str, name: str) -> str:
             "--match-head-commit <head sha>`, with no earlier ref-moving step in the same command."
         )
     return (
-        "For optional receipt enforcement, sign one at a terminal with the configured key: "
+        "The owner must sign one at a terminal with the configured key: "
         f"python3 scripts/action_receipt_cli.py approve-action --session {session} --kind {name} "
         "--command '<exact command>' --cwd <directory it runs in>. "
         "One-time key setup: scripts/authority_keys.py init."
@@ -156,26 +155,15 @@ def main() -> int:
             return 0
         if not (calls := guarded_operations(command, cwd, implicit_push=True)):
             return 0
-        source_mode, _ = resolve_mode(cwd)
+        mode_ = "enforce"
+        source_mode, _ = resolve_mode(cwd, trace_id)
         priority = {"off": 0, "advisory": 1, "enforce": 2}
         configured: list[tuple[Operation, str]] = []
         for call in calls:
             selected = repository(call)
-            config = config_path(selected)
-            selected_mode, _ = resolve_mode(selected)
+            selected_mode, _ = resolve_mode(selected, trace_id)
             selected_mode = max((source_mode, selected_mode), key=priority.__getitem__)
             configured.append((call, selected_mode))
-            if not config:
-                continue
-            try:
-                strict_settings(config, trace_id)
-            except ConfigRejected as error:
-                append_row("action_authority", "denied", "config_rejected", trace_id, None)
-                deny(
-                    f"Blocked: {call.name.replace('_', ' ')} because workflow config is invalid: {error}. "
-                    "Fix .coderails/workflow.config.yaml; run resolve-config --json for details."
-                )
-                return 0
         active = [(call, selected_mode) for call, selected_mode in configured if selected_mode != "off"]
         if not active:
             return 0
@@ -201,6 +189,12 @@ def main() -> int:
         append_row("action_authority", "denied", f"denied_{code}", trace_id, loop_id)
         need = "needs a bound PR and head" if code.startswith("budget_") else "needs an action receipt"
         deny(f"Blocked: {name.replace('_', ' ')} {need} ({code}). {how_to_proceed(code, session, name)}")
+    except ConfigRejected as error:
+        append_row("action_authority", "denied", "config_rejected", trace_id, loop_id)
+        deny(
+            f"Blocked: workflow config is invalid: {error}. "
+            "Fix .coderails/workflow.config.yaml; run resolve-config --json for details."
+        )
     except Exception as error:  # noqa: BLE001 - enforce and live grants must refuse unexpected hook errors
         resource = isinstance(error, OSError) and error.errno in RESOURCE_ERRNOS
         if (resource and not policy_known) or mode_ == "enforce" or authority:

@@ -24,7 +24,7 @@ from hooks.scripts.lib.pr_workflow_match import (
     targets_main_call,
     transcript_entries,
 )
-from hooks.scripts.lib.shell_context import opaque_execution
+from hooks.scripts.lib.shell_context import invocations, opaque_execution, payload_cwd
 from hooks.scripts.lib.trace_row import append_row
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -85,8 +85,10 @@ def _main() -> int:
     if opaque_execution(command, cwd):
         deny("Blocked: executable shell body exceeds the guarded parser depth.")
         return 0
-    raw_session = payload.get("session_id")
-    session = raw_session if isinstance(raw_session, str) else ""
+    session = raw_session if isinstance(raw_session := payload.get("session_id"), str) else ""
+    if reason := publication_gate.push_preflight(invocations(command, payload_cwd(payload)), session):
+        deny(reason)
+        return 0
     calls = operations(command, cwd)
     merges = [call for call in calls if call.name == "merge"]
     guarded = [call for call in calls if call.name == "merge" or (call.name == "git_push" and targets_main_call(call))]

@@ -28,16 +28,15 @@ read-only and prints a JSON skeleton `{goal, decisions[{id, cite, text}], done, 
 degraded[]}` (decisions carry their Muninn K-ids and cites; proof verdicts are recorded claims, not `done`). Use it for Goal, Decisions, Done
 and Next steps instead of reconstructing them from the conversation. **State `degraded[]` to the user in the handoff
 under a "Memory degraded" line**, reason code by reason code (exit 3 means it is non-empty); never skip it and never
-replace it with hand-written Markdown. The commands it wraps, for reference or when you need a field it does not print:
-`python3 "$SKILL_DIR/../agentic-loop/scripts/graph.py" summarize "$STATE"` (JSON: `phase`, `detail`, `done`, `active`,
-`ready`, `pending`), `... graph.py collection <state-root>` (JSON graph list with each node's stable ID, readable name and status), `... graph.py inspect "$STATE"` (JSON: `revision`, `active_wave`, `running`, `ready`, `hard_stop`),
-and `python3 "$SKILL_DIR/../../scripts/lib/memory_adapter.py" list --type decision --scope loop --loop "<loop id from inspect>" --session "$SESSION"`
-(JSON records with `cite`). `$SKILL_DIR` is the absolute directory containing this `SKILL.md`.
-Use successful results for Goal, Decisions, Done, and Next steps. If a graph command fails, omit only its result.
-Keep current-graph results when collection fails on another graph. A missing loop graph drops only the graph commands.
-If the adapter exits nonzero, it prints `{"degraded": "<reason_code>"}`. Put that code under a "Memory degraded" line
-in the handoff (see `docs/RUNBOOK.md`, "Memory degraded (Muninn authoritative)"). Do not skip the read silently or
-replace typed decisions with hand-written Markdown. Then run Step 1.
+replace it with hand-written Markdown. Run these commands from the actual mapped project repository.
+The state-key directory and plugin checkout do not establish project scope.
+The skeleton uses retained R-id/window/project bindings for local decisions and exact current task receipts for extras.
+Keep revision, real selected quote, complete supports, conditions and expiry in the handoff. Do not assume a condition
+is true. Keep unknown/pending and unsupported-use reasons visible. Current Muninn has no normal/restricted classifier;
+its physical source, scope, redaction and owner-authority checks do not establish semantic privacy classification.
+For graph fields, use the provider `graph.py summarize`, `inspect` and supported `collection` commands as applicable.
+If one graph read fails, omit only its result. Do not use the standalone legacy adapter list as a modern fallback.
+A missing graph drops only its graph-derived fields. Then continue with Step 1.
 
 When reporting graph work, use the `node_names` entry from `inspect` or `summarize`. Show each node's job name and
 lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.
