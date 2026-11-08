@@ -9,7 +9,7 @@ import { mkdir, readdir, rename, rmdir, stat as nodeStat, unlink, writeFile as n
 import { basename, dirname, join, relative, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-export const CLAUDE_PARSER_VERSION = 6;
+export const CLAUDE_PARSER_VERSION = 7;
 const MAX_SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
 export function safeReadError(error: unknown): string {
   if (error instanceof Error && error.message.startsWith("source exceeds trace scan limit:"))

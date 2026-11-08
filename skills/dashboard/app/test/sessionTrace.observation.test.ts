@@ -22,6 +22,30 @@ async function fixture(rows: Row[]) {
 }
 
 describe("Claude transcript observations", () => {
+  it.each([
+    ["See AGENTS.md.", "context:AGENTS.md"],
+    ["See /repo/AGENTS.md.", "context:AGENTS.md"],
+    ["See ./CLAUDE.md.", "context:CLAUDE.md"],
+    ["See `../repo/CLAUDE.md`.", "context:CLAUDE.md"],
+    ["See /repo/skills/wiki-query/SKILL.md.", "skill:wiki-query"],
+  ])("records a mention in %s", async (text, identity) => {
+    const { deps } = await fixture([{ type: "assistant", sessionId: "s1", message: {
+      content: [{ type: "text", text }],
+    } }]);
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    expect(page.events.filter((event) => event.attributes["coderails.observation.kind"] === "mention"))
+      .toHaveLength(1);
+    expect(page.events[0].attributes["coderails.observation.target_sha256"]).toBe(digest(identity));
+  });
+
+  it.each(["See /repo/notAGENTS.md.", "See ./CLAUDE.mdx."])("rejects a partial filename in %s", async (text) => {
+    const { deps } = await fixture([{ type: "assistant", sessionId: "s1", message: {
+      content: [{ type: "text", text }],
+    } }]);
+    const page = await readClaudeTracePage("s1", null, 50, deps);
+    expect(page.events.some((event) => event.attributes["coderails.observation.kind"] === "mention")).toBe(false);
+  });
+
   it("keeps arbitrary skill-file origin unproved", async () => {
     const { deps } = await fixture([
       { type: "assistant", sessionId: "s1", message: { content: [
