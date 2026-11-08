@@ -117,27 +117,23 @@ class RecoveryCase(StoreCase):
         return progress(self.repo, session, "logical-" + session, "in-progress")
 
     def stage(self, session: str, scope: str = "agnostic", mode: str = "stable-mode") -> tuple[int, dict[str, Any]]:
-        """Stage the same shared id while independently owning session, loop and source."""
+        """Stage one order, complete its fake review, then inspect the same request."""
         if not (self.repo / session / "progress.json").exists():
             self.owner(session)
         env = {**self.native_env, "CODEX_THREAD_ID" if self.codex else "CLAUDE_CODE_SESSION_ID": session}
-        return self.cli(
-            "record",
-            "--id",
-            "stable-mode",
-            "--failure-mode",
-            mode,
-            "--lesson",
-            "Lesson for " + session,
-            "--scope",
-            scope,
-            "--loop",
-            "logical-" + session,
-            "--quote",
-            PROMPT,
-            session=session,
-            env=env,
-        )
+        args = ("record", "--id", "stable-mode", "--failure-mode", mode,
+                "--lesson", "Lesson for " + session, "--scope", scope,
+                "--loop", "logical-" + session, "--quote", PROMPT)  # fmt: skip
+        code, result = self.cli(*args, session=session, env=env)
+        if code != 3 or not result.get("muninn", {}).get("request_id"):
+            return code, result
+        completed = subprocess.run(
+            ["muninn", "learn", "complete", result["muninn"]["request_id"], "--kind", "lesson",
+             "--content", "Lesson for " + session],
+            capture_output=True, text=True, env=env, check=False,
+        )  # fmt: skip
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        return self.cli(*args, session=session, env=env)
 
     def complete(self, session: str) -> None:
         """Save the fields changed by the actual provider's completion contract."""

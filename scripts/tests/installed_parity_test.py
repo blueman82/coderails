@@ -55,6 +55,9 @@ class InstalledParityTests(unittest.TestCase):
             write(root, relative, b"{}\n")
         subprocess.run(["git", "init", "-q", str(self.source)], check=True)
         subprocess.run(["git", "-C", str(self.source), "add", "-A"], check=True)
+        for path in (self.source / "packages/codex").rglob("*"):
+            if path.is_file():
+                write(self.claude, path.relative_to(self.source).as_posix(), path.read_bytes())
 
     def run_parity(self) -> subprocess.CompletedProcess[str]:
         """Compare the fixture installs against the fixture source."""
@@ -306,6 +309,8 @@ class InstalledParityTests(unittest.TestCase):
             for relative in ("policy/review_policy.json", "capabilities/profiles.json", "routines/docs-sync.json"):
                 write(self.source, prefix + relative, b"{}\n")
                 write(installed, relative, b"{}\n")
+                if prefix:
+                    write(self.claude, prefix + relative, b"{}\n")
             subprocess.run(["git", "-C", str(self.source), "add", "-A"], check=True)
             for relative in (
                 "skills/x/a.py",

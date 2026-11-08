@@ -1,7 +1,15 @@
-# Typed-records measurement (lane D, started by the record-decision unit)
+# Typed record measurement
 
-Before/after numbers for turning hand-written loop records into typed, hash-chained, Muninn-synced records. One section
-per unit; this file starts with decisions. Counts come from code and trace rows, not from recollection.
+This note compares hand-written loop records with typed records. It starts with decisions, then covers standing
+orders, lessons, retrospective records, handoff data, and proof results. Counts come from source checks and trace
+rows. A count does not prove that an installed provider used the control.
+
+| Evidence | Status |
+|---|---|
+| Source | The named Python writers and validators exist in the candidate plugin. |
+| Local | The named tests check record shapes, chains, refusals, and recovery on local fixtures. |
+| Installed | Both providers still need live allowed and refused control checks after installation. |
+| Operation | Muninn sync and completion counts need a named session and its retained records. |
 
 ## Decisions (`decisions_absorbed`)
 
@@ -120,7 +128,7 @@ matrix owner's to update after merge.
 | Evidence the gate reads | a transcript tool pair (Claude) or an exec result frame plus `status == pass` (Codex) | hash-chained run rows on both providers | `proof_run_test.py` (a perfectly matching transcript no longer satisfies a proof) |
 | `expect` | prose, never evaluated | `{exit_code, stdout_contains, stdout_not_contains}`, evaluated | `proof_run_test.py` expect tests; skipping the evaluation fails them |
 | Tamper detection | none | edited proof.json, wrong cmd hash and removal of a nonfinal row block (`proof_stale_cmd`, `proof_chain_broken`); removal of a valid-prefix tail is undetected | `proof_run_test.py` mutation controls and current-head review |
-| Codex loop with no executable surface | could not complete | completes with `none: <reason>` or the typed disposition | `packages/tests/test_codex_completion.py` |
+| Codex loop with no executable surface | could not complete | completes with `none: <reason>` or a typed choice about proof execution | `packages/tests/test_codex_completion.py` |
 
 Counters: `proof.freeze|run|gate` trace rows are counted by `scripts/lib/memory_counters.py` (prefix `proof.`), embedded under
 the `memory` key of `scripts/measure_graph_alignment.py`; no edit to that script. Runbook entry: `docs/RUNBOOK.md`

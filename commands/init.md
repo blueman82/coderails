@@ -73,7 +73,7 @@ engineering_principles_paths:
 # or: engineering_principles_paths: null
 engineering_principles_skill: "/engineering-principles-python"   # nil = skip engineering-principles entirely; /engineering-principles-go, /engineering-principles-ts, /engineering-principles-bash also supported
 sandbox_workers: true    # default ON; requires npx and a supported OS for contained worker dispatch
-action_authority: advisory  # shipped setting: warn without a receipt; omitted means off; enforce requires a signed receipt
+action_authority: enforce  # default: signed owner receipts; explicit advisory warns; explicit off disables this gate
 integrity_review:
   enabled: false   # Turn on local status checks after the GitHub Actions ruleset is live
 ```

@@ -171,8 +171,16 @@ class DocsTests(unittest.TestCase):
         for text in (record, (ROOT / "AGENTS.md").read_text(), (ROOT / "docs/RUNBOOK.md").read_text()):
             self.assertIn("cooperating-agent safeguard", text)
         for residual in ("agent-writable", "Accessibility", "NOT verified", "command text the hook sees",
-                         ".consumed", "fills the receipts directory", "fails open", "off unless"):  # fmt: skip
+                         ".consumed", "fills the receipts directory", "fails open"):  # fmt: skip
             self.assertIn(residual, record)
+        modes = " ".join(record.split())
+        for contract in (
+            "The gate defaults to `action_authority: enforce`, including when there is no configuration file.",
+            "Invalid configuration denies guarded actions.",
+            "Explicit `advisory` warns without a receipt",
+            "explicit `off` disables this receipt gate",
+        ):
+            self.assertIn(contract, modes)
 
 
 if __name__ == "__main__":
