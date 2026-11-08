@@ -77,9 +77,20 @@ def identity(root: Path) -> dict[str, str]:
     }
 
 
+def ignored(relative: Path) -> bool:
+    """Keep cache and Finder exclusions independent of entry type and runtime selection."""
+    return "__pycache__" in relative.parts or relative.name.endswith(".pyc") or relative.name == ".DS_Store"
+
+
+def runtime_module(relative: str) -> bool:
+    """Select module files reachable through ordinary import package components."""
+    path = Path(relative)
+    return path.name.endswith(MODULE_SUFFIXES) and all(part.isidentifier() for part in path.parts[:-1])
+
+
 def _runtime_file(relative: str) -> tuple[str, str] | None:
     """Name tracked plugin files that an installed bundle must contain."""
-    if "__pycache__" in Path(relative).parts or relative.endswith(".pyc") or Path(relative).name == ".DS_Store":
+    if ignored(Path(relative)):
         return None
     if relative.startswith(CODEX_PREFIX):
         bundle, path = "codex", relative[len(CODEX_PREFIX) :]
@@ -87,12 +98,7 @@ def _runtime_file(relative: str) -> tuple[str, str] | None:
         bundle, path = "claude", relative
     if not path or "tests" in Path(path).parts or path.endswith(("_test.py", ".test.ts", ".spec.ts")):
         return None
-    if (
-        bundle == "claude"
-        and path not in ROOT_FILES
-        and not path.startswith(RUNTIME_DIRS)
-        and not path.endswith(MODULE_SUFFIXES)
-    ):
+    if bundle == "claude" and path not in ROOT_FILES and not path.startswith(RUNTIME_DIRS) and not runtime_module(path):
         return None
     return bundle, path
 
@@ -236,14 +242,16 @@ def verify(manifest: object, root: Path, config: Path, claude: Path, codex: Path
         for candidate in installed.rglob("*"):
             relative = candidate.relative_to(installed).as_posix()
             source_relative = f"{CODEX_PREFIX}{relative}" if bundle == "codex" else relative
-            selected = _runtime_file(source_relative)
-            if selected is None:
+            if ignored(Path(relative)):
                 continue
             if candidate.is_symlink():
                 raise ValueError("installed_path_symlink")
             mode = candidate.lstat().st_mode
             if not stat.S_ISREG(mode) and not stat.S_ISDIR(mode):
                 raise ValueError("installed_path_type")
+            selected = _runtime_file(source_relative)
+            if selected is None:
+                continue
             if candidate.is_file() and selected[0] == bundle and selected[1] not in current_files[bundle]:
                 raise ValueError("installed_file_extra")
         for relative, expected_sha in current_files[bundle].items():

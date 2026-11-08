@@ -157,6 +157,29 @@ class ReleaseInventoryTests(unittest.TestCase):
         result = case.verify(snapshot)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_extra_symlinked_import_package_refuses_manifest(self) -> None:
+        """Package directories must not escape link checks through file filtering."""
+        case = self.manifest
+        snapshot = case.snapshot()
+        package = case.root.parent / "external-package"
+        package.mkdir()
+        (package / "__init__.py").write_bytes(b"unused package\n")
+        (case.claude / "argparse").symlink_to(package, target_is_directory=True)
+        self.assertIn("installed_path_symlink", case.verify(snapshot).stderr)
+
+    def test_ignored_local_tool_modules_are_not_bundle_inputs(self) -> None:
+        """Ignored private tooling cannot shadow ordinary root module imports."""
+        case = self.manifest
+        case.write(".gitignore", b".local-tools/\n")
+        case.git("add", ".gitignore")
+        case.git("commit", "-qm", "private tooling state")
+        case.write(".local-tools/tool.py", b"local tooling\n")
+        self.assertEqual(case.verify(case.snapshot()).returncode, 0)
+        installed_parity_test.write(self.parity.source, ".gitignore", b".local-tools/\n")
+        installed_parity_test.write(self.parity.source, ".local-tools/tool.py")
+        result = self.strict()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_strict_requires_tracked_nonruntime_assets(self) -> None:
         """A tracked document must exist even when all runtime files remain."""
         case = self.parity
