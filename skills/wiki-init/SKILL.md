@@ -8,11 +8,11 @@ model: sonnet
 
 Bootstrap an LLM Wiki for the current project based on Karpathy's LLM Wiki pattern: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
 
-The core idea: instead of re-deriving knowledge from raw code on every question, the LLM incrementally builds and maintains a persistent wiki — a structured, interlinked collection of markdown files that compounds over time. The human browses it in Obsidian. The LLM does the bookkeeping.
+The LLM builds and maintains a persistent wiki. It adds links and updates pages as the project changes. The human browses the wiki in Obsidian. This reduces repeated work from raw code.
 
 ## Prerequisites
 
-Use Obsidian to browse the vault. `qmd` is optional: without it, read `index.md` and linked pages directly. Install matplotlib only when creating charts; install any build tools required by your chosen optional tooling. This plugin does not bundle a wiki setup script.
+Use Obsidian to browse the vault. `qmd` is optional; without it, read `index.md` and linked pages. Install matplotlib only if you create charts. Install other build tools only for optional tooling that needs them. This plugin has no wiki setup script.
 
 The plugin also bundles Obsidian config files and the Marp plugin in `assets/` — these get copied into the vault in Step 3.
 
@@ -45,7 +45,7 @@ Present the proposal and iterate until the user approves. Include 3-5 seed pages
 
 1. Determine project name from current directory or CLAUDE.md.
 2. Ask the user where the vault should live. Default suggestion: `<project-parent-dir>/<project-name>-wiki/` (sibling of the current project directory). Accept any path they provide. Set the shell variable `VAULT` to this path.
-3. Locate the skill's bundled assets. The assets live next to this SKILL.md file, in the `assets/` subdirectory. Set the shell variable `ASSETS` to the absolute path of that directory. On a typical Claude Code install this is `~/.claude/skills/wiki-init/assets`. Verify it exists and contains `obsidian-plugins/marp/main.js` before proceeding — if it doesn't, stop and ask the user to reinstall the skill.
+3. Locate the bundled `assets/` directory next to this SKILL.md file. Set `ASSETS` to its absolute path. A typical Claude Code path is `~/.claude/skills/wiki-init/assets`. Check that `obsidian-plugins/marp/main.js` exists. If it does not, stop and ask the user to reinstall the skill.
 4. Create the vault and init git:
    ```bash
    mkdir -p "$VAULT/.obsidian/plugins"
@@ -70,7 +70,7 @@ Present the proposal and iterate until the user approves. Include 3-5 seed pages
    grep -q '"marp"' "$VAULT/.obsidian/community-plugins.json" || { echo "FATAL: community-plugins.json missing marp entry"; exit 1; }
    ```
    If any check fails, stop. Do not improvise. Tell the user what failed and ask for help.
-7. Create the wiki content directories (one per approved page type) plus `templates/`. Also create `assets/` if the project expects matplotlib charts or other generated images in the wiki — it's optional, not required for every vault:
+7. Create one directory for each approved page type and create `templates/`. Create `assets/` only if the wiki will hold charts or other generated images:
    ```bash
    cd "$VAULT" && mkdir -p templates <page-type-1> <page-type-2> ...
    # optional, only if charts/images are expected:

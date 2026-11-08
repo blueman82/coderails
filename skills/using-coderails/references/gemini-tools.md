@@ -25,7 +25,7 @@ When a skill mentions "your instructions file", on Gemini CLI this is **`GEMINI.
 
 ## Personal skills directory
 
-User-level skills live at **`~/.gemini/skills/`**, with **`~/.agents/skills/`** as a cross-runtime alias (shared with Codex and Copilot CLI). When both directories exist at the same scope, `.agents/skills/` takes precedence. Each skill is a subdirectory containing a `SKILL.md` (with `name` and `description` frontmatter).
+User-level skills live at **`~/.gemini/skills/`**. The cross-runtime alias **`~/.agents/skills/`** is shared with Codex and Copilot CLI. If both paths exist at the same scope, `.agents/skills/` takes precedence. Each skill has a `SKILL.md` with `name` and `description` frontmatter.
 
 ## Subagent support
 
@@ -56,7 +56,7 @@ Skills provide prompt templates with placeholders like `{WHAT_WAS_IMPLEMENTED}` 
 
 ### Parallel dispatch
 
-Gemini CLI supports parallel subagent dispatch. Issue multiple `invoke_agent` calls in the same response (or multiple `@generalist` invocations in one prompt) to run independent subagent work in parallel. Keep dependent tasks sequential, but do not serialize independent subagent tasks just to preserve a simpler history.
+Gemini CLI can dispatch subagents in parallel. Put independent `invoke_agent` calls in one response, or use multiple `@generalist` invocations in one prompt. Run dependent tasks in sequence.
 
 ## Additional Gemini CLI tools
 

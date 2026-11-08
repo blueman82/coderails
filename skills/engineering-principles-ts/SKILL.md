@@ -53,7 +53,7 @@ paths: "**/*.ts,**/*.tsx"
 
 ## Imperative → Declarative Patterns (MANDATORY)
 
-Scan for these anti-patterns and replace with idiomatic TypeScript.
+Find these patterns and replace them with the matching TypeScript idiom.
 
 ### Loop Anti-Patterns
 

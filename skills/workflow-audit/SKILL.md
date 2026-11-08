@@ -37,7 +37,7 @@ python3 skills/workflow-audit/scripts/scan_transcripts.py <scan args> \
 
 `scan_transcripts.py` (full contract: `--help`) emits one JSON line per session: tool names plus a privacy-whitelisted `head` (first two Bash command tokens, the Skill name, or the Agent subagent_type — nothing else). `cluster_ngrams.py` (full contract: `--help`) consumes that stream and emits one JSON object: n-grams (n=2..5) that recur across `--min-sessions` (default 3) distinct sessions, capped at `--top` (default 50) clusters.
 
-**Diagnostics are not noise.** `jq_parse_error:<file>` or `jq_parse_error:<line-no>` lines on stderr are real parse failures — surface them, don't swallow them. An empty `clusters` array is a legitimate result ("no repeated patterns found at this threshold") — report it plainly and stop; don't lower the threshold or invent candidates to fill the gap.
+**Report diagnostics.** A `jq_parse_error:<file>` or `jq_parse_error:<line-no>` line on stderr is a parse failure. Do not suppress it. An empty `clusters` array means no repeated pattern met the threshold. Report that result and stop. Do not lower the threshold or invent candidates.
 
 ## 4. Judge stage
 
@@ -107,7 +107,7 @@ Present one row per candidate cluster to the owner:
 | Proposed name / description | judge's `proposed_name` / `proposed_description` |
 | Verdict | judge's `verdict` (+ `reject_reason` if rejected) |
 
-Only rows with `verdict: "propose"` go forward (to creation or a queue entry, per section 7); rejected clusters are reported (with their reason) but nothing further is done with them.
+Only rows with `verdict: "propose"` go to creation or the queue. Report rejected clusters and their reasons. Take no further action on them.
 
 **Privacy invariant.** The chart and every downstream artifact (proposal file, wrap-up report) contain only tool names, whitelisted heads, counts, and session ids — never verbatim transcript prose, file contents, or reconstructed intent beyond what those fields literally say. Any proposal artifact written to disk stays local (scratch or loop-state dir) and is never committed to the repo.
 
@@ -132,4 +132,8 @@ Report, unscored:
 
 ## 10. Scheduled invocation
 
-This skill is invoked weekly via the `workflow-audit-weekly` routine (see `docs/routines.md` for the full operator guide). The routine scans transcripts from the last 7 days (`--days 7`), clusters repeated patterns, judges them, and writes any `propose` verdicts as queue entries on the dashboard. **Queue-mode is mandatory for scheduled runs** — in-session skill creation is forbidden, and the owner's Approve click on a queue entry is the sole build trigger for each proposal. This differs from an interactive run, which can create skills in-session or defer to queue-mode at the user's discretion. The routine completes cleanly only if `proposals_written == proposals_attempted` (no queue write failures); a run with zero proposals is a successful week, not a failure.
+The `workflow-audit-weekly` routine invokes this skill each week. See `docs/routines.md` for the operator guide. The routine scans the last 7 days of transcripts (`--days 7`). It clusters and judges repeated patterns, then writes `propose` verdicts as dashboard queue entries.
+
+**Scheduled runs must use queue-mode.** They must not create skills in-session. Only the owner's Approve click on a queue entry can start each build. An interactive run can create skills in-session or use queue-mode, at the user's discretion.
+
+The routine completes cleanly only when `proposals_written == proposals_attempted`, with no queue write failures. A week with zero proposals is successful.

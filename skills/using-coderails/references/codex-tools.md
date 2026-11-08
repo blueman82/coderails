@@ -24,7 +24,7 @@ When a skill mentions "your instructions file", on Codex this is **`AGENTS.md`**
 
 ## Personal skills directory
 
-User-level skills live at **`$CODEX_HOME/skills/`** (default `~/.codex/skills/`). Codex also reads the cross-runtime path **`~/.agents/skills/`** (shared with Copilot CLI and Gemini CLI). When both directories exist at the same scope, Codex loads them both as separate skill catalogs — Codex's docs don't currently document a precedence between them. Each skill is a subdirectory containing a `SKILL.md` (with `name` and `description` frontmatter).
+User-level skills live at **`$CODEX_HOME/skills/`** (default `~/.codex/skills/`). Codex also reads **`~/.agents/skills/`**, which Copilot CLI and Gemini CLI share. If both paths exist at the same scope, Codex loads both catalogs. Its docs do not state a precedence. Each skill has a `SKILL.md` with `name` and `description` frontmatter.
 
 ## Subagent dispatch requires multi-agent support
 

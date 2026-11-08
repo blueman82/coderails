@@ -24,7 +24,7 @@ When a skill mentions "your instructions file", on Copilot CLI this is **`AGENTS
 
 ## Personal skills directory
 
-User-level skills live at **`~/.copilot/skills/`**. Copilot CLI also recognizes the cross-runtime alias **`~/.agents/skills/`**, which is shared with Codex and Gemini CLI. Each skill is a subdirectory containing a `SKILL.md` (with `name` and `description` frontmatter).
+User-level skills live at **`~/.copilot/skills/`**. Copilot CLI also reads **`~/.agents/skills/`**, which Codex and Gemini CLI share. Each skill has a `SKILL.md` with `name` and `description` frontmatter.
 
 ## Async shell sessions
 

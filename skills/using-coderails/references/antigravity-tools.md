@@ -1,6 +1,7 @@
 # Antigravity CLI (`agy`) Tool Mapping
 
-Skills speak in actions ("dispatch a subagent", "create a todo", "read a file"). On the Antigravity CLI (`agy`) these resolve to the tools below.
+Skills name actions such as dispatching an agent or reading a file. On the
+Antigravity CLI (`agy`), use these tools:
 
 | Action skills request | Antigravity CLI equivalent |
 |----------------------|----------------------|
@@ -51,11 +52,11 @@ directly, no `define_subagent` needed:
   or command access). Use it when you specifically want a subagent that can't make
   changes — investigation and read-only review.
 
-Call `define_subagent` only for a custom system prompt or capability mix: set
-`enable_write_tools: true` to grant file edits **and** `run_command`,
-`enable_subagent_tools` for nested dispatch, `enable_mcp_tools` for MCP. Then
-invoke it by the name you gave it. (`manage_subagents` lists/kills running
-subagents.)
+Use `define_subagent` only when you need a custom system prompt or capability
+mix. Set `enable_write_tools: true` to grant file edits and `run_command`.
+Set `enable_subagent_tools` for nested dispatch, and `enable_mcp_tools` for
+MCP. Then invoke the type by the name you gave it. `manage_subagents` lists
+or stops running subagents.
 
 Skills dispatch by naming an agent (e.g. `coderails:loop-worker`,
 `pr-review-toolkit:code-reviewer`) or by supplying an inline prompt. Antigravity

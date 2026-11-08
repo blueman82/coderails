@@ -6,16 +6,15 @@ model: sonnet
 
 # Memory Consolidation
 
-Periodically health-check and consolidate a project's persistent memory
-directory (`~/.claude/projects/<slug>/memory/`), the same directory the
-memory system documented in `~/.claude/CLAUDE.md` writes to during normal
-sessions.
+Check and consolidate the project's memory directory at
+`~/.claude/projects/<slug>/memory/`. Normal sessions write there as
+described in `~/.claude/CLAUDE.md`.
 
 ## When to Use
 
-- Run as a scheduled routine (weekly, via the `routines` section of
-  `~/.claude/coderails-dashboard.json`). The skill needs no routines setup
-  to work — it runs standalone on demand too.
+- Run weekly through the `routines` section of
+  `~/.claude/coderails-dashboard.json`, if configured. You can also run it
+  on demand without a routine.
 - Run on demand when memory files have visibly accumulated overlapping or
   contradictory content.
 
@@ -129,6 +128,5 @@ artifact-gate checks. Its content:
 Updated: yes|no
 ```
 
-This report is this skill's own durable artifact, written natively by the
-skill itself — the property that lets a scheduled routine gate on the
-report's existence.
+The report is the skill's durable artifact. A scheduled routine checks that
+it exists.

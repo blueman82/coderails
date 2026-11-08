@@ -281,6 +281,6 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/agentic-loop/scripts/graph.py" \
   --disposition none --reason "no executable surface"
 ```
 
-The command saves `none: no executable surface` under the graph lock. It refuses a foreign owner, a stale revision, an active wave, an existing proof file, or a repeated decision. The `loop_stall_guard` proof gate requires the saved disposition when `proof.json` is absent.
+The command saves `none: no executable surface` under the graph lock. It refuses a foreign owner, a stale revision, an active wave, an existing proof file, or a repeated decision. The `loop_stall_guard` proof gate requires the saved no-proof reason when `proof.json` is absent.
 
 Write schema 2: `expect` is a structured object `{"exit_code":0,"stdout_contains":[...],"stdout_not_contains":[...]}` (optional `timeout_s`); `proof.py freeze` refuses schema 1. The `status` field is written `"pending"` but never consulted. After freezing, the controller runs `python3 scripts/lib/proof.py freeze <state-dir>` then `run <state-dir> --all` (teardown Step 1); the `loop_stall_guard` hook's `loop_proofs.validate_proofs` (and the Codex `graph_artifacts` gate) read only the resulting `proof_results.jsonl` rows, never the transcript. See [loop-state.md](loop-state.md) for the full field contract and honest boundary.
