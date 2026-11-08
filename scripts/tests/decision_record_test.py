@@ -179,7 +179,7 @@ class MuninnSync(Base):
         self.muninn("learn", "complete", out["muninn"]["request_id"])
         flushed = dr.flush_pending(self.path, SESSION, transition=claude_transition)
         self.assertEqual(
-            (flushed["exit_code"], flushed["synced"][0]["muninn"]["reason_code"]), (3, "learning_no_matching_record")
+            (flushed["exit_code"], flushed["synced"][0]["muninn"]["reason_code"]), (3, "learning_no_change")
         )
         self.assertEqual(len(self.decisions()), 1)
         self.assertEqual(self.listed(), [])

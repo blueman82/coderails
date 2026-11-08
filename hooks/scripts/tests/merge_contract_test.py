@@ -14,7 +14,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from scripts import merge
 from scripts.lib import git_common as git
-from scripts.lib import manifest_policy
+from scripts.lib import manifest_policy, review_artifact
 from scripts.lib.eval_artifact import facts_line
 from scripts.lib.eval_integrity import suite_hash
 
@@ -89,10 +89,11 @@ class MergeContractTests(unittest.TestCase):
             stack.enter_context(patch.object(git, "pr_field", side_effect=field))
             stack.enter_context(patch.object(git, "run", side_effect=command))
             stack.enter_context(patch.object(git, "gate_review_summary_for_pr", return_value=review))
-            # the publication gate reads the passes line itself; a bare v1 artifact on an empty diff by default
-            stack.enter_context(
-                patch.object(git, "review_passes_for_pr", return_value=passes or git.ReviewPasses(0, ()))
-            )
+            if passes is None:
+                body = review_artifact.marker("7", sha) + "\n## No findings\n"
+                with patch.object(git, "trusted_comment_bodies", return_value=[body]):
+                    passes = git.review_passes_for_pr("7", sha)
+            stack.enter_context(patch.object(git, "review_passes_for_pr", return_value=passes))
             stack.enter_context(patch.object(manifest_policy, "diff_changes", return_value=changes or []))
             eval_reader = stack.enter_context(patch.object(git, "gate_eval_summary_for_pr", return_value=summary))
             stack.enter_context(patch.object(merge, "smoke_verify", return_value=smoke))
@@ -154,6 +155,13 @@ class MergeContractTests(unittest.TestCase):
         code, _, merged, _ = self.invoke(sha="cafe1234")
         self.assertEqual((code, merged), (0, True))
         self.assertEqual(self.merge_arguments, ("gh", "pr", "merge", "7", "--merge", "--match-head-commit", "cafe1234"))
+
+    def test_explicit_empty_pass_result_cannot_replace_general_review(self) -> None:
+        """An explicitly empty reader reply remains refused even though the default legacy body passes."""
+        code, text, merged, _ = self.invoke(passes=git.ReviewPasses(0, ()))
+        self.assertEqual(code, 1)
+        self.assertIn("required_review_missing:review-pr", text)
+        self.assertFalse(merged)
 
     def test_fetch_diagnostics_distinguish_identity_permission_and_local_failure(self) -> None:
         """Name each trust-failure stage without relabelling local failures as network errors."""

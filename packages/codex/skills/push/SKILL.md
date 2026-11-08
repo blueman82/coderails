@@ -30,6 +30,15 @@ Resolve the linked helper relative to this `SKILL.md`, then run it from the user
 - If this session owns a graph unit in this worktree, pass its exact `--unit <id> --progress <absolute state path>`.
   Read both values from the active graph. Do not guess them.
 
+The `pr_publication_gate` hook checks the trusted push helper before `action_authority_gate`. For a graph unit,
+run from its canonical assigned worktree with the exact unit ID and absolute progress path owned by this session.
+If the hook refuses the binding, read the active graph and correct the directory or arguments before retrying.
+Without an active graph unit, omit both flags. This read-only preflight does not consume a receipt;
+the existing authority and receipt checks still apply.
+The hook recognizes the documented `${PLUGIN_ROOT}` form and direct Python script options.
+Python `-c`/`-m`, arbitrary shell variables and custom execution trampolines are outside this preflight;
+invoke the helper directly for graph publication.
+
 The helper must fail if the branch is protected or the commit, push, or pull-request creation fails.
 It must also fail if the remote branch does not match local `HEAD`.
 Report success only when it returns a pull-request URL.

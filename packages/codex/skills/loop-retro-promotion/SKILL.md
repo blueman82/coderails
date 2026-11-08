@@ -79,6 +79,9 @@ If the predicate is met, read all `retro.json` files under
 `<repo-key-dir>/*/retro.json` plus the `candidates` list from the
 `lessons.py ... predicate` output of §1 (the typed standing orders; the
 generated `standing-orders.md` is only a view of them).
+Preserve each candidate's `memory` metadata with its revision, body, supports and expiry.
+A conditional or condition-expiring Note returns `learning_conditional_use_unsupported` and is excluded from promotion.
+Do not turn an unresolved free-text condition into unconditional guidance.
 Candidates carry current, live, verified owner-cited lesson text from Muninn. Retros lacking complete owned sources
 cannot inflate the graduation count; free-text notes cannot substitute for typed recurrence fields.
 Select ONLY failure modes that:

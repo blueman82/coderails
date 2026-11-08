@@ -333,6 +333,8 @@ def main() -> int:
             output = _record_unit(args)
         elif args.command in {"record-decision", "flush-decisions"}:
             output = _decision(args)
+            if args.cite_quote is not None:
+                output["quote_ignored"] = True
         elif args.command == "record-repair":
             output = graph_controller.record_repair(
                 args.state, args.session, args.unit, args.failed_node, args.kind, args.identity, args.diagnosis

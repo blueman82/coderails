@@ -15,7 +15,9 @@ from hooks.scripts.tests.claude_graph_test_support import node
 from hooks.scripts.tests.lib import assembled_retro
 from hooks.scripts.tests.lib import claude_transcript_fixture as claude
 from packages.tests import codex_fixture as codex
+from scripts.lib import orders_ledger as ol
 from scripts.lib import proof_results
+from scripts.tests import fake_muninn_current as fc
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -81,6 +83,76 @@ class Provider:
         }
         self.write(self.state())
         self.freeze()
+
+    def current_note(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Connect the real reader to complete public responses with two physical supports."""
+        data = fc.fixture(self.home, self.checkout, task="fixture-loop", kind="lesson", claim="Use both supports.")
+        note = data["notes"][0]
+        note["body"]["extra"] = {"retained": ["body"]}
+        note["expiry"] = {"at": 9999999999.0, "condition": None, "evidence_refs": [fc.EID], "extra": "expiry"}
+        data["evidence"][1]["extra"] = {"retained": ["second support"]}
+        data["graph_locks"] = [{"path": f"{self.path}.lock", "kind": "directory" if self.name == "claude" else "file"}]
+        (self.home / "data.json").write_text(json.dumps(data))
+        binary = self.home / "bin/muninn"
+        binary.parent.mkdir()
+        binary.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{fc.__file__}" "$@"\n')
+        binary.chmod(0o700)
+        self.environment.update(CURRENT_MUNINN_FIXTURE=str(self.home))
+        self.environment["PATH"] = str(binary.parent) + os.pathsep + self.environment["PATH"]
+        (self.home / ".coderails/workflow.config.yaml").write_text(
+            "memory:\n  backend: muninn\nsandbox_workers: false\n"
+        )
+        ledger = ol.record(
+            ol.empty(),
+            "both",
+            "Use both supports.",
+            session_id=self.session,
+            loop_id="fixture-loop",
+            now="2026-11-06T00:00:00+00:00",
+        )["ledger"]
+        ledger = ol.set_muninn(
+            ledger,
+            "both",
+            {
+                "state": "written",
+                "id": fc.KID,
+                "request_id": fc.RID,
+                "task": "fixture-loop",
+                "request_window": data["request"]["window"],
+                "project_id": str(self.checkout),
+                "reason_code": "ok",
+            },
+        )
+        ol.save(self.path.parent.parent / "orders.json", ledger)
+        row = {
+            "id": "both",
+            "text": "Use both supports.",
+            "cited": True,
+            "cite": "codex:s1:1.1",
+            "quote": fc.QUOTE,
+            "muninn_id": fc.KID,
+            "scope": "repo",
+            "revision": 3,
+            "request_id": fc.RID,
+            "body": note["body"],
+            "expiry": note["expiry"],
+            "supports": [{**e, "ref": f"codex:s1:{e['line']}.1", "quote": e["excerpt"]} for e in data["evidence"]],
+            "privacy_classification": "unknown",
+            "privacy_checks": [
+                "project_task",
+                "live_primary_source",
+                "physical_hash",
+                "unredacted",
+                "owner_prompt",
+                "selected_quote",
+            ],
+            "use_allowed": True,
+            "use_reason": "ok",
+        }
+        state = self.state()
+        state["work_units"] = {"1": {"manifest": ["docs/**"], "lessons": ["Authored local guidance."]}}
+        self.write(state)
+        return data, row
 
     def state(self, identifiers: tuple[str, ...] = ("U3[1]",)) -> dict[str, Any]:
         """Return a current state using stable semantic IDs and native session identity."""

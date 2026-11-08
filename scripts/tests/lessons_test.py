@@ -371,9 +371,18 @@ class NativeReadBoundary(recovery.RecoveryCase):
                 with self.subTest(codex=codex, field=field):
                     for command, key in (("query", "lessons"), ("predicate", "candidates")):
                         rc, out = self.cli(command, script="lessons.py")
-                        self.assertEqual((rc, out[key]), (0, []))
-                    self.assertEqual(self.cli("render")[0], 0)
-                    self.assertNotIn("Lesson for", (self.repo / "standing-orders.md").read_text())
+                        if target == "list":
+                            self.assertEqual((rc, out[key]), (0, []))
+                        else:
+                            self.assertEqual(rc, 3, out)
+                            self.assertIn("degraded", out)
+                    if target == "list":
+                        self.assertEqual(self.cli("render")[0], 0)
+                        self.assertNotIn("Lesson for", (self.repo / "standing-orders.md").read_text())
+                    else:
+                        before = (self.repo / "standing-orders.md").read_bytes()
+                        self.assertEqual(self.cli("render")[0], 3)
+                        self.assertEqual((self.repo / "standing-orders.md").read_bytes(), before)
             exe.write_bytes(original)
             self.assertEqual(len(self.cli("query", script="lessons.py")[1]["lessons"]), 1)
 

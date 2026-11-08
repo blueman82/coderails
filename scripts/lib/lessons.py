@@ -29,17 +29,8 @@ from scripts.lib import memory_request as mr  # noqa: E402
 from scripts.lib import orders_ledger as ol  # noqa: E402
 from scripts.lib.memory_reasons import REASONS  # noqa: E402
 
-TAG_MAX = 32  # muninn's tag rule
 
-
-def tag_for(order_id: str) -> str:
-    """The Muninn tag `ord-<id>`, shortened with a hash when the id would overflow the 32-char tag limit."""
-    if len("ord-" + order_id) <= TAG_MAX:
-        return "ord-" + order_id
-    return f"ord-{order_id[:TAG_MAX - 13]}-{hashlib.sha1(order_id.encode()).hexdigest()[:8]}"  # noqa: S324
-
-
-def _row(order: dict[str, Any], rec: ma.Record | None) -> dict[str, Any]:
+def _row(order: dict[str, Any], rec: mr.Note | None) -> dict[str, Any]:
     cited = rec is not None
     return {
         "id": order["id"],
@@ -49,16 +40,8 @@ def _row(order: dict[str, Any], rec: ma.Record | None) -> dict[str, Any]:
         "quote": rec.quote if rec else "",
         "muninn_id": rec.id if rec else None,
         "scope": order["scope"],
+        **(rec.metadata() if rec else {}),
     }
-
-
-def pick(records: list[ma.Record], order_id: str, prior: str | None = None) -> ma.Record | ma.Degraded | None:
-    """Select an unambiguous current claim, preferring its known K-id among identical claims."""
-    mine = [r for r in records if tag_for(order_id) in r.tags]
-    if len({r.claim for r in mine}) > 1:
-        return ma.Degraded("lesson_not_current")
-    exact = next((r for r in mine if r.id == prior), None)
-    return exact or max(mine, key=lambda r: int(str(r.id)[1:]), default=None)
 
 
 def claim_text(text: str) -> str:
@@ -76,7 +59,7 @@ def current(
     claim: str | None = None,
     request_window: dict[str, Any] | None = None,
     project_id: str | None = None,
-) -> ma.Record | ma.Degraded | None:
+) -> mr.Note | ma.Degraded | None:
     """Read the exact saved task request and its current note."""
     if ma.backend() == "off":
         return ma.Degraded("memory_backend_off")
@@ -92,9 +75,11 @@ def current(
     return result
 
 
-def metadata(result: ma.Record | ma.Written | mr.Pending | ma.Degraded | None, prior: str | None) -> dict[str, Any]:
+def metadata(result: mr.Note | ma.Written | mr.Pending | ma.Degraded | None, prior: str | None) -> dict[str, Any]:
     """Cache an observation, retaining known provenance when currentness cannot be established."""
-    if isinstance(result, (ma.Record, ma.Written)):
+    if isinstance(result, mr.Note):
+        return {"id": result.id, "state": "written", "reason_code": "ok", **result.metadata()}
+    if isinstance(result, ma.Written):
         return {"id": result.id, "state": "written", "reason_code": "ok"}
     if isinstance(result, mr.Pending):
         return {"id": prior, "state": "pending", "request_id": result.request_id, "reason_code": "learning_pending"}
@@ -122,7 +107,7 @@ def joined(ledger: ol.Ledger, include_decayed: bool = False, session: str = "") 
     excluded: list[dict[str, str]] = []
     for order in active:
         field = order["muninn"]
-        if field.get("state") == "unknown":
+        if field.get("state") == "unknown" and not field.get("request_id"):
             return {"degraded": "learning_request_unknown"}
         observed = current(
             order["id"],
@@ -170,6 +155,8 @@ def contract(payload: dict[str, Any]) -> dict[str, Any]:
     """
     keep = payload.get("state") == "memory_backend_off"
     rows = sorted((r for r in payload["lessons"] if keep or r["cited"]), key=lambda r: str(r["id"]))
+    if any(row.get("use_allowed") is False for row in rows):
+        return {"lessons": rows, "degraded": "learning_conditional_use_unsupported"}
     return {"lessons": rows, "sha256": hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()}
 
 
@@ -182,7 +169,10 @@ def query_contract(repo_dir: Path, session: str = "") -> tuple[dict[str, Any], i
     except ValueError:
         return {"reason_code": "order_state_error"}, 2
     payload, rc = serve(ledger, session)
-    return (payload, rc) if rc else (contract(payload), 0)
+    if rc:
+        return payload, rc
+    selected = contract(payload)
+    return selected, 3 if "degraded" in selected else 0
 
 
 def selection(ledger: ol.Ledger, repo_dir: Path, session: str = "") -> dict[str, Any]:
@@ -191,19 +181,23 @@ def selection(ledger: ol.Ledger, repo_dir: Path, session: str = "") -> dict[str,
     The lesson text is Muninn's cited claim; with Muninn down or the entry not current there is no candidate.
     """
     got = joined(ledger, session=session)
-    texts = {r["id"]: r["text"] for r in got.get("lessons", []) if r["cited"]}
+    rows = {r["id"]: r for r in got.get("lessons", []) if r["cited"] and r.get("use_allowed", True)}
     picked = [
         {
             "id": o["id"],
             "failure_mode": o["failure_mode"],
-            "lesson": texts[o["id"]],
+            "lesson": rows[o["id"]]["text"],
+            "memory": rows[o["id"]],
             "recurrences": len(o["evidence"]) - 1,
             "sessions": sorted({e["session_id"] for e in o["evidence"]}),
         }
         for o in ol.candidates(ledger)
-        if o["id"] in texts
+        if o["id"] in rows
     ]
     out: dict[str, Any] = {"graduation": ol.predicate(ledger, ol.retro_count(repo_dir)), "candidates": picked}
+    unsupported = [r for r in got.get("lessons", []) if r.get("use_allowed") is False]
+    if unsupported:
+        out.update(degraded="learning_conditional_use_unsupported", unsupported=unsupported)
     if "degraded" in got:
         out["degraded"] = got["degraded"]
     return out
