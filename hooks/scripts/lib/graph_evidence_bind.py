@@ -145,7 +145,7 @@ def bind_wave(state: dict[str, Any], results: dict[str, Any]) -> dict[str, list[
                 if approved:
                     if not evidence.startswith("non_independent: human approved") or attempt < 2:
                         raise ValueError("non-independent skip needs a prior refusal and explicit approval")
-                    approval_ref = approval(state, node_id, attempt, rows)
+                    approval_ref = approval(state, node_id, attempt, rows, active["wave_id"], boundary)
                 else:
                     if attempt != 1:
                         raise ValueError("no-work scout skip must precede any scout attempt")

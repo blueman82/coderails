@@ -131,9 +131,11 @@ class ScoutBoundaryTests(unittest.TestCase):
     def test_native_result_and_fresh_sibling_skip_remain_usable(self) -> None:
         """Consumed authorization for an actual child must remain valid native evidence."""
         for provider in ("claude", "codex"):
-            for node_id in ("S2.5", "S2.6"):
-                with self.subTest(provider=provider, node=node_id):
+            for node_id, explicit_id in (("S2.5", True), ("S2.6", True), ("S2.5", False), ("S2.6", False)):
+                with self.subTest(provider=provider, node=node_id, explicit_id=explicit_id):
                     case = self.fixture(provider)
+                    if not explicit_id:
+                        case.environment["CODERAILS_A6_EVIDENCE_WRITE"] = "off"
                     case.native_result(node_id)
                     report = case.report()
                     report["results"][node_id] = {
@@ -213,6 +215,121 @@ class ScoutBoundaryTests(unittest.TestCase):
                     state["graph"]["wave_history"]["wave-2"]["cursor"] = 2
                     case.save(state)
                 self.assert_saved_skip(case)
+
+    def test_prior_refusal_proof_at_recording_and_terminal_reliance(self) -> None:
+        """A fallback must prove its preceding issue, exact try, request, result and approval."""
+        changes = (
+            "missing-issue",
+            "duplicate-issue",
+            "unused-auth",
+            "null-id",
+            "foreign-id",
+            "malformed-auth",
+            "bool-try",
+            "float-try",
+            "zero-try",
+            "duplicate-reference",
+            "missing-history",
+            "old-cursor",
+            "late-result",
+            "duplicate-call",
+            "duplicate-result",
+            "missing-result",
+            "approval-before-result",
+            "request-before-result",
+            "wrong-role",
+            "missing-envelope",
+            "foreign-envelope",
+            "missing-sections",
+            "success-result",
+        )
+        for provider in ("claude", "codex"):
+            case = self.fixture(provider)
+            report = case.fallback()
+            pending, transcript = case.load(), case.transcript.read_bytes()
+            saved = self.assert_saved_skip(case, report)
+            for later in (False, True):
+                for change in changes:
+                    with self.subTest(provider=provider, later=later, change=change):
+                        state = copy.deepcopy(saved if later else pending)
+                        rows = [json.loads(line) for line in transcript.decode().splitlines()]
+                        case.change_prior(state, rows, change)
+                        case.save(state)
+                        case.transcript.write_text("".join(json.dumps(row) + "\n" for row in rows))
+                        self.assert_refused(case, report, later=later)
+
+    def test_safe_prior_modes_and_approval_after_wave_issue(self) -> None:
+        """ON and durable Codex OFF proofs remain usable on either side of issuance."""
+        for provider in ("claude", "codex"):
+            for after in (False, True):
+                for mode in ("on", "off"):
+                    with self.subTest(provider=provider, after=after, mode=mode):
+                        case = self.fixture(provider)
+                        if mode == "off" and provider == "codex":
+                            case.environment["CODERAILS_GRAPH_DISPATCH"] = "off"
+                        report = case.fallback(approval_after_issue=after)
+                        if mode == "off":
+                            case.environment["CODERAILS_GRAPH_DISPATCH"] = "off"
+                        if mode == "off" and provider == "codex":
+                            state = case.load()
+                            rows = [json.loads(line) for line in case.transcript.read_text().splitlines()]
+                            case.change_prior(state, rows, "wrong-role")
+                            case.change_prior(state, rows, "missing-sections")
+                            case.save(state)
+                            case.transcript.write_text("".join(json.dumps(row) + "\n" for row in rows))
+                        self.assert_saved_skip(case, report)
+
+    def test_unbound_failure_audit_does_not_prove_fallback(self) -> None:
+        """Ordinary refused-result history can survive without becoming strict skip proof."""
+        for provider in ("claude", "codex"):
+            for marker in ("unused", "null-id"):
+                with self.subTest(provider=provider, marker=marker):
+                    case = self.fixture(provider)
+                    case.environment["CODERAILS_GRAPH_DISPATCH"] = "off"
+                    case.refuse(authorize=False)
+                    state = case.load()
+                    self.assertEqual(state["graph"]["nodes"]["S2.5"]["retry"]["attempts"], 1)
+                    if marker == "null-id":
+                        next(record for record in state["graph"]["dispatches"].values() if record["node_id"] == "S2.5")[
+                            "authorized"
+                        ] = {"tool_use_id": None}
+                        case.save(state)
+                    case.approve()
+                    case.opened = case.accept("begin-wave", str(case.path))
+                    report = {
+                        "wave_id": case.opened["wave_id"],
+                        "results": {
+                            "S2.5": {
+                                "outcome": "skipped",
+                                "evidence": "non_independent: human approved design fallback",
+                            }
+                        },
+                    }
+                    self.assert_refused(case, report)
+
+    def test_claude_true_issued_try_cannot_be_relabelled(self) -> None:
+        """A genuine consumed try2 cannot substantiate retained try1, even with coherent counters."""
+        case = self.fixture("claude")
+        case.refuse()
+        case.opened = case.accept("begin-wave", str(case.path))
+        case.refuse()
+        state = case.load()
+        ref = next(
+            cast(dict[str, Any], item)
+            for item in reversed(state["graph"]["nodes"]["S2.5"]["evidence"])
+            if isinstance(item, dict)
+        )
+        ref["attempt"] = 1
+        state["graph"]["nodes"]["S2.5"].update(evidence=["retained failure", ref])
+        state["graph"]["nodes"]["S2.5"]["retry"]["attempts"] = 1
+        case.save(state)
+        case.approve()
+        case.opened = case.accept("begin-wave", str(case.path))
+        report = {
+            "wave_id": case.opened["wave_id"],
+            "results": {"S2.5": {"outcome": "skipped", "evidence": "non_independent: human approved design fallback"}},
+        }
+        self.assert_refused(case, report)
 
     def test_claude_foreign_prior_refusal_refuses_before_save_and_at_reliance(self) -> None:
         """A correct approval cannot authorize refusal history from a different loop or wave."""

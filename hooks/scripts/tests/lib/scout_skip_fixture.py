@@ -47,6 +47,7 @@ class ScoutFixture:
             "CLAUDE_AGENTIC_LOOP_DIR": str(self.home / "state"),
             "CODERAILS_AGENTIC_LOOP_DIR": str(self.home / "state"),
             "CLAUDE_DISCIPLINE_LOG": str(self.home / "discipline.log"),
+            "CODERAILS_A6_EVIDENCE_WRITE": "on",
         }
         source = "skills/agentic-loop/scripts/graph.py"
         self.cli = ROOT / (source if provider == "claude" else "packages/codex/" + source)
@@ -155,11 +156,18 @@ class ScoutFixture:
         with self.transcript.open("a") as handle:
             handle.write(json.dumps(row) + "\n")
 
-    def consume(self, node_id: str) -> None:
+    def consume(self, node_id: str, tool_use_id: str = "") -> None:
         """Exercise real single-use authorization without performing its native launch."""
         item = next(item for item in self.opened["dispatches"] if item["node_id"] == node_id)
         prompt = item["prompt_prefix"] + "\n" + item["prompt_sections"] + "\nRead scout instructions."
-        args = ["authorize-dispatch", str(self.path), "--session", "parent", "--tool-use-id", "call-" + node_id]
+        args = [
+            "authorize-dispatch",
+            str(self.path),
+            "--session",
+            "parent",
+            "--tool-use-id",
+            tool_use_id or "call-" + node_id,
+        ]
         if self.provider == "claude":
             args.extend(["--prompt", prompt, "--subagent-type", "coderails:" + ROLES[node_id]])
         else:

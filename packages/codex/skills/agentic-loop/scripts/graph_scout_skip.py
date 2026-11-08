@@ -20,6 +20,7 @@ from graph_identity import (
     task_name,
     task_node,
 )
+from graph_scout_prior import prove_prior_refusal
 from graph_transcript import thread_transcript
 
 PREFIXES = {"S2.5": "no_design_fork:", "S2.6": "no_retired_path:"}
@@ -54,31 +55,13 @@ def _text(record: dict[str, Any], role: str) -> str | None:
     return cast(str, block["text"])
 
 
-def _approval(
-    state: dict[str, Any], node_id: str, attempt: int, refusals: dict[str, tuple[int, str]]
-) -> dict[str, Any]:
+def _approval(state: dict[str, Any], node_id: str, attempt: int, wave_id: str, cursor: int) -> dict[str, Any]:
     """Bind an exact assistant request to the next direct native user reply."""
-    node = state["graph"]["nodes"][node_id]
-    prior: list[dict[str, Any]] = []
-    for value in cast(list[object], node["evidence"]):
-        if isinstance(value, dict):
-            item = cast(dict[str, Any], value)
-            if (
-                item.get("kind") == "codex_agent"
-                and item.get("outcome") == REFUSED_OUTCOME
-                and item.get("attempt") == attempt - 1
-            ):
-                prior.append(item)
-    if node_id != "S2.5" or len(prior) != 1:
-        raise GraphError("non-independent skip needs a recorded scout spawn refusal")
-    call_id = prior[0].get("spawn_call_id")
-    refused = refusals.get(call_id) if isinstance(call_id, str) else None
-    if refused is None or refused[1] != task_name(state["loop_id"], node_id, attempt - 1):
-        raise GraphError("non-independent skip has no native refused scout call")
     records = read_records(thread_transcript(state["session_id"]), "parent transcript")
+    result_line = prove_prior_refusal(state, node_id, attempt, wave_id, cursor, records)
     request = _request(state, attempt)
     matches = [
-        (line, text) for line, row in records if line > refused[0] if (text := _text(row, "assistant")) == request
+        (line, text) for line, row in records if line > result_line if (text := _text(row, "assistant")) == request
     ]
     if len(matches) != 1:
         raise GraphError("non-independent skip has no unique native approval request")
@@ -283,7 +266,7 @@ def bind(
             or not evidence.startswith("non_independent: human approved")
         ):
             raise GraphError("non-independent skip needs a prior refusal and explicit approval")
-        approval = _approval(state, node_id, attempt, refusals)
+        approval = _approval(state, node_id, attempt, active_wave["wave_id"], cursor)
     else:
         if attempt != 1:
             raise GraphError(f"node {node_id} no-work skip must precede any scout attempt")
@@ -336,7 +319,7 @@ def verify(
             for item in cast(list[object], node["evidence"])
         ):
             raise GraphError("non-independent skip has no prior refused scout attempt")
-        approval = _approval(state, node_id, attempt, refusals)
+        approval = _approval(state, node_id, attempt, reference["wave_id"], reference["cursor"])
         if any(reference.get(key) != value for key, value in approval.items()):
             raise GraphError("non-independent skip approval reference changed")
     matching = [

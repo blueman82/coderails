@@ -14,6 +14,7 @@ from graph_evidence import bind_worker_evidence, validate_worker_evidence
 from graph_identity import GraphError, task_name
 from graph_scout_skip import bind as bind_skip
 from graph_scout_skip import verify as verify_skip
+from graph_transcript import launch_observations, refused_launches
 
 from packages.tests import test_codex_native_evidence as native_fixture
 
@@ -93,6 +94,7 @@ class ScoutSkipTests(unittest.TestCase):
         """A failed scout needs a matching request and direct user approval."""
         case = self.fixture
         first_task = task_name("loop", "S2.5", 1)
+        prior_id, prior_record, message = self.prior_dispatch(first_task)
         request = (
             "Coderails: Approve a non-independent design-scout fallback for loop loop, "
             "node S2.5, attempt 2? Reply approve or deny."
@@ -106,7 +108,9 @@ class ScoutSkipTests(unittest.TestCase):
                     "name": "spawn_agent",
                     "namespace": "collaboration",
                     "call_id": "old",
-                    "arguments": json.dumps({"task_name": first_task}),
+                    "arguments": json.dumps(
+                        {"task_name": first_task, "agent_type": "design-scout", "message": message}
+                    ),
                 },
             },
             {
@@ -145,8 +149,12 @@ class ScoutSkipTests(unittest.TestCase):
         ]
         case.wave.update(wave_id="wave-4", revision=4, transcript_cursor=5)
         case.state["revision"] = 4
-        case.state["graph"]["wave_history"] = {"wave-4": {"cursor": 5, "nodes": ["S2.5"], "revision": 4}}
+        case.state["graph"]["wave_history"] = {
+            "wave-2": {"cursor": 1, "nodes": ["S2.5"], "revision": 2},
+            "wave-4": {"cursor": 5, "nodes": ["S2.5"], "revision": 4},
+        }
         self.issue_skip()
+        case.state["graph"]["dispatches"][prior_id] = prior_record
         refusals = {"old": (2, first_task)}
         evidence = "non_independent: human approved design fallback"
         ref = bind_skip(case.state, case.wave, "S2.5", evidence, 5, {}, refusals)
@@ -159,6 +167,7 @@ class ScoutSkipTests(unittest.TestCase):
         ref["approval_line"] = 4
         with self.assertRaisesRegex(GraphError, "approval"):
             verify_skip(case.state, "S2.5", ref, {}, refusals)
+
         ref["approval_line"] = 5
         rows[4]["payload"]["content"][0]["text"] = "deny"
         save()
@@ -170,20 +179,52 @@ class ScoutSkipTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphError, "approval"):
             verify_skip(case.state, "S2.5", ref, {}, refusals)
         rows[3]["payload"]["content"][0]["text"] = request
-        rows.insert(
-            4,
-            {
-                "type": "response_item",
-                "payload": {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "New"}, {"type": "output_text", "text": "question"}],
-                },
-            },
-        )
+        question = {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "New"}, {"type": "output_text", "text": "question"}],
+        }
+        rows.insert(4, {"type": "response_item", "payload": question})
         save()
         with self.assertRaisesRegex(GraphError, "approval"):
             verify_skip(case.state, "S2.5", ref, {}, refusals)
+
+    def prior_dispatch(self, task: str) -> tuple[str, dict[str, Any], str]:
+        """Represent the correctly consumed prior issue in the direct approval fixture."""
+        contract = graph_contract.build_contract(self.fixture.state, "S2.5", "main")
+        identifier, record = graph_contract.make_record(self.fixture.state, "S2.5", "wave-2", 1, contract, None)
+        record.update(authorized={"tool_use_id": "old"}, task_name=task)
+        message = (
+            graph_contract.prompt_prefix(self.fixture.state, identifier, record)
+            + "\n"
+            + graph_contract.render_sections(contract)
+        )
+        return identifier, record, message
+
+    def test_raw_observer_preserves_ordinary_refusal_tuple_api(self) -> None:
+        """Duplicate error outputs remain visible without changing ordinary audit projection."""
+        task = "loop_worker_6c6f6f70_53322e35"
+        call = {
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "spawn_agent",
+                "namespace": "collaboration",
+                "call_id": "fixture-call",
+                "arguments": json.dumps({"task_name": task}),
+            },
+        }
+        output = {
+            "type": "response_item",
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "fixture-call",
+                "output": "agent thread limit reached",
+            },
+        }
+        rows = [(2, call), (3, output), (4, output)]
+        self.assertEqual([line for line, _ in launch_observations(rows)["fixture-call"]["outputs"]], [3, 4])
+        self.assertEqual(refused_launches(rows), {"fixture-call": (2, task)})
 
 
 if __name__ == "__main__":

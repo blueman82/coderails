@@ -85,7 +85,7 @@ class ScoutSkipTests(GraphCase):
         """Record an approved skip with its other scout and check the join."""
         wave_state = copy.deepcopy(state)
         wave_state["revision"] = 3
-        wave_state["graph"]["contract_from_revision"] = 3
+        wave_state["graph"]["contract_from_revision"] = 1
         scout = wave_state["graph"]["nodes"]["S2.5"]
         scout.update(status="running", outcome="running", evidence=scout["evidence"][:1])
         wave_state["graph"]["nodes"]["S2.6"] = node("S2.6", "running")
@@ -226,16 +226,16 @@ class ScoutSkipTests(GraphCase):
             "wave-1": {"cursor": 1, "nodes": ["S2.5"], "revision": 1},
             "wave-3": {"cursor": 5, "nodes": ["S2.5"], "revision": 3},
         }
-        state["graph"]["contract_from_revision"] = 100
+        state["graph"]["contract_from_revision"] = 1
         state["revision"] = 3
-        prompt = "CODERAILS_GRAPH_DISPATCH=" + json.dumps(
-            {
-                "session_id": state["session_id"],
-                "loop_id": state["loop_id"],
-                "revision": 1,
-                "wave_id": "wave-1",
-                "node_id": "S2.5",
-            }
+        prior = copy.deepcopy(state)
+        prior["revision"] = 1
+        contract = graph_contract.build_contract(prior, "S2.5", "main")
+        identifier, issued = graph_contract.make_record(prior, "S2.5", "wave-1", 1, contract, None)
+        issued["authorized"] = {"tool_use_id": "toolu_old"}
+        state["graph"]["dispatches"][identifier] = issued
+        prompt = (
+            graph_contract.prompt_prefix(prior, identifier, issued) + "\n" + graph_contract.render_sections(contract)
         )
         request = (
             "Coderails: Approve a non-independent design-scout fallback for loop fixture-loop, "

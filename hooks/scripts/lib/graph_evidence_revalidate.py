@@ -98,6 +98,6 @@ def validate_skip_reference(
     if len(matching) != 1:
         raise ValueError("scout skip reason no longer matches its evidence")
     if approved:
-        expected_approval = approval(state, node_id, ref["attempt"], rows)
+        expected_approval = approval(state, node_id, ref["attempt"], rows, ref["wave_id"], ref["cursor"])
         if any(ref.get(key) != value for key, value in expected_approval.items()):
             raise ValueError("scout skip approval reference changed")

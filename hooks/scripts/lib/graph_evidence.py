@@ -16,18 +16,17 @@ ENVELOPE_KEY = graph_contract.ENVELOPE_KEY
 API_METADATA_TYPES = {"api-request-shape", "api-request-blob", "api-request"}
 
 
-def check_record(state: dict[str, Any], row: dict[str, Any]) -> None:
+def check_record(state: dict[str, Any], row: dict[str, Any]) -> dict[str, Any] | None:
     """Require current-contract native spawns to match their consumed issued dispatch."""
     start = state["graph"].get("contract_from_revision")
     if type(start) is not int or row["revision"] < start:
-        return
+        return None
     if "dispatch_id" not in row:
         raise graph_contract.DispatchDeniedError(
             "dispatch_missing_envelope", "native spawn lacks a v2 dispatch envelope"
         )
     if graph_contract.dispatch_off():
-        graph_contract.check_ownership(state, row, live=False)
-        return
+        return graph_contract.check_ownership(state, row, live=False)
     record = graph_contract.check_dispatch(state, row, row["prompt"], live=False)
     graph_contract.assert_role(record["contract"], row["subagent_type"], "coderails:", graph_contract.CLAUDE_TYPES)
     authorized: object = record.get("authorized")
@@ -38,6 +37,7 @@ def check_record(state: dict[str, Any], row: dict[str, Any]) -> None:
         raise graph_contract.DispatchDeniedError(
             "dispatch_unauthorized", "native spawn does not match its consumed dispatch authorization"
         )
+    return record
 
 
 def validate_reference(
@@ -47,6 +47,8 @@ def validate_reference(
     required = {"kind", "attempt", "wave_id", "tool_use_id", "record_uuid", "subagent_type", "outcome"}
     if set(ref) not in (required, required | {"agent_id"}) or ref.get("kind") != "claude_agent":
         raise ValueError("native evidence does not have the bound object shape")
+    if type(ref.get("attempt")) is not int or ref["attempt"] < 1:
+        raise ValueError("native reference attempt must be an exact positive integer")
     if ref["outcome"] not in {"done", "skipped", "failed", "stale"}:
         raise ValueError("invalid native attempt outcome")
     matches = [row for row in rows if row["tool_use_id"] == ref["tool_use_id"]]
@@ -66,7 +68,9 @@ def validate_reference(
         or wave.get("revision") != row["revision"]
     ):
         raise ValueError("native bound spawn is outside its original wave cursor or node set")
-    check_record(state, row)
+    issued = check_record(state, row)
+    if issued is not None and issued.get("attempt") != ref["attempt"]:
+        raise ValueError("native reference attempt differs from its issued dispatch")
     return row
 
 
@@ -136,7 +140,9 @@ def spawns(path: Path, session: str) -> list[dict[str, Any]]:
     """Derive native Agent requests, rejecting conflicting duplicate tool identities."""
     entries = parent_records(path, session)
     results: dict[str, dict[str, Any]] = {}
-    for _, record in entries:
+    result_lines: dict[str, list[int]] = {}
+    call_lines: dict[str, list[int]] = {}
+    for line, record in entries:
         if record.get("type") != "user":
             continue
         for block in content(record):
@@ -153,6 +159,7 @@ def spawns(path: Path, session: str) -> list[dict[str, Any]]:
                 if key in results and results[key] != value:
                     raise ValueError("conflicting native tool results")
                 results[key] = value
+                result_lines.setdefault(key, []).append(line)
     found: dict[str, dict[str, Any]] = {}
     for line, record in entries:
         if record.get("type") != "assistant":
@@ -171,6 +178,7 @@ def spawns(path: Path, session: str) -> list[dict[str, Any]]:
             identifier = record.get("uuid")
             if not isinstance(identifier, str) or not identifier.strip():
                 raise ValueError("native Agent dispatch lacks its raw record UUID")
+            call_lines.setdefault(key, []).append(line)
             row = {
                 **ownership,
                 "line": line,
@@ -187,6 +195,9 @@ def spawns(path: Path, session: str) -> list[dict[str, Any]]:
                     raise ValueError("conflicting duplicate native Agent spawn")
             else:
                 found[key] = row
+    for key, row in found.items():
+        row["native_call_lines"] = call_lines[key]
+        row["native_result_lines"] = result_lines.get(key, [])
     return list(found.values())
 
 
