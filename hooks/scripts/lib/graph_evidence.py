@@ -16,6 +16,60 @@ ENVELOPE_KEY = graph_contract.ENVELOPE_KEY
 API_METADATA_TYPES = {"api-request-shape", "api-request-blob", "api-request"}
 
 
+def check_record(state: dict[str, Any], row: dict[str, Any]) -> None:
+    """Require current-contract native spawns to match their consumed issued dispatch."""
+    start = state["graph"].get("contract_from_revision")
+    if type(start) is not int or row["revision"] < start:
+        return
+    if "dispatch_id" not in row:
+        raise graph_contract.DispatchDeniedError(
+            "dispatch_missing_envelope", "native spawn lacks a v2 dispatch envelope"
+        )
+    if graph_contract.dispatch_off():
+        graph_contract.check_ownership(state, row, live=False)
+        return
+    record = graph_contract.check_dispatch(state, row, row["prompt"], live=False)
+    graph_contract.assert_role(record["contract"], row["subagent_type"], "coderails:", graph_contract.CLAUDE_TYPES)
+    authorized: object = record.get("authorized")
+    authorized = cast(dict[str, Any], authorized) if isinstance(authorized, dict) else None
+    if not isinstance(authorized, dict) or (
+        authorized.get("tool_use_id") is not None and authorized.get("tool_use_id") != row["tool_use_id"]
+    ):
+        raise graph_contract.DispatchDeniedError(
+            "dispatch_unauthorized", "native spawn does not match its consumed dispatch authorization"
+        )
+
+
+def validate_reference(
+    state: dict[str, Any], node_id: str, ref: dict[str, Any], rows: list[dict[str, Any]], history: dict[str, Any]
+) -> dict[str, Any]:
+    """Recheck original role, wave ownership, cursor and raw spawn UUID."""
+    required = {"kind", "attempt", "wave_id", "tool_use_id", "record_uuid", "subagent_type", "outcome"}
+    if set(ref) not in (required, required | {"agent_id"}) or ref.get("kind") != "claude_agent":
+        raise ValueError("native evidence does not have the bound object shape")
+    if ref["outcome"] not in {"done", "skipped", "failed", "stale"}:
+        raise ValueError("invalid native attempt outcome")
+    matches = [row for row in rows if row["tool_use_id"] == ref["tool_use_id"]]
+    if len(matches) != 1:
+        raise ValueError("native bound spawn no longer resolves uniquely")
+    row = matches[0]
+    if row["node_id"] != node_id or any(row[key] != state[key] for key in ("session_id", "loop_id")):
+        raise ValueError("native bound spawn belongs to another node or session")
+    for key in ("wave_id", "record_uuid", "subagent_type"):
+        if row[key] != ref[key]:
+            raise ValueError(f"native bound spawn {key} no longer matches")
+    wave = object_value(history.get(row["wave_id"]), "native wave history entry")
+    if (
+        type(wave.get("cursor")) is not int
+        or row["line"] <= wave["cursor"]
+        or node_id not in wave.get("nodes", [])
+        or wave.get("revision") != row["revision"]
+    ):
+        raise ValueError("native bound spawn is outside its original wave cursor or node set")
+    check_record(state, row)
+    return row
+
+
 def object_value(value: object, label: str) -> dict[str, Any]:
     """Require an object at a native transcript boundary."""
     if not isinstance(value, dict):

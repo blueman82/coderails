@@ -12,11 +12,23 @@ from typing import Any, Callable
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from hooks.scripts.lib.graph_evidence_bind import bind_wave
 from hooks.scripts.lib.graph_evidence_revalidate import revalidate_all
+from hooks.scripts.lib.graph_executor import graph_contract
 from hooks.scripts.tests.claude_graph_test_support import GraphCase, dispatch, fixture, load, node
 
 
 class ScoutSkipTests(GraphCase):
     """Check a whole Claude wave with two skipped scout stages."""
+
+    consume_on_begin = False
+
+    def issue_skip_records(self, state: dict[str, Any]) -> None:
+        """Give handcrafted fallback fixtures the current wave's actual issued contracts."""
+        wave = state["graph"]["active_wave"]
+        for node_id in wave["nodes"]:
+            contract = graph_contract.build_contract(state, node_id, "main")
+            attempt = state["graph"]["nodes"][node_id]["retry"]["attempts"] + 1
+            identifier, record = graph_contract.make_record(state, node_id, wave["wave_id"], attempt, contract, None)
+            state["graph"]["dispatches"][identifier] = record
 
     def test_historical_native_fanout_revalidates(self) -> None:
         """Distinct children in one pre-contract attempt remain valid historical evidence."""
@@ -89,6 +101,7 @@ class ScoutSkipTests(GraphCase):
             "transcript_cursor": 5,
         }
         wave_state["graph"]["wave_history"]["wave-3"]["nodes"] = ["S2.5", "S2.6"]
+        self.issue_skip_records(wave_state)
         self.save(wave_state)
         dispatch.record_wave(
             self.path,
@@ -214,6 +227,7 @@ class ScoutSkipTests(GraphCase):
             "wave-3": {"cursor": 5, "nodes": ["S2.5"], "revision": 3},
         }
         state["graph"]["contract_from_revision"] = 100
+        state["revision"] = 3
         prompt = "CODERAILS_GRAPH_DISPATCH=" + json.dumps(
             {
                 "session_id": state["session_id"],
@@ -269,6 +283,7 @@ class ScoutSkipTests(GraphCase):
         save()
         evidence = "non_independent: human approved design fallback"
         result = {"S2.5": {"outcome": "skipped", "evidence": evidence}}
+        self.issue_skip_records(state)
         ref = bind_wave(state, result)["S2.5"][0]
         self.assertEqual(ref["reason"], "non_independent")
         scout.update(status="skipped", outcome="skipped", evidence=[*scout["evidence"], evidence, ref])

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any, cast
 
-from .graph_evidence import parent_records, transcript
+from .graph_evidence import object_value, parent_records, transcript, validate_reference
 
 
 def _text(record: dict[str, Any], role: str) -> str | None:
@@ -54,6 +54,8 @@ def approval(state: dict[str, Any], node_id: str, attempt: int, rows: list[dict[
     ]
     if len(failed) != 1:
         raise ValueError("non-independent skip has no native refused scout call")
+    history = object_value(state["graph"].get("wave_history", {}), "native wave history")
+    validate_reference(state, node_id, prior[0], rows, history)
     request = (
         "Coderails: Approve a non-independent design-scout fallback for loop "
         f"{state['loop_id']}, node S2.5, attempt {attempt}? Reply approve or deny."

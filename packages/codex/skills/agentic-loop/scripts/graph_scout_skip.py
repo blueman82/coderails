@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from typing import Any, cast
 
+import graph_contract
 from graph_data import event_payload, nonempty, object_value, read_records
 from graph_identity import (
     ENCRYPTED_REFERENCE_KEYS,
@@ -16,6 +18,7 @@ from graph_identity import (
     REFUSED_OUTCOME,
     GraphError,
     task_name,
+    task_node,
 )
 from graph_transcript import thread_transcript
 
@@ -158,7 +161,48 @@ def check_shape(reference: dict[str, Any], label: str) -> None:
         raise GraphError(f"{label} has invalid scout skip fields")
 
 
+def scout_requested(records: list[tuple[int, dict[str, Any]]], loop_id: str, node_id: str, cursor: int) -> bool:
+    """Check raw post-boundary scout work without relying on unique-start or refusal indexes."""
+    for line, record in records:
+        if line <= cursor:
+            continue
+        payload = event_payload(record)
+        raw_item = payload.get("item") if record.get("type") == "event_msg" else None
+        item = cast(dict[str, Any], raw_item) if isinstance(raw_item, dict) else {}
+        observed: object
+        if (
+            record.get("type") == "response_item"
+            and payload.get("type") == "function_call"
+            and payload.get("name") == "spawn_agent"
+        ):
+            try:
+                arguments = object_value(json.loads(payload.get("arguments", "")), "native spawn arguments")
+            except (TypeError, ValueError) as error:
+                raise GraphError("scout skip cannot establish absence from an unreadable native request") from error
+            observed = arguments.get("task_name")
+        elif item.get("type") == "SubAgentActivity" and item.get("kind") == "started":
+            path = item.get("agent_path")
+            observed = path.removeprefix("/root/") if isinstance(path, str) else None
+        elif item.get("type") == "CollabAgentToolCall" and item.get("tool") == "spawn_agent":
+            prompt = item.get("prompt")
+            observed = (
+                prompt.split("\n", 1)[0].removeprefix("CODERAILS_GRAPH_TASK=") if isinstance(prompt, str) else None
+            )
+        else:
+            continue
+        if not isinstance(observed, str):
+            raise GraphError("scout skip cannot establish absence from an unidentified native request")
+        try:
+            owner = task_node(observed)
+        except GraphError as error:
+            raise GraphError("scout skip cannot establish absence from an unidentified native task") from error
+        if owner == (loop_id, node_id):
+            return True
+    return False
+
+
 def no_spawn(
+    state: dict[str, Any],
     node_id: str,
     expected: str,
     cursor: int,
@@ -166,10 +210,49 @@ def no_spawn(
     refusals: dict[str, tuple[int, str]],
 ) -> None:
     """Reject a skip if the current wave tried to start the scout."""
-    if any(line > cursor and task == expected for rows in indexes.values() for line, task, *_ in rows) or any(
-        line > cursor and task == expected for line, task in refusals.values()
+    records = read_records(thread_transcript(state["session_id"]), "parent transcript")
+    if (
+        scout_requested(records, state["loop_id"], node_id, cursor)
+        or any(line > cursor and task == expected for rows in indexes.values() for line, task, *_ in rows)
+        or any(line > cursor and task == expected for line, task in refusals.values())
     ):
         raise GraphError(f"node {node_id} scout skip cannot reuse a native spawn")
+
+
+def check_wave(state: dict[str, Any], node_id: str, attempt: int, wave_id: str, cursor: int) -> dict[str, Any]:
+    """Require one unused issued scout slot with matching independent wave history."""
+    graph = state["graph"]
+    dispatches = object_value(graph.get("dispatches"), "scout skip dispatches")
+    records = ((identifier, object_value(record, "scout dispatch")) for identifier, record in dispatches.items())
+    issued = [
+        (identifier, record)
+        for identifier, record in records
+        if record.get("node_id") == node_id and record.get("wave_id") == wave_id
+    ]
+    if len(issued) != 1:
+        raise GraphError(f"node {node_id} scout skip needs exactly one issued dispatch")
+    identifier, record = issued[0]
+    if (
+        record.get("attempt") != attempt
+        or type(record.get("attempt")) is not int
+        or record.get("authorized") is not None
+        or "authorized" not in record
+        or identifier != graph_contract.dispatch_id(state["loop_id"], wave_id, node_id, attempt)
+    ):
+        raise GraphError(f"node {node_id} has no unconsumed native skip wave")
+    history = object_value(graph.get("wave_history"), "native wave history")
+    wave = object_value(history.get(wave_id), "native wave history entry")
+    if (
+        wave.get("cursor") != cursor
+        or type(wave.get("cursor")) is not int
+        or not isinstance(wave.get("nodes"), list)
+        or node_id not in wave.get("nodes", [])
+        or type(wave.get("revision")) is not int
+        or type(record.get("revision")) is not int
+        or wave["revision"] != record.get("revision")
+    ):
+        raise GraphError(f"node {node_id} scout skip has a changed wave cursor or revision")
+    return wave
 
 
 def bind(
@@ -205,7 +288,14 @@ def bind(
         if attempt != 1:
             raise GraphError(f"node {node_id} no-work skip must precede any scout attempt")
         approval = {}
-    no_spawn(node_id, task_name(state["loop_id"], node_id, attempt), cursor, indexes, refusals)
+    no_spawn(state, node_id, task_name(state["loop_id"], node_id, attempt), cursor, indexes, refusals)
+    wave = check_wave(state, node_id, attempt, active_wave["wave_id"], cursor)
+    if (
+        active_wave.get("revision") != state["revision"]
+        or wave["revision"] != active_wave["revision"]
+        or wave["nodes"] != active_wave["nodes"]
+    ):
+        raise GraphError(f"node {node_id} scout skip does not own the active wave")
     return {
         "kind": "graph_skip",
         "attempt": attempt,
@@ -238,27 +328,8 @@ def verify(
         or reference["reason"] != prefix[:-1]
     ):
         raise GraphError(f"node {node_id} has invalid scout skip evidence")
-    dispatches = cast(dict[str, dict[str, Any]], state["graph"].get("dispatches", {}))
-    issued = [
-        record
-        for record in dispatches.values()
-        if record.get("node_id") == node_id
-        and record.get("wave_id") == reference["wave_id"]
-        and record.get("attempt") == attempt
-    ]
-    if len(issued) != 1 or issued[0].get("authorized") is not None:
-        raise GraphError(f"node {node_id} has no unconsumed native skip wave")
-    history = cast(dict[str, dict[str, Any]], state["graph"].get("wave_history", {}))
-    wave = history.get(reference["wave_id"])
-    if (
-        not isinstance(wave, dict)
-        or wave.get("cursor") != reference["cursor"]
-        or type(wave.get("cursor")) is not int
-        or node_id not in wave.get("nodes", [])
-        or wave.get("revision") != issued[0].get("revision")
-    ):
-        raise GraphError(f"node {node_id} scout skip has a changed wave cursor")
-    no_spawn(node_id, task_name(state["loop_id"], node_id, attempt), reference["cursor"], indexes, refusals)
+    check_wave(state, node_id, attempt, reference["wave_id"], reference["cursor"])
+    no_spawn(state, node_id, task_name(state["loop_id"], node_id, attempt), reference["cursor"], indexes, refusals)
     if approved:
         if not any(
             isinstance(item, dict) and cast(dict[str, Any], item).get("outcome") == REFUSED_OUTCOME
