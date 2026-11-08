@@ -65,10 +65,13 @@ class ScoutSkipTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphError, "reason changed"):
             validate_worker_evidence(case.state)
         case.state["graph"]["nodes"]["S2.5"]["evidence"][0] = reason
+        end_cursor = ref["end_cursor"]
         ref["cursor"] = 999
+        ref["end_cursor"] = 999
         with self.assertRaisesRegex(GraphError, "wave cursor"):
             validate_worker_evidence(case.state)
         ref["cursor"] = 1
+        ref["end_cursor"] = end_cursor
         ref["attempt"] = True
         with self.assertRaisesRegex(GraphError, "invalid scout skip fields"):
             validate_worker_evidence(case.state)
@@ -79,6 +82,117 @@ class ScoutSkipTests(unittest.TestCase):
         case.write_transcripts()
         with self.assertRaisesRegex(GraphError, "approval"):
             bind_worker_evidence(case.state, case.wave, skip_evidence={"S2.5": "non_independent: human approved"})
+
+    def test_saved_skip_survives_later_unrelated_native_launches(self) -> None:
+        """A closed scout interval does not include subsequent reviewer launches."""
+        case = self.fixture
+        self.issue_skip()
+        case.write_transcripts()
+        reason = "no_design_fork: plan has no unresolved design choice"
+        ref = bind_worker_evidence(case.state, case.wave, skip_evidence={"S2.5": reason})[0]["S2.5"]
+        case.state["graph"]["nodes"]["S2.5"].update(status="skipped", evidence=[reason, ref])
+        case.state["graph"]["active_wave"] = None
+        case.state["revision"] = 3
+        case.extra_parent.extend(
+            [
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call",
+                        "name": "spawn_agent",
+                        "call_id": "reviewer",
+                        "arguments": json.dumps({"agent_type": "security-reviewer", "message": "Inspect the change"}),
+                    },
+                },
+                {
+                    "type": "event_msg",
+                    "payload": {
+                        "item": {
+                            "type": "SubAgentActivity",
+                            "kind": "started",
+                            "agent_path": "/root/reviewer",
+                        }
+                    },
+                },
+                {
+                    "type": "event_msg",
+                    "payload": {
+                        "item": {
+                            "type": "CollabAgentToolCall",
+                            "tool": "spawn_agent",
+                            "prompt": "Inspect the change",
+                        }
+                    },
+                },
+            ]
+        )
+        case.write_transcripts()
+        validate_worker_evidence(case.state)
+
+    def test_saved_skip_rejects_changed_scanned_interval(self) -> None:
+        """Changed historical launch identities cannot retain a saved absence result."""
+        case = self.fixture
+        self.issue_skip()
+        case.write_transcripts()
+        reason = "no_design_fork: plan has no unresolved design choice"
+        ref = bind_worker_evidence(case.state, case.wave, skip_evidence={"S2.5": reason})[0]["S2.5"]
+        case.state["graph"]["nodes"]["S2.5"].update(status="skipped", evidence=[reason, ref])
+        case.state["graph"]["active_wave"] = None
+        case.state["revision"] = 3
+        case.arguments["task_name"] = task_name("different-loop", "U3[1]", 1)
+        case.write_transcripts()
+        with self.assertRaisesRegex(GraphError, "scout skip transcript interval changed"):
+            validate_worker_evidence(case.state)
+
+    def test_unidentified_request_inside_skip_interval_refuses(self) -> None:
+        """An anonymous current-wave launch cannot establish scout absence."""
+        case = self.fixture
+        self.issue_skip()
+        case.arguments.pop("task_name")
+        case.write_transcripts()
+        with self.assertRaisesRegex(GraphError, "unidentified native request"):
+            bind_worker_evidence(case.state, case.wave, skip_evidence={"S2.5": "no_design_fork: false claim"})
+
+    def test_later_matching_scout_launch_still_refuses(self) -> None:
+        """A saved interval does not permit a later reuse of its skipped task."""
+        case = self.fixture
+        self.issue_skip()
+        case.write_transcripts()
+        reason = "no_design_fork: plan has no unresolved design choice"
+        ref = bind_worker_evidence(case.state, case.wave, skip_evidence={"S2.5": reason})[0]["S2.5"]
+        case.state["graph"]["nodes"]["S2.5"].update(status="skipped", evidence=[reason, ref])
+        case.state["graph"]["active_wave"] = None
+        case.state["revision"] = 3
+        task = task_name("loop", "S2.5", 1)
+        case.extra_parent.extend(
+            [
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call",
+                        "name": "spawn_agent",
+                        "namespace": "collaboration",
+                        "call_id": "late",
+                        "arguments": json.dumps({"task_name": task}),
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call_output",
+                        "call_id": "late",
+                        "output": "agent thread limit reached",
+                    },
+                },
+            ]
+        )
+        case.write_transcripts()
+        with self.assertRaisesRegex(GraphError, "cannot reuse a native spawn"):
+            validate_worker_evidence(case.state)
+        case.extra_parent.pop()
+        case.write_transcripts()
+        with self.assertRaisesRegex(GraphError, "cannot reuse a native spawn"):
+            validate_worker_evidence(case.state)
 
     def test_scout_skip_cannot_replace_native_spawn(self) -> None:
         """A real native spawn excludes a no-work skip."""

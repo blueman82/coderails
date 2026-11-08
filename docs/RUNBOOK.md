@@ -719,7 +719,6 @@ A stale scope needs a new complete inspection. The writer checks before/after ea
 The same shared publication gate checks merge helpers and direct publication hooks.
 
 Old readers reject this result. Keep installation on HOLD until the merged release passes
-[Check a release candidate](RELEASE-CANDIDATE.md) and
 [Installing coderails](../INSTALLATION.md), using paths relative to the release checkout.
 Select explicit new provider versions and matching manifest/marketplace metadata.
 Stop new graph work and drain affected sessions with their owners. Preserve old runtime,

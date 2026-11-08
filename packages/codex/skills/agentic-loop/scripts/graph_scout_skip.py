@@ -24,7 +24,7 @@ from graph_scout_prior import prove_prior_refusal
 from graph_transcript import thread_transcript
 
 PREFIXES = {"S2.5": "no_design_fork:", "S2.6": "no_retired_path:"}
-KEYS = {"kind", "attempt", "wave_id", "reason", "evidence_sha256", "cursor"}
+KEYS = {"kind", "attempt", "wave_id", "reason", "evidence_sha256", "cursor", "end_cursor", "transcript_sha256"}
 APPROVAL_KEYS = KEYS | {"request_line", "request_sha256", "approval_line", "approval_sha256"}
 
 
@@ -123,6 +123,10 @@ def check_shape(reference: dict[str, Any], label: str) -> None:
         or (reference.get("reason") != "non_independent" and reference["attempt"] != 1)
         or type(reference.get("cursor")) is not int
         or reference["cursor"] < 1
+        or type(reference.get("end_cursor")) is not int
+        or reference["end_cursor"] < reference["cursor"]
+        or not isinstance(reference.get("transcript_sha256"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", reference["transcript_sha256"])
         or not isinstance(reference.get("wave_id"), str)
         or not re.fullmatch(r"wave-[1-9][0-9]*", reference["wave_id"])
         or not isinstance(reference.get("evidence_sha256"), str)
@@ -144,8 +148,11 @@ def check_shape(reference: dict[str, Any], label: str) -> None:
         raise GraphError(f"{label} has invalid scout skip fields")
 
 
-def scout_requested(records: list[tuple[int, dict[str, Any]]], loop_id: str, node_id: str, cursor: int) -> bool:
-    """Check raw post-boundary scout work without relying on unique-start or refusal indexes."""
+def scout_absence(
+    records: list[tuple[int, dict[str, Any]]], loop_id: str, node_id: str, cursor: int, end_cursor: int
+) -> list[tuple[int, str]]:
+    """Bind observed task identities through the saved boundary and reject any matching scout."""
+    observed_tasks: list[tuple[int, str]] = []
     for line, record in records:
         if line <= cursor:
             continue
@@ -161,6 +168,8 @@ def scout_requested(records: list[tuple[int, dict[str, Any]]], loop_id: str, nod
             try:
                 arguments = object_value(json.loads(payload.get("arguments", "")), "native spawn arguments")
             except (TypeError, ValueError) as error:
+                if line > end_cursor:
+                    continue
                 raise GraphError("scout skip cannot establish absence from an unreadable native request") from error
             observed = arguments.get("task_name")
         elif item.get("type") == "SubAgentActivity" and item.get("kind") == "started":
@@ -174,14 +183,20 @@ def scout_requested(records: list[tuple[int, dict[str, Any]]], loop_id: str, nod
         else:
             continue
         if not isinstance(observed, str):
+            if line > end_cursor:
+                continue
             raise GraphError("scout skip cannot establish absence from an unidentified native request")
         try:
             owner = task_node(observed)
         except GraphError as error:
+            if line > end_cursor:
+                continue
             raise GraphError("scout skip cannot establish absence from an unidentified native task") from error
         if owner == (loop_id, node_id):
-            return True
-    return False
+            raise GraphError(f"node {node_id} scout skip cannot reuse a native spawn")
+        if line <= end_cursor:
+            observed_tasks.append((line, observed))
+    return observed_tasks
 
 
 def no_spawn(
@@ -191,15 +206,24 @@ def no_spawn(
     cursor: int,
     indexes: dict[str, list[tuple[int, str, str, str | None, str | None, str | None]]],
     refusals: dict[str, tuple[int, str]],
-) -> None:
+    end_cursor: int | None = None,
+) -> dict[str, Any]:
     """Reject a skip if the current wave tried to start the scout."""
     records = read_records(thread_transcript(state["session_id"]), "parent transcript")
-    if (
-        scout_requested(records, state["loop_id"], node_id, cursor)
-        or any(line > cursor and task == expected for rows in indexes.values() for line, task, *_ in rows)
-        or any(line > cursor and task == expected for line, task in refusals.values())
+    end = records[-1][0] if end_cursor is None else end_cursor
+    if end < cursor or end > records[-1][0]:
+        raise GraphError("scout skip transcript interval is unavailable")
+    interval = scout_absence(records, state["loop_id"], node_id, cursor, end)
+    if any(line > cursor and task == expected for rows in indexes.values() for line, task, *_ in rows) or any(
+        line > cursor and task == expected for line, task in refusals.values()
     ):
         raise GraphError(f"node {node_id} scout skip cannot reuse a native spawn")
+    return {
+        "end_cursor": end,
+        "transcript_sha256": hashlib.sha256(
+            json.dumps(interval, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
 
 
 def check_wave(state: dict[str, Any], node_id: str, attempt: int, wave_id: str, cursor: int) -> dict[str, Any]:
@@ -271,7 +295,7 @@ def bind(
         if attempt != 1:
             raise GraphError(f"node {node_id} no-work skip must precede any scout attempt")
         approval = {}
-    no_spawn(state, node_id, task_name(state["loop_id"], node_id, attempt), cursor, indexes, refusals)
+    interval = no_spawn(state, node_id, task_name(state["loop_id"], node_id, attempt), cursor, indexes, refusals)
     wave = check_wave(state, node_id, attempt, active_wave["wave_id"], cursor)
     if (
         active_wave.get("revision") != state["revision"]
@@ -286,6 +310,7 @@ def bind(
         "reason": prefix[:-1],
         "evidence_sha256": hashlib.sha256(evidence.encode()).hexdigest(),
         "cursor": cursor,
+        **interval,
         **approval,
     }
 
@@ -312,7 +337,17 @@ def verify(
     ):
         raise GraphError(f"node {node_id} has invalid scout skip evidence")
     check_wave(state, node_id, attempt, reference["wave_id"], reference["cursor"])
-    no_spawn(state, node_id, task_name(state["loop_id"], node_id, attempt), reference["cursor"], indexes, refusals)
+    interval = no_spawn(
+        state,
+        node_id,
+        task_name(state["loop_id"], node_id, attempt),
+        reference["cursor"],
+        indexes,
+        refusals,
+        reference["end_cursor"],
+    )
+    if interval["transcript_sha256"] != reference["transcript_sha256"]:
+        raise GraphError("scout skip transcript interval changed")
     if approved:
         if not any(
             isinstance(item, dict) and cast(dict[str, Any], item).get("outcome") == REFUSED_OUTCOME
