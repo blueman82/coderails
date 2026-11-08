@@ -1,6 +1,7 @@
 # recover-wave runbook (Codex graph CLI)
 
-Symptom: a wave is `active` (`graph.py summarize STATE` says `waiting for worker`) but nothing is progressing.
+Symptom: a wave remains `active` with no progress. `graph.py summarize STATE`
+reports `waiting for worker`.
 
 ## Query
 

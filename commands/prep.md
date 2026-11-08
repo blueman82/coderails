@@ -28,7 +28,7 @@ $ARGUMENTS
 
 ## Parse Arguments
 
-The raw args block above is whatever the user typed after `/prep`. **Parse it yourself** — do NOT rely on positional `$1`/`$2` substitution, which does a naive whitespace-split that does not honour quotes and breaks on tokens containing `/`, `:`, or spaces.
+The raw args block above contains what the user typed after `/prep`. **Parse it yourself.** Do not use positional `$1`/`$2` substitution. It splits on whitespace without respecting quotes. It also breaks tokens that contain `/`, `:`, or spaces.
 
 Extract four fields from `$ARGUMENTS`:
 
@@ -53,7 +53,7 @@ All of these must work:
 /prep feature/add-retry-logic --type Task --summary "Add retry logic" --description "Implement exponential back-off..."
 ```
 
-If the user's args don't match any of these shapes but the intent is clear, best-effort parse and proceed. If the intent is ambiguous, ask one targeted clarifying question — don't guess the branch name.
+If the args have a different shape but the intent is clear, parse them and proceed. If the intent is unclear, ask one targeted question. Do not guess the branch name.
 
 ## Task Part 1: Worktree Creation
 
@@ -79,9 +79,9 @@ Feature and bug work must be isolated in a git worktree — never branch off or 
 
 ## Task Part 1b: Progress Stub (best-effort, non-blocking)
 
-After the worktree is created, initialize a current-schema `progress.json` only if the resolved path does not already exist. This optional bootstrap must not overwrite an active or completed loop. Existing state belongs to the agentic-loop workflow: leave it unchanged, including its ownership, graph, review cache, and hook-owned fields. A failure here does **not** abort `/prep`; later graph dispatch and completion still enforce their own gates.
+After you create the worktree, initialize a current-schema `progress.json` only if the resolved path is absent. This step is optional. Do not overwrite an active or completed loop. Keep the existing ownership, graph, review cache, and hook-owned fields. A failure does **not** abort `/prep`. Graph dispatch and completion use their own gates.
 
-Resolve the path by running the path helper — do NOT compute the path yourself. It keys the path on cwd and `$CLAUDE_CODE_SESSION_ID` (read automatically; no argument needed):
+Run the path helper to resolve the path. Do not compute it yourself. The helper uses cwd and `$CLAUDE_CODE_SESSION_ID` as path keys and reads them automatically without arguments:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"

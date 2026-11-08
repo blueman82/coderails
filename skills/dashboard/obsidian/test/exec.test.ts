@@ -301,9 +301,10 @@ describe("pressButton — run note lifecycle", () => {
 });
 
 describe("pressButton — argv parity with Task 7's buildArgv", () => {
+  const framing = "This is an unattended, headless run with no human watching output in real time. Do not address a human or end your final text with a question. Write findings only to whatever report/artifact file the invoked skill specifies.";
   it("passes the standard-profile argv exactly as buildArgv would produce it", async () => {
     const execFile = vi.fn((_cmd: string, args: string[], _opts, callback) => {
-      expect(args).toEqual(["-p", "/coderails:wiki-lint"]);
+      expect(args).toEqual(["-p", `${framing} /coderails:wiki-lint`]);
       callback(null, "", "");
     });
     const deps = makeDeps({ execFile });
@@ -314,7 +315,7 @@ describe("pressButton — argv parity with Task 7's buildArgv", () => {
 
   it("passes the read-only-profile argv with --allowedTools", async () => {
     const execFile = vi.fn((_cmd: string, args: string[], _opts, callback) => {
-      expect(args).toEqual(["-p", "/coderails:sync-docs", "--allowedTools", "Read", "Grep", "Glob"]);
+      expect(args).toEqual(["-p", `${framing} /coderails:sync-docs`, "--allowedTools", "Read", "Grep", "Glob"]);
       callback(null, "", "");
     });
     const deps = makeDeps({ execFile });
@@ -324,7 +325,7 @@ describe("pressButton — argv parity with Task 7's buildArgv", () => {
 
   it("passes input with the -- sentinel for an inputAllowed button", async () => {
     const execFile = vi.fn((_cmd: string, args: string[], _opts, callback) => {
-      expect(args).toEqual(["-p", "--", "/coderails:ask hello"]);
+      expect(args).toEqual(["-p", "--", `${framing} /coderails:ask hello`]);
       callback(null, "", "");
     });
     const deps = makeDeps({ execFile });

@@ -102,12 +102,9 @@ its existence does not prove independent authorship.
 (`exit_code`, default 0) and stdout (`stdout_contains` / `stdout_not_contains`, plain substrings). Prose `expect`
 (schema_version 1) is legacy and is checked for exit 0 only. `timeout_s` is optional.
 
-`status` is always `"pending"` when you write it. You never run a proof to
-completion and never set it to pass/fail — that would make you the grader of
-your own artifact, defeating the independence this exists for. This is also
-what separates you from `source-auditor`: source-auditor renders a PASS / FAIL
-/ UNSUPPORTED verdict on a claim now; you author a not-yet-run proof for later,
-and issue no verdict at all.
+Write every `status` as `"pending"`. Do not run a proof to completion or
+score it. The `source-auditor` gives a current PASS, FAIL, or UNSUPPORTED
+verdict. You write proofs for later and give no verdict.
 
 ## Rules for every `cmd`
 

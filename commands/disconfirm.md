@@ -11,4 +11,4 @@ Take your most recent recommendation, suggestion, or conclusion. Argue against i
 - What did the analysis miss or assume away?
 - Who would push back, and on what grounds?
 
-Steelman the opposition. Do not hedge. After the disconfirmation, state honestly whether your original recommendation still holds.
+Make the strongest case against your position. Do not hedge. Then state whether your original recommendation still holds.

@@ -14,7 +14,7 @@ If the config block above says `NO_CONFIG`, do NOT stop. Run in minimal mode:
 - Skip the engineering-principles pre-flight — `config.engineering_principles_paths` is null.
 - Worktree uses plain `git worktree add` off the git root.
 
-The workflow collapses to: prep (worktree only) → code → push → review → merge.
+The workflow becomes: prep (worktree only) → code → push → review → merge.
 
 ## Raw arguments
 
@@ -24,7 +24,7 @@ $ARGUMENTS
 
 ## Purpose
 
-This command is the umbrella for the canonical code-change workflow. The rules it encodes:
+This command runs the code-change workflow. Follow these rules:
 
 - **Worktree before code**: create a worktree for every feature/bug branch — never edit on main
 - **Engineering-principles pre-flight**: run `config.engineering_principles_skill` (default: `/engineering-principles-python`) before pushing if the diff touches paths listed in `config.engineering_principles_paths` (or any file with ≥20 lines changed)
@@ -33,9 +33,9 @@ This command is the umbrella for the canonical code-change workflow. The rules i
 - **Wiki after merge**: after every merge run `/wiki-ingest` (if `config.wiki_path` is non-null); also run `/wiki-lint` immediately only when `config.wiki_git_worktree` is `false` (direct-write) — for PR flow (`true`, or the key absent) `/wiki-lint` is deferred until the ingest PR merges, see Phase 5
 - **Parallel tool calls**: when multiple tool calls or file reads have no dependency between them, issue them in parallel in a single message — not sequentially. Never serialize work that can run concurrently.
 
-Phase 2b (design adversarial review) is distinct from Phase 3 (`/pr-review-toolkit:review-pr`): Phase 2b reviews the *design page* before coding, Phase 3 reviews the *code* before merge. Both are required on non-trivial features.
+Phase 2b reviews the *design page* before coding. Phase 3 (`/pr-review-toolkit:review-pr`) reviews the *code* before merge. Run both for non-trivial features.
 
-The workflow has two interactive pauses where the developer drives: (a) the code/iterate loop, (b) the final ship-it authorization. Everything else auto-chains. The Phase 3 review chain runs in order: `review-pr → post-review → (Phase 4 ship-it pause) → /merge`.
+Pause for the developer during code and iteration. Pause again for final ship-it authorization. Run the other steps in sequence. The review chain is `review-pr → post-review → (Phase 4 ship-it pause) → /merge`.
 
 ## Parse Arguments
 
@@ -115,7 +115,7 @@ If none of those apply, skip this phase and go straight to Code.
 | New dependency-injection protocol or service registration pattern | `type-design-analyzer` |
 | Novel test surface or integration boundary | `pr-test-analyzer` |
 
-Always pick at least 2. Cap at 3. Brief each agent with the full design investigation page content + the specific sub-questions most relevant to its expertise (not just "review this" — give it attack vectors).
+Pick at least 2 agents and no more than 3. Give each agent the full design page. Add specific questions and attack vectors for its area.
 
 **After the agents report:**
 1. Enumerate every finding — do not skip any.
@@ -145,7 +145,7 @@ Note: `/push` already runs this pre-flight itself for paths in `config.engineeri
 Execute in order — do not pause between these:
 
 1. `/coderails:push` — stages, commits, pushes, opens PR with branch-protection reviewers, auto-resolves JIRA on PR creation (if `config.jira` non-null). Capture the PR URL from the output.
-2. `/pr-review-toolkit:review-pr <PR#>` — runs all applicable specialist agents (code-reviewer, pr-test-analyzer, silent-failure-hunter, type-design-analyzer). Use the PR number captured from `/coderails:push` — the hook requires the args to start with the PR number. Passing just the number is sufficient; the command defaults to all reviews when no aspect keyword is given.
+2. `/pr-review-toolkit:review-pr <PR#>` — runs the applicable specialist agents: code-reviewer, pr-test-analyzer, silent-failure-hunter, and type-design-analyzer. Use the PR number from `/coderails:push`. The hook requires it at the start of the arguments. The number alone selects all reviews.
 2b. **Verify engineering principles** — run `/engineering-principles` on the cumulative diff against the base branch. Apply the same rule as `/push`'s pre-flight: deviations from documented architectural conventions are blocking; style notes are non-blocking. Feed any blocking finding into step 3's apply loop.
 2c. **Simplify** — run `/simplify` on the diff (built-in command). `review-pr`'s own `code-simplifier` agent only runs "after passing review" and is not guaranteed, so this is the explicit simplify pass; route its changes through step 3.
 3. Apply worthwhile findings inline — do not re-ask per finding. Push the follow-up commit. Classify each finding as:

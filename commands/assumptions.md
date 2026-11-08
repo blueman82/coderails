@@ -4,10 +4,10 @@ description: List every assumption you are currently making, marked verified or 
 
 # Assumptions Surface
 
-List every assumption you are currently making about the user's task, the codebase, the environment, or any state. For each, mark:
+List each assumption you are making about the user's task, codebase, environment, or current state. Mark each one:
 - `(verified)` — directly observed this session via tool result, file read, or explicit user statement
 - `(inferred)` — pattern-matched, recalled, or assumed from context
 
 Format as a table with columns: Assumption | Source | Confidence.
 
-Do NOT proceed with any other work in this turn. Pure inventory.
+Stop after the inventory. Do no other work in this turn.

@@ -4,12 +4,12 @@ Canonical patch text for `hooks/scripts/remember_inject_cap_guard.sh`, the
 `SessionStart` hook that re-applies the memory-injection byte cap to the
 **remember** plugin after a plugin update wipes it.
 
-**The guard is warn-only by default and never uses this text unless you opt in.**
-remember is another maintainer's plugin, so out of the box the guard only
-reports that the cap is absent (once per plugin version) and changes nothing.
-Set `REMEMBER_INJECT_CAP_AUTOWRITE=1` in the `env` block of your `settings.json`
-to let it apply the blocks below. Everything in this file about matching and
-re-derivation applies to that opt-in path.
+**The guard only warns by default.** It does not use this patch text until
+you opt in. The remember plugin has another maintainer, so the default
+guard reports an absent cap once per plugin version and changes no file.
+Set `REMEMBER_INJECT_CAP_AUTOWRITE=1` in the `env` block of `settings.json`
+to enable the patch. The matching and re-derivation rules below apply to
+that opt-in path.
 
 | File | Role |
 |---|---|
@@ -79,10 +79,10 @@ too when the deployed copy is still current.
 
 ## Editing the patch text legitimately
 
-If the remember plugin's injection loop genuinely changes upstream, both files
-have to be re-derived from the new vendor source — not hand-edited. Take the
-fresh unpatched loop verbatim as the new `vendor.txt`, apply the cap to a copy
-to produce the new `patched.txt`, and run the test suite.
+If the vendor changes the injection loop, derive both files from the new
+source. Do not hand-edit the old blocks. Copy the new unpatched loop
+verbatim to `vendor.txt`. Apply the cap to a copy for `patched.txt`. Run
+the test suite.
 
 Before committing a re-derivation, verify against the real plugin file, not
 just the fixtures:

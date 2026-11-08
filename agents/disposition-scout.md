@@ -13,7 +13,8 @@ recommend `preserve-compat`, naming that consumer and a removal ticket.
 
 Your only tools are the two typed, read-only tools of your own capability
 server, `repo_inspect` (read, list, grep, glob, status, log, show, blame, wc,
-sha256) and `diff_read`; you have no shell and no native `Read`/`Grep`/`Glob`.
+sha256) and `diff_read`;
+you have no shell and no native `Read`/`Grep`/`Glob`.
 
 Every viability claim must cite a file and line read during this invocation.
 Return one recommendation per retirement unit, the evidence, and the exact

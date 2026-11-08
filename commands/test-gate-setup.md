@@ -8,7 +8,8 @@ Set up the test gate hook for the current project. This makes `git commit` autom
 
 ## Steps
 
-1. Check if `.claude/test_command` already exists in the current working directory. If it does, read it and report what's configured. Ask if the user wants to change it.
+1. Check for `.claude/test_command` in the current working directory.
+   If it exists, read and report its command. Ask whether to change it.
 
 2. If it doesn't exist, detect the project's test runner with the script (it owns the ordered marker list: npm `test` script, Cargo, pytest, Go, a Makefile `test` target, mix, Gemfile):
 
