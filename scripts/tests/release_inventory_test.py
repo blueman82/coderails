@@ -56,10 +56,49 @@ class ReleaseInventoryTests(unittest.TestCase):
         """Parity must compare permissions as well as identical hook bytes."""
         source = self.parity.source / "skills/x/a.py"
         source.chmod(0o755)
+        subprocess.run(["git", "-C", str(self.parity.source), "add", "skills/x/a.py"], check=True)
         (self.parity.claude / "skills/x/a.py").chmod(0o755)
         self.assertEqual(self.strict().returncode, 0)
         (self.parity.claude / "skills/x/a.py").chmod(0o644)
         self.assertNotEqual(self.strict().returncode, 0)
+
+    def test_candidate_refuses_execute_drift_hidden_from_git_status(self) -> None:
+        """Disabling Git's mode detection cannot remove approved executable intent."""
+        case = self.manifest
+        selections = (("hooks/run.py", case.claude), ("packages/codex/hooks/run.py", case.codex))
+        for relative, installed in selections:
+            case.write(relative, b"pass\n")
+            (case.root / relative).chmod(0o755)
+            case.copy(relative, installed / "hooks/run.py")
+            (installed / "hooks/run.py").chmod(0o755)
+        case.git("add", ".")
+        case.git("commit", "-qm", "executable hook")
+        snapshot = case.snapshot()
+        case.git("config", "core.filemode", "false")
+        self.assertEqual(case.verify(snapshot).returncode, 0)
+        for relative, installed in selections:
+            with self.subTest(relative=relative):
+                (case.root / relative).chmod(0o644)
+                (installed / "hooks/run.py").chmod(0o644)
+                self.assertEqual(case.git("status", "--porcelain"), "")
+                self.assertIn("source_file_mode", case.verify(snapshot).stderr)
+                (case.root / relative).chmod(0o755)
+                (installed / "hooks/run.py").chmod(0o755)
+        self.assertEqual(case.verify(snapshot).returncode, 0)
+
+    def test_index_inventory_preserves_tabs_and_newlines_in_paths(self) -> None:
+        """NUL-delimited Git entries keep path delimiters separate from mode metadata."""
+        case = self.manifest
+        paths = ("hooks/tab\tname.py", "packages/codex/hooks/line\nname.py")
+        for relative, installed in zip(paths, (case.claude, case.codex)):
+            case.write(relative, b"pass\n")
+            case.copy(relative, installed / "hooks" / Path(relative).name)
+        case.git("add", ".")
+        case.git("commit", "-qm", "delimited paths")
+        snapshot = case.snapshot()
+        self.assertEqual(case.verify(snapshot).returncode, 0)
+        (case.codex / "hooks/line\nname.py").unlink()
+        self.assertIn("installed_file_missing", case.verify(snapshot).stderr)
 
     def test_strict_requires_tracked_nonruntime_assets(self) -> None:
         """A tracked document must exist even when all runtime files remain."""
