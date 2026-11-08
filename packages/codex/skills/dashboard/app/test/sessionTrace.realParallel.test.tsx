@@ -43,6 +43,7 @@ function assertCorrectTrace(page: TracePage) {
   expect(orchestrator.length).toBeGreaterThanOrEqual(2);
   for (let index = 0; index < workers.length; index += 1) {
     const lane = page.events.filter((event) => event.attributes["coderails.actor.id"] === workers[index]);
+    expect(lane.every((event) => event.attributes["coderails.actor.name"] === `Worker ${index === 0 ? "A" : "B"}`)).toBe(true);
     expect(lane.length).toBeGreaterThan(0);
     const parent = page.events.find((event) => event.spanId === lane[0].parentSpanId);
     expect(parent?.attributes["coderails.native.call_id"]).toBe(calls[index]);
@@ -103,14 +104,14 @@ describe("sanitized real Codex parallel session", () => {
     const { container } = render(<SessionTracePanel token="test-token" dashboardRunId="separate-run" />);
     await screen.findByRole("option", { name: new RegExp(ID.slice(0, 8)) });
     fireEvent.change(screen.getByLabelText("Native session"), { target: { value: ID } });
-    expect(await screen.findAllByText(`Actor: Worker ${workers[0]}`)).not.toHaveLength(0);
-    expect(screen.getAllByText(`Actor: Worker ${workers[1]}`)).not.toHaveLength(0);
+    expect(await screen.findAllByText("Actor: Worker A (01a0ea63…3953)")).not.toHaveLength(0);
+    expect(screen.getAllByText("Actor: Worker B (01a0ea63…ac60)")).not.toHaveLength(0);
     expect(screen.getByText(/separate-run/)).toBeTruthy();
     expect(env.details).toBe(0);
     const workerEvent = page.events.find((event) => event.attributes["coderails.actor.id"] === workers[0])!;
     const timeline = within(screen.getByRole("list", { name: "Trace timeline" }));
     const workerRow = timeline.getAllByRole("listitem")
-      .find((row) => row.textContent?.includes(`Actor: Worker ${workers[0]}`))!;
+      .find((row) => row.textContent?.includes("Actor: Worker A (01a0ea63…3953)"))!;
     const parentText = within(workerRow).getByText(/^parent:/).textContent;
     expect(parentText).toContain("derived");
     for (const key of ["method", "parent_source_ref", "child_source_ref"]) {

@@ -28,6 +28,7 @@ class ObservationReportTests(unittest.TestCase):
         self.scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self.scratch.cleanup)
         self.root = Path(self.scratch.name)
+        (self.root / "workflow.config.yaml").write_text("memory:\n  backend: off\n")
         self.source = self.root / "native.jsonl"
         self.source.write_bytes(b'{"message":"SECRET BODY"}\n')
         self.event: dict[str, Any] = {
@@ -113,7 +114,11 @@ class ObservationReportTests(unittest.TestCase):
     def run_report(self) -> subprocess.CompletedProcess[str]:
         """Run the CLI without copying its source files to stdout."""
         return subprocess.run(
-            [sys.executable, str(SCRIPT), str(self.config_path)], capture_output=True, text=True, check=False
+            [sys.executable, str(SCRIPT), str(self.config_path)],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
     def test_report_counts_bound_observations_without_bodies_or_token_sums(self) -> None:
@@ -184,6 +189,55 @@ class ObservationReportTests(unittest.TestCase):
         result = self.run_report()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("foreign source reference", result.stderr)
+
+    def test_named_worker_metadata_keeps_public_report_counts(self) -> None:
+        """Safe display metadata cannot make a source-bound worker report unreadable."""
+        plain = self.run_report()
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        self.event["attributes"].update(
+            {
+                "coderails.actor.kind": "worker",
+                "coderails.actor.id": "child-one",
+                "coderails.actor.name": "Builder",
+            }
+        )
+        self.write_inputs()
+        named = self.run_report()
+        self.assertEqual(named.returncode, 0, named.stderr)
+        named_counts = json.loads(named.stdout)["cohorts"]["baseline"]
+        plain_counts = json.loads(plain.stdout)["cohorts"]["baseline"]
+        for field in ("eligible_sessions", "observations", "coverage", "usage_records"):
+            self.assertEqual(named_counts[field], plain_counts[field], field)
+        self.assertEqual(named_counts["usage_records"], 1)
+        self.assertEqual(named_counts["observations"]["read"], 1)
+        self.assertNotIn("Builder", named.stdout)
+        self.assertNotIn("SECRET BODY", named.stdout)
+
+    def test_worker_display_metadata_requires_safe_name_kind_and_identity(self) -> None:
+        """Hostile names and missing worker bindings cannot enter report metadata."""
+        attrs = dict(self.event["attributes"])
+        for change in (
+            {"coderails.actor.name": "<img src=x>"},
+            {"coderails.actor.name": "Builder\n"},
+            {"coderails.actor.name": "A" * 41},
+            {"coderails.actor.name": None},
+            {"coderails.actor.kind": "orchestrator"},
+            {"coderails.actor.id": ""},
+            {"coderails.actor.id": " "},
+            {"coderails.actor.id": None},
+        ):
+            with self.subTest(change=change):
+                self.event["attributes"] = {
+                    **attrs,
+                    "coderails.actor.kind": "worker",
+                    "coderails.actor.id": "child-one",
+                    "coderails.actor.name": "Builder",
+                    **change,
+                }
+                self.write_inputs()
+                result = self.run_report()
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("worker display", result.stderr)
 
     def test_changed_source_and_foreign_identity_refuse(self) -> None:
         """A changed source or foreign session cannot join a cohort."""

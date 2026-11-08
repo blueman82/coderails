@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { NativeSessionSummary, SourceRef, TraceEvent, TracePage } from "@/lib/collect/sessionTrace";
+import { validActorDisplayName } from "@/lib/collect/actorDisplay";
 
 type SessionsResponse = { sessions: NativeSessionSummary[] };
 type DetailResponse = { content: string };
@@ -31,9 +32,27 @@ function timeLabel(nanos: string | null): string {
   return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : "time unavailable; source order only";
 }
 
-function actorLabel(event: TraceEvent): string {
+function shortActorId(id: string): string {
+  return id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
+}
+
+function collidingActorIds(events: TraceEvent[]): Set<string> {
+  const groups = new Map<string, Set<string>>();
+  for (const event of events) {
+    if (attribute(event, "coderails.actor.kind") !== "worker") continue;
+    const id = attribute(event, "coderails.actor.id");
+    if (id) groups.set(shortActorId(id), (groups.get(shortActorId(id)) ?? new Set<string>()).add(id));
+  }
+  return new Set([...groups.values()].filter((ids) => ids.size > 1).flatMap((ids) => [...ids]));
+}
+
+function actorLabel(event: TraceEvent, collisions: ReadonlySet<string>): string {
   const kind = attribute(event, "coderails.actor.kind");
-  if (kind === "worker") return `Worker ${attribute(event, "coderails.actor.id") ?? "unknown"}`;
+  if (kind === "worker") {
+    const name = attribute(event, "coderails.actor.name");
+    const id = attribute(event, "coderails.actor.id") ?? "unknown";
+    return `${validActorDisplayName(name) ? name : "Worker"} (${collisions.has(id) ? id : shortActorId(id)})`;
+  }
   return kind === "orchestrator" ? "Orchestrator and evidence" : "Actor unavailable";
 }
 
@@ -70,8 +89,9 @@ function timeBasisLabel(event: TraceEvent, prefix: "start_time" | "end_time"): s
   return "unavailable";
 }
 
-function EventRow({ event, token, nativeSessionId, parentName }: {
+function EventRow({ event, token, nativeSessionId, parentName, collidingIds }: {
   event: TraceEvent; token: string; nativeSessionId: string; parentName: string | null;
+  collidingIds: ReadonlySet<string>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<string | null>(null);
@@ -123,7 +143,7 @@ function EventRow({ event, token, nativeSessionId, parentName }: {
 
   return <li style={{ borderTop: "1px solid #45515e", padding: "0.65rem 0" }}>
     <div><strong>{event.name}</strong> · {timeLabel(event.startTimeUnixNano)} · time basis: {timeBasisLabel(event, "start_time")}</div>
-    <div>Actor: {actorLabel(event)}</div>
+    <div>Actor: {actorLabel(event, collidingIds)}</div>
     <div>end time: {timeLabel(event.endTimeUnixNano)} ({timeBasisLabel(event, "end_time")})</div>
     <div>status: {event.status.value} ({basisLabel(event.status.basis, event.status.derivation)})</div>
     <div>record: {basisLabel(source.basis, source.derivation)} · {source.sourceId}#{source.sourceOrdinal}</div>
@@ -225,6 +245,7 @@ export function SessionTracePanel({ token, dashboardRunId }: { token: string; da
   const filteredSessions = sessions.filter((session) => [session.projectLabel, session.displayLabel,
     session.nativeSessionId, session.lastActivity.value ?? ""].some((value) => value.toLocaleLowerCase().includes(normalizedFilter)));
   const spans = new Map(events.map((event) => [event.spanId, event.name]));
+  const collidingIds = collidingActorIds(events);
   const ambiguity = events.some((event) => event.startTimeUnixNano === null) ||
     new Set(events.map((event) => event.startTimeUnixNano).filter((value) => value !== null)).size <
       events.filter((event) => event.startTimeUnixNano !== null).length;
@@ -259,7 +280,7 @@ export function SessionTracePanel({ token, dashboardRunId }: { token: string; da
       {ambiguity && <p>Time is missing or tied for some records; source order is a display tie break, not a causal order.</p>}
       <ol aria-label="Trace timeline" style={{ listStyle: "none", paddingLeft: 0, marginTop: "1rem" }}>
         {events.map((event) => <EventRow key={event.eventId} event={event} token={token} nativeSessionId={selected}
-          parentName={event.parentSpanId ? spans.get(event.parentSpanId) ?? null : null} />)}
+          parentName={event.parentSpanId ? spans.get(event.parentSpanId) ?? null : null} collidingIds={collidingIds} />)}
       </ol>
       {nextCursor && <button type="button" disabled={loading} onClick={() => void loadPage(selected, nextCursor, false)}>
         Load more trace events

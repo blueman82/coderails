@@ -90,7 +90,7 @@ export async function collectCodexSessionTrace(sessionId: string, deps: TraceCol
       src.rows.forEach((row, index) => {
         const ordinal = src.ordinals[index];
         const event = nativeEvent(sessionId, src, ordinal, row, actor, actor === "worker" ? parentId : null,
-          byOrdinal.get(ordinal) ?? inherited, parentSpanId);
+          byOrdinal.get(ordinal) ?? inherited, parentSpanId, inherited);
         if (actor === "worker" && parentSpanId && inherited) {
           const parent = events.find((candidate) => candidate.spanId === parentSpanId);
           if (parent) {
