@@ -33,7 +33,7 @@ class HookRegistrationTests(unittest.TestCase):
         self.assertNotIn("sys.stdin.read()", source)
 
     def test_prose_gate_retired(self) -> None:
-        """Negative control: crack-on denial is the authority-backed AskUserQuestion gate only; no Stop prose gate."""
+        """The autonomous input denial applies only to AskUserQuestion; no Stop prose gate is registered."""
         self.assertNotIn("crack_on_prose_gate", (ROOT / "hooks/hooks.json").read_text())
         self.assertFalse((ROOT / "hooks/scripts/crack_on_prose_gate.py").exists())
 
@@ -44,7 +44,7 @@ class HookRegistrationTests(unittest.TestCase):
         prompt = hooks["UserPromptSubmit"][0]["hooks"]
         self.assertEqual(len(prompt), 2)
         self.assertIn("inject_context.py", prompt[0]["command"])
-        self.assertIn("crack_on_gate.py", prompt[1]["command"])
+        self.assertIn("autonomous_gate.py", prompt[1]["command"])
         stop = hooks["Stop"][0]["hooks"]
         self.assertIn("voice_announce.py", stop[0]["command"])
         self.assertIn("offload_push_guard.py", stop[-1]["command"])

@@ -179,13 +179,13 @@ plugin, not bundled here.
 as durable PR comments; `task-evals` freezes a game-resistant success-eval set
 at task intake and gates `/merge` on it.
 
-Two UserPromptSubmit hooks run silently: inject_context, and crack_on_gate (which
-only prints the `/coderails:authorize` grant command when the raw prompt contains "crack on"; the typed
+Two UserPromptSubmit hooks run silently: inject_context, and autonomous_gate (which
+only prints the `/coderails:authorise` grant command when the raw prompt contains "autonomous"; the typed
 `authority.py grant` is the only thing that mints an expiring, revocable authority object).
 Seven Stop hooks are registered; two of them block via exit 2: loop-state guard and
 loop-stall guard. The confidence-label and verify-loop checks are advisory lints; the rest
-(voice_announce, unregistered_loop_guard, offload_push_guard) nudge only. The crack-on prose
-gate was retired: prose questions are no longer blocked under crack-on, only AskUserQuestion.
+(voice_announce, unregistered_loop_guard, offload_push_guard) nudge only. The former crack-on prose
+gate was retired: prose questions are no longer blocked under live authority, only AskUserQuestion.
 Verify-loop
 also advises when a turn edits 3+ files and the response omits the
 Did-Not-Verify section entirely, not just on untagged
@@ -210,8 +210,8 @@ invocation per work-unit of `hooks/scripts/tests/run_all.py` or a
 (validates current graph schema, native ownership envelope and available provider role; nonempty work-unit rosters require owned frozen or valid graded evals before implementation), the
 opt-in `agent_only_gate` (nudges by default; blocks the orchestrator's own
 inline do-work tool calls only under `AGENT_ONLY_GATE_ENFORCE=1`), and
-`crack_on_gate` on
-`AskUserQuestion` (denies the tool while the session's crack-on authority is live
+`autonomous_gate` on
+`AskUserQuestion` (denies the tool while the session's autonomous authority is live
 and unexpired — proceed autonomously instead of asking; revoke with
 `python3 scripts/authority.py revoke --session <id>`).
 

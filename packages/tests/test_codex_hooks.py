@@ -214,9 +214,9 @@ class HookTests(unittest.TestCase):
         self.assertEqual(self.hook("check_confidence_labels", labeled), {})
 
     def prompt(self, text: str, session: str) -> dict[str, Any]:
-        """Submit a raw prompt to the Codex crack-on gate."""
+        """Submit a raw prompt to the Codex autonomous input gate."""
         payload = {"session_id": session, "hook_event_name": "UserPromptSubmit", "prompt": text}
-        return self.hook("crack_on_gate", payload)
+        return self.hook("autonomous_gate", payload)
 
     def asks(self, session: str) -> bool:
         """True when request_user_input is denied for the session."""
@@ -227,7 +227,7 @@ class HookTests(unittest.TestCase):
             "tool_input": {},
         }
         return bool(
-            self.hook("crack_on_gate", payload).get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
+            self.hook("autonomous_gate", payload).get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
         )
 
     def authority(self, session: str) -> Path:
@@ -266,7 +266,7 @@ class HookTests(unittest.TestCase):
         self.assertEqual(result.returncode == 0, ok, result.stderr)
         return result
 
-    def test_crack_on_deny_expiry_revoke_and_regrant(self) -> None:
+    def test_autonomous_deny_expiry_revoke_and_regrant(self) -> None:
         """Live denies (traced); expiry allows (traced); re-grant works; the shared CLI revoke ends it."""
         self.grant("e1")
         self.assertTrue(self.asks("e1"))
@@ -282,7 +282,7 @@ class HookTests(unittest.TestCase):
         )
         self.assertFalse(self.asks("e1"))
 
-    def test_crack_on_foreign_torn_and_unsafe(self) -> None:
+    def test_autonomous_foreign_torn_and_unsafe(self) -> None:
         """A copied foreign file, a truncated file and an unsafe id all fail open; foreign is traced."""
         self.grant("src")
         (self.loop / "dst").mkdir()
@@ -298,7 +298,7 @@ class HookTests(unittest.TestCase):
         self.assertEqual(found, sorted([self.authority("src"), self.authority("dst"), self.authority("t1")]))
         self.assertFalse((self.loop / "a").exists())
 
-    def test_crack_on_legacy_flag_denies_with_traced_code(self) -> None:
+    def test_autonomous_legacy_flag_denies_with_traced_code(self) -> None:
         """A pre-existing Codex crack_on_active flag still denies, never silently."""
         legacy = self.directory / "data/sessions/old"
         legacy.mkdir(parents=True)
@@ -306,7 +306,7 @@ class HookTests(unittest.TestCase):
         self.assertTrue(self.asks("old"))
         self.assertEqual(self.reasons("old"), ["crack_on_legacy_flag"])
 
-    def test_crack_on_corrupt_authority_traced_and_legacy_flag_honoured(self) -> None:
+    def test_autonomous_corrupt_authority_traced_and_legacy_flag_honoured(self) -> None:
         """Corrupt authority = no valid authority: allowed alone, legacy-denied with a flag; traced, no crash."""
         (self.loop / "c1").mkdir(parents=True)
         self.authority("c1").write_text("{not json")

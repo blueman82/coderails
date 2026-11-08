@@ -78,7 +78,7 @@ class HookCase(unittest.TestCase):
         subprocess.run(["git", "-C", str(path), "symbolic-ref", "HEAD", f"refs/heads/{branch}"], check=True)
 
     def flag(self, session: str) -> Path:
-        """Stamp only the session's crack-on flag."""
+        """Stamp only the session's legacy autonomy flag."""
         directory = self.loop / session
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "crack_on_active").touch()

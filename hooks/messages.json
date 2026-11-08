@@ -25,9 +25,9 @@
       "remediation": "State the durable rule in the comment without a session label.",
       "category": "comment citation gate"
     },
-    "crack_on_gate": {
+    "autonomous_gate": {
       "remediation": "Use the typed authority command, or continue after the authority expires.",
-      "category": "crack on gate"
+      "category": "autonomous input gate"
     },
     "destructive_bash_gate": {
       "remediation": "Use a safe command that avoids the blocked operation.",
@@ -120,27 +120,27 @@
   "memory_source": "scripts/lib/memory_reasons.py",
   "aliases": {
     "action_authority": "action_authority_gate",
-    "crack_on": "crack_on_gate"
+    "autonomous": "autonomous_gate"
   },
   "reasons": {
     "authority_phrase_ignored": {
-      "source": "hooks/scripts/crack_on_gate.py",
+      "source": "hooks/scripts/autonomous_gate.py",
       "remediation": "Use the typed authority command, or continue after the authority expires."
     },
     "authority_corrupt_ignored": {
-      "source": "hooks/scripts/crack_on_gate.py",
+      "source": "hooks/scripts/autonomous_gate.py",
       "remediation": "Use the typed authority command, or continue after the authority expires."
     },
     "authority_deny": {
-      "source": "hooks/scripts/crack_on_gate.py",
+      "source": "hooks/scripts/autonomous_gate.py",
       "remediation": "Use the typed authority command, or continue after the authority expires."
     },
     "authority_expired_allow": {
-      "source": "hooks/scripts/crack_on_gate.py",
+      "source": "hooks/scripts/autonomous_gate.py",
       "remediation": "Use the typed authority command, or continue after the authority expires."
     },
     "crack_on_legacy_flag": {
-      "source": "hooks/scripts/crack_on_gate.py",
+      "source": "hooks/scripts/autonomous_gate.py",
       "remediation": "Use the typed authority command, or continue after the authority expires."
     },
     "confidence_label_missing": {
