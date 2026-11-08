@@ -253,5 +253,6 @@
   "scripts/lib/review_na.py": "100644",
   "scripts/lib/review_na_context.py": "100644",
   "skills/agentic-loop/scripts/decision_chain.py": "100644",
-  "packages/codex/skills/agentic-loop/scripts/decision_chain.py": "100644"
+  "packages/codex/skills/agentic-loop/scripts/decision_chain.py": "100644",
+  "scripts/release_manifest.py": "100755"
 }
