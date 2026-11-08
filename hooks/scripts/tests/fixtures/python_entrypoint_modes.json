@@ -245,5 +245,6 @@
   "uninstall.py": "100755",
   "scripts/lib/source_manifest.py": "100644",
   "skills/agentic-loop/scripts/decision_chain.py": "100644",
-  "packages/codex/skills/agentic-loop/scripts/decision_chain.py": "100644"
+  "packages/codex/skills/agentic-loop/scripts/decision_chain.py": "100644",
+  "scripts/release_manifest.py": "100755"
 }
