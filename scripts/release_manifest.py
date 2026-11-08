@@ -38,6 +38,7 @@ ROOT_FILES = frozenset(
     {"AGENTS.md", "config.schema.json", "install.py", "uninstall.py", "pyproject.toml", "wiki.schema.json"}
 )
 CODEX_PREFIX = "packages/codex/"
+MODULE_SUFFIXES = (".py", ".pyw", ".pyi", ".so", ".pyd")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -86,7 +87,12 @@ def _runtime_file(relative: str) -> tuple[str, str] | None:
         bundle, path = "claude", relative
     if not path or "tests" in Path(path).parts or path.endswith(("_test.py", ".test.ts", ".spec.ts")):
         return None
-    if bundle == "claude" and path not in ROOT_FILES and not path.startswith(RUNTIME_DIRS):
+    if (
+        bundle == "claude"
+        and path not in ROOT_FILES
+        and not path.startswith(RUNTIME_DIRS)
+        and not path.endswith(MODULE_SUFFIXES)
+    ):
         return None
     return bundle, path
 
@@ -119,7 +125,7 @@ def source_files(root: Path) -> dict[str, dict[str, str]]:
         raise ValueError("source_path_invalid") from error
     for entry in tracked:
         metadata, relative = entry.split("\t", 1)
-        mode, _, stage = metadata.split()
+        mode, indexed_oid, stage = metadata.split()
         selected = _runtime_file(relative)
         if selected is None:
             continue
@@ -133,7 +139,14 @@ def source_files(root: Path) -> dict[str, dict[str, str]]:
             or bool(source.stat().st_mode & stat.S_IXUSR) != (mode == "100755")
         ):
             raise ValueError("source_file_mode")
-        files[bundle][path] = digest(source.read_bytes())
+        data = source.read_bytes()
+        if len(indexed_oid) not in (40, 64):
+            raise ValueError("source_git_unavailable")
+        algorithm = "sha1" if len(indexed_oid) == 40 else "sha256"
+        blob = f"blob {len(data)}\0".encode() + data
+        if hashlib.new(algorithm, blob).hexdigest() != indexed_oid:
+            raise ValueError("source_file_uncommitted")
+        files[bundle][path] = digest(data)
     if not all(
         required in files[bundle]
         for bundle, required in (("claude", ".claude-plugin/plugin.json"), ("codex", ".codex-plugin/plugin.json"))
