@@ -22,11 +22,11 @@ engineering_principles_skill: /engineering-principles-python
 # node/npx and a supported platform (macOS Seatbelt, Linux/WSL2 bubblewrap).
 # Default/absent = true. Contained dispatch needs the sandbox runtime.
 sandbox_workers: true
-# The shipped workflow uses advisory: trace and warn without requiring a receipt.
-# With no setting, the optional gate is off. Explicit enforce requires a signed
-# receipt for gh pr merge, git push to main/master, or scripts/merge.py with
-# --expected-head <full PR head SHA>. Routine work needs no key or passphrase.
-action_authority: advisory
+# Default enforce requires a signed receipt for gh pr merge, git push to
+# main/master, or scripts/merge.py with --expected-head <full PR head SHA>.
+# The owner approves each action at a terminal; a passphrase is optional.
+# Explicit advisory warns without a receipt; explicit off disables this gate.
+action_authority: enforce
 # integrity_review.machine_user: the GitHub login of the dedicated machine-user
 # identity that posts `integrity-review` commit statuses. When set, scripts/merge.py
 # and hooks/scripts/enforce_pr_workflow.py additionally require, for any PR

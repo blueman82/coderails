@@ -6,8 +6,10 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from . import eval_artifact, eval_level, eval_validation, manifest_policy, review_passes
+from . import eval_artifact, eval_level, eval_validation, manifest_policy, review_na, review_passes
 from . import git_common as git
+from ._publication_preflight import push_preflight as push_preflight
+from ._publication_preflight import trace_preflight as trace_preflight
 from .artifact_io import object_value
 from .config import config_path, load_config
 from .eval_integrity import IntegrityError, suite_hash
@@ -22,12 +24,7 @@ def manifest_check(number: str, sha: str, unit: str, progress: str) -> list[Viol
 
 
 def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list[Violation]:
-    """Required reviewers for the diff (policy/review_policy.json) against the passes in the SHA-bound artifact.
-
-    `review-pr` is satisfied by the v1 marker itself; a v1 artifact with no passes line has passes=[]. A pass counts
-    only with verdict `pass`; the artifact's `blocking` flag never waives a required pass. Fails closed. Config
-    `review_passes: off` skips the check; absent or any other value enforces.
-    """
+    """Require known passing dispositions or validated security N/A; only review_passes: off skips this check."""
 
     def refused(code: str, detail: str = "") -> list[Violation]:
         manifest_policy.trace(f"{git.repo()}@pr-{number}", "refused", code, command="review-passes")
@@ -46,6 +43,8 @@ def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list
         return refused("review_artifact_missing", found.failure_reason or "no artifact for this head")
     if found.passes is None:
         return refused("review_passes_malformed")
+    if invalid := review_na.publication_violations(found.passes, number, sha):
+        return refused(invalid[0]["code"], invalid[0]["detail"])
     try:
         policy = review_passes.load_policy()
         base = git.pr_field(number, "baseRefOid")
@@ -62,14 +61,13 @@ def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list
         return refused("review_policy_modified", "policy changes need a separate trusted release")
     verdicts = {p["name"]: p["verdict"] for p in found.passes}
     needed = review_passes.required(changes, policy)
-    # a failed pass that marks itself blocking refuses even when the policy did not ask for it
     extra = [p["name"] for p in found.passes if p["verdict"] == "fail" and p["blocking"] and p["name"] not in needed]
     names = needed + extra
     problems: list[Violation] = []
     for name in names:
-        if name in needed and name != "review-pr" and name not in verdicts:
+        if name in needed and name not in verdicts:
             problems.append({"code": f"required_review_missing:{name}", "detail": ""})
-        elif verdicts.get(name) == "fail":
+        elif verdicts.get(name) not in ("pass", "not_applicable"):
             problems.append({"code": f"required_review_failed:{name}", "detail": ""})
     label = f"{git.repo()}@pr-{number}"
     for code in [v["code"] for v in problems] or ["review_passes_ok"]:
@@ -78,10 +76,7 @@ def review_passes_check(number: str, sha: str, unit: str, progress: str) -> list
 
 
 def eval_level_check(number: str, sha: str, unit: str, progress: str) -> list[Violation]:
-    """Require a current-head GO suite with matching level, computed lateness and hash.
-
-    The live diff/unit lower bounds set the floor; level >= 1 must be frozen. Only eval_level: off skips.
-    """
+    """Require a frozen current-head GO at the derived level; only eval_level: off skips."""
     values, _ = load_config(config_path() or "")
     if str(values.get("eval_level") or "enforce") == "off":
         manifest_policy.trace(f"{git.repo()}@pr-{number}", "skipped", "eval_level_off", command="eval-level")
@@ -146,15 +141,10 @@ def remediation(code: str) -> str:
     if code.startswith("diff_manifest"):
         return "Fix the diff or the policy; set diff_manifest: off only on purpose."
     if code.startswith("required_review_") or code in ("review_artifact_missing", "review_passes_malformed"):
-        return "Run the required reviews, then re-post: post_review.py post <PR> --summary F --pass NAME=F."
+        return "Complete the required inspection/scope; post: post_review.py post <PR> --summary F --pass NAME=F."
     if code.startswith(("eval_", "level_", "late_freeze", "suite_", "chain_", "integrity_", "not_frozen")):
         return "Re-run and re-post the evals: post_evals.py post <PR> <evals.json> (record an oracle edit with amend)."
     return "Resolve the reported publication-check refusal, then retry."
-
-
-def trace_preflight(code: str) -> None:
-    """Count a repository or base retarget refusal before PR evidence can be trusted."""
-    manifest_policy.trace("merge-preflight", "refused", code, command="publication")
 
 
 def evaluate(number: str, sha: str, unit: str = "", progress: str = "") -> list[Violation]:

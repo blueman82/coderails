@@ -1,6 +1,32 @@
 import { expect, it } from "vitest";
+import { join } from "node:path";
 import { collectCodexSessionTrace, readCodexTracePage } from "../src/lib/collect/sessionTrace";
 import { fixture } from "./sessionTraceFixture";
+
+it("keeps the spawning worker's name while its child has a separate name", async () => {
+  const { deps, child, children, save } = await fixture();
+  const path = "/root/loop_worker_6c6f6f70_55335b315d/researcher";
+  await save(child, [...children,
+    { type: "response_item", payload: { type: "function_call", name: "spawn_agent", namespace: "collaboration",
+      call_id: "nested-call", arguments: JSON.stringify({ task_name: "researcher", message: "Nested task" }) } },
+    { type: "event_msg", payload: { item: { type: "SubAgentActivity", kind: "started", id: "nested-call",
+      agent_thread_id: "grandchild", agent_path: path } } },
+  ]);
+  await save(join(deps.sourceRoot, "2026/09/28/rollout-grandchild.jsonl"), [
+    { type: "session_meta", payload: { id: "grandchild", session_id: "parent", parent_thread_id: "child-one",
+      thread_source: "subagent", agent_role: null, agent_path: path,
+      source: { subagent: { thread_spawn: { parent_thread_id: "child-one", depth: 2,
+        agent_role: null, agent_path: path } } } } },
+  ]);
+  const page = await readCodexTracePage("parent", null, 50, deps);
+  const spawn = page.events.find((event) => event.attributes["coderails.native.call_id"] === "nested-call");
+  expect(spawn?.attributes).toMatchObject({ "coderails.actor.id": "child-one", "coderails.actor.name": "Builder",
+    "coderails.child.id": "grandchild" });
+  expect(page.events.filter((event) => event.attributes["coderails.actor.id"] === "child-one")
+    .every((event) => event.attributes["coderails.actor.name"] === "Builder")).toBe(true);
+  expect(page.events.find((event) => event.attributes["coderails.actor.id"] === "grandchild")
+    ?.attributes["coderails.actor.name"]).toBe("Researcher");
+});
 
 it("names the native worker from its bound graph job and keeps its child identity", async () => {
   const { deps } = await fixture();
@@ -27,9 +53,12 @@ it("uses a validated native task name when no role or nickname exists", async ()
   expect(page.events.find((event) => event.attributes["coderails.actor.id"] === "child-one")?.attributes["coderails.actor.name"]).toBe("Worker A");
 });
 
-it("refuses a hostile native nickname while keeping the validated child", async () => {
+it.each([
+  ["Map Scout", "Map Scout"], ["Signal Reader", "Signal Reader"],
+  ["North Alpha Beta Gamma", "North Alpha Beta Gamma"], ["One Two Three Four Five", "Worker"],
+  ["Map  Scout", "Worker"], ["<img src=x onerror=alert(1)>\n\u0007", "Worker"],
+])("checks the recorded native nickname %j while keeping child identity", async (nickname, expected) => {
   const { deps, parent, child, rows, children, save } = await fixture();
-  const nickname = "<img src=x onerror=alert(1)>";
   const taskName = "loop_worker_55335b315d_a2";
   const legacy = { type: "event_msg", payload: { item: { type: "CollabAgentToolCall", tool: "spawn_agent",
     status: "completed", id: "legacy", prompt: `CODERAILS_GRAPH_TASK=${taskName}\nSensitive prompt`,
@@ -43,7 +72,9 @@ it("refuses a hostile native nickname while keeping the validated child", async 
       depth: 1, agent_role: "worker", agent_nickname: nickname, agent_path: null } } } } }, ...children.slice(1)]);
   const page = await readCodexTracePage("parent", null, 30, deps);
   const worker = page.events.find((event) => event.attributes["coderails.actor.id"] === "child-one")!;
-  expect(worker.attributes["coderails.actor.name"]).toBe("Worker");
+  expect(worker.attributes["coderails.actor.name"]).toBe(expected);
+  expect(worker.parentSpanId).toBe(page.events.find((event) =>
+    event.attributes["coderails.child.id"] === "child-one" && event.attributes["coderails.actor.kind"] === "orchestrator")?.spanId);
   expect(JSON.stringify(page)).not.toContain("<img");
 });
 
