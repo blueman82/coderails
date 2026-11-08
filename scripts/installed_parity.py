@@ -18,23 +18,21 @@ from collections.abc import Iterator
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.release_manifest import CODEX_PREFIX, MODULE_SUFFIXES, ROOT_FILES, RUNTIME_DIRS, source_files  # noqa: E402
+from scripts.release_manifest import (  # noqa: E402
+    CODEX_PREFIX,
+    MODULE_SUFFIXES,
+    ROOT_FILES,
+    RUNTIME_DIRS,
+    ignored,
+    runtime_module,
+    source_files,
+)
 
-IGNORED_DIRS = {"__pycache__"}
-IGNORED_NAMES = {".DS_Store"}
-IGNORED_SUFFIXES = (".pyc",)
 RUNTIME_PATHS = (*RUNTIME_DIRS, *sorted(ROOT_FILES), CODEX_PREFIX, *(f"*{suffix}" for suffix in MODULE_SUFFIXES))
 REQUIRED_FILES = {
     "claude": (".claude-plugin/plugin.json", "hooks/hooks.json"),
     "codex": (".codex-plugin/plugin.json", "hooks/hooks.json"),
 }
-
-
-def ignored(relative: Path) -> bool:
-    """Apply the same unconditional cache exclusions before inspecting entry types."""
-    return bool(
-        IGNORED_DIRS & set(relative.parts) or relative.name in IGNORED_NAMES or relative.name.endswith(IGNORED_SUFFIXES)
-    )
 
 
 def installed_files(root: Path) -> Iterator[Path]:
@@ -99,11 +97,8 @@ def _tracked_source(source: Path) -> set[str]:
     tracked = _git_paths(source, "ls-files", "--cached")
     for mode in (("--others", "--exclude-standard"), ("--others", "--ignored", "--exclude-standard")):
         for path in sorted(_git_paths(source, "ls-files", *mode, "--", *RUNTIME_PATHS)):
-            if not (
-                IGNORED_DIRS & set(Path(path).parts)
-                or Path(path).name in IGNORED_NAMES
-                or path.endswith(IGNORED_SUFFIXES)
-            ):
+            selected = path in ROOT_FILES or path.startswith((*RUNTIME_DIRS, CODEX_PREFIX)) or runtime_module(path)
+            if selected and not ignored(Path(path)):
                 raise ValueError(f"untracked runtime source: {path}")
     return tracked
 
