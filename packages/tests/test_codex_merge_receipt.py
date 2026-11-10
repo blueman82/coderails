@@ -80,7 +80,9 @@ class CodexDestructiveLeaseTests(unittest.TestCase):
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertIn("authority_denied_destructive_shell", out["permissionDecisionReason"])
         self.assertIn("authority_denied_destructive_shell", (self.loop / "s1" / "trace.jsonl").read_text())
-        self.assertEqual(self.run_hook("rm -rf build")["patternId"], "rm-rf")
+        blocked = self.run_hook("rm -rf build")
+        self.assertEqual(blocked["permissionDecision"], "deny")
+        self.assertIn("rm -rf build", blocked["permissionDecisionReason"])
         self.assertEqual(self.run_hook("ls -la"), {})
         for split in (
             "git push origin \\\n  --force-with-lease feat/x",
