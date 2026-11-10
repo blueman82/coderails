@@ -3,10 +3,8 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
-from contextlib import suppress
 from typing import cast
 
 from hook_common import append_trace_row, deny, payload_object, read_input, text_field
@@ -17,14 +15,6 @@ from lib.shell_context import opaque_execution
 from scripts.lib.authority_permits import permits
 
 LEASE = re.compile(r"\bgit\b.*\bpush\b.*--force-with-lease\b", re.I)  # the one family permanent_pattern can allow
-
-
-def mark() -> None:
-    """Flag the deny printed by this hook so telemetry records cause deny, not ok."""
-    with suppress(ImportError):  # telemetry must never be able to break the hook
-        from lib.hook_telemetry import mark_deny
-
-        mark_deny()
 
 
 def main() -> int:
@@ -43,22 +33,11 @@ def main() -> int:
     for token in re.findall(r"[a-zA-Z0-9_./-]+", command):
         normalized = os.path.abspath(os.path.join(cwd, token))
         if normalized.endswith(("/.codex/config.toml", "/.codex/requirements.toml")):
-            print(
-                json.dumps(
-                    {
-                        "hookSpecificOutput": {
-                            "hookEventName": "PreToolUse",
-                            "permissionDecision": "deny",
-                            "patternId": "codex-owner-config",
-                            "permissionDecisionReason": "Destructive pattern detected: "
-                            "native Codex owner configuration path\n"
-                            f"Full command: {command}\nThis command is permanently blocked. "
-                            "Safe route: these owner-only files must be changed by the owner outside this session.",
-                        }
-                    }
-                )
+            deny(
+                "Destructive pattern detected: native Codex owner configuration path\n"
+                f"Full command: {command}\nThis command is permanently blocked. "
+                "Safe route: these owner-only files must be changed by the owner outside this session."
             )
-            mark()
             return 0
     try:
         pattern, identifier = permanent_pattern(command, cwd)
@@ -66,21 +45,11 @@ def main() -> int:
         deny("Host resource exhaustion prevented this hook from checking the command. Retry; the action is blocked.")
         return 0
     if pattern:
-        print(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "patternId": identifier,
-                        "permissionDecisionReason": f"Destructive pattern detected: {pattern}\n"
-                        f"Full command: {command}\n"
-                        f"This command is permanently blocked. {ROUTES[identifier]}",
-                    }
-                }
-            )
+        deny(
+            f"Destructive pattern detected: {pattern}\n"
+            f"Full command: {command}\n"
+            f"This command is permanently blocked. {ROUTES[identifier]}"
         )
-        mark()
         return 0
     session = text_field(payload, "session_id")
     flat = command.replace("\\\n", "").replace("\n", " ")  # the same flattening permanent_pattern decides on

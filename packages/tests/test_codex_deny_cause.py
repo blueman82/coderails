@@ -1,4 +1,4 @@
-"""Codex hooks that print their own deny JSON record telemetry cause deny; allows stay ok; output is unchanged."""
+"""Codex hook denials produce valid output and record telemetry cause deny."""
 
 from __future__ import annotations
 
@@ -12,16 +12,10 @@ from collections.abc import Mapping
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "codex/hooks/scripts"
-ENVELOPE = '{{"hookSpecificOutput": {{"hookEventName": "PreToolUse", "permissionDecision": "deny", {rest}}}}}\n'
-OWNER = (
-    '"patternId": "codex-owner-config", "permissionDecisionReason": "Destructive pattern detected: native Codex '
-    "owner configuration path\\nFull command: cat .codex/config.toml\\nThis command is permanently blocked. "
-    'Safe route: these owner-only files must be changed by the owner outside this session."'
-)
 
 
 class DenyCauseTests(unittest.TestCase):
-    """Each hand-rolled Codex deny emitter flags telemetry; stdout and exit code are byte-stable."""
+    """Codex hooks record deny for blocked commands and ok for commands they allow."""
 
     def run_hook(self, name: str, payload: Mapping[str, object], data: str) -> tuple[int, str, list[str]]:
         """Run a hook as a real process and return exit code, stdout and recorded causes."""
@@ -51,13 +45,30 @@ class DenyCauseTests(unittest.TestCase):
             def run(command: str) -> tuple[int, str, list[str]]:
                 return self.run_hook("destructive_bash_gate", {"tool_input": {"command": command}, "cwd": tmp}, tmp)
 
-            code, out, causes = run("cat .codex/config.toml")
-            self.assertEqual((code, out, causes), (0, ENVELOPE.format(rest=OWNER), ["deny"]))
-            code, out, causes = run("git reset " + "--hard")
-            self.assertEqual((code, causes[1:]), (0, ["deny"]))
-            self.assertIn('"patternId"', out)
+            for command, reason_prefix in (
+                ("cat .codex/config.toml", "Destructive pattern detected: native Codex owner configuration path"),
+                ("git reset " + "--hard", "Destructive pattern detected:"),
+            ):
+                with self.subTest(command=command):
+                    code, out, causes = run(command)
+                    self.assertEqual((code, causes[-1]), (0, "deny"))
+                    envelope = json.loads(out)
+                    self.assertEqual(set(envelope), {"hookSpecificOutput"})
+                    decision = envelope["hookSpecificOutput"]
+                    self.assertEqual(
+                        set(decision),
+                        {
+                            "hookEventName",
+                            "permissionDecision",
+                            "permissionDecisionReason",
+                        },
+                    )
+                    self.assertEqual(decision["hookEventName"], "PreToolUse")
+                    self.assertEqual(decision["permissionDecision"], "deny")
+                    self.assertTrue(decision["permissionDecisionReason"].startswith(reason_prefix))
+                    self.assertIn(command, decision["permissionDecisionReason"])
             code, out, causes = run("git status")
-            self.assertEqual((code, out, causes[2:]), (0, "", ["ok"]))
+            self.assertEqual((code, out, causes), (0, "", ["deny", "deny", "ok"]))
 
     def test_verification_volume_ceiling(self) -> None:
         """Test the third full-suite run records deny; the first records ok."""
