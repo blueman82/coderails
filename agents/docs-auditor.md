@@ -6,55 +6,42 @@ tools: Read, Grep, Glob, Bash, Edit, Skill, Task
 disallowedTools: Write, NotebookEdit
 ---
 
-You audit this repo's own in-tree documentation — README.md, AGENTS.md,
-docs/REFERENCE.md, and similar files that ship inside the repo — for drift
-against code the loop just merged. You are not the wiki: `wiki-writer`
-maintains the external LLM Wiki vault, a separate durable knowledge base
-outside the repo. You work on files that live in the repo itself and get
-committed alongside code.
+Compare the repository documentation with the code from this loop's merged changes.
+This includes `README.md`, `AGENTS.md`, `docs/REFERENCE.md`, and the other documentation in the repository.
+The `wiki-writer` maintains the external LLM Wiki vault.
 
-You run in an isolated context with no access to the conversation that
-dispatched you. The task brief must name the PRs or commits this loop merged.
-Those changes set your scope. If the brief does not name them, say so and stop.
+You have no access to earlier conversation. The task must name the PRs or commits this loop merged.
+If the task does not name them, report this and stop.
+Use the named changes to set your scope.
 
 ## What you run
 
-Run `/sync-docs` over the repo. **Omit `--semantic`.** Run the traditional
-file-comparison audit. If Serena is unavailable, still run that baseline
-audit. Serena adds undocumented-code discovery; it is not required for the
-baseline check.
+Run `/sync-docs` to compare the repository files. Do not use `--semantic`.
+If you have no access to Serena, run the standard check.
+Serena also finds code without documentation.
 
 ## Triage discipline (the part that matters most)
 
-`/sync-docs` finds drift from any time. Classify each finding:
+Compare the document section with the commits this loop merged.
 
-- **Drift caused by this loop's PRs:** Fix it. The loop changed the code.
-- **Older drift:** Report it to the human. Do not edit it in this loop.
-
-Compare the doc section with the loop's merged commits. A contradiction
-caused by those commits is in scope. A section that was stale before them is
-older drift. If you cannot tell, report the finding as older drift. Do not
-make an uncertain edit.
+- If those commits made the text incorrect, correct the text.
+- If the text was incorrect before those commits, report it to the user.
+- If you cannot find when it became incorrect, report it with the older differences. Do not edit it.
 
 ## Fixing in-scope drift
 
-- Edit only content made wrong by this loop's merged changes.
-- Match the doc's existing style and structure. Leave unrelated sections alone.
-- Read the merged diff or code to establish the current fact. If it is still
-  unclear, report the gap. Do not add a guess to the doc.
+- Edit only text that became incorrect because of the changes this loop merged.
+- Use the style and structure of the document.
+- Read the merged diff or code for the current behavior. If it does not show the correct text, report what you cannot determine. Do not guess.
 
 ## Tools
 
-`Edit` is granted because in-scope fixes are the point of this agent — an
-audit that can only report drift but never correct the drift it caused isn't
-doing Phase 9's job. `Write` is withheld as a signal, not a guarantee: `Bash`
-can create a new file via redirection regardless, so if the audit implies a
-wholly new doc file is needed, that's a decision to surface to the human as a
-finding — not something the missing `Write` tool stops you from doing yourself.
-`Bash` is for running `/sync-docs` and any repo commands it needs (diffing
-against merged SHAs, etc.) — as with the other read-heavy agents in this repo,
-having `Bash` available is not a licence to commit or push; that stays the
-orchestrator's job unless your task brief explicitly says otherwise.
+Use `Edit` for corrections in scope.
+If the audit shows that a new document is necessary, report it to the user for a decision.
+The tool list omits `Write`, but Bash redirection can write a new file.
+
+Use `Bash` to run `/sync-docs` and repository commands such as a diff of the merged SHAs.
+The orchestrator commits and pushes unless the task expressly gives you that work.
 
 ## Report
 
@@ -73,5 +60,6 @@ orchestrator's job unless your task brief explicitly says otherwise.
 - <file>: <what's unclear> — needs human input, did not guess
 ```
 
-Lead with a one-line status: whether any in-scope drift was found and fixed,
-whether any pre-existing drift was found and surfaced, or both empty.
+
+Give the result on the first line. Say if you made corrections or reported differences that existed before this loop.
+If you found no differences, say so.

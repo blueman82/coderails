@@ -5,56 +5,67 @@ description: Generate a structured memory file and continuation prompt for carry
 
 # Handoff
 
-Generate two artefacts that allow a fresh Codex session to continue the current work without re-deriving context:
+Make two artifacts that let a new Codex session continue the current work with the necessary context:
 
-1. **A project memory file** — persists in `~/.codex/projects/<project>/memory/` and loads automatically in future sessions
-2. **A continuation prompt** — ready to paste into a new session to kick off the work immediately
+1. **A project memory file** — stays in `~/.codex/projects/<project>/memory/` and loads automatically in future sessions
+2. **A continuation prompt** — the user can paste it into a new session to continue the work
 
 ## When to use
 
-- Session is ending but work isn't done
-- A design has been agreed but implementation hasn't started
-- Research/analysis is complete and the next step is building
+- Session ends before the work is complete
+- A design has been agreed but implementation has not started
+- Research or analysis is complete, and the next step starts the build
 - User explicitly says "handoff", "save for later", "continue next time"
 
 ## Instructions
 
 ### Step 0: Read recorded state (Muninn authoritative)
 
-If a native loop graph exists for this session, take `$STATE` (the `<session>/progress.json` path) and `$SESSION` from
-the SessionStart bootstrap text (it reports the active state path), then run
-`python3 "$SKILL_DIR/../../scripts/lib/handoff_derive.py" "$STATE" --session "$SESSION"`. It reads the recorded state
-read-only and prints a JSON skeleton `{goal, decisions[{id, cite, text}], done, recorded_proof_results, next_steps, open_questions, lessons,
-degraded[]}` (decisions carry their Muninn K-ids and cites; proof verdicts are recorded claims, not `done`). Use it for Goal, Decisions, Done
-and Next steps instead of reconstructing them from the conversation. **State `degraded[]` to the user in the handoff
-under a "Memory degraded" line**, reason code by reason code (exit 3 means it is non-empty); never skip it and never
-replace it with hand-written Markdown. Run these commands from the actual mapped project repository.
-The state-key directory and plugin checkout do not establish project scope.
-The skeleton uses retained R-id/window/project bindings for local decisions and exact current task receipts for extras.
-Keep revision, real selected quote, complete supports, conditions and expiry in the handoff. Do not assume a condition
-is true. Keep unknown/pending and unsupported-use reasons visible. Current Muninn has no normal/restricted classifier;
-its physical source, scope, redaction and owner-authority checks do not establish semantic privacy classification.
-For graph fields, use the provider `graph.py summarize`, `inspect` and supported `collection` commands as applicable.
-If one graph read fails, omit only its result. Do not use the standalone legacy adapter list as a modern fallback.
-A missing graph drops only its graph-derived fields. Then continue with Step 1.
+If this session has a native loop graph, get `$STATE` (the `<session>/progress.json` path) and `$SESSION` from the SessionStart bootstrap text.
+Run `python3 "$SKILL_DIR/../../scripts/lib/handoff_derive.py" "$STATE" --session "$SESSION"`.
+The script reads the recorded graph without changing it and prints a JSON skeleton:
+`{goal, decisions[{id, cite, text}], done, recorded_proof_results, next_steps, open_questions, lessons, degraded[]}`.
+Decisions include their Muninn K-IDs and citations. Proof verdicts are recorded claims and do not count as `done`.
 
-When reporting graph work, use the `node_names` entry from `inspect` or `summarize`. Show each node's job name and
-lane code beside its stable ID. Keep the stable ID in continuation instructions and evidence references.
+Use the skeleton for Goal, Decisions, Done, and Next steps. Do not reconstruct them from the conversation.
+**In the handoff, list each code in `degraded[]` below a "Memory degraded" line.** Exit 3 means the array is not empty.
+Include this report. Do not replace it with Markdown you wrote by hand.
+
+The script uses `memory_adapter.py` to read Muninn records.
+
+Run these commands from the mapped project repository.
+The state-key directory and plugin checkout do not identify project scope.
+
+The skeleton uses retained R-id/window/project bindings for local decisions. It uses current task receipts for the other entries.
+Keep the revision, verbatim selected quote, full set of source records, conditions, and expiry in the handoff.
+Do not infer that a condition holds. Give the causes for unknown, pending, and unsupported uses.
+
+Current Muninn has no classifier for the `normal` or `restricted` privacy categories.
+Its physical source, scope, redaction, and owner-authority checks do not give a privacy class based on meaning.
+
+For graph fields, use the provider `graph.py summarize`, `inspect`, and `collection` commands when available.
+If one graph read does not succeed, omit only its result.
+Do not use the standalone legacy adapter list as a fallback.
+If there is no graph, omit only the fields that come from it. Then continue with Step 1.
+
+When you report graph work, use the `node_names` entry from `inspect` or `summarize`.
+Show each node's name for its work and lane code next to its stable ID.
+Keep that ID in the continuation instructions and citations for the recorded work.
 
 ### Step 1: Extract from current session
 
-Scan the conversation for these categories. Be thorough — the new session has ZERO context from this one:
+Find these categories in the conversation. Include all necessary information because the new session has no context from this one:
 
 | Category | What to capture |
 |----------|----------------|
 | **Goal** | What are we building/doing and why |
-| **Decisions made** | Architecture choices, patterns selected, approaches rejected (with reasons) |
-| **Constraints** | Expert feedback, technical limitations, things that won't work and why |
-| **Taxonomy/Schema** | Any enums, categories, data structures, DDB schemas designed |
-| **File references** | Specific files to read, with what to look for in each |
-| **What's done** | Work already completed this session (PRs, deploys, commits) |
-| **Next steps** | Ordered list of what to do next, specific enough to act on |
-| **Open questions** | Unresolved decisions the user needs to make |
+| **Decisions made** | Architecture selections, selected patterns, and rejected methods, with causes |
+| **Constraints** | Expert feedback, technical limits, things that will not work and why |
+| **Taxonomy/Schema** | Enums, categories, data structures, and DDB schemas from this work |
+| **Files** | The files to read and what to look for in each |
+| **What's done** | Work completed in this session (PRs, deployments, commits) |
+| **Next steps** | Numbered instructions the next session can use |
+| **Open questions** | Unresolved decisions for the user |
 
 ### Step 2: Write the memory file
 
@@ -67,24 +78,35 @@ Write to the **project-specific** memory directory. The correct path is derived 
 For example, if cwd is `/Users/you/Documents/Github/ops-agent`, write to:
 `~/.codex/projects/-Users-you-Documents-Github-ops-agent/memory/`
 
-**Do NOT use the path shown in your system prompt's auto-memory section** — that may be a global fallback path which other project sessions won't load. Always derive from cwd.
+**Do not use the auto-memory path in your system prompt as the default.**
+It can be a global fallback path that other project sessions do not read. Start with the current directory.
 
-**Monorepo edge case — verify the store location before deriving a new one.** When cwd is a sub-project inside a larger repo (e.g. you are working in `<repo>/projects/<sub>` or `<repo>/packages/<sub>`), the memory store is often keyed at the **repo root**, not the sub-project cwd. All of that repo's sessions — including this one — share one root store. Blindly deriving the path from a sub-project cwd creates a brand-new, empty `memory/` folder that NO future session will load from, orphaning your handoff. So before writing:
+**Monorepos can use a shared store.** Check the store location before you make a new one.
+For a subproject such as `<repo>/projects/<sub>` or `<repo>/packages/<sub>`, the store is frequently keyed to the repository root.
+All sessions in that repository can share one root store.
+If you derive a new directory from the subproject path alone, future sessions can miss this handoff.
 
-1. Find the existing store. Check the cwd-derived path AND its parent-directory candidates (walk up the path, replacing slashes with dashes), and look at the auto-memory path from the system prompt. Pick the one that already contains a populated `MEMORY.md` + `project_*.md` files.
-2. If exactly one populated store exists, write there — even if it's keyed to a parent/root path rather than your sub-project cwd. Matching the store the session actually loads from beats matching cwd.
-3. Only create a new cwd-derived directory if NO populated store exists for this repo (genuinely first memory for the project).
+1. Find the existing store. Check the path derived from the current directory and each parent.
+   Replace slashes with dashes for each candidate. Also check the system prompt's auto-memory path.
+   Look for a populated `MEMORY.md` and `project_*.md` files.
 
-A quick check: list candidate `memory/` dirs and see which holds existing `*.md` memories. Do not create a competing empty folder next to a populated one.
+2. If there is only one populated store, write there. Use it if it belongs to a parent directory or repository root.
+   Use the store that the session reads from.
 
-If `MEMORY.md` doesn't exist in the **chosen** target directory (and you've confirmed no populated store exists at a parent/root path), create it with a `# Memory Index` header.
+3. Make a new directory from the current path only if the repository has no populated store.
+
+List candidate `memory/` directories. Check which one holds existing `*.md` memories.
+Do not make a competing empty directory next to a populated one.
+
+If the selected directory has no `MEMORY.md`, first check that no parent or root path has a populated store.
+Then make the index with a `# Memory Index` header.
 
 Write the memory file with type `project`:
 
 ```markdown
 ---
 name: <descriptive name>
-description: <one-line — specific enough to surface on relevant queries>
+description: <one line with sufficient information for related queries>
 type: project
 ---
 
@@ -94,13 +116,13 @@ type: project
 <what and why, 2-3 sentences>
 
 ## Decisions
-<bullet list of choices made, each with WHY>
+<bullet list of decisions with their causes>
 
 ## Constraints
-<things that won't work and why — expert feedback, technical limits>
+<things that will not work and why — expert feedback, technical limits>
 
 ## Schema / Taxonomy
-<any structured designs — tables, enums, record formats>
+<structured designs such as tables, enums, or record formats>
 
 ## Key files
 <paths + what to look for in each>
@@ -109,22 +131,22 @@ type: project
 <what was completed this session>
 
 ## Next steps
-<ordered, specific, actionable>
+<numbered steps with concrete instructions>
 
 ## Open questions
-<decisions the user still needs to make>
+<decisions for the user>
 ```
 
 Update `MEMORY.md` index with a one-line entry.
 
 ### Step 3: Generate the continuation prompt
 
-Output a fenced prompt block that the user can paste into a new session. The prompt should:
+Give a fenced prompt block that the user can paste into a new session.
 
-- Reference the memory file by name (so the new session knows to read it)
-- State the immediate next action clearly
-- Include any branch name, worktree path, or JIRA ticket if relevant
-- Be concise — the memory file has the detail, the prompt just kicks things off
+- Name the memory file so the new session can read it
+- Give the first step clearly
+- Include the branch name, worktree path, or JIRA ticket if related
+- Keep the prompt short. The memory file contains the full information
 
 Format:
 
@@ -147,11 +169,11 @@ Show the user:
 1. The memory file path
 2. The continuation prompt
 
-Ask if anything is missing or needs adjusting before they close the session.
+Before the user closes the session, check with them for missing information or necessary changes.
 
 ## What NOT to include
 
 - Conversation tone/style (the new session has its own)
-- Tool outputs or raw data (point to files instead)
-- Debugging dead-ends (only include if they inform a constraint)
-- Anything derivable from git log or reading the code
+- Tool outputs or raw data (give file paths)
+- Debugging dead-ends (only include if they show a constraint)
+- Information the next session can get from git log or the code

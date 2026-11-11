@@ -1,53 +1,59 @@
 # E1: demote the Stop discipline gates?
 
-> Superseded 2026-10-04 by `2026-10-04-not-in-gate-demotion.md`: the user overrode the unmet criteria and demoted both gates to advisory lints. The verdict below is retained as the record of why the criteria were not met.
+> Superseded 2026-10-04 by `2026-10-04-not-in-gate-demotion.md`: the user overrode the unmet criteria and demoted the two gates to advisory lints. This verdict records the unmet criteria.
 
-Verdict: **criteria NOT met. No behaviour change. No exit code edited. Hooks stay.**
+Verdict: **Criteria NOT met. No behavior change. No exit code change. Hooks stay.**
 
 ## Rule
 
-`docs/graph-alignment-measurement.md`, rule (a): a gate is a demotion candidate only if all hold: at least 100
-`decisions`; `blocked / decisions` of at least 10%; and a hand-sampled real-fix rate below 30% over at least 30
-of its blocks. "Without the sampled rate, no gate may be called demotable."
+A gate qualifies for demotion only if it satisfies all conditions in rule (a) of `docs/graph-alignment-measurement.md`:
+
+- The gate has 100 or more `decisions`.
+- `blocked / decisions` is 10% or more.
+- Fewer than 30% of the blocked replies in a manual sample have substantive corrections. The sample has 30 or more blocks.
+
+"Without the sampled rate, no gate may be called demotable."
 
 ## Numbers (2026-10-04, local Claude log 2026-08-04 to 2026-10-04)
 
-Reproduce: `python3 scripts/measure_graph_alignment.py --root . --json`
-(then `['gate_blocks']['claude']['gates']['confidence_labels' | 'verify_loop']`).
+Run `python3 scripts/measure_graph_alignment.py --root . --json`.
+Read `['gate_blocks']['claude']['gates']['confidence_labels' | 'verify_loop']`.
 
 | Gate | blocked | decisions | blocked/decisions | blocked/total lines | Rule (a) |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `confidence_labels` | 200 | 272 | 73.5% | 5.2% (200/3843) | volume and ratio legs met on decisions; **real-fix leg never sampled** |
-| `verify_loop` | 160 | 3663 | 4.4% | 4.4% | **fails the 10% leg** |
+| `confidence_labels` | 200 | 272 | 73.5% | 5.2% (200/3843) | Above the count and ratio thresholds. **No sample of substantive corrections.** |
+| `verify_loop` | 160 | 3663 | 4.4% | 4.4% | **Below the 10% threshold** |
 
-The earlier 194/258 baseline is stale. The log is a live append-only file, so figures drift upward.
+The previous baseline of 194/258 is stale. The log is live and append-only, so the figures can increase.
 
-- Hand-sample of at least 30 `confidence_labels` blocks: **not taken** (it needs transcript reads, which the
-  measurement script deliberately never does). Status: undecided, not "passed".
-- Read on all evaluations the doc says `confidence_labels` would not cross 10%.
-- `verify_loop` fails the ratio leg regardless of any sample, so it stays blocking.
+- No one sampled 30 or more `confidence_labels` blocks. The sample uses transcripts, which the measurement script does not read.
+  The verdict for this condition remains open.
+- The measurement document says `confidence_labels` is below 10% if the denominator is all checks.
+- `verify_loop` stays blocking because its ratio is below 10%. A sample cannot change that result.
 
 ## Behaviour at time of writing (read from source; superseded, outside-loop `Stop` is now an advisory exit 0 for both hooks)
 
-- Outside a loop, `Stop` exits 2 (both hooks).
-- Inside an active loop, `Stop` already emits a `[discipline-warn(loop)]` `additionalContext` and exits 0
-  (`loop_active_incomplete` branch).
-- `SubagentStop` has no loop branch and blocks. The doc dictates that worker output stays blocking; kept.
-- Headless `Stop` (`CODERAILS_HEADLESS_RUN=1`) is already skipped.
-- Codex has `check_confidence_labels.py` only; there is no Codex `verify_loop`.
+- Out of a loop, `Stop` exits with code 2 for the two hooks.
+- In an active loop, `Stop` gives a `[discipline-warn(loop)]` `additionalContext` and exits with code 0 (`loop_active_incomplete` branch).
+- `SubagentStop` has no loop branch and blocks. This keeps the block on worker output that the measurement document specifies.
+- Headless `Stop` (`CODERAILS_HEADLESS_RUN=1`) skips the check.
+- Codex has `check_confidence_labels.py` only. It has no `verify_loop` hook.
 
 ## What this change adds (observability only)
 
-- `reason_code=confidence_label_missing` / `reason_code=verify_loop_missing` on the existing `blocked=1` and
-  `warned=1` log lines. The `hook=`, `blocked=`, `would_block=`, `warned=` fields the counters read are unchanged.
-- One non-authoritative trace row per block or warning (`command` = hook script, `outcome` = blocked | warned).
+- `reason_code=confidence_label_missing` or `reason_code=verify_loop_missing` on the `blocked=1` and `warned=1` log lines.
+  The `hook=`, `blocked=`, `would_block=`, and `warned=` fields that the counters read stay the same.
+- One advisory diagnostic log entry for a block or warning (`command` = hook script, `outcome` = blocked | warned).
   Count them with `['trace']['by_reason']` in the same command.
-- Guard: the 12 discipline fixture suites (`discipline_responses_test.py`) pass unchanged; the new
-  `discipline_reason_code_test.py` fails if the field or the row is removed.
+- The 12 discipline fixture suites (`discipline_responses_test.py`) complete with the same results.
+  The new `discipline_reason_code_test.py` fails if someone removes the field or the log entry.
 
 ## Flip condition
 
-If a hand-sample of at least 30 `confidence_labels` blocks (next turn changed substance, versus a token appended)
-shows a real-fix rate under 30%, with 100+ decisions and blocked/decisions of at least 10% still holding, demote
-only the outside-loop `Stop` branch of `check_confidence_labels.py` by reusing its existing warn-and-exit-0 branch,
-keeping the `blocked` / `would_block` / `warned` log fields. `verify_loop` stays blocking either way.
+Manually sample 30 or more `confidence_labels` blocks. Count a substantive correction when the next reply changes its content.
+Do not count a reply that only appends a token.
+
+If the correction rate is below 30%, check that the gate has 100 or more decisions and `blocked / decisions` of 10% or more.
+If all conditions hold, demote only the `Stop` branch of `check_confidence_labels.py` for sessions out of a loop.
+Use its warn-and-exit-0 branch and keep the `blocked`, `would_block`, and `warned` log fields.
+`verify_loop` stays blocking with all results.

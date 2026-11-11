@@ -1,348 +1,363 @@
 # Coderails skills catalogue
 
-[Component reference](REFERENCE.md).
+[Coderails components](REFERENCE.md).
 
 ## Skills
 
-Skills are loaded by Claude via the `Skill` tool. They encode a discipline, workflow, or method. There is no automatic activation — Claude must choose to invoke a skill, guided by each skill's `description` frontmatter (which is what the harness surfaces to Claude when deciding whether to fire).
+Claude uses the `Skill` tool to invoke a skill for a discipline, workflow, or method.
+The harness gives Claude the skill's `description` from frontmatter. Claude selects when to invoke it.
 
 ### Coderails-original skills
 
-These skills were written for coderails and are not vendored from elsewhere.
+Coderails supplies these skills.
 
 #### `agentic-loop`
 
-**Purpose:** Multi-agent orchestration discipline for sessions where the user has authorised autonomous work across multiple PRs or agents.
+**Purpose:** Coordinate work across agents or PRs when the user grants autonomy.
 
-**When it triggers:** Any of: "spawn a team", "create a team", "team of agents", "no human gates", "self-merge", "autonomous", "without the human", "no per-PR confirmation", "agentic loop", "multi-PR", or 3+ PRs authorised in one instruction. Also triggers for single-PR autonomous merge+deploy+verify chains where the user has explicitly waived per-step confirmation.
+**When to use it:** "spawn a team", "create a team", "team of agents", "no human gates", "self-merge", "autonomous", "without the human", "no per-PR confirmation", "agentic loop", or "multi-PR".
+It also applies if the user authorizes three or more PRs in one instruction.
+It can run a single-PR merge, deploy, and verification chain if the user explicitly waives confirmation for each step.
 
-**When it does NOT apply:** Single-PR interactive work — that is `/coderails:workflow`. The agentic loop sits _above_ `/workflow` and uses it as a subroutine.
+**When it does NOT apply:** Use `/coderails:workflow` for interactive single-PR work. The agentic loop uses `/workflow` as a subroutine.
 
-**Key discipline:** Main context is a pure orchestrator. Every code change (even single-file edits) goes to a routed provider-native worker with explicit task instructions. The orchestrator never implements; it delegates to agents, verifies artifacts, and escalates to a spawned team only for ≥3 sequential PRs or dependency chains.
+**Key discipline:** The parent session orchestrates. Send each code change to a provider-native worker with explicit task instructions.
+This includes edits to one file. The orchestrator checks artifacts and starts a team only for three or more sequential PRs or dependency chains.
 
-**Dependencies:** Reads and writes `progress.json` (ephemeral loop state — path computed by `hooks/scripts/lib/agentic_loop_path.py`, never manually). Invokes `superpowers:writing-plans`, `coderails:premortem`, `superpowers:brainstorming`, `coderails:handoff` as sub-skills. Interacts with `loop_state_guard` and `loop_stall_guard` Stop hooks.
+**Dependencies:** Reads and writes `progress.json` for temporary loop data. Use `hooks/scripts/lib/agentic_loop_path.py` to calculate the path.
+It invokes `superpowers:writing-plans`, `coderails:premortem`, `superpowers:brainstorming`, and `coderails:handoff`.
+The `loop_state_guard` and `loop_stall_guard` hooks check Stop.
 
 ---
 
 #### `planning-sequence`
 
-**Purpose:** Three-stage adversarial planning — Pre-Parade (success conditions), Premortem (failure modes), Red Team (adversarial challenge) — run in order on a plan, idea, or decision before committing.
+**Purpose:** Use Pre-Parade for success conditions, Premortem for possible causes of a bad result, and Red Team for adversarial challenge.
+Use them in that sequence before you commit to a plan, idea, or decision.
 
-**When it triggers:** "run the planning sequence", "put this through the planning techniques", "stress-test my plan", "Pre-Parade this", or before high-stakes decisions. Also proactively when a user is about to commit without adversarial planning.
+**When to use it:** "run the planning sequence", "put this through the planning techniques", "stress-test my plan", or "Pre-Parade this".
+Use it before a high-stakes decision or if the user is about to commit without adversarial planning.
 
-**When it does NOT apply:** Forward-looking checklists, code review, or general architecture critique — those do not require backwards reasoning from an assumed failure.
+**When it does NOT apply:** Use other skills for forward-looking checklists, code inspection, and general architecture critique.
 
 ---
 
 #### `premortem`
 
-**Purpose:** Assume a plan, decision, or approach has already failed, then reason backwards to identify failure modes and causes.
+**Purpose:** Start with the assumption that a plan, decision, or approach did not succeed. Work from that result to find its possible causes.
 
-**When it triggers:** "premortem this", "steelman the failure", "what could go wrong with this plan", adversarial stress-testing of a specific commitment. Distinguishing signal is backwards reasoning from an assumed bad outcome.
+**When to use it:** "premortem this", "steelman the failure", or "what could go wrong with this plan".
+It applies to adversarial stress-testing of a commitment by starting from an assumed bad result.
 
-**When it does NOT apply:** Forward-looking checklists ("what should I check before X"), code review, general architecture critique, fact verification.
+**When it does NOT apply:** Forward-looking checklists such as "what should I check before X", code inspection, general architecture critique, and fact verification.
 
 ---
 
 #### `handoff`
 
-**Purpose:** Generate a structured memory file and continuation prompt for carrying work into a new Claude Code session.
+**Purpose:** Write a structured memory file and a prompt to continue work in a new Claude Code session.
 
-**When it triggers:** "handoff", "hand off", "continue in new session", "pick this up later", "save this for next session", "create a handoff", or any intent to preserve session context for future continuation. Also proactively when a session grows long and the user signals they want to wrap up and continue later.
+**When to use it:** "handoff", "hand off", "continue in new session", "pick this up later", "save this for next session", or "create a handoff".
+Use it if the user wants to keep session context, for example at the end of a long session that they plan to continue.
 
 ---
 
 #### `improve-prompt`
 
-**Purpose:** Improve a prompt before execution by surfacing ambiguities, filling gaps with reasonable assumptions, and rewriting it for clarity and precision.
+**Purpose:** Improve the prompt before execution. Identify ambiguity, fill missing information with reasonable assumptions, and write a clear task.
 
-**When it triggers:** `/improve-prompt`, "improve this prompt", "what's missing from this prompt", requests to tighten a task description before running it. Also proactively when a prompt is vague, underspecified, or missing success criteria.
+**When to use it:** `/improve-prompt`, "improve this prompt", "what's missing from this prompt", or a user who asks to tighten a task before execution.
+Also use it when a prompt is vague or has no clear conditions for success.
 
 ---
 
 #### `task-evals`
 
-**Purpose:** Game-resistant success-eval generation. Produces a frozen `evals.json` (scope `pr` or `loop`, verification levels 0-2) with negative controls and grader independence, so success is judged against a fixed target instead of hand-waved after the fact.
+**Purpose:** Make a frozen `evals.json` with `pr` or `loop` scope and verification level 0 to 2.
+Use negative controls and a grader who works independently. Compare results with a fixed target to prevent gaming.
 
-**When it triggers:** Invoked at agentic-loop Phase 2.7, at plan completion per `superpowers:writing-plans` (after stress-test, before implementation dispatch), or directly.
+**When to use it:** Use it at agentic-loop Phase 2.7 or when `superpowers:writing-plans` finishes the plan.
+For a plan, use it after the stress test and before sending implementation work. Users can also invoke it directly.
 
-**Dependencies:** Consumed by `scripts/post_evals.py` (`pr` scope, merge gate) and the `loop_state_guard` hook (`loop` scope gate).
+**Dependencies:** `scripts/post_evals.py` reads `pr` scope for the merge gate. The `loop_state_guard` hook reads `loop` scope.
 
 ---
 
 #### `dashboard`
 
-**Purpose:** Live local web HUD showing sessions, agentic loops, PR gate states, runs, memory activity, and declared one-click triggers.
+**Purpose:** A live local web dashboard for sessions, agentic loops, PR gate status, runs, and memory operations. It offers declared one-click commands.
 
 **Invocation:** `/coderails:dashboard` or `skills/dashboard/scripts/start_dashboard.py`.
 
-**Run output viewer:** the COMMAND DECK's `OutputViewerPanel`
-(`skills/dashboard/app/src/components/OutputViewerPanel.tsx`) shows a
-run's output, selected by clicking a row in run history. A still-live run
-streams via the `run-output` SSE event (`runId`, `chunk`) added to the
-aggregator's event set in `skills/dashboard/app/src/lib/collect/index.ts`
-and published by `skills/dashboard/app/src/lib/runOutputBus.ts` — an
-in-process pub/sub, not a second SSE endpoint, so it rides the existing
-single `/api/events` connection. A finished run's full output is instead
-fetched once from `GET /api/run/output`
-(`skills/dashboard/app/src/app/api/run/output/route.ts`), which takes
-`runId` + `token` query params and returns `{status: "ok", output}`,
-`{status: "in-progress"}` (409, if the
-run's `endedAt` hasn't landed yet — the client should keep using the live
-SSE buffer instead) or `{status: "error", error}`.
-
-**Context Trend and the `context-trend` SSE event:** the CONTEXT TREND panel
-(`skills/dashboard/app/src/components/ContextTrendPanel.tsx`) is fed by
-`collectContextTrend`
-(`skills/dashboard/app/src/lib/collect/contextTrend.ts`), which sweeps every
-coderails orchestrator transcript under the projects dir. That sweep is far
-slower than the activity slice, so it rides its **own** `context-trend` SSE
-event rather than the `activity` frame — otherwise it would gate the System
-Vitals KPI tiles, which must paint as soon as their own collect resolves.
-
-Adding a new SSE event means wiring **two** places, and they fail differently
-— which is worth knowing before you debug one:
-
-- `src/lib/collect/index.ts` — the `AggregatorEventName` union, the
-  `AggregatorEventPayloadMap` entry, and the overloaded `emit`/listener
-  signatures. Miss one and it is a **compile error**: the overloads exist so a
-  mismatched event/payload pairing cannot type-check.
-- `src/hooks/useDashboardState.ts` — the `DashboardEvent` union, a
-  `mergeDashboardEvent` case, and the `SSE_EVENT_NAMES` array. That array is
-  the **silent** one: the `for (const name of SSE_EVENT_NAMES)` loop is what
-  registers each `addEventListener`, so a name missing from it means the
-  browser receives the frame, no handler fires, and nothing errors. Only the
-  hook-level wiring test catches it — a `mergeDashboardEvent` unit test cannot,
-  because it bypasses the registration entirely.
-
-`src/app/api/events/route.ts` needs **no** per-event change: its subscribe
-callback forwards any `{event, data}` through an event-name-agnostic
-`sseFrame`, with no per-event branch. It does hold
-`sharedContextTrendCache`, but that is contextTrend-specific performance
-plumbing (stat-only revalidation across connections) — omitting it forfeits
-caching, it never drops a frame.
-
-`Snapshot.contextTrend` is **tri-state**, and each state renders differently:
-`undefined` means the frame has not arrived yet (the panel shows "loading…"),
-`null` means the source was unreadable (the panel shows "unavailable"), and a
-summary object is data. Collapsing `undefined` and `null` makes the panel
-flash "unavailable" on every page load — the same regression PR #265 removed
-for the KPI tiles, where `healthNotYetLoaded` in `RailLeft.tsx` distinguishes
-"the collect has not resolved yet" from "the collector tried and could not
-populate this tile".
-
-**Per-connection teardown:** `/api/events` releases its aggregator from the
-request's `abort` signal as well as `ReadableStream.cancel()`, plus an
-`if (request.signal?.aborted)` re-check after setup. `cancel()` alone fires
-only when the response *consumer* cancels — a client that simply goes away
-does not reliably trigger it, and each abandoned connection then leaked a
-recursive `fs.watch` handle per watched dir plus the gates interval. That is
-fatal under launchd, which caps the process at `launchctl limit maxfiles`
-(256 on stock macOS) rather than the shell's soft limit: once exhausted the
-server still accepts TCP but serves nothing.
+[Dashboard output and connection behavior](REFERENCE-DASHBOARD.md).
 
 ---
 
 #### `workflow-audit`
 
-**Purpose:** Mines Claude Code session transcripts for tool-use patterns that repeat across sessions, judges which ones are genuine candidates for a new skill, and — only after explicit owner approval — creates each approved skill through the normal `superpowers:writing-skills` TDD process and a full PR gate.
+**Purpose:** Find recurring tool-use patterns in Claude Code transcripts. Check which patterns qualify for a skill.
+Only after owner approval, write each approved skill through `superpowers:writing-skills` TDD and the full PR gate.
 
-**When it triggers:** "look at our last N sessions and pull out repeated tasks", "what do I do repeatedly that isn't a skill yet", "audit my workflows", "mine my transcripts for skill candidates", "turn my repeated tasks into skills".
+**When to use it:** "look at our last N sessions and pull out repeated tasks", "what do I do repeatedly that isn't a skill yet", "audit my workflows", "mine my transcripts for skill candidates", or "turn my repeated tasks into skills".
 
-**Pipeline:** `skills/workflow-audit/scripts/scan_transcripts.py` (transcripts → per-session tool-use event sequences) pipes into `skills/workflow-audit/scripts/cluster_ngrams.py` (event sequences → recurring n-gram clusters across `--min-sessions` distinct sessions), then a fresh sonnet subagent applies `references/judge-contract.md` to each cluster for a propose/reject verdict. Proposed candidates are charted for the owner; nothing is created without an explicit approval in that interaction — this gate overrides any standing agentic-loop autonomy.
+**Procedure.** The `skills/workflow-audit/scripts/scan_transcripts.py` script gives tool-use sequences for each session.
+The `skills/workflow-audit/scripts/cluster_ngrams.py` script groups recurring n-grams across `--min-sessions` different sessions.
+A new sonnet subagent applies `references/judge-contract.md` to each cluster and proposes or rejects it.
 
-**Queue-mode output (optional):** each `verdict: "propose"` judge output can additionally be piped through `skills/workflow-audit/scripts/write_queue_entry.py` to surface it on the observability dashboard, writing into `~/.claude/coderails-dashboard/approvals/` (routines' own scheduler intents live in the sibling `queue/` directory — see `docs/routines.md`). This is additive to, never a replacement for, the interactive approval gate — a dashboard "Approve" click only flips a queue entry's `status` from `pending` to `approved`.
+Show the candidates to the owner. Only explicit approval in that interaction permits creation. This gate also applies during agentic-loop autonomy.
 
-**Approve-click build runner:** flipping a `workflow-audit:propose-skill` entry to `approved` makes the dashboard's `POST /api/queue` route claim a build directory and spawn a detached, headless `claude -p` build (`skills/dashboard/app/src/lib/build/spawn.ts`, running `skills/dashboard/scripts/run_builder.py` and prompted via `skills/dashboard/app/src/lib/build/prompt.ts`) that authors the proposed skill through skill-creator and ships it as a coderails PR through the full gate sequence. The builder never merges — its terminal state is an open PR with gates green, surfaced on the dashboard (`skills/dashboard/app/src/lib/collect/builds.ts`); the owner reviews and merges by hand. While the build runs, the panel shows a coarse builder-reported phase (`authoring`/`testing`/`pushing`/`opening_pr`, closed-set-validated in the collector before reaching the client), an elapsed timer, and heartbeat freshness rather than an opaque "building"; once the build's PR leaves the dashboard's open-PR set it shows "PR resolved" instead of a stale "awaiting your merge" (skipped whenever the open-PR set is untrustworthy, so an open PR is never falsely marked resolved). **First skill built end-to-end by this runner:** `verify-merged-pr` (below).
+**Queue output.** Optionally send `verdict: "propose"` through `skills/workflow-audit/scripts/write_queue_entry.py` to show it on the dashboard.
+It writes to `~/.claude/coderails-dashboard/approvals/`. Scheduled intent files use sibling `queue/`. See `docs/routines.md`.
 
-**Privacy invariant:** every artifact in the pipeline — scan output, cluster output, judge input/output, proposal chart, queue entry — carries only tool names, a privacy-whitelisted `head` (first two Bash command tokens, the Skill name, or the Agent subagent_type), counts, and session ids. Never verbatim transcript prose, file contents, or reconstructed intent.
+The dashboard "Approve" click changes an entry's `status` from `pending` to `approved`. This does not replace interactive approval.
 
-**When it does NOT apply:** it never creates a skill without the interactive approval gate; the mechanical scan+cluster+queue-write pipeline has no skill-creation capability at all, the judge stage only proposes, and the build runner only triggers on an explicit owner Approve click — it is not autonomous.
+**Build after approval.** When a `workflow-audit:propose-skill` entry becomes `approved`, `POST /api/queue` claims a build directory.
+It starts a detached headless `claude -p` build through `skills/dashboard/app/src/lib/build/spawn.ts` and `skills/dashboard/scripts/run_builder.py`.
+The prompt comes from `skills/dashboard/app/src/lib/build/prompt.ts`. The builder uses skill-creator and opens a Coderails PR through the full gate sequence.
+
+The builder leaves the PR open with its gates green. The collector is `skills/dashboard/app/src/lib/collect/builds.ts`.
+The owner examines and merges the PR by hand. The first skill from this procedure was `verify-merged-pr`.
+
+During the build, the panel shows phase, elapsed time, and heartbeat age.
+The collector validates the phase against `authoring`, `testing`, `pushing`, and `opening_pr`.
+When the PR leaves a trusted open-PR set, the panel shows "PR resolved". If that set cannot be trusted, it does not mark the PR resolved.
+
+**Privacy.** Transcript extraction, clustering, judging, charts, and queue entries use only tool names, approved `head` values, counts, and session IDs.
+The `head` value is the first two Bash command tokens, Skill name, or Agent `subagent_type`.
+No step includes verbatim transcript prose, file contents, or reconstructed intent.
+
+**When it does NOT apply:** The extraction, clustering, and queue tools do not write skills.
+The judge only proposes. The builder runs only after an explicit owner Approve click. This procedure does not grant autonomy.
 
 ---
 
 #### `verify-merged-pr`
 
-**Purpose:** Re-derives a "PR #N is merged" claim from the tools before you rely on it — independently confirming the merge **state** (`gh pr view`), the **content** on `origin/main` (fetch + `git merge-base --is-ancestor` + `git grep`), and the **sibling PRs** that landed in the same author/time window. The sibling check is the one agents skip: a reporter names one PR, but a session often lands several.
+**Purpose:** Check a "PR #N is merged" claim before you rely on it.
+Check merge status with `gh pr view`, and check content on `origin/main` with fetch, `git merge-base --is-ancestor`, and `git grep`.
+Check sibling PRs from the same author and time window. A report can name one PR when a session merged more than one.
 
-**When it triggers:** an agent / teammate / CI report / session summary says a PR is merged, shipped, live, or landed; you are about to build on, deploy, or hand off work that depends on the merge being real; a headless builder or loop reports "done — PR merged" with one PR number.
+**When to use it:** Use it if an agent, teammate, CI report, or session summary says a PR is merged, shipped, live, or landed.
+Use it before building on, deploying, or handing off work that requires the merge. A headless builder can report "done — PR merged" with one PR number.
 
-**When it does NOT apply:** you performed the merge yourself this session and watched it complete, or the claim is about an open/draft PR (nothing merged to verify).
+**When it does NOT apply:** You did and saw the merge in this session, or the claim concerns an open or draft PR.
 
-**Provenance:** the first skill authored end-to-end by the dashboard Approve→build runner (above) — a `workflow-audit` proposal, Approved on the dashboard, built by a headless `skill-creator` session, and merged by hand.
+**Provenance:** A `workflow-audit` proposal, approved on the dashboard and built by a headless `skill-creator` session. The owner merged it by hand.
+It was the first skill that the dashboard Approve→build runner made.
 
 ---
 
 #### `cite-check`
 
-**Purpose:** Re-derives a stated claim from durable sources only — file contents, git output, and fresh command output — and returns a sourced PASS / FAIL / UNSUPPORTED verdict per claim. No recall, no inference.
+**Purpose:** Check a claim from durable sources only: file contents, Git output, and new command output.
+Give PASS, FAIL, or UNSUPPORTED with sources for each claim. Use no recall or inference.
 
-**How it runs:** `context: fork` with `agent: coderails:source-auditor` and `background: false`. The fork is the point: an audit that runs in the context which produced the claim is self-verification, since the same reasoning that made the error is available to excuse it. The forked auditor sees only the claim text passed via `$ARGUMENTS`.
+**How it runs:** Uses `context: fork`, `agent: coderails:source-auditor`, and `background: false`.
+The forked auditor gets only the claim through `$ARGUMENTS`. It does not get the conversation that gave the claim.
+The fork prevents self-verification.
 
-**When it triggers:** invoked directly as `/coderails:cite-check <claim>`; also named by `agentic-loop` Phase 5, which applies it to the single claim "this bug currently reproduces" before spawning any fix.
+**When to use it:** Use `/coderails:cite-check <claim>`. In Phase 5, `agentic-loop` uses it on "this bug currently reproduces" before it sends repair work.
 
-**Naming:** called `cite-check` rather than `verify` because `/verify` is a Claude Code **bundled** skill (build and run your app to confirm a change). A project skill of the same name overrides the bundled one, which would silently shadow a built-in with an unrelated meaning.
+**Naming:** The name `cite-check` avoids a collision with Claude Code's bundled `/verify`, which builds and runs an app to check a change.
+A project skill named `verify` would override the bundled skill.
 
-**Dependencies:** the `coderails:source-auditor` agent.
+**Dependencies:** The `coderails:source-auditor` agent.
 
 ---
 
 #### `execution-discipline`
 
-**Purpose:** Establishes working habits for specify-before-start, high autonomy, first-shot correctness, instruction retention over long sessions, and rigorous self-verification.
+**Purpose:** Specify work before starting. Work autonomously in the granted scope, keep instructions in long sessions, and check the result.
 
-**When it triggers:** Any non-trivial task — multi-step work, anything involving files or tool calls, analysis, building something, debugging, research, document creation, or long-running work. Applied before starting work, not after, since it changes how the work is done.
+**When to use it:** Use it before non-trivial work: multiple steps, files, tool calls, analysis, builds, debugging, research, document work, or long tasks.
 
-**When it does NOT apply:** Trivial single-step responses with no tool use or file involvement.
+**When it does NOT apply:** A trivial single-step response with no tool or file use.
 
 ---
 
 #### `sync-docs`
 
-**Purpose:** Analyzes any codebase and its documentation to identify drift and generate actionable sync reports. Enhanced with Serena for semantic code discovery — an optional `--semantic` flag adds AI-powered undocumented-code discovery on top of the mechanical diff.
+**Purpose:** Compare code with its documentation to find drift and report work to correct it.
+The optional `--semantic` setting uses Serena to find undocumented code. The mechanical diff also runs.
 
-**When it triggers:** "sync docs", "check documentation", "documentation drift", "doc audit", explicit `/sync-docs`.
+**When to use it:** "sync docs", "check documentation", "documentation drift", "doc audit", or `/sync-docs`.
 
-**Invocation modes:** `/sync-docs` (full drift report), `/sync-docs --check` (drift report only, no suggestions), `/sync-docs --suggest-updates` (includes proposed markdown for updates), `/sync-docs --semantic` (Serena-powered deep code discovery), `/sync-docs --compare <section>` (deep-dive analysis of a specific section), `/sync-docs --verbose` (includes detailed file references), `/sync-docs --diagrams-only` (audits only `docs/diagrams/`).
+**Invocation modes:**
+
+- `/sync-docs` gives a full drift report.
+- `/sync-docs --check` gives a report without suggestions.
+- `/sync-docs --suggest-updates` gives proposed Markdown updates.
+- `/sync-docs --semantic` uses Serena to find related code.
+- `/sync-docs --compare <section>` analyzes one section in depth.
+- `/sync-docs --verbose` gives file refs.
+- `/sync-docs --diagrams-only` audits only `docs/diagrams/`.
 
 ---
 
 #### `memory-consolidation`
 
-**Purpose:** Health-checks and consolidates a project's persistent memory directory (`~/.claude/projects/<slug>/memory/`) — dedupes overlapping memories, flags stale or contradicted ones (without silently deleting `feedback`-type memories), and refreshes the `MEMORY.md` index.
+**Purpose:** Check a project's memory directory at `~/.claude/projects/<slug>/memory/`.
+Remove duplicates, mark stale or contradictory entries, and update `MEMORY.md`.
+Do not silently remove `feedback` memories.
 
-**When it triggers:** "consolidate memory", "clean up memory", "memory consolidation", or when running as a scheduled routine (weekly, via the `routines` section of `~/.claude/coderails-dashboard.json`). Also runs standalone on demand.
+**When to use it:** "consolidate memory", "clean up memory", or "memory consolidation".
+Run on demand or weekly through `routines` in `~/.claude/coderails-dashboard.json`.
 
-**Dependencies:** Writes a durable report artifact to `~/.claude/coderails-dashboard/routines/memory-consolidation/report-{date}.md`, unconditionally — the property a scheduled routine's artifact-gate checks.
+**Dependencies:** Always write the report to `~/.claude/coderails-dashboard/routines/memory-consolidation/report-{date}.md`.
+The scheduled artifact gate checks it.
 
 ---
 
 #### `docs-sync`
 
-**Purpose:** Scheduled nightly pipeline (not for interactive use) that audits this repo's git-tracked documentation for drift against the actual codebase and — only if drift is found — edits, pushes, reviews and self-merges the fix with no human in the loop. Invokes `sync-docs`'s audit as its first step; distinct from that skill, which does the audit alone and is the right entry point for an interactive drift check.
+**Purpose:** The scheduled procedure checks Git-tracked docs against code. If it finds drift, it edits, pushes, checks, and merges the fix without human interaction.
+It uses the `sync-docs` audit first. Use `sync-docs` for an interactive audit.
 
-**When it triggers:** Only as the scheduled `sync-docs-nightly` routine (see `docs/routines.md`). It replaced `sync-docs-weekly`, which was read-only (report-only) and had been dead since 2026-07-15 — its `foreignSkillPath` pointed at a path that never existed. An in-repo skill needs no `foreignSkillPath`, so there is no path left to rot.
+**When to use it:** Only `sync-docs-nightly`. See `docs/routines.md`.
+The previous read-only `sync-docs-weekly` did not run after 2026-07-15 because `foreignSkillPath` named a missing path.
+The in-repo skill does not use that setting.
 
-**No-drift short-circuit:** if the audit finds nothing to fix, the routine appends a `no-drift` line to its run log, then appends a `run=ok` terminal marker, and exits 0 — no branch, no PR. That run log is the routine's `expectedArtifact`, gated by a `last-marker` predicate: the `run=ok` marker is what passes it, so a quiet night still satisfies the gate rather than reading as dead. There is no separate report file on a no-drift night. Most nights take this path.
+**No drift.** If the audit finds no drift, append `no-drift` and then terminal `run=ok`. Exit 0 without a branch or PR.
+The run log is the `expectedArtifact`.
+Its `last-marker` predicate accepts `run=ok`. A night with no drift passes without a different report file.
 
-**Delivery (only when drift is found):** full gate chain, manifest-locked — `task-evals` (pr scope) frozen before the edit, `/coderails:push`, `/pr-review-toolkit:review-pr`, `/coderails:post-review`, `/coderails:post-evals`, `/coderails:merge`. The manifest assertion reads `git diff origin/main...HEAD --name-status` (never `--name-only`, which prints a rename as its destination alone and cannot distinguish a deletion from an edit) and aborts with cleanup unless every path is a git-tracked `.md`, no path is on the self-governance deny-list, no rename's source was out of scope, and no in-scope doc is deleted.
+Most nights use this path.
 
-**Self-governance deny-list:** `skills/**/SKILL.md` (including its own), `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`, anything under `.claude/`, `examples/dashboard-config.json`. These are the documents that define what the routine may do; drift against them is reported and escalated to a human, never fixed by the routine. The deny-list is what makes that enforceable rather than merely stated: the first four are themselves `.md`, so the manifest's `.md`-only rule would happily pass them — naming them explicitly is the only thing that stops the routine editing its own contract. The last two are already caught by the non-`.md` rule and are listed anyway, so the deny-list reads as complete on its own rather than depending on a rule stated elsewhere.
+**Publication.** If the audit finds drift, freeze `task-evals` for `pr` before edits.
+Use `/coderails:push`, `/pr-review-toolkit:review-pr`, `/coderails:post-review`, `/coderails:post-evals`, and `/coderails:merge`.
+Check `git diff origin/main...HEAD --name-status`. Do not use `--name-only`, which shows only the destination of a rename and cannot distinguish a deletion.
 
-**Dependencies:** the second routine in this repo to use a `bypass` button profile — `PreToolUse` hooks do not fire under `claude -p`, so `scripts/merge.py`'s own artifact gates are the merge rail. Honest boundary: the deny-list and every manifest condition are prompt-enforced, not hook-enforced; they narrow the blast radius (capped at `.md`) rather than mechanically closing it. See `docs/routines.md` for the full contract and security note.
+Abort and clean up unless the changed paths are Git index entries for Markdown files.
+Abort and clean up for denylist matches, renames from paths external to scope, and deletions of docs in scope.
+
+**Denylist.** The list has `skills/**/SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`, all paths in `.claude/`, and `examples/dashboard-config.json`.
+It includes this skill's own instructions. Report their drift to the human. Do not edit them in the scheduled procedure.
+
+The first four entries are `.md`, so the manifest needs explicit denylist entries to prevent edits to them.
+The rule for non-`.md` paths also blocks the last two. They stay in the list so it is complete on its own.
+
+**Dependencies:** This was the repo's second scheduled procedure with the button set to `bypass`.
+In `claude -p`, `PreToolUse` hooks do not run. The merge uses the artifact gates in `scripts/merge.py`.
+
+The prompt supplies the denylist and manifest checks. The hooks do not check those conditions.
+The `.md` rule limits scope for a cooperating agent. See the procedure and its limits in `docs/routines.md`.
 
 ---
 
 #### `loop-retro-promotion`
 
-**Purpose:** Predicate-dormant pipeline (scheduled, not for interactive use) that mines accumulated `retro.json` files and the `standing-orders.md` overlay for repo-agnostic lessons and promotes them into `skills/agentic-loop/learned-failure-modes.md`.
+**Purpose:** The scheduled procedure reads accumulated `retro.json` files and `standing-orders.md`.
+It promotes lessons that apply across repositories into `skills/agentic-loop/learned-failure-modes.md`.
 
-**When it triggers:** Only as the scheduled `loop-retro-promotion-weekly` routine (see `docs/routines.md`) — never for a single loop's retro and never from inside an active agentic-loop session.
+**When to use it:** Only `loop-retro-promotion-weekly`. See `docs/routines.md`.
+Do not use it for one retro or in an active agentic-loop session.
 
-**Graduation predicate (evaluated on every run, dormant until met):** at least 10 `retro.json` files under the repo-key dir; at least one order in the typed ledger `orders.json` whose `last_recurred` differs from its `created` date (one full lifecycle); at least one order with `status: decayed` (one clean decay), all computed by `scripts/lib/lessons.py predicate`. Every run — met or unmet — appends a line to `promotion-runs.log`; an unmet predicate then appends a `run=ok` terminal marker and stops, with no branch, no PR, no gate chain. The routine's artifact gate is a `last-marker` predicate keyed on that log's final terminal marker (`run=ok` passes; `abort=` or a stranded `delivery=started` fails).
+**Graduation.** The `scripts/lib/lessons.py predicate` check runs each time. It checks for 10 or more `retro.json` files in the repo-key directory.
+In `orders.json`, one entry must have different `last_recurred` and `created` dates. One must have `status: decayed`.
 
-**Delivery (once graduated):** full gate chain, manifest-locked to exactly `skills/agentic-loop/learned-failure-modes.md` — `task-evals` (pr scope) frozen before the edit, `/coderails:push`, `/pr-review-toolkit:review-pr`, `/coderails:post-review`, `/coderails:post-evals`, `/coderails:merge`. Any other file in the diff aborts with cleanup (closes the PR, deletes the branch, logs the abort).
+Each run appends a line to `promotion-runs.log`. If the condition does not hold, append terminal `run=ok` and stop without a branch, PR, or gate chain.
+The artifact gate uses `last-marker`. It accepts `run=ok` and refuses `abort=` or an unfinished `delivery=started`.
 
-**Dependencies:** Its routine, `loop-retro-promotion-weekly`, is the first routine in this repo to use a non-read-only button profile (`bypass`) — `PreToolUse` hooks do not fire under that execution mode, so `scripts/merge.py`'s own artifact gates are the only merge rail once the predicate graduates. See `docs/routines.md` for the full routine contract and security note.
+**Publication.** After graduation, freeze `task-evals` for `pr` before edits.
+Use `/coderails:push`, `/pr-review-toolkit:review-pr`, `/coderails:post-review`, `/coderails:post-evals`, and `/coderails:merge`.
+The manifest accepts only `skills/agentic-loop/learned-failure-modes.md`. If a different file changes, abort, close the PR, remove the branch, and log the abort.
+
+**Dependencies:** This was the first scheduled procedure with a button set to `bypass` for writes.
+The `PreToolUse` hooks do not run in that mode. The `scripts/merge.py` artifact gates apply after graduation.
+See the procedure and its limits in `docs/routines.md`.
 
 ---
 
 #### `using-coderails`
 
-**Purpose:** Establishes how to find and use skills at session start. Requires skill invocation before ANY response including clarifying questions.
+**Purpose:** Find and use skills at session start. Invoke an applicable skill before a response or question.
 
-**When it triggers:** When starting any conversation. Also injected automatically at every session start by the `inject_bootstrap.py` `SessionStart` hook — Claude receives the full SKILL.md content as context so it can self-bootstrap without being told.
+**When to use it:** At the start of a conversation.
+The `inject_bootstrap.py` `SessionStart` hook adds the full SKILL.md text so Claude can start with those instructions.
 
 ---
 
 ### Required plugin dependency: superpowers
 
-These are general development-discipline skills (not coderails-specific
-workflow). coderails no longer bundles them — they are provided by the
-required `superpowers@claude-plugins-official` plugin (see
-[Requirements](../README.md#requirements)/[INSTALLATION.md](../INSTALLATION.md)).
-Without that plugin installed, the skill names below resolve to nothing.
+Install `superpowers@claude-plugins-official` for these general development skills. See [Requirements](../README.md#requirements) and [installation instructions](../INSTALLATION.md).
+Without that plugin, the skill names below do not resolve.
 
 | Skill | Purpose |
 |---|---|
-| `superpowers:brainstorming` | Explores user intent, requirements, and design before implementation. Required before any creative work |
-| `superpowers:writing-plans` | Turns a resolved spec into an ordered set of self-contained implementation tasks, each with exact files, interfaces, bite-sized steps, and verify-criteria |
-| `superpowers:subagent-driven-development` | Executes implementation plans with independent tasks in the current session using sub-agents |
-| `superpowers:dispatching-parallel-agents` | Dispatches 2+ independent tasks to parallel agents to avoid sequential bottlenecks |
-| `superpowers:executing-plans` | Executes a written implementation plan in a separate session with review checkpoints |
-| `superpowers:using-git-worktrees` | Ensures an isolated workspace exists via native tools or git worktree fallback before feature work |
-| `superpowers:requesting-code-review` | Guides the code review request process to ensure work is complete and requirements are met |
-| `superpowers:receiving-code-review` | Ensures code review feedback is handled with technical rigor and verification, not performative agreement or blind implementation |
-| `superpowers:finishing-a-development-branch` | Presents structured options (merge, PR, cleanup) for integrating completed work when implementation is done and all tests pass |
-| `superpowers:systematic-debugging` | Structured debugging approach before proposing fixes for bugs, test failures, or unexpected behaviour |
-| `superpowers:test-driven-development` | Red-green-refactor discipline: write the failing test first, watch it fail for the right reason, write minimal code to pass, refactor |
-| `superpowers:verification-before-completion` | Runs verification commands and confirms output before making any success claims. Evidence before assertions |
-| `superpowers:writing-skills` | Guidance for creating new skills, editing existing skills, or verifying skills work before deployment |
+| `superpowers:brainstorming` | Examine user intent, requirements, and design before creative work or implementation. |
+| `superpowers:writing-plans` | Put implementation tasks in sequence. For each task, specify files, interfaces, small steps, and checks. |
+| `superpowers:subagent-driven-development` | Use subagents in the current session for tasks in a plan that have no dependencies on each other. |
+| `superpowers:dispatching-parallel-agents` | Send two or more tasks without dependencies to agents that can work in parallel. |
+| `superpowers:executing-plans` | Use an isolated session to do the plan, with inspection checkpoints. |
+| `superpowers:using-git-worktrees` | Set up an isolated workspace before feature work. Use native tools or a Git worktree. |
+| `superpowers:requesting-code-review` | Get a code inspection and check the work against its requirements. |
+| `superpowers:receiving-code-review` | Check the technical basis for each result before you apply it. |
+| `superpowers:finishing-a-development-branch` | Select merge, PR, or cleanup after implementation and tests are complete. |
+| `superpowers:systematic-debugging` | Examine the cause of a bug, a test error, or unexpected behavior before a repair. |
+| `superpowers:test-driven-development` | Write the test first. Check that it gives the expected error. Write the minimum code for success, then refactor. |
+| `superpowers:verification-before-completion` | Run checks and show their output before you claim success. |
+| `superpowers:writing-skills` | Write, edit, and check skills before deployment. |
 
-After the self-review gate, a `superpowers:writing-plans` plan goes through
-`/coderails:planning-sequence` (Pre-Parade → Premortem → Red Team) before
-implementation hands off to `superpowers:subagent-driven-development`/
-`superpowers:executing-plans`. Plan storage: `docs/coderails/plans/` is
-gitignored — plans are session-local working documents, never tracked in the
-repo (owner decision, 2026-07-11). The agentic loop's `plan.md` is a special
-case — it lives in the loop-state dir outside the repo alongside
-`progress.json`, same treatment.
+After the self-review gate, run `/coderails:planning-sequence` on the `superpowers:writing-plans` plan.
+Do Pre-Parade, Premortem, and Red Team before `superpowers:subagent-driven-development` or `superpowers:executing-plans`.
+Git ignores session plans in `docs/coderails/plans/` by the owner's 2026-07-11 decision.
+An agentic loop keeps `plan.md` with `progress.json` in its external loop directory.
 
 ---
 
 ### Wiki skills
 
-These skills manage the LLM Wiki — a persistent, compounding knowledge base maintained by Claude and browsable in Obsidian.
+Claude maintains the LLM Wiki across sessions. Read it in Obsidian.
 
 #### `wiki-init`
 
 **Purpose:** Initialize an LLM Wiki for the current project.
 
-**When it triggers:** "wiki init", "create wiki", "knowledge base", "set up obsidian wiki", explicit `/wiki-init`. Also when the user mentions Karpathy's LLM Wiki pattern, AGENTS.md, or wants to organise project knowledge beyond CLAUDE.md.
+**When to use it:** "wiki init", "create wiki", "knowledge base", "set up obsidian wiki", explicit `/wiki-init`. Also use it when the user mentions Karpathy's LLM Wiki pattern or `AGENTS.md`, or wants a knowledge base external to `CLAUDE.md`.
 
-**When it does NOT apply:** When a wiki already exists and the user wants to query or update it.
+**When it does NOT apply:** Use the applicable skill when the user wants to query or update an existing wiki.
 
 ---
 
 #### `wiki-ingest`
 
-**Purpose:** Create or update wiki pages to document a merged PR, shipped feature, or engineering decision.
+**Purpose:** Write or update wiki pages to document a merged PR, shipped feature, or engineering decision.
 
-**When it triggers:** "ingest this", "create wiki pages for this PR", "add to wiki", "document this in the wiki", "capture this change", "file this in the wiki". The user always has a concrete artifact to record.
+**When to use it:** "ingest this", "create wiki pages for this PR", "add to wiki", "document this in the wiki", "capture this change", "file this in the wiki". The user always has a concrete artifact to record.
 
-**When it does NOT apply:** General knowledge lookup — use `wiki-query` for that.
+**When it does NOT apply:** Use `wiki-query` to look up information.
 
 ---
 
 #### `wiki-lint`
 
-**Purpose:** Audit the quality and structural integrity of the project's LLM Wiki — find contradictions, stale pages, orphaned pages, dead links, missing cross-references, coverage gaps.
+**Purpose:** Check the quality and structure of the project's LLM Wiki. Find contradictions, stale or orphaned pages, dead links, missing cross-references, and topics with missing pages.
 
-**When it triggers:** "wiki-lint", "lint the wiki", "wiki health check", find contradictions or stale content, detect orphaned pages.
+**When to use it:** "wiki-lint", "lint the wiki", "wiki health check", find contradictions or stale content, find orphaned pages.
 
-**When it does NOT apply:** When the user wants to look up what the wiki says about a topic — use `wiki-query`.
+**When it does NOT apply:** Use `wiki-query` to look up a topic.
 
 ---
 
 #### `wiki-query`
 
-**Purpose:** Search, query, or look up information in the project's LLM Wiki. Can also generate Marp slides or matplotlib charts drawing on wiki knowledge.
+**Purpose:** Search, query, or look up information in the project's LLM Wiki. It can also make Marp slides or matplotlib charts from wiki material.
 
-**When it triggers:** "search wiki", "query wiki", "ask the wiki", "what does the wiki say", requests to find project-specific answers grounded in wiki content.
+**When to use it:** "search wiki", "query wiki", "ask the wiki", "what does the wiki say", or a user who wants a project answer with wiki sources.
 
-**When it does NOT apply:** General coding questions unrelated to wiki content, wiki maintenance tasks (adding, filing, ingesting, linting), wiki initialisation.
+**When it does NOT apply:** General coding questions unrelated to wiki content, wiki maintenance (page changes, ingest, or lint), wiki initialisation.
 
 ---
 
 ### Engineering principles skills
 
-These skills enforce engineering principles and language-specific coding standards on code being written or modified.
+These skills apply engineering principles and language standards to code changes.
 
 #### `engineering-principles`
 
-**Purpose:** Enforce engineering principles (YAGNI, KISS, DRY, Fail Fast, SSOT, Law of Demeter) and language-specific coding standards across Python, Go, TypeScript, and Bash. Uses LSP (Serena) for call site analysis and reference counting. Dispatches to the appropriate language sub-skill after detecting the file extension (or, for extensionless files, the shebang line).
+**Purpose:** Apply engineering principles (YAGNI, KISS, DRY, Fail Fast, SSOT, Law of Demeter) and language-specific coding standards across Python, Go, TypeScript, and Bash. Use LSP (Serena) to examine call sites and count uses. Select the language skill from the extension or, for a file without one, the shebang.
 
-**When it triggers:** Proactively after writing or modifying any code file, or explicitly via `/engineering-principles`. Trigger phrases: "enforce standards", "check principles", "apply standards", "code quality".
+**When to use it:** Use after a code change or when the user invokes `/engineering-principles`. Example phrases are "enforce standards", "check principles", "apply standards", "code quality".
 
 **When it does NOT apply:** Docs, config, or prose edits with no code to audit.
 
@@ -350,32 +365,34 @@ These skills enforce engineering principles and language-specific coding standar
 
 #### `engineering-principles-python`
 
-**Purpose:** Enforce Python idioms and standards on `.py` files — PEP 8 naming, type hints, EAFP over LBYL, context managers, and Pyright strict compliance.
+**Purpose:** Apply Python standards to `.py` files. Use PEP 8 names, type hints, EAFP in preference to LBYL, context managers, and Pyright strict checks.
 
-**When it triggers:** Invoked by `engineering-principles` after detecting `.py` files, or directly for Python-only sessions.
+**When to use it:** Invoked by `engineering-principles` after detecting `.py` files, or directly for Python-only sessions.
 
 ---
 
 #### `engineering-principles-go`
 
-**Purpose:** Enforce Go idioms and standards on `.go` files — accept interfaces/return structs, errors-as-values, table-driven tests, and idiomatic naming.
+**Purpose:** Apply Go idioms and standards on `.go` files — accept interfaces, give callers structs, errors-as-values, table-driven tests, and idiomatic naming.
 
-**When it triggers:** Invoked by `engineering-principles` after detecting `.go` files, or directly for Go-only sessions.
+**When to use it:** Invoked by `engineering-principles` after detecting `.go` files, or directly for Go-only sessions.
 
 ---
 
 #### `engineering-principles-ts`
 
-**Purpose:** Enforce TypeScript idioms and standards on `.ts`/`.tsx` files — strict mode, no `any`, discriminated unions, optional chaining, and exhaustive switch checks.
+**Purpose:** Apply TypeScript standards to `.ts` and `.tsx` files. Use strict mode, discriminated unions, optional chaining, and checks for all switch branches. Do not use `any`.
 
-**When it triggers:** Invoked by `engineering-principles` after detecting `.ts`/`.tsx` files, or directly for TypeScript-only sessions.
+**When to use it:** Invoked by `engineering-principles` after detecting `.ts`/`.tsx` files, or directly for TypeScript-only sessions.
 
 ---
 
 #### `engineering-principles-bash`
 
-**Purpose:** Enforce Bash/shell idioms and standards on `.sh` files — the `set -euo pipefail` safety header and its documented exceptions (sourced libraries, degrade-gracefully hooks), quoting discipline, `[[ ]]` over `[ ]`, avoiding `eval`/word-splitting/unquoted globs, `local`-scoping and the command-substitution-subshell footgun, `namespace::function` decomposition, and shellcheck-clean patterns.
+**Purpose:** Apply Bash standards to `.sh` files. Use the `set -euo pipefail` header unless the file is a sourced library or a hook that must degrade safely.
+Put shell expansions in quotation marks and use `[[ ]]` in preference to `[ ]`. Do not use `eval`, word splitting, or unquoted globs.
+Use `local` for function scope and check for subshell effects in command substitutions. Use `namespace::function` names to organize functions and run ShellCheck.
 
-**When it triggers:** Invoked by `engineering-principles` after detecting `.sh` files (or an extensionless file with a `bash`/`sh` shebang), or directly for shell-only sessions.
+**When to use it:** `engineering-principles` invokes it for `.sh` files and files without extensions that have a `bash` or `sh` shebang. Invoke it directly for shell-only sessions.
 
 ---
