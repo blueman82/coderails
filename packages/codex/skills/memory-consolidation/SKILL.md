@@ -5,26 +5,24 @@ description: Use on demand to consolidate a project's memory directory — dedup
 
 # Memory Consolidation
 
-On request, check and consolidate the project's persistent memory directory:
-`~/.codex/projects/<slug>/memory/`. The memory system in
-`~/.codex/AGENTS.md` writes there during normal sessions.
+When the user tells you to consolidate memory, check the project's memory directory `~/.codex/projects/<slug>/memory/`.
+The memory system in `~/.codex/AGENTS.md` writes there during usual sessions.
 
 ## When to Use
 
 - Run on demand when memory files have visibly accumulated overlapping or
   contradictory content.
-- A user-owned external scheduler may invoke this same routine in the future,
+- A user-owned external scheduler may invoke the same procedure in the future,
   but the native Codex plugin includes and configures no scheduler.
 
 ## Instructions
 
 ### Step 1: Locate the memory directory
 
-The target is `~/.codex/projects/<project-slug>/memory/`. Derive it with
-`scripts/memory_dir.py --provider codex`, resolved relative to this `SKILL.md`
-(`../../scripts/memory_dir.py`); `<project-slug>` is the sanitized form of the project's working directory
-path (matching the directory this skill itself is invoked from). Read
-`MEMORY.md` in that directory first — it is the index of every memory file.
+The target is `~/.codex/projects/<project-slug>/memory/`. Get it with `scripts/memory_dir.py --provider codex`.
+Find the script at `../../scripts/memory_dir.py` relative to this `SKILL.md`.
+The script gets `<project-slug>` from the sanitized project working directory path where you invoke this skill.
+First read `MEMORY.md` in that directory. It is the index of memory files.
 
 ### Step 2: Read every memory file
 
@@ -33,87 +31,70 @@ Read each file the index points to. Each memory has YAML frontmatter
 
 ### Step 3: Find consolidation candidates
 
-- **Overlapping memories:** Two or more files describe the same fact,
-  decision, or project state. Merge them into the most recent or complete
-  file. Delete the superseded files.
-- **Stale memories:** A newer memory contradicts a `project` or `feedback`
-  record, or another record marks its work complete. Flag it for the user.
-  Do not delete it silently. A `feedback` record can contain a standing
-  instruction.
-- **Contradicted memories:** Two records assert incompatible facts. Flag
-  both. Do not silently choose a winner.
+- **Overlapping memories:** Two or more files describe the same fact, decision, or project status.
+  Merge them into the most recent or complete file. Remove the superseded files.
+
+- **Stale memories:** A newer memory contradicts a `project` or `feedback` record, or a different record marks its work complete.
+  Flag it for the user. Do not remove it silently. A `feedback` record can contain a standing instruction.
+
+- **Contradicted memories:** Two records give facts that cannot all be correct. Flag the two records.
+  Do not silently select one.
 
 ### Step 4: Apply merges, update MEMORY.md
 
-For each merge or deletion decided in Step 3: update or remove the
-affected memory file(s), then update `MEMORY.md`'s index line(s) to match.
-Never leave `MEMORY.md` pointing at a file that no longer exists. When a
-merge changes what a surviving file covers, update that file's frontmatter
-`description:` FIRST so it still matches the file's content, then derive
-the index line from the updated description — never from a `description:`
-left stale by the merge itself.
+For each merge or removal from Step 3, update or remove the corresponding files. Then update their index lines in `MEMORY.md`.
+Remove links to files that no longer exist.
+If a merge changes a file's scope, first make its frontmatter `description:` accurate for the current content.
+Then use the updated description for the index line. Do not use a description that the merge made stale.
 
-**This next rule applies any time you edit `MEMORY.md` — including a run
-where Step 3 found nothing to merge, and any pass whose sole purpose is
-answering a size-pressure nudge.** Never shorten an index line by cutting
-it. A size-pressure nudge (a hook warning the index is approaching a
-read-limit) may fire while you work — it is a prompt to compress, never
-an instruction to truncate. Byte-truncating a line mid-clause silently
-destroys information with no record of what was lost, and nothing else in
-this system holds a second copy of it once that happens.
+**Apply this rule each time you edit `MEMORY.md`.** It also applies if Step 3 found nothing to merge or a hook warns that the index is near its read limit.
+Condense index lines. Do not cut them at a byte limit.
+A cut can remove part of a clause without a record of the removed text. This system has no other copy of that line.
 
-The file's own frontmatter `description:` field is the durable source of
-truth for its one-line summary — it is written once, at memory-creation
-time (or updated deliberately on merge, per above), and normal sessions do
-not touch it again. When shortening an index line, derive it from
-`description:`, not from the previous index line: condense the
-description's wording, but never drop the concrete fact it states — the
-incident, the concrete consequence, the specific next action. That fact
-must stay on the index line itself; if there is genuinely more supporting
-detail beyond that one fact, move the extra detail into the memory file's
-own body, but never the load-bearing fact itself.
+The file's frontmatter `description:` is the authoritative source for its one-line summary.
+Write the description when you make the memory file. Update it only as part of a deliberate merge as above.
+Use `description:` to condense an index line. Do not use the previous index line.
 
-Before finishing this step, re-check every index line you touched: does
-it end on a complete clause (not a bare article, preposition, or
-conjunction), and does it still carry the specific fact — a name, a PR
-number, a concrete failure mode — that made the original entry worth
-recording? A line that reads as a complete sentence but lost its
-concrete details has been damaged just as much as one cut mid-word.
-When a run finds existing index lines already damaged this way (cut
-mid-clause, or a complete sentence stripped of its concrete fact), that
-counts as a consolidation candidate too — rebuild it from the file's
-`description:` in this same step, even if Step 3 didn't separately flag
-it.
+Keep the concrete fact in the index line, such as the incident, its effect, and the next step.
+If the description has more related information, move that information to the memory file's body.
+Keep the concrete fact on the index line itself.
 
-Worked example — given a file whose `description:` reads "a failed git
-checkout leaves a plausible-looking tree at the OLD commit; nearly
-reported a merged, working fix as broken because foreign WIP blocked the
-checkout and my test ran against pre-merge code", a correct shortened
-index line keeps the load-bearing fact (failed checkout → stale tree →
-false-broken report) while trimming connective wording: "a failed `git
-checkout` leaves a plausible-looking tree at the OLD commit; nearly
-reported a merged fix as broken". An incorrect shortening — the failure
-mode this rule exists to prevent — stops mid-clause: "a failed `git
-checkout` leaves a".
+Check each changed line before you finish. Make sure it ends with a complete clause.
+The last word must not be a word such as "the", "of", or "and".
+Make sure it includes the fact that made the initial entry useful, such as a name, PR number, or cause of an error.
+
+An index line with a complete sentence and no concrete fact has the same problem as a line cut in the middle.
+Write such lines again from the file's `description:` in this step. Do this if you find a damaged line that Step 3 did not flag.
+
+Worked example. The file's `description:` reads:
+
+"a failed git checkout leaves a plausible-looking tree at the OLD commit; nearly reported a merged, working fix as broken because foreign WIP blocked the checkout and my test ran against pre-merge code"
+
+A concise index line keeps the connection between the checkout error, the stale tree, and the incorrect report:
+
+"a failed `git checkout` leaves a plausible-looking tree at the OLD commit; nearly reported a merged fix as broken".
+
+An incorrect index line stops in the middle of the clause:
+
+"a failed `git checkout` leaves a".
 
 ### Step 5: Write the durable report artifact
 
-Write `~/.codex/coderails-dashboard/routines/memory-consolidation/report-{date}.md`
-(where `{date}` is `YYYY-MM-DD`), unconditionally, even if Step 3 found
-nothing to change — this file's existence is what an external caller can
-check. Its content:
+Write `~/.codex/coderails-dashboard/routines/memory-consolidation/report-{date}.md` with `{date}` in `YYYY-MM-DD` format.
+Write the file if Step 3 found nothing to change, too. An external caller can check for that file.
+Use this content:
 
 ```markdown
 # Memory Consolidation Report — {date}
 
 ## Summary
-<N> files reviewed. <N> merged. <N> flagged as stale/contradicted. <N> deleted.
+<N> files examined. <N> merged. <N> flagged as stale/contradicted. <N> removed.
 
 ## Merges
-- <old file(s)> → <surviving file>: <one-line reason>
+- <superseded files> → <surviving file>: <one-line cause>
 
 ## Flagged (not auto-resolved)
-- <file>: <what's stale or contradicted, and why it wasn't auto-resolved>
+- <file>: <what's stale or contradicted, and why it was not auto-resolved>
 
 ## MEMORY.md index
 Updated: yes|no

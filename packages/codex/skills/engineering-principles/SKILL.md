@@ -7,13 +7,14 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 # Engineering Principles & Language Standards
 
 **Version:** 4.0.0
-**Purpose:** Proactively enforce engineering principles and language-specific idioms. Uses LSP (Serena) for structural verification and reference counting. **Dispatches to language-specific skills for idiom enforcement.**
+**Purpose:** Apply engineering principles and language-specific idioms.
+Use Serena LSP to check structure and count uses of symbols. Invoke the applicable language skill for idioms.
 
 ## When to Activate
 
 **Proactively** (without user asking):
-- After writing or modifying code in any file
-- When reviewing code changes before commit
+- After you write or change code
+- When you examine code changes before commit
 - When implementing features or fixing bugs
 
 **Explicitly** (user invokes `/engineering-principles`):
@@ -23,14 +24,14 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 
 ## PHASE 0: Language Detection & Dispatch (MANDATORY)
 
-**Before any analysis, detect the language and invoke the appropriate sub-skill:**
+**Identify the language before analysis. Invoke the applicable sub-skill:**
 
 | File Extension | Invoke Skill |
 |----------------|--------------|
-| `.go` | Execute `engineering-principles-go` skill |
-| `.py` | Execute `engineering-principles-python` skill |
-| `.ts`, `.tsx` | Execute `engineering-principles-ts` skill |
-| `.sh` (or no extension with a `bash`/`sh` shebang, e.g. `#!/usr/bin/env bash`) | Execute `engineering-principles-bash` skill |
+| `.go` | Run `engineering-principles-go` skill |
+| `.py` | Run `engineering-principles-python` skill |
+| `.ts`, `.tsx` | Run `engineering-principles-ts` skill |
+| `.sh` (or no extension with a `bash`/`sh` shebang, e.g. `#!/usr/bin/env bash`) | Run `engineering-principles-bash` skill |
 
 **The language-specific skill provides idioms, patterns, and examples. This coordinator provides universal principles and MCP analysis.**
 
@@ -41,7 +42,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__mcp-exec__*
 Before analysis, activate Serena for the current project.
 
 ```javascript
-// Execute via mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
+// Use mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
 
 // Test connectivity
 const serenaConfig = await serena.get_current_config();
@@ -55,18 +56,18 @@ if (hasSerena) {
 }
 ```
 
-**Graceful degradation:** If Serena is unavailable, fall back to file-level static analysis using Read/Grep/Glob. Serena enhances but is not required.
+**Fallback:** If Serena is unavailable, use Read/Grep/Glob for file-level static analysis.
 
 ---
 
 ## Phase 2: Structural Analysis via Serena (LSP)
 
-Use Serena to get precise structural data for principle enforcement.
+Use Serena to get accurate structural data for the principle checks.
 
 ### 2.1 Symbol Overview
 
 ```javascript
-// Execute via mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
+// Use mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
 
 const symbols = await serena.get_symbols_overview({ relative_path: "TARGET_FILE" });
 
@@ -100,7 +101,7 @@ async function checkDemeter(symbolName) {
   const detail = await serena.find_symbol({ name: symbolName, depth: 3 });
   const body = detail.body || '';
 
-  // Detect a.b.c.d chains (3+ dots)
+  // Find a.b.c.d chains (3+ dots)
   const chainPattern = /\w+(?:\.\w+){3,}/g;
   const chains = body.match(chainPattern) || [];
 
@@ -127,24 +128,24 @@ async function checkKISS(className) {
 
 ### 2.5 Return Value Contract Verification
 
-For functions returning status dicts/enums/tagged unions, verify all callers handle all possible return values:
+If a function gives status dicts, enums, or tagged unions, check how all callers handle the possible results:
 
 ```javascript
-// Execute via mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
+// Use mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
 
 async function checkReturnContracts(functionName) {
-  // 1. Read the function body to find all return paths
+  // 1. Read the function body to find all result paths
   const detail = await serena.find_symbol({ name: functionName, depth: 2 });
   const body = detail.body || '';
 
-  // 2. Extract distinct return values (status strings, enum variants, error types)
+  // 2. Get all different result values (status strings, enum variants, error types)
   const returnStatuses = body.match(/return\s+\{[^}]*"status":\s*"(\w+)"/g) || [];
   const statusValues = [...new Set(returnStatuses.map(r => r.match(/"(\w+)"$/)?.[1]).filter(Boolean))];
 
   // 3. Find all callers
   const callers = await serena.find_referencing_symbols({ name_path: functionName });
 
-  // 4. For each caller, check which return values they handle
+  // 4. Check the results each caller handles
   for (const caller of callers) {
     const callerBody = (await serena.find_symbol({ name: caller.name, depth: 1 })).body || '';
     const handledStatuses = statusValues.filter(s => callerBody.includes(`"${s}"`));
@@ -157,58 +158,58 @@ async function checkReturnContracts(functionName) {
 }
 ```
 
-**Contract rule:** If a function returns N distinct status values but a caller only checks M < N, flag as "silent failure path" (HIGH severity). Prefer allowlist checks (`status not in (good_values)`) over blocklist checks (`status == "error"`) — fail-closed by default.
+**Contract rule:** If a function gives N different status values and a caller checks only M < N, flag "silent failure path" (HIGH severity).
+Prefer allowlist checks (`status not in (good_values)`) to blocklist checks (`status == "error"`) so an unknown status blocks work.
 
 ---
 
 ## Core Principles (Universal)
 
-Every code change MUST be checked against these six principles:
+Each code change MUST be checked against these six principles:
 
 | # | Principle | What to Look For | Best Tool |
 |---|-----------|-------------------|-----------|
-| 1 | **YAGNI** | Unused code, speculative features, dead branches | Serena `find_referencing_symbols` (LSP-precise); else Grep for call sites |
+| 1 | **YAGNI** | Unneeded code, speculative features, dead branches | Serena `find_referencing_symbols` for LSP data. If unavailable, use Grep for call sites. |
 | 2 | **KISS** | Over-engineered abstractions, trivial classes | Serena `find_symbol` depth → single-method classes |
-| 3 | **DRY** | Duplicated logic across files | Grep/Glob for repeated signatures or body fragments across files |
-| 4 | **Fail Fast** | Late validation, deep nesting before error checks | Serena `find_symbol` body → nesting depth |
-| 5 | **SSOT** | Duplicated state/config | Grep for the same config key/value in 2+ files |
+| 3 | **DRY** | Duplicated logic across files | Grep/Glob for matching signatures or body fragments across files |
+| 4 | **`Fail Fast`** | Late validation, deep nesting before error checks | Serena `find_symbol` body → nesting depth |
+| 5 | **SSOT** | Duplicated runtime data or config | Grep for the same config key/value in 2+ files |
 | 6 | **Law of Demeter** | `a.b.c.d` chains | Serena `find_symbol` body → chain regex |
 
-**Tool selection rule:** Serena for in-file structural analysis (LSP-backed, authoritative) when available; plain Grep/Glob for cross-file checks and as the fallback when Serena is absent.
+**Tool selection rule:** If Serena is available, use its authoritative LSP data for analysis in a file.
+Use plain Grep/Glob for checks across files and if Serena is unavailable.
 
 ### Code Reduction Rules
 
 - No helpers for one-time operations
-- No premature abstractions (3 similar lines > a premature abstraction)
-- Delete unused code completely (no `_unused` renames, no `# removed` comments)
-- No backwards-compatibility shims when you can just change the code
+- Keep three lines that do almost the same work if there is no need for an abstraction
+- Remove unneeded code fully (no `_unused` renames, no `# removed` comments)
+- If you can change the code directly, do not add a backwards-compatibility shim
 - No feature flags for unreleased features
 
 ### Comment Discipline
 
-A comment states the constraint the code enforces. It never cites the
-conversation, review, or session artifact that produced it. A comment must
-stand on its own for a reader who has none of the surrounding history.
+A comment gives the constraint that the code checks. Do not cite the conversation, inspection, or session artifact that led to it.
+The comment must make sense to a reader with no session history.
 
-**The dead-link test:** any ID or label in a comment must resolve durably
-within the repo or its host platform. A PR number passes — it's a real,
-checkable GitHub artifact. A session ID, work-unit label, or reviewer
-finding ID fails — it points at a transcript or conversation the reader
-will never have.
+**The dead-link test:** Each ID or label in a comment must resolve to a durable object in the repository or its host platform.
+Use a PR number if it identifies a GitHub artifact that readers can check.
+A session ID, work-unit label, or reviewer result ID points to a transcript or conversation that the reader does not have.
+Do not use those IDs in comments.
 
-Before/after (from a real cleanup sweep):
+Before and after examples from a cleanup sweep:
 
-```
+```diff
 - # ── Change #4: extended permanent blocklist ──────────────────────────
 + # ── Permanent blocklist ───────────────────────────────────────────────
 ```
 
-```
+```diff
 - # F1 fix: also match --force and multi-token "-d -f" patterns.
 + # Also matches --force and multi-token "-d -f" patterns.
 ```
 
-```
+```diff
 - # E1: untrusted login posts a byte-identical valid marker → exit 1 (spoofing
 - # rejected). Permission defaults to WRITE in the stub — the highest-value
 - # regression case in the whole PR: login-match alone must still reject a
@@ -218,14 +219,12 @@ Before/after (from a real cleanup sweep):
 + # a forged marker regardless of the (write-capable) permission field.
 ```
 
-Each rewrite keeps the property being tested or enforced — the "what" and
-the "why" — and drops the framing that only made sense inside the review
-or session that produced it (a change number, a fix label, "the highest-
-value regression case in the whole PR").
+Each rewrite keeps the property the code tests or checks, the "what" and the "why".
+It removes information that only made sense in the inspection or session, such as a change number or correction label.
+The phrase "the highest-value regression case in the whole PR" also makes sense only with the session context.
 
-In coderails-equipped repos, the `comment_citation_gate` PreToolUse hook
-enforces this mechanically on Write/Edit/MultiEdit. The rule itself is
-platform-agnostic — it holds whether or not that hook is installed.
+In Coderails repositories, the `comment_citation_gate` PreToolUse hook checks Write/Edit/MultiEdit for this rule.
+The rule applies with or without that hook installed.
 
 ---
 
@@ -239,23 +238,23 @@ Read the file extension. **Invoke the matching language skill:**
 - `.sh` (or no extension with a `bash`/`sh` shebang) → `engineering-principles-bash`
 
 ### Step 2: Analyze
-- **If Serena available:** Run symbol overview, reference counting, depth analysis (Phase 2)
-- **Cross-file analysis:** Grep/Glob for duplicated signatures (DRY), repeated config keys (SSOT), call sites (YAGNI)
-- **If Serena unavailable:** Fall back entirely to file-level static analysis via Read/Grep/Glob
+- **If Serena is available:** Get a symbol overview, count uses, and check depth (Phase 2)
+- **Cross-file analysis:** Use Grep/Glob for duplicate signatures (DRY), the same config keys (SSOT), and call sites (YAGNI)
+- **If Serena is unavailable:** Use only file-level static analysis through Read/Grep/Glob
 
 ### Step 3: Fix or Flag
 
-**Fix directly** (LSP-confirmed safe):
+**Correct directly** if LSP data shows the change is safe:
 - Naming convention violations
 - Missing type hints
 - Redundant `else` after `return`
 - Verbose patterns with idiomatic replacements
-- Unused imports
+- Unneeded imports
 
 **Flag to user** (need confirmation):
-- Removing functions with 0 references
-- Collapsing single-method class
-- Extracting duplicated code
+- Removing functions with no uses
+- Replacing a single-method class
+- Moving duplicated code into one shared function or module
 - Breaking `a.b.c.d` chains
 
 ### Step 4: Report
@@ -277,13 +276,13 @@ Engineering Principles: <filename>
 
 ## Rules
 
-- Never change external behavior or public APIs
-- Never remove or simplify error handling
-- Always preserve test coverage
-- When in doubt, flag instead of fix
+- Do not change external behavior or public APIs
+- Do not remove or simplify error handling
+- Always keep test coverage
+- If the change is uncertain, report the issue. Do not make the change
 - Apply the minimum change needed
-- Don't add features, comments, or docstrings beyond what's needed
-- Trust LSP data (Serena) over heuristics for in-file analysis when available
+- Add features, comments, or docstrings only if necessary
+- If Serena is available, use its LSP data for in-file analysis. Use heuristics only if that data is unavailable
 - Use Grep/Glob for cross-file checks (DRY/SSOT/YAGNI)
 - **Always invoke language-specific skill for idioms**
 

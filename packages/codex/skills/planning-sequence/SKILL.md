@@ -5,15 +5,16 @@ description: 'Run the full three-stage planning sequence — Pre-Parade, Premort
 
 # Planning Sequence
 
-Run three planning checks on the same plan, idea, or decision. Find missing
-success conditions, likely failures, and weaknesses before commitment.
+Run three planning checks on the same plan, idea, or decision.
+Before commitment, find missing conditions for success, likely problems, and weak points.
 
-The three techniques are:
-1. **Pre-Parade** — what does success actually require?
-2. **Premortem** — what's the most credible story of failure?
-3. **Red Team** — does this survive a genuine adversary?
+Use these three methods:
 
-Run them in this order on the same subject.
+1. **Pre-Parade** — what conditions are necessary for success?
+2. **Premortem** — what is most likely to prevent the plan from working?
+3. **Red Team** — can the plan succeed against an active opponent?
+
+Run them in this sequence on the same subject.
 
 ---
 
@@ -22,26 +23,26 @@ Run them in this order on the same subject.
 If the user gave a subject, use it directly. For example:
 `/planning-sequence "migrate to Kubernetes"`.
 
-Otherwise, read the conversation. Identify the plan, idea, or decision.
+If the user gave no subject, read the conversation. Identify the plan, idea, or decision.
 If the subject is unclear, ask one question:
 "What should I run the planning sequence on?"
 
-State the subject at the top in one sentence.
+Name the subject at the top in one sentence.
 
 ---
 
 ## Stage 1: Pre-Parade
 
-Imagine that the plan succeeded one year from now. Ask what had to be
-true for that result.
+Imagine that the plan succeeded one year after this point. Identify the conditions necessary for that result.
 
 List the conditions, assumptions, and decisions that made success possible.
 
-**Run this stage as follows:**
+**Use these steps:**
 
-1. State the success scenario in one sentence: "It's [timeframe] from now. This worked."
-2. List 3–5 conditions that made it work. Be specific — not "the team executed well" but "the API contract was locked before frontend work started".
-3. For each condition, ask: is this condition currently in place? Flag any that are missing or uncertain.
+1. Give the success scenario in one sentence: "It's [timeframe] from now. This worked."
+2. List 3–5 concrete conditions that made it work. For example, "the API contract was locked before frontend work started".
+   Do not use general claims such as "the team executed well".
+3. Check if each condition currently holds. Identify missing or uncertain conditions.
 
 **Output format:**
 
@@ -65,20 +66,18 @@ What success actually required — focus on the least obvious conditions, what t
 
 ## Stage 2: Premortem
 
-Run the premortem process here. Do not call its skill separately.
+Use the premortem procedure here. Do not invoke its skill independently.
 
-Assume the plan failed. Work backward to find the most credible causes.
+Imagine that the plan did not succeed. Start from that result and identify the most credible causes.
 
-**Run this stage as follows:**
+**Use these steps:**
 
-1. State the failure scenario in one sentence: "It's [timeframe] from now. This failed."
-2. Check assumptions, execution, people, dependencies, timing, optimism
-   bias, and unknown factors. For people, consider resistance, disengagement,
-   and behavior that differs from the plan.
-3. Give 2–4 failure modes. For each, state what goes wrong, why it is credible,
-   likelihood (low/medium/high), impact, and a concrete mitigation.
-4. Give a verdict. State whether the plan is sound with specific risks to
-   address, or has structural problems.
+1. Give the scenario in one sentence: "It's [timeframe] from now. This failed."
+2. Check assumptions, implementation, participants, dependencies, timing, optimism bias, and unknowns.
+   For participants, consider resistance, disengagement, and behavior that does not follow the plan.
+3. Give 2–4 problems that could stop the plan from working. For each, say what can occur and why it is credible.
+   Include likelihood (`low`, `medium`, or `high`), effect, and a concrete mitigation.
+4. Give a verdict. Say if the plan is sound after the owner addresses the named risks, or if structural problems exist.
 
 **Output format:**
 
@@ -104,22 +103,19 @@ What does this plan assume that's almost certainly wrong? Where is the optimism?
 
 ## Stage 3: Red Team
 
-For Red Team, take the strongest position against the plan. Attack its
-weakest points directly. Make the challenge one-sided.
+For Red Team, argue against the plan from the strongest opposing position.
+Attack its weakest points directly. Make the challenge one-sided.
 
-Premortem considers accidental failure. Red Team considers an opponent
-who acts against the plan. The opponent can be a competitor, sceptic,
-regulator, or hostile stakeholder.
+Premortem considers problems that can occur without a deliberate opponent.
+Red Team considers deliberate opposition. The opponent can be a competitor, skeptic, regulator, or hostile stakeholder.
 
-**Run this stage as follows:**
+**Use these steps:**
 
 1. Identify the most credible opponent or constraint for this plan.
-   Consider a competitor, internal sceptic, technical constraint, or
-   market force.
-2. From that position, find 2–3 specific attacks. Use weak assumptions,
-   exposed gaps, and points where the plan can fail.
-3. For each attack, state what the opponent does or says. State the damage.
-4. Tell the plan owner what to change or prove to withstand the attack.
+   Possible examples are a competitor, internal skeptic, technical constraint, or pressure from the market.
+2. From that position, find 2–3 concrete attacks. Use weak assumptions, exposed weak points, and points where the plan can break.
+3. For each attack, say what the opponent does or says. Identify the damage.
+4. Tell the plan owner what to change or prove so the plan can resist the attack.
 
 **Output format:**
 
@@ -143,9 +139,9 @@ Who specifically would want this to fail, and why? What do they know that the pl
 
 ## Closing synthesis
 
-After all three stages, write a short synthesis (3–5 sentences):
+After all three steps, write a short synthesis (3–5 sentences):
 
-- What risks or gaps appear in all three stages? These are the highest-confidence risks or gaps.
+- What risks or weak points appear in all three steps? You can report these with the most confidence.
 - What did Pre-Parade surface that the other two missed?
 - What is the single most important thing to address before committing?
 
@@ -159,15 +155,15 @@ After all three stages, write a short synthesis (3–5 sentences):
 
 ## What good looks like
 
-- All three stages are specific to *this plan*, not generic.
+- All three steps use facts from this plan.
 - Pre-Parade conditions are concrete and checkable. For example: "Alice
   owns the API contract, confirmed."
-- Premortem failure modes are credible, not catastrophist.
-- Red Team presents a credible attack, even if it is uncomfortable.
-- Synthesis converges on one clear priority, not a hedged list.
+- The premortem gives credible problems that can stop the plan from working.
+- Red Team gives a credible attack that can be uncomfortable.
+- The synthesis names one most important step.
 
 ## What to avoid
 
-- Running all three stages as variations of the same critique. They should surface *different* things.
-- Softening the Red Team to avoid discomfort. Its value is exactly the discomfort.
-- Synthesis that just restates the three stages. It should add something by combining them.
+- Giving the same critique in all three steps. Identify different problems in each step.
+- Making the Red Team challenge weaker to prevent discomfort. Its value comes from the discomfort.
+- Giving the same results again in the synthesis. Use the results together to give a new verdict.
