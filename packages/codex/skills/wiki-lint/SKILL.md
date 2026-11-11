@@ -155,7 +155,7 @@ Set `N` to the total from Step 2. Add the counts for contradictions, stale pages
 Also add the counts for missing cross-references, missing data, and inbox backlog items.
 If there are no results, use 0.
 
-This machine-readable record supplies the dashboard's LINT RESULTS tile.
+This machine-readable record supplies the dashboard's `LINT FINDINGS` tile.
 It does not change the user report in Step 3. Do not calculate it from the prose summary.
 
 ### Step 6: Commit
