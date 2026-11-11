@@ -106,7 +106,7 @@ Read `$vault/index.md`. Before adding content, check existing coverage. Curator 
 
 ### Step 5: Write/Update Pages
 
-1. **Source page** in `$vault/sources/` — YAML frontmatter (title, type, source, date, tags), key takeaways, context, and effects
+1. **Source page** in `$vault/sources/`. Give YAML frontmatter with `title`, `type`, `origin`, `date`, and `tags`. Include key takeaways, context, and effects.
 2. **Update affected pages** — concept, entity, service pages as needed. Update `last_updated` in frontmatter
 3. **Make new pages** if the source introduces something deserving its own page. Use `[[wiki-links]]`
 4. **Update `$vault/index.md`** — new entries, updated summaries, source table

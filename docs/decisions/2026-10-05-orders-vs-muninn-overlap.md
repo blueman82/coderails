@@ -7,7 +7,7 @@ Two stores hold different fields of the standing instruction. Each field has one
 | Part | Data location | Purpose |
 | --- | --- | --- |
 | Cited claim: lesson text, K-id, cite, quote, and retraction, expiry, or supersession status. | Muninn holds a repository-scoped `lesson` tagged `order` and `ord-<id>`. | Muninn owns cited knowledge that comes from the user and can be retracted. A second copy would give it a second authority. |
-| Counters and decay: `loops_since_recurrence`, `last_recurred`, `status`, `decayed_at`, record list, `scope), and an append-only hash chain. | The scripts own `orders.json` in the repo-key directory, two directories above `progress.json`. | Muninn has no operation to update or touch a record. Each Muninn write uses a user-substantiated cite, which a loop tick cannot supply. |
+| Counters and decay: `loops_since_recurrence`, `last_recurred`, `status`, `decayed_at`, record list, `scope`, and an append-only hash chain. | The scripts own `orders.json` in the repo-key directory, two directories above `progress.json`. | Muninn has no operation to update or touch a record. Each Muninn write uses a user-substantiated cite, which a loop tick cannot supply. |
 
 Only `scripts/lib/orders.py` writes `orders.json` with `dir_lock`. Only `scripts/lib/lessons.py` joins it with Muninn.
 The writer makes `standing-orders.md` and `standing-orders-decayed.md` atomically, with a marker and mode 0444.
