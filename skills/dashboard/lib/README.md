@@ -1,106 +1,80 @@
 # @coderails/dashboard-lib
 
-The single source of truth for the intent-queue/runner contract's
-consumer-side pieces: the `Intent` schema and the `RoutineDef`/routines
-section of `DashboardConfig`. The base `ButtonDef`/`PermissionProfile`/
-`loadConfig` and the `buildArgv` profile→flag mapping are NOT owned here —
-they live in `skills/dashboard/app/src/lib/config.ts` and `argv.ts`
-(merged via PR #25) and this package imports them rather than
-re-implementing them.
+This package defines the consumer side of the intent queue contract. It owns the `Intent` schema and the `RoutineDef` and `routines` parts of `DashboardConfig`.
+
+The base `ButtonDef`, `PermissionProfile`, `loadConfig`, and the `buildArgv` mapping to flags come from `skills/dashboard/app/src/lib/config.ts` and `argv.ts`. PR #25 merged those modules. This package imports their definitions.
 
 This README covers the schema contract only. For how to actually stand
-the system up on a fresh clone (`npm install` in this package and in
+the system up on a new clone (`npm install` in this package and in
 `skills/dashboard/runner`, where the dashboard's data directory comes
-from, how the `claude` binary is located under `launchd`) see
+from, how to find the `claude` binary with `launchd`) see
 [`docs/routines.md`](../../../docs/routines.md)'s Prerequisites section.
 
 ## The queue seam is LIVE
 
-As of PR #25, `skills/dashboard/obsidian/src/exec.ts` already writes
+As of PR #25, `skills/dashboard/obsidian/src/exec.ts` writes
 intent files to `~/.claude/coderails-dashboard/queue/<runId>.json` on
-every button press, matching this package's `Intent` type exactly:
+each button press. These files use this package's `Intent` type.
 
 ```typescript
 interface Intent {
-  button: string;       // matches a ButtonDef.name or is the routine's own trigger name
-  input?: string;       // optional freeform text, never parsed as a flag (see buildArgv)
-  requestedAt: number;  // epoch-ms (Date.now()), NOT an ISO string
+  button: string;       // Use a ButtonDef.name or the routine's own trigger name.
+  input?: string;       // Optional freeform text. Do not parse it as a flag (see buildArgv).
+  requestedAt: number;  // Epoch milliseconds from `Date.now()`, with no ISO string.
   source: "web" | "obsidian" | "cli" | string;
 }
 ```
 
-`parseIntent(raw: unknown): Intent` validates and returns a typed `Intent`,
-throwing `IntentValidationError` on any malformed input. A compile-time
+`parseIntent(raw: unknown): Intent` checks the input and gives a typed `Intent`. It throws `IntentValidationError` for malformed input. A compile-time
 test (`test/schema-compat.test.ts`) type-checks this `Intent` type against
-the obsidian plugin's own `IntentFile` type on every build, so producer
+the obsidian plugin's own `IntentFile` type on each build, so producer
 and consumer cannot silently drift apart.
 
-`IntentFile.source` is presently the single literal `"obsidian"` on the
-wire (the only merged producer); `Intent.source`'s wider union exists to
-admit future producers (`"web"`, `"cli"`), not because they exist today.
+The only merged producer uses the literal `"obsidian"` for `IntentFile.source`. The wider `Intent.source` union permits future producers (`"web"`, `"cli"`).
 
-**Interim producer behaviour, not part of this contract:** the obsidian
-plugin currently ALSO direct-execs `claude` itself after writing the
-intent file (see `obsidian/src/exec.ts`'s `pressButton`) — it does not
-yet wait for the runner to claim and execute the queued intent. This is
-the producer's own transitional behaviour on the way to the runner
-becoming the sole executor; it is not something this package's contract
-endorses going forward, and it is out of scope for this loop to change
-(see Global Constraints: `app/`/`obsidian/` code is not modified here).
+**Interim producer behavior.** The contract does not specify this behavior. The Obsidian plugin writes the intent file and then invokes `claude` directly. See `pressButton` in `obsidian/src/exec.ts`. It does not wait for the runner to claim and execute the intent.
+
+This behavior is temporary until only the runner executes queued intents. This loop does not change it. See Global Constraints for the limits on `app/` and `obsidian/` changes.
 
 ## The runner is the sole executor (target state)
 
 No surface other than the runner (`skills/dashboard/runner`) may
-invoke the `claude` CLI for a queued or scheduled run. This is a
-permanent design rule for every surface wired to this queue, going
-forward from this loop — even though the obsidian plugin's current
-interim behaviour (above) does not yet honor it.
+invoke the `claude` CLI for a queued or scheduled run. This design rule applies to each interface that uses this queue from this loop onward. The interim Obsidian behavior described above does not follow the rule.
 
 ### Lifecycle
 
-A queued intent file moves through exactly these directories, atomically
-claimed by rename (never copied, never edited in place):
+A queued intent file moves only through the directories below. Use an atomic rename to claim it. Do not copy or edit it.
 
 1. `queue/<runId>.json` — written by a producer (web click, Obsidian
-   command, routine scheduler). Not yet claimed. Directory is created
-   with mode `0o700` by producers (see `obsidian/src/main.ts`).
-2. `processing/<runId>.json` — claimed by the runner via `fs.renameSync`.
+   command, or scheduler). The runner has not claimed it.
+   Producers make the directory with mode `0o700` (see `obsidian/src/main.ts`).
+2. `processing/<runId>.json` — claimed by the runner through `fs.renameSync`.
    The atomicity of a same-filesystem rename is what prevents two runner
    instances from double-claiming the same intent.
-3. On success: `archive/<runId>.json` — never deleted, subject to a
-   configurable retention prune.
+3. On success: `archive/<runId>.json`. Remove it only if the configurable retention rule permits it.
 4. On malformed input (fails `parseIntent`): `quarantine/<runId>.json` —
-   the sweep continues past it rather than crash-looping.
+   the sweep continues with other files and does not crash-loop.
 
 ## Config: buttons and routines
 
-`~/.claude/coderails-dashboard.json` holds both `buttons` (interactive,
-user-triggered, defined by the merged `app/src/lib/config.ts`'s
-`ButtonDef`) and `routines` (scheduled, artifact-gated, defined by this
-package's `RoutineDef`) under one `DashboardConfig`. A `RoutineDef` names
-either a `skillCommand` directly or a `buttonRef` pointing at an existing
-`ButtonDef` — never both — and declares its `cadence`, `expectedArtifact`
-(the artifact-gate contract the runner enforces after execution), and
-`escalation` channels. See `src/config.ts` for the exact validation
-rules.
+`~/.claude/coderails-dashboard.json` holds `buttons` and `routines` in one `DashboardConfig`. Buttons are interactive and start when the user selects them. See `ButtonDef` in the merged `app/src/lib/config.ts`. See this package’s `RoutineDef` for the schedule and artifact gate.
+
+A `RoutineDef` specifies one of two fields: a `skillCommand` or a `buttonRef` that points to an existing `ButtonDef`. It also specifies `cadence`, `expectedArtifact`, and `escalation` channels. The runner applies the artifact gate after execution. See `src/config.ts` for the validation rules.
 
 ## buildArgv: the one profile→flag mapping (imported, not owned here)
 
-`buildArgv(btn: ButtonDef, input?: string): string[]` lives in
-`skills/dashboard/app/src/lib/argv.ts` (merged via PR #25) and is the
-only place a `ButtonDef.profile` is translated into `claude` CLI flags
-anywhere in this contract. The obsidian plugin already imports it
-directly (esbuild-bundled); this package's runner imports it the
-same way. No consumer in this contract re-implements the profile→flag
-mapping — `dashboard-lib` does not carry its own copy.
+`buildArgv(btn: ButtonDef, input?: string): string[]` is in `skills/dashboard/app/src/lib/argv.ts`, which PR #25 merged. It is the only function in this contract that maps a `ButtonDef.profile` to `claude` CLI flags.
+
+The Obsidian plugin and this package’s runner import it directly. The Obsidian plugin bundles it with esbuild. Consumers share the mapping. `dashboard-lib` does not have a copy.
 
 ## Note on `tsconfig.json`'s `lib`
 
 `test/schema-compat.test.ts` type-only-imports `IntentFile` from
 `../../obsidian/src/exec`, which itself type-imports `ButtonItem`/
 `PermissionProfile` from `obsidian/src/render.ts` — a file that uses DOM
-types (`HTMLElement`, `document`). Because `tsc` type-checks the full
+types (`HTMLElement`, `document`).
+
+Because `tsc` type-checks the full
 import graph reachable from the `include` set, this package's
 `tsconfig.json` `lib` includes `"DOM"` alongside `"esnext"` purely to
-satisfy that transitively-imported type; `dashboard-lib` itself has no
-runtime DOM dependency and never emits code (`noEmit: true`).
+satisfy that transitively imported type. `dashboard-lib` has no runtime DOM dependency and writes no output code (`noEmit: true`).

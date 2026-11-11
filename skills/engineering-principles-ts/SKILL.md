@@ -16,17 +16,17 @@ paths: "**/*.ts,**/*.tsx"
 
 ### Type Safety
 - **Strict mode always** — `"strict": true` in tsconfig.json
-- **No `any` type** — Use `unknown` and narrow, or define proper types
-- **Explicit return types** on exported functions
-- **Discriminated unions** over type assertions
+- **No `any` type** — Use `unknown` and narrow, or define the correct types
+- **Explicit function output types** on exported functions
+- **Discriminated unions** preferred to type assertions
 
 ### Null Handling
-- **Optional chaining** (`?.`) instead of nested null checks
-- **Nullish coalescing** (`??`) instead of `|| defaultValue`
-- **Non-null assertion (!)** only when you've verified safety
+- **Optional chaining** (`?.`) to simplify nested null checks
+- **Nullish coalescing** (`??`) for null and undefined defaults. Use it in the expression that would use `|| defaultValue`.
+- **Non-null assertion (!)** only if you check that the value cannot be null or undefined
 
 ### Switch Statements
-- **Exhaustive checks** — Never use `default` that swallows cases
+- **Checks for all union members** — Do not use `default` to hide unhandled members.
 - Use `assertNever` pattern for compile-time exhaustiveness
 
 ### Patterns
@@ -34,7 +34,7 @@ paths: "**/*.ts,**/*.tsx"
 - Type inference where type is obvious from assignment
 - Object shorthand (`{ name }` not `{ name: name }`)
 - Arrow functions for callbacks
-- Template literals over string concatenation
+- Prefer template literals to string concatenation
 
 ---
 
@@ -65,7 +65,7 @@ Find these patterns and replace them with the matching TypeScript idiom.
 | Nested `for` loops | `.flatMap()` | `for (a of lists) { for (b of a) { ... } }` → `lists.flatMap(a => a.map(...))` |
 | Index-based `for (let i)` | `for...of` / `.forEach()` / `.entries()` | `for (let i = 0; i < arr.length; i++)` → `for (const [i, val] of arr.entries())` |
 | Loop building object | `Object.fromEntries()` | `const obj = {}; for (...) { obj[k] = v; }` → `Object.fromEntries(pairs.map(...))` |
-| Loop with running total | `.reduce()` | `let sum = 0; for (x of items) sum += x;` → `items.reduce((s, x) => s + x, 0)` |
+| Loop that sums values | `.reduce()` | `let sum = 0; for (x of items) sum += x;` → `items.reduce((s, x) => s + x, 0)` |
 | Loop counting matches | `.filter().length` | `let n = 0; for (x of items) { if (pred(x)) n++; }` → `items.filter(pred).length` |
 | Loop with type narrowing | `.filter()` with type predicate | `for (x of items) { if (isString(x)) result.push(x); }` → `items.filter(isString)` |
 
@@ -74,18 +74,18 @@ Find these patterns and replace them with the matching TypeScript idiom.
 | Anti-Pattern | Replacement |
 |-------------|-------------|
 | `if/else if` chain (5+) | Object lookup / `Map` / `Record<K, V>` |
-| Nested ternaries 3+ deep | Extract to function or `switch` |
-| Repeated `typeof` checks | Type guard function (`value is T`) |
-| Flag accumulation in loop | `.some()` / `.every()` |
-| Nested conditionals 3+ deep | Guard clauses / early returns |
-| `switch` with identical patterns per case | Object/Map dispatch |
+| Nested ternaries 3+ deep | Move the logic to a function or `switch` |
+| Recurring `typeof` checks | Type guard function (`value is T`) |
+| Loop that updates a Boolean flag | `.some()` / `.every()` |
+| Nested conditionals 3+ deep | Check the condition and exit the function immediately if applicable |
+| `switch` with the same patterns for each branch | Object/Map dispatch |
 
 ### Accumulation Anti-Patterns
 
 | Anti-Pattern | Replacement |
 |-------------|-------------|
-| Manual array concat | Spread `[...a, ...b]` |
-| Manual object merge | Spread `{ ...a, ...b }` |
+| Manual array concat | Use `[...a, ...b]` |
+| Manual object merge | Use `{ ...a, ...b }` |
 | String concat in loop | `.join()` or template literal |
 | Manual grouping | `Map` + `.reduce()` or `Object.groupBy()` (ES2024) |
 | Manual counting | `.reduce()` to `Map` |
@@ -96,7 +96,7 @@ Find these patterns and replace them with the matching TypeScript idiom.
 
 | Anti-Pattern | Replacement |
 |-------------|-------------|
-| Sequential `await` in loop | `Promise.all()` for independent operations |
+| Sequential `await` in loop | `Promise.all()` for operations that can run in parallel |
 | `.then()` chains | `async/await` |
 | Manual error collection | `Promise.allSettled()` |
 | Callback nesting (callback hell) | `async/await` |
@@ -107,7 +107,7 @@ Find these patterns and replace them with the matching TypeScript idiom.
 ## Example: Before/After
 
 ```typescript
-// BEFORE (violations: any, verbose null checks, no return type)
+// BEFORE (violations: `any`, verbose null checks, no function output type)
 function getDisplayName(user: any) {
     if (user !== null && user !== undefined) {
         if (user.profile !== null && user.profile !== undefined) {
@@ -121,7 +121,7 @@ function getDisplayName(user: any) {
 ```
 
 ```typescript
-// AFTER (typed, optional chaining, nullish coalescing, return type)
+// AFTER (typed, optional chaining, nullish coalescing, function output type)
 interface User {
     profile?: {
         displayName?: string;
@@ -186,7 +186,7 @@ function handleResult<T>(result: Result<T>): T | never {
     throw new Error(result.error);
 }
 
-// Exhaustive switch
+// `switch` with a branch for each union member
 type Status = 'pending' | 'active' | 'completed' | 'failed';
 
 function assertNever(x: never): never {
@@ -253,21 +253,21 @@ function speak(animal: Dog | Cat): void {
 
 Before completing TypeScript code changes:
 
-- [ ] No `any` type — use `unknown` or proper types
-- [ ] Explicit return types on exported functions
+- [ ] No `any` type — use `unknown` or the correct types
+- [ ] Explicit function output types on exported functions
 - [ ] Optional chaining (`?.`) for null checks
 - [ ] Nullish coalescing (`??`) not `||` for defaults
 - [ ] Discriminated unions for variant types
-- [ ] Exhaustive switch with `assertNever`
+- [ ] `switch` checks for all union members with `assertNever`
 - [ ] `as const` for literal types
 - [ ] Object shorthand used
 - [ ] Template literals (not string concatenation)
 - [ ] Arrow functions for callbacks
-- [ ] `.map`/`.filter`/`.reduce` over `for` loops with `push`
-- [ ] `.find`/`.some`/`.every` over `for` with `break`
-- [ ] `.flatMap` over nested `for` loops
-- [ ] `Object.fromEntries` over loop building objects
-- [ ] `Promise.all` over sequential `await` in loops
-- [ ] Object/Map dispatch over `if/else if` chains (5+)
-- [ ] Guard clauses over nested conditionals 3+ deep
-- [ ] `[...new Set()]` over manual dedup
+- [ ] Prefer `.map`/`.filter`/`.reduce` to `for` loops with `push`
+- [ ] Prefer `.find`/`.some`/`.every` to `for` with `break`
+- [ ] Prefer `.flatMap` to nested `for` loops
+- [ ] Prefer `Object.fromEntries` to loop building objects
+- [ ] Prefer `Promise.all` to sequential `await` in loops
+- [ ] Prefer Object/Map dispatch to `if/else if` chains (5+)
+- [ ] Check conditions and exit the function to prevent nesting 3 or more levels deep
+- [ ] Prefer `[...new Set()]` to manual dedup

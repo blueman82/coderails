@@ -5,10 +5,11 @@ description: 'Use this skill for premortem analysis: assume a plan, decision, or
 
 # Premortem
 
-For a premortem, assume the plan failed. Work backward to find why. Use
-the findings before commitment, while you can still change the plan.
+For a premortem, imagine that the plan did not succeed. Start from that result and identify its causes.
+Use the results before commitment, while you can change the plan.
 
-This skill works on plans, decisions, arguments, features, architectures, or your own previous response. The user may explicitly invoke it (`premortem this`, `premortem <X>`) or it may be appropriate to trigger it proactively before a high-stakes commitment.
+Use this skill for plans, decisions, arguments, features, architectures, or your previous answer.
+The user can invoke it explicitly (`premortem this`, `premortem <X>`). It also applies before a high-stakes commitment.
 
 ---
 
@@ -16,44 +17,46 @@ This skill works on plans, decisions, arguments, features, architectures, or you
 
 ### Step 1: Establish what's being premortemed
 
-If the subject is clear from context, identify it directly. For example,
-the user might ask you to assess a plan or your previous answer. If the
-subject is unclear, ask: "What specifically should I premortem?"
+If the context makes the subject clear, identify it directly.
+The user can select a plan or your previous answer.
+If the subject is unclear, ask: "What specifically should I premortem?"
 
 ### Step 2: Reason adversarially
 
-Use a `<thinking>` block to reason before writing output. The goal is genuine adversarial thinking, not a checklist. Work through:
+Use a `<thinking>` block for analysis before you write the result.
+Challenge the plan as you examine these topics:
 
-- **Assumptions:** Which assumption might be false?
-- **Execution:** Where could execution fail, even with a sound plan?
-- **People:** Who might resist, disengage, or act differently?
-- **Dependencies:** Which external condition might change or fail?
-- **Optimism:** Where does the plan assume too much success?
-- **Unknown factors:** What has the plan not considered?
+- **Assumptions:** Which assumption could be incorrect?
+- **Implementation:** If the plan is sound, what could prevent you from implementing it?
+- **Participants:** Who could resist, disengage, or behave differently?
+- **Dependencies:** Which external condition could change or stop work?
+- **Optimism:** Where does the plan rely too much on success?
+- **Unknowns:** What does the plan miss?
 - **Timing:** Which sequence or deadline could slip?
 
-Select the most plausible and consequential failures. Keep the list short
-and specific.
+Select the most plausible problems with important effects. Keep the list short and name each problem.
 
 ### Step 3: Assess each failure
 
-For each significant failure mode, give a brief verdict:
-- **Likelihood**: low / medium / high (use judgment)
-- **Impact**: if it happens, how bad?
-- **Mitigation**: what would actually reduce this risk?
+For each important problem, give a brief verdict:
 
-Give an action that reduces the risk. "Monitor closely" does not do this.
+- **Likelihood**: `low`, `medium`, or `high` (use judgment)
+- **`Impact`**: If the problem occurs, how bad is it?
+- **Mitigation**: what change can decrease this risk?
+
+Give a step that decreases the risk. "Monitor closely" does not do this.
 "Add a circuit breaker" and "validate assumption X before commitment"
-are concrete actions.
+are concrete steps.
 
 ### Step 4: Verdict
 
 End with one direct verdict:
-- Is this plan basically sound with specific risks to address?
-- Are there structural problems that should reshape the plan?
-- Is there a fatal flaw that makes the plan unlikely to succeed as stated?
 
-If you assess your own answer, say so. Update your recommendation if needed.
+- Is the plan sound if the owner addresses the risks you found?
+- Do structural problems make changes necessary?
+- Is there a problem that makes the current plan unlikely to succeed?
+
+If you examine your own answer, say so. Update your recommendation if necessary.
 
 ---
 
@@ -85,13 +88,13 @@ If you assess your own answer, say so. Update your recommendation if needed.
 
 ## What good looks like
 
-- Failure modes are *specific to this plan*, not generic project risks copy-pasted from a template.
+- Name problems that can occur in this plan. Do not copy generic project risks from a template.
 - Mitigations are *actionable*, not reassurances.
-- The verdict is *direct* — it doesn't hedge by listing everything as "worth considering".
-- If the plan is mostly fine, say so. A premortem that finds catastrophe in everything is as useless as one that finds nothing.
+- Give an explicit verdict. Do not hedge by listing everything as "worth considering".
+- If the plan is mostly sound, say so. Report the risks at their actual severity.
 
 ## What to avoid
 
-- Generic risk lists ("team alignment", "scope creep", "technical debt") without grounding them in *this specific plan*.
-- Softening a serious finding. State when an idea has a serious flaw.
-- Exhaustive lists. Give a few specific failure modes.
+- Generic risk lists ("team alignment", "scope creep", "technical debt") without facts from this plan.
+- Language that makes an important problem sound less important. Say when an idea has an important problem.
+- Long lists. Give a short list of problems in this plan.
