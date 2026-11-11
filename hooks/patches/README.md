@@ -1,105 +1,73 @@
 # hooks/patches/
 
-Canonical patch text for `hooks/scripts/remember_inject_cap_guard.sh`, the
-`SessionStart` hook that re-applies the memory-injection byte cap to the
-**remember** plugin after a plugin update wipes it.
+These files give the patch text for `hooks/scripts/remember_inject_cap_guard.py`.
+The `SessionStart` hook can apply the memory byte limit again after an update removes it from the remember plugin.
 
-**The guard only warns by default.** It does not use this patch text until
-you opt in. The remember plugin has another maintainer, so the default
-guard reports an absent cap once per plugin version and changes no file.
-Set `REMEMBER_INJECT_CAP_AUTOWRITE=1` in the `env` block of `settings.json`
-to enable the patch. The matching and re-derivation rules below apply to
-that opt-in path.
+**By default, the guard gives a warning only.**
+It reports a missing limit one time for each plugin version and changes no plugin files.
+The remember plugin has a different maintainer.
+To let the guard apply the patch, set `REMEMBER_INJECT_CAP_AUTOWRITE=1` in the `env` block of `settings.json`.
+The instructions below apply when that setting is `1`.
 
 | File | Role |
 |---|---|
-| `remember_inject_cap.vendor.txt` | The **search** block — the remember plugin's unpatched memory-injection `for MFILE` loop, exactly as the vendor ships it |
-| `remember_inject_cap.patched.txt` | The **replace** block — the same loop with the `REMEMBER_INJECT_MAX_BYTES` truncation applied |
+| `remember_inject_cap.vendor.txt` | Block to find. Copy the vendor's `for MFILE` loop before the patch. |
+| `remember_inject_cap.patched.txt` | Replacement block. The same loop applies the `REMEMBER_INJECT_MAX_BYTES` limit. |
 
 ### Scope: the loop only, not the enclosing `if`
 
-Both blocks cover the `for MFILE ...; do ... done` loop and nothing else. They
-deliberately stop short of the surrounding `if [ -n "$HAS_MEMORY" ]; then` and
-its closing `fi`.
+Each block starts and end with the `for MFILE ...; do ... done` loop.
+Keep `if [ -n "$HAS_MEMORY" ]; then` and its `fi` out of the two blocks.
 
-That boundary was moved in 0.8.9 and is the point of this file. The blocks
-originally spanned the whole `if`, which made **any** vendor edit anywhere
-inside the if-body a shape mismatch. 0.8.9 appended a rotated-archives section
-between `done` and `fi`, the sequence stopped matching, and the guard refused to
-patch. The loop itself was byte-identical across 0.8.3 and 0.8.9 — only the
-region around it changed. Anchoring on just the loop matches both versions with
-one patch pair, and leaves the vendor's own additions untouched.
+The first patch included the full `if` block. A change anywhere in that block could prevent a match.
+Version 0.8.9 added a section for rotated archives between `done` and `fi`. The guard found no match and refused the patch.
+Versions 0.8.3 and 0.8.9 use the same loop. One patch matches the two versions and preserves the vendor's changes around the loop.
 
-Keep the two blocks' scopes identical. Narrowing `vendor.txt` without narrowing
-`patched.txt` emits a duplicate `if` and an orphan `fi` — broken bash that the
-guard's own `head -c` sanity check still passes. `bash -n` on the patched file
-is the check that catches it.
+Use the same boundaries in the two patch files.
+If you remove lines from `vendor.txt` alone, the result can have a duplicate `if` and a `fi` without a matching `if`.
+The guard checks for the `head -c` command. Use `bash -n` to check Bash syntax.
 
-The loop is unique in the file, but only just: the vendor runs a
-byte-identical `for MFILE in ...` line earlier to compute `HAS_MEMORY`. The two
-diverge on the next line (`[ -f "$MFILE" ]` alone vs `&& [ -s "$MFILE" ]`), so
-the 8-line sequence matches exactly once. Do not shorten the block further —
-verify any change by running the guard's own counter and confirming it reports
-exactly 1 match.
+The vendor uses the same `for MFILE in ...` line earlier to calculate `HAS_MEMORY`.
+The first loop uses `[ -f "$MFILE" ]` alone. The patch target also uses `&& [ -s "$MFILE" ]`.
+The sequence of eight lines matches one time. Do not remove lines.
+After a change, use the guard's match procedure to make sure the count is one.
 
 ## DO NOT EDIT, REFORMAT, OR COMMENT THESE FILES
 
-Both `.txt` files are **byte-exact match keys**, not documentation.
+The two `.txt` files contain the text for the patch.
+The guard reads `vendor.txt` and looks for the same sequence of lines in `session-start-hook.sh`.
+An added line, a different indent, a comment that spans different lines, or a removed space at the end can prevent a match.
+If the guard finds no match, the guard refuses the patch and asks you to apply it by hand.
+If an update changes the block, the guard gives a warning. A patch that uses line numbers or context can change incorrect text without a warning.
 
-The guard does a whole-block literal search/replace: it reads
-`vendor.txt` as a sequence of lines and looks for that exact contiguous
-sequence in the plugin's `session-start-hook.sh`. A single added line, a
-changed indent, a re-wrapped comment, or a stripped trailing space makes the
-sequence stop matching, and the guard then refuses to patch — it reports that
-the file's shape is unrecognised and asks for hand re-application. There is no
-fuzzy fallback by design: line-number or context-diff tooling drifts silently
-across a vendor bump, whereas a literal block match fails cleanly and loudly.
+Put explanations in this README. Do not add headers, comments about the source, or generator notices to the patch files.
 
-So: **no header lines, no provenance comments, no "generated by" banners inside
-either file.** That is what this README is for.
-
-`patched.txt` is additionally round-trip tested against the deployed copy in the
-plugin cache when one is present and current, so its bytes have to reproduce the
-real file exactly.
+If the cache has the current patched copy, check that the patch result has the same bytes.
 
 ## Provenance
 
-`vendor.txt` is a **reconstructed** pristine copy, not an authentic upstream
-artifact. The cap was originally applied by hand directly to the file in the
-version-pinned plugin cache, and no untouched original was kept. `vendor.txt`
-was recovered by reverse-applying that hand patch to the live file — swapping
-the patched block back out for what it must have been before. `patched.txt` was
-taken from the live file as it stood after the hand patch.
+The first hand patch changed the file in the cache for a fixed plugin version. The author kept no copy of the file before the patch.
+To make `vendor.txt`, the author removed the hand patch from a copy of the cache file.
+To make `patched.txt`, the author copied the block from that file after the hand patch.
 
-Both were then verified by round trip: reversing `patched.txt` → `vendor.txt`
-over the live file and re-applying the guard reproduces the live file
-byte-for-byte. `hooks/scripts/tests/remember_inject_cap_guard.test.sh` asserts
-that inverse relationship hermetically on every run, and against the live cache
-too when the deployed copy is still current.
+To do a check of the two blocks, replace `patched.txt` with `vendor.txt` in a copy of the file. Run the guard on the copy.
+The result must have the same bytes as the patched file in the cache.
+`hooks/scripts/tests/remember_inject_cap_guard_test.py` checks that it is possible to remove and apply the patch with a test file.
 
 ## Editing the patch text legitimately
 
-If the vendor changes the injection loop, derive both files from the new
-source. Do not hand-edit the old blocks. Copy the new unpatched loop
-verbatim to `vendor.txt`. Apply the cap to a copy for `patched.txt`. Run
-the test suite.
+If the vendor changes the loop, make the two files from the new source.
+Copy all bytes of the new unpatched loop to `vendor.txt`.
+Apply the cap to a copy of the loop for `patched.txt`. Run the tests.
 
-Before committing a re-derivation, verify against the real plugin file, not
-just the fixtures:
+Before you commit, do these checks with the installed plugin file.
 
-1. Run the guard's own block counter (the `awk` in
-   `remember_inject_cap_guard.sh`) over the new `vendor.txt` and the live
-   `session-start-hook.sh`. It must print exactly `1`.
-2. Run the guard with `REMEMBER_INJECT_CAP_AUTOWRITE=1` against a **copy** of
-   the live file, then `bash -n` that copy. This is the only check that catches
-   a mismatched-scope block pair.
-3. Execute the patched loop against a memory file larger than the cap and one
-   smaller, and confirm the truncation marker appears for the first and not the
-   second. Grepping for the `head -c` line proves the text landed, not that
-   truncation works.
+1. Use the match procedure in `apply_cap` from `remember_inject_cap_guard.py` to count the new vendor block in `session-start-hook.sh`.
+   The count must be `1`.
+2. Run the guard with `REMEMBER_INJECT_CAP_AUTOWRITE=1` on a copy of the installed file. Run `bash -n` on that copy to check the syntax.
+3. Run the patched loop on one memory file above the limit and one below it.
+   Make sure the marker shows only for the file above the limit.
 
-Note that editing `patched.txt`'s NOTE comment alone does **not** propagate to
-an already-patched install: the guard detects the cap by the truncation call
-(`head -c "$REMEMBER_INJECT_MAX_BYTES"`), not by the comment, so a
-comment-only change leaves an already-capped file untouched until the next
-plugin bump wipes and re-applies the whole block.
+The guard uses `head -c "$REMEMBER_INJECT_MAX_BYTES"` to find the cap.
+A change to only the NOTE comment in `patched.txt` has no effect on a copy with the cap.
+If a plugin update removes the cap, the guard can apply the full block again.

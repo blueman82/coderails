@@ -4,10 +4,13 @@ description: Lead with the direct answer in the first sentence; stop there unles
 type: feedback
 originSessionId: session_01D3imGD5CmyqnxVr4aAVzfK
 ---
-Lead with the direct answer in the first sentence. Stop there unless the user asks for reasoning, evidence, or options. Default to the shortest reply that fully answers — usually one to three sentences. If several options exist, name them in a line each, no essay. Offer detail as a question ("Want the reasoning?") instead of pre-writing it.
 
-The required confidence tags (`(verified)`/`(inferred)`/`(guess)`) and the `## Did Not Verify` section still apply — they are structure, not prose, so never pad the answer just to reach them.
+Give the answer in the first sentence. Stop there unless the user asks why, asks for sources, or asks for options. Give the shortest reply that answers the question. One to three sentences is usual.
 
-**Why:** The user's habit is to show all their work — reasoning, caveats, evidence — by default, and they rarely want that. The conclusion is what they're after; they will ask for the "why" if they need it. Established 2026-08-23.
+If there are multiple options, give one line for each. Offer more information with a question if necessary. Example: "Want the reasoning?"
 
-**How to apply:** Every response. Do not restate the question back, list what wasn't asked about, or explain a choice the user didn't challenge. Answer, then stop.
+Use the required confidence tags `(verified)`, `(inferred)`, and `(guess)`, and the `## Did Not Verify` section. They give the reply its structure. Add no filler for these tags or this section.
+
+**Why**. The usual reply had too much information on the basis for the answer, its limits, and its sources. The user usually wants the answer first. They will tell you if they want to know why. This preference dates from 2026-08-23.
+
+**When to apply**. Use this rule in each reply. Do not restate the question. Discuss only what the user wants to know. Give the answer and stop.

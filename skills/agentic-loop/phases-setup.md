@@ -1,14 +1,11 @@
 # Agentic loop — setup phases (-2 through 2.7)
 
-Everything before routing and delegation: starting `progress.json` via `graph.py start`, sharpening the
-authorising prompt, reading the envelope, pre-flight checks, resolving design forks
-and disposition, and committing the design to `spec.md`/`plan.md`.
-
-Read this in full at loop start. Phase 2.8 onward lives in SKILL.md.
+Read this file in full at loop start. Use it to start `progress.json` with `graph.py start`, clarify the authorising prompt, and read the envelope. Then delegate pre-flight checks, resolve design and retirement decisions, and record the design in `spec.md` and `plan.md`. See SKILL.md for Phase 2.8 onward.
 
 ### `S-2` — Phase -2: Bootstrap a local repo, then start `progress.json`
 
-Before resolving the loop-state path, check whether the current folder is inside a Git repository with `git rev-parse --show-toplevel`. If it is not, create the local-only base required for worktree isolation:
+Use `git rev-parse --show-toplevel` to check if the current directory is in a Git repo.
+If it is not, make a local Git base to isolate worktrees:
 
 ```bash
 git init -b main
@@ -16,79 +13,128 @@ git add -A
 git commit --allow-empty -m "Initial project"
 ```
 
-Stop and report the exact failing command if any of these commands fails (for example, Git author identity is not configured). Do not add a remote, create a hosted repository, push, or create a pull request. This is the only action before the loop's initial state is created: it ensures the path helper below keys the loop to the repository it just created rather than to the pre-Git folder path.
+If one command fails, stop and report that command.
+For example, Git can refuse the commit if author identity is not configured.
+Do not add a remote, make a hosted repo, push, or open a PR.
+Do this before the loop file so the path helper uses the Git repo as its key.
 
-Before Phase -1 — before anything else — create the loop's durable state with the controller command. This guarantees `progress.json` exists before the first stop, so the `loop_state_guard` Stop hook never trips a compliant loop; the block degrades to a backstop for a skipped `start`. Never write or edit `progress.json` by hand for this.
+Before Phase -1, make the durable loop file with the controller.
+This gives the `loop_state_guard` Stop hook a `progress.json` before the first stop.
+The hook is a backstop for a skipped `start`.
+Do not write or edit `progress.json` by hand.
 
-**Resolve the path — never compute it yourself.** Run the path helper; it keys the path to the repo's `git --git-common-dir` (falling back to the raw cwd), so a mid-loop worktree hop resolves to the SAME path:
+**Get the path from the helper.**
+The helper keys it to the repo's `git --git-common-dir`, or raw cwd if no repo.
+A worktree change in the same repo gives the same path.
 
 > `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"`
 
-If `${CLAUDE_PLUGIN_ROOT}` is not set, do **not** guess the path: proceed without `start`; the `loop_state_guard` hook blocks once and hands you the exact path. Put the authorising prompt, verbatim, in a file, then run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<unique non-blank id>" --prompt-file "$PROMPT_FILE"`. It writes the schema-v3 state atomically (`in-progress`, revision 1, empty graph), treats a repeat of the same loop id as a no-op, re-arms a completed loop (carrying `completed_marker` forward and dropping the finished loop's `loop_stop_counts`), and refuses with a `[reason_code=...]` when an unfinished loop already owns the session: resume it instead.
+If `${CLAUDE_PLUGIN_ROOT}` is unset, do not guess the path.
+Continue without `start`. The `loop_state_guard` hook blocks one time and gives you the path.
 
-Then register every work unit with `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" add-unit "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<same id>" --unit N [--depends-on M ...] [--join] [--manifest GLOB ...]`. It adds the work unit, its `U3[N]` node, the dependency edges and, with `--join`, the `J12-all-units` input in one locked write. `--manifest` (repeatable) records the globs the unit may touch as `unit.manifest`, which `scripts/diff_manifest.py --progress ... --unit N` compares with the diff. Never edit `progress.json` by hand for either step.
+Put the authorising prompt verbatim in a file.
+Then run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<unique non-blank id>" --prompt-file "$PROMPT_FILE"`.
+It writes schema 3 atomically with `in-progress`, revision 1, and an empty graph.
+A second call for the same loop ID does nothing.
+For a completed loop it re-arms, keeps `completed_marker`, and drops the completed loop’s `loop_stop_counts`.
 
-The graph starts empty: running `start` is an orchestrator action, not a fabricated native worker dispatch. Do not create a running `S-2` wave or insert synthetic completion evidence for it.
+If an unfinished loop owns the session, the command refuses with `[reason_code=...]`.
+Continue that loop.
 
-Unit nodes (`U3[N]`) and the `J12-all-units` join come from `add-unit`; any other node is registered by the orchestrator before querying readiness, with its registry label, matching `status` and `outcome`, `retry: {"attempts":0,"max":5}`, `evidence: []`, and `respawn: {"generation":0,"intent":null}`. A fresh node is pending. Join objects need `id`, `mode:"all"`, `inputs`, and `released:false`. Keep orchestrator-only phase decisions in the phase record; graph worker completion always requires actual provider-native evidence. Use the Python CLI in `execution-graph.md` to begin and record waves. There are no schema-2 readers or hand-written synthetic wave results.
+For each work unit, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" add-unit "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<same id>" --unit N [--depends-on M ...] [--join] [--manifest GLOB ...]`.
+One locked write adds the unit, its `U3[N]` node, and the dependencies.
+With `--join`, it also adds the `J12-all-units` input.
+Use `--manifest` for each permitted glob in `unit.manifest`.
+The `scripts/diff_manifest.py --progress ... --unit N` command checks the diff against it.
 
-`loop_stop_counts` is HOOK-OWNED (see Context-window persistence below): `start` never writes it, and a re-arm drops it because the completed loop's counts are already preserved in its own `retro.json`.
+The orchestrator runs `start` and starts with an empty graph.
+Do not start an `S-2` worker wave or make a synthetic worker result for it.
+
+The `add-unit` command supplies `U3[N]` and the `J12-all-units` join.
+Before a readiness query for other nodes, add the registry label, corresponding `status` and `outcome`, `retry: {"attempts":0,"max":5}`, `evidence: []`, and `respawn: {"generation":0,"intent":null}`.
+A new node starts as pending.
+A join has `id`, `mode:"all"`, `inputs`, and `released:false`.
+
+Keep orchestrator-only decisions in the phase record.
+A completed worker node needs native provider records.
+Use the Python CLI in `execution-graph.md` to open and record waves.
+Do not use a schema-2 reader or hand-written wave results.
+
+Only the hook writes `loop_stop_counts`.
+The `start` command does not write this field.
+A re-arm drops it because the completed loop’s counts are in its `retro.json`.
 
 ### `S-1` — Phase -1: Sharpen the authorising prompt
 
-**Run this phase UNLESS the user's prompt explicitly opts out.** Opt-out signals: "just do it", "skip improve-prompt", "don't improve the prompt", or any language that makes the directive unambiguous. On opt-out, skip directly to Phase 0. (Note: improve-prompt itself treats "just do it" as an unconditional skip — align with that.)
+Run this phase unless the user explicitly opts out.
+For example, "just do it", "skip improve-prompt", and "don't improve the prompt" are opt-outs.
+If the user opts out, go to Phase 0.
+The improve-prompt skill also skips unconditionally for "just do it".
 
 **Step 1 — Invoke `/coderails:improve-prompt` on the authorising prompt.**
 
 > `/coderails:improve-prompt` — apply it to the prompt above.
 
-It surfaces ambiguities, fills gaps with grounded assumptions, and produces a rewritten prompt that passes its 7-foundation diagnosis. Let it run to completion before Step 2.
+It identifies ambiguities, uses grounded assumptions, and rewrites the prompt against seven criteria.
+Let it finish before Step 2.
 
-**Step 2 — Adopt the improved prompt. Ask only outside a full-autonomous envelope.**
+**Step 2 — Adopt the revised prompt.**
 
-Step 2 has two paths. Which one applies is decided by the authorising prompt's envelope class (the same classification Phase 0 makes): "autonomous", "human is dead", "ship N PRs without asking", "no human gates", or equivalent means full-autonomous. These words still select the envelope class for your reasoning, but they no longer create authority: the `AskUserQuestion` denial exists only after the user types `/coderails:authorise` (or `authority.py grant` runs); on the word alone the hook just prints that command.
+Use the envelope class from Phase 0.
+Phrases such as "autonomous", "human is dead", "ship N PRs without asking", and "no human gates" select the full-autonomous envelope class.
+The words alone do not give authority.
+The `AskUserQuestion` denial applies only after the user types `/coderails:authorise` or `authority.py grant` runs.
+With the words alone, the hook prints the command.
 
-**Full-autonomous envelope → auto-adopt, do not ask.** An `AskUserQuestion` here is a human gate, and a full-autonomous envelope has already withdrawn consent for gates. Do not resolve that contradiction by skipping Phase -1 — the improve-prompt output is worth more in autonomous operation, not less, because there is no human downstream to catch a vague envelope. Instead: run Step 1, auto-adopt outcome **A** without asking, and emit the improved prompt so it stays on the record. Concretely:
+**For a full-autonomous envelope, auto-adopt.**
+Do Step 1. Use outcome **A** without an approval question.
+The revised prompt clarifies the envelope for autonomous work.
+Show the prompt to the user after you finish the writes.
 
-**Do the writes first, then emit the prompt last — the order matters.** Delivery mechanism (a) below means *ending the turn* with the improved prompt as final text and no trailing tool call. Any `progress.json` write issued after that text is a trailing tool call, which by the Delivery constraint below makes the prompt invisible. Emitting first and writing second therefore defeats the visibility this path exists to preserve. So:
-
-1. Write the improved prompt to `progress.json.authorising_prompt_raw` as the canonical envelope.
+1. Write the revised prompt to `progress.json.authorising_prompt_raw` as the canonical envelope.
 2. Read the current `loop_id` and `revision` from `progress.json`. Run `graph.py record-decision <progress.json> --session <id> --loop-id <loop-id> --revision <revision> --phase -1 --decision "auto-adopted improved prompt as envelope" --flip-condition "user names a divergence between the improved and original prompt"`.
-3. Emit the improved prompt as the turn's final text (delivery mechanism (a) below), with no tool call after it, so it stays visible. Auto-adoption must not make it invisible — the user has waived the gate, not the record.
-4. Begin Phase 0 on the next turn, and note the auto-adoption at the next approval gate. Do not stall waiting for a reply — adopting a sharpened envelope is neither a verification failure nor a destructive action, so Phase 0's rule says the loop proceeds. The turn break here is a rendering requirement, not an approval gate: continue without any input.
+3. End the turn with the revised prompt as the last text, as in mechanism (a) below. Do not make a tool call after it. The user must be able to see the adopted prompt.
+4. Start Phase 0 on the next turn and report the auto-adoption at the next approval gate. Continue without user input.
 
-This follows Phase 2.5's handling of the design fork in full-autonomous mode — auto-adopt, record, surface later, never stall — with one difference: Phase 2.5 writes only to a file and carries no render-as-final-text constraint, so it can finish inside one turn. Phase -1 must also show the prompt to the user, which costs the turn break in step 4.
+Write before you display the prompt.
+A tool call after the prompt prevents the terminal from displaying it.
+Phase 2.5 auto-adopts and records its decision in one turn because it only writes a file.
+Phase -1 needs the next turn because the revised prompt must be the last text.
 
-The auto-adoption is bounded by the flip-condition: if the user later says the improved prompt drifted from what they meant, revert `authorising_prompt_raw` to the original and continue from there.
+If the user says the revised prompt differs from their intent, restore `authorising_prompt_raw` to the initial prompt and continue.
 
-**Any other envelope class → ask, as below.**
+**For other envelope classes, get the user’s decision.**
+The Claude Code terminal displays the last text in a turn or content in a tool call.
+The sequence "present the improved prompt as text, then call `AskUserQuestion`" hides the prompt.
+Use one of these mechanisms:
 
-**Delivery constraint — the improved prompt must be visible, not just asked-about.** Text emitted before a tool call is not rendered in the Claude Code terminal UI — only text with no trailing tool call, or content inside the tool call itself, reaches the user. This means "present the improved prompt as text, then call `AskUserQuestion`" silently drops the prompt: the user sees only the question, never the content it's asking about. Use one of two delivery mechanisms instead:
-- (a) End the turn with the improved prompt as the final text — no trailing tool call — and issue the `AskUserQuestion` call in the *next* turn; or
-- (b) Embed the improved prompt directly inside the `AskUserQuestion` call itself: its question text, option descriptions, or option preview fields. This renders regardless of turn-splitting.
+- (a) End the turn with the revised prompt. Use no tool after that text. Invoke `AskUserQuestion` in the next turn.
+- (b) Include the revised prompt in the `AskUserQuestion` question, option descriptions, or option preview fields.
 
-After improve-prompt produces its output, deliver it via (a) or (b) above, then present three options through `AskUserQuestion`:
+Use (a) or (b), then give the three options with `AskUserQuestion`:
 
-> "Here's the improved prompt. How do you want to proceed?
-> A) Proceed with the improved prompt as the authorising envelope
-> B) Tweak it — tell me what to adjust and I'll revise
-> C) Use the original prompt as-is"
+```text
+Here's the improved prompt. How do you want to proceed?
+A) Proceed with the improved prompt as the authorising envelope
+B) Tweak it — tell me what to adjust and I will revise
+C) Use the initial prompt as-is
+```
 
-On **A**: the improved prompt becomes the authorisation envelope. Phase 0 reads it verbatim.
-On **B**: apply the user's tweak, re-present the revised prompt via (a) or (b) again, and ask again (bounded to two revision passes — if a third is needed, something is wrong with the envelope itself; surface that).
-On **C**: proceed with the original prompt unchanged; Phase 0 reads it verbatim.
+For **A**, use the revised prompt as the envelope.
+For **B**, apply the user’s changes, show the prompt through (a) or (b), and ask again.
+Limit this to two revisions. If a third is necessary, report the problem with the envelope.
+For **C**, keep the initial prompt.
 
-On adopting an improved envelope (outcome **A** or **B**), update `progress.json.authorising_prompt_raw` to the adopted text so the field stays the canonical post-Phase-0 envelope. Outcome **C** needs no update — `graph.py start` at Phase -2 already wrote the original prompt verbatim.
-
-The improved-and-approved prompt (or the original, if C was chosen; or the auto-adopted improved prompt, in a full-autonomous envelope) is what Phase 0 treats as the authorisation envelope. Phase 0's `<thinking>` block quotes it verbatim from here.
+For **A** and **B**, update `progress.json.authorising_prompt_raw` with the adopted prompt.
+For **C**, keep the value `graph.py start` wrote in Phase -2.
+Phase 0 quotes the adopted envelope verbatim in its `<thinking>` block.
 
 ### `S0` — Phase 0: Read the authorisation envelope
 
-Before doing anything, ask: what did the user actually authorise?
+Before other work, identify the authority the user gave.
+Read the standing envelope one time at loop start and use it for the loop.
 
-The envelope is the standing instruction. Read it once at the start of the loop and keep it in mind.
-
-Before responding to the first user message in an authorised loop, do this in a `<thinking>` block (this is the one place in the skill where the slow-down pass is worth the ceremony — misreading the envelope is the root of most over-asking):
+Before the first response in a loop with user authority, use this `<thinking>` block:
 
 ```
 <thinking>
@@ -101,178 +147,236 @@ Before responding to the first user message in an authorised loop, do this in a 
 </thinking>
 ```
 
-Then respond.
+Then give your response.
 
 **Envelope examples:**
-- "Ship N PRs without asking" → full-autonomous. Includes deploys, post-deploy cleanup, follow-up tickets within the same theme. Merges are included only up to the live authority's `max_prs` and each needs an owner-signed receipt (the envelope class never mints either: `authority.py grant --max-prs N` plus `action_receipt_cli.py approve-action`). With no authority, or `max_prs` 0, the loop prepares the PR and asks the owner to mint a receipt.
-- "Fix this bug" → narrow-fix. Confirm before scope creep into adjacent files.
-- "Autonomous / human is dead" → full-autonomous. All routine sub-steps autonomous; only break the loop on verification failure, destructive/irreversible actions, or a merge/push-to-main the authority and receipt gate refuses (`authority_denied`, `max_prs_exceeded`, `no_receipt`).
-- "Help me debug" → diagnostic-only. Do not write code without explicit go-ahead.
 
-Match the confirmation cadence to the envelope class for the rest of the session — every "do you want me to..." inside an authorised envelope is a stall the user has to clear, and stalls cost more than the occasional over-reach you'd avoid by asking.
+- "Ship N PRs without asking" gives full-autonomous. It includes deploys, cleanup after deploy, and follow-up tickets for the same theme. A merge needs live authority, an owner-signed receipt, and an available slot in `max_prs`. Use `authority.py grant --max-prs N` and `action_receipt_cli.py approve-action`. The envelope class grants no authority or receipt. Without authority, or with `max_prs` 0, prepare the PR and tell the owner to mint a receipt.
+- "Fix this bug" gives narrow-fix. Check scope before changing nearby files.
+- "Autonomous / human is dead" gives full-autonomous. Do the usual steps without pauses. Stop on a verification error, an irreversible or destructive step, or a refusal to merge or push to `main`. The authority and receipt codes include `authority_denied`, `max_prs_exceeded`, and `no_receipt`.
+- "Help me debug" gives diagnostic-only. Do not write code without explicit permission.
+
+Use the envelope class to identify when to get confirmation.
+Do not stop for "do you want me to..." if the envelope gives authority for the step.
 
 ### `S0.4` — Phase 0.4: Surface the orchestrator's model cost to the user at loop launch
 
-**Token-burn rule (row 1 of 3).** The orchestrator cannot change its own model — `/model` is a user-typed slash command; nothing available to the orchestrator sets it. So the only executable action here is to tell the user. At loop launch — alongside Phase 0's envelope read, before Phase 1's plan — state once, in your own output, that this session's model bills every turn of the loop, and that switching it is theirs via `/model` before the loop gets long. Then continue; this is a notice, not a gate, never stall for a reply. Distinct from Phase 2.8's worker routing (spawned workers, not the orchestrator itself); given once at launch, not repeated per phase. See [model-routing.md](model-routing.md) for why the cost compounds.
+**Token-burn rule (row 1 of 3).** Only the user can change the orchestrator's model with `/model`. At launch, tell the user that this model bills each turn of the loop and that they can change it with `/model`. Give this notice one time during Phase 0 before the Phase 1 plan. Continue without a reply.
+
+Phase 2.8 assigns worker models. See [model-routing.md](model-routing.md) for how the cost grows.
 
 ### `S0.5` — Phase 0.5: Orchestrator operating rules (the conductor obeys its own rules)
 
-The orchestrator (main context) is subject to the same discipline it imposes on workers. Inside an active, incomplete loop, the two discipline Stop hooks — confidence-label and verify-loop — demote a would-be block to a model-visible warn (`additionalContext` on the Stop event) rather than stopping the turn outright; the discipline itself hasn't changed, the warn is the correction signal the orchestrator acts on next turn. Outside an active loop, and for worker output (SubagentStop), both hooks still block outright. Even at warn-level, a missed warn is still a cost — it's the cost this skill exists to keep to a minimum, just paid as a drifted transcript instead of a forced regeneration.
+Use the same reporting rules for the orchestrator and workers. The confidence-label and verify-loop hooks can give advice through `additionalContext` on Stop or SubagentStop. Correct the issue on the next turn. Without a stop row, the `loop_stall_guard` hook can block.
 
-Main context must, in its own output (not just in spawned-agent prompts):
-- Confidence-label every substantive status claim — `(verified)` / `(inferred)` / `(guess)` (same taxonomy as Phase 11).
-- Pre-tag any `## Did Not Verify` bullet that genuinely can't be checked, in the same turn it's written — an untagged bullet blocks the stop outside a loop and for workers, and is the first thing the in-loop warn will name.
-- Never narrate a claim about an artifact (PR merged, deploy live) without having run the check this turn (Phase 12).
-- Before ending any stopping turn inside an active loop, run `graph.py stop --category <hard-stop|approval-gate|awaiting-input|complete> --reason-code <code> --reason "<why>" <state> --session <id>` in the SAME turn — the hook releases only on that recorded row and blocks with `stop_row_missing` otherwise. Then end the turn with the rendering line `LOOP-STOP: <category> — <reason>` as the FINAL line, emitted together with the confidence-label and Did-Not-Verify requirements above: the final line is a rendering that hooks never read. Bundling all three matters more, not less, in the warn era: the confidence-label and verify-loop hooks no longer block the orchestrator's in-loop Stop turns, so nothing else forces those labels and DNV tags into the transcript — the bundle is what keeps them present for post-hoc audit, and one composed ending beats clearing one stop hook only to trip another (`loop_stall_guard` still blocks). Declaring `complete` means the loop is done: also set `progress.json` `status: "complete"` and run the Phase 13 teardown. The recorded row is all that's required — `loop_stop_counts` is HOOK-OWNED: the `loop_stall_guard` hook itself increments the matching category when it consumes the row; never write or compute this field yourself.
+- Apply `(verified)`, `(inferred)`, or `(guess)` to each substantive status claim as in Phase 11.
+- Tag each `## Did Not Verify` bullet you cannot check in the same turn as the bullet. Use `(unverifiable: <reason>)`.
+- Run the Phase 12 check before you claim a merge, live deploy, or other artifact in that turn.
+- Before an active loop stops, run `graph.py stop --category <hard-stop|approval-gate|awaiting-input|complete> --reason-code <code> --reason "<why>" <state> --session <id>`. Record it in the same turn. The Stop hook requires the row and blocks with `stop_row_missing` without it.
+
+Give the confidence labels and Did-Not-Verify content before the last line: `LOOP-STOP: <category> — <reason>`. The last line is for the user. The hook reads the row. Give the three parts together for the audit.
+
+For `complete`, follow the Phase 13 teardown to set `progress.json` `status: "complete"`. The `loop_stall_guard` hook increments the matching category in `loop_stop_counts` when it consumes the row. Do not write or calculate the counts.
 
 ### `S1` — Phase 1: State the plan in bullets, ask once
 
-Before the first agent spawn, write the full plan: phases, which agents per phase, parallel vs sequential, stop conditions. Use bullets. Keep it tight — the user reads this fast and decides whether to redirect.
+Before you start an agent, give a short plan in bullets. Name the phases and their agents, what runs in parallel or in sequence, and when work stops. The user can redirect the plan.
 
-Ask once: "Want me to execute this?" or "Confirm scope and I'll execute."
+Use one confirmation question: "Want me to execute this?" or "Confirm scope and I'll execute." If the user approves, continue through the envelope without more confirmation. If the user refuses, revise the plan one time and give the question again. Do not negotiate more than two times. If a third is necessary, report the problem with the envelope.
 
-If yes → execute silently through to the end of the envelope.
-If no → revise once based on feedback, then re-ask.
-
-Do not loop more than twice on plan negotiation. If the third pass is needed, something is wrong with the envelope itself — surface that.
-
-The harness choice itself — which loop skill drives this (`/coderails:agentic-loop` vs a flat loop vs a goal runner) — is part of the authorisation envelope (Phase 0), not a Phase 1 question. Resolve it once when reading the envelope and never re-surface it as "which approach do you want?".
+Select the loop harness from the Phase 0 envelope, such as `/coderails:agentic-loop`, a flat loop, or a goal runner. Do this one time when you read the envelope. Do not send "which approach do you want?" in Phase 1.
 
 ### `S2` — Phase 2: Pre-flight checks via spawned agents, not main context
 
-Pre-planning skills (`/coderails:planning-sequence`, `/coderails:premortem`, `/coderails:assumptions`, `/coderails:notchecked`, `/coderails:wiki-query`) belong in a delegated agent, not in main context.
+Delegate the pre-planning skills: `/coderails:planning-sequence`, `/coderails:premortem`, `/coderails:assumptions`, `/coderails:notchecked`, and `/coderails:wiki-query`.
 
-Spawn a single pre-flight agent, `subagent_type: coderails:preflight-scout` (a guarded role: `general-purpose` is refused as `role_mismatch`), after pasting its `begin-wave` envelope and sections, whose prompt includes:
-- The plan from Phase 1
-- An instruction to invoke each relevant skill via its `Skill` tool call
-- An instruction to return one consolidated report (plan-sequence findings + premortem failure modes + assumptions inventory + wiki findings)
+Start one agent with `subagent_type: coderails:preflight-scout`. The role uses guard checks. The gate refuses `general-purpose` with `role_mismatch`. Paste the `begin-wave` envelope and sections first. Then include:
 
-**Never substitute a generic agent here.** The pre-flight stage requires grounded risk identification from actual codebase state — a generic agent would re-derive the premortem and planning logic inline, fragmenting discipline across workers.
+- The Phase 1 plan.
+- An instruction to invoke each applicable skill with the `Skill` tool.
+- An instruction to give one report with planning results, premortem problems, assumptions, and wiki results.
 
-Include `/coderails:wiki-query` in the pre-flight agent's skill list, scoped to the **whole plan theme** (not per-PR). The query is something like: "What does the wiki cover about [overall theme of the agentic loop]? Identify cross-PR constraints, gaps, superseded decisions, and anything the plan assumes but isn't enforced in code." This pre-empts the per-PR `/coderails:wiki-query` that `/coderails:workflow` Phase 2 runs — see Phase 9 for why per-PR wiki steps are suppressed inside this loop.
+Use the `default` role here, before Phase 2.8. This controls cost for work that runs skills and makes no architecture decisions. The guarded scout must check the actual code for risks. Do not use a generic agent.
 
-**Retro intake.** The pre-flight agent additionally reads the generated `standing-orders.md` view (or `lessons.py query`) at the repo-key dir (derive it as the grandparent of the path printed by `hooks/scripts/lib/agentic_loop_path.py` — i.e. `dirname` of `dirname` of that path) and the last N=5 `retro.json` files under `<repo-key-dir>/*/retro.json` (mtime-sorted). It returns (a) premortem entries seeded from OBSERVED past failure modes and (b) a "carry into worker prompts" list of applicable lessons. Intake is additive-only: it may add cautions, assertions, and premortem entries; it may never relax a gate, skip a phase, or pre-justify an eval amendment. Gate changes remain human-owned. First-loop no-op: no retros + no overlay → skip silently, not an error.
+Include `/coderails:wiki-query` for the full plan theme. For example, use "What does the wiki cover about [overall theme of the agentic loop]? Identify cross-PR constraints, gaps, superseded decisions, and anything the plan assumes but isn't enforced in code." This supplies the wiki read from Phase 2 of `/coderails:workflow` for the full loop. See Phase 9 for the rule that skips individual PR wiki steps.
 
-**Primitive-contract read (mandatory when the plan calls a primitive in a non-standard way).** If the plan calls a lock, queue, transaction, or other shared primitive in any of: nested calls, recursion, parallel from same process, re-entered from the same caller — the pre-flight agent MUST read the primitive's source and document its contract: raise vs. return-bool semantics, reentrancy (PK collision behaviour), owner identity, expiry/steal logic. The schema may have been written before anyone read the primitive's internals. Past failure: a "wrap both sites with a DistributedLock" schema was impossible — the lock's `attribute_not_exists(PK)` semantics are non-reentrant and the sites were nested, not parallel; only reading the primitive's source caught it.
+**Read the retros.** Read the `standing-orders.md` view or run `lessons.py query` at the repo-key directory. Use `dirname` of `dirname` of the path from `hooks/scripts/lib/agentic_loop_path.py`. Read the last N=5 `retro.json` files at `<repo-key-dir>/*/retro.json` by mtime. Give observed problems for the premortem and a "carry into worker prompts" list of applicable lessons.
 
-Spawn this pre-flight agent at the `default` role — it's running skills, not making architectural decisions, and `default` controls cost. (One of the two assignment sites Phase 2.8 doesn't cover — this agent runs before 2.8 exists in the sequence, so it gets its role inline, here.)
+You can add cautions, assertions, and premortem entries. Do not relax a gate, skip a phase, or pre-justify an eval change. Only the user can change gates. If there are no retros or overlay for the first loop, skip this read without an error.
 
-**Clean-base check (mandatory orchestrator action in main context, before ANY worker is spawned).** First check whether `origin` exists. When it does, run `git fetch origin`, then `git log --oneline origin/main..main` and `git status --short`; the base ref is `origin/main`. Without `origin`, run `git log --oneline main..HEAD` and `git status --short`; the base ref is `main`. If the current branch carries commits the selected base ref does not, or has uncommitted/untracked files, the base is DIRTY — a parallel session (or an earlier uncommitted edit) has polluted it. When the base is dirty:
-- NEVER let a worker branch off the current checkout. Every worker MUST create its worktree via `superpowers:using-git-worktrees`, which accepts a declared base ref — the orchestrator must state the selected base ref explicitly, by name, in the worker prompt: use `origin/main` when `origin` exists or `main` otherwise; never use HEAD. This keeps worktree mechanics (native-tool detection, ignore-verification, directory selection) on the shared skill instead of Phase 3 reinventing them inline, while the selected-base-ref requirement travels through the skill's own declared-base-ref mechanism rather than being asserted outside it.
-- Carry the foreign file names into worker prompts as an explicit "these are not yours — never stage, commit, or include them" exclusion list.
+**Check the contract of a shared primitive.** If the plan nests calls, recurses, uses parallel in-process calls, or re-enters from the same caller, read the primitive's source. This applies to locks, queues, transactions, and other shared primitives. Record if it throws an error or gives a Boolean. Record reentrancy and PK collision behavior, owner identity, expiry, and steal logic.
 
-Do this check even when the base looks clean — two cheap git reads pre-empt a worker's PR silently inheriting another session's WIP from a dirty base, which otherwise only surfaces at the merge gate.
+A previous plan said to "wrap both sites with a DistributedLock". Its `attribute_not_exists(PK)` semantics prevented reentrancy, and the calls were nested. The source showed the defect.
+
+**Check the base before starting workers.** The orchestrator checks if `origin` is available. If so, run `git fetch origin`, then `git log --oneline origin/main..main` and `git status --short`. Use `origin/main` as the base ref. Without `origin`, run `git log --oneline main..HEAD` and `git status --short`. Use `main` as the base ref.
+
+The checkout is dirty if the current branch has commits missing from the base, or files that are uncommitted or untracked. Check it regardless of how it looks. If it is dirty:
+
+- Do not let a worker branch from the current checkout. Use `superpowers:using-git-worktrees`. Give the selected ref by name in the worker prompt: `origin/main` with `origin`, or `main` without it. Do not use HEAD. Use the skill's declared-base-ref, native-tool, ignore, and directory checks.
+- List other work as "these are not yours — never stage, commit, or include them". Name the files in the worker prompt.
 
 ### `S2.5` — Phase 2.5: Resolve design forks before execution, not during it
 
-`S2.5` and `S2.6` are sibling graph branches after `S2`: when both triggers
-exist, dispatch their scouts in one wave. They reconverge at `J2`; the
-orchestrator validates both results and performs the single state write before
-releasing `S2.7a`.
+`S2.5` and `S2.6` are siblings after `S2`.
+If the two conditions apply, start the scouts in one wave.
+Their results go to `J2`.
+The orchestrator checks the two results and writes the loop data in one step before it releases `S2.7a`.
 
-If the plan contains an unresolved architectural choice (which primitive, which topology, which of several viable shapes), resolve it BEFORE entering Phase 3 — not through live back-and-forth once workers are spawning.
+If the plan has an open decision about the primitive, topology, or design shape, resolve it before Phase 3.
+Start one guarded `subagent_type: coderails:design-scout`.
+Paste its `begin-wave` envelope and sections first.
+Use the Phase 2.8 table to set the role here.
+Use `default` for a bounded decision between known designs.
+Use `frontier` from the start for a genuinely ambiguous investigation, as in "Investigations get frontier FIRST".
 
-Spawn one design agent, `subagent_type: coderails:design-scout` (guarded role; its `begin-wave` envelope and sections are pasted first), role assigned per Phase 2.8's table: `default` when the fork is a bounded choice between well-understood shapes; `frontier` from the start when the fork is a genuinely ambiguous investigation (Phase 2.8's "Investigations get frontier FIRST" states why). This agent runs before Phase 2.8's per-loop task routing, so it gets its role inline, here, using the same table. Its prompt requires:
-- Read the actual code paths the alternatives touch — not assumptions about them.
-- Build a head-to-head of the viable shapes with the real constraint each one hits.
-- Return ONE recommended shape, the rejected alternatives with the reason each lost, and the single fact that would flip the recommendation.
-- Apply `/superpowers:brainstorming`'s design-quality discipline *without* its human-approval gates: weigh the viable approaches against each other rather than taking the first that works, cut anything speculative (**YAGNI**), and prefer the shape whose units stay small and independently testable (**design-for-isolation**). The loop can't run brainstorming itself (its steps block on a human — see Phase 2.7); this reuses its *thinking*, not its control flow.
+Include the design-scout instructions in the prompt and use an available native role. Tell the scout to:
 
-**Carry the design-scout instructions explicitly.** Use an available native role and require actual code-path reading and tradeoff evidence. A custom label is not proof that these actions occurred.
+- Read the actual code paths that each design changes.
+- Compare viable designs against the constraints each one has.
+- Recommend one design. Name the alternatives and why they did not win. Give the one fact that can change the recommendation.
+- Apply the design checks in `/superpowers:brainstorming` without its approval gates. Compare the designs. Remove speculative work (YAGNI). Prefer small units that you can test independently (design-for-isolation).
 
-**Scout spawn refusal fails closed.** If the design scout (or any independent reviewer) cannot be spawned (a capacity refusal, or a resumed loop's stale scout reference), do not silently downgrade to the orchestrator's or a worker's own read. Retry with a fresh `Agent` call (Claude has no `task_name`; nothing is bound by name); if it keeps being refused, record the node `failed` with `graph.py record-wave` and halt. Without an independent scout the loop HALTS for the human: do not continue past the refusal. A `non_independent` fallback requires explicit human approval. After the failed attempt, ask the owner: `Coderails: Approve a non-independent design-scout fallback for loop <loop_id>, node S2.5, attempt <next_attempt>? Reply approve or deny.` Replace the two placeholders with the current values. The next direct user reply must be `approve`. The native record command checks both transcript messages and refuses a missing or different reply. Only then record `S2.5` as `skipped` with evidence beginning `non_independent: human approved` and run `graph.py record-decision` with that phase and decision text. A `non_independent` read never counts as an independent review or as `done`. A no-fork skip uses `no_design_fork: <reason>` and needs no scout spawn. Record it only before any scout attempt. If no existing path is retired, skip the sibling with `no_retired_path: <reason>`; the two skip records let `J2` release.
+Check the scout’s code reads and tradeoffs. A role label alone does not show that the scout did it.
 
-For that decision, read the current loop ID and revision. Pass `--loop-id` and `--revision` to `record-decision`.
+**Stop on scout spawn refusal.** If the design scout or a reviewer cannot start, do not use an orchestrator or worker read as the scout.
+If capacity or a stale scout ID prevents the call, retry with a new `Agent` call. Claude has no `task_name` binding.
+If the call is refused again, record the node as `failed` with `graph.py record-wave`.
 
-**What consumes the thread limit.** Every spawned agent thread, including completed and idle ones, counts until it is retired. Before a scout spawn, retire completed threads with the provider's close tool where one exists; otherwise nothing frees the slot, so record the limit in the refusal and halt rather than assume a thread was freed.
+If no scout can do the check independently, stop the loop and wait for the user.
+A `non_independent` fallback needs explicit user approval.
 
-What happens with that recommendation depends on the envelope class (Phase 0) — this phase resolves the fork, it does NOT add a new human gate:
-- **Full-autonomous ("autonomous / ship N PRs without asking"):** auto-adopt the design agent's recommendation. Read the current loop ID and revision. Run `graph.py record-decision` with `--loop-id`, `--revision`, phase `2.5`, the chosen shape as `--decision`, and the flip condition as `--flip-condition`. Note it at the next approval gate. Do not stall for sign-off; the loop proceeds under Phase 0.
-- **Narrow-fix / diagnostic / ambiguous envelope:** surface the one recommendation as a single decision — "here's the shape, here's why, approve or redirect" — bounded like Phase 1 (ask once, don't loop), then enter Phase 3.
+After you record the refused scout call, send the owner this question verbatim:
+`Coderails: Approve a non-independent design-scout fallback for loop <loop_id>, node S2.5, attempt <next_attempt>? Reply approve or deny.`
+Replace the two placeholders with the current values. The next direct user reply must be `approve`.
+The native record command checks the two transcript messages. It refuses a missing or different reply.
 
-Either way the fork is closed by ONE design artifact before building starts — the loop does not start half-built while the design is still being argued turn by turn.
+Only after that reply, record `S2.5` as `skipped` with an `evidence` prefix of `non_independent: human approved`.
+Run `graph.py record-decision` with that phase and decision text.
+Read the current loop ID and revision and give `--loop-id` and `--revision`.
+A `non_independent` read cannot count as a check by a different agent or as `done`.
 
-**Where the design artifact is written — never onto local `main`.** Any phase that produces a file — a design investigation page, a recon note, a `progress.json` — writes it *outside the code repo's working tree*: to the wiki vault (`config.wiki_path`) if it is wiki-bound, otherwise a temp dir outside the repo. It is promoted into the PR worktree only at build time (Phase 3); it never lands on local `main`, where an untracked file silently pollutes the base every worker branches from — exactly the contamination the Phase 2 clean-base check then has to catch downstream. The recon/design phase is logically read-only with respect to the code repo; keep it literally so.
+If there is no design fork, record `no_design_fork: <reason>` before a scout call.
+If no path retires, use `no_retired_path: <reason>` for the sibling.
+The skip records let `J2` release.
+
+**Agent limit.** Each agent thread uses a slot until the provider closes it. This includes completed and idle threads.
+Before you start a scout, close completed threads with the provider's close tool where one exists.
+If the tool cannot free a slot, report that limit and stop.
+
+Use the envelope class from Phase 0:
+
+- **Full-autonomous ("autonomous / ship N PRs without asking").** Auto-adopt the recommendation. Read the loop ID and revision. Run `graph.py record-decision` with `--loop-id`, `--revision`, and phase `2.5`. Give the design as `--decision` and its flip condition as `--flip-condition`. Report it at the next approval gate. Continue without waiting for sign-off, as in Phase 0.
+- **Narrow-fix, diagnostic, or ambiguous.** Give one decision: "here's the shape, here's why, approve or redirect". Limit the discussion as in Phase 1, then go to Phase 3.
+
+Use one design artifact to resolve the fork before build work.
+Write a wiki-bound artifact to the vault in `config.wiki_path`.
+For other design or recon files, use a temporary directory that is not in the repo’s working tree.
+Do not write those files to local `main`, where an untracked file can change a worker’s base.
+Move a PR deliverable into its worktree only in Phase 3.
+Keep recon and design read-only for the code repo.
 
 ### `S2.6` — Phase 2.6: Resolve disposition before replacement work (clean-break vs preserve-compat)
 
-When the Phase 1 plan contains a work-unit that **retires an existing code path** — there is a *named thing being replaced* (a function, module, endpoint, schema, or flag the change removes from use) — resolve its **disposition** once, up front, before the first spawn. This is the migration analogue of Phase 2.5's design fork: asked once, not re-litigated.
+If a unit retires a named function, module, endpoint, schema, or flag, decide how to retire it one time before the first worker.
+Use `subagent_type: coderails:disposition-scout` as the guarded sibling of `S2.5`.
+Give it the Phase 1 plan and named paths.
+It gives one result for each retirement unit and does not write loop data.
+If no path retires, record the skip and let `J2` release without this branch.
 
-When triggered, run the disposition scout (`subagent_type: coderails:disposition-scout`, a guarded role) as the `S2.6` sibling of `S2.5`,
-giving it the Phase 1 plan and named retirement paths. It returns one result per
-retirement unit and writes no loop state. If no path is retired, record the
-conditional skip and let `J2` release without this branch.
+Use this check only if a named path goes out of use.
+A call to a previous path or a wrapper for it does not retire it.
+Use "what named thing does this remove?" as the test. "is this a migration?" is too broad.
 
-**Trigger precisely.** The fork fires only when an existing path is being *retired*, not merely when new code calls or wraps old code. If nothing is being removed from use, there is no disposition question. A concrete "what named thing does this remove?" test is deliberately harder to self-exempt from than a vague "is this a migration?".
+Use one of these decisions:
 
-**The fork, asked once:**
-- **clean-break** — the old path is removed in the same unit. No shims, bridges, adapters, or compatibility flags remain.
-- **preserve-compat** — the old path is kept behind a shim, justified by a **specific named blocker**: a named consumer still on the old path that cannot migrate in this unit. A generic justification ("safer", "less risky", "to avoid breakage") is NOT sufficient and must be rejected — name the consumer or choose clean-break.
+- **`clean-break`.** Remove the previous path in the same unit. Keep no shim, bridge, adapter, or compatibility flag.
+- **`preserve-compat`.** Keep the path behind a shim only for a named consumer that cannot migrate in this unit. "safer", "less risky", and "to avoid breakage" do not name a consumer. Name the consumer or use `clean-break`.
 
-**clean-break is the default recommendation for a retirement.** Recommend clean-break unless a specific named blocker exists. This is deliberate: the model's untold prior leans toward preserving the old path because removal feels destructive, and that prior is exactly what silently doubles migration work. Requiring a named blocker stops the prior being laundered into the human's explicit approval — where it would become invisible to the Phase 13 counter.
+Recommend `clean-break` by default.
+A model can keep a previous path because removing it feels destructive.
+This can double migration work.
+The named blocker keeps that decision in view for Phase 13.
 
-**What happens with the answer depends on the envelope class (Phase 0)** — this resolves the fork, it does NOT add a human gate:
-- **Full-autonomous:** adopt clean-break by default, record it, proceed. Surface a preserve-compat choice (with its named blocker) at the next approval-gate; do not stall.
-- **Narrow-fix / diagnostic / ambiguous:** surface the disposition as one decision — "clean-break recommended, here's why" — bounded like Phase 1 (ask once, don't loop).
+Use the envelope class from Phase 0:
 
-**Record** each work-unit disposition with `graph.py add-unit ... --disposition clean-break` or `--disposition preserve-compat --named-blocker <consumer> --removal-ticket <ticket>`. The CLI refuses an incomplete preserve-compat record; `graph.py disposition-audit` checks it again. Then read the current loop ID and revision and use `graph.py record-decision` with `--loop-id`, `--revision`, phase `2.6`, the decision, and `--unit` to append one hash-chained decision row. Never append to `decisions_absorbed` by hand.
+- **Full-autonomous.** Use `clean-break` by default. Record it and continue. If you select `preserve-compat`, report the named blocker at the next approval gate. Do not wait for sign-off.
+- **Narrow-fix, diagnostic, or ambiguous.** Give one decision: "clean-break recommended, here's why". Limit discussion as in Phase 1.
+
+Record each unit with `graph.py add-unit ... --disposition clean-break` or `--disposition preserve-compat --named-blocker <consumer> --removal-ticket <ticket>`.
+The CLI refuses an unfinished preserve-compat record.
+The `graph.py disposition-audit` command checks it again.
+
+Read the current loop ID and revision.
+Use `graph.py record-decision` with `--loop-id`, `--revision`, phase `2.6`, the decision, and `--unit`.
+It appends one hash-chained row.
+Do not write to `decisions_absorbed` by hand.
 
 ### `S2.7` — Phase 2.7: Commit the resolved design to durable `spec.md` and `plan.md`
 
-Thresholds live in `packages/graph-semantics/policy.yaml` and are rendered here by `python3 scripts/gen_graph_docs.py` (edit the policy, never this block):
+The command `python3 scripts/gen_graph_docs.py` reads the thresholds from `packages/graph-semantics/policy.yaml`. Edit the policy to change the table.
 
-<!-- BEGIN GENERATED graph-spec:thresholds -->
+<!-- START GENERATED graph-spec:thresholds -->
 | Policy key | Value | Meaning |
 |---|---|---|
-| `design_doc_min_units` | `3` | `S2.7a`/`S2.7b` (spec.md and plan.md) fire only for a loop with at least this many work units or a cross-unit dependency; the same line Phase 3 draws between one agent and a spawned team |
-| `loop_evals_min_units` | `1` | `S2.7c` loop-scope evals are required from this many work units (`loop_dispatch_guard` and `loop_state_guard` still hard-code the floor of 1: this key documents it, no hook reads it yet) |
-| `retry_max` | `5` | default per-node retry bound (the pure core caps it at 5) |
-| `repair_attempts_max` | `5` | distinct repair attempts per failure (`U5-repair[i]` procedure bound) |
-| `graph.profile` | `full` | what `graph.py instantiate` builds when `--profile` is absent: `units-only` is the unit lane `U3[i]` plus `J12-all-units`; `full` is every node and join in the table (guards are conditional procedures) |
+| `design_doc_min_units` | `3` | Run `S2.7a` and `S2.7b` if the loop has this number of units or more, or if units depend on each other. Phase 3 uses the same conditions to select one agent or a team. |
+| `loop_evals_min_units` | `1` | Run the `S2.7c` loop evals if the loop has this number of work units or more. `loop_dispatch_guard` and `loop_state_guard` use a fixed minimum of 1. No hook reads this key. |
+| `retry_max` | `5` | Default limit for retries for one node. The graph core sets a maximum of 5. |
+| `repair_attempts_max` | `5` | Limit for different repairs to try for each problem in `U5-repair[i]`. |
+| `graph.profile` | `full` | `graph.py instantiate` uses this value if you do not specify `--profile`. `units-only` includes `U3[i]` and `J12-all-units`. `full` includes all nodes and joins in the table. Each guard has its own condition. |
 <!-- END GENERATED graph-spec:thresholds -->
 
-The **2.7a/2.7b** design-doc sub-steps fire ONLY when the loop has **at least `design_doc_min_units` work-units (table above) or a cross-unit dependency** — the same line Phase 3 draws to choose a spawned team over a single agent. A 1–2-unit fix that Phase 3 routes to a single agent needs no separate design docs: the envelope (Phase 0) + `progress.json` + the one self-contained task description already carry everything. If the loop is below that threshold, skip 2.7a/2.7b.
+Run **2.7a and 2.7b** only if the loop has `design_doc_min_units` units or more, or a cross-unit dependency. Phase 3 uses the same threshold for a team. For 1–2 units with one agent, the envelope, `progress.json`, and the full task prompt carry the design. Skip 2.7a and 2.7b below the threshold.
 
-**2.7c and 2.7e carry their own independent triggers and are NOT gated by the `design_doc_min_units` threshold above** — a loop can skip 2.7a/2.7b entirely and still owe 2.7c and/or 2.7e. 2.7c fires on either of its own two stated triggers (verification_level-2-eligibility on work-unit count, or an irreversible-surface trigger, independently of each other and of 2.7a/2.7b). 2.7e fires for ANY loop with an executable surface, whatever its unit count, even when the rest of Phase 2.7 is skipped.
+Run **2.7c** if the unit count or an irreversible surface triggers it. Run **2.7e** for a loop with an executable surface. These conditions apply if the loop skips 2.7a and 2.7b too.
 
-When 2.7a/2.7b fire, `J2` first joins the triggered Phase 2.5 and 2.6
-results. The orchestrator validates both and performs one state update; a
-skipped branch is recorded as skipped. Then run 2.7a and 2.7b in order. The
-independent evidence branches 2.7c, 2.7d, and 2.7e may run in the same wave
-when their own inputs are ready:
+For 2.7a and 2.7b, first release `J2` with the Phase 2.5 and 2.6 results. Check the two results and update the graph in one write. Record a skipped branch as skipped. Then run 2.7a followed by 2.7b. Run 2.7c, 2.7d, and 2.7e in the same wave if their inputs allow it.
 
-**2.7a — write `spec.md`.** Write a durable `spec.md` to the loop-state dir — the path printed by the loop-state path helper (`hooks/scripts/lib/agentic_loop_path.py`, run at Phase -2), next to `progress.json`, outside the code repo, **not committed** (loop state, not a PR deliverable). This is a **commit of design the loop has already resolved**, not interactive brainstorming — a loop cannot brainstorm with itself; the forks were closed at 2.5 and 2.6. Record:
-- the authorisation envelope verbatim (Phase 0);
-- the design-fork decision and its flip-condition (Phase 2.5);
-- the disposition decision(s) and any named blocker (Phase 2.6);
-- the success criteria — what "done" means for the whole loop;
-- the high-level work-unit boundaries (the detailed decomposition is Phase 2.7b's plan).
+**2.7a — Write `spec.md`.** Write it next to `progress.json` in the loop directory that `hooks/scripts/lib/agentic_loop_path.py` prints in Phase -2. This directory is external to the code repo. Do not commit the file. Record the design from Phases 2.5 and 2.6. Include:
 
-The `spec.md` is loop state, keyed to this orchestrator's run, exactly like `progress.json` — not a shareable design record. When ad-hoc loop work genuinely needs handing to a human, that is what `/coderails:handoff` is for.
+- The authorisation envelope verbatim (Phase 0).
+- The design decision and its flip condition (Phase 2.5).
+- Each retirement decision and its named blocker, if applicable (Phase 2.6).
+- The success criteria for "done" for the loop.
+- The boundaries of each work unit. Phase 2.7b gives the task steps.
 
-**2.7b — write `plan.md` via `/superpowers:writing-plans`.** Produce a durable `plan.md` in the loop-state dir (next to `spec.md` and `progress.json`, outside the repo, not committed) by invoking **`/superpowers:writing-plans`** — the same one-line skill-reference idiom Phase 3/3a use for `/superpowers:test-driven-development`.
+The file belongs to this orchestrator’s run, like `progress.json`. Use `/coderails:handoff` if the user needs to continue the work.
 
-`plan.md` is the **static SSOT** for the decomposition; `progress.json` is the **dynamic position** against it. The plan is **consumed, not write-only**, in both directions:
-- **Phase 3 builds its task list directly from `plan.md`** — the shared task list (`TaskCreate`/`TaskUpdate`) and the Phase 3/3a worker descriptions derive from the plan's tasks, so the two are consistent by construction rather than re-derived from conversation.
-- **After any compaction the orchestrator re-reads `plan.md` to recover *scope* (what to build)** the same way it re-reads `progress.json` to recover *position* (where we are).
+**2.7b — Write `plan.md` with `/superpowers:writing-plans`.** Write the plan next to `spec.md` and `progress.json` in the loop directory. Do not commit it. Invoke the skill explicitly, as Phase 3 or 3a invokes `/superpowers:test-driven-development`.
 
-**2.7c — generate and freeze loop-scope evals via `/coderails:task-evals`.** Alongside `spec.md`/`plan.md`, invoke **`/coderails:task-evals`** (scope: `loop`) to produce a frozen `evals.json` defining the loop's end-state success evals. This sub-step fires for EVERY loop, regardless of unit count — it is NOT gated behind 2.7a/2.7b's `design_doc_min_units`-or-cross-unit-dependency threshold, and does not wait on "reaching Phase 2.7" in that sense: `loop_dispatch_guard`/`loop_state_guard` gate every loop with **work_units >= 1** on a frozen/graded loop-scope `evals.json`, so a 1–2-unit loop must run 2.7c even when it skips 2.7a/2.7b entirely, or its first worker dispatch deadlocks against a gate that never got a chance to be satisfied. Two triggers fire this sub-step, stated explicitly because they're independent: (1) verification_level-2-eligibility on work-unit count alone, which applies to any loop with **work_units >= 1** (2.7c itself is required starting at that same floor); (2) an irreversible-surface trigger (publish, deploy, migration, data deletion, external send), independently of unit count. The frozen `evals.json` (scope: `loop`) lives beside `progress.json`/`spec.md`/`plan.md` in the loop-state dir — same "never committed, outside the repo" rule as those two files. Grading this file at loop end is `post_evals.py grade-loop`'s job, not the orchestrator's — see Phase 13. **The frozen-and-ungraded file is itself checked at dispatch**: `loop_dispatch_guard` refuses every graph-bound implementation dispatch regardless of native worker role in a **>=1-unit** loop until a loop-scope `evals.json` exists that is owned by this session and loop, carries a non-blank `verification_justification`, and holds at least one P0 in an array-typed `.evals` — the FROZEN state. It does **not** demand a grade at dispatch, and must not: at freeze time every P0 is still `pending` with empty evidence, so `grade-loop` correctly refuses the file (`validate_structure` check 5). Do not run `grade-loop` early to satisfy the dispatch gate — a suite graded before the build is either a refusal or a rigged pass. Completion is the opposite: Phase 13, `loop_state_guard`, and `loop_stall_guard` accept only a genuinely graded GO (or a graded verification_level-0 exemption), so a FROZEN suite opens dispatch and still blocks `complete`. The eval author anchors goal state on `progress.json`'s `authorising_prompt_raw`, per `task-evals`'s oracle-independence rule.
+Use `plan.md` as the fixed source for how to divide the work. Use `progress.json` for the current position.
 
-**2.7d — freeze a PR-scope `evals.json` per work-unit, in the same invocation.** The same `/coderails:task-evals` run ALSO produces one **frozen** PR-scope `evals.json` (scope: `pr`) for every work-unit that will carry a PR. This is a **separate artifact** from 2.7c's loop-scope file, not a view of it, and freezing 2.7c alone does not satisfy it: `scripts/merge.py` hard-gates every merge on a SHA-bound **pr-scope** eval comment with `result=GO` — fail-closed, no config opt-out. A loop that freezes only loop-scope evals passes Phase 3 and Phase 4b unimpeded and then meets an unsatisfiable merge gate, with the implementation already built.
+- In Phase 3, make the task list with `TaskCreate` and `TaskUpdate` from `plan.md`. Use the same tasks for the worker descriptions in Phases 3 and 3a. Do not derive them again from the conversation.
+- After compaction, read `plan.md` for scope and `progress.json` for position.
 
-Each unit's PR-scope eval ref then travels into its worker prompt the same way disposition travels under Phase 3's existing "Disposition — ... copied **verbatim** into the task description" bullet: a ref recorded only in `progress.json`/`plan.md` and absent from the worker prompt does not exist for the worker.
+**2.7c — Freeze the loop evals with `/coderails:task-evals`.** Use scope `loop`. Make a frozen `evals.json` that defines the success conditions at loop end. Run it for `work_units >= 1`, the unit floor for verification_level-2 eligibility. Run it for an irreversible surface regardless of count. Examples are publish, deploy, migration, data deletion, or external send.
 
-**The timing cannot be recovered later, which is why it is a freeze and not a to-do.** Freeze-before-build is `task-evals`' rule 1; a pr-scope suite authored at merge time cannot honour it, because its author already knows what the implementation does. When it has been missed, the only honest repair is: author them late, stamp `frozen_at` at the **real** authoring time (never backdate — a backdated freeze is the one edit that turns a disclosed gap into a rigged gate), disclose the gap in `verification_justification`, and report it at Phase 13. The GO then rests on evidence the suite genuinely discriminates — an executed negative control, or a run that actually failed against a real defect — never on the timestamp. That repair is a **disclosed gap, not a pass**; its availability is not a licence to skip the freeze.
+Run 2.7c for 1–2 units if the design steps do not apply. Do not wait for "reaching Phase 2.7" through the design-doc steps. Without 2.7c, `loop_dispatch_guard` blocks the first graph-bound implementation call. Keep this file next to `progress.json`, `spec.md`, and `plan.md` in the loop directory. Apply the "never committed, outside the repo" rule. At loop end, use `post_evals.py grade-loop` as in Phase 13.
 
-Past failure (loop 0d3fb487, 2026-07-16): this sub-step was a trailing sentence under a heading that said "loop-scope", carrying no freeze obligation, no timing, and no mention of the merge gate. The loop froze loop-scope evals at its Task 1 — correctly, pre-build — and never registered that the pr-scope half was missing until `merge.py` refused the merge, by which point the work was built, merged-ready, and live-fired. The gate caught what the process missed; that is the gate working, not the process working.
+For dispatch, `loop_dispatch_guard` checks the frozen but ungraded file for loops with one or more work units. It checks all native worker roles. The file must belong to this session and loop. It must have a non-blank `verification_justification` and one or more P0 entries in an array `.evals`.
 
-**2.7e — freeze `proof.json` beside `evals.json`, authored by a separate blind agent, `subagent_type: general-purpose` with explicit instructions from `agents/proof-author.md`.** For every loop with an executable surface, spawn a SEPARATE agent whose input is `authorising_prompt_raw` plus `session_id` and `loop_id` (all three verbatim from `progress.json`, passed as explicit dispatch inputs — not a grant to read `progress.json` itself) plus any pre-implementation docs that prompt itself references — never the plan, spec, design decisions, or this conversation. By Phase 2.7c the orchestrator has already seen the plan, so its blind spot already exists; this generalises `task-evals`' grader-independence to the AUTHOR, not just the grading. That agent writes `proof.json` (schema `{"schema_version":2,"session_id","loop_id","frozen_at","frozen_sha","proofs":[{"id","claim","cmd","expect","status":"pending"}]}`) beside `progress.json`/`evals.json` — same "never committed, outside the repo" rule.
+At freeze, each P0 is `pending` with empty `evidence`. This can open dispatch. Do not run `grade-loop` before build. The `validate_structure` check 5 refuses a pending suite. For `complete`, Phase 13, `loop_state_guard`, and `loop_stall_guard` need a grader’s verdict of `GO` or a graded verification_level-0 exemption. The eval author derives the goal from `authorising_prompt_raw` in `progress.json` as specified by `task-evals`.
 
-**Preserve the blind-input contract explicitly.** Include the proof-author instructions in the native worker prompt, with only the authorized inputs above. A custom label does not establish independence.
+**2.7d — Freeze PR evals for each work unit in the same invocation.** For each unit with a PR, make a frozen `evals.json` at scope `pr`. This file differs from the loop-scope file in 2.7c. The `scripts/merge.py` gate checks each merge for a SHA-bound PR eval comment with `result=GO`. It blocks without that comment and has no config opt-out. Loop evals alone let Phases 3 and 4b start but cannot clear the merge gate.
 
-Each `cmd` must be a self-contained shell command. The controller runs it unchanged through `proof.py run`. The command starts in a private copy of committed `HEAD`. The controller refuses a committed tree that has a symlink. Use relative paths for repository files. It cannot read the original checkout. It can read other host files, write only below its fresh `TMPDIR`, and use no network. Put temporary files below `TMPDIR`. Keep command substitution out of gated script invocation lines. Exclude destructive patterns. This applies to every loop with an executable surface, even when the design document threshold does not apply.
+Copy the PR eval pointer verbatim into the worker prompt, as for the "Disposition — ... copied **verbatim** into the task description" rule. Do not keep it only in `progress.json` or `plan.md`.
 
-For a loop with no executable surface, leave `proof.json` absent. First record the reason with `record-decision` in `decisions_absorbed`. Get the current revision from `inspect`. Then run:
+Freeze the PR suite before build as required by `task-evals` rule 1. A suite written at merge time cannot meet that rule because the author knows the implementation. If you missed the freeze, write the suite and set `frozen_at` to the actual time of writing. Do not backdate it. Disclose the late freeze in `verification_justification` and Phase 13.
+
+Use a negative control that ran or a run that found a defect. The grade `GO` comes from a test that distinguishes correct and incorrect results. Disclose that the freeze came after build. Do not use it as permission to skip the freeze.
+
+In loop 0d3fb487 on 2026-07-16, a sentence at the end of "loop-scope" did not specify the PR freeze, timing, or merge gate. Task 1 froze the loop evals before build. The loop did not freeze the PR evals. The loop found this only when `merge.py` refused. At that point the work was built, the other merge checks were clear, and it had run live.
+
+**2.7e — Freeze `proof.json` with a different author.** For each loop with an executable surface, start a different `subagent_type: general-purpose` agent with the instructions from `agents/proof-author.md`. Give it `authorising_prompt_raw`, `session_id`, and `loop_id` verbatim as explicit inputs. Do not give it access to read `progress.json`. Give only the pre-implementation docs that the prompt itself cites. Do not give it the plan, spec, design decisions, or conversation.
+
+At Phase 2.7c, the orchestrator has read the plan. This uses the `task-evals` rule for a grader that works independently and also applies it to the author. A role label does not show which inputs the agent got. Put the proof-author instructions and only the permitted inputs in the native worker prompt.
+
+The agent writes `proof.json` next to `progress.json` and `evals.json` in the loop directory. Do not commit it. Use schema `{"schema_version":2,"session_id","loop_id","frozen_at","frozen_sha","proofs":[{"id","claim","cmd","expect","status":"pending"}]}`.
+
+Each `cmd` is a self-contained shell command. The controller runs it unchanged through `proof.py run` in a private copy of committed `HEAD`. The controller refuses a committed tree with a symlink. Use relative paths for repo files. The proof cannot read the initial checkout. It can read other host files, write only in its new `TMPDIR`, and use no network.
+
+Put temporary files in `TMPDIR`. Do not use command substitution in gated script invocation lines. Do not use destructive patterns. Apply this to each loop with an executable surface, regardless of the design threshold.
+
+For a loop with no executable surface, do not write `proof.json`. First use `record-decision` to record why in `decisions_absorbed`. Get the current revision from `inspect`. Then run:
 
 ```bash
 python3 "$CLAUDE_PLUGIN_ROOT/skills/agentic-loop/scripts/graph.py" \
@@ -281,6 +385,8 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/agentic-loop/scripts/graph.py" \
   --disposition none --reason "no executable surface"
 ```
 
-The command saves `none: no executable surface` under the graph lock. It refuses a foreign owner, a stale revision, an active wave, an existing proof file, or a repeated decision. The `loop_stall_guard` proof gate requires the saved no-proof reason when `proof.json` is absent.
+The command saves `none: no executable surface` with the graph lock held. It refuses a different owner, stale revision, active wave, proof file on disk, or duplicate decision. With no `proof.json`, `loop_stall_guard` checks the saved no-proof explanation.
 
-Write schema 2: `expect` is a structured object `{"exit_code":0,"stdout_contains":[...],"stdout_not_contains":[...]}` (optional `timeout_s`); `proof.py freeze` refuses schema 1. The `status` field is written `"pending"` but never consulted. After freezing, the controller runs `python3 scripts/lib/proof.py freeze <state-dir>` then `run <state-dir> --all` (teardown Step 1); the `loop_stall_guard` hook's `loop_proofs.validate_proofs` (and the Codex `graph_artifacts` gate) read only the resulting `proof_results.jsonl` rows, never the transcript. See [loop-state.md](loop-state.md) for the full field contract and honest boundary.
+Use the schema 2 `expect` object `{"exit_code":0,"stdout_contains":[...],"stdout_not_contains":[...]}` and optional `timeout_s`. The `proof.py freeze` command refuses schema 1. Write `"pending"` in `status`. The controller does not read that field.
+
+At teardown Step 1, run `python3 scripts/lib/proof.py freeze <state-dir>`, then `run <state-dir> --all`. The `loop_stall_guard` hook’s `loop_proofs.validate_proofs` and the Codex `graph_artifacts` gate read only `proof_results.jsonl`. See [loop-state.md](loop-state.md) for the field contract and limits.

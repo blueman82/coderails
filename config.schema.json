@@ -10,7 +10,7 @@
       ],
       "default": null,
       "status": "read_by_prose_only",
-      "description": "Project name written by /coderails:init; read by command prose only."
+      "description": "The `/coderails:init` command writes the project name. Only command instructions read this value."
     },
     "wiki_path": {
       "type": [
@@ -27,7 +27,7 @@
       ],
       "default": 30,
       "status": "enforced_by_code",
-      "description": "Age in days after which a wiki page becomes a staleness candidate; scripts/wiki_lint.py stale reads it. Without comparable repo sources, an old candidate is stale on a date-only basis."
+      "description": "The number of days before a wiki page becomes a staleness candidate. The `scripts/wiki_lint.py stale` command reads it. Without comparable repo sources, the command uses only the date to mark a candidate stale."
     },
     "wiki_supervision": {
       "type": [
@@ -36,7 +36,7 @@
       ],
       "default": "discuss",
       "status": "read_by_prose_only",
-      "description": "wiki-ingest mode: discuss (pause before writing) or autonomous."
+      "description": "The wiki-ingest mode is `discuss` or `autonomous`. The `discuss` mode pauses before a write."
     },
     "wiki_git_worktree": {
       "type": [
@@ -45,7 +45,7 @@
       ],
       "default": true,
       "status": "read_by_prose_only",
-      "description": "true = PR flow for wiki commits; false = commit directly to the vault."
+      "description": "Use `true` for the PR workflow for wiki commits. Use `false` to commit directly to the vault."
     },
     "wiki_git_bypass_flag": {
       "type": [
@@ -54,7 +54,7 @@
       ],
       "default": null,
       "status": "read_by_prose_only",
-      "description": "Env var set when creating or merging the wiki's own PRs, for example BYPASS_REVIEW=1."
+      "description": "Environment setting for wiki PR creation and merge, for example `BYPASS_REVIEW=1`."
     },
     "wiki_git_pull_path": {
       "type": [
@@ -71,7 +71,7 @@
       ],
       "default": null,
       "status": "enforced_by_code",
-      "description": "First PR number the wiki-ingest debt merge gate covers. An absent key disables the gate; an empty or null value is invalid."
+      "description": "First PR number that the wiki-ingest debt merge gate checks. Without the key, the gate is off. It refuses an empty value or `null`."
     },
     "worktree_base": {
       "type": [
@@ -89,7 +89,7 @@
       ],
       "default": null,
       "status": "read_by_prose_only",
-      "description": "Project script that creates a worktree."
+      "description": "Project script that makes a worktree."
     },
     "jira": {
       "type": [
@@ -98,7 +98,7 @@
       ],
       "default": null,
       "status": "read_by_prose_only",
-      "description": "Jira settings (project, epic, component_name, component_id, epic_field, points_field, fix_version, mcp_namespace, transitions). Nested keys are not type-checked."
+      "description": "Jira settings: `project`, `epic`, `component_name`, `component_id`, `epic_field`, `points_field`, `fix_version`, `mcp_namespace`, and `transitions`. The schema does not check the types of nested keys."
     },
     "engineering_principles_paths": {
       "type": [
@@ -107,7 +107,7 @@
       ],
       "default": null,
       "status": "read_by_prose_only",
-      "description": "Glob patterns that trigger the engineering-principles pre-flight in /coderails:push."
+      "description": "Glob patterns that start the engineering-principles pre-flight in `/coderails:push`."
     },
     "engineering_principles_skill": {
       "type": [
@@ -116,7 +116,7 @@
       ],
       "default": "/engineering-principles-python",
       "status": "read_by_prose_only",
-      "description": "Slash command run by the pre-flight; null skips it."
+      "description": "The slash command that the pre-flight runs. The value `null` skips it."
     },
     "sandbox_workers": {
       "type": [
@@ -125,7 +125,7 @@
       ],
       "default": true,
       "status": "enforced_by_code",
-      "description": "Default ON. Claude graph_dispatch.plan() reports sandboxed or in-process-fallback:<reason> for U3 nodes. Codex refuses native U3 spawns while ON; use the existing OAuth graph driver and its sealed process evidence. Standalone worker output earns no graph completion credit. OFF explicitly permits inherited parent sandbox behavior.",
+      "description": "The default is ON. Claude `graph_dispatch.plan()` reports `sandboxed` or `in-process-fallback:<reason>` for U3 nodes. While ON, Codex refuses native U3 spawns. Use the OAuth graph driver and its sealed worker records. Output from a standalone worker cannot complete a graph node. OFF explicitly permits use of the parent sandbox behavior.",
       "control": true,
       "on_value": true
     },
@@ -139,7 +139,7 @@
         "off"
       ],
       "status": "enforced_by_code",
-      "description": "on (default) denies an untyped Bash subagent in a graph-bound Claude session; off disables that hook.",
+      "description": "The default `on` denies an untyped Bash subagent in a graph-bound Claude session. Use `off` to disable that hook.",
       "control": true,
       "on_value": "on"
     },
@@ -155,7 +155,7 @@
         "off"
       ],
       "status": "enforced_by_code",
-      "description": "Default enforce requires signed receipts for guarded merges and pushes. Explicit advisory warns; explicit off disables this receipt gate. Invalid configuration is rejected.",
+      "description": "The default `enforce` makes signed receipts mandatory for guarded merges and pushes. Use `advisory` for warnings or `off` to disable this receipt gate. The check refuses an incorrect configuration.",
       "control": true,
       "on_value": "enforce"
     },
@@ -173,7 +173,7 @@
       "status": "enforced_by_code",
       "control": true,
       "on_value": "enforce",
-      "description": "Diff-manifest publication gate for push.py, merge.py and direct-merge hooks. Default enforce uses the shipped policy; invalid values are rejected by strict config consumers."
+      "description": "Diff-manifest publication gate for `push.py`, `merge.py`, and direct-merge hooks. The default `enforce` uses the policy in the plugin. Strict config readers refuse incorrect values."
     },
     "review_passes": {
       "type": [
@@ -181,11 +181,11 @@
       ],
       "default": "enforce",
       "status": "enforced_by_code",
-      "description": "Required-reviewer check in the publication gate (policy/review_policy.json): off skips it; enforce (default) and any other value apply it."
+      "description": "The publication gate checks the reviewer rules in `policy/review_policy.json`. The default is `enforce`. The value `off` skips the check. All other values apply it."
     },
     "eval_level": {
       "type": ["string"], "default": "enforce", "status": "enforced_by_code",
-      "description": "Derived-eval-level and suite-integrity check in the publication gate (policy/surface_policy.json): off skips it; enforce (default) and any other value apply it."
+      "description": "The publication gate checks derived eval level and suite integrity with `policy/surface_policy.json`. The default is `enforce`. The value `off` skips the check. All other values apply it."
     },
     "diff_manifest_policy": {
       "type": [
@@ -194,7 +194,7 @@
       ],
       "default": null,
       "status": "enforced_by_code",
-      "description": "Path to the diff-manifest policy JSON; null or absent uses policy/diff-policy.default.json."
+      "description": "Path to the diff-manifest policy JSON. If there is no key or its value is `null`, the reader uses `policy/diff-policy.default.json`."
     },
     "integrity_review": {
       "type": [
@@ -212,7 +212,7 @@
           ],
           "default": false,
           "status": "enforced_by_code",
-          "description": "true = local merge checks require the exact-head GitHub Actions integrity-review status after the server rule is live."
+          "description": "After the server rule is active, `true` makes the `integrity-review` status from `github-actions[bot]` mandatory on the current PR head."
         },
         "machine_user": {
           "type": [
@@ -221,7 +221,7 @@
           ],
           "default": null,
           "status": "enforced_by_code",
-          "description": "Deprecated. A non-empty legacy login remains the required local status author until enabled is true."
+          "description": "Deprecated. If `enabled` is not `true`, local checks accept only the nonempty legacy login as the status author."
         }
       }
     },
@@ -243,7 +243,7 @@
           ],
           "default": true,
           "status": "enforced_by_code",
-          "description": "true (default) = eval artifacts must be signed; the local key is created on first use, and signing refuses when ssh-keygen is unavailable. false opts out.",
+          "description": "The default `true` makes eval artifact signatures mandatory. The signer makes a local key on first use. It refuses to sign without `ssh-keygen`. Use `false` to opt out.",
           "control": true,
           "on_value": true
         }
@@ -265,7 +265,7 @@
           ],
           "default": "muninn",
           "status": "enforced_by_code",
-          "description": "muninn (default) = Muninn is the authoritative typed-memory store and a missing or refusing Muninn fails with a reason code; off = no typed memory at all (reason memory_backend_off, traced, Markdown is never read or written). Any other value fails with memory_backend_invalid."
+          "description": "The default `muninn` uses Muninn as the authoritative typed-memory store. If Muninn is unavailable or refuses an operation, the adapter gives a cause code. Use `off` to disable typed memory. The adapter logs `memory_backend_off` and does not read or write Markdown. It refuses other values with `memory_backend_invalid`."
         }
       }
     }

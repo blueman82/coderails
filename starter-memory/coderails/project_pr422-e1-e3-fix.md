@@ -6,77 +6,77 @@ type: project
 
 # PR #422 E1-E3 Fix and Rerun
 
-> Supersession note (2026-09-21): This is a historical PR #422 repair handoff, not current authorization or an instruction to post artifacts. Its shell paths and prior Codex package-test names were retired by the Python/schema-3 cutover. Consult the current implementation and component reference before reusing an old diagnostic.
+> Supersession note (2026-09-21): This is a historical PR #422 repair handoff. Work and artifact posting require current authorization. The Python and schema 3 cutover retired its shell paths and earlier Codex package-test names. Check the current implementation and component documentation before using an earlier diagnostic.
 
 ## Goal
 
-Investigate and fix PR #422's E1-E3 and related exact-head NO-GO findings, rerun the acceptance evals, and publish a new truthful SHA-bound review/eval result. The user explicitly prefers both investigation and repair; formally disclose any item that cannot be fixed within the PR contract instead of masking it.
+Examine and repair PR #422's E1-E3 and related NO-GO results at the PR head. Rerun the evals and publish new, accurate SHA-bound reviewer and eval results. The user explicitly wants investigation and repair. Formally disclose all items that the PR contract prevents you from correcting. Do not conceal them.
 
 ## Decisions
 
-- Scope is PR #422 only. Never inspect, mention, or use PR #418 as evidence.
-- Current live PR repository is `blueman82/coderails`; branch is `codex/live-graph-wiring`; base is `neutral-integration/parallel-review`.
+- Scope is PR #422 only. Do not examine, mention, or cite PR #418.
+- The live PR repository is `blueman82/coderails`. Its branch is `codex/live-graph-wiring`. Its base is `neutral-integration/parallel-review`.
 - Current PR head when this handoff was written: `e8704dd0ac1b915ad2b38fabfaf5ceb527a00598`.
-- Work in a fresh sibling worktree. Do not edit the primary checkout.
-- Preserve provider ownership and the frozen mixed-provider contract. Do not weaken fail-closed gates or substitute fixtures for real provider evidence.
-- Minimal root-cause fixes are preferred; generated Codex runtime and canonical runtime must remain byte-identical.
-- No merge is authorized. A branch commit/push is in scope only if needed to deliver the requested fix; post review/eval artifacts only after the final exact head is known.
+- Work in a new sibling worktree. Do not edit the primary checkout.
+- Keep provider ownership and the frozen mixed-provider contract. Do not weaken fail-closed gates. Use records from live provider runs to prove live behavior.
+- Prefer the smallest repair that corrects the cause. The generated Codex runtime and canonical runtime must stay byte-identical.
+- Keep the PR unmerged. Commit and push the PR branch only if the repair needs it. Identify the last head SHA before posting reviewer or eval artifacts.
 
 ## Constraints
 
-- Read `AGENTS.md` before substantive edits. Independently verify the live PR head/base and `origin/main`/relevant base before editing.
-- Freeze or update task-eval material before implementation according to the repository task-evals rules; do not hand-write a result. Result must be computed by the supported eval tooling.
+- Read `AGENTS.md` before substantive edits. Independently check the live PR head and base, `origin/main`, and the applicable base before editing.
+- Freeze or update task evals before implementation. Follow the repository task-evals rules. Use the repository eval tooling to calculate the result. Do not write it manually.
 - The checkout's local `origin` is a fixture-only path and must not be used for live GitHub operations. Use `gh -R blueman82/coderails` or explicit `GH_REPO=blueman82/coderails`.
-- Active GitHub CLI account is now `blueman82` on `github.com`; verified with `gh api user --hostname github.com`. Do not expose tokens.
-- Existing review/eval artifacts are NO-GO evidence, not proof of the new run. Fresh exact-head evidence is required after any fix.
+- `gh api user --hostname github.com` showed that the active GitHub CLI account is `blueman82` on `github.com`. Do not disclose tokens.
+- The existing reviewer and eval artifacts record NO-GO for the earlier run. After a repair, obtain new records for the current PR head.
 
 ## Key files
 
-- `codex/runtime/graph.py`: inspect `evaluate_parallel_review_join`; prior review found it required top-level `route` and nested `provenance.provider` fields that the real Claude writer does not emit.
-- `packages/codex/runtime/graph.py`: generated/packaged Codex runtime; compare byte-for-byte with canonical runtime after changes.
-- `codex/scripts/run_graph.py`: inspect the path from reviewer JSON into the neutral join; prior review found no normalization adapter.
-- `codex/tests/test_graph_runtime.py`, `codex/tests/test_live_graph_wiring.py`: existing tests reportedly enrich fixtures with route/provenance and therefore may miss the real Claude writer output shape.
-- `hooks/scripts/lib/parallel_review.sh`: Claude-owned production writer; inspect its actual record shape but preserve ownership unless the frozen contract explicitly permits a Claude-side change.
-- `hooks/scripts/lib/parallel_review_join.sh`: pre-existing Claude-side join and frozen contract reference.
-- `docs/evals/live-graph-wiring.evals.json`: checked-in PR eval file; at the handoff head it had E1-E4 with null status/evidence and `head_sha`/`frozen_sha` pointing at the old base `1a9c38a301a4a4b83fe07d52d419fd5e9398eeaa`.
+- In `codex/runtime/graph.py`, examine `evaluate_parallel_review_join`. The prior reviewer found that it rejects records without top-level `route` and nested `provenance.provider`. The live Claude writer omits them.
+- `packages/codex/runtime/graph.py` is the generated, packaged Codex runtime. Compare it byte-for-byte with the canonical runtime after changes.
+- In `codex/scripts/run_graph.py`, examine how reviewer JSON reaches the neutral join. The prior reviewer found no normalization adapter.
+- `codex/tests/test_graph_runtime.py` and `codex/tests/test_live_graph_wiring.py` reportedly add `route` and provenance to fixtures. They can miss the output shape of the live Claude writer.
+- Examine the record shape from the Claude-owned production writer in `hooks/scripts/lib/parallel_review.sh`. Keep ownership unless the frozen contract explicitly permits a Claude-side change.
+- `hooks/scripts/lib/parallel_review_join.sh` is the existing Claude-side join and documents the frozen contract.
+- `docs/evals/live-graph-wiring.evals.json` is the checked-in PR eval file. At the handoff head, E1-E4 had null status and `evidence`. The fields `head_sha` and `frozen_sha` pointed at the previous base `1a9c38a301a4a4b83fe07d52d419fd5e9398eeaa`.
 - `scripts/post_evals.sh`, `scripts/lib/eval-artifact.sh`: structural validation, smoke/discriminating checks, computed result, and posting mechanics.
 - `commands/post-review.md`, `commands/post-evals.md`, `scripts/post_review.sh`: SHA-bound artifact posting conventions.
-- `packages/tests/codex_package.test.sh`: prior exact-head failure: standalone Codex package contained provider-specific Claude content.
-- Executable-bit manifest/invariant tests and tracked hook scripts: prior exact-head failure reported two tracked hook scripts missing from the manifest.
+- At the prior head, `packages/tests/codex_package.test.sh` found provider-specific Claude content in the standalone Codex package.
+- At the prior head, executable-bit manifest and invariant tests found two tracked hook scripts missing from the manifest.
 - `skills/agentic-loop/execution-graph.md`, `skills/index.yaml`: E3 graph contract and provider routing/parity.
 
 ## Done so far
 
-- Fresh reviewer agent independently reviewed 21 changed files and reported NO-GO.
-- Live PR metadata was verified with `gh -R blueman82/coderails`: PR #422 is OPEN and head is exactly `e8704dd0ac1b915ad2b38fabfaf5ceb527a00598`.
-- SHA-bound review artifact posted at comment `5328969094`: https://github.com/blueman82/coderails/pull/422#issuecomment-5328969094
+- A new reviewer agent independently examined 21 changed files and reported NO-GO.
+- At handoff, `gh -R blueman82/coderails` showed PR #422 was OPEN at `e8704dd0ac1b915ad2b38fabfaf5ceb527a00598`.
+- SHA-bound reviewer artifact at comment `5328969094`: https://github.com/blueman82/coderails/pull/422#issuecomment-5328969094
 - SHA-bound eval artifact posted at comment `5329706802`, result `NO-GO`, verification_level `2`: https://github.com/blueman82/coderails/pull/422#issuecomment-5329706802
-- Live marker verification confirmed both artifacts bind to PR 422 and head `e8704dd0ac1b915ad2b38fabfaf5ceb527a00598`.
+- Live marker verification confirmed the two artifacts bind to PR 422 and head `e8704dd0ac1b915ad2b38fabfaf5ceb527a00598`.
 - No tracked files were changed, no commit/push/merge/deploy occurred in this session.
 
 ## Prior NO-GO findings to reproduce and fix
 
-- E1-E3 checked-in eval evidence was empty/ungraded and pointed at the old base rather than the PR head.
-- No real provider-run/Claude-shaped evidence was available; fixture/canned wiring evidence is insufficient.
-- Codex join required `route` and `provenance.provider` fields absent from the real Claude writer's output, so legitimate Claude evidence would be rejected as mismatched.
-- Neutral join accepted records from non-provider identities; wrong-creator/provider identity was not fail-closed.
-- Standalone Codex package independence/parity test failed because provider-specific Claude content appeared in the package.
-- Exact-head executable-bit invariant failed because two tracked hook scripts were missing from the manifest.
-- Tests that passed previously included Python graph tests (27), runtime parity, parallel-review/join/harness tests, skills-index/provider-graph tests, discriminating check, and review-summary grammar; these must be rerun after changes, not trusted as current proof.
+- The checked-in E1-E3 evals had no grades or run records. They pointed at the previous base. They must point at the PR head.
+- There were no records from a live provider run with the Claude output shape. Fixtures and canned wiring records cannot establish live behavior.
+- The Codex join required `route` and `provenance.provider`. The live Claude writer omitted those fields, so the join would reject legitimate Claude records.
+- The neutral join accepted records from non-provider identities. It did not reject records with an incorrect creator or provider identity.
+- The standalone Codex package independence and parity test found provider-specific Claude content in the package.
+- The executable-bit invariant check for the PR head found two tracked hook scripts missing from the manifest.
+- Prior checks passed for Python graph behavior (27 tests), runtime parity, parallel-review, join, harness, skills-index, and provider-graph. The discriminating and review-summary grammar checks also succeeded. Rerun them after changes to get the result for the new head.
 
 ## Next steps
 
-1. Start a fresh session and read this file plus `AGENTS.md`, current live PR metadata, and the relevant current skill instructions.
-2. Create/use a fresh sibling worktree at the exact PR branch/head; verify primary worktree remains untouched.
-3. Investigate E1-E3 and every prior blocker against actual files and the frozen contract. Identify the smallest shared/root-cause fix; do not paper over failures with fixture fields or relaxed gates.
-4. Freeze/update eval definitions before implementation, then implement the minimum coherent fix and regression tests. Keep Claude-owned files/provider boundaries intact unless the contract requires a coordinated change.
-5. Run relevant graph, provider-parity, package-independence, fail-closed/wrong-creator, executable-bit/protected-path, and eval tests. Check canonical/packaged byte identity.
-6. Commit and push only the PR branch if the fix is valid. Record the new exact head SHA.
-7. Run fresh review and eval ceremonies against that exact head. If any E1-E3 or other P0 remains unresolved, formally disclose it and post a truthful `NO-GO`; only post `GO` when all P0 evidence and independent checks pass.
-8. Verify live review/eval markers, SHA, result, comment URLs, changed files, and PR remains unmerged. Report exact commands/exit codes and remaining limitations.
+1. Start a new session. Read this file, `AGENTS.md`, the current PR metadata, and the applicable current skill instructions.
+2. Use a new sibling worktree at the PR branch and head. Check that the primary worktree stays unchanged.
+3. Examine E1-E3 and all earlier blockers against the actual files and frozen contract. Correct the shared cause with the smallest repair. Do not conceal errors with fixture fields or relaxed gates.
+4. Freeze or update eval definitions before implementation. Make the smallest coherent repair and add regression tests. Keep Claude-owned files and provider boundaries unless the contract requires a joint change.
+5. Run the applicable graph, provider-parity, package-independence, fail-closed/wrong-creator, executable-bit/protected-path, and eval tests. Check canonical and packaged byte identity.
+6. Commit and push only the PR branch if the repair satisfies the checks. Record the new head SHA.
+7. Run new reviewer checks and evals against that head. If E1-E3 or a different P0 is unresolved, formally disclose it and post `NO-GO`. Post `GO` only if the records for all P0 checks and the checks done independently show success.
+8. Check the live reviewer and eval markers, SHA, result, comment URLs, and changed files. Check that the PR is unmerged. Report commands verbatim, exit codes, and remaining limits.
 
 ## Open questions
 
-- Whether the route/provenance mismatch is fixed by removing the Codex-only requirements or by an explicitly frozen contract extension and coordinated Claude writer change.
-- Whether the package independence failure is a source-generation boundary issue or an actual provider-specific import/content leak.
-- Exact identities/paths of the two executable-bit manifest failures; derive them from the current exact-head tests rather than relying on the prior summary.
+- Can we remove Codex-only routing and provenance requirements? Or does this need an explicitly frozen contract extension and a joint Claude writer change?
+- Did the package independence check detect a source-generation boundary issue or a leak of provider-specific imports or content?
+- Which two scripts does the executable-bit manifest omit? Get their paths from the current PR-head tests. Use the prior summary as historical context.

@@ -22,16 +22,15 @@ class EvalAuthorityTests(unittest.TestCase):
         post = (ROOT / "packages/codex/skills/post-evals/SKILL.md").read_text()
         task = (ROOT / "packages/codex/skills/task-evals/SKILL.md").read_text()
         for text in (
-            "Local or committed eval files are working material, not PR-readiness evidence.",
+            "Local or committed eval files do not show that a PR is prepared to merge.",
             "fetches the current head with `gh pr view <pr> --json headRefOid -q .headRefOid`",
-            "The marker must remain bound to the validated pull request and its currently fetched head.",
-            "Never treat missing, stale, mismatched, rejected, untrusted, or unavailable evidence as success.",
+            "The marker must stay bound to the validated PR and its current fetched head.",
+            "Report success only if the script accepts a current, trusted record that agrees with the PR.",
+            "If there is no record, or if it is stale, rejected, or unreadable, do not report success.",
         ):
             with self.subTest(contract=text):
                 self.assertIn(text, post)
-        self.assertIn(
-            "PR scope** → the file is working material only. The durable artifact is the SHA-bound PR comment", task
-        )
+        self.assertIn("PR scope** — Use the file during work only. The durable artifact is the SHA-bound comment", task)
 
     def test_only_trusted_embed_executes_at_fetched_head(self) -> None:
         """Pass the fetched head and exact remote embed into the actual smoke boundary."""

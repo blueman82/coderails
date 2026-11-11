@@ -10,12 +10,8 @@ effort: high
 
 # Cite-check
 
-Re-derive each claim below from current file contents, git output, or fresh
-command output. You have no conversation history. Read or rerun the source
-instead of relying on prior results. Do not use recall or inference.
+Check each claim below against the current files, Git output, or the output of a new command. You have no conversation history. Read the source or run the command again. Do not use memory or inference.
 
 **Claim(s):** $ARGUMENTS
 
-Give each claim its own verdict and evidence. Cite `file:line`, tool output,
-or an exact quote. If a claim lacks full support, state what source is
-missing and how to verify it.
+Give a verdict for each claim and show what led to it. Give the `file:line`, tool output, or verbatim text. If the source does not show that the full claim is correct, identify the missing source. Tell the user how to check the claim.

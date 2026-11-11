@@ -1,42 +1,32 @@
 # Antigravity CLI (`agy`) Tool Mapping
 
-Skills name actions such as dispatching an agent or reading a file. On the
-Antigravity CLI (`agy`), use these tools:
+Skills tell you to start agents, read files, and do other work. On Antigravity CLI (`agy`), use these tools.
 
-| Action skills request | Antigravity CLI equivalent |
+| Skill instruction | Antigravity CLI equivalent |
 |----------------------|----------------------|
 | Read a file | `view_file` |
-| Create a new file | `write_to_file` |
+| Make a new file | `write_to_file` |
 | Edit a file | `replace_file_content` |
-| Edit a file in several places at once | `multi_replace_file_content` |
+| Edit multiple parts of a file in one operation | `multi_replace_file_content` |
 | Run a shell command | `run_command` |
-| Search file contents | `grep_search` |
+| Find text in files | `grep_search` |
 | Find files by name / list a directory | `list_dir` (no dedicated glob tool — combine `list_dir` with `grep_search`) |
 | Fetch a URL | `read_url_content` |
-| Search the web | `search_web` |
+| Find information on the web | `search_web` |
 | Pose a structured question to your human partner | `ask_question` |
-| Dispatch a subagent (a skill naming an agent, e.g. `coderails:loop-worker`) | `invoke_subagent` with a built-in `TypeName` — `self` for full-capability work, `research` for read-only (see [Subagent support](#subagent-support)) |
+| Start a subagent (a skill names an agent, e.g. `coderails:loop-worker`) | `invoke_subagent` with a built-in `TypeName` — `self` for full-capability work, `research` for read-only (see [Subagent types](#subagent-support)) |
 | Multiple parallel dispatches | Multiple entries in one `invoke_subagent` call's `Subagents` array |
-| Task tracking ("create a todo", "mark complete") | a **task artifact** — `write_to_file` with `IsArtifact: true` and `ArtifactType: "task"` (see [Task tracking](#task-tracking)). **Not** `manage_task`, which manages background processes. |
+| Task tracking ("create a todo", "mark complete") | a **task artifact** — `write_to_file` with `IsArtifact: true` and `ArtifactType: "task"` (see [Task tracking](#task-tracking)). Use `manage_task` only for background commands. |
 
 ## Invoking a skill — read its `SKILL.md`
 
-Antigravity surfaces every installed skill's `name` + `description` to you at the
-start of each session, but it has **no `Skill`/`activate_skill` tool**. To load a
-skill, **read its `SKILL.md` with `view_file`, setting `IsSkillFile: true`** when
-the skill applies — e.g. `view_file` on
-`.../plugins/coderails/skills/<skill-name>/SKILL.md` with `IsSkillFile: true`.
-(`IsSkillFile` is agy's own signal that you're reading a file to *execute its
-instructions*, not to edit or preview it — set it whenever you load a skill.)
+At session start, Antigravity shows the `name` and `description` of each installed skill. It has no `Skill` or `activate_skill` tool. If the skill applies, **read its `SKILL.md` with `view_file` and set `IsSkillFile: true`**.
 
-This is the blessed skill-loading mechanism on this harness. The general rule
-"never read skill files manually" means "don't bypass your platform's
-skill-loading mechanism" — and on Antigravity, reading `SKILL.md` *is* that
-mechanism. Reading it honors the rule rather than breaking it.
+For example, use `view_file` on `.../plugins/coderails/skills/<skill-name>/SKILL.md` with `IsSkillFile: true`. This tells Antigravity to follow the instructions in the file. Set it each time you invoke a skill, not when you edit or preview it.
 
-You already know which skills exist and what they're for: their names and
-descriptions are in front of you at session start. When a description matches
-what you're about to do, read that skill's `SKILL.md` before acting.
+The general rule "never read skill files manually" means "do not bypass your platform's skill-loading mechanism". On Antigravity, use `SKILL.md` as described above to follow that rule.
+
+Use the names and descriptions shown at session start to find applicable skills. Before you start the task, read the applicable skill's `SKILL.md`.
 
 ## Subagent support
 
@@ -44,60 +34,41 @@ Antigravity dispatches subagents with `invoke_subagent`, passing each one a
 `TypeName` in the `Subagents` array. Two `TypeName`s are **built in** — use them
 directly, no `define_subagent` needed:
 
-- **`self`** — a full clone of you, with every tool you have (including
-  `write_to_file`/`replace_file_content`/`run_command`). The safe default for
-  general-purpose work: implementing, fixing, anything that edits files or runs
-  commands.
-- **`research`** — read-only (file reading, `grep_search`, web/URL fetch; no write
-  or command access). Use it when you specifically want a subagent that can't make
-  changes — investigation and read-only review.
+- **`self`** — has all your tools, such as `write_to_file`, `replace_file_content`, and `run_command`. Use it by default for general work, file edits, and commands.
+- **`research`** — can read files, use `grep_search`, and fetch web pages or URLs. It cannot write files or run commands. Use it for investigation and read-only checks.
 
-Use `define_subagent` only when you need a custom system prompt or capability
-mix. Set `enable_write_tools: true` to grant file edits and `run_command`.
+Use `define_subagent` only if the task requires a custom system prompt or a custom set of tools. Set `enable_write_tools: true` to grant file edits and `run_command`.
 Set `enable_subagent_tools` for nested dispatch, and `enable_mcp_tools` for
-MCP. Then invoke the type by the name you gave it. `manage_subagents` lists
-or stops running subagents.
+MCP. Then invoke the type by the name you gave it.
 
-Skills dispatch by naming an agent (e.g. `coderails:loop-worker`,
-`pr-review-toolkit:code-reviewer`) or by supplying an inline prompt. Antigravity
-has no equivalent of a named agent definition, so the agent's own system prompt
-does not come along — read the agent file and carry its body into the prompt
-yourself. On Antigravity:
+`manage_subagents` lists or stops active subagents.
 
-| Skill dispatch form | Antigravity equivalent |
+Skills name an agent such as `coderails:loop-worker` or `pr-review-toolkit:code-reviewer`, or supply an inline prompt. Antigravity has no equivalent of a named agent definition. Read the agent file and include its body in the prompt.
+
+| Skill instruction | Antigravity equivalent |
 |---------------------|----------------------|
 | An implementer agent (`coderails:loop-worker`) — writes code, runs tests | Read the agent file, then `invoke_subagent` with `TypeName: "self"` and its body as the prompt prefix |
 | A read-only agent (`pr-review-toolkit:code-reviewer`, `coderails:spec-reviewer`, `coderails:source-auditor`) | `invoke_subagent` with `TypeName: "research"` and the agent's body as the prompt prefix |
 | Inline prompt (no agent named) | `invoke_subagent` with `TypeName: "self"` (or `"research"` if the task only reads) and your inline prompt |
 
-`TypeName: "research"` is the closest match to a read-only `tools:` list — use it
-for every reviewer/auditor agent so the read-only constraint is enforced by the
-runtime rather than only by the prompt text.
+Use `TypeName: "research"` for each reviewer and auditor. This provides read-only access like a read-only `tools:` list. The runtime limits the tools to read-only operations.
 
 ### Prompt filling
 
 Skills provide prompt templates with placeholders like `{WHAT_WAS_IMPLEMENTED}` or
 `[FULL TEXT of task]`. Fill all placeholders before passing the complete prompt to
-`invoke_subagent`. The prompt template itself contains the agent's role, review
-criteria, and expected output format — the subagent will follow it.
+`invoke_subagent`. The prompt template gives the agent its role, criteria for its checks, and expected output format. The subagent follows the template.
 
 ### Parallel dispatch
 
-Put multiple entries in a single `invoke_subagent` call's `Subagents` array to run
-independent subagent work in parallel. Keep dependent tasks sequential, but do not
-serialize independent subagent tasks just to preserve a simpler history.
+Put tasks without dependencies in the `Subagents` array of one `invoke_subagent` call. They run in parallel. Run dependent tasks in sequence. Do not put tasks without dependencies in sequence for a simpler history.
 
 ## Task tracking
 
-Antigravity has **no todo / `TodoWrite` tool** (`manage_task` manages background
-processes — `list`/`kill`/`status`/`send_input` — it is *not* a checklist). When a
-skill says to create a todo list or track tasks, maintain a **task artifact**: a
-markdown checklist saved with `write_to_file` (`IsArtifact: true`,
-`ArtifactMetadata.ArtifactType: "task"`), edited with `replace_file_content` /
-`multi_replace_file_content` as you go.
+Antigravity has no todo or `TodoWrite` tool. The `manage_task` tool controls background commands with `list`, `kill`, `status`, and `send_input`.
 
-At the start of any multi-step task, create the task artifact listing every step of
-your plan. As you complete each step, edit the artifact to mark it done (`- [x]`).
-If the plan changes, update the checklist. Keep it current — it is your source of
-truth for what remains; once the conversation gets long, re-read it before starting
-each step.
+When a skill tells you to keep a todo list or monitor tasks, use a **task artifact**. Write a Markdown checklist with `write_to_file` and set `IsArtifact: true` and `ArtifactMetadata.ArtifactType: "task"`. Update it with `replace_file_content` or `multi_replace_file_content`.
+
+At the start of each multi-step task, make a task artifact that lists all steps of your plan. When you complete a step, mark it done (`- [x]`). If the plan changes, update the checklist.
+
+Use the checklist to see what remains. If the conversation gets long, read the checklist again before you start each step.

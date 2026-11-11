@@ -1,56 +1,124 @@
 # Integrity gate
 
-The gate reads review and eval comments for the exact pull request head. A trusted GitHub Actions workflow posts the `integrity-review` commit status. A GitHub rule on `main` must require that status and bind it to the GitHub Actions app.
+The gate reads inspection and eval comments for the current PR head. A trusted GitHub workflow posts the `integrity-review` commit status.
+A GitHub rule on `main` must make that status mandatory and accept it only from the `github-actions` app.
 
-The workflow uses the built-in `GITHUB_TOKEN`. You do not need a second account, a personal access token, a Mac service, or sudo.
+The workflow uses the built-in `GITHUB_TOKEN`. No second account, personal access token, Mac service, or sudo is necessary.
 
-The local publication gate also supports the bounded `security-review` disposition
-`not_applicable` for standalone wiki prose. Its scope binds the actual live base, unique merge
-base, head, complete page inventory and the full tracked context digest. Explicit path groups must cover
-all context outside authored endpoints, including unchanged Markdown and plugin files. A missing
-consumer path refuses even if other groups remain correct. The v3 form needs explicit `effect_free`
-at whole `consumer_scope` and each reference group. States are `effect_free`, `active` and `unknown`;
-the initial state is `unknown`. Known execution, access-control or instruction effects, unknown states
-and missing declarations refuse, even with complete coverage and unresolved=[]. The whole declaration
-covers all M/B/H facts, authored M-to-H operations combined with live-B context and group interactions.
-Each group covers its members at all three trees and their role in that combination. Version 1 and 2
-records refuse; the reader does not insert affirmative declarations. These are cooperating-agent checks;
-coverage does not prove that the inspection text is true. Base-only affected entry changes refuse.
-The trusted Actions reader still checks the ordinary general-review companion. An `integrity-review`
-status does not prove that N/A scope is valid or that an assessment is true. Old local readers
-reject N/A. Use the qualified release-candidate and maintained installation steps before relying
-on the new writer and reader. Keep installation on HOLD until affected sessions stop and new
-sessions pass installed checks. Do not patch an active reader or disable a gate.
+The local publication gate accepts `not_applicable` for `security-review` on standalone wiki prose in a fixed scope.
+The scope identifies the live base, the unique merge base, the head, all affected page entries, and the full tracked context digest.
+Explicit path groups must list all context paths other than the authored endpoints. This includes unchanged Markdown and plugin files.
+The reader refuses the scope if a consumer path has no group.
+
+In version 3, the full `consumer_scope` and each group must explicitly declare `effect_free`.
+The available values are `effect_free`, `active`, and `unknown`. The initial value is `unknown`.
+Known effects on execution, access control, or instructions cause a refusal. So do unknown or missing declarations, with or without full coverage and `unresolved=[]`.
+
+The full declaration covers all M/B/H facts and the combined effects of authored M-to-H operations, live-B context, and group interactions.
+Each group covers its members in the three trees and their role in that combination.
+The reader refuses version 1 and 2 records. It does not supply affirmative declarations.
+
+The checks rely on the agent to follow the rules. Full coverage cannot prove the inspection text is correct.
+A change to an affected entry on the live base alone causes a refusal.
+
+The trusted GitHub reader continues to check the ordinary general-inspection companion comment.
+The `integrity-review` status cannot prove that the N/A scope is correct or that its declaration is correct.
+Previous local readers reject N/A. Use a release candidate that passed its checks. Follow its installation steps before you use the new writer and reader.
+Keep installation on HOLD until affected sessions stop and the checks succeed in new sessions.
+
+Do not patch an active reader or disable a gate.
 
 ## What the workflow checks
 
-- The review and eval markers name the current PR and head SHA. GitHub attributes both comments to the live repository owner login.
-- The review summary has the required headings.
-- The Claude and Codex post-review helpers post a passes comment, then a separate comment with the same marker and general review summary. The gate reads the second comment. The local merge check requires the two comments to match. The gate also accepts a compatibility line directly after the marker when that line names the same PR and SHA. A malformed line or a `clean-break` finding count above zero fails. When the compatibility-line producers reach `main`, update the gate to require that line.
-- The eval has a valid structure, a frozen hash, command and control fields, and recorded results. Every P0 eval has a passing result and evidence.
-- For a version 2 eval, the signed hash binds the freeze SHA and timestamp. A version 1 level 1 or 2 eval needs a signed amendment that names both fields and marks timing unverifiable. Actions checks the signature bytes. It has no trusted signer list or PR branch ancestry proof. The local post and merge checks use the trusted signer list and check ancestry.
-- The complete changed-file list matches the PR file count and stays below GitHub's 3,000-file API cap. The PR does not change the workflow, gate code, its imported Python modules, or other protected paths. This includes `scripts/lib/artifact_io.py`, `eval_integrity.py`, `eval_signing.py`, `eval_trace.py`, `config.py`, and the package paths that could replace those imports.
-- The diff is present and no larger than 768 KiB by default. A missing diff or a larger diff fails.
-- The PR targets `main`. Before a passing status, the workflow reads all open PRs that target `main`. It refuses a shared head SHA. A PR that targets another branch cannot post a passing status.
+- The inspection and eval markers name the current PR and head SHA. GitHub attributes the two comments to the current repository owner login.
 
-The workflow runs code from `main`. It reads PR files and comments as data. It never checks out the PR head or runs a command from an eval comment. It skips closed PRs. It reads the owner comments and PR head again just before it posts a passing status. One concurrency group prevents runs of this workflow from posting statuses at the same time. GitHub does not guarantee the order of queued runs. A queue can overflow and cancel a waiting run. Comment changes trigger a new check. An hourly run checks open PRs again if GitHub misses an event. Each run checks the evidence, then skips the status write if the latest Actions bot status has the same state and description. This preserves GitHub's [1,000-status limit per SHA and context](https://docs.github.com/en/rest/commits/statuses#create-a-commit-status). At 900 statuses, the workflow retires the SHA with a final error status. Push a new commit to restart the gate. If a SHA already has 1,000 statuses and its latest status passes, GitHub will reject the correction; move the PR head and inspect the failed run.
+- The inspection summary has the headings that the gate expects.
 
-**Trust limit:** This is a structure and consistency check. A passing status does not prove that the repository owner ran the commands or used an independent reviewer. The owner can change either comment. A comment can also change after the final read and before the status post. A newly opened PR can briefly inherit an earlier passing status at the same SHA, before its event runs. The next event or hourly run can correct that status, but there is a delay. If GitHub rejects the new status, the workflow cannot replace an old success. Inspect the failed run and status history. Another trusted workflow with `statuses:write` could post the same context; the app source rule cannot identify one workflow.
+- The Claude and Codex post-review helpers post a comment with the pass records. Then they post a comment with the same marker and the general inspection summary.
+  The gate reads the second comment. The local merge check compares the two comments for agreement.
+  The gate accepts a compatibility line directly after the marker if it names the same PR and SHA.
+  A malformed line or a `clean-break` count above zero causes a refusal.
+  After the producers of this line reach `main`, update the gate to make the line mandatory.
+
+- The eval has the correct structure, a frozen hash, command and control fields, and recorded results.
+  Each P0 eval must have a result that shows success and records for verification.
+
+- A version 2 eval has a signed hash that covers the freeze SHA and timestamp.
+  A level 1 or 2 version 1 eval must have a signed change that names the two fields and marks timing as unverifiable.
+  The workflow checks the signature bytes. It has no trusted signer list or PR branch ancestry proof.
+  The local post and merge checks use the trusted signer list and check ancestry.
+
+- The full list of changed files agrees with the PR file count and stays below GitHub's 3,000-file API cap.
+  The PR cannot change the workflow, gate code, its imported Python modules, or other protected paths.
+  The protected modules include `scripts/lib/artifact_io.py`, `eval_integrity.py`, `eval_signing.py`, `eval_trace.py`, and `config.py`.
+  The protected paths also include package paths that could replace those imports.
+
+- The default diff limit is 768 KiB. The gate refuses a missing diff or a diff above that limit.
+
+- The PR targets `main`. Before it posts a status that shows success, the workflow reads all open PRs that target `main`.
+  It refuses a shared head SHA. A PR that targets a different branch cannot post a status that shows success.
+
+The workflow runs code from `main` and reads PR files and comments as data. It does not check out the PR head or run commands from eval comments.
+It skips closed PRs. It reads the owner comments and PR head again before it posts a status that shows success.
+
+One concurrency group prevents this workflow's runs from posting statuses at the same time. GitHub does not guarantee the sequence of queued runs.
+A full queue can cancel a waiting run. Comment changes start a new check. An hourly run checks open PRs again if GitHub misses a change.
+
+Each run checks the PR records. It skips the status write if the latest `github-actions[bot]` status has the same value and description.
+This preserves GitHub's [limit of 1,000 statuses for one SHA and context](https://docs.github.com/en/rest/commits/statuses#create-a-commit-status).
+At 900 statuses, the workflow retires the SHA with one last error status. Push a new commit to start the gate again.
+
+If the SHA has 1,000 statuses and the latest shows success, GitHub rejects a correction. Move the PR head and examine the run with the error.
+
+**Trust limit.** This check tests structure and consistency. A status that shows success cannot prove that the owner ran the commands or used an unaffiliated reviewer.
+The owner can change one or the two comments. A comment can also change between the last read and the status post.
+
+A new PR can briefly inherit an earlier status that shows success at the same SHA, before GitHub starts the new run.
+A subsequent check or the hourly run can correct that status after an interval. If GitHub rejects the correction, the workflow cannot replace the previous success.
+Examine the run with the error and the status history.
+
+A different trusted workflow with `statuses:write` could post the same context.
+The rule checks the app source, so it cannot identify a single workflow.
 
 ## Turn on the gate
 
-1. Merge and review this workflow and its validator through the existing PR process. Changes to `.github/workflows/` and `scripts/integrity-gate/` cannot attest themselves after the rule is active.
-2. Enable GitHub Actions for the repository. Check that the workflow has only `contents:read`, `pull-requests:read`, `issues:read`, and `statuses:write`.
-3. In repository Settings → Actions → Policies, create an **active** policy named `coderails-integrity-review-events`. Target only `.github/workflows/integrity-review.yml`. Allow `pull_request_target`, `issue_comment`, `schedule`, and `workflow_dispatch`. The setup command checks this policy before it creates a status rule. [GitHub's default public-repository policy](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target#default-policy-for-pull_request_target) currently evaluates `pull_request_target` runs and is scheduled to block them on December 2, 2026. A passing run today does not prove the event will run then.
-4. If an old integrity daemon is installed, stop it before you rely on an Actions status. Open a test PR that changes an ordinary file. Post valid current-head review and eval comments from the repository owner login. Read its Actions run and the newest `integrity-review` status on its exact head. Test a missing artifact, a foreign author's marker, and a changed comment; each must produce a newer failure.
-5. Preview the exact rule with `python3 scripts/integrity-gate/setup.py --candidate-pr <test PR number>`. The command refuses disabled Actions, a missing event policy, or a test PR without a valid GitHub Actions status. It looks up the GitHub Actions app ID from GitHub. It never falls back to “any source.”
-6. If an old `integrity_review.machine_user` is configured, local merge checks still trust only that login. After you confirm the Actions bot status, set `integrity_review.enabled: true` and remove `machine_user`. Local checks now trust only `github-actions[bot]`. New installs can set `enabled: true` after the Actions bot status passes.
-7. Run the setup command with `--apply`. Read the returned rule. Check a passing and a failing PR in the GitHub merge box. Do not merge either test PR as part of this check.
+1. Use the PR workflow to examine and merge this workflow and its validator.
+   After the rule is active, changes to `.github/workflows/` and `scripts/integrity-gate/` cannot attest themselves.
 
-The rule requires a PR and `integrity-review` on `main`, with no bypass actor. A test PR must pass before the rule is created, so the setup does not lock the repository before the workflow can report a status.
+2. Turn on the repository's GitHub automation service. Check that the workflow has only `contents:read`, `pull-requests:read`, `issues:read`, and `statuses:write`.
+
+3. In repository Settings → `Actions` → Policies, make an **active** policy named `coderails-integrity-review-events`.
+   Target only `.github/workflows/integrity-review.yml`. Set the policy to accept `pull_request_target`, `issue_comment`, `schedule`, and `workflow_dispatch`.
+   The setup command checks this policy before it makes a status rule.
+   [GitHub's default public-repository policy](https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target#default-policy-for-pull_request_target) currently checks `pull_request_target` runs.
+   GitHub plans to block them on December 2, 2026. A run that succeeds today does not prove that the run will work then.
+
+4. If a previous integrity daemon is installed, stop it before you rely on a status from the GitHub workflow.
+   Open a test PR that changes an ordinary file. Post correct current-head inspection and eval comments from the repository owner login.
+   Read the workflow run and the newest `integrity-review` status on the same head SHA.
+   Test a missing artifact, a marker from a different author, and a changed comment. Each must cause a newer `failure` status.
+
+5. Preview the rule with `python3 scripts/integrity-gate/setup.py --candidate-pr <test PR number>`.
+   The command refuses if the GitHub automation service is off or if it cannot find the policy. It also refuses a test PR without a correct status from the service.
+   It gets the `github-actions` app ID from GitHub. It does not fall back to “any source.”
+
+6. If the config has a previous `integrity_review.machine_user`, local merge checks continue to trust only that login.
+   After you check the status from the GitHub bot, set `integrity_review.enabled: true` and remove `machine_user`.
+   The local checks then trust only `github-actions[bot]`. New installs can set `enabled: true` after the bot posts a status that shows success.
+
+7. Run the setup command with `--apply`. Read the rule in the output. Check a PR that succeeds and a PR that fails in the GitHub merge box.
+   Do not merge the test PRs during this check.
+
+The rule makes a PR and `integrity-review` mandatory on `main`. No actor can bypass it.
+The setup command makes the rule only after a test PR succeeds. This keeps the repository open until the workflow can report a status.
 
 ## Change or recover the gate
 
-The rule blocks changes to the workflow and validator. For an update, use an owner-managed maintenance window: record the current rule, disable its enforcement, merge the reviewed gate change, test the new status on a safe PR, and restore enforcement. If a gate failure blocks all merges, an administrator can disable the rule and inspect the Actions run and status history. Restore the rule only after a new passing and failing test.
+The rule blocks changes to the workflow and validator. The repository owner controls the maintenance window for an update.
+Record the current rule. Disable its checks. Merge the inspected change and test the new status on a safe PR. Turn the rule back on.
 
-Older root-owned LaunchDaemon files remain in the tree for recovery of historical installs. The product installer does not select them. Do not run that daemon alongside the GitHub Actions rule: a newer old-daemon status can hide an Actions bot success on the same SHA.
+If a gate error blocks all merges, an administrator can disable the rule and examine the GitHub run and status history.
+Turn the rule back on only after a test that succeeds and a test that fails as expected.
+
+Earlier root-owned LaunchDaemon files remain in the tree for recovery of historical installations. The installer does not select them.
+Do not run that daemon with the GitHub rule. A newer daemon status can hide a GitHub bot success on the same SHA.

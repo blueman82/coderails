@@ -15,22 +15,22 @@ paths: "**/*.py"
 ## Python Idioms (MANDATORY)
 
 ### Naming & Structure (PEP 8)
-- `snake_case` for functions and variables
+- `snake_case` for function names and names for nonconstant values
 - `PascalCase` for classes
 - `UPPER_CASE` for constants
-- Full type hints on ALL function signatures and class attributes (must pass Pyright strict)
+- Full type hints on ALL function signatures and class attributes (no errors in Pyright strict mode)
 
 ### Imports
 - Explicit imports (no star imports)
 - No lazy imports
 - No `TYPE_CHECKING` blocks — fix architecture if circular imports exist
-- Use `from __future__ import annotations` for forward references
+- Use `from __future__ import annotations` for type hints that use types the module defines after the hint
 
 ### Idioms
-- **EAFP over LBYL** — `try/except` not `if`-checks for existence/validity
+- **Prefer EAFP to LBYL.** Use `try/except` to catch errors from the operation. Do not check first if the input is available or correct.
 - **Context managers** for all resources (`with open(...)`, `async with ...`)
-- **f-strings** over `.format()` or `%`
-- **List/dict comprehensions** over explicit loops where readable
+- Prefer **f-strings** to `.format()` or `%`
+- Prefer **list and dict comprehensions** to explicit loops if the result is clear
 - **No mutable default arguments** — use `None` and check
 
 ### Documentation
@@ -64,23 +64,23 @@ Find these patterns and replace them with the matching Python idiom.
 | Nested loops 3+ deep | `itertools.product`, comprehension, or extract function | `for a in x: for b in y: for c in z:` → `for a, b, c in product(x, y, z):` |
 | Manual counter | `enumerate()` | `i = 0; for x in items: i += 1` → `for i, x in enumerate(items):` |
 | Parallel iteration by index | `zip()` | `for i in range(len(a)): a[i], b[i]` → `for x, y in zip(a, b):` |
-| Loop with early break on condition | `any()` / `all()` | `for x in items: if pred(x): found = True; break` → `found = any(pred(x) for x in items)` |
+| Loop with `break` when a condition matches | `any()` / `all()` | `for x in items: if pred(x): found = True; break` → `found = any(pred(x) for x in items)` |
 | Loop building dict | dict comprehension | `d = {}; for k, v in pairs: d[k] = f(v)` → `{k: f(v) for k, v in pairs}` |
 | Loop building set | set comprehension | `s = set(); for x in items: s.add(f(x))` → `{f(x) for x in items}` |
-| Loop with running total | `sum()` | `total = 0; for x in items: total += x` → `sum(items)` |
+| Loop that adds values | `sum()` | `total = 0; for x in items: total += x` → `sum(items)` |
 | Loop filtering then transforming | chained comprehension | `for x in items: if pred(x): result.append(f(x))` → `[f(x) for x in items if pred(x)]` |
 | Nested loop with flatten | `itertools.chain.from_iterable()` | `for sub in lists: for x in sub: result.append(x)` → `list(chain.from_iterable(lists))` |
-| Loop with `sorted()` inside | sort once outside | `for x in items: sorted_sub = sorted(...)` → sort before loop |
+| Loop that calls `sorted()` | Sort one time before the loop | `for x in items: sorted_sub = sorted(...)` → sort before loop |
 
 ### Conditional Anti-Patterns
 
 | Anti-Pattern | Replacement |
 |-------------|-------------|
 | Long `if/elif/else` chains (5+) | dict dispatch / lookup table |
-| Repeated `isinstance` checks | `match/case` (3.10+) or visitor pattern |
-| Flag variables set in conditionals | direct returns or ternary |
-| Nested conditionals 3+ deep | guard clauses / early returns |
-| Boolean flag accumulation in loop | `any()` / `all()` |
+| Recurring `isinstance` checks | `match/case` (3.10+) or visitor pattern |
+| Conditions that set flags | Use `return` in the conditional, or use a conditional expression |
+| Nested conditionals 3+ deep | Check the condition and exit the function immediately if applicable |
+| Loop that updates a Boolean flag | `any()` / `all()` |
 
 ### Accumulation Anti-Patterns
 
@@ -102,7 +102,7 @@ Find these patterns and replace them with the matching Python idiom.
 ## Example: Before/After
 
 ```python
-# BEFORE (violations: KISS, naming, type hints, redundant else, old generics)
+# BEFORE (violations: KISS, naming, type hints, redundant else, legacy generics)
 from typing import List, Dict, Optional
 
 class DataProcessor:
@@ -156,7 +156,7 @@ def summarize(groups: list[list[str]]) -> str:
 ```
 
 ```python
-# AFTER (declarative: chain, any, join, f-string)
+# AFTER (declarative: chain, `any`, join, f-string)
 from itertools import chain
 
 def summarize(groups: list[list[str]]) -> str:
@@ -217,13 +217,13 @@ if key in dictionary:
 else:
     value = default
 
-# EAFP (Easier to Ask Forgiveness) - PREFER
+# EAFP (try the operation, then catch an error) - PREFER
 try:
     value = dictionary[key]
 except KeyError:
     value = default
 
-# Or even better for dicts:
+# For dicts, prefer this:
 value = dictionary.get(key, default)
 ```
 
@@ -235,15 +235,15 @@ When inserting untrusted text (AI output, user input, external API responses) in
 
 | Output Format | Dangerous Tokens | Sanitization |
 |---------------|-----------------|--------------|
-| **Slack mrkdwn** | `<!channel>`, `<!here>`, `<!everyone>`, `<@U...>` | `re.sub(r'<[!@][^>]+>', '', text)` |
-| **HTML** | `<script>`, `onclick=`, entity injection | `html.escape(text)` |
-| **SQL** | `'; DROP TABLE`, `OR 1=1` | Parameterized queries only, never f-strings |
+| **Slack’s mrkdwn format** | `<!channel>`, `<!here>`, `<!everyone>`, `<@U...>` | `re.sub(r'<[!@][^>]+>', '', text)` |
+| **HTML** | `<script>`, `onclick=`, injected entities | `html.escape(text)` |
+| **SQL** | `'; DROP TABLE`, `OR 1=1` | Use parameterized queries only. Do not use f-strings. |
 | **Shell** | `$(cmd)`, `` `cmd` ``, `; rm -rf` | `shlex.quote(text)` |
 | **JSON in templates** | Unescaped quotes, newlines | `json.dumps(text)` |
 
-**Rule:** Any text from AI models, user input, or external APIs MUST be treated as untrusted. Sanitize at the point of insertion, not at the point of collection.
+**Rule:** Text from AI models, user input, and external APIs is untrusted. Sanitize it at insertion. Do not sanitize it during collection.
 
-**Allowlist > blocklist:** When building status/result dicts consumed by callers, prefer allowlist checks (`if status not in ("success", "disabled")`) over blocklist checks (`if status == "error"`) — fail-closed prevents silent failures from unhandled return values.
+**Prefer an allowlist to a blocklist.** When a caller checks a status or result dict, use an allowlist such as `if status not in ("success", "disabled")`. A blocklist such as `if status == "error"` can miss errors with an unknown status. Reject all unknown status values.
 
 ---
 
@@ -251,21 +251,21 @@ When inserting untrusted text (AI output, user input, external API responses) in
 
 Before completing Python code changes:
 
-- [ ] All functions have full type hints (args and return)
+- [ ] All functions have full type hints (parameters and function output)
 - [ ] No `List`, `Dict`, `Optional` from typing — use builtins
 - [ ] No star imports
 - [ ] No mutable default arguments
 - [ ] f-strings used (not `.format()` or `%`)
 - [ ] Context managers for resources
-- [ ] EAFP pattern (try/except not if-checks)
-- [ ] No redundant else after return
+- [ ] EAFP pattern (`try/except` in preference to `if` checks)
+- [ ] No redundant `else` after `return`
 - [ ] Comprehensions where readable
 - [ ] No nested loops 3+ deep — flatten or extract
-- [ ] `enumerate`/`zip` over manual indexing
-- [ ] `any`/`all` over loop-with-break boolean checks
-- [ ] `sum`/`max`/`min` over manual accumulation
-- [ ] `Counter`/`defaultdict` over manual counting/grouping
-- [ ] `"".join()` over string concatenation in loops
-- [ ] Dict dispatch over long `if/elif` chains (5+)
-- [ ] Guard clauses over nested conditionals 3+ deep
+- [ ] Prefer `enumerate`/`zip` to manual indexing
+- [ ] Prefer `any`/`all` to loop-with-break boolean checks
+- [ ] Prefer `sum`/`max`/`min` to loops for totals, maxima, and minima
+- [ ] Prefer `Counter`/`defaultdict` to manual counting/grouping
+- [ ] Prefer `"".join()` to string concatenation in loops
+- [ ] Prefer dict dispatch to long `if/elif` chains (5+)
+- [ ] Check conditions and exit the function to prevent nesting 3 or more levels deep
 - [ ] **Untrusted text sanitized before output** (AI responses, user input, API data)

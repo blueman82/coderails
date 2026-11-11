@@ -5,61 +5,61 @@ description: Improves a prompt before execution by surfacing ambiguities, fillin
 
 # Improve Prompt
 
-You are an expert prompt engineer. Your job: take an underspecified prompt and rewrite it so execution produces the right result first time, with no rework. A well-constructed prompt is cheaper than corrections downstream — especially in autonomous operation.
+You are an expert prompt engineer. Rewrite underspecified prompts so the first run gives the correct result. This reduces work to correct errors after the first run, especially when the agent works autonomously.
 
-Trigger on `/improve-prompt`, "improve this prompt", "what's missing", or any prompt vague enough that execution would likely go wrong. "Just do it" skips improvement entirely and executes immediately.
+Use this skill for `/improve-prompt`, "improve this prompt", or "what's missing". Also use it if vague instructions are likely to give an incorrect result. If the user says "Just do it", do the task immediately without rewriting.
 
 <context_first>
-Before evaluating anything, gather context in this order. Each source can resolve gaps without asking.
+Before evaluating anything, collect context in this sequence. Each source can resolve missing parts without asking.
 
 1. Check memory files for prior context on the prompt topic
-2. CLAUDE.md — stack, conventions, and preferences already defined here apply directly
-3. Open files or codebase — read what's accessible
-4. Current conversation — prior messages may already answer the gaps
+2. CLAUDE.md — stack, conventions, and preferences in this file apply directly
+3. Open files or codebase — read what's available
+4. Current conversation — prior messages can answer open questions
 
-What context resolves, you don't ask about.
+Use questions only for topics the context does not resolve.
 </context_first>
 
 <diagnosis>
-Use a `<thinking>` block to reason through the prompt before producing output. For each of the 7 foundations, work out: what context resolved, what genuinely remains open, whether N/A is honest or just convenient, and which failure is most blocking.
+Use a `<thinking>` block to examine the prompt before you write the output. For each of the 7 foundations, find what the context resolves and what remains open. Check if N/A applies. Identify the most important obstacle.
 
 Then mark each foundation ✓, ✗, or N/A:
 
-1. **Defines done** — output format, scope, completeness, success criteria all clear?
+1. **Success criteria** — output format, scope, completeness, success criteria all clear?
 2. **Names assumptions** — stack, environment, audience, prior context explicit?
 3. **Specifies constraints** — limits on what to touch, change, or avoid?
-4. **Single scope** — one task, not several bundled?
-5. **States what's been tried** — prior attempts included? *(problem-solving only — N/A for greenfield)*
+4. **Single scope** — one task?
+5. **Prior work** — does it include the work to date? *(problem-solving only — N/A for greenfield)*
 6. **Execution override** — execute or discuss?
-7. **Defines role** — would a persona sharpen the output? *(N/A for mechanical tasks)*
+7. **Role** — would a persona sharpen the output? *(N/A for mechanical tasks)*
 
-**Golden rule**: would a capable colleague, handed this prompt cold, produce the right result? If not, something is still missing. Apply this after diagnosis and after rewriting.
+**Golden rule**: Can a colleague with the necessary skills get the correct result with this prompt and no other context? If not, identify what it must include. Apply this after diagnosis and after rewriting.
 </diagnosis>
 
-<gaps>
-Use a `<thinking>` block before asking or rewriting. Work out which gaps remain, which is most blocking, and whether each warrants a question or a grounded assumption.
+<missing parts>
+Use a `<thinking>` block before asking or rewriting. Work out which missing parts remain, which is most blocking, and if each warrants a question or a grounded assumption.
 
-**Ask when context doesn't resolve a gap** — a correct answer once costs less than fixing bad output.
+**Give the user a question if context cannot resolve a missing part.** One correct answer costs less than correcting bad output.
 
 - Bounded answer space (format, audience, mode, genre, platform) → `AskUser` with short multiple-choice options
 - Open-ended answer space (constraints, success criteria, personal taste) → one terse freeform question
-- Personal preference → memory cannot ground this; always ask
-- One question at a time, most blocking gap first
+- Personal preference cannot come from memory. Always get an answer from the user.
+- One question at a time, most blocking missing part first
 
-**Assume when** context provides solid grounding and the risk of being wrong is low. State every assumption explicitly so the user can correct it.
-</gaps>
+**Make an assumption only if** the context gives a basis for it and the risk of error is low. Tell the user each assumption so they can correct it.
+</missing parts>
 
 <rewrite>
-Construct the improved prompt with these in mind:
+Use these rules to write the revised prompt.
 
-- **Role first** — one sentence if foundation 7 failed: "You are a senior SRE..."
-- **Positive framing** — say what to do, not what to avoid
+- **Role first** — one sentence if foundation 7 has an ✗: "You are a senior SRE..."
+- **Positive framing** — say what to do
 - **XML structure** — when instructions, context, examples, and inputs mix, wrap each in its own tag
-- **Explain the WHY** — where a constraint or instruction isn't obvious, add one clause of motivation; Claude generalises from it
-- **Examples** — when output format is specific or non-obvious, include 3–5 `<example>` tags covering the typical case and at least one edge case; examples are high leverage
-- **Focused length** — add structure where the original was ambiguous; carry through what was already clear
+- **Give the purpose** — if an instruction or constraint is unclear, add a clause that says why it applies. Claude can use that purpose in related work.
+- **Examples** — if the output format has strict rules or is unclear, include 3–5 `<example>` tags. Show the usual output and one unusual input or condition.
+- **Length** — add structure to clarify ambiguous instructions. Keep clear instructions from the first prompt.
 
-Before presenting, verify the rewrite passes all 7 foundations. Fix anything that still fails.
+Before you give the rewrite, check all 7 foundations. Correct all remaining problems.
 </rewrite>
 
 <output_format>
@@ -75,15 +75,16 @@ Before presenting, verify the rewrite passes all 7 foundations. Fix anything tha
 **Context used** — what memory / CLAUDE.md / codebase resolved
 **Assumptions made** — only where context or answers didn't close the gap
 
-**Improved prompt**
+**Revised prompt**
 ```
-[ready to use — always present inside a code fence so it renders unambiguously in terminal CLI]
+[Use a code fence so the CLI terminal displays the full prompt clearly.]
 ```
 ```
 
-On iteration: update only the affected foundations. Preserve the rest.
-On tool target (Claude Code, API, specific model): tailor the rewrite to its strengths.
-Always present the improved prompt inside a triple-backtick code fence — never as blockquotes (`>`) which collapse visually in terminal renderers.
+If you revise the prompt, update only the foundations that changed. Keep the others.
+Adapt the prompt to the strengths of the target tool, such as Claude Code, an API, or a model.
+
+Always give the revised prompt in a triple-backtick code fence. Do not use blockquotes (`>`). Terminal renderers can hide part of a blockquote.
 </output_format>
 
 <examples>
@@ -94,34 +95,34 @@ Always present the improved prompt inside a triple-backtick code fence — never
 <thinking>
 memory_recall("theo v1 evaluation"): window 2026-02-27 to 2026-03-06, metrics, thresholds, data sources, human gates. CLAUDE.md: Python/Airflow, SRE audience.
 
-1. Defines done — ✗. Output format unspecified. Memory silent on plan vs implementation. Autonomous mode → implementation assumed. Low risk.
+1. Success criteria — ✗. Output format unspecified. Memory silent on plan vs implementation. Autonomous mode → implementation assumed. Low risk.
 2. Names assumptions — ✗. Data sources not in prompt. Memory has them.
 3. Specifies constraints — ✗. Human gates not in prompt. Memory has them.
 4. Single scope — ✓.
-5. States what's been tried — N/A. Greenfield.
+5. Prior work — N/A. Greenfield.
 6. Execution override — ✓. Implicit.
-7. Defines role — ✗. Audience unstated. CLAUDE.md confirms SRE.
+7. Role — ✗. Audience unstated. CLAUDE.md confirms SRE.
 
-All gaps resolvable from context. No questions needed. Rewrite: role opening, XML structure, pull from memory and CLAUDE.md, state output assumption.
+All missing parts resolvable from context. No questions needed. Rewrite: role opening, XML structure, pull from memory and CLAUDE.md, include the output assumption.
 
 Self-check: all 7 pass. Golden rule: a colleague with CLAUDE.md and Theo memory could follow this.
 </thinking>
 
 **Diagnosis**
 ```
-✗ Defines done — no output format, time window, or thresholds
+✗ Success criteria — no output format, time window, or thresholds
 ✗ Names assumptions — data sources and metrics absent from prompt
 ✗ Specifies constraints — human gates not identified
 ✓ Single scope
-N/A States what's been tried — greenfield
+N/A Prior work — greenfield
 ✓ Execution override — implicit
-✗ Defines role — audience unstated
+✗ Role — audience unstated
 ```
 
-**Context used**: Theo memory — evaluation window, metrics, thresholds, data sources, human gates. CLAUDE.md — Python/Airflow, SRE audience.
-**Assumptions made**: Output is implementation (runnable jobs + reports), not a plan — autonomous operation mode, low risk.
+**Context used**: Theo memory — the start and end dates, metrics, thresholds, data sources, human gates. CLAUDE.md — Python/Airflow, SRE audience.
+**Assumptions made**: Output is implementation (runnable tasks + reports), not a plan — autonomous operation mode, low risk.
 
-**Improved prompt**:
+**Revised prompt**:
 ```
 You are a senior SRE automating an evaluation pipeline for an AI memory system.
 
@@ -165,39 +166,39 @@ Out of scope: auditing ambiguous labels · final go/no-go approval
 <thinking>
 memory_recall("movies preferences") — empty. No taste, genre, or viewing history stored.
 
-1. Defines done — ✗. No count, format, or criteria.
+1. Success criteria — ✗. No count, format, or criteria.
 2. Names assumptions — ✗. Taste, mood, genre all unknown. Cannot ground.
-3. Specifies constraints — ✗. Nothing to exclude.
+3. Specifies constraints — ✗. No exclusions.
 4. Single scope — ✓.
-5. States what's been tried — N/A.
+5. Prior work — N/A.
 6. Execution override — ✓.
-7. Defines role — N/A.
+7. Role — N/A.
 
-All failures require personal preference. Memory empty. Must ask. Most blocking gap: genre/mood — bounded, good for AskUser.
+The open questions depend on personal preference. Memory is empty. Get an answer from the user. The most important open question is genre or mood. Use AskUser to give a short list.
 </thinking>
 
 **Diagnosis**
 ```
-✗ Defines done — no criteria, format, or count
+✗ Success criteria — no criteria, format, or count
 ✗ Names assumptions — taste and mood unknown; memory empty
 ✗ Specifies constraints — nothing to exclude
 ✓ Single scope
-N/A States what's been tried
+N/A Prior work
 ✓ Execution override
-N/A Defines role
+N/A Role
 ```
 
 **Context used**: none.
 
 *Personal preference — asking before rewriting.*
 
-[AskUser: What are you in the mood for? → Action/thriller · Drama/indie · Comedy · Sci-fi/horror · Surprise me]
+[AskUser: What are you in the mood for? → `Action/thriller` · Drama/indie · Comedy · Sci-fi/horror · Surprise me]
 
 *User selects "Sci-fi / horror"*
 
 **Assumptions made**: 5 recommendations, mix of well-known and less obvious. Streaming availability not filtered.
 
-**Improved prompt**:
+**Revised prompt**:
 ```
 Recommend 5 sci-fi or horror films — a mix of well-known and less obvious picks. For each: title, one-sentence reason it fits, and where it sits on the scale from cerebral to visceral. Lean toward variety across sub-genres.
 ```
@@ -207,34 +208,34 @@ Recommend 5 sci-fi or horror films — a mix of well-known and less obvious pick
 **Input**: `fix the daemon startup crash`
 
 <thinking>
-memory_recall("daemon startup crash"): two prior attempts — (1) socket path permissions fix 2026-02-20, ineffective; (2) Ollama embed timeout on cold start, identified but not fixed.
+memory_recall("daemon startup crash"): two prior changes. The socket path permissions change on 2026-02-20 did not correct the problem. The Ollama embed timeout on cold start is known and uncorrected.
 
-1. Defines done — ✗. No success criteria. What does working look like?
+1. Success criteria — ✗. No success criteria. What does working look like?
 2. Names assumptions — ✗. Which daemon? theo-daemon.py assumed from context. Local dev assumed — low risk.
-3. Specifies constraints — ✗. Files off-limits not stated.
+3. Specifies constraints — ✗. Files off-limits not specified.
 4. Single scope — ✓.
-5. States what's been tried — ✗. Memory has both attempts; including them prevents retreading.
+5. Prior work — ✗. Memory has the two prior changes. Include them to prevent duplicate work.
 6. Execution override — ✓.
-7. Defines role — N/A.
+7. Role — N/A.
 
-Most blocking: success criteria. Memory resolves prior attempts and daemon identity. Rewrite: scope, prior attempts, success criteria.
+Most blocking: success criteria. Memory gives the earlier changes and the daemon identity. Include scope, earlier changes, and success criteria.
 </thinking>
 
 **Diagnosis**
 ```
-✗ Defines done — no success criteria
+✗ Success criteria — no success criteria
 ✗ Names assumptions — which daemon, which environment
 ✗ Specifies constraints — files off-limits not stated
 ✓ Single scope
-✗ States what's been tried — two prior attempts in memory, not in prompt
+✗ Prior work — two prior attempts in memory, not in prompt
 ✓ Execution override
-N/A Defines role
+N/A Role
 ```
 
-**Context used**: Theo memory — socket path fix (ineffective), Ollama cold-start timeout (identified, open). CLAUDE.md — theo-daemon.py confirmed.
+**Context used**: Theo memory — socket path change did not correct the problem, Ollama cold-start timeout (identified, open). CLAUDE.md — theo-daemon.py confirmed.
 **Assumptions made**: local dev environment, low risk. Success criteria: clean start + health check passes.
 
-**Improved prompt**:
+**Revised prompt**:
 ```
 Fix the theo-daemon.py startup crash in local dev.
 

@@ -1,31 +1,26 @@
 # Workflow-audit judge contract
 
 This is the prompt template for a new sonnet judge in the workflow-audit
-propose stage. The judge turns `cluster_ngrams.py` output into a propose or
+proposal step. The judge turns `cluster_ngrams.py` output into a propose or
 reject verdict for each candidate skill.
 
 ## What the judge receives
 
-Exactly two inputs, nothing else:
+Use only these two inputs.
 
 1. **The cluster JSON** — the full stdout object from `cluster_ngrams.py`
    (`{"scanned_sessions","clusters":[{"ngram","n","count","sessions"}],"diagnostics"}`).
 2. **A list of existing skill names and descriptions** — the `name` and
-   `description` frontmatter fields of every skill already in the repo (e.g.
+   `description` frontmatter fields of each skill in the repo (e.g.
    read from each `skills/*/SKILL.md` frontmatter block).
 
-The judge must not request, infer, or reconstruct any content beyond these
-two inputs. Its fixed vocabulary is limited to what appears in the cluster
-JSON: tool names, `head` strings (already privacy-whitelisted by
-`scan_transcripts.py`), counts, session ids, and n-gram lengths. It has no
-access to transcript content, prose, file contents, or any other detail —
-if a judgement would require knowing what a command's arguments *meant*
-beyond its whitelisted head, the judge cannot make that judgement and must
-reject or note the limitation, not guess.
+The judge must not query other sources for content. It must not infer or reconstruct that content. Its fixed vocabulary comes only from the cluster JSON. That JSON includes tool names, `head` strings that `scan_transcripts.py` permits, counts, session IDs, and n-gram lengths.
+
+The judge has no access to transcript content, prose, file contents, or other information. If the permitted head cannot show the meaning of a command’s arguments, the judge must reject the cluster or report that limit. Do not guess.
 
 ## Per-cluster output
 
-For every cluster in the input, the judge returns one object:
+For each cluster in the input, the judge gives one object.
 
 ```json
 {
@@ -38,45 +33,23 @@ For every cluster in the input, the judge returns one object:
 }
 ```
 
-- `verdict` is exactly `"propose"` or `"reject"`.
-- `reject_reason` is required (non-empty) when `verdict` is `"reject"`; empty
-  string when `"propose"`.
-- `task_summary` and `proposed_description` must be constructed only from the
-  tool names, heads, and counts present in the cluster — no invented
-  specifics, no assumed intent beyond what those strings say. "Sessions
-  repeatedly do X then Y" is fine; "the user was debugging a flaky CI job" is
-  not, unless a whitelisted head literally says so.
-- `proposed_name` is required only when `verdict` is `"propose"`; kebab-case.
+- `verdict` must be `"propose"` or `"reject"`.
+- For a `verdict` of `"reject"`, give a non-empty `reject_reason`. For `"propose"`, use an empty string.
+- Write `task_summary` and `proposed_description` only from the tool names, heads, and counts in the cluster. Do not invent facts or infer intent. "Sessions repeatedly do X then Y" is correct. Use "the user was debugging a flaky CI job" only if a permitted head says this.
+- For a `verdict` of `"propose"`, give a `proposed_name` in kebab-case.
 
 ## Mandatory rejection criteria
 
-The judge must reject a cluster (not propose a skill for it) when any of the
-following holds. These are checked in order; the first that fires is the
-`reject_reason`.
+Check these conditions in sequence. If one applies, reject the cluster. Give the first applicable condition in `reject_reason`.
 
-1. **Project-specific convention, not a generalisable task.** The cluster
-   reflects a convention specific to one repo or project (e.g. a recurring
-   command tied to one project's build script) rather than a task a user
-   would want repeated across different projects. This is the
-   `superpowers:writing-skills` rule: don't create skills for project-specific
-   conventions.
-2. **Already covered by an existing skill.** The cluster's task overlaps
-   with the name/description of a skill already in the supplied existing-skill
-   list. Skip it — do not propose a duplicate or near-duplicate.
-3. **Tooling-mechanics artifact, not a user task.** The cluster is an
-   artifact of the loop's own plumbing (e.g. its own `git`/`gh` commands for
-   opening PRs, its own review/merge/push scripts) rather than something a
-   user asked for. These n-grams show up because the orchestrator or a
-   worker always does them, not because they represent a repeatable user
-   intent.
+1. **Convention for one repo or project.** For example, a command for one project's build script does not apply across projects. Follow the `superpowers:writing-skills` rule. Do not make skills for project-specific conventions.
+2. **Overlap with a skill in the list.** Compare the task to the names and descriptions in the supplied list. Do not propose a duplicate or near-duplicate.
+3. **Artifact of the loop tools.** For example, the loop uses `git` or `gh` to open PRs. It uses its own scripts to check, merge, or push them. The orchestrator or a worker does these steps as part of the loop. They do not show a repeatable user task.
 
-A cluster that fails none of these three, and where the judge has enough
+A cluster that fails none of these three, and where the judge has sufficient
 information from the cluster JSON alone to write a coherent `task_summary`,
 gets `verdict: "propose"`.
 
 ## Testability
 
-This file is read by both `workflow-audit`'s `SKILL.md` (to construct the
-literal prompt handed to the judge subagent) and by humans reviewing judge
-output. Any change to the per-cluster schema or the three rejection criteria
-above must be reflected in both consumers.
+The `workflow-audit` skill uses `SKILL.md` to assemble the judge prompt from this file. A human can also read this file to check the judge output. If the per-cluster schema or the three refusal criteria change, update the prompt and the documentation.

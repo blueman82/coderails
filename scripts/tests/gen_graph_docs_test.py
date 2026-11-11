@@ -48,7 +48,7 @@ class GenGraphDocsTests(unittest.TestCase):
         """Editing one generated table row is detected, and regenerating restores it."""
         root = self.copy_tree()
         document = root / FILES[0]
-        document.write_text(document.read_text().replace("never skipped", "sometimes skipped", 1), encoding="utf-8")
+        document.write_text(document.read_text().replace("Do not skip.", "Skip this node.", 1), encoding="utf-8")
         failed = run("--check", "--root", str(root))
         self.assertEqual(failed.returncode, 1)
         self.assertIn("execution-graph.md", failed.stdout)
@@ -59,6 +59,7 @@ class GenGraphDocsTests(unittest.TestCase):
         """A changed spec text or policy threshold no longer matches the committed docs."""
         for relative, old, new in (
             (FILES[2], "durable `spec.md` exists", "durable spec exists"),
+            (FILES[2], "path helper returns the session-owned state path", "the session owns its path"),
             (FILES[3], '"design_doc_min_units": 3', '"design_doc_min_units": 4'),
         ):
             with self.subTest(relative):

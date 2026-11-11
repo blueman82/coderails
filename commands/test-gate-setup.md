@@ -4,41 +4,34 @@ description: Set up the test gate for the current project — detects test runne
 
 # Test Gate Setup
 
-Set up the test gate hook for the current project. This makes `git commit` automatically run tests first — if they fail, the commit is denied.
+Set up the test gate hook for the current project. The hook runs tests before each `git commit`. If the tests do not succeed, the hook denies the commit.
 
 ## Steps
 
 1. Check for `.claude/test_command` in the current working directory.
-   If it exists, read and report its command. Ask whether to change it.
+   If you find the file, read it and report its command. Get the user's decision before you change it.
 
-2. If it doesn't exist, detect the project's test runner with the script (it owns the ordered marker list: npm `test` script, Cargo, pytest, Go, a Makefile `test` target, mix, Gemfile):
+2. If you do not find the file, use the script to find the project's test runner. It checks markers in sequence. It checks the npm `test` script, Cargo, pytest, Go, a Makefile `test` target, mix, and Gemfile.
 
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/detect_test_command.py"
    ```
 
-   It prints JSON `{"command": ..., "candidates": [...]}`. A missing directory exits 2 with
-   `directory_unavailable`; resolve the project root and rerun before selecting or writing a command.
+   It prints JSON `{"command": ..., "candidates": [...]}`. For an unavailable directory, the script exits 2 with
+   `directory_unavailable`. Resolve the project root and rerun the script before you select or write a command.
 
-3. If `command` is set, propose it to the user. If `command` is null and `candidates` has several entries, ask which one to use. If `candidates` is empty, ask the user to provide the command.
+3. If `command` is set, propose it to the user. If `command` is null and `candidates` lists multiple entries, get the user's selection. If `candidates` is empty, get the test command from the user.
 
-4. Create the `.claude` directory if it doesn't exist, then write the single-line test command to `.claude/test_command`.
+4. Make the `.claude` directory if necessary. Write the single-line test command to `.claude/test_command`.
 
-5. Run the test command once to verify it works. Report the result.
+5. Run the test command one time to check that it works. Report the result.
 
-6. Confirm: "Test gate is active. Every `git commit` in this project will run `<command>` first. Remove `.claude/test_command` to disable."
+6. Tell the user: "Test gate is active. Every `git commit` in this project will run `<command>` first. Remove `.claude/test_command` to disable."
 
-7. Explain that every hook execution of the configured command retains complete
-   stdout/stderr in a unique run under `~/.coderails/test-output/` (override with
-   `CODERAILS_TEST_OUTPUT_DIR`). A run may contain many tests. On failure, follow
-   the reported reader command: add `--all`, `--start N --end M` (one-based,
-   inclusive), or `--search TEXT --before N --after N` for literal search.
-   Without flags, reads always return metadata and guidance. Expand requests
-   explicitly as needed; there is no cross-run line-range prediction.
-   Completed logs compress automatically under a 1 GiB compressed-log budget
-   (`CODERAILS_TEST_LOG_BUDGET_BYTES` overrides it). Oldest completed logs expire
-   first; active and just-completed runs are protected and may exceed the budget.
-   Compact measurement and expiry records persist separately. Emitted bytes are
-   not proof of model delivery;
-   ordinary log-file reads bypass retrieval telemetry. See
-   [the output reference](../docs/REFERENCE.md#retained-test-gate-output).
+7. Tell the user that the hook keeps all stdout and stderr for each run. Each run has its own directory in `~/.coderails/test-output/`. Use `CODERAILS_TEST_OUTPUT_DIR` to change that path. One run can contain many tests.
+
+   If tests do not succeed, use the reader command in the report. Add `--all`, `--start N --end M` (one-based, inclusive), or `--search TEXT --before N --after N` for literal search. With no flags, the reader gives metadata and guidance only. Use flags to get more output. The reader does not predict line ranges across runs.
+
+   The hook compresses completed logs automatically and uses a 1 GiB budget for compressed logs. `CODERAILS_TEST_LOG_BUDGET_BYTES` overrides the budget. The oldest completed logs expire first. The hook keeps active and just-completed runs, which can go above the budget.
+
+   The hook keeps compact measurement and expiry records apart from the logs. Bytes sent do not prove the model got them. If you read the log files directly, the reads bypass retrieval telemetry. See [the output documentation](../docs/REFERENCE.md#retained-test-gate-output).

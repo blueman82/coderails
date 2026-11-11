@@ -7,35 +7,41 @@ description: "Use this skill to audit the quality and structural integrity of th
 
 **Scope:** $ARGUMENTS
 
-An empty scope means lint the whole vault — that is the intended default, not a
-missing argument. Unlike `wiki-ingest` and `wiki-query`, this skill has a
-meaningful behaviour with no argument, so it does not stop. Be aware the whole
-vault is in scope. Spawn the installed `wiki-writer` custom agent with
-`spawn_agent`, passing the scope and project location in a self-contained
-prompt. Collect its result with `wait_agent`, use `send_input` only for a
-specific missing check, then `close_agent`. The agent can write and commit: report
-findings before making sweeping changes across pages you were not asked about.
+If the scope is empty, lint the full vault. This skill can run without an argument, unlike `wiki-ingest` and `wiki-query`.
+Start the installed `wiki-writer` custom agent with `spawn_agent`.
+Give it the scope and project location in a self-contained prompt.
 
-Periodically health-check the wiki. The LLM is good at finding inconsistencies, gaps, and new connections — and at suggesting further questions to ask and sources to look for.
+Collect its result with `wait_agent`. Use `send_input` only if you can name a missing check. Then use `close_agent`.
+
+The agent can write and commit. Report results before you make broad changes to pages the user did not name.
+Check wiki health at intervals. Look for inconsistencies, missing topics, connections, new questions, and sources to examine.
 
 ## Instructions
 
 ### Step 0: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start — use that content. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root. If no `AGENTS.md` is found by the git root, tell the user to invoke `$coderails-codex:wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.coderails/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
+At session start, Codex reads the project root's `AGENTS.md` into context. Use that file for project instructions.
+Read its linked `AGENTS-wiki-schema.md` for the full schema, which defines page types, page format, and the three layers.
 
-`repo` — absolute path to the **code** repo root: the directory containing the `AGENTS.md` you just located. Step 2's staleness check compares against its git history, so resolve this explicitly rather than assuming cwd.
+If the context does not contain `AGENTS.md`, start at the current directory and check each parent up to the Git root.
+If you find no `AGENTS.md`, tell the user to invoke `$coderails-codex:wiki-init` first.
+The vault is a sibling repository, for example `../coderails-wiki`. Find `AGENTS.md` in the project repository.
+The session can use the vault from the project directory.
 
-The git/vault settings below are **not** read from AGENTS.md — they are flat keys in that same `repo`'s `.coderails/workflow.config.yaml`. Starting from `repo`, check each directory up to its git root; the first config found wins.
+Set `repo` to the absolute path of the code repository directory that contains the `AGENTS.md` you found.
+Step 2 checks its Git history. Find that path explicitly. Do not use the current directory by default.
 
-- `wiki_path` — the wiki vault path; resolved relative to the directory containing that `workflow.config.yaml` unless already absolute. This is `vault` below.
-- `wiki_git_worktree` — whether to use worktree/PR flow (`true`) or write directly (`false`). Default when absent: **`true`** (PR flow) — the fail-safe choice, since defaulting to direct-write would silently start committing straight to the vault for a project that expected review.
-- `wiki_git_bypass_flag` — env var for PR creation/merge (e.g. `BYPASS_REVIEW=1`)
-- `wiki_git_pull_path` — path to pull after merge. Default when absent: skip the post-merge pull.
-- `wiki_stale_days` — age in days before a page becomes a **candidate** for the
-  staleness check (default: 30). Age alone never makes a page stale; see Step 2.
+Read the flat keys below from that project's `.coderails/workflow.config.yaml`.
+Check for that config from `repo` up to its Git root. Use the first config you find.
 
-Set `vault` to the resolved `wiki_path` for the rest of this skill.
+- `wiki_path` — the vault path. If relative, resolve it from the directory containing `workflow.config.yaml`.
+  Use that value for `vault` below.
+- `wiki_git_worktree` — worktree/PR flow (`true`) or direct writes (`false`).
+  If there is no setting, use `true` so changes go through a PR before a commit goes into the vault.
+- `wiki_git_bypass_flag` — environment assignment for PR creation or merge (e.g. `BYPASS_REVIEW=1`)
+- `wiki_git_pull_path` — path to pull after merge. If there is no setting, skip the pull.
+- `wiki_stale_days` — age in days to select **candidates** for the staleness check (default: 30).
+  Age alone selects candidates. See Step 2 for the check and date-only fallback.
 
 **If `wiki_git_worktree` is `true`** (team repos):
 ```bash
@@ -52,88 +58,105 @@ WORKTREE_PATH="$vault"
 
 ### Step 1: Analyse the Wiki
 
-Read all markdown files in `$vault` (excluding `.obsidian/`, `templates/`, `inbox/`). Parse each file's YAML frontmatter and all `[[wiki-links]]`.
+Read all Markdown files in `$vault`. Skip `.obsidian/`, `templates/`, and `inbox/`.
+Parse each file's YAML frontmatter and all `[[wiki-links]]`.
 
 ### Step 2: Check
 
 **Contradictions**: Pages with `⚠️ CONTRADICTION` flags. Also look for claims that newer sources have superseded.
 
-**Stale pages**: run the script; it owns the rule, so do not re-derive it by hand.
+**Stale pages**: run the script. It owns the rule, so do not re-derive it by hand.
 
 ```bash
 python3 <path to scripts/wiki_lint.py, relative to this SKILL.md: ../../scripts/wiki_lint.py> stale --repo "$repo" --vault "$vault"
 ```
 
-It prints JSON `{stale_days, candidates, stale, data_gaps}`. `stale_days` is `wiki_stale_days`, read through the
-typed config loader (default 30). A page is a **candidate** when `last_updated` is more than `stale_days` old; it is
-**stale** when a source moved, or when no repo source can be compared and the date-only fallback applies. `sources/`, `investigations/` and the other
-point-in-time or structural directories are excluded by the script.
+The script prints JSON `{stale_days, candidates, stale, data_gaps}`.
+The typed config loader reads `stale_days` from `wiki_stale_days` (default 30).
+A page is a **candidate** if `last_updated` is more than `stale_days` earlier than today.
+It is **stale** if a source moved or no comparable repository source is available and the date-only fallback applies.
+The script skips `sources/`, `investigations/`, and other point-in-time or structural directories.
 
-How the script decides, so the report can cite it: each `sources:` entry resolves in this order and stops at the first
-hit: `$repo/<entry>`, then `$repo/<entry-without-.md>/SKILL.md` (the `skills/foo.md` shorthand), then a vault page
-(another wiki page, skipped, tested by existence); nothing existing is unresolvable. Repo forms are tried before the
-vault because a wiki page that mirrors a repo file has the same path in both trees. For each repo source it compares
-`git log -1 --format=%cs` (commit date, never mtime; an empty result is a gap, not "unchanged") with `last_updated`,
-and counts a source as moved when its commit date is more than 7 days after the page date. The 7-day window covers
-authoring lag between a source commit and a page's date stamp; a source committed on day 7 remains in grace.
+Use the script's rules to cite the result. It checks each `sources:` entry in this sequence:
+
+1. `$repo/<entry>`.
+2. `$repo/<entry-without-.md>/SKILL.md` for the `skills/foo.md` shorthand.
+3. A page in the vault. If the page exists, skip it. If no path exists, the entry is unresolvable.
+
+The script uses the first path it finds. It checks the repository first because a vault page can have the same path as a repository file.
+For each repository source, it compares the commit date from `git log -1 --format=%cs` with `last_updated`.
+It does not use mtime. If the command gives no date, report missing data and do not report "unchanged".
+
+The script counts a source as moved when its commit date is more than 7 days after the page date.
+The 7-day window accounts for writing time. A source committed on day 7 stays in that window.
 
 Classify each entry of `stale`:
-- `basis: sources` — read each `moved` source's diff over the drifted span before reporting. Find the base commit
-  first, and check it:
+
+- `basis: sources` — read the diff for each `moved` source since the page date before you report. First find and check the base commit:
 
   ```bash
   base=$(git -C "$repo" log -1 --format=%H --before="<page's last_updated>" -- "$source_path")
   ```
 
-  If `base` is **empty**, the source has no commit before the page's stamp: its whole history postdates the page,
-  the strongest drift signal there is. Diff the whole history (`git -C "$repo" log -p -- "$source_path"`); never run
-  `"$base"..HEAD` with an empty `base`, which collapses to an empty diff with exit 0. Otherwise
-  `git -C "$repo" diff "$base"..HEAD -- "$source_path"`. If it changed only formatting, a rename, or a line the page
-  does not cover, it is not drift. If it changed something the page states, report a **source-drift** finding naming
-  every moved source and its exact commit, so the follow-up is a real `/wiki-ingest` rather than a date edit. Count it
-  under **missing cross-references** in Step 5's total; say "source drift" in the prose.
-- `basis: date_only` — report the page as stale because it has no comparable repo source and is older than
-  `wiki_stale_days`. Name the weaker evidence. Do not claim source drift or bump `last_updated` to close the finding.
-- A candidate absent from `stale` is not a finding: do not report it and do not bump `last_updated`; a blind bump
-  turns "unverified" into "verified" with no verification.
-- Every `data_gaps` entry (unresolvable source, empty commit date, missing `last_updated`, `no_repo_sources`) is a **data gap**: name the
-  page and entry. Never treat it as unchanged, and never let it clear a page other sources already flagged.
-  Pages without any comparable repo source also use the date-only stale fallback. This lint is advisory and trusts the supplied page dates,
-  sources and configuration. A missing repo or vault is reported unavailable with exit 2; repair the input and rerun.
+  If `base` is **empty**, all source commits come after the page date. This is the strongest signal of source drift.
+  Diff the full history (`git -C "$repo" log -p -- "$source_path"`).
+  Do not run `"$base"..HEAD` with an empty `base`. That gives an empty diff with exit 0.
+  If `base` has a value, run `git -C "$repo" diff "$base"..HEAD -- "$source_path"`.
+
+  Formatting, a rename, or a change to information the page does not include do not show source drift.
+  If the diff changes a claim on the page, give a **source-drift** result. Name each moved source and its commit SHA.
+  Use `/wiki-ingest` to follow up. Do not only change the date.
+
+  Include the result in Step 5's count for missing cross-references. Say "source drift" in the prose.
+
+- `basis: date_only` — report the page as stale because it has no comparable repository source and is older than `wiki_stale_days`.
+  Say that the date is the only basis. Do not claim source drift or change `last_updated` to close the result.
+
+- If `stale` does not contain a candidate, do not report it and do not change `last_updated`.
+  A date change without a check turns "unverified" into "verified" without verification.
+
+- For each `data_gaps` entry, name the page and entry.
+  This includes an unresolvable source, empty commit date, missing `last_updated`, or `no_repo_sources`.
+  Report missing data. Do not report the page as unchanged or clear it if other sources flagged it.
+
+Pages with no comparable repository source also use the date-only stale fallback.
+This lint is advisory and trusts the supplied page dates, sources, and config.
+If the repository or vault is unavailable, the script exits 2 and reports the missing input. Correct it and run again.
 
 **Orphan pages**: Zero inbound links (exclude index.md, log.md, AGENTS.md).
 
-**Missing concepts**: Important terms mentioned across multiple pages but lacking their own page.
+**Missing concepts**: Important terms that multiple pages name and that have no page of their own.
 
-**Missing cross-references**: Pages that mention a concept by name but don't wiki-link it, when a page for that concept exists.
+**Missing cross-references**: Pages that mention a concept by name but do not wiki-link it, when a page for that concept exists.
 
-**Data gaps**: Topics the user cares about (based on existing pages) that aren't documented. Compare wiki coverage against the project's actual structure.
+**Missing data**: Undocumented topics that existing pages show are important to the user.
+Compare wiki coverage with the project's actual structure.
 
-**Inbox backlog**: Files in `$vault/inbox/` that haven't been ingested yet (no corresponding source page).
+**Inbox backlog**: Files in `$vault/inbox/` with no corresponding source page.
 
 ### Step 3: Report
 
-Summary with counts per category, then details for each finding.
+Give a summary with counts for each category. Then give the information for each result.
 
 ### Step 4: Suggest
 
-After reporting findings:
-- New questions to investigate that would fill gaps
+After you report results, suggest:
+
+- New questions to answer for missing topics
 - New sources to look for that would strengthen coverage
-- Interesting connections for new article candidates
+- Connections that can become new pages
 
 ### Step 5: Update Log
 
 Append to `$vault/log.md`: `## [YYYY-MM-DD] lint | <summary of findings>`
 
-Immediately after that line, append a structured findings-count record on its
-own line: `<!-- lint-findings: N -->`, where `N` is the total number of
-findings from Step 2 (contradictions + stale pages + orphan pages + missing
-concepts + missing cross-references + data gaps + inbox backlog items — sum
-every category, 0 if the pass was clean). This is a machine-readable summary
-for tooling (the dashboard's LINT FINDINGS tile) — it does not change what
-gets reported to the user in Step 3, and it is never derived by re-parsing
-the prose summary.
+Immediately after that line, append `<!-- lint-findings: N -->` on its own line.
+Set `N` to the total from Step 2. Add the counts for contradictions, stale pages, orphan pages, and missing concepts.
+Also add the counts for missing cross-references, missing data, and inbox backlog items.
+If there are no results, use 0.
+
+This machine-readable record supplies the dashboard's LINT RESULTS tile.
+It does not change the user report in Step 3. Do not calculate it from the prose summary.
 
 ### Step 6: Commit
 
@@ -145,11 +168,12 @@ git commit -m "wiki(lint): <summary of fixes>"
 git push -u origin "$BRANCH"
 ${wiki_git_bypass_flag} gh pr create --title "wiki(lint): <summary>" --body "Findings: <list>"
 ${wiki_git_bypass_flag} gh pr merge --squash --delete-branch
-# Note: enforce_pr_workflow gates `gh pr create`/`gh pr merge` only in a repo that has a
-# workflow.config.yaml (a wiki vault usually has none → no-op). When it does apply, the
-# satisfier is `$coderails-codex:push` for creation or a fresh review from the installed
-# `spec-reviewer` custom agent for merge, or an explicit Bash permission. ${wiki_git_bypass_flag} is the wiki's own
-# delivery bypass, separate from that hook.
+# enforce_pr_workflow gates `gh pr create` and `gh pr merge` only in a repository with workflow.config.yaml.
+# A wiki vault usually has no such file, so the hook does nothing there.
+# If it applies, use `$coderails-codex:push` for creation.
+# For merge, get a new inspection from the installed `spec-reviewer` custom agent.
+# Explicit Bash permission can also satisfy the hook.
+# The wiki uses ${wiki_git_bypass_flag} for its publication bypass independently of the hook.
 git -C "${wiki_git_pull_path}" pull
 git -C "$vault" worktree remove "$WORKTREE_PATH"
 ```
@@ -163,10 +187,7 @@ git commit -m "wiki(lint): <summary of findings>"
 
 ### Step 7: Pairing note
 
-Lint does not need to trigger a follow-up ingest — this direction is
-one-way. It's `$coderails-codex:wiki-ingest` that pairs forward into a lint pass
-(see that skill's own Step 8) — immediately for direct-write
-(`wiki_git_worktree: false`), or as a separate follow-up once the ingest
-PR merges for PR flow (`wiki_git_worktree: true`, the default); this
-skill is the target of that pairing, not a source of a new obligation
-back onto ingest.
+A follow-up ingest is optional after lint.
+`$coderails-codex:wiki-ingest` Step 8 specifies a lint after ingest.
+For direct writes (`wiki_git_worktree: false`), lint immediately.
+For PR flow (`wiki_git_worktree: true`, the default), lint after the ingest PR merges.

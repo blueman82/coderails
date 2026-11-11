@@ -1,49 +1,112 @@
 # Phase 4b — PR review, in full
 
-This file gives the Phase 4b review steps for [SKILL.md](SKILL.md). Invoke
-`/pr-review-toolkit:review-pr <PR#>`, then `/coderails:post-review <PR#>`
-before merge. Use the rules below for the six reviewers, security and
-deployment safety, clean-break checks, and worktree cleanup.
+This file gives the Phase 4b steps for [SKILL.md](SKILL.md).
+Before merge, invoke `/pr-review-toolkit:review-pr <PR#>` and then `/coderails:post-review <PR#>`.
+Follow the rules below for reviewer selection, deployment safety, clean-break checks, and worktree cleanup.
 
-**Graph dispatch boundary.** `U4b-review` and `U4b-merge-gate` have no direct target
-in `graph_dispatch.py`. Each is a workflow gate that requires several actions.
-The native graph CLI `plan` command reports them as `unresolved:true`. Follow the
-Skill-based review, artifact, eval, and merge sequence below.
+**Boundary for graph dispatch.** Nodes `U4b-review` and `U4b-merge-gate` have no direct target in `graph_dispatch.py`.
+Each gate has multiple steps.
+The native graph CLI `plan` command reports them as `unresolved:true`.
+Follow the Skill invocation, artifact, eval, and merge steps below.
 
-When a phase reaches "review the PR" (after a `/workflow` agent has pushed a PR, before merge), invoke the **`/pr-review-toolkit:review-pr <PR#>`** Skill — passing the PR number as the argument — which itself fans out the six specialised reviewers plus a security pass. Do NOT hand-roll the reviewers as separate `Agent` or `Task` spawns; use the Skill invocation.
+When a phase says "review the PR", invoke **`/pr-review-toolkit:review-pr <PR#>`** as a Skill.
+Give the PR number as its argument.
+Do this after the `/workflow` agent pushes the PR and before merge.
+The skill selects from six specialized reviewers based on the changes and does a check for vulnerabilities.
+Do not start those reviewers in individual `Agent` or `Task` calls.
 
-**Invoke `/pr-review-toolkit:review-pr <PR#>` with the PR number to satisfy the
-merge gate.** `enforce_pr_workflow` accepts only the `review-pr` Skill with the
-PR number in its args as review evidence. A manually spawned agent fanout
-leaves no evidence the gate recognises, so merge blocks. The gate checks
-`scripts/merge.py <PR#>` as well as raw `gh pr merge`. The wrapper script does
-not bypass this rule.
+**The merge gate needs the Skill invocation and the PR number.**
+The `enforce_pr_workflow` hook accepts only the `review-pr` Skill invocation with the PR number as an argument.
+Individual agents do not give the gate this record, so it blocks merge.
+The hook checks `scripts/merge.py <PR#>` and `gh pr merge`.
+The wrapper script does not bypass this rule.
 
-**Review verification_level ladder.** All verification levels — regardless of the PR's own eval-artifact verification_level (a separate, orthogonal check) — invoke `/pr-review-toolkit:review-pr <PR#>` (the toolkit self-scales its reviewer fan-out by change shape) plus `/coderails:post-review <PR#>`. Only at verification_level 0 MAY the separate `/security-review` pass below be skipped, and only after checking the actual diff file list (`gh pr diff <PR#> --name-only` or `git diff origin/main...HEAD --name-only`): any path under `hooks/` or `scripts/`, or any change touching auth/exec/network-fetch code, FORCES the security pass regardless of declared verification_level. The override keys off the diff, never the self-assigned verification_level label. Verification level 1/2 PRs run the full Phase 4b unchanged, security pass included.
+**Use verification_level to select the checks.**
+All levels use `/pr-review-toolkit:review-pr <PR#>` and `/coderails:post-review <PR#>`.
+The toolkit selects reviewers for the type of change.
+Apply this check without using the eval artifact’s verification_level.
 
-**After `review-pr` completes and all applied findings (blocking and worthwhile) are committed and pushed, invoke `/coderails:post-review <PR#>`.** This posts the SHA-bound review artifact — a machine-marked GitHub comment — that the `/merge` gate requires before merging. Loop symmetry: this is the same artifact gate that `/coderails:workflow`'s Phase 3 wires in for non-loop use. Both paths produce the same artifact; `/merge` checks both the same way. Run `post-review` after findings are applied and the follow-up commit is pushed, so the artifact is stamped against the final head SHA.
+At verification_level 0, you can skip the native `/security-review` pass only after checking the diff.
+Use `gh pr diff <PR#> --name-only` or `git diff origin/main...HEAD --name-only`.
+Run the pass if the diff touches `hooks/`, `scripts/`, or code for authentication, authorization, command execution, or network fetches.
+Use the diff to select the checks, regardless of the declared verification_level.
+At verification_level 1 or 2, run all Phase 4b steps with `/security-review`.
 
-Before `/coderails:merge`, the loop must also produce a second, independent artifact: run `/coderails:task-evals` (scope: `pr`; docs-only/single-unit PRs that meet its verification_level-0 predicate get the lightweight exemption path) then `/coderails:post-evals`. `scripts/merge.py` hard-gates on this eval artifact separately from the review artifact above — same fail-closed posture, no config opt-out.
+**Post the SHA-bound artifact after the corrections.**
+Finish `review-pr`.
+Commit and push corrections for the blocking issues and other issues you select.
+Then invoke `/coderails:post-review <PR#>`.
+It posts a machine-marked GitHub comment for the last head SHA.
+The `/merge` gate checks that comment.
 
-**Worktree teardown, immediately after `/coderails:merge` confirms this work-unit's PR is merged.** A work-unit's worktree (created per the `origin/main`-based instruction above) is scoped to that one PR — once it's merged, the worktree has no further purpose and must not be left to accumulate across a multi-work-unit loop. Clean up the worktree using `superpowers:finishing-a-development-branch`'s Step 6 mechanics — the commands, provenance check, and cwd-pinned-worktree caveat are in [finishing-out.md](finishing-out.md). When the worktree is the orchestrator's own cwd, teardown uses the native exit-worktree tool (e.g. `ExitWorktree`) rather than `git worktree remove` — see finishing-out.md for the lock-case split. (The PR is already merged via `/coderails:merge` at this point, so this is the Step 6 cleanup only, not the skill's push/PR outcome-selection.) This runs per-work-unit at this point in Phase 4b — not deferred to Phase 9/13's loop-level teardown, which handles wiki/retro artifacts, not worktrees.
+Phase 3 of `/coderails:workflow` posts the same artifact for work without a loop.
+The `/merge` gate applies the same check to each artifact.
 
-The six review dimensions the Skill covers:
+**Post the eval artifact before merge.**
+Run `/coderails:task-evals` at scope `pr`, then run `/coderails:post-evals`.
+Docs-only or single-unit PRs can use the lightweight path if they satisfy its verification_level-0 predicate.
+The `scripts/merge.py` gate checks the eval artifact independently of the reviewer artifact.
+It blocks if the check does not succeed.
+There is no config opt-out.
 
-| # | Reviewer | Reviews | Runs when |
+**Remove the worktree immediately after its PR merges.**
+After `/coderails:merge` checks that the unit’s PR merged, finish the worktree for that unit.
+The worktree based on `origin/main` serves one PR.
+Remove it during Phase 4b for that unit.
+Phases 9 and 13 handle wiki and retro artifacts.
+
+Use Step 6 of `superpowers:finishing-a-development-branch` for cleanup.
+See [finishing-out.md](finishing-out.md) for commands, worktree provenance, and lock checks.
+If the worktree is the orchestrator’s cwd, use the native exit tool such as `ExitWorktree` as described there.
+Do not run `git worktree remove` from the worktree.
+Do the Step 6 cleanup only. The PR has merged.
+
+Use the six reviewer roles below:
+
+| # | Reviewer | Checks | Runs when |
 |---|---|---|---|
-| 1 | `code-reviewer` | General quality + CLAUDE.md compliance, bugs | always |
-| 2 | `pr-test-analyzer` | Behavioural test coverage, mock-tautology, critical gaps | test files changed (almost always) |
-| 3 | `silent-failure-hunter` | Swallowed exceptions, message-loss, spurious-success error paths | error handling / catch blocks / queue-delete semantics changed |
-| 4 | `type-design-analyzer` | Protocol/type invariants, illegal-states-unrepresentable | new/changed types or protocol surfaces |
-| 5 | `comment-analyzer` | Comment/docstring accuracy, comment rot | comments/docstrings added or behaviour-changing extractions |
-| 6 | `code-simplifier` | Dead code from extractions, duplication, over-engineering (report-only, no edits) | always (polish pass) |
+| 1 | `code-reviewer` | General quality, CLAUDE.md compliance, and bugs | Always |
+| 2 | `pr-test-analyzer` | Behavioral test coverage, mock tautology, and important missing tests | Test files change, which is usual |
+| 3 | `silent-failure-hunter` | Errors suppressed by catch blocks, message loss, and error paths that report success | Error handling, catch blocks, or queue deletion changes |
+| 4 | `type-design-analyzer` | Protocol and type invariants. Can the types admit invalid combinations? | New or changed types or protocol surfaces |
+| 5 | `comment-analyzer` | Incorrect or stale comments and docstrings | New comments or docstrings, or code moves that change behavior |
+| 6 | `code-simplifier` | Dead code from code moves, duplication, and code that is more complex than necessary | Always. It reports issues without editing. |
 
-Collect all reports, aggregate into Critical / Important / Suggestion, and feed any MERGE-BLOCKER back to a fix agent (Phase 5/10) BEFORE merge.
+Collect all reports. Group results as `Critical`, `Important`, or `Suggestion`.
+Send each `MERGE-BLOCKER` to a correction agent in Phase 5 or 10 before merge.
 
-**Plus the native `/security-review` pass.** Alongside the six agents, run Claude Code's built-in `/security-review` on the same branch diff as part of this gate — it is a dedicated security review (auth/authz surfaces, injection, secret leakage, unsafe deserialisation, SSRF) that the six general reviewers do not specialise in. Run it in the worktree so it sees the branch's pending changes. Fold its findings into the same Critical / Important / Suggestion aggregation; any security MERGE-BLOCKER blocks merge exactly like a code finding (Phase 5/10) BEFORE merge.
+**Use the native `/security-review` pass when the rules above call for it.**
+Run the built-in Claude Code command in the worktree on the same branch diff.
+It checks authentication, authorization, attacks through injected input, secret leakage, and deserialization of untrusted data, and SSRF.
+The six general reviewers do not specialize in those checks.
+Group these results with the others.
+A `MERGE-BLOCKER` from this pass blocks merge and goes to Phase 5 or 10.
 
-**Plus `subagent_type: general-purpose` with explicit instructions from `agents/deploy-safety-reviewer.md` when the change has a runtime/production surface.** This is a coderails repo agent, not one of the six `pr-review-toolkit` reviewers above, and does not substitute for the `review-pr` Skill invocation the merge gate requires. Spawn it as a separate `Agent` call, alongside the six and the security pass, for any change with a runtime/production surface — not just schema/migration or flag/infra-config diffs, but any change that ships to production (matching the agent's own wrong-agent tripwire, which returns NOT APPLICABLE for docs-only/comment-only/test-only diffs). It reviews rollback risk, blast radius, deploy-time observability coverage, and migration/rollout safety, none of which the six reviewers or `/security-review` cover. Fold its findings into the same Critical / Important / Suggestion aggregation; a DO NOT SHIP verdict blocks merge exactly like a code finding (Phase 5/10) BEFORE merge.
+**For a change with a runtime or production surface, start a deployment safety reviewer.**
+Use its own `Agent` call with `subagent_type: general-purpose` and the instructions from `agents/deploy-safety-reviewer.md`.
+Run this Coderails agent alongside the toolkit Skill invocation, its six reviewer roles, and the `/security-review` pass.
+Run it for all changes that ship to production, such as migrations, flags, or infrastructure config changes.
+The agent gives `NOT APPLICABLE` for docs-only, comment-only, or test-only changes.
 
-**Clean-break gate (when the unit's disposition is `clean-break`).** The `code-simplifier` pass — already independent of the worker (separately spawned, read-only) — is additionally instructed to hunt **relabelled compatibility**: a surviving old code path renamed to "fallback", "adapter", "guard", "transitional", or "bridge". It checks whether an **old code path still executes**, not whether the literal word "shim" appears. On a clean-break unit, its findings of surviving compat are **MERGE-BLOCKERS**, not row 6's default report-only suggestions. **The orchestrator cannot downgrade this finding unilaterally.** Its only two moves: (a) fix it — remove the compat path, or (b) declare a hard-stop and hand it to a human, logged with who/when/SHA/reason. If a fully-unattended envelope cannot tolerate ever hard-stopping here, the human must grant auto-demote authority explicitly **at envelope-authorisation time** (Phase 0) — never something the orchestrator grants itself mid-run. The why: letting the orchestrator grade an independent reviewer's finding reintroduces the same self-attestation loophole one level up.
+It checks rollback risk, blast radius, deploy-time observability, and migration and rollout safety.
+The six toolkit reviewers and `/security-review` do not check those areas.
+Group the result with the other reports.
+A `DO NOT SHIP` verdict blocks merge and goes to Phase 5 or 10.
 
-**Do not substitute the generic `architect-review` + `debugger` + `ai-engineer` trio here.** That trio is a separate general-purpose adversarial pattern for design stress-tests before a thing is built — it is NOT the PR-review step. The canonical review step is `/pr-review-toolkit:review-pr all` = the six agents above. PR review is a specialised gate requiring knowledge of the codebase's review culture and the PR's own change shape; a generic agent cannot carry that context.
+**For `clean-break`, check for surviving compatibility paths.**
+Start the read-only `code-simplifier` pass independently of the worker.
+Tell it to check for a surviving code path renamed to "fallback", "adapter", "guard", "transitional", or "bridge".
+Check if the previous path can run. The word "shim" is only a label.
+A surviving path is a `MERGE-BLOCKER` for `clean-break`.
+
+The orchestrator must correct it by removing the path or declare a hard stop for the user.
+For a hard stop, log who, when, the SHA, and why.
+The orchestrator cannot downgrade the blocker without authority from the user.
+If a fully unattended loop cannot stop for this, the user must explicitly grant auto-demote authority in Phase 0 when they give the envelope.
+The orchestrator cannot grant this authority to itself during the loop.
+That would let the orchestrator approve its own response to a check by a different agent.
+
+**Use `/pr-review-toolkit:review-pr all` for the six roles above.**
+The generic `architect-review`, `debugger`, and `ai-engineer` trio is for design stress tests before implementation.
+Do not use that trio for this gate.
+The reviewer roles need the repo’s reviewer conventions and the PR diff.

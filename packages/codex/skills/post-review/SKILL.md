@@ -5,69 +5,96 @@ description: Post a fail-closed, SHA-bound GitHub PR artifact from a completed r
 
 # Post review
 
-Create the durable review comment consumed by the Coderails merge gate.
+Post the durable PR comment that the Coderails merge gate reads.
 
 ## Input gate
 
-Require an explicitly supplied PR number. Inspect it before using it in any command: it must be non-empty and contain digits only. The script validates it again in code (`pr_number_invalid`) before any network call; never paste a non-numeric value into a command.
+The user must explicitly supply a PR number. Before you use it in a command, check that it has one or more digits and no other characters.
+The script checks the value again before network access. An invalid value gives `pr_number_invalid`.
+Do not put a non-numeric value into a command.
 
 ## Native Codex review evidence
 
-Resolve the PR's current `headRefOid`. Run guarded reviewers through `python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role <role> --prompt-file <file> --cwd <exact-head-worktree>` per [guarded role sessions](../using-coderails/references/guarded-role-sessions.md); use `spawn_agent` for other installed Codex custom reviewers. Wait for every reviewer. Use only their observed findings; never invent or silently omit a finding.
+Get the PR's current `headRefOid`. Follow [guarded role sessions](../using-coderails/references/guarded-role-sessions.md).
+For guarded reviewers, use `python3 "$SKILL_DIR/../../scripts/codex_role_session.py" --role <role> --prompt-file <file> --cwd <exact-head-worktree>`.
+Use `spawn_agent` for other installed Codex custom reviewers.
 
-Stop without posting when:
+Wait for each reviewer. Use only the results they gave. Do not invent results or silently leave one out.
 
-- no Codex reviewer completed successfully;
-- any reviewer result is missing or ambiguous;
-- the PR head changes before posting; or
-- findings were fixed after the review, making the review stale. Review the new head first.
+Stop without posting if one of these conditions holds:
 
-The merge gate computes which reviews the diff needs from `policy/review_policy.json`: a diff touching `hooks/`, `scripts/`, `install.py`, `uninstall.py`, `.claude-plugin/` or the Codex hook/script trees needs a `security-review` pass (spawn `security-reviewer`); `launchd/`, `scripts/integrity-gate/`, `scripts/installer/`, `.github/workflows/` or `skills/dashboard/runner/` needs a `deploy-safety` pass (spawn `deploy-safety-reviewer`). A pass verdict is derived from the validated summary text (a bullet under `## Critical` fails it), never asserted.
+- No Codex reviewer completed with success.
+- A reviewer's result is unavailable or ambiguous.
+- The PR head changes before you post.
+- You corrected results after the reviewers examined the head. Examine the new head before you post.
 
-Record the reviewer-reported counts. Write one summary file per pass. If a reviewer reports no findings, its file must contain only:
+The merge gate uses `policy/review_policy.json` to select the checks from the diff:
+
+- Start `security-reviewer` for the mandatory `security-review` pass.
+  This applies to `hooks/`, `scripts/`, `install.py`, `uninstall.py`, `.claude-plugin/`, and the Codex hook and script trees.
+- `deploy-safety` is mandatory for `launchd/`, `scripts/integrity-gate/`, `scripts/installer/`, `.github/workflows/`, or `skills/dashboard/runner/`. Start `deploy-safety-reviewer`.
+
+The gate derives the verdict from the validated summary. A bullet in `## Critical` gives a negative verdict. Do not assert the verdict by hand.
+
+Record the counts that the reviewer gives. Write one summary file for each pass.
+If a reviewer gives no results, its file must contain only:
 
 ```markdown
 ## No findings
 ```
 
-Otherwise, use these headings in order, with at least one bullet or `None` under each:
+If it gives results, use the headings below in this sequence. Give a minimum of one bullet or `None` for each heading:
 
 ```markdown
 ## Critical
 None
 
 ## Important
-- Observed finding.
+- Result from the reviewer.
 
 ## Suggestions
 None
 ```
 
-Keep the reviewer names and exact critical, important, and suggestion counts in the posting report. Do not add them to a no-findings body because the validator's no-findings form is intentionally exact.
+Give the reviewer names and counts for `Critical`, `Important`, and `Suggestions` in the posting report.
+Do not add names or counts to the no-results body. The validator checks its literal text.
 
 ## Package helper
 
-Resolve [post_review.py](../../scripts/post_review.py) relative to this `SKILL.md`, never relative to the repository working directory. It must exist and load. Stop if it is missing or fails; do not substitute another helper or build the marker by hand.
+Find [post_review.py](../../scripts/post_review.py) relative to this `SKILL.md`.
+Do not resolve it from the repository working directory.
+Stop if the file is unavailable, cannot load, or does not work. Do not use a different helper or write the marker by hand.
 
 ## Post
 
-Write the summary files with the file-writing tool (not a shell heredoc), then run the one command, replacing `<PR>` with the validated number:
+Use the file-writing tool for the summary files. Do not use a shell heredoc.
+Run the command below. Replace `<PR>` with the validated number:
 
 ```bash
 python3 <resolved post_review.py> post <PR> --summary <review-summary-file> --compat-count <COUNT> --disposition <CHOICE> --pass security-review=<security-summary-file>
 ```
 
-Omit `--pass NAME=FILE` for passes the diff does not need. Set `COUNT` to the reviewer's count of retained compatibility code findings; use `0` only when no such finding exists. Set `CHOICE` to the registered work-unit choice (`clean-break` or `preserve-compat`). The script validates the files, binds all lines to the current head, and posts two comments: a review-passes record that also carries the compatibility choice, then a server compatible summary. It checks the head before and after each post. A failed second post can leave the first comment; a retry completes the pair. For `stale`, review the new head before posting again. The merge gate refuses a missing compatibility line or `clean-break` with a positive count.
+Use `--pass NAME=FILE` only for passes the diff needs.
+Set `COUNT` to the reviewer's count of retained compatibility code results. Use `0` only if there are no such results.
+Set `CHOICE` to the registered work-unit selection (`clean-break` or `preserve-compat`).
 
-The GitHub PR comment is authoritative. Do not read or write local review caches.
+The script validates the files and binds all lines to the current head.
+It posts a record of the passes with the compatibility selection, then a server-compatible summary.
+It checks the head before and after each post.
+If the second post does not succeed, the first comment can stay on the PR. A retry completes the pair.
 
-Report the PR number, reviewed SHA, spawned reviewer names and counts, and the posted comment URL.
+For `stale`, examine the new head before posting again.
+The merge gate refuses a missing compatibility line or `clean-break` with a positive count.
+
+The GitHub PR comment is authoritative. Do not read or write local reviewer caches.
+
+Report the PR number, the SHA the reviewers examined, their names and counts, and the posted comment URL.
 
 ## Standalone wiki security applicability
 
-The shipped path policy stays in force. Only `security-review` can use the typed
-`not_applicable` result for `standalone_wiki_prose_v3`. `review-pr` must pass.
-Other required specialists must pass. A plain NOT APPLICABLE message is not a pass.
+The shipped path policy stays in effect. Only `security-review` can use the typed `not_applicable` result for `standalone_wiki_prose_v3`.
+The `review-pr` pass and other mandatory specialists must succeed.
+A plain NOT APPLICABLE message does not satisfy the gate.
 
 Use the same resolved helper as the posting command:
 
@@ -76,59 +103,83 @@ python3 <resolved post_review.py> na-scope <PR>
 python3 <resolved post_review.py> validate <security-summary-file> --pass-name security-review
 ```
 
-`na-scope` prints compact current binding, authored inventory and complete context metadata.
-It supplies no inspection or authority. All tracked non-tree paths at merge base, live base and
-head count as context, except the authored page endpoints. Include unchanged Markdown and assets;
-filenames do not prove inertness. Identical path/entry facts may share explicit tree-membership tags.
-Give this data and approved source context to `security-reviewer`. The role's structured
-`## Not applicable` JSON form records repository purpose, the complete context digest and
-explicit assessment path groups. Every context path must occur in one group, with no omissions,
-duplicates, foreign paths or glob selectors. Each group must contain only unchanged base entries
-or only changed base entries; the latter need a nonempty base-change assessment. Exact immutable
-mode/type/blob facts at all three trees enter the digest. Keep complete=true and unresolved=[].
-The v3 form needs `effect_state` at `consumer_scope` and in each reference group.
-The closed states are `effect_free`, `active` and `unknown`. The initial state is `unknown`;
-only explicit `effect_free` at both levels permits N/A. Known execution, access-control or
-instruction-loading effects use `active` and need the ordinary applicable inspection, even
-with complete coverage and unresolved=[]. Unknown, missing, malformed and other states refuse.
-The whole declaration covers repository purpose, all authored operations, all merge-base/live-base/head
-facts, and authored merge-base-to-head operations combined with live-base context and group interactions.
-Each group covers its members at all three trees and their role in that whole combination.
-Do not infer `effect_free` from suffixes, modes, unchanged files or an empty unresolved list.
-Version 1 and 2 records refuse. Do not add affirmative declarations to them automatically.
-Do not convert this result into `## No findings`. Post it with the ordinary general summary:
+`na-scope` prints the compact current binding, authored inventory, and full context metadata.
+It gives no inspection or authority.
+Context includes all tracked non-tree paths at merge base, live base, and head, other than the authored page endpoints.
+Include unchanged Markdown and assets. A filename cannot show that the file has no effect.
+The same path and entry facts can share explicit tree-membership tags.
+
+Give this data and approved source context to `security-reviewer`.
+The role's structured `## Not applicable` JSON records repository purpose and the full context digest.
+It also records explicit path groups in `references` with an `assessment` for each group.
+Each context path must occur in one group.
+Include all inventory paths one time each. Do not add other paths or use glob selectors.
+
+A group can contain only unchanged base entries or only changed base entries.
+A group with changed entries needs a non-empty `base_change_assessment`.
+The digest includes immutable mode, type, and blob facts at all three trees.
+Keep `complete=true` and `unresolved=[]`.
+
+Version 3 needs `effect_state` at `consumer_scope` and in each group of paths.
+The allowed values are `effect_free`, `active`, and `unknown`. The initial value is `unknown`.
+N/A needs explicit `effect_free` at the two levels.
+
+If there are known execution, access-control, or instruction-loading effects, use `active` and do the applicable inspection.
+Do this if coverage is complete and `unresolved=[]` too.
+The gate refuses `unknown`, missing, malformed, or other values.
+
+The full declaration covers repository purpose, all authored operations, and all facts at merge base, live base, and head.
+It also includes the authored merge-base-to-head operations together with live-base context and group interactions.
+Each group covers its members at all three trees and their role in that combination.
+
+Do not infer `effect_free` from suffixes, modes, unchanged files, or an empty unresolved list.
+The gate refuses version 1 and 2 records. Do not automatically add affirmative declarations to them.
+Do not change this result to `## No findings`.
+Post it with the ordinary general summary:
 `post <PR> --summary <general-file> --pass security-review=<security-summary-file>`.
 
-The writer and publication gate independently read the actual remote base branch tip,
-unique merge base and head. Every affected entry must match between merge base and live base.
-Both rename names, deletion sources, added-path absence, blobs, types and modes count.
-Only nonempty A/M/D/R ordinary `100644` Markdown inventories qualify. Control files,
-plugin command manifests and security matches outside root hooks/commands collisions refuse.
-Known unchanged code, pages, data and settings need actual inspection. Unknown context refuses.
-Complete path coverage binds the statement to objects, not to semantic truth or reviewer identity.
-The helper uses batched tree/blob reads, never a process loop over context paths.
-The complete final comment must fit 65536 characters. Compact preparation must fit 131072 bytes;
-refuse oversized output, do not truncate it or raise the cap. Both bounds include all serialized data. Missing objects, unresolved context and moved bindings refuse.
-A stale scope needs a new complete inspection. The writer checks before/after each post and reuse.
-The same shared publication gate checks merge helpers and direct publication hooks.
+The writer and publication gate independently read the actual remote base branch head, unique merge base, and PR head.
+Each authored entry must have the same facts at merge base and live base.
+Check the two rename names, deletion sources, blobs, types, and modes.
+There must be no entry for an added path at merge base or live base.
 
-Old readers reject this result. Keep installation on HOLD until release qualification is complete.
-Use [Installing coderails](../../../../INSTALLATION.md) for maintained installer options, with paths
-relative to the selected release checkout. That document alone does not qualify this transition.
-Select explicit new provider versions and matching manifest/marketplace metadata.
-Stop new graph work and drain affected sessions with their owners. Preserve old runtime,
-state/config/eval/proof/retro/Muninn backups with hashes. Unknown quiescence keeps the HOLD.
-Run both maintained previews from that checkout:
+The inventory must be non-empty and contain only A/M/D/R operations on ordinary Markdown files with mode `100644`.
+The gate refuses control files and plugin command manifests.
+Root `hooks/` and `commands/` collisions are the only permitted `security-review` path matches.
+Examine known unchanged code, pages, data, and settings too. The gate refuses unknown context.
+
+Full path coverage binds the statement to objects. It cannot prove semantic truth or reviewer identity.
+The helper reads trees and blobs in batches. It does not run a command for each context path.
+
+The complete last comment must fit in 65536 characters.
+The compact `na-scope` output must fit in 131072 bytes. These limits count all serialized data.
+Refuse oversized output. Do not truncate it or increase the limit.
+The gate refuses missing objects, unresolved context, and moved bindings.
+
+If the scope becomes stale, do a new full inspection.
+The writer checks the binding before and after each post and each reuse.
+The shared publication gate checks merge helpers and direct publication hooks.
+
+Earlier readers reject this result. Keep installation on HOLD until release qualification is complete.
+Use [Installing coderails](../../../../INSTALLATION.md) for the maintained installer options.
+Resolve paths from the selected release checkout. That document alone does not qualify this change.
+Select explicit new provider versions and matching manifest and marketplace metadata.
+
+Stop new graph work. Drain affected sessions with their owners.
+Keep copies of the earlier runtime, graph data, config, evals, proofs, retros, and Muninn. Record their hashes.
+If you cannot confirm quiescence, keep the HOLD.
+Run the two maintained previews from that checkout:
 
 ```bash
 python3 install.py --dry-run
 python3 install.py --provider codex --dry-run
 ```
 
-These previews do not install or clear the HOLD. Complete expected-file and link inventories,
-hashed runtime/state backups and a checked coordinated restore procedure are required.
-The maintained tools do not supply a release manifest or qualified rollback procedure.
-Keep installation on HOLD until release qualification supplies and checks those missing parts.
+The previews do not install or clear the HOLD.
+Complete the expected-file and link inventories. Keep hashed copies of the runtime and graph data and check the coordinated restore procedure.
+The maintained tools supply no release manifest or approved rollback procedure.
+Keep installation on HOLD until release qualification supplies and checks these parts.
+
 After the HOLD clears, use the maintained installers for the selected versions.
 Start new sessions and complete Codex `/hooks` trust. Compare explicit installed roots:
 
@@ -136,11 +187,13 @@ Start new sessions and complete Codex `/hooks` trust. Compare explicit installed
 python3 scripts/installed_parity.py --source-root /path/to/release-checkout --claude-installed /path/to/selected-claude-version --codex-installed /path/to/selected-codex-version
 ```
 
-Replace all three paths with the selected directories. This helper compares existing installed
-regular files to source. It skips symlinks and does not detect missing expected source files.
-It is not a complete installation inventory. Check allowed and refused writer/reader routes.
-Account-free checks for both providers remain required. For a Codex-only live release, keep
-Claude live checks recorded as not complete; a Claude account is not required for that scope.
-Do not copy helper files into an active version. A new inspection must use both the new writer
-and reader. Preserve old runtime/state together for rollback; these checks do not prove all
-installed behavior or bytecode authenticity. No current wiki pass or install follows from this change.
+Replace all three paths with the selected directories. The helper compares existing installed regular files to source.
+It skips symlinks and does not find missing expected source files.
+It does not give a full installation inventory. Check the inputs the writer and reader accept and refuse.
+
+Account-free checks are mandatory for the two providers.
+For a Codex-only live release, record Claude live checks as not complete. A Claude account is optional for that scope.
+Do not copy helper files into an active version. A new inspection must use the new writer and reader together.
+
+Keep earlier runtime and graph data together for rollback. These checks cannot prove all installed behavior or bytecode authenticity.
+This change does not authorize a current wiki pass or an install.

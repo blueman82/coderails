@@ -107,7 +107,7 @@ class NativePackageTests(unittest.TestCase):
         """Keep local bootstrap, provider-native orchestration, and graph authority guidance."""
         prep = (PACKAGE / "skills/prep/SKILL.md").read_text(encoding="utf-8")
         for text in (
-            "walking from the current directory upward to the Git root",
+            "Look for `.coderails/workflow.config.yaml` from the current directory up to the Git root.",
             "git init -b main",
             "git add -A",
             'git commit --allow-empty -m "Initial project"',
@@ -127,12 +127,12 @@ class NativePackageTests(unittest.TestCase):
             "superpowers:verification-before-completion",
             "superpowers:systematic-debugging",
             "superpowers:finishing-a-development-branch",
-            "three or more work units, or any cross-unit dependency",
+            "If the graph has three or more units or a dependency between units",
         ):
             self.assertIn(text, guidance)
-        self.assertRegex(guidance, r"update_plan.*display only")
-        self.assertRegex(guidance, r"spec.md.*beside.*progress.json")
-        self.assertRegex(guidance, r"reread.*spec.md.*plan.md.*resume")
+        self.assertRegex(guidance, r"update_plan.*only displays information")
+        self.assertRegex(guidance, r"spec.md.*next to.*progress.json")
+        self.assertRegex(guidance, r"Read.*spec.md.*plan.md.*again when you continue the loop")
         self.assertNotRegex(guidance, r"claude -p|codex exec|pr-review-toolkit|background scheduler")
         result = subprocess.run(
             [sys.executable, str(PACKAGE / "skills/agentic-loop/scripts/graph.py"), "--help"],

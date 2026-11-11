@@ -2,15 +2,15 @@
   "schema_version": 1,
   "hooks": {
     "action_authority_gate": {
-      "remediation": "Use the configured authority path for the exact action and session.",
-      "category": "action authority gate"
+      "remediation": "Use the authority path set in config for this operation and session.",
+      "category": "operation authority gate"
     },
     "agent_model_routing_nudge": {
       "remediation": "Select a model role that fits the task when the suggestion is useful.",
       "category": "agent model routing nudge"
     },
     "agent_only_gate": {
-      "remediation": "Dispatch source work to an agent or use the allowed workflow command.",
+      "remediation": "Send source work to an agent or use the allowed workflow command.",
       "category": "agent only gate"
     },
     "check_confidence_labels": {
@@ -22,7 +22,7 @@
       "category": "check verify loop"
     },
     "comment_citation_gate": {
-      "remediation": "State the durable rule in the comment without a session label.",
+      "remediation": "Write the durable rule in the comment without a session label.",
       "category": "comment citation gate"
     },
     "autonomous_gate": {
@@ -34,20 +34,20 @@
       "category": "destructive bash gate"
     },
     "enforce_pr_workflow": {
-      "remediation": "Run the required PR review and post current-head evidence.",
-      "category": "enforce pr workflow"
+      "remediation": "Run `review-pr`. Post the records for the current PR head.",
+      "category": "PR workflow gate"
     },
     "graph_completion_guard": {
-      "remediation": "Resolve the graph state and record a valid stop result.",
-      "category": "graph completion guard"
+      "remediation": "Resolve the graph status and record a stop result that meets the rules.",
+      "category": "check for graph closeout"
     },
     "inject_bootstrap": {
-      "remediation": "Check the plugin root and hook registration when context is absent.",
-      "category": "inject bootstrap"
+      "remediation": "Check the plugin root and hook registration if there is no context.",
+      "category": "add bootstrap context"
     },
     "inject_context": {
-      "remediation": "Check the prompt hook registration when context is absent.",
-      "category": "inject context"
+      "remediation": "Check the prompt hook registration if there is no context.",
+      "category": "add prompt context"
     },
     "loop_dispatch_guard": {
       "remediation": "Use the current owned graph dispatch envelope and role.",
@@ -58,43 +58,43 @@
       "category": "loop stall guard"
     },
     "loop_state_guard": {
-      "remediation": "Restore owned graph and graded loop eval evidence.",
-      "category": "loop state guard"
+      "remediation": "Put the owned graph and graded loop eval records back.",
+      "category": "check for loop status"
     },
     "no_edit_on_main": {
       "remediation": "Move the source edit to a feature branch.",
-      "category": "no edit on main"
+      "category": "primary branch edit gate"
     },
     "offload_push_guard": {
       "remediation": "Keep the push in the authorised workflow.",
       "category": "offload push guard"
     },
     "pr_publication_gate": {
-      "remediation": "Complete the required review and eval steps for this PR head.",
+      "remediation": "Complete the required `review-pr` and eval steps for this PR head.",
       "category": "pr publication gate"
     },
     "quality_feedback": {
-      "remediation": "Read the quality result and correct reported source findings.",
+      "remediation": "Read the quality result and correct the source problems it lists.",
       "category": "quality feedback"
     },
     "remember_inject_cap_guard": {
-      "remediation": "Set the memory injection cap or use the documented opt-in patch.",
+      "remediation": "Set the limit for added memory text or use the documented opt-in patch.",
       "category": "remember inject cap guard"
     },
     "reviewer_bash_allowlist": {
-      "remediation": "Use an allowed read-only command or a granted capability tool.",
+      "remediation": "Use an allowed read-only command or a tool that your grant permits.",
       "category": "reviewer bash allowlist"
     },
     "subagent_identity_gate": {
-      "remediation": "Dispatch with a native agent type that the graph can identify.",
+      "remediation": "Start the agent with a native type that the graph can identify.",
       "category": "subagent identity gate"
     },
     "test_gate": {
-      "remediation": "Fix the failed tests before the commit.",
+      "remediation": "Correct the tests with errors before you commit.",
       "category": "test gate"
     },
     "unregistered_loop_guard": {
-      "remediation": "Register the active agentic loop graph before more dispatches.",
+      "remediation": "Record the active agentic loop graph before you send more work.",
       "category": "unregistered loop guard"
     },
     "verification_volume_ceiling": {
@@ -102,11 +102,11 @@
       "category": "verification volume ceiling"
     },
     "voice_announce": {
-      "remediation": "Read the loop state when a spoken notice is absent.",
+      "remediation": "Read the loop status if you did not get a spoken notice.",
       "category": "voice announce"
     },
     "wiki_taxonomy_gate": {
-      "remediation": "Write the page under a directory allowed by the wiki schema.",
+      "remediation": "Write the page in a directory that the wiki schema permits.",
       "category": "wiki taxonomy gate"
     },
     "worker_containment_gate": {
@@ -149,11 +149,11 @@
     },
     "bash_agent_type_absent": {
       "source": "hooks/scripts/subagent_identity_gate.py",
-      "remediation": "Dispatch with a native agent type that the graph can identify."
+      "remediation": "Start the agent with a native type that the graph can identify."
     },
     "config_rejected": {
       "source": "hooks/scripts/subagent_identity_gate.py",
-      "remediation": "Fix .coderails/workflow.config.yaml and retry."
+      "remediation": "Correct .coderails/workflow.config.yaml and retry."
     },
     "containment_unavailable": {
       "source": "hooks/scripts/worker_containment_gate.py",
@@ -181,27 +181,27 @@
     },
     "hook_state_unreadable": {
       "source": "hooks/scripts/lib/hook_state.py",
-      "remediation": "Restore the owned hook state file and retry."
+      "remediation": "Put the owned hook status file back. Then retry."
     },
     "nudge_first": {
       "source": "hooks/scripts/lib/hook_state.py",
-      "remediation": "The first nudge was recorded; continue the required workflow."
+      "remediation": "The hook recorded the first nudge. Continue the required workflow."
     },
     "nudge_suppressed": {
       "source": "hooks/scripts/lib/hook_state.py",
-      "remediation": "The earlier nudge still applies; check the loop state."
+      "remediation": "The earlier nudge applies. Check the loop status."
     },
     "action_authority_failed_open": {
       "source": "hooks/scripts/action_authority_gate.py",
-      "remediation": "Use the configured authority path for the exact action and session."
+      "remediation": "Use the authority path set in config for this operation and session."
     },
     "denied_gate_error": {
       "source": "hooks/scripts/action_authority_gate.py",
-      "remediation": "Use the configured authority path for the exact action and session."
+      "remediation": "Use the authority path set in config for this operation and session."
     },
     "receipt_consumed": {
       "source": "hooks/scripts/action_authority_gate.py",
-      "remediation": "Use the configured authority path for the exact action and session."
+      "remediation": "Use the authority path set in config for this operation and session."
     },
     "authority_denied_destructive_shell": {
       "source": "hooks/scripts/destructive_bash_gate.py",

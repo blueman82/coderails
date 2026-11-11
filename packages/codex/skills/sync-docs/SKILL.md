@@ -5,17 +5,18 @@ description: Analyze documentation drift and generate sync reports for any proje
 
 # Sync Docs - Universal Documentation Synchronization
 
-Analyze any codebase and its documentation to identify drift and generate actionable sync reports. **Enhanced with Serena for semantic code discovery.**
+Compare a codebase with its documentation. Report differences and how to correct them.
+Use Serena for semantic code discovery when the user selects that option.
 
 ## Invocation
 
 ```bash
-/sync-docs                          # Generate full drift report
+/sync-docs                          # Write the full drift report
 /sync-docs --check                  # Only show drift report (no suggestions)
 /sync-docs --suggest-updates        # Include proposed markdown for updates
 /sync-docs --semantic               # Use Serena for deep code discovery
-/sync-docs --compare <section>      # Deep-dive analysis of specific section
-/sync-docs --verbose                # Include detailed file references
+/sync-docs --compare <section>      # Examine one named section
+/sync-docs --verbose                # Include file paths and line numbers
 /sync-docs --diagrams-only          # Audit only docs/diagrams/
 ```
 
@@ -58,7 +59,7 @@ Analyze any codebase and its documentation to identify drift and generate action
 
 ### 1.1 Identify Documentation Sources
 
-Scan for primary documentation:
+Find primary documentation:
 - `README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `ARCHITECTURE.md`
 - `docs/`, `documentation/`, `wiki/`, `guides/`
 - `docs/diagrams/`, `docs/internal_documentation/`
@@ -69,7 +70,7 @@ Scan for primary documentation:
 | Project Type | Indicators |
 |--------------|------------|
 | Microservices | Multiple service directories, docker-compose.yml, k8s configs |
-| Monolithic | Single main application, traditional MVC structure |
+| Monolithic | One application, traditional MVC structure |
 | Library | package.json/setup.py/Cargo.toml with library config |
 | Frontend | React/Vue/Angular configs, public/static directories |
 | Serverless | serverless.yml, SAM templates, Lambda functions |
@@ -77,10 +78,10 @@ Scan for primary documentation:
 ### 1.3 Extract Documented Elements
 
 From discovered documentation:
-- Services/components with descriptions
+- Documented service and component names with descriptions
 - Architecture patterns and design decisions
 - Technology stack and dependencies
-- Feature flags and configuration options
+- Configuration options and feature flags
 - Deployment procedures
 - Container/service counts
 
@@ -102,39 +103,39 @@ ls -d */ | grep -v node_modules
 ### 2.2 Configuration Audit
 
 If infrastructure files exist:
-- Extract environment variables from docker-compose.yml
+- Read the environment assignments from docker-compose.yml
 - Compare against documented configuration
 - Identify undocumented feature flags
 - Check container counts (documented vs actual)
 
 ### 2.3 Version and Date Check
 
-- Verify version numbers match latest release
-- Check "Last Updated" dates aren't stale
+- Check version numbers against the latest release
+- Check "Last Updated" dates are not stale
 - Validate service counts in documentation
 
 ---
 
 ## Phase 2.5: Semantic Discovery (--semantic flag)
 
-**When `--semantic` flag is provided**, use Serena MCP servers for deep code discovery.
+If the user supplies `--semantic`, use Serena MCP servers for deep code discovery.
 
 ### Prerequisites
 
-- Serena MCP server running with project activated
+- An active Serena MCP server with the project activated
 
 ### Step 1: Compare to Documentation
 
 For each discovered file:
-1. Check if file/class is mentioned in any documentation
-2. If NOT mentioned → flag as **UNDOCUMENTED**
+1. Check the documentation for the file or class.
+2. If the documentation does not identify it, mark it **UNDOCUMENTED**.
 
 ### Step 3: Serena Precise Navigation
 
-For each undocumented entity, extract precise details:
+Get these facts for each undocumented entity:
 
 ```javascript
-// Execute via mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
+// Use mcp__mcp-exec__execute_code_with_wrappers with wrappers: ["serena"]
 
 // First activate project
 await serena.activate_project({ project: "/path/to/project" });
@@ -143,7 +144,7 @@ await serena.activate_project({ project: "/path/to/project" });
 const symbols = await serena.get_symbols_overview({
   relative_path: "path/to/undocumented/file.py"
 });
-// Returns: { Class: ['ClassName'], Function: ['func_name'], Constant: [...] }
+// Result: { Class: ['ClassName'], Function: ['func_name'], Constant: [...] }
 
 // For deeper analysis
 const classDetails = await serena.find_symbol({
@@ -152,7 +153,7 @@ const classDetails = await serena.find_symbol({
 });
 ```
 
-**Extract for documentation:**
+**Collect for documentation:**
 - Class names and purposes
 - Method signatures
 - Constants and configuration values
@@ -171,10 +172,10 @@ const classDetails = await serena.find_symbol({
 - **Classes** (Serena): ClassName1, ClassName2
 - **Protocols**: ProtocolName1, ProtocolName2
 - **Missing From**: doc1.md, doc2.md
-- **Recommended Action**: Add section following [existing pattern]
+- **Recommended step**: Add a section in the format of [existing pattern]
 
 ### Coverage Summary
-- Files discovered via Serena: X
+- Files discovered through Serena: X
 - Undocumented entities: Y
 - Documentation coverage: Z%
 ```
@@ -193,32 +194,32 @@ const classDetails = await serena.find_symbol({
 
 ## Critical Updates Needed
 [Blocks understanding or deployment]
-- [ ] Item with file reference
+- [ ] Item with file and line
 
 ## High Priority Updates
-[Impacts daily workflow]
-- [ ] Item with file reference
+[Has an effect on daily workflow]
+- [ ] Item with file and line
 
 ## Medium Priority Updates
-[Improves clarity]
-- [ ] Item with file reference
+[Makes the text clearer]
+- [ ] Item with file and line
 
 ## Low Priority Updates
-[Minor improvements]
-- [ ] Item with file reference
+[Small improvements]
+- [ ] Item with file and line
 
 ## Semantic Discovery Findings (if --semantic)
 [Undocumented code patterns found]
 
 ## Detailed Action Items
 ### 1. [File Path]
-- **Current state**: [what's documented]
-- **Actual state**: [what's in codebase]
+- **Current documentation**: [what's documented]
+- **Actual code**: [what's in codebase]
 - **Suggested update**: [markdown snippet]
 
 ## Summary
-- Total gaps: X
-- Critical: Y
+- Total differences: X
+- Differences that block understanding or deployment: Y
 - From semantic discovery: Z
 ```
 
@@ -240,14 +241,15 @@ const classDetails = await serena.find_symbol({
 ## When to Use `--semantic`
 
 **Best for:**
-- After major refactoring or new service deployment
+- After large refactoring or new service deployment
 - When documentation health score is low
-- Comprehensive quarterly audits
-- When you suspect undocumented features exist
+- Full audits each quarter
+- When you think the code has undocumented features
 - Large codebases where manual discovery is impractical
 
 **Key insight:**
-- Serena answers both: "What code exists that docs don't mention?" and "What exactly does that code do?" — combined, a complete picture of documentation gaps
+- Serena answers two questions: "What code exists that docs don't mention?" and "What exactly does that code do?"
+- Use those answers to find differences between the code and the documentation.
 
 ---
 
@@ -323,8 +325,8 @@ Add after section 6:
 
 ## Notes
 
-- Tool adapts to any project structure
-- Configuration optional (auto-discovery handles most cases)
-- Prioritization focuses effort on important gaps
+- The tool adapts to the project structure
+- Configuration is optional. The tool finds settings automatically for most projects.
+- The report puts important differences first
 - `--semantic` requires Serena project activation
-- Health score accounts for both traditional and semantic findings
+- The health score includes traditional and semantic results

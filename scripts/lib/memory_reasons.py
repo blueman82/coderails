@@ -8,202 +8,233 @@ from __future__ import annotations
 
 REASONS: dict[str, str] = {
     "memory_backend_off": (
-        "memory.backend is off in the workflow config; set it to muninn (or remove the key) to write " "typed memory."
+        "The workflow config sets `memory.backend` to `off`. To write typed memory, set it to `muninn` or remove "
+        "the key."
     ),
-    "memory_backend_invalid": "memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml.",
-    "muninn_absent": "muninn is not on PATH; install it (the Markdown path is not a fallback).",
+    "memory_backend_invalid": "Set `memory.backend` to `muninn` or `off` in `.coderails/workflow.config.yaml`.",
+    "muninn_absent": "Install `muninn` and put it on `PATH`. The Markdown path cannot serve as a fallback.",
     "muninn_old_ledger": (
-        "the installed Muninn command lacks task requests, or this record has only an old K-id; "
-        "legacy bindings cannot establish current request provenance."
+        "The installed Muninn command has no learning tasks, or this record has only an earlier K-id. Legacy "
+        "bindings cannot establish the source of the current learning task."
     ),
-    "muninn_timeout": "muninn hung past 10s; run `muninn know list` by hand and check store locks.",
+    "muninn_timeout": "Muninn took more than 10 seconds. Run `muninn know list` by hand and check the store locks.",
     "muninn_error": (
-        "muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and "
-        "read stderr."
+        "Muninn gave a nonzero exit code or JSON that cannot be read. Run the same `muninn know ...` command again "
+        "and read stderr."
     ),
     "muninn_bad_output": (
-        "Muninn returned a reply that does not match the task request or current-note contract; inspect its output."
+        "The Muninn reply does not agree with the learning task or the current Note rules. Examine the output."
     ),
-    "learning_pending": "Muninn has accepted the task request. Keep its R_ ID and check the same request later.",
+    "learning_pending": "Muninn accepted the learning task. Keep its R_ ID and use it to check the same task again.",
     "learning_request_unknown": (
-        "Muninn may have accepted a request without returning its R_ ID. "
-        "Inspect `muninn learn list`; do not submit again."
+        "Muninn can accept a learning task without giving its R_ ID. Examine `muninn learn list`. Do not send the "
+        "task again."
     ),
     "learning_request_failed": (
-        "The saved Muninn request failed or was cancelled. Inspect it with `muninn learn show R_ID`."
+        "The saved Muninn task did not finish successfully, or it was cancelled. Examine it with `muninn learn "
+        "show R_ID`."
     ),
     "learning_no_matching_record": (
-        "The completed request produced no active note with this exact task and text. Inspect its receipt and notes."
+        "The completed task gave no active Note for this task and text. Examine the receipt and Notes."
     ),
-    "learning_no_change": "The saved request completed without applying knowledge. It is not a written Note.",
-    "learning_request_mismatch": "Request project, task, source window or receipt identity differs from its binding.",
-    "learning_receipt_unavailable": "The request has no supported committed receipt; acceptance alone is not a save.",
+    "learning_no_change": "The saved task ended without a change to knowledge. No Note was written.",
+    "learning_request_mismatch": (
+        "The binding and the learning task differ in project, task, source window, or receipt identity."
+    ),
+    "learning_receipt_unavailable": (
+        "The learning task has no committed receipt that this reader can use. Muninn can accept the task without "
+        "writing a Note."
+    ),
     "learning_record_changed": "Listed and shown current revisions differ. Read again with the same binding.",
-    "learning_record_expired": "The current Note has reached its timed expiry and cannot be used.",
-    "learning_record_ambiguous": "Several receipts match the exact K-id/revision. No request identity was selected.",
-    "learning_form_unsupported": "This reader supports Notes only; Guide use remains unsupported.",
+    "learning_record_expired": "The current Note reached its expiry time. Do not use it.",
+    "learning_record_ambiguous": (
+        "More than one receipt matches this K-id and revision. No learning task was selected."
+    ),
+    "learning_form_unsupported": "This reader reads Notes only. It cannot use Guides.",
     "learning_conditional_use_unsupported": (
-        "The Note is saved with conditions or conditional expiry. Legacy dispatch/promotion/render cannot evaluate "
-        "those conditions; retain its metadata and do not use it unconditionally."
+        "The Note has conditions for use or expiry. Legacy dispatch, promotion, and render cannot check those "
+        "conditions. Keep the metadata. Do not use the Note unconditionally."
     ),
-    "learning_selection_unavailable": "A required E-id/ref/hash/selected excerpt is unavailable; no cite is asserted.",
-    "learning_evidence_mismatch": "The retained evidence identity, selector, scope or source window does not match.",
-    "learning_source_changed": "A physical source or its exact retained provenance changed; no cite is asserted.",
-    "learning_source_unavailable": "A required live physical original is unavailable; no cite is asserted.",
+    "learning_selection_unavailable": (
+        "An E-id, ref, hash, or excerpt is necessary but unavailable. Do not cite this Note."
+    ),
+    "learning_evidence_mismatch": (
+        "The saved record identity, selector, scope, or source window differs from the binding."
+    ),
+    "learning_source_changed": "A physical source or its saved provenance changed. Do not cite it.",
+    "learning_source_unavailable": "A necessary live source file is unavailable. Do not cite it.",
     "learning_source_authority": (
-        "The complete support set must be live, primary, unflagged, unredacted direct-owner user prompts. "
-        "Current Muninn has no normal/restricted classification; do not infer one."
+        "Use only live, primary, unflagged, unredacted prompts directly from the owner as sources. Current Muninn "
+        "has no `normal` or `restricted` classes. Do not infer a class."
     ),
-    "learning_quote_mismatch": "A retained selected excerpt did not pass public quote-check; no cite is asserted.",
-    "learning_read_limit": "The read exceeded a time, reply, record or support limit; results are incomplete.",
-    "learning_project_unavailable": "The calling project directory is unavailable; do not use the graph key.",
-    "muninn_store_missing": "no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once.",
+    "learning_quote_mismatch": "The saved excerpt differs from the source in the public quote check. Do not cite it.",
+    "learning_read_limit": "The read exceeded a time, reply, record, or source limit. It did not give all results.",
+    "learning_project_unavailable": "The calling project directory is unavailable. Do not use the graph key.",
+    "muninn_store_missing": (
+        "There is no Muninn store at `$MUNINN_HOME` or `~/.local/share/muninn`. Run `muninn ingest` one time."
+    ),
     "muninn_schema_old": (
-        "the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2."
+        "The D4 adapter expects retired schema v2. Current Muninn uses schema v1. Do not migrate the store to v2."
     ),
     "muninn_schema_incomplete": (
-        "the D4 adapter expects retired v2 columns or tables; inspect the current store with `muninn doctor`, "
-        "then redesign the adapter."
+        "The D4 adapter expects retired v2 columns or tables. Examine the current store with `muninn doctor`. Then "
+        "redesign the adapter."
     ),
-    "uncited_write": "give a verbatim --quote (and --cite ref); a record without a quote is never written.",
-    "restricted_refused": "restricted records are never written by the adapter; write a normal-sensitivity claim.",
+    "uncited_write": (
+        "Supply a verbatim `--quote` and `--cite ref`. The adapter cannot write a record without a quote."
+    ),
+    "restricted_refused": "The adapter does not write restricted records. Write a normal-sensitivity claim.",
     "bad_record": (
-        "the record failed validation (type, scope, tag, date, empty claim, or loop scope without a loop " "id)."
+        "The record has an error in its type, scope, tag, date, claim text, or loop ID. A claim must have text, "
+        "and loop scope must have a loop ID."
     ),
-    "handwritten_protected": "the render target is hand-written (no generator marker); render to a new path.",
+    "handwritten_protected": "The target has no generator marker and is hand-written. Write the view to a new path.",
     "cite_not_user": (
-        "the cite must anchor in a user prompt; cite the owner's own words or use the approved-reply " "form."
+        "The citation must point to a user prompt. Cite the owner's words or use the approved-reply syntax."
     ),
     "cite_too_short": (
-        "a quote-only cite needs 12 to 300 characters; quote more of the user's prompt or cite an "
+        "A quote-only citation must have 12 to 300 characters. Use more text from the user's prompt or cite the "
         "approval with its reply."
     ),
     "cite_unresolved": (
-        "the cite ref was not found in `muninn session <root>`, or the approval has no reply before it; "
-        "check the ref."
+        "The ref did not occur in `muninn session <root>`, or the approval has no preceding reply. Check the ref."
     ),
     "cite_not_own_session": (
-        "the cite ref belongs to another session; only a prompt of the caller's own session (--session) can "
-        "anchor a write."
+        "The ref points to a different session. Only a user prompt from the calling session (`--session`) can "
+        "authorize the write."
     ),
     "cite_bad_approval": (
         "the approval must be a short user prompt (80 chars or fewer) that directly follows the reply it answers."
     ),
-    "refused_uncited": "muninn got no citation; pass --cite/--quote.",
-    "refused_not_found": "the cite ref does not resolve; run `muninn ingest` and check the ref.",
+    "refused_uncited": "Muninn got no citation. Supply `--cite` and `--quote`.",
+    "refused_not_found": "The ref does not resolve. Run `muninn ingest` and check the ref.",
     "refused_not_citable": (
-        "the cited event is a subagent thread; only the orchestrator session can write typed records."
+        "The citation points to a subagent thread. Only the orchestrator session can write typed records."
     ),
     "refused_quote_length": (
-        "the quote must be 12 to 300 characters (a shorter one is valid only as a whole approval prompt)."
+        "A quote must have 12 to 300 characters. A shorter quote must be the full approval prompt."
     ),
-    "refused_quote_not_found": "the quote is not verbatim in the cited event; copy it exactly.",
-    "refused_approval_needs_reply": (
-        "a short approval needs the reply it answers cited too; use the approved-reply form (--approval " "REF)."
-    ),
+    "refused_quote_not_found": "The quote differs from the cited text. Copy the source text verbatim.",
+    "refused_approval_needs_reply": "For a short approval, also cite the reply it answers. Use `--approval REF`.",
     "refused_preference_needs_user": "a preference must cite a user prompt.",
-    "refused_bad_supersedes": "the superseded K-id is missing, not current, or in another scope.",
-    "refused_bad_contradicts": "the contradicted K-id does not exist.",
+    "refused_bad_supersedes": "There is no K-id to supersede, or the K-id is out of date or has a different scope.",
+    "refused_bad_contradicts": "There is no K-id for the contradiction.",
     "refused_bad_valid_until": "valid_until must be a future ISO date.",
-    "refused_bad_tags": "tags must match [a-z0-9_-]{1,32}.",
-    "refused_bad_loop_scope": "the loop id is invalid, or --global was combined with a loop scope.",
-    "refused_bad_kind": "the record kind is not one muninn accepts.",
+    "refused_bad_tags": "Use tags with the format `[a-z0-9_-]{1,32}`.",
+    "refused_bad_loop_scope": "The loop ID has an error, or the caller used `--global` with loop scope.",
+    "refused_bad_kind": "Muninn does not accept this record type.",
     "refused_text_length": "the claim must be 1 to 500 characters.",
     "refused_no_caller_session": (
         "quote-only writes need CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID in the environment."
     ),
     "refused_other": (
-        "muninn refused with a code not listed here; the reason is `refused_<code>`, read it and the " "muninn docs."
+        "Muninn refused the write with a code this catalog does not list. Read `refused_<code>` and the Muninn docs."
     ),
-    "decision_wrong_session": "the loop state belongs to another session; record only from the owning session.",
-    "decision_wrong_loop": "the loop changed after the caller read it; read its current loop ID before recording.",
-    "decision_wrong_revision": "the graph changed after the caller read it; read its revision before recording.",
+    "decision_wrong_session": (
+        "The loop belongs to a different session. Record the decision only from the session that owns the loop."
+    ),
+    "decision_wrong_loop": (
+        "The loop changed after the caller read it. Read the current loop ID before you record the decision."
+    ),
+    "decision_wrong_revision": (
+        "The graph changed after the caller read it. Read the current revision before you record the decision."
+    ),
     "decision_blank_phase": "a decision needs a non-blank phase (for example 2.5).",
-    "decision_blank_decision": "a decision needs a non-blank decision text; nothing was written.",
+    "decision_blank_decision": "A decision must have text. The command did not write a record.",
     "decision_invalid_chain": (
-        "the decision chain is damaged; inspect and preserve the loop state before any further sync."
+        "The decision chain has damage. Examine and preserve the loop data before you sync again."
     ),
-    "decision_sync_unknown": "a decision sync may have reached Muninn; inspect the store before any manual retry.",
-    "decision_state_error": "the loop state could not be read, validated or locked; nothing was written.",
+    "decision_sync_unknown": "Muninn can have received the decision. Examine the store before you retry by hand.",
+    "decision_state_error": "The command could not read, check, or lock the loop data. It did not write a record.",
     "order_chain_broken": (
-        "orders.json was edited by hand (the hash chain names the order); restore it from backup or review the "
-        "named order, then re-seal by recording through orders.py."
+        "Someone edited `orders.json` by hand. The hash chain names the entry. Use a saved copy or examine the "
+        "named entry. To seal the entry again, record it with `orders.py`."
     ),
-    "order_blank_field": "an order needs a non-blank failure mode and lesson; nothing was written.",
+    "order_blank_field": (
+        "A standing instruction must have text for the problem and the lesson. The command did not write an entry."
+    ),
     "order_lesson_too_long": (
-        "the collapsed lesson exceeds 500 characters; provide a shorter complete claim, never truncate it."
+        "The collapsed lesson has more than 500 characters. Write a shorter complete claim. Do not truncate it."
     ),
-    "order_bad_id": "an explicit order id must match [a-z0-9][a-z0-9_-]{0,119}; use a canonical id.",
-    "order_id_collision": (
-        "that order id already names another failure mode or scope; use its real identity or a distinct id."
-    ),
-    "order_not_found": "no order with that id in orders.json; check the id with `orders.py lessons`.",
+    "order_bad_id": "Use the format `[a-z0-9][a-z0-9_-]{0,119}` for the standing instruction ID.",
+    "order_id_collision": "That ID names a different problem or scope. Use the ID for this entry or make a new one.",
+    "order_not_found": "There is no entry with that ID in `orders.json`. Check the ID with `orders.py lessons`.",
     "order_state_error": (
-        "orders, preparation or receipt could not be read, locked or written; check the repo-key dir, "
-        "orders.lock and persistent teardown.jsonl.lock."
+        "The command could not read, lock, or write the standing instructions, prepared data, or receipt. Check "
+        "the repo-key directory, `orders.lock`, and `teardown.jsonl.lock`."
     ),
     "order_loop_unknown": (
-        "no source at <repo-key dir>/<session>/progress.json; pass the owning --session and its separate "
-        "logical --loop."
+        "There is no source at `<repo-key dir>/<session>/progress.json`. Supply the `--session` that owns it and "
+        "the logical `--loop`."
     ),
     "order_wrong_session": (
-        "the source directory, session or logical loop is foreign; use the owning directory and identifiers."
+        "The source directory, session, or logical loop does not belong to this operation. Use the directory and "
+        "IDs that own it."
     ),
     "order_source_invalid": (
-        "progress, preparation or observations are malformed; restore genuine validated source artifacts."
+        "The `progress.json` file, prepared data, or observations have a format error. Put the correct checked "
+        "source files back."
     ),
     "order_source_mismatch": (
-        "the prepared source/hash is stale; before completion use prepare --refresh-from-sha256 with its "
-        "CURRENT evidence_sha256."
+        "The prepared source or hash is out of date. Before the loop ends, run `prepare --refresh-from-sha256` "
+        "with its current `evidence_sha256`."
     ),
     "order_loop_ineligible": (
-        "the owned graph or work units are incomplete or stopped; finish the existing completion requirements."
+        "The owned graph or work units did not finish or have stopped. Complete the required work."
     ),
     "order_not_complete": (
-        "preparation is prospective; durably save owned progress as complete before applying recurrence or aging."
+        "The prepared data is for future use. Apply recurrence or aging only after the owned `progress.json` "
+        "records `complete`."
     ),
     "order_pending_teardown": (
-        "completion saved but local apply or its observation failed; retry tick with the same bound source."
+        "The saved loop is complete, but the local update or its observation did not succeed. Retry `tick` with "
+        "the same source binding."
     ),
     "order_retro_validator_unavailable": (
-        "schema3 retros require the matching retro_check validator; install the matching validator before graduation."
+        "Schema 3 retros use the matching `retro_check` validator. Install it before graduation."
     ),
-    "order_already_ticked": "this session and logical loop were already counted; the tick was skipped (informational).",
+    "order_already_ticked": "The tick skipped this session and logical loop because the count includes them.",
     "no_user_cite": (
-        "The local diagnostic has no verified current owner citation. A caller quote cannot establish request evidence."
+        "The local diagnostic has no checked citation from the current owner. A caller quote cannot prove the "
+        "learning task."
     ),
-    "legacy_uncited": "The legacy import has no retained current request selection; keep it explicitly uncited.",
+    "legacy_uncited": "The legacy import has no saved selection for the current learning task. Keep it uncited.",
     "legacy_parse_error": (
-        "the local legacy input has an incomplete, ambiguous or colliding entry; fix the named entry and "
-        "rerun import-legacy, preserving the original."
+        "The local legacy input has an entry with missing data, an ambiguous meaning, or a collision. Correct that "
+        "entry and run `import-legacy` again. Keep the initial file."
     ),
-    "legacy_missing": "there is no hand-written standing-orders.md to import (absent, empty or already generated).",
+    "legacy_missing": (
+        "There is no hand-written `standing-orders.md` to import. The file may not be there, may have no text, or "
+        "may come from a generator."
+    ),
     "retro_not_assembled": (
-        "retro.json is below schema_version 3 or has no source_hashes; run `python3 scripts/lib/retro.py assemble "
-        "<state-dir> --session <session_id>` instead of writing it by hand."
+        "`retro.json` has a schema version below 3 or has no `source_hashes`. Run `python3 scripts/lib/retro.py "
+        "assemble <state-dir> --session <session_id>`."
     ),
     "retro_source_mismatch": (
-        "a hashed source (named in the message) changed after the retro was assembled; re-run retro.py assemble "
-        "once the sources are final."
+        "A hashed source changed after assembly. The message names it. Run `retro.py assemble` again when the "
+        "source files are complete."
     ),
     "retro_decisions_chain_broken": (
-        "decisions_absorbed fails verify_chain (the failing seq is named); restore the rows, record decisions only "
-        "through `graph.py record-decision`, then re-assemble."
+        "The `verify_chain` check rejected `decisions_absorbed`. The message gives the sequence number. Put the "
+        "rows back. Record decisions only with `graph.py record-decision`. Then assemble again."
     ),
     "retro_steps_missing": (
-        "a teardown step is missing or out of order in teardown.jsonl; run proof.py run --all (or proof.py "
-        "disposition), flush decisions, orders.py prepare and retro.py assemble, in that order."
+        "Check `teardown.jsonl` for a missing step or an incorrect sequence. Run `proof.py run --all` or `proof.py "
+        "disposition`. Then flush decisions. Next run `orders.py prepare`. Last, run `retro.py assemble`."
     ),
-    "retro_state_error": "progress.json is unreadable, so nothing was assembled.",
-    "retro_wrong_session": "the loop state belongs to another session; assemble only from the owning session.",
-    "retro_free_invalid": "--free-file must hold one JSON object; nothing was assembled.",
-    "handoff_state_unreadable": "handoff_derive could not read the loop's progress.json; pass the real state path.",
+    "retro_state_error": "The command could not read `progress.json`. It did not assemble a retro.",
+    "retro_wrong_session": "The loop belongs to a different session. Assemble only from the session that owns it.",
+    "retro_free_invalid": "`--free-file` must contain one JSON object. The command did not assemble a retro.",
+    "handoff_state_unreadable": (
+        "`handoff_derive` could not read the loop's `progress.json`. Supply the path to that file."
+    ),
     "graph_unavailable": (
-        "graph.py summarize or inspect failed for this state, so the done and next-step lists are empty; run the "
-        "command by hand and read stderr."
+        "`graph.py summarize` or `graph.py inspect` did not succeed for this graph. The done and next-step lists "
+        "are empty. Run the command by hand and read stderr."
     ),
     "lesson_not_current": (
-        "The saved request has no exact eligible current Note. Inspect its retained receipt; "
-        "a caller quote cannot repair authority."
+        "The saved learning task has no current Note that meets its rules. Examine its saved receipt. A caller "
+        "quote cannot give it authority."
     ),
 }

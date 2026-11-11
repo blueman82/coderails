@@ -7,7 +7,8 @@ description: "Initialize an LLM Wiki for the current project — a persistent, c
 
 Bootstrap an LLM Wiki for the current project based on Karpathy's LLM Wiki pattern: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
 
-The core idea: instead of re-deriving knowledge from raw code on every question, the LLM incrementally builds and maintains a persistent wiki — a structured, interlinked collection of markdown files that compounds over time.
+The LLM builds and maintains a wiki of linked Markdown files.
+It keeps knowledge from earlier work so the LLM can answer future questions without deriving it from raw code again.
 The human browses it in Obsidian.
 The LLM does the bookkeeping.
 
@@ -15,55 +16,60 @@ The LLM does the bookkeeping.
 
 Use Obsidian to browse the vault.
 `qmd` is optional: without it, read `index.md` and linked pages directly.
-Install matplotlib only when creating charts; install any build tools required by your chosen optional tooling.
+Install matplotlib only when you make charts. Install the build tools necessary for the optional tools you select.
 This plugin does not bundle a wiki setup script.
 
 The plugin also bundles Obsidian config files and the Marp plugin in `assets/` — these get copied into the vault in Step 3.
 
 ## Three Layers
 
-1. **Raw sources** (immutable): The project codebase, git history, PRs, documentation. Read from these but never modify wiki when modifying code.
-2. **The wiki**: LLM-generated markdown in an Obsidian vault. Codex owns this layer entirely — creates pages, updates cross-references, maintains consistency.
-3. **The schema** (`AGENTS-wiki-schema.md`, linked from `AGENTS.md`): Tells the LLM how the wiki is structured, what conventions to follow, what workflows to run. Co-evolved between human and LLM over time.
+1. **Raw sources** (immutable): The project codebase, Git history, PRs, and documentation.
+   Read these sources. Do not change the wiki when you change code.
+2. **The wiki**: Markdown the LLM writes in an Obsidian vault.
+   Codex owns this layer. It makes pages, updates links, and makes sure the pages agree.
+3. **The schema** (`AGENTS-wiki-schema.md`, linked from `AGENTS.md`): It gives the LLM the wiki structure, conventions, and workflows.
+   The user and LLM develop it together.
 
 ## Instructions
 
 ### Step 1: Understand the Project
 
-Read the project's AGENTS.md (or equivalent). Explore the codebase. Understand what kind of project this is and what knowledge would be most valuable pre-compiled.
+Read the project's AGENTS.md (or equivalent). Examine the codebase.
+Identify the project type and which knowledge is most useful to record first.
 
 ### Step 2: Propose Wiki Structure
 
 Based on the project, propose page types and directory structure. Do NOT use hardcoded types — adapt to the domain. Examples:
 
-- **Backend service**: services/, concepts/, entities/, impact/, investigations/, sources/
-- **Frontend app**: components/, routes/, state/, patterns/, investigations/, sources/
+- **Backend service**: `services/`, `concepts/`, `entities/`, `impact/`, `investigations/`, `sources/`
+- **Frontend app**: `components/`, `routes/`, `state/`, `patterns/`, `investigations/`, `sources/`
 - **Library**: modules/, apis/, patterns/, migrations/, sources/
 - **Infrastructure**: services/, resources/, runbooks/, incidents/, sources/
 
-Common across all projects: `index.md` (catalog), `log.md` (chronological), `templates/` (page skeletons), `sources/` (ingested PRs), `investigations/` (filed-back answers).
-Schema lives in the project directory as `AGENTS-wiki-schema.md`, linked from a slim `AGENTS.md` entry point — not inside the vault.
+All projects use `index.md` (catalog), `log.md` (chronological), `templates/` (page skeletons), `sources/` (PR records), and `investigations/` (answers filed from queries).
+Schema lives in the project directory as `AGENTS-wiki-schema.md`, linked from a slim `AGENTS.md` entry point — not in the vault.
 
-Present the proposal and iterate until the user approves. Include 3-5 seed pages you'd create first.
+Give the user the proposal. Update it until the user approves. List the 3–5 pages you propose to make first.
 
 ### Step 3: Create the Vault
 
-1. Determine project name from current directory or AGENTS.md.
-2. Ask the user where the vault should live.
-   Default suggestion: `<project-parent-dir>/<project-name>-wiki/` (sibling of the current project directory).
-   Accept any path they provide.
-   Set the shell variable `VAULT` to this path.
-3. Locate the skill's bundled assets.
-   The assets live next to this SKILL.md file, in the `assets/` subdirectory.
-   Set the shell variable `ASSETS` to the absolute path of that directory.
-   On a typical Codex install this is `~/.codex/skills/wiki-init/assets`.
-   Verify it exists and contains `obsidian-plugins/marp/main.js` before proceeding — if it doesn't, stop and ask the user to reinstall the skill.
-4. Create the vault and init git:
+1. Find the project name in the current directory name or AGENTS.md.
+2. Let the user select the vault path. Suggest `<project-parent-dir>/<project-name>-wiki/` as the default.
+   This is a sibling of the project directory. Accept the path the user gives.
+   Set `VAULT` to that path in the shell.
+
+3. Find the bundled `assets/` subdirectory next to this SKILL.md file.
+   Set `ASSETS` to its absolute path in the shell. A typical Codex install uses `~/.codex/skills/wiki-init/assets`.
+   Check that the directory contains `obsidian-plugins/marp/main.js`.
+   If it does not, stop and tell the user to install the skill again.
+
+4. Make the vault and init git:
    ```bash
    mkdir -p "$VAULT/.obsidian/plugins"
    cd "$VAULT" && git init
    ```
-5. **Copy the bundled assets — do NOT hand-write any of these files.** The manifest.json, main.js, and config files are exact copies from a working production vault. Never generate them from memory:
+5. **Copy the bundled assets. Do not write these files by hand or from memory.**
+   The bundled `manifest.json`, `main.js`, and config files are unchanged copies from a production vault that works.
    ```bash
    cp "$ASSETS/gitignore.template" "$VAULT/.gitignore"
    cp "$ASSETS/obsidian-config/app.json" "$VAULT/.obsidian/app.json"
@@ -73,65 +79,70 @@ Present the proposal and iterate until the user approves. Include 3-5 seed pages
    cp "$ASSETS/obsidian-config/appearance.json" "$VAULT/.obsidian/appearance.json"
    cp -R "$ASSETS/obsidian-plugins/marp" "$VAULT/.obsidian/plugins/marp"
    ```
-6. **Verify the copy succeeded before moving on.** The Marp plugin's `main.js` is ~3.6MB of compiled JavaScript — if it's missing or tiny, Obsidian will silently fail to load the plugin:
+6. **Check the copy before you continue.** The Marp plugin's `main.js` contains about 3.6 MB of compiled JavaScript.
+   If there is no file or it is too small, Obsidian does not activate the plugin and gives no error:
    ```bash
-   # main.js must exist and be at least 1MB
+   # Check for `main.js` and a byte count above 1000000
    test -f "$VAULT/.obsidian/plugins/marp/main.js" || { echo "FATAL: marp main.js missing"; exit 1; }
    test $(wc -c < "$VAULT/.obsidian/plugins/marp/main.js") -gt 1000000 || { echo "FATAL: marp main.js is too small (likely not the real plugin)"; exit 1; }
-   # community-plugins.json must list "marp" (not "marp-slides" — that's a different plugin)
+   # `community-plugins.json` must list "marp". "marp-slides" is a different plugin.
    grep -q '"marp"' "$VAULT/.obsidian/community-plugins.json" || { echo "FATAL: community-plugins.json missing marp entry"; exit 1; }
    ```
-   If any check fails, stop. Do not improvise. Tell the user what failed and ask for help.
-7. Create the wiki content directories (one per approved page type) plus `templates/`.
-   Also create `assets/` if the project expects matplotlib charts or other generated images in the wiki — it's optional, not required for every vault:
+   If a check does not succeed, stop. Do not improvise. Tell the user the error and ask for help.
+7. Make one wiki content directory for each approved page type. Also make `templates/`.
+   Also make `assets/` if the project expects matplotlib charts or other generated images in the wiki — it is optional, not necessary for each vault:
    ```bash
    cd "$VAULT" && mkdir -p templates <page-type-1> <page-type-2> ...
-   # optional, only if charts/images are expected:
+   # Optional. Use this only if the wiki will include charts or images.
    mkdir -p assets
    ```
 
 ### Step 4: Create Foundation Files
 
-**index.md** — content catalog. Codex reads this FIRST when answering queries. Organized by page type with `[[wiki-links]]`. Mark gaps as "Not yet documented." Reference `AGENTS-wiki-schema.md` as the schema location (do NOT create a separate schema.md in the vault — `AGENTS-wiki-schema.md` in the project directory is the single source of truth).
+**index.md** — content catalog. Codex reads this first for queries. Organize it by page type with `[[wiki-links]]`.
+Mark missing content as "Not yet documented." Give `AGENTS-wiki-schema.md` as the schema location.
+Use only the project directory's `AGENTS-wiki-schema.md` for the schema. Do not add a `schema.md` to the vault.
 
 **log.md** — append-only. Each entry: `## [YYYY-MM-DD] operation | description`.
 
-**templates/** — one per page type with YAML frontmatter skeleton.
+**templates/** — one file for each page type with a YAML frontmatter skeleton.
 
 ### Step 5: Seed Initial Pages
 
 Read the codebase and create 5-10 pages covering the most architecturally important parts. Each page:
 - YAML frontmatter (title, type, created, last_updated, sources, tags)
 - `[[wiki-links]]` for cross-references
-- Concise — under 2 minutes to read
-- Focus on knowledge that compounds (relationships, patterns, decisions), not facts derivable from code
+- Short. The reader can finish it in less than 2 minutes
+- Record knowledge that accumulates (relationships, patterns, decisions). Do not include facts a reader can get directly from code
 
-Discuss pages with the user as you create them — don't auto-ingest silently.
+Discuss pages with the user as you make them — do not auto-ingest silently.
 
 ### Step 6: Create AGENTS.md and AGENTS-wiki-schema.md
 
-Create two files in the project directory (not the wiki vault):
+Make two files in the project directory (not the wiki vault):
 
 - **`AGENTS.md`** — a slim entry point.
-  It points to `AGENTS-wiki-schema.md` as the source of truth for wiki conventions and, if the project already has other `AGENTS.md` content (a working guide, etc.), coexists with it rather than replacing it.
+  Point to `AGENTS-wiki-schema.md` as the authoritative source for wiki conventions.
+  Keep existing `AGENTS.md` content, such as the working guide.
 - **`AGENTS-wiki-schema.md`** — the actual schema the LLM reads at conversation start.
   Include: wiki location, three layers, page types, page format, search, Ingest/Query/Lint workflows, conventions, evolution note.
-  The Search section must note that `qmd` is optional — a fallback to reading `index.md` directly — so a machine without qmd isn't left with unconditional `qmd` instructions.
+  In the Search section, say that `qmd` is optional.
+  If a machine does not have `qmd`, tell the reader to use `index.md` directly.
 
-**List every directory Codex can write to in the Page types section of `AGENTS-wiki-schema.md`.** Include `templates/` and `assets/` as structural directories, not page types.
+**List each directory Codex can write to in the Page types section of `AGENTS-wiki-schema.md`.** Include `templates/` and `assets/` as structural directories, not page types.
 The Coderails `hooks/scripts/wiki_taxonomy_gate.py` hook reads `wiki.schema.json` (repo root: `{"page_types": [...dir names], "structural_dirs": [...]}`) as its write allow-list.
 Write that file with the Page types section, and keep them in step.
 
 The hook applies only to the ONE vault named in the plugin's own `.coderails/workflow.config.yaml`.
-A vault for another project is outside this gate.
+The gate does not apply to a vault for a different project.
 If the gate denies a write, it logs the rejected directory and the sanctioned list.
-A directory created in Step 3 but omitted from the Page types section will fail on its first gated write.
+If Step 3 made a directory and the Page types section does not include it, the gate refuses the first write.
 
 You can list a directory before creating it.
 The allow-list parser does not check the filesystem.
-For example, list `assets/` here even if Step 3 did not create it.
-The hook makes a separate check: at least 2 listed directories must exist on disk.
-Create the rest of the vault structure as Step 3 requires.
+For example, list `assets/` here if Step 3 did not make it.
+The hook also checks that a minimum of two listed directories are on disk.
+Make the other vault directories as specified in Step 3.
 
 ### Step 7: Update AGENTS.md
 
@@ -140,12 +151,17 @@ Add near the top of the project's AGENTS.md:
 ```markdown
 ## Wiki Knowledge Base
 
-**At the start of every conversation**, read `AGENTS.md` in this directory — the entry point — which links to `AGENTS-wiki-schema.md` for wiki maintenance protocols. The <project> wiki is a persistent, compounding knowledge base maintained by Codex and browsed by <user> in Obsidian. The wiki vault lives at `<vault-path-chosen-in-step-3>`.
+**At the start of each conversation**, read `AGENTS.md` in this directory.
+Follow its link to `AGENTS-wiki-schema.md` for wiki maintenance instructions.
+Codex maintains the <project> wiki and adds knowledge to it as work continues.
+The <user> browses the wiki in Obsidian. The vault is at `<vault-path-chosen-in-step-3>`.
 ```
 
 ### Step 8: Setup Tooling
 
-**qmd**: Register the wiki vault as a collection and add context — only if qmd is installed. `qmd collection add` errors "Collection already exists" on a rerun — guard it so re-running this step doesn't fail:
+**qmd**: If `qmd` is installed, register the wiki vault as a collection and add context.
+`qmd collection add` can give "Collection already exists" when you run it again.
+Check for the collection first:
 ```bash
 if command -v qmd >/dev/null 2>&1; then
   qmd collection list | grep -qx wiki || qmd collection add <vault-path> --name wiki
@@ -155,8 +171,8 @@ else
 fi
 ```
 
-If qmd is installed, reindex after any wiki changes with `qmd update && qmd embed`.
-Run `qmd update` first — `qmd embed` alone misses new files, since it only refreshes embeddings for already-known content hashes (inferred from qmd's documented behaviour); `qmd update` is what scans for new/changed files.
+If `qmd` is installed, reindex after wiki changes with `qmd update && qmd embed`.
+Run `qmd update` first to find new or changed files. `qmd embed` alone refreshes only known content hashes (inferred from qmd's documented behaviour).
 
 **Obsidian**: Register the vault programmatically and open it:
 
@@ -174,7 +190,7 @@ if os.path.exists(registry_path):
 else:
     registry = {"vaults": {}}
 
-# Check if already registered
+# Check for an existing registration
 already = any(v["path"] == vault_path for v in registry["vaults"].values())
 if not already:
     vault_id = secrets.token_hex(8)
@@ -189,8 +205,10 @@ if not already:
 
 Then open it: `open "obsidian://open?vault=<vault-name>"`
 
-On first open, the Marp plugin and all settings are already configured from the bundled assets. The user clicks "Trust author and enable plugins" when prompted — this is the only manual step.
+On first open, the bundled assets supply the Marp plugin and all settings.
+When Obsidian prompts the user, the user clicks "Trust author and enable plugins". This is the only manual step.
 
 ### Step 9: Commit and Report
 
-Commit everything. Report: pages created, vault location, how to open in Obsidian, what to ingest first.
+Commit everything. Report the pages you made, the vault location, and how to open it in Obsidian.
+Tell the user which source to add first.

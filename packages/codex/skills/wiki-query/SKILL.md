@@ -9,50 +9,57 @@ Answer a question against the project's LLM Wiki.
 
 **Question:** $ARGUMENTS
 
-Spawn the installed `wiki-writer` custom agent with `spawn_agent`, passing the
-question and the project location in a self-contained prompt. Collect its
-result with `wait_agent`, use `send_input` only for a specific missing check,
-then `close_agent`. If the question above is empty, report that and stop rather
-than inferring one.
+If the question above is empty, report that and stop. Do not infer a question.
+
+Start the installed `wiki-writer` custom agent with `spawn_agent`.
+Give it the question and the project location in a self-contained prompt.
+Collect its result with `wait_agent`. Use `send_input` only if you can name a missing check.
+Then use `close_agent`.
 
 ## Instructions
 
 ### Step 1: Load the Schema
 
-`AGENTS.md` at the project's git root is loaded into context at session start — use that content for conventions. The wiki schema itself (page types, page format, the three layers) lives in `AGENTS-wiki-schema.md`, which `AGENTS.md` links to; read it for the full schema. If `AGENTS.md` isn't present in context (e.g. a fresh fork with no prior context), do not assume cwd: walk up from the current directory, checking each level for `AGENTS.md`, up to the git repository root. If no `AGENTS.md` is found by the git root, tell the user to invoke `$coderails-codex:wiki-init` first. (The wiki vault itself, e.g. `../coderails-wiki`, is a separate sibling repo the project's `.coderails/workflow.config.yaml` points to; it is not where `AGENTS.md` lives, and a fork should never need to be running from inside it.)
+At session start, Codex reads the project root's `AGENTS.md` into context. Use that file for project conventions.
+Read its linked `AGENTS-wiki-schema.md` for the full schema, which defines page types, page format, and the three layers.
 
-The vault path and git flow are **not** read from AGENTS.md — they are the `wiki_path` and
-`wiki_git_worktree` flat keys in that same project's `.coderails/workflow.config.yaml`, resolved
-by walking up from the project repo location to its git root and checking for
-`.coderails/workflow.config.yaml`; the first one found wins. Set `vault` to the resolved
-`wiki_path` (relative to the directory containing that `workflow.config.yaml` unless already
-absolute).
+If the context does not contain `AGENTS.md`, start at the current directory and check each parent up to the Git root.
+If you find no `AGENTS.md`, tell the user to invoke `$coderails-codex:wiki-init` first.
+The vault is a sibling repository, for example `../coderails-wiki`. Find `AGENTS.md` in the project repository.
+The session can use the vault from the project directory.
+
+Read the vault path and Git flow from the flat `wiki_path` and `wiki_git_worktree` keys in `.coderails/workflow.config.yaml`.
+Check for that config from the project repository location up to its Git root. Use the first config you find.
+Set `vault` to the resolved `wiki_path`. If that path is relative, resolve it from the directory containing `workflow.config.yaml`.
 
 ### Step 2: Search the Wiki
 
-1. Read `$vault/index.md` first — scan for relevant pages
-2. Read relevant wiki pages — drill into matches
-3. `qmd` is an optional accelerator — absent, rely on steps 1–2. Use the named `wiki` collection: `qmd query -c wiki "<question>"` for hybrid BM25 + vector search on open-ended questions; `qmd search -c wiki "<keywords>"` for fast BM25-only known-term lookups; `qmd get qmd://wiki/<file>` to fetch a specific page by path.
-4. Fall back to raw code/codebase only if the wiki doesn't cover the topic
+1. Read `$vault/index.md` first — scan for related pages
+2. Read related wiki pages — drill into matches
+3. If `qmd` is unavailable, use steps 1–2. If it is available, use the named `wiki` collection.
+   Use `qmd query -c wiki "<question>"` for hybrid BM25 + vector lookup on open-ended questions.
+   Use `qmd search -c wiki "<keywords>"` for fast BM25-only lookups of known terms.
+   Use `qmd get qmd://wiki/<file>` to fetch a page by path.
+4. Read the code only if the wiki does not include the topic.
 
 Synthesize the answer from wiki pages with citations: "According to [[page_name]]..."
 
 ### Step 3: Answer
 
-Answers can take different forms — choose naturally:
+Use the format that fits the question:
 
 - **Markdown** — explanations, walkthroughs, summaries
-- **Comparison table** — comparing approaches, services, patterns
-- **Slide deck** (Marp format) — write a `.md` file with Marp frontmatter
+- **Table** — compare approaches, services, and patterns
+- **Marp deck** — write a `.md` file with Marp frontmatter
   in `$vault/assets/`. The Obsidian Marp Slides plugin renders it.
-- **Chart** (matplotlib) — write and run a Python script, then save its `.png`
+- **Chart** (matplotlib) — write and run a Python script, then write its `.png`
   file to `$vault/assets/`.
 
 ### Step 4: File Back
 
-When the answer reveals something non-obvious or reusable:
+If the answer gives new information or information that can help on a future task:
 
-1. Create an investigation page in `$vault/wiki/investigations/` with YAML frontmatter and `[[wiki-links]]`
+1. Make an investigation page in `$vault/wiki/investigations/` with YAML frontmatter and `[[wiki-links]]`
 2. Update `$vault/index.md`
 3. Append to `$vault/log.md`: `## [YYYY-MM-DD] query-file-back | <question summary>`
 
@@ -60,7 +67,11 @@ When the answer reveals something non-obvious or reusable:
 
 **If `wiki_git_worktree` is `false`**: write directly and commit to the vault.
 
-After writing, reindex if `qmd` is available: `qmd update` (refreshes all configured collections), then `qmd embed -c wiki` (`update` must run first to pick up new/changed files; `embed` alone only refreshes already-known content hashes).
-Run `qmd collection add <vault-path> --name wiki` only during first-time setup when the `wiki` collection is missing; it is not routine maintenance.
+After writing, reindex if `qmd` is available. Run `qmd update` first, then run `qmd embed -c wiki`.
+The update refreshes all configured collections and finds new or changed files.
+The embed command alone refreshes only known content hashes.
 
-Good answers compound the knowledge base. File back anything that took real effort to assemble.
+If there is no `wiki` collection during first-time setup, run `qmd collection add <vault-path> --name wiki`.
+Do not run it as part of usual maintenance.
+
+File back answers that took substantial work to assemble.
