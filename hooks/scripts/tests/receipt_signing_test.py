@@ -175,10 +175,10 @@ class DocsTests(unittest.TestCase):
             self.assertIn(residual, record)
         modes = " ".join(record.split())
         for contract in (
-            "The gate defaults to `action_authority: enforce`, including when there is no configuration file.",
-            "Invalid configuration denies guarded actions.",
+            "The gate defaults to `action_authority: enforce` with or without a configuration file.",
+            "An incorrect configuration denies operations that the gate checks.",
             "Explicit `advisory` warns without a receipt",
-            "explicit `off` disables this receipt gate",
+            "Explicit `off` disables this receipt gate",
         ):
             self.assertIn(contract, modes)
 

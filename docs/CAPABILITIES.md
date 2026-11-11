@@ -1,181 +1,233 @@
 # Capability profiles
 
-`capabilities/profiles.json` declares what each agent type may reach. `scripts/capability_profiles_validate.py`
-(run by `scripts/tests/capability_profiles_test.py`) fails when it disagrees with `agents/*.md` frontmatter or
-`packages/codex/agents/*.toml`.
+The `capabilities/profiles.json` file lists tools for each agent type.
+The `scripts/capability_profiles_validate.py` validator fails if the file disagrees with `agents/*.md` frontmatter or `packages/codex/agents/*.toml`.
+The `scripts/tests/capability_profiles_test.py` test runs the validator.
 
-The `security-reviewer` holds exactly `repo.inspect` and `diff.read`. The Codex role launcher and both provider MCP
-servers refuse to start that role if its profile grants another capability. These checks use the installed source.
+The `security-reviewer` role holds only `repo.inspect` and `diff.read`.
+The Codex role launcher and the MCP server for each provider refuse to start the role if its settings grant more tools.
+These checks use the installed source.
 
-Capabilities: `repo.inspect`, `diff.read`, `tests.run`, `pr.comment` (reached through `scripts/capability.py <tool>`),
-plus `worktree.write` (Write/Edit, or a non-read-only Codex sandbox) and `shell.raw` (unrestricted Bash). An agent with
-a capability tool but no `shell.raw` is "guarded": the Bash allowlist hook derives its guarded set from this file.
+The available tools include `repo.inspect`, `diff.read`, `tests.run`, and `pr.comment` through `scripts/capability.py <tool>`.
+The `worktree.write` setting uses Write and Edit or a writable Codex sandbox. The `shell.raw` setting gives raw Bash.
+An agent with a declared tool and no `shell.raw` is "guarded". The Bash allowlist hook reads this file to find those agents.
 
 ## What each harness can enforce
 
 | Property | Claude Code | Codex |
 |---|---|---|
-| Write/Edit withheld | frontmatter `tools`/`disallowedTools` (harness-enforced) | `sandbox_mode = "read-only"` (sandbox-enforced) |
-| Bash narrowed to capability tools | **Bash removed**: the six guarded source agent files list no `Bash`. The earlier live probe covered five roles; the new `security-reviewer` still needs an installed probe. `reviewer_bash_allowlist.py` stays as defence in depth for an install whose agent file still lists Bash; `subagent_identity_gate.py` denies Bash from a subagent with no `agent_type` in a graph-bound session | **shell switched off**: each guarded role TOML carries `[features] shell_tool = false` (plus `sandbox_mode = "read-only"`, which alone does NOT bind a child). No per-agent Bash hook exists: Codex PreToolUse carries no `agent_type`/`agent_id`, so there is no Codex counterpart of the identity gate |
-| Typed first-class tools | agent `tools:` are exactly `mcp__plugin_coderails_cap-<role>__<tool>` (+`Skill` for preflight-scout); servers declared by `.claude-plugin/plugin.json` `mcpServers` -> generated `capabilities/mcp.json` | `scripts/codex_role_session.py` launches a role as its own `codex exec` with exactly that role's server; native children inherit the parent's MCP servers, so no per-role server is registered in the Codex plugin manifest |
-| `tests.run` | allowed for `source-auditor` only; bounded execution of declared argv lists, NOT read-only | same script; the read-only sandbox may block its cache writes (inferred) |
+| No Write or Edit | The harness applies frontmatter `tools` and `disallowedTools`. | The sandbox applies `sandbox_mode = "read-only"`. |
+| Shell control | Six agent files have no `Bash`. An earlier live probe tested five roles. The installed `security-reviewer` needs a probe. The `reviewer_bash_allowlist.py` hook covers installations with Bash in an agent file. The `subagent_identity_gate.py` hook denies Bash without `agent_type` in a graph-bound session. | Each controlled role TOML has `[features] shell_tool = false` and `sandbox_mode = "read-only"`. The sandbox mode alone does not control a child. Codex PreToolUse has no `agent_type` or `agent_id`, so it has no identity gate or Bash hook for individual agents. |
+| Typed MCP tools | The `tools:` list contains only `mcp__plugin_coderails_cap-<role>__<tool>`. The `preflight-scout` role also has `Skill`. The `mcpServers` key in `.claude-plugin/plugin.json` points to `capabilities/mcp.json`. | The `scripts/codex_role_session.py` script starts a `codex exec` session with only that role's server. Native children inherit the parent's servers. The Codex plugin manifest declares no server for an individual role. |
+| `tests.run` | Only `source-auditor` can use it. It runs declared argv lists with limits and can write files. | It uses the same script. The read-only sandbox can block its cache writes (inferred). |
 
-On Claude the guarded agents now reach the capability tools as harness-level typed MCP tools and hold no Bash (see Role
-binding below). The paragraph that follows describes the Bash-path hook, which remains as defence in depth for an install whose
-agent file still lists Bash. Interpreters (`python`, `node`, `bash -c`) stay denied for guarded agents; execution is only via
-a declared name in `profiles.json` `tests`. The hook allows the call only when the caller's profile grants that tool, and refuses with
-`capability_denied_<tool>`, `capability_unknown_tool` or `capability_bad_argv`. An `agent_type` absent from `profiles.json` (including `general-purpose`) is not this hook's concern and passes through unchanged.
+Claude agents with these controls use typed MCP tools and have no Bash. See Role binding below.
+The Bash-path hook also checks installations with Bash in an agent file.
+It refuses interpreters such as `python`, `node`, and `bash -c` for these agents. Use a declared name in the `tests` section of `profiles.json`.
 
-Known gaps: the agent must be handed the absolute script path (the hook does not expand `$CLAUDE_PLUGIN_ROOT`); a
-missing or malformed `profiles.json` makes the hook fall back to the original hard-coded guarded set (allowlist stays on, capability calls then deny as plain Bash). `tests.run` executes repo code: that is user-level code execution unless confined. On macOS it runs under `sandbox-exec` (no network, writes only to the repo, a throwaway HOME and tmp, real-home `.ssh`/`.config/gh`/`.aws`/`.gnupg` unreadable); elsewhere it refuses with `capability_sandbox_unavailable` unless `CAPABILITY_TESTS_UNSANDBOXED=1` (then it is NOT contained). A throwaway `$HOME` alone does not protect secrets: Python and ssh resolve the real home via the passwd entry. The validator also fails an agent file with no inline `tools:` line (the harness then grants all tools) and a guarded agent whose tools differ from the derived MCP names (only preflight-scout's `Skill` is added). The documented `general-purpose` source-auditor dispatch is not gated by profiles (it already has full Bash), so only a dispatch as `subagent_type: source-auditor` gets the tighter allowlist.
+The hook accepts a call only if the role settings grant its tool.
+Its refusal codes are `capability_denied_<tool>`, `capability_unknown_tool`, and `capability_bad_argv`.
+It skips an `agent_type` without an entry in `profiles.json`, for example `general-purpose`.
+
+Give the agent the absolute script path. The hook does not expand `$CLAUDE_PLUGIN_ROOT`.
+If the hook cannot find or parse `profiles.json`, the hook uses its hardcoded set. The allowlist stays on and rejects these tool calls as ordinary Bash.
+
+The `tests.run` tool executes repo code at the user's privilege level.
+On macOS, `sandbox-exec` blocks network access. It limits writes to the repo, a temporary HOME, and tmp.
+It blocks reads of the user's `.ssh`, `.config/gh`, `.aws`, and `.gnupg`.
+On other systems it refuses with `capability_sandbox_unavailable` unless `CAPABILITY_TESTS_UNSANDBOXED=1`, which runs without containment.
+A temporary `$HOME` alone cannot protect secrets because Python and ssh can get the actual home directory from the passwd entry.
+
+The validator refuses an agent file without an inline `tools:` line because the harness then grants all tools.
+It refuses an agent with these controls if its tools differ from the derived MCP names. The only added tool is `Skill` for `preflight-scout`.
+A source-auditor call as `general-purpose` has full Bash and these rules do not apply to it.
+Use `subagent_type: source-auditor` for the tighter allowlist.
 
 ## Per-role MCP server
 
-`scripts/capability_mcp.py --role <agent>` is a stdio MCP server (newline-delimited JSON-RPC: `initialize`,
-`notifications/initialized`, `ping`, `tools/list`, `tools/call`) that serves exactly the capability tools
-`capabilities/profiles.json` grants that role and dispatches in-process to `scripts/capability.py`. The profile stays the
-single source of truth: `tools/list` is recomputed from it at launch, so a profile edit changes the served set and
-`scripts/capability_profiles_validate.py` still flags frontmatter/Codex files that disagree. The Codex package carries
-byte-identical copies of `capability.py`, `capability_mcp.py`, `lib/capability_extra.py` and `profiles.json`
-(`packages/tests/test_codex_capability_parity.py`).
+The command `scripts/capability_mcp.py --role <agent>` starts a stdio MCP server.
+Its newline-delimited JSON-RPC methods are `initialize`, `notifications/initialized`, `ping`, `tools/list`, and `tools/call`.
+It offers only the tools the role gets in `capabilities/profiles.json` and uses `scripts/capability.py` without starting a child.
 
-- **Tool names.** MCP tool names cannot contain dots, so `repo.inspect`, `diff.read`, `tests.run`, `pr.comment`, `cmd.run`
-  are served as `repo_inspect`, `diff_read`, `tests_run`, `pr_comment`, `cmd_run`. Guarded read-only roles
-  (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `security-reviewer`) get `repo_inspect`, `diff_read`;
-  `source-auditor` additionally gets `tests_run` and `cmd_run`. The two read tools advertise `readOnlyHint: true`.
-  The execution tools advertise `readOnlyHint: false`; they can run repo code.
-- **Per-role instance; role is not an argument.** The role is fixed at launch. No `inputSchema` has a `role` property and
-  `capability.check` rejects unknown keys, so a smuggled `role` is `capability_args_invalid`. Startup exits 2 with a
-  stderr reason when the role is absent from `profiles.json`, holds no capability tool, or an unknown flag is given.
-  It tries to write a `capability_mcp_refused` trace row. A `tools/call` for a name outside the role's list returns a
-  JSON-RPC error and tries to write a `capability_wrong_role` row. It dispatches nothing.
-- **cwd and `worktree`.** A plugin MCP server's cwd is the session's cwd, not a subagent's worktree. Every repo tool
-  therefore accepts an optional `worktree` argument, honoured only if it is a path listed by `git worktree list` in the
-  server's own repo (else `capability_path_denied`).
-- **More `repo.inspect` ops** (all through `safe_path` / `REF`): `show` (`spec` = `<ref>:<path>`), `blame`, `wc`, `sha256`,
-  `glob` (a `git ls-files` pathspec, tracked files only) and `offset` on `read`.
-- **`cmd.run`** runs one entry of `profiles.json` `named_commands` (`git-rev-count {ref}`, `file-lines {path}`,
-  `file-sha256 {path}`): argv templates with typed placeholders (`repo_path`, `ref`), exact argument keys, whole-token
-  substitution (no shell), executed through `capability.sandboxed()` like `tests.run` (no network, confined writes,
-  scrubbed env). Granted to `source-auditor` only. Refusals: `capability_args_invalid` (unknown name, missing/extra key),
-  `capability_path_denied` (`..`, absolute), `capability_bad_ref`.
-- **Trace.** Each call and refusal tries to append a `capability` row with inputs `{tool, role, via: mcp}` (stored as
-  hashes). A missing trace library or failed write leaves no row. A recognized tool's response sets `traced: false` in
-  that case; startup and wrong-role errors have no `traced` field. Counters include only stored rows:
-  `python3 scripts/lib/capability_counters.py [--since <ISO ts>]` (reads `CLAUDE_AGENTIC_LOOP_DIR`).
-- **Cost.** Plugin MCP servers all launch at session start: one Python process per role, six per session after installation.
+The server calculates `tools/list` from the file at launch. A change to the file changes that list at the next launch.
+The `scripts/capability_profiles_validate.py` validator continues to flag differences in frontmatter and Codex files.
+The Codex package has the same bytes for `capability.py`, `capability_mcp.py`, `lib/capability_extra.py`, and `profiles.json`.
+The `packages/tests/test_codex_capability_parity.py` test checks them.
 
-Limits (stated, not hidden): `cmd.run` and `pr.comment` offer no network command: `gh pr view` is
-deliberately NOT offered, so reviewers work from `diff.read` and dispatcher-supplied PR metadata. `tests.run` and
-`cmd.run` are contained only where `sandbox-exec` exists (else `capability_sandbox_unavailable`). The server cannot stop
-an agent that holds a raw shell from bypassing it; that is what removing Bash from the agent achieves. Same-user policy
-files are agent-writable: this is a cooperating-agent safeguard, not an absolute boundary.
+- **Tool names.** MCP names cannot have dots. The names `repo.inspect`, `diff.read`, `tests.run`, `pr.comment`, and `cmd.run` use underscores in MCP.
+  The MCP names are `repo_inspect`, `diff_read`, `tests_run`, `pr_comment`, and `cmd_run`.
 
-Further stated limits: (1) `cmd.run` and `tests.run` read `capabilities/profiles.json` on every call, and `tests.run`
-executes repo code in a sandbox that can write the repo, so that code can edit the command table within a session
-(the same-user "tests.run executes repo code" boundary; `tools/list` is fixed at launch, the command tables are not).
-(2) The `worktree` argument accepts any entry of `git worktree list`, not only the dispatched tree, so a granted role can
-read, and via `tests.run`/`cmd.run` execute in, another agent's worktree of the same repo.
+  The roles `deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, and `security-reviewer` get `repo_inspect` and `diff_read`.
+  The `source-auditor` also gets `tests_run` and `cmd_run`. The two read tools set `readOnlyHint: true`.
+  The execution tools set `readOnlyHint: false` and can run repo code.
+
+- **Role selection.** The launcher sets the role. The `inputSchema` has no `role` property.
+  The `capability.check` function refuses unknown keys, so a `role` argument gives `capability_args_invalid`.
+
+  The server exits 2 with stderr if the role has no entry or no tool in `profiles.json`, or a flag is unknown.
+  It tries to log `capability_mcp_refused`.
+  A `tools/call` for a tool that the role does not have gives a JSON-RPC error and tries to log `capability_wrong_role`.
+  It does not run the tool.
+
+- **cwd and `worktree`.** The server uses the session's cwd. It does not automatically use a subagent's worktree.
+  Each repo tool accepts an optional `worktree` if that path is in `git worktree list` for the server's repo.
+  Other paths give `capability_path_denied`.
+
+- **More `repo.inspect` operations.** These use `safe_path` or `REF`: `show` (`spec` = `<ref>:<path>`), `blame`, `wc`, and `sha256`.
+  They also include `glob` with a `git ls-files` pathspec for tracked files only, and `offset` on `read`.
+
+- **`cmd.run`.** Only `source-auditor` gets this tool. It runs one entry from `named_commands` in `profiles.json`.
+  The names are `git-rev-count {ref}`, `file-lines {path}`, and `file-sha256 {path}`.
+  The argv templates use typed placeholders `repo_path` and `ref` with specified argument keys. Substitution replaces a full token and uses no shell.
+
+  The tool runs through `capability.sandboxed()` like `tests.run`. It has no network, limits writes, and uses a filtered environment.
+  An unknown name, missing key, or key not in the schema gives `capability_args_invalid`.
+  The value `..` or an absolute path gives `capability_path_denied`. An incorrect ref gives `capability_bad_ref`.
+
+- **Diagnostic log.** Each call and refusal tries to append a `capability` entry with hashes of `{tool, role, via: mcp}`.
+  An unavailable log library or write error gives no entry. A response for a known tool sets `traced: false` in that condition.
+  Startup and role errors have no `traced` field.
+  Run `python3 scripts/lib/capability_counters.py [--since <ISO ts>]`. It reads `CLAUDE_AGENTIC_LOOP_DIR` and counts only written entries.
+
+- **Cost.** At session start, the installed plugin launches one Python server for each role. This is six servers in a session.
+
+The `cmd.run` and `pr.comment` tools offer no network command. Reviewers use `diff.read` and PR metadata from the dispatcher.
+The server does not offer `gh pr view`. Containment for `tests.run` and `cmd.run` uses `sandbox-exec`.
+If it is unavailable, the usual refusal is `capability_sandbox_unavailable`. See the opt-out for tests above.
+
+The server cannot stop an agent that has a raw shell from bypassing it. Removing Bash applies that control.
+Policy files are agent-writable because the agent has the same user ID. The files are a cooperating-agent safeguard.
+
+The `cmd.run` and `tests.run` tools read `capabilities/profiles.json` on each call.
+The sandbox for `tests.run` can write the repo. Repo code can thus edit the command table during the session.
+The server sets `tools/list` at launch, but it reads the command tables again.
+
+The `worktree` argument accepts each path from `git worktree list` in the same repo.
+A role can read a different agent's worktree. With `tests.run` or `cmd.run`, it can also run code there.
 
 ## Role binding: tools, generated config, identity gate, Codex role sessions
 
-**Claude.** `.claude-plugin/plugin.json` declares `"mcpServers": "./capabilities/mcp.json"`. That file is GENERATED from
-`profiles.json` by `python3 scripts/capability_profiles_validate.py --write-mcp` (one server `cap-<role>` per guarded
-role, command `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/capability_mcp.py --role <role>`); `--check` (also the default) fails
-on a doctored file, a server for a role not in the profile, or a missing one. Each guarded agent's frontmatter `tools:` is
-exactly the derived `mcp__plugin_coderails_cap-<role>__<tool>` names (+`Skill` for `preflight-scout`); `disallowedTools`
-stays. The validator names an error for: any `Bash`/`Write`/`Edit`/`NotebookEdit`/`Agent`/`Task`/`WebFetch`/`Read`/`Grep`/
-`Glob` in a guarded agent, a stale or extra MCP name, and a full tool name over 64 characters (the API limit; the longest,
-`cap-deploy-safety-reviewer`, is 62).
+### Claude
 
-**Observed, not just configured.** `hooks/scripts/tests/reviewer_tools_probe_test.py` runs the real `claude` CLI against a
-loopback API fixture (no billing), both as `--agent coderails:<role>` and as an Agent-tool dispatch with
-`subagent_type`, and asserts the `tools` array of the request the model receives: exactly the profile-derived names for
-the five roles that were installed then, none of Bash, Write, Edit, NotebookEdit, Agent, Read. Source now defines a sixth
-role, `security-reviewer`; its installed request and tool list need a new probe. design-scout's list holds none of source-auditor's
-server tools, and the live per-role servers refuse `tests_run` (design-scout) and any `cmd_run` name not in `profiles.json`.
-A control agent that does list Bash shows Bash in the same request, so the probe can fail.
+The `.claude-plugin/plugin.json` file declares `"mcpServers": "./capabilities/mcp.json"`.
+Run `python3 scripts/capability_profiles_validate.py --write-mcp` to build the config from `profiles.json`.
+It adds one `cap-<role>` server for each role with controls. The command is `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/capability_mcp.py --role <role>`.
+The default `--check` fails if the file has edits or if there is no role server or if a server has no matching entry.
 
-**Decision D4 (native Read/Grep/Glob removed too).** The literal reading is taken: a guarded role has MCP tools only.
-`repo_inspect` compensates with `read` (with `offset`), `list`, `grep`, `glob`, `status`, `log`, `show`, `blame`, `wc`,
-`sha256`. If reviewers prove unusable, restoring native `Read`/`Grep`/`Glob` is acceptable (they are not a shell); that is
-a one-line change to `EXTRA_TOOLS`/`FORBIDDEN_TOOLS` in `scripts/lib/capability_validation.py` plus the agent files.
+The role's frontmatter `tools:` uses the derived `mcp__plugin_coderails_cap-<role>__<tool>` names.
+The `preflight-scout` role also gets `Skill`. The `disallowedTools` setting stays.
 
-**Known cost: preflight-scout skills.** Its skills may shell out (wiki-query runs a search command). Without Bash the
-agent text tells it to report that step UNSUPPORTED; it is never handed a shell. Measure how often via the
-`capability/refused` and agent reports before re-adding anything.
+The validator refuses `Bash`, `Write`, `Edit`, `NotebookEdit`, and `Agent` for these roles. It also refuses `Task`, `WebFetch`, `Read`, `Grep`, and `Glob`.
+It also refuses a stale or unlisted MCP name, or a full tool name above the API limit of 64 characters.
+The longest name, `cap-deploy-safety-reviewer`, has 62.
 
-**Identity gate.** `hooks/scripts/subagent_identity_gate.py` (registered right after `reviewer_bash_allowlist`) denies a Bash
-call with `agent_id` present and `agent_type` absent/blank in a graph-bound session: reason `bash_agent_type_absent`. It
-lives in its own hook; `loop_dispatch_guard.py` is not touched. Claude only. It is a cooperating-agent safeguard: it
-relies on the harness populating `agent_id`, and a session with no `progress.json` is out of its scope. It denies only
-when tool is Bash, `agent_id` is present, `agent_type` is blank and the session is graph-bound; it allows when
-`session_id` is missing/`?`, `progress.json` is missing/unreadable/without `graph`, `agent_id` is omitted, or the tool is
-not Bash. It is not "fail-closed" in general. Claude role binding is also not a forced route: a present `agent_type`
-(including `general-purpose`, which keeps Bash) passes untouched, so dispatching a guarded role by `subagent_type`
-depends on lane A's `loop_dispatch_guard` (not changed here) and is otherwise a cooperating-orchestrator convention.
+### Claude tool probe
 
-**Codex.** Each guarded role TOML carries `[features]` / `shell_tool = false` after the instructions string (a table
-before `developer_instructions` would swallow it) and keeps `sandbox_mode = "read-only"`; the validator requires both.
-`sandbox_mode` alone is not sufficient: a native child preserves the parent's permissions and MCP configuration.
-`scripts/codex_role_session.py --role <agent> --prompt-file <file> [--cwd <dir>]` (byte-identical copy in the Codex
-package) launches `codex exec --ignore-user-config -s read-only -c features.shell_tool=false -c
-features.multi_agent=false -c mcp_servers.cap-<role>=... -`. It registers only that role's server. It reads the prompt
-from the file on stdin and passes an allowlisted environment (PATH, HOME, CODEX_HOME, LANG, LC_ALL, TERM, TMPDIR; no
-tokens). It also loads the tracked role TOML's
-`developer_instructions` into the contained session. The Codex cite-check, merge, workflow, post-review,
-workflow-audit, and docs-sync skills route guarded review roles through this launcher with an exact-head worktree.
-For `source-auditor` only, the launcher sets `approval_mode="approve"` on that server's `cmd_run` and `tests_run` tools.
-This allows the two granted, sandboxed execution tools to run under Codex's `approval=never` policy. It adds no approval
-for other tool names or roles. The [Codex config reference](https://learn.chatgpt.com/docs/config-file/config-reference)
-defines the per-server, per-tool setting. The MCP server still checks the role, arguments, named command or test, and
-execution sandbox. These same-user files can be changed by repo code; this route is not a tamper-proof boundary.
-Use it for `source-auditor`, because
-`tests_run`/`cmd_run` must not be reachable by inherited children. It refuses roles that are not guarded profile entries.
-The Codex plugin manifest declares no `mcpServers`: a manifest server would be inherited by every native child, and
-Codex's `mcpServers` handling could not be exercised offline here, so a native Codex child of a guarded role has the
-shell off and no capability tools and must report file/history checks UNSUPPORTED; route real work through the role
-session.
+The `hooks/scripts/tests/reviewer_tools_probe_test.py` test runs the actual `claude` CLI against a loopback API fixture with no billing.
+It uses `--agent coderails:<role>` and an Agent-tool call with `subagent_type`.
+For the five installed roles it tested, the model's `tools` array had only the derived names. It had none of Bash, Write, Edit, NotebookEdit, Agent, or Read.
 
-Accepted limit (review finding): `scripts/installer/codex.py` is untouched, so the launcher is the only Codex route to
-the typed tools; the plan's installer-managed read-only reviewer `mcp_servers` block is not built because it would be
-inherited by every native child. The role-TOML `[features]` block is config asserted, not observed.
+Source has a sixth role, `security-reviewer`. No installed probe has tested its tool list.
+The `design-scout` list has none of the `source-auditor` server tools.
+The live servers refuse `tests_run` for `design-scout` and refuse a `cmd_run` name with no entry in `profiles.json`.
+A control agent with Bash shows Bash in the same array, so the test can find a difference.
 
-Stated limits of the Codex path (not hidden): (1) The role session is the built alternative, not a forced route. Nothing
-in the installer or the agent flow stops an orchestrator running a native Codex child or a plain `codex exec`, and Codex
-PreToolUse carries no `agent_type`, so no hook can backstop it; the plan accepts "separate contained sessions where a
-sandbox/MCP boundary is required" and the installer deliberately adds no per-role `mcpServers` block (it would be
-inherited by every native child). (2) `--ignore-user-config` skips `$CODEX_HOME/config.toml` only. Project `.codex/`
-config discovered from the cwd up to the repo root is NOT skipped, so the launcher refuses a `--cwd` (or working
-directory) whose tree holds a `.codex` directory; "exactly one `mcp_servers` entry" is then true of the effective
-config for that tree, and the live test observes the tools array for the repo cwd only. Project `AGENTS.md` still loads
-as instructions; it grants no tools.
+### Decision D4
 
-`subagent_identity_gate` is ON by default; `subagent_identity_gate: off` in `.coderails/workflow.config.yaml` disables
-it (any other value leaves it on). Trace rows `subagent_identity_gate/denied/bash_agent_type_absent` show it firing.
+A role with these controls uses MCP tools only, without native Read, Grep, or Glob.
+The `repo_inspect` tool gives `read` with `offset`. It also gives `list`, `grep`, `glob`, `status`, `log`, `show`, `blame`, `wc`, and `sha256`.
+If the reviewer cannot work, the native read tools can be put back because they are not a shell.
+Change `EXTRA_TOOLS` or `FORBIDDEN_TOOLS` in `scripts/lib/capability_validation.py` and the agent files.
 
-`preflight-scout` keeps `Skill`. Skills such as `engineering-principles-*` declare `allowed-tools` that include Bash,
-Write and Edit. Whether invoking one grants a tool the subagent's `tools:` list omits is UNVERIFIED (no probe re-lists
-tools after a Skill call). If it did, the remaining controls are `reviewer_bash_allowlist` (agent_type present) and
-`subagent_identity_gate`; treat "no shell for preflight-scout" as probe-observed for the initial tools array only.
+The `preflight-scout` skills can use shell commands, for example wiki-query.
+With no Bash, the agent instructions say to report that step as UNSUPPORTED. The role gets no shell.
+Measure the frequency with `capability/refused` and agent reports before adding tools.
 
-**Codex observation.** `scripts/tests/codex_role_session_live_test.py` runs the real `codex exec` with the launcher's
-argv against a loopback Responses fixture that answers with an `exec_command` call. With the launcher's argv the request's
-`tools` array holds no `exec_command`/`write_stdin`, the call returns `unsupported call: exec_command`, and only the
-requested role's server tools are present. The recorded test covered five guarded roles. Source now has six; an installed
-`security-reviewer` run must confirm its tool list. Without
-`features.multi_agent=false`, the control run offers `spawn_agent`. Without `features.shell_tool=false`, the control
-run offers the shell and executes the command. The tests observe the launcher's argv. They do not test the `[features]`
-block in the role TOML files by spawning a native child.
-An OAuth spot check also ran the launcher with `approval=never` and a read-only Codex sandbox. `design-scout` completed
-`repo_inspect`; `source-auditor` completed `cmd_run(file-lines)` and `tests_run(reviewer-allowlist)`. Before the read
-annotation and the two per-tool approval settings, Codex offered the tools but refused calls that required approval.
+### Identity gate
 
-Measurement note: the success signal is the `capability_wrong_role`, `capability_args_invalid`, `capability_path_denied`
-and `capability_bad_ref` counts staying near zero for well-behaved roles, with `ok` rising once agents are bound to the
-servers. A sustained `capability_wrong_role` rate means a prompt or profile asks a role for a tool it does not hold.
+The `hooks/scripts/subagent_identity_gate.py` hook runs immediately after `reviewer_bash_allowlist`.
+It denies Bash in a graph-bound session if the payload has `agent_id` and has no `agent_type` value.
+The code is `bash_agent_type_absent`. This is its own Claude hook. The change does not edit `loop_dispatch_guard.py`.
 
-Binding measurement note: `subagent_identity_gate/denied/bash_agent_type_absent` should stay at zero for well-formed
-dispatches; any count means a subagent reached Bash without a typed identity. `codex_role_session/refused/*` counts
-launcher refusals. A rising `capability/refused/capability_wrong_role` after binding means a prompt asks a role for a
-tool it does not hold.
+The hook relies on the harness to give `agent_id`. It skips sessions with no `progress.json`.
+It also skips a missing or `?` session ID, an unreadable `progress.json`, or one with no `graph`.
+It skips calls without `agent_id` or to a tool other than Bash. Its denial applies only to the condition above.
+
+The check accepts a payload with `agent_type`. This includes `general-purpose`, which keeps Bash.
+Use `subagent_type` to select the role for dispatch. Lane A's `loop_dispatch_guard` checks that in graph work and is unchanged here.
+An orchestrator without that check must follow the role instructions.
+
+### Codex
+
+Each role TOML has `[features]` and `shell_tool = false` after the instruction string, so the table does not contain `developer_instructions`.
+It also has `sandbox_mode = "read-only"`. The validator checks the two settings.
+A native child inherits the parent's permissions and MCP configuration. The sandbox mode alone cannot change that.
+
+The command `scripts/codex_role_session.py --role <agent> --prompt-file <file> [--cwd <dir>]` uses a copy with the same bytes in the Codex package.
+It launches `codex exec --ignore-user-config -s read-only -c features.shell_tool=false -c features.multi_agent=false -c mcp_servers.cap-<role>=... -`.
+It sets up only that role's server and reads the file through stdin.
+The environment allowlist is PATH, HOME, CODEX_HOME, LANG, LC_ALL, TERM, and TMPDIR. It sends no tokens.
+
+The launcher loads `developer_instructions` from the tracked role TOML.
+The Codex cite-check, merge, workflow, post-review, workflow-audit, and docs-sync skills use it with a worktree at the specified head.
+For `source-auditor`, it sets `approval_mode="approve"` on that server's `cmd_run` and `tests_run` only.
+The settings let those two sandboxed tools run with Codex `approval=never`. Other tools and roles get no approval from this setting.
+
+The [Codex configuration guide](https://learn.chatgpt.com/docs/config-file/config-reference) gives the settings for a server and its tools.
+The MCP server checks the role, arguments, named command or test, and execution sandbox.
+Repo code can edit files that the same user owns. This is a cooperating-agent safeguard.
+
+Use the launcher for `source-auditor` so native children do not inherit `tests_run` and `cmd_run`.
+The launcher refuses a role without an entry that has the required controls.
+The Codex manifest declares no `mcpServers`, which native children would inherit. This work could not test that manifest behavior offline.
+A native child of a role with controls has no shell or role tools and must report file or history checks as UNSUPPORTED.
+Use the role session for those checks.
+
+The change does not edit `scripts/installer/codex.py`. The launcher is the only Codex path to the typed tools.
+The plan's installer-managed read-only reviewer `mcp_servers` block would pass tools to native children, so the installer does not add it.
+The role TOML `[features]` block is a config claim without a live native child test.
+
+The installer and agent flow make launcher use optional.
+An orchestrator can start a native Codex child or plain `codex exec`. Codex PreToolUse has no `agent_type` for a hook check.
+The plan accepts "separate contained sessions where a sandbox/MCP boundary is required". The installer adds no per-role `mcpServers` block.
+
+The `--ignore-user-config` option skips only `$CODEX_HOME/config.toml`.
+Codex also reads project `.codex/` from the cwd to the repo root. The launcher refuses a `--cwd` or working directory with `.codex` in that tree.
+The resolved config then has one `mcp_servers` entry. The live test checks the tools array at the repo cwd only.
+Project `AGENTS.md` gives instructions without granting tools.
+
+The `subagent_identity_gate` defaults to ON. Set `subagent_identity_gate: off` in `.coderails/workflow.config.yaml` to disable it.
+All other values keep it on. The `subagent_identity_gate/denied/bash_agent_type_absent` entry records a denial.
+
+The `preflight-scout` keeps `Skill`. Skills such as `engineering-principles-*` have `allowed-tools` with Bash, Write, and Edit.
+It is UNVERIFIED if a skill can grant a tool the subagent does not list. No probe lists tools after a Skill call.
+If a skill can grant them, the remaining controls are `reviewer_bash_allowlist` for a known `agent_type` and `subagent_identity_gate`.
+The initial probe is the only observation for "no shell for preflight-scout".
+
+### Codex observation
+
+The `scripts/tests/codex_role_session_live_test.py` test runs the actual `codex exec` with the launcher argv.
+A loopback Responses fixture replies with `exec_command`.
+The `tools` array has no `exec_command` or `write_stdin`, and the call gives `unsupported call: exec_command`.
+The array has only the named role's server tools.
+
+The test covered five roles with controls. Source has six. Check the installed `security-reviewer` list in a new run.
+Without `features.multi_agent=false`, the control run offers `spawn_agent`.
+Without `features.shell_tool=false`, the control run offers the shell and runs the command.
+
+These tests check the launcher's argv. They do not spawn a native child to check the TOML `[features]` block.
+
+One OAuth check ran the launcher with `approval=never` and a read-only Codex sandbox.
+The `design-scout` completed `repo_inspect`. The `source-auditor` completed `cmd_run(file-lines)` and `tests_run(reviewer-allowlist)`.
+Before the read-only hint and two tool approval settings, Codex offered the tools and refused calls that needed approval.
+
+### Counters
+
+For roles that follow the instructions, counts for `capability_wrong_role`, `capability_args_invalid`, `capability_path_denied`, and `capability_bad_ref` stay near zero.
+The `ok` count increases after agents connect to servers.
+A sustained `capability_wrong_role` count means a prompt or tool setting names a tool the role does not have.
+
+The `subagent_identity_gate/denied/bash_agent_type_absent` count should stay at zero for well-formed dispatches.
+A count above zero means a subagent reached Bash without a typed identity.
+The `codex_role_session/refused/*` entries count launcher refusals.
+If `capability/refused/capability_wrong_role` increases after binding, a prompt names a tool the role does not have.

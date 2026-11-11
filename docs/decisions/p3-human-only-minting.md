@@ -1,141 +1,173 @@
 # P3: signed action receipts
 
-Status: introduced in draft PR #513. Scope: how an action receipt for `gh pr merge` or `git push` to main is
-signed and bound to the action. Same-user minting remains possible.
+Status: introduced in draft PR #513.
+Scope: signing and binding a receipt for `gh pr merge` or `git push` to `main`.
+An agent with the same user ID can mint a receipt.
 
 ## Question
 
-Can a macOS Keychain item with user-presence or biometric access control, plus a native confirmation dialog an
-agent cannot answer, make minting human-only on this Mac, using only read-only probes?
+Can a macOS Keychain item and a native confirmation dialog limit minting to a human on this Mac?
+The item would use user-presence or biometric access control. The dialog would have to refuse input from an agent.
+The investigation used read-only probes.
 
 ## Investigation (read-only probes only; nothing created, no prompt, no TCC)
 
-Verified, with the command that showed it:
+- Touch ID is enrolled for unlock. The `bioutil -r` command prints `Biometrics for unlock: 1`.
+- The launchd session is Aqua, a GUI session. The `launchctl managername` command prints `Aqua`.
+- The `swiftc` command is at `/usr/bin/swiftc` and uses Swift 6.4.
+- The `security add-generic-password -h` command lists `-A` and `-T` for application ACLs.
+  It gives no flag for biometry or for access that checks the user is there.
+  A biometric Keychain item or `Secure Enclave` key must use `Security.framework` or `LocalAuthentication` through a compiled helper.
+- The `ssh-keygen -Y sign` command fails with a passphrase-protected ed25519 key and no controlling terminal.
+  A key that an agent makes without encryption can sign. The `ssh-keygen -Y verify` command refuses that signature against the owner's signers file.
+  The `receipt_signing_test.py` and `action_receipt_test.py` tests check these conditions with `ssh-keygen`.
 
-- Touch ID is enrolled for unlock: `bioutil -r` prints `Biometrics for unlock: 1`.
-- The launchd session is Aqua (a GUI session): `launchctl managername` prints `Aqua`.
-- `swiftc` is present: `/usr/bin/swiftc`, Swift 6.4.
-- The `security` CLI has no user-presence or biometry flag: `security add-generic-password -h` lists `-A`/`-T`
-  (application ACLs) and nothing for biometry or user presence. A biometric Keychain item or a Secure Enclave key
-  needs Security.framework / LocalAuthentication, i.e. a compiled helper.
-- `ssh-keygen -Y sign` with a passphrase-protected ed25519 key and no controlling terminal fails; an agent-made
-  unencrypted key signs, but `ssh-keygen -Y verify` against the owner's signers file rejects it. Both are
-  re-checked on every test run with real `ssh-keygen` (`receipt_signing_test.py`, `action_receipt_test.py`).
+### NOT verified and NOT attempted
 
-NOT verified and NOT attempted (they would need a prompt, a created item, or a TCC grant):
+These checks would use a prompt, a new Keychain item, or a TCC grant:
 
-- that an unsigned CLI helper can persist a Secure Enclave key or a user-presence Keychain item;
-- that a native confirmation dialog cannot be driven by `osascript` / System Events (that depends on an
-  Accessibility TCC grant this work did not touch);
-- any prompt behaviour of the above.
+- Can an unsigned CLI helper keep a `Secure Enclave` key or a user-presence Keychain item?
+- Can `osascript` or `System Events` answer a native confirmation dialog?
+  The result depends on an Accessibility TCC grant, which this work did not use.
+- How do these prompts behave?
 
-So the Keychain-plus-dialog design is neither confirmed feasible nor ruled out. It is not built.
+The probes did not show if the Keychain and dialog design can work. The implementation does not use it.
 
 ## Chosen design
 
-Receipt minting uses a signing key; a passphrase is optional:
+Receipt minting uses a signing key. The owner can use a passphrase.
 
-1. `python3 scripts/authority_keys.py init` (owner, at a terminal) creates an ed25519 key
-   `~/.coderails/keys/receipt_ed25519` and a signers file. `ssh-keygen` prompts on `/dev/tty`; the tool refuses
-   (`receipt_refused_no_tty`) when there is no terminal and never overwrites an existing key. The owner can leave
-   the passphrase empty; encryption is not required by the tool.
-2. `python3 scripts/action_receipt_cli.py approve-action ...` computes the binding itself
-   (`scripts/lib/action_binding.py`: repository, destination ref, SHA; the owner never types a SHA), signs the
-   canonical receipt body with `ssh-keygen -Y sign` (namespace `coderails-receipt`), and refuses without a
-   controlling terminal (`receipt_refused_no_tty`). A usable unprotected key or `--key <public-key-path>` backed
-   by an available signing agent can avoid a passphrase prompt. The owner still issues the approval command; an
-   autonomy grant is separate and cannot replace it. Agents must not create a PTY or call the signer to impersonate
-   owner approval. A same-user agent can replace the user-tier signers file and use another key.
-3. The hook verifies the signature against a trust root, then the binding, then consumes the receipt atomically
-   (`O_CREAT|O_EXCL`). Unsigned, wrongly signed, edited, stale, replayed, v1 and unbound receipts are all refused.
-4. The trust root is `~/.coderails/keys/receipt_signers`. The agent runs as the same user and can write this file, so
-   it is a cooperating-agent safeguard (traced `trust_root_user_tier`). If absent, verification reports
-   `trust_root_missing`.
+1. The owner runs `python3 scripts/authority_keys.py init` at a terminal.
+   It makes the ed25519 key `~/.coderails/keys/receipt_ed25519` and a signers file.
+   The `ssh-keygen` tool prompts on `/dev/tty`. The command refuses with `receipt_refused_no_tty` if there is no terminal.
+   It does not overwrite a key. The owner can use an empty passphrase. Encryption is optional.
+
+2. The `python3 scripts/action_receipt_cli.py approve-action ...` command calculates the repository, destination ref, and SHA.
+   It uses `scripts/lib/action_binding.py`. The owner does not type a SHA.
+   It signs the canonical receipt with `ssh-keygen -Y sign` in namespace `coderails-receipt`.
+   It refuses without a controlling terminal (`receipt_refused_no_tty`).
+
+   A key without a passphrase or `--key <public-key-path>` with an available signing agent can sign without a prompt.
+   The owner must issue the approval command. An autonomy grant cannot replace it.
+   Agents must not make a PTY or invoke the signer to impersonate owner approval.
+   An agent with the same user ID can replace the user-tier signers file and use a different key.
+
+3. The hook checks the signature against a trust root, then checks the binding.
+   It then consumes the receipt atomically with `O_CREAT|O_EXCL`.
+   It refuses unsigned, incorrectly signed, edited, stale, replayed, v1, and unbound receipts.
+
+4. The trust root is `~/.coderails/keys/receipt_signers`.
+   The agent runs as the same user and can write this file. This is a cooperating-agent safeguard.
+   The `trust_root_user_tier` code marks its use. If the file is unavailable, the check gives `trust_root_missing`.
 
 ## Residuals (what this does not stop)
 
-- The user-tier trust root and the key directory are agent-writable. A hostile same-user agent can replace the
-  signers file with its own key and sign its own receipts. Treat this as a cooperating-agent safeguard.
-- An agent with Accessibility permission or control of the owner's terminal (pty injection, a tty it shares) can
-  answer the passphrase prompt or type the command. The tty rule excludes headless agents, not a hostile process
-  in the owner's session. A key loaded in `ssh-agent` could also sign without a prompt.
-- The hash covers only the command text the hook sees (not aliases, functions, `xargs`, scripts that push).
-  Quoting, absolute program paths (`/usr/bin/git`), `env`/`sudo` wrappers, `bash -c` and `eval '...'` strings are
-  normalised by `guarded_segments`; a non-literal push destination (`HEAD:$B`, a glob, `$(...)`), `--all` and
-  `--mirror` are guarded and unbindable (denied). Binding is the repository, ref and SHA computed at hook time; a push
-  by another route is not seen.
-- Out of scope, so not guarded: `gh api` writes that move a protected branch without a PR merge (`PATCH
-  repos/o/r/git/refs/heads/main`, the contents API `PUT`, graphql merge mutations); pushes to protected branches other
-  than `main`/`master` (release branches); merges through the web UI or another host.
-- The mode switch lives in `.coderails/workflow.config.yaml` inside the repository, which the agent can edit with
-  Edit/Write (no hook guards that key). `action_authority: off` therefore disables the gate for a hostile same-user
-  agent; it is an honest same-user boundary like the user-tier trust root. The deny text no longer suggests it. A
-  mode read from a root-tier or user-level file outside the repo is not built.
-- A subagent whose `session_id` differs from the minter's is refused as `foreign_session` (documented limit).
-- Single-use and revocation live in unsigned `<id>.consumed` / `<id>.revoked` marker files in the agent-writable
-  receipts directory. `O_EXCL` stops races, not `unlink`: a same-user agent can delete `<id>.consumed` to replay a
-  receipt until it expires (owner-chosen, default 1 h) or delete `<id>.revoked` to un-revoke it. Only a consumed
-  ledger outside the agent's write reach (root-owned or append-only) would close this; it is not built.
-- A session lock covers selection, claim, note writes and execution markers for every guarded segment in one
-  command. A synchronous failure denies and removes markers this call created. If an execution marker cannot be
-  removed, consumed markers stay in place so the receipt cannot be reused. A process killed between marker writes
-  can leave a partial spend. The batch is not crash-atomic; confirm the command did not run before recovery.
-- An agent that fills the receipts directory with junk `*.json` sorted ahead of the real one can push the real
-  receipt past the 50-receipt cap (`MAX_RECEIPTS`). That denies, never allows (a denial-of-service, not a bypass).
-- An unexpected hook error denies a guarded command under `enforce` or after live authority loads
-  (`denied_gate_error`). Advisory mode without live authority still fails open and traces
-  `action_authority_failed_open`. A failed budget lock or reservation release denies and keeps an ambiguous
-  reservation spent. `read_authority()` maps a file read error to no authority; in advisory mode, an unreadable
-  authority can therefore take the no-authority path. The user owns that file and can also turn the mode off.
+- The user-tier trust root and key directory are agent-writable.
+  An agent with the same user ID can replace the signers file and sign its own receipts. This is a cooperating-agent safeguard.
+
+- An agent with Accessibility permission or control of the owner's terminal can answer the passphrase prompt or type the command.
+  Examples include input through a PTY or a shared tty.
+  The tty rule excludes headless agents. An agent in the owner's session can have access.
+  A key in `ssh-agent` can sign without a prompt.
+
+- The hash covers only the command text the hook sees. It does not see aliases, functions, `xargs`, or scripts that push.
+  The `guarded_segments` code normalizes quoting, absolute paths such as `/usr/bin/git`, `env` and `sudo` wrappers, `bash -c`, and `eval '...'`.
+  It denies non-literal push destinations such as `HEAD:$B`, a glob, or `$(...)`, and the flags `--all` and `--mirror`.
+  The hook cannot issue a binding for these commands. The binding uses repository, ref, and SHA at hook time. A push through a different path can be unseen.
+
+- This historical scope excludes `gh api` writes that move a protected branch without a PR merge.
+  Examples are `PATCH repos/o/r/git/refs/heads/main`, the contents API `PUT`, and GraphQL merge mutations.
+  This scope does not include pushes to refs other than `main` or `master`, such as release branches. It does not include merges through the web UI or a different host.
+
+- The agent can edit `.coderails/workflow.config.yaml` with Edit or Write.
+  The setting `action_authority: off` disables the gate. The denial does not suggest this setting.
+  The gate does not read mode from a root-tier or user-level file external to the repository.
+
+- The hook refuses a subagent with a different `session_id` from the minter as `foreign_session`.
+
+- Single-use and revocation use unsigned `<id>.consumed` and `<id>.revoked` marker files in the agent-writable receipts directory.
+  The `O_EXCL` operation prevents races. A same-user agent can remove a marker.
+  Removal of `<id>.consumed` can let a receipt replay until expiry. The owner sets the expiry, which defaults to 1 h.
+  Removal of `<id>.revoked` can clear revocation.
+
+  A consumed ledger that the agent cannot write could prevent this operation. Examples are a root-owned or append-only ledger. This implementation has no such ledger.
+
+- A session lock covers selection, claim, note writes, and execution markers for all gated segments in one command.
+  A synchronous error denies the command and removes markers from that call.
+  If the hook cannot remove an execution marker, consumed markers stay to prevent reuse.
+  A stop between writes can record part of the spend. Check that the command did not run before recovery.
+
+- An agent that fills the receipts directory with `*.json` files can make a receipt unavailable. This occurs if those files sort before the receipt and put it after the 50-receipt cap (`MAX_RECEIPTS`).
+  This causes a denial and cannot grant permission.
+
+- An unexpected hook error denies a gated command in `enforce` or with loaded live authority (`denied_gate_error`).
+  Advisory mode without live authority fails open and logs `action_authority_failed_open`.
+  An error in the budget lock or reservation release denies the command and keeps an ambiguous reservation spent.
+
+  The `read_authority()` function gives no authority on a read error. In advisory mode, an unreadable file can thus use the no-authority path.
+  The user owns that file and can turn the mode off.
 
 ## Binding rules and mode
 
-The gate defaults to `action_authority: enforce`, including when there is no configuration file. Shipped example
-and init presets also enforce. Invalid configuration denies guarded actions. Explicit `advisory` warns without a
-receipt; explicit `off` disables this receipt gate. Signed receipts require an owner approval command, not a
-passphrase. To keep the repository+ref+SHA binding honest, a guarded command is
-unbindable (`binding_unknown`, denied) when it:
+The gate defaults to `action_authority: enforce` with or without a configuration file.
+The example and init settings also use `enforce`. An incorrect configuration denies operations that the gate checks.
+Explicit `advisory` warns without a receipt. Explicit `off` disables this receipt gate.
 
-- carries an env assignment prefix (`GIT_DIR=`, `GIT_CONFIG_*=`, `GH_REPO=`, any `NAME=value`), `git -c`, `--git-dir` or
-  `--work-tree` (they retarget the action; the prefix is kept in the hashed segment so it is never silently stripped);
-- is a bare or remote-only `git push` (push.default, `branch.*.remote` and `remote.*.push` decide the destination);
-- is `gh pr merge` without `--match-head-commit <live head sha>` (or `gh api .../merge` without `sha=`). GitHub then
-  refuses a merge whose head moved after the hook ran. Bare `scripts/merge.py <n>` is unbindable in enforce mode.
-  Use `scripts/merge.py <n> --expected-head <live head sha>` to bind a helper receipt;
-- names the PR ambiguously in `gh pr merge` (a branch name, two PRs, a `-R` that disagrees with the PR URL, a
-  combined short flag hiding a value option). The helper resolves its `auto` or branch target before it binds.
-  The repository comes from `-R`, the PR URL or the api path, else `origin`.
+A signed receipt must have an owner approval command. A passphrase is optional.
 
-`git push origin HEAD` binds the current branch. A detached HEAD is unbindable. The repository is the push URL from
-`git remote get-url --push --all`, including `remote.<n>.pushurl` and `pushInsteadOf`. More than one push URL is
-unbindable because the command would push to each URL while a receipt names one.
+To check repository, ref, and SHA, the hook denies an unbindable command with `binding_unknown`.
+These conditions prevent binding:
 
-The hook checks earlier segments in the same command. A guarded segment after an unknown or state-changing segment
-is denied as `state_mutated_before_guard`: its bound SHA could be stale. Known read-only commands include `status`,
-`log`, `diff`, `show`, `rev-parse`, `ls-remote`, `cd`, `echo` and `grep`. A redirect, command substitution or unknown
-program may change state. Negative probes include `git push . evil:feature`, `git worktree add -B`, `git
-filter-branch` and a write into `.git`. A ref changed by a separate earlier command is the state the hook binds.
+- The command has an env assignment prefix such as `GIT_DIR=`, `GIT_CONFIG_*=`, `GH_REPO=`, or `NAME=value`.
+  It can also have `git -c`, `--git-dir`, or `--work-tree`. These can change the target. The hash keeps the prefix.
 
-A plain `cd` to an existing path changes the binding directory. A variable path, `cd -`, a missing path, a
-`( cd x && ... )` group, or `cd` before `bash -c` or `eval` makes later guards unbindable. A pipeline `cd` runs in a
-subshell and changes no directory for later segments. Git global options (`-c`, `-C`, `--git-dir`, `--no-pager`) no
-longer hide a push from the matcher; this also tightens `enforce_pr_workflow`. Codex has no `receipt_counters` mirror:
-the shared measurement script reads trace rows from both providers.
+- The command is a bare or remote-only `git push`. The settings `push.default`, `branch.*.remote`, and `remote.*.push` determine its destination.
+
+- The command is `gh pr merge` without `--match-head-commit <live head sha>`, or `gh api .../merge` without `sha=`.
+  A bound command lets GitHub refuse a merge if the head changed after the hook ran.
+  Bare `scripts/merge.py <n>` cannot bind in `enforce` mode.
+  Use `scripts/merge.py <n> --expected-head <live head sha>` to attach a helper receipt.
+
+- The `gh pr merge` target is ambiguous. Examples are a branch name, two PRs, or a `-R` value that differs from the URL. A combined short flag can also hide a value option.
+  The helper resolves its `auto` or branch target before binding. The repo comes from `-R`, the PR URL, or the API path. If those sources give no repo, it uses `origin`.
+
+The `git push origin HEAD` command binds the current branch. A detached HEAD cannot bind.
+The repository is the push URL from `git remote get-url --push --all`. This includes `remote.<n>.pushurl` and `pushInsteadOf`.
+More than one push URL prevents binding. The command would push to each URL, but a receipt names one.
+
+The hook checks earlier segments in the same command.
+If an unknown segment or a segment that can change data precedes a gated one, the hook gives `state_mutated_before_guard`.
+The bound SHA could be stale.
+Known read-only commands include `status`, `log`, `diff`, `show`, `rev-parse`, `ls-remote`, `cd`, `echo`, and `grep`.
+A redirect, command substitution, or unknown executable can change data.
+
+Negative probes include `git push . evil:feature`, `git worktree add -B`, `git filter-branch`, and a write into `.git`.
+The hook binds the ref after changes from a different earlier command.
+
+A literal `cd` to a directory changes the binding directory.
+A path that uses shell expansion, `cd -`, a missing path, a `( cd x && ... )` group, or `cd` before `bash -c` or `eval` prevents binding.
+A pipeline `cd` runs in a subshell. It does not change the directory for subsequent segments.
+
+The matcher finds pushes with Git global options `-c`, `-C`, `--git-dir`, or `--no-pager`.
+This also tightens `enforce_pr_workflow`.
+Codex has no `receipt_counters` copy. The shared measurement script reads the logs from the two providers.
 
 ## Counters and reason codes
 
-Trace reason codes: `denied_signature_missing`, `denied_signature_invalid`, `denied_signer_unknown`,
-`denied_trust_root_missing`, `denied_binding_unknown`, `denied_{hash,repository,ref,sha}_mismatch`,
-`denied_consumed`, `trust_root_user_tier` (allow resting on the agent-writable tier), `receipt_consumed`,
-`receipt_refused_no_tty`, `denied_state_mutated_before_guard`. `scripts/lib/receipt_counters.py: trust_summary()` counts
-them from trace counts. It has its own CLI, so the counters are reachable without editing the measurement script:
-`python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py` (prints `receipts` and
-`trust`). Folding the same call into `measure_graph_alignment.py` itself is a handoff (that file is at its line limit).
+Codes include `denied_signature_missing`, `denied_signature_invalid`, `denied_signer_unknown`, `denied_trust_root_missing`, and `denied_binding_unknown`.
+Other codes are `denied_{hash,repository,ref,sha}_mismatch`, `denied_consumed`, `trust_root_user_tier`, `receipt_consumed`, `receipt_refused_no_tty`, and `denied_state_mutated_before_guard`.
+The `trust_root_user_tier` code marks an allow with the agent-writable trust root.
+
+The `scripts/lib/receipt_counters.py: trust_summary()` function counts the codes.
+Run `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py` for `receipts` and `trust`.
+The measurement script is at its line limit. A change to add the counter there is a handoff.
 
 ## Measurement note
 
-Per guarded command the hook runs `git` for the binding (push) or one `gh pr view` (merge, 4 s timeout) and two
-`ssh-keygen` calls per candidate receipt per pass (peek, then consume). Measured once on this Mac (not a benchmark): a
-gate test that creates two keys and runs two hook subprocesses takes about 0.5 s end to end, so one hook run is well under
-a second with one candidate receipt; cost grows with the number of receipts in the session (cap 50, 2 `ssh-keygen`
-calls each, per pass) and the hook timeout is 10 s.
+For each gated command, the hook runs `git` for a push binding or one `gh pr view` for a merge binding (4 s timeout).
+For each candidate receipt it runs two `ssh-keygen` calls, to check and then consume it.
+
+One test on this Mac made two keys and ran two hook subprocesses in about 0.5 s.
+That measurement puts a hook run with one candidate receipt below a second.
+Cost increases with the number of receipts in the session. The cap is 50 receipts, with two `ssh-keygen` calls each.
+The hook timeout is 10 s.

@@ -6,46 +6,19 @@ model: sonnet
 
 # Dashboard
 
-Launch the local Coderails dashboard. It shows current sessions, loop
-progress, wiki and memory activity, PR state, and run history. It reads
-files already on this machine. It uses no new services and sends no telemetry away.
+Launch the local Coderails dashboard. It shows active sessions, loop status, wiki and memory changes, PR status, and run history. It reads files on this machine. It uses no new service and sends no telemetry.
 
 ## What it shows
 
 Seven panels:
 
-1. **SYSTEM VITALS** — usage windows, hooks fired, lint findings; hero
-   numerals + sparklines. Tiles show "loading…" until the first activity
-   collect resolves, then "unavailable" for a source that honestly can't be
-   read locally (never a guess), or the value once collected.
-2. **DIRECTIVES** — one card per live agentic loop (last updated within 60
-   minutes): title, done/total work-unit count, a per-unit checklist with
-   status glyphs (done / in-flight / pending), PR chips, recent decisions,
-   and an evals-frozen footer. A `Live.N` counter in the section header
-   tracks how many loop cards are showing. Non-complete loops that have
-   gone stale drop into a dim sub-list below the cards, one line per loop
-   with its title and time since last update.
-3. **CONTEXT TREND** — one dot per agentic-loop session: x is the session's
-   start date, y is orchestrator cache-read tokens per assistant turn. The
-   2026-07-17 token-reduction cutover is drawn as an annotation the series
-   runs straight through — no gap, no colour change, no causal claim.
-   Per-side medians and n are shown side by side; a side below n=20 is
-   captioned as too few to call. Whether the cutover reduced token burn is
-   not established, and the panel is built to keep it that way: it never
-   renders a "saved X%" headline. Collects on its own SSE frame, so its slow
-   transcript sweep never delays the KPI tiles above.
-4. **COMMAND DECK** — declared buttons (bounded, config-driven runs — never a
-   free prompt box) plus run history, plus a Run Output viewer: click any
-   run-history row to view its output — live-streaming while the run is
-   still going, settled (fetched once) once it ends.
-5. **PR GATES** — open PRs with gate state: merge-ready / blocked (missing
-   artifact) / stale (SHA mismatch).
-6. **Bottom-centre hero** — the active loop's primary directive with a big
-   numeral (e.g. work units 2/7) and a micro ticker.
-7. **ASSISTANT.LINK** — pending workflow-audit approvals awaiting a
-   decision (Approve/Deny), plus build status for approved
-   `workflow-audit:propose-skill` entries as they claim, build, and open a
-   PR.
+1. **`SYSTEM VITALS`.** Account use windows, hook counts, and lint results appear as large numbers and sparklines. Tiles show "loading…" until the first data collection ends. Then they show a value or "unavailable" if the source cannot be read locally.
+2. **`DIRECTIVES`.** One card shows each live agentic loop with an update in the last 60 minutes. It shows the title, done and total work-unit counts, and a checklist with done, in-flight, and pending symbols. It also shows PR badges, recent decisions, and an evals-frozen footer. The `Live.N` counter gives the number of live cards. Older loops that are not complete appear in a dim list below. Each row shows the title and time since update.
+3. **`CONTEXT TREND`.** One dot shows each agentic-loop session. The x axis is the start date. The y axis is orchestrator cache-read tokens for each assistant turn. The series continues through the 2026-07-17 token-reduction mark without a break or color change. The panel makes no causal claim about the cutover. It gives medians and n for each side. If n is below 20, it says the sample is too small to make a claim. It does not display a "saved X%" headline. The slow transcript sweep uses its own SSE frame so the KPI tiles can update first.
+4. **`COMMAND DECK`.** Buttons run the commands declared in the config. There is no free prompt box. Select a run-history row to see its output in Run Output. An active run streams output. After it ends, the viewer fetches its output one time.
+5. **`PR GATES`.** Open PRs show a status: `merge-ready`, `blocked` for a missing artifact, or `stale` for a SHA mismatch.
+6. **Bottom-center panel.** The active loop’s primary directive has a large number, such as work units 2/7, and a small ticker.
+7. **`ASSISTANT.LINK`.** Shows pending workflow-audit entries with `Approve` and `Deny` controls. It shows the claim, build, and PR-open status of approved `workflow-audit:propose-skill` entries.
 
 ## Starting
 
@@ -53,14 +26,12 @@ Seven panels:
 scripts/start_dashboard.py
 ```
 
-First run installs dependencies (`npm ci`) and builds the app (`npm run
-build`); later runs skip both when `node_modules` and a fresh `.next` build
-already exist, so a re-launch is fast. Starts the production server
-(`npm run start`) on `127.0.0.1:4173`, writes its pid to
-`~/.claude/coderails-dashboard/dashboard.pid`, and opens the dashboard in the
-browser.
+On the first run, the script installs dependencies with `npm ci` and builds the app with `npm run build`.
+On subsequent runs, it skips these steps when it finds `node_modules` and a current `.next` build.
+It starts the production server with `npm run start` on `127.0.0.1:4173`.
+It writes the PID to `~/.claude/coderails-dashboard/dashboard.pid` and opens the dashboard in the browser.
 
-Override the port with `DASHBOARD_PORT`:
+Set `DASHBOARD_PORT` to change the listener from `4173`.
 
 ```
 DASHBOARD_PORT=4200 scripts/start_dashboard.py
@@ -68,40 +39,35 @@ DASHBOARD_PORT=4200 scripts/start_dashboard.py
 
 ## LAN access (opt-in)
 
-By default, the dashboard binds to `127.0.0.1`. It accepts only Host and
-Origin values that resolve to loopback. Set `DASHBOARD_HOST` to your machine's
-LAN IP to allow access from other devices on that network:
+By default, the dashboard binds to `127.0.0.1`.
+The guard accepts loopback hosts in the `Host` and `Origin` headers.
+To give other devices on the LAN access, set `DASHBOARD_HOST` to the machine's LAN IP:
 
 ```
 DASHBOARD_HOST=192.168.50.140 scripts/start_dashboard.py
 ```
 
-This does two things together, from the one variable: the server binds to
-that exact address instead of `127.0.0.1`, and the request guard additionally
-accepts that exact host (and only that host) alongside loopback on both the
-Host and Origin headers. From any other device on the LAN, open
-`http://<LAN-IP>:<port>` (e.g. `http://192.168.50.140:4173`).
+The server binds to that address. The guard then accepts that host and loopback.
+It rejects other hosts in `Host` and `Origin`.
+To open the dashboard from a device on that LAN, use `http://<LAN-IP>:<port>`, for example `http://192.168.50.140:4173`.
 
-For the persistent launchd agent, set `DASHBOARD_HOST` in the `plist`'s
-`EnvironmentVariables` dict (it ships with an empty `DASHBOARD_HOST` entry —
-fill in your LAN IP), then reinstall the agent
-(`launchd/install_dashboard_agent.py`) so launchd picks it up.
+For the launchd agent, set `DASHBOARD_HOST` in the `plist`’s `EnvironmentVariables` dict.
+It has an empty entry by default.
+Set it to the LAN IP and install the agent again with `launchd/install_dashboard_agent.py`.
 
-Leaving `DASHBOARD_HOST` unset (or empty) is unchanged from before this
-option existed: bind and guard are loopback-only, identical to today.
-Wildcard binds (`0.0.0.0`, `::`, `*`) and `host:port` forms are rejected at
-startup with a non-zero exit — the guard exact-matches one host, so a
-wildcard bind would silently 403 real LAN requests.
+If `DASHBOARD_HOST` is unset or empty, the bind and guard stay on loopback only.
+The server rejects wildcard binds (`0.0.0.0`, `::`, and `*`) and `host:port` values with a nonzero exit at startup.
+The guard accepts one LAN host. With a wildcard bind, other LAN hosts would get HTTP 403.
 
-**SECURITY NOTE:** the dashboard has an unauthenticated command-execution
-surface — the COMMAND DECK's `POST /run` and workflow-audit Approve/Deny both
-execute declared commands with no login of any kind. The Host/Origin guard
-defends against a hostile web page or DNS-rebinding attack reaching the
-dashboard from your browser; it does **not** authenticate LAN devices. Any
-device on your LAN that can reach the port can trigger declared runs. Only
-enable LAN access on a trusted home network, and use a DHCP reservation or
-static lease for the host — if the host's LAN IP changes, the dashboard will
-fail to bind on next start rather than break silently.
+**LAN access and authentication.**
+The `COMMAND DECK` endpoint `POST /run` and the workflow-audit `Approve` and `Deny` controls run declared commands without a login.
+The `Host` and `Origin` checks protect against hostile web pages and DNS rebinding through the browser.
+They do not authenticate devices on the LAN.
+A device with access to the dashboard address can start declared runs.
+
+Use LAN access only on a trusted home network.
+Use a DHCP reservation or static lease for the host.
+If the host’s LAN IP changes, the server reports a bind error at the next startup.
 
 ## Stopping
 
@@ -109,73 +75,66 @@ fail to bind on next start rather than break silently.
 scripts/stop_dashboard.py
 ```
 
-Kills the process recorded in the pidfile and removes it. The dashboard keeps
-no state of its own outside the config and run-history files below.
+This stops the server named in the PID file and removes the file.
+The dashboard uses the config and run-history files below for stored data.
 
 ## Surviving reboots (launchd)
 
-To keep the dashboard running across reboots and crashes, install it as a
-launchd LaunchAgent, mirroring the routine-sweeper agents in
-`docs/routines.md`:
+To keep the dashboard active across reboots and crashes, install the launchd LaunchAgent.
+This follows the scheduler pattern in `docs/routines.md`.
 
 ```
 launchd/install_dashboard_agent.py     # copy plist + bootstrap into gui/$(id -u)
 launchd/uninstall_dashboard_agent.py   # bootout + remove the copy
 ```
 
-The installer copies `launchd/com.coderails.dashboard.plist` into
-`~/Library/LaunchAgents/` and bootstraps from that copy, not from the repo
-path — launchd only auto-loads plists that live in `~/Library/LaunchAgents/`,
-so bootstrapping straight from the repo would silently stop surviving
-reboots. The plist runs `skills/dashboard/runner/bin/dashboard_server.py`
-with `RunAtLoad` and `KeepAlive` set — launchd starts it at login and
-restarts it if it dies. Logs go to `~/.claude/coderails-dashboard/dashboard.log`,
-same path `start_dashboard.py` uses.
+The installer copies `launchd/com.coderails.dashboard.plist` to `~/Library/LaunchAgents/`.
+It bootstraps the agent from the copy.
+Launchd loads only the plists in `~/Library/LaunchAgents/` automatically for the user.
+If you bootstrap from the repo, the agent does not start after a reboot.
 
-The plist also sets `SoftResourceLimits.NumberOfFiles` to 4096. A
-launchd-spawned process inherits `launchctl limit maxfiles` — 256 on stock
-macOS — **not** the much higher soft limit an interactive shell reports, so
-checking `ulimit -n` in a terminal tells you nothing about the agent. The
-dashboard opens a recursive `fs.watch` handle per watched dir per SSE
-connection, and at 256 that ceiling is reachable in ordinary use. Once the
-descriptor table is exhausted the process still accepts TCP but can no longer
-open files or watches: every route returns nothing, no SSE frames arrive, and
-panels sit on "loading…" forever. If you ever see that shape, check
-`lsof -p <pid> | wc -l` against the limit — a count that climbs across
-requests and never falls is a leak, not load.
+The plist runs `skills/dashboard/runner/bin/dashboard_server.py` with `RunAtLoad` and `KeepAlive`.
+Launchd starts it at login and starts it again if it stops.
+Logs go to `~/.claude/coderails-dashboard/dashboard.log`, the path `start_dashboard.py` uses.
 
-**Once the agent is installed, `stop_dashboard.py` does not stop it** — the
-agent-owned server has no pidfile for `stop_dashboard.py` to find. Stop it
-with:
+The plist sets `SoftResourceLimits.NumberOfFiles` to 4096.
+A server that launchd starts inherits `launchctl limit maxfiles`, which is 256 on stock macOS.
+An interactive shell can show a much higher value with `ulimit -n`. That value does not apply to the agent.
+For each SSE connection, the dashboard opens a recursive `fs.watch` handle for each watched directory. Usual use can hit the limit at 256.
+
+If the descriptor table is full, the server can accept TCP connections but cannot open files or watches.
+The handlers give no data and send no SSE frames, so panels stay on "loading…".
+To check this, compare `lsof -p <pid> | wc -l` with the limit.
+A count that goes up across calls and does not go down indicates a leak.
+
+**To stop the LaunchAgent, use the launchd command.**
+The agent server has no PID file for `stop_dashboard.py` to read.
 
 ```
 launchctl bootout gui/$(id -u)/com.coderails.dashboard
 ```
 
-Likewise, stop any manual server (`python3 skills/dashboard/scripts/stop_dashboard.py`)
-**before** running `install_dashboard_agent.py` — the installer also refuses
-to bootstrap if port 4173 is already held. Hand-running `start_dashboard.py`
-while the agent's server is healthy fails cleanly instead (its own lsof guard
-refuses and exits 1, no fight). The real crash-loop risk is the reverse:
-installing the agent while a manual server holds the port causes
-EADDRINUSE, and launchd respawns the agent every `ThrottleInterval` (60s,
-rate-limited — not immediately) until one of the two is stopped.
+Before you run `install_dashboard_agent.py`, stop a manual server with `python3 skills/dashboard/scripts/stop_dashboard.py`.
+The installer refuses to bootstrap if `4173` is in use.
+If the agent server is active and you run `start_dashboard.py`, its lsof check refuses and exits 1.
+
+If the agent starts while a manual server uses `4173`, it gets `EADDRINUSE`.
+Launchd starts it again at each `ThrottleInterval` of 60s until one of the two servers stops.
 
 ## First run without a config
 
-If `~/.claude/coderails-dashboard.json` doesn't exist yet, the server still
-starts — it just runs with an empty config, so every panel renders its
-explicit empty state (no repos polled, no buttons declared) instead of
-erroring. Add the config once you're ready to point it at real repos, wiki
-paths, and COMMAND DECK buttons; no restart-and-hope required beyond a normal
-reload.
+If there is no `~/.claude/coderails-dashboard.json`, the server starts with an empty config.
+The panels show that there are no repos to poll or buttons to run.
+When you have the repo paths, wiki paths, and `COMMAND DECK` buttons, add them to the config.
+Reload the dashboard to use them.
 
 ## Configuration
 
-Config lives at `~/.claude/coderails-dashboard.json` (per-user; the watch
-scope is machine-wide): which repos to poll, wiki paths, and the
-button declarations for the COMMAND DECK.
+The per-user config is `~/.claude/coderails-dashboard.json`.
+It gives the repos to poll, wiki paths, and declared `COMMAND DECK` buttons.
+The watch scope is machine-wide.
 
-Buttons only ever run what this config declares. `POST /run` takes a button
-name, looks it up in the config, and refuses anything undeclared — there is
-no path from the dashboard to an arbitrary command.
+A button runs only a command in this config.
+The `POST /run` endpoint reads a button name and looks it up in the config.
+It refuses names with no declaration.
+The dashboard cannot run arbitrary commands.

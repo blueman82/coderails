@@ -4,8 +4,9 @@ description: Memory records past truth — re-check current state before recomme
 type: feedback
 originSessionId: 445479ca-d469-4749-b261-83394794c9a4
 ---
-Before recommending or acting on anything cited from memory, verify against current state — read the file, grep for the symbol, check git, query the resource. Memory records what was true at write-time, not necessarily now.
 
-**Why:** Stale memory presented as current is a top failure mode. A memory naming a file, function, or flag is a claim that it existed when written, not that it exists now. Acting on stale recall produces confidently-wrong recommendations. The user flagged this on 2026-05-01 as a structural gap.
+Before you use memory for a recommendation or step, check the current conditions. Read the file, find the symbol, check Git, or query the resource. Memory describes what the writer knew at that time.
 
-**How to apply:** Every time memory content is used as the basis for a recommendation or an action. Single-turn verification: the same response that cites the memory must also show the verification step (Read, Grep, or git output).
+**Why**. Memory can give a fact that is out of date. A record that names a file, function, or flag shows what was there when the record was written. The user identified this problem on 2026-05-01.
+
+**When to apply**. Use this rule each time memory is the basis for a recommendation or step. Show the file read, symbol lookup, or Git output in the same reply.

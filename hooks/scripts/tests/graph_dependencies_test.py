@@ -130,7 +130,7 @@ class DependencyTests(GraphCase):
     def test_skill_readiness_call_is_in_graph_section(self) -> None:
         """Pin executable readiness guidance within its bounded dependency section."""
         text = (ROOT / "skills/agentic-loop/SKILL.md").read_text()
-        section = text.split("The phases below are a dependency graph", 1)[1].split("### Phases -2 through 2.7", 1)[0]
+        section = text.split("The phases are a dependency graph", 1)[1].split("### Phases -2 through 2.7", 1)[0]
         self.assertIn("graph_readiness.py", section)
         self.assertNotIn("Cluster wiki ingest", section)
 

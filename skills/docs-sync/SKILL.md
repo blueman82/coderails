@@ -6,189 +6,163 @@ effort: high
 
 # Docs Sync
 
-Machine-run pipeline. Every night it audits this repo's git-tracked
-documentation for drift against the actual codebase. If nothing is
-wrong, it logs that and stops — no branch, no PR. If something is wrong,
-it fixes it through the full gate chain and merges the fix itself.
+Each night, this pipeline checks the repo’s tracked documentation against the code.
+If it finds no drift, it records that result and stops without a branch or PR.
+If it finds drift, it corrects it through the full gate sequence and merges the correction.
 
-This replaces the former `sync-docs-weekly` routine, which was
-**read-only** and had been silently broken for 9 days (its
-`foreignSkillPath` pointed at a path that never existed). `docs-sync`
-needs no `foreignSkillPath`: this skill lives in the plugin, same as
-`loop-retro-promotion`.
+This replaces the read-only `sync-docs-weekly` schedule.
+That schedule did not work for 9 days and gave no error. Its `foreignSkillPath` pointed to a missing path.
+The plugin includes `docs-sync` and `loop-retro-promotion`, so this skill uses no `foreignSkillPath`.
 
-**State machine.** Everything after the audit is one script,
-`routine_run.py`, shared with `loop-retro-promotion` (spec:
-`routines/docs-sync.json`: the ordered stages, the policy file, the log
-path and the cleanup). It needs no hooks, so it works headless
-(`claude -p`). Write `RR` for
-`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/routine_run.py" docs-sync`. Do not
-write the run log by hand: `routine_run.py` appends a JSONL event row
-(closed outcomes `stage_ok`, `run_ok`, `run_abort`, `run_refused`,
-`run_incomplete`; closed reason codes in the spec) and derives the legacy
-marker line (`run=ok`, `abort=<code>`, `refused=<gate>`,
-`abort=incomplete-run`) that the dashboard's `last-marker` predicate reads.
-An outcome or code outside the closed lists is refused (exit 2).
-`RR begin` refuses an open run even across midnight. Explicit `RR begin --new`
-first aborts the previous open id; never replace a run merely to hide its failure.
-`log_unwritable` refuses state advancement; inspect both logs and state for
-partial writes. Same-user forgery and runner limits are in `docs/routines.md`.
+**Run controls.**
+After the audit, the `routine_run.py` script controls the run.
+The `loop-retro-promotion` skill uses the same script.
+The spec `routines/docs-sync.json` gives the step sequence, policy file, log path, and cleanup.
+The script works in `claude -p` without hooks.
+
+Here, `RR` means `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/routine_run.py" docs-sync`.
+Do not write the run log by hand.
+The script appends a JSONL row for `stage_ok`, `run_ok`, `run_abort`, `run_refused`, or `run_incomplete`.
+The spec gives the permitted codes.
+The script derives the legacy marker that the dashboard’s `last-marker` predicate reads: `run=ok`, `abort=<code>`, `refused=<gate>`, or `abort=incomplete-run`.
+It refuses an outcome or code that is not on the lists and exits 2.
+
+The `RR begin` command refuses an open run across date changes too.
+An explicit `RR begin --new` first aborts the previous open ID.
+Do not replace a run to hide an error.
+With `log_unwritable`, the run cannot move to the next step.
+Check the log and run data for writes that did not finish.
+See `docs/routines.md` for the limits of the runner and same-user forgery.
 
 ## 1. Audit
 
-Invoke `/coderails:sync-docs`'s audit (Phases 1–3 of that skill: discover
-project structure, traditional audit, generate a drift report) to detect
-drift between this repo's documentation and its actual code.
+Use Phases 1–3 of `/coderails:sync-docs` to find differences between tracked docs and code.
+Identify the project structure, run the traditional audit, and give the drift report.
 
-**Scope of docs this routine may fix: git-tracked `.md` files only** —
-`README.md`, `AGENTS.md`, `CLAUDE.md`, and tracked files under `docs/` —
-**except the self-governance deny-list** in `policy/docs-sync.policy.json`
-(`skills/**/SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`,
-anything under `.claude/`, `examples/dashboard-config.json`). Read the
-deny-list as an override: if the audit finds drift in a deny-listed file,
-report it, do not fix it. This routine can flag that its own governing
-documents look stale; it can never be the one to edit them. Before
-treating any `docs/*.md` file as in-scope, confirm it is actually tracked
-and not gitignored:
+**Correct only tracked `.md` files that the policy permits.**
+Check `README.md`, `AGENTS.md`, `CLAUDE.md`, and tracked docs in `docs/`.
+The deny-list in `policy/docs-sync.policy.json` overrides this scope.
+It includes `skills/**/SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`, paths in `.claude/`, and `examples/dashboard-config.json`.
+Report drift in those files and do not correct it.
+
+Before you correct a `docs/*.md` file, check that Git tracks it and does not ignore it.
 
 ```bash
-git ls-files --error-unmatch <path>          # tracked, or
+git ls-files --error-unmatch <path>          # Git knows this path.
 git check-ignore -q <path> && echo IGNORED   # gitignored — EXCLUDE
 ```
 
-An ignored document or unread file is outside the fix scope. Read the code
-before changing a document to match it. If the audit cannot confirm drift,
-report the uncertainty and leave the file alone.
+Do not change an ignored document or a document you did not read.
+Read the code before you update a document to agree with it.
+If you cannot show drift, report the uncertainty and do not edit the file.
 
 ## 2. NO-DRIFT SHORT-CIRCUIT
 
-Run this step immediately after the audit, **BEFORE any branch or PR is created**.
+After the audit, do this step before you make a branch or PR.
 
-Run `RR begin` (writes the state file and a provisional `run_incomplete`
-row), then, if the audit finds nothing to fix, `RR finish no_drift`
-(emits `run_ok`; the derived `run=ok` marker is what the routine's
-`expectedArtifact` predicate keys on). Exit 0.
+Run `RR begin` to write the run data and a provisional `run_incomplete` row.
+If the audit finds nothing to correct, run `RR finish no_drift`.
+This records `run_ok` and the `run=ok` marker that the schedule’s `expectedArtifact` checks.
+Exit 0.
 
-Do **NOT** create a branch. Do **NOT** open a pull request. A no-drift
-night is a successful, quiet run, not a reason to open an empty or no-op
-PR. Only proceed to step 3 if the audit found at least one concrete,
-git-tracked `.md` drift item this routine is confident about fixing.
+Do not make a branch or open a PR for a no-drift run.
+Go to step 3 only if you can show drift in a tracked `.md` file the policy permits and you can correct it.
 
 ## 3. Delivery — full gate chain, manifest-locked
 
-`RR begin` has already run (step 2), so a session that ends mid-sequence
-leaves the standing `run_incomplete` row: the log reads red
-(`abort=incomplete-run`), distinguishable from a run that never started.
-The runner also appends `run_abort` `runner_exit_no_terminal` when a
-routine child exits without a terminal row.
+Step 2 ran `RR begin`.
+If the session stops before a terminal result, the provisional `run_incomplete` row stays.
+The log’s `abort=incomplete-run` marker shows that the run started and did not finish.
+If the child exits without a terminal row, the runner also appends `run_abort` with `runner_exit_no_terminal`.
 
-Run the stages in this order. `RR stage NAME` and `RR run-gate STAGE -- ARGV`
-enforce it; a call out of order aborts the run (`stage_out_of_order`).
+Run the steps in this sequence.
+The `RR stage NAME` and `RR run-gate STAGE -- ARGV` commands abort with `stage_out_of_order` if the sequence is incorrect.
 
-1. `fetch_branch`: fetch `origin/main`, branch off the freshly-fetched tip,
-   then `RR stage fetch_branch` (records the branch for cleanup).
-2. `evals_frozen`: run `/coderails:task-evals` (scope: `pr`) and FREEZE it
-   BEFORE making the edit, then `RR stage evals_frozen`.
-3. `edit_made`: make the doc edits identified in step 1 (git-tracked `.md`
-   files only), commit them, then `RR stage edit_made`.
-4. `manifest_check`: `RR stage manifest_check`. It runs
-   `diff_manifest.py --policy policy/docs-sync.policy.json` itself over
-   `origin/main...HEAD` (three-dot, with rename detection, so
-   `git mv scripts/gate.sh evil.md` shows its source). Any violation
-   (`out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`,
-   `special_file_type`, `status_not_allowed`, `too_many_paths`,
-   `manifest_unreadable`) ends the run `run_abort` with cleanup.
-   **ABORT, never warn-and-continue.** The policy encodes: every path is a
-   git-tracked `.md` file; no path is on the self-governance deny-list (even
-   though each is itself `.md`); no rename or copy whose source was not an
-   in-scope doc; no deletion of an in-scope doc.
+1. `fetch_branch`: Fetch `origin/main`. Make a branch from the commit you fetched. Run `RR stage fetch_branch` to record the branch for cleanup.
+2. `evals_frozen`: Run `/coderails:task-evals` at scope `pr` and freeze the evals before editing. Run `RR stage evals_frozen`.
+3. `edit_made`: Make the Step 1 edits to the tracked `.md` files. Commit them. Run `RR stage edit_made`.
+4. `manifest_check`: Run `RR stage manifest_check`. It runs `diff_manifest.py --policy policy/docs-sync.policy.json` on `origin/main...HEAD`. It uses a three-dot diff with rename detection. For example, `git mv scripts/gate.sh evil.md` shows its source.
+
+   The policy permits only tracked `.md` files. It refuses files on the self-governance deny-list. It refuses renames and copies from a source that is not an in-scope doc, and deletions of in-scope docs.
+
+   A violation gives `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `special_file_type`, `status_not_allowed`, `too_many_paths`, or `manifest_unreadable`. The runner ends with `run_abort` and cleans up. Do not continue after a violation.
+
 5. `push`: `RR run-gate push -- python3 "${CLAUDE_PLUGIN_ROOT}/scripts/push.py"`.
 6. `review`: `/pr-review-toolkit:review-pr <PR#>`, then `RR stage review`.
 7. `post_review`: `RR run-gate post_review -- python3 "${CLAUDE_PLUGIN_ROOT}/scripts/post_review.py" post <PR#> --summary <file>`.
 8. `post_evals`: `RR run-gate post_evals -- python3 "${CLAUDE_PLUGIN_ROOT}/scripts/post_evals.py" post <PR#> <evals.json>`.
 9. `merge`: `RR run-gate merge -- python3 "${CLAUDE_PLUGIN_ROOT}/scripts/merge.py" <PR#>`.
-   Then `RR finish ok` (emits `run_ok`, the last terminal row).
+   Then run `RR finish ok` to record `run_ok` as the last terminal row.
 
-**The trigger is the mechanism, not the reason: `run-gate` exits non-zero
-when a gate fails and the PR is still open.** It records
-`run_refused` for that gate (`refused=<gate>`), cleans up, and never emits
-`run_ok`. This is keyed on the exit code, not on a list of rejecting
-reasons: `merge.py` has more than thirty distinct non-zero exits plus
-failures that bypass its own error function, so any list is incomplete. A
-non-zero exit that is neither a pass nor a rejection is still a refusal; the
-worked example is a `pending` `integrity-review` status, where
-`/coderails:merge` exits non-zero because GitHub Actions has not yet posted
-the required status. If GitHub confirms the exact PR and head merged despite
-a CLI error, `run-gate merge` advances the stage. If GitHub cannot confirm
-the state, the run stays red and cleanup stops.
-**Never wait, poll, or retry for a gate to resolve**, never retry past a
-refusal in the same run, never relax the gate that refused, and
-**never invent a new marker**: `RR abort CODE` and `RR refuse GATE` accept only the
-spec's closed reason codes (the historical invented marker
-`merge-blocked reason=integrity-review-pending` is refused with exit 2).
-Use `RR abort audit_failed` for an audit that cannot continue.
+**Use the exit code to identify gate refusal.**
+If a gate fails and the PR is open, `run-gate` exits nonzero.
+It records `run_refused` for the gate (`refused=<gate>`), then cleans up without recording `run_ok`.
+The rule uses the exit code. It also applies when the command reports no named cause.
+The `merge.py` script has more than 30 nonzero exits, plus errors that bypass its error function.
 
-Cleanup (on `abort`, `refuse`, a manifest violation or a refused gate) runs
-once, in code, with `git` and `gh` only: close the PR if one was opened,
-delete the current local branch only while still on the branch recorded at
-`fetch_branch`. The remote branch is left intact. No file is removed with
-`rm`. A confirmed merged PR is never closed or logged as an abort.
+For example, `integrity-review` can be `pending`.
+The `/coderails:merge` command exits nonzero if the GitHub workflow has not posted the mandatory status.
+If GitHub shows that the same PR and head merged despite a CLI error, `run-gate merge` moves to the next step.
+If GitHub cannot show the merge status, the run remains unsuccessful and cleanup stops.
+
+Do not wait, poll, or retry for a gate to succeed.
+After a refusal, do not retry in the same run or relax a gate.
+Do not invent a marker.
+The `RR abort CODE` and `RR refuse GATE` commands accept only codes from the spec.
+The historical marker `merge-blocked reason=integrity-review-pending` gives exit 2.
+For an audit that cannot continue, use `RR abort audit_failed`.
+
+After an abort, refusal, manifest violation, or gate refusal, cleanup runs one time in code with `git` and `gh`.
+It closes the open PR if one was made.
+It removes the local branch only if the current branch is the one recorded in `fetch_branch`.
+It keeps the remote branch and uses no `rm`.
+Do not close a merged PR or log it as an abort.
 
 ## 4. Run log and failure visibility
 
-The log path is the spec's `log`
-(`~/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log`, `{date}`
-the run's LOCAL calendar date, matching the runner's `localDateIso()`); pass
-`--log PATH` only when `~/.claude/coderails-dashboard.json` names a
-different `expectedArtifact.artifactPath`. The JSONL log and the state file
-sit beside it with `.jsonl` and `.state.json` suffixes. Never write the run
-log to a repo-relative path, and never adopt a pre-existing log at a
-different location: a log at any other path is invisible to the gate.
+Use the spec’s `log` path, `~/.claude/coderails-dashboard/routines/docs-sync/run-{date}.log`.
+The `{date}` is the local calendar date, as from `localDateIso()`.
+Use `--log PATH` only if `~/.claude/coderails-dashboard.json` specifies a different `expectedArtifact.artifactPath`.
+The JSONL log and run data use the same path with `.jsonl` and `.state.json` suffixes.
+Do not use a repo-relative log or reuse a log at a different location.
+The gate reads only its configured path.
 
-The `last-marker` predicate takes the LAST terminal marker in the per-date
-log and passes only if it is `run=ok`, so a same-date run that aborts after
-an earlier `run=ok` still reads red. A log whose last marker is
-`abort=incomplete-run` means the run began and never reached a terminal
-outcome, not that it was never attempted.
+The `last-marker` predicate reads the last terminal marker in the date’s log.
+It succeeds only if that marker is `run=ok`.
+An abort after an earlier `run=ok` on the same date makes the gate refuse the run.
+The `abort=incomplete-run` marker means the run began but did not record a terminal result.
 
-This routine keeps both of its config's escalation channels
-(`escalation: ["notification", "vault-note"]`). Every abort or refusal does
-BOTH: writes its reason into the run-note (the `vault-note` channel), and
-leaves its greppable `abort=<code>` / `refused=<gate>` line in the run log
-(written by `routine_run.py`). Where a human should look, in order: the macOS
-notification, the vault-note run history, then the run log. There is no
-dashboard alert and no PR comment for a failed run.
+Keep the two escalation channels `escalation: ["notification", "vault-note"]`.
+Each abort or refusal writes its cause to the run note through `vault-note`.
+It also writes an `abort=<code>` or `refused=<gate>` line in the run log through `routine_run.py`.
+Check the macOS notification first, then the vault-note run history, then the run log.
+The run does not give a dashboard alert or PR comment for an error.
 
 ## 5. Prohibitions
 
-This pipeline writes ONLY git-tracked documentation `.md` files. It
-NEVER edits: hook scripts, gate logic, anything under `scripts/`,
-`install.py`, its own `SKILL.md`, the routine config
-(`~/.claude/coderails-dashboard.json` or `examples/dashboard-config.json`),
-`.claude/settings.json`, or any code.
+Write only tracked documentation `.md` files that the policy permits.
+Do not edit hook scripts, gate code, paths in `scripts/`, `install.py`, this `SKILL.md`, or code.
+Do not edit the schedule config (`~/.claude/coderails-dashboard.json` or `examples/dashboard-config.json`) or `.claude/settings.json`.
 
-**This is mechanically enforced, not merely stated.** The self-governance
-deny-list is data in `policy/docs-sync.policy.json`, checked by the same
-`stage manifest_check` that rejects a non-`.md` path: an edit to
-`skills/**/SKILL.md` (including this file), `AGENTS.md`, `CLAUDE.md`,
-`docs/routines.md`, or anything under `.claude/` aborts the run before push.
-The limit: it runs under `claude -p`, where `PreToolUse` hooks do not fire,
-and the agent could skip calling it; it reduces the risk of
-self-governance drift, it does not eliminate it the way a hook-level or
-server-side check would. The default-on publication gate in `merge.py`
-(`diff_manifest`) checks the same diff again at merge. See the security
-warning in `docs/routines.md`.
+The self-governance deny-list is in `policy/docs-sync.policy.json`.
+The `stage manifest_check` command checks this list and refuses non-`.md` paths.
+Changes to `skills/**/SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `docs/routines.md`, or paths in `.claude/` abort before push.
+The agent can skip the command because `PreToolUse` hooks do not run in `claude -p`.
+This rule reduces the risk of self-governance changes.
+The command supplies no hook-level or server-level check.
 
-It never relaxes, reorders, or skips a gate. It merges ONLY via
-`merge.py` (`/coderails:merge`) — never raw `gh pr merge`: `PreToolUse`
-hooks do not fire in this headless execution mode, so `test_gate` and
-`enforce_pr_workflow` do not protect this routine's runs either;
-`scripts/merge.py`'s own script-internal artifact gates are the merge rail.
+The default-on `diff_manifest` publication gate in `merge.py` checks the same diff again at merge.
+See the alert about these risks in `docs/routines.md`.
 
-It must NEVER edit `INSTALLATION.md`'s workflow-tools/claude-guardrails
-migration section — those names document live installer behaviour
-(`install.py:232` hard-exits on them) and are not documentation drift for
-this routine to "fix."
+Do not relax, reorder, or skip a gate.
+Use only `merge.py` (`/coderails:merge`) to merge.
+Do not use raw `gh pr merge`.
+In headless mode, `PreToolUse` hooks do not run.
+The script’s artifact gates apply during merge without the `test_gate` and `enforce_pr_workflow` hooks.
 
-It never "fixes" a doc to match code it has not read — no guessing. If
-the audit is uncertain, it reports rather than edits.
+Do not edit the workflow-tools/claude-guardrails migration section of `INSTALLATION.md`.
+Those names document current installer behavior.
+The installer exits on them at `install.py:232`.
+
+Read the code before you correct a document to agree with it.
+If the audit is uncertain, report it and do not edit.

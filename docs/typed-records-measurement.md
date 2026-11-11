@@ -1,142 +1,161 @@
 # Typed record measurement
 
-This note compares hand-written loop records with typed records. It starts with decisions, then covers standing
-orders, lessons, retrospective records, handoff data, and proof results. Counts come from source checks and trace
-rows. A count does not prove that an installed provider used the control.
+This document compares hand-written loop records with typed records for decisions, standing instructions, lessons, retrospective data, handoffs, and proof results.
+Counts come from source checks and diagnostic log entries. They cannot show that an installed provider used a control.
 
-| Evidence | Status |
+| Verification | Status |
 |---|---|
 | Source | The named Python writers and validators exist in the candidate plugin. |
-| Local | The named tests check record shapes, chains, refusals, and recovery on local fixtures. |
-| Installed | Both providers still need live allowed and refused control checks after installation. |
-| Operation | Muninn sync and completion counts need a named session and its retained records. |
+| Local | The named tests check record structure, chains, refusals, and recovery on local fixtures. |
+| Installed | Run live tests that accept and refuse operations in each installed provider. |
+| Operation | Muninn sync and loop-end counts apply to a named session and its saved records. |
 
 ## Decisions (`decisions_absorbed`)
 
 | Measure | Before | After | How measured |
 | --- | ---: | ---: | --- |
-| Writers of `decisions_absorbed` in code | 0 (prose told the model to hand-append) | 1 (`scripts/lib/decision_record.py`) | `grep -rln "decisions_absorbed" scripts hooks packages` minus tests, Markdown and the TypeScript dashboard reader lists only `decision_record.py` and its mirror |
-| Rows carrying a hash chain | 0 | every row appended by `record` | `decision_record.verify_chain(rows)` returns `[]` |
+| Writers of `decisions_absorbed` in code | 0 (instructions told the model to append by hand) | 1 (`scripts/lib/decision_record.py`) | Run `grep -rln "decisions_absorbed" scripts hooks packages`. Remove tests, Markdown, and the TypeScript dashboard reader from the results. Only `decision_record.py` and its mirror remain. |
+| Rows with a hash chain | 0 | Each row that `record` appends | `decision_record.verify_chain(rows)` gives `[]`. |
 | Rows synced to Muninn | 0 | `muninn.state == "written"` rows | `decisions_absorbed[*].muninn` |
-| Silent loss when Muninn is down | n/a | 0: local row kept, `decision.sync/degraded/<code>`, exit 3 | `decision_record_test.py` |
+| Silent loss when Muninn is down | n/a | 0: the writer keeps the local row, logs `decision.sync/degraded/<code>`, and exits 3 | `decision_record_test.py` |
 
-Counters: `decision.record` and `decision.sync` trace rows are counted by `scripts/lib/memory_counters.py`
-(`by_command`, `by_reason_code`), which `scripts/measure_graph_alignment.py` already embeds under the `memory` key; no
-edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Decision recorded locally but Muninn sync degraded".
+The `scripts/lib/memory_counters.py` module counts `decision.record` and `decision.sync` entries in `by_command` and `by_reason_code`.
+The `scripts/measure_graph_alignment.py` script includes them in `memory` without changes.
+See "Decision recorded locally but Muninn sync degraded" in `docs/RUNBOOK.md`.
 
 ## Limits (written, not hidden)
 
-- The chain is a cooperating-agent safeguard: a same-user agent can rewrite the file and recompute every hash. Deleting
-  the last row is undetectable by the chain alone.
-- Muninn refuses a short approval citation and an agent cannot cite itself, so the cite is a quote of the owner's
-  `authorising_prompt_raw` (or a caller-supplied substantive `cite_quote`). An authorising prompt such as "yes" degrades
-  (`cite_too_short`) and stays visible until `flush_pending` is given a substantive user quote.
-- Only the orchestrator session can write (subagent threads are not citable by Muninn).
-- Decisions are stored with `confidence=inferred`, so Muninn treats them as pull-only, not injected.
+- The chain is a cooperating-agent safeguard. The same user can rewrite the file and calculate all hashes again.
+  The chain alone cannot detect removal of the last row.
+- Muninn refuses a short approval cite. An agent cannot cite its own text.
+  Use a quote from the owner's `authorising_prompt_raw` or a substantive `cite_quote` that the caller supplies.
+  An approval prompt such as "yes" gives `cite_too_short`. The degradation stays in the output until the caller gives `flush_pending` a substantive user quote.
+- Only the orchestrator session can write. Muninn cannot cite subagent threads.
+- The writer uses `confidence=inferred`. Muninn can supply the decision only on a read.
 
 ## Standing orders and lessons (`orders.json`)
 
 | Measure | Before | After | How measured |
 | --- | ---: | ---: | --- |
-| Writers of standing-order counters in code | 0 (prose told the model to hand-edit Markdown) | 1 (`scripts/lib/orders.py` over `orders_ledger.py`) | `grep -rln "loops_since_recurrence" scripts hooks packages` minus tests and Markdown lists only `orders_ledger.py`, `orders.py`, `lessons.py` and their Codex mirrors |
-| Orders carrying a hash chain | 0 | every order written by `orders.py` | `orders_ledger.verify(ledger)` returns `[]`; a hand edit is refused as `order_chain_broken` naming the order |
-| Decay rule | prose ("K=5") | `orders_ledger.K = 5`, tested at 4 ticks (active) and 5 (decayed, never deleted) | `scripts/tests/orders_test.py` |
-| Graduation predicate | model counted files and read Markdown | >=10 distinct completed source-bound retros, typed recurrence and decay | `orders_test.py`, `lessons_test.py`, `orders_lifecycle_test.py` |
-| Lessons given to a dispatch | model copied from Markdown | `lessons.py query --format contract`: sorted, verbatim, stable sha256 | `lessons_test.py` |
-| Unavailable currentness | n/a | explicit exit 3, prior K-id retained, no ledger-text fallback | `orders_test.py`, `orders_repair_test.py`, `lessons_test.py` |
-| Lifecycle effect before durable completion | prose ticked before completion | none: record/prepare stage inputs, tick applies only saved owned completion | `orders_lifecycle_test.py` |
-| Changed preparation recovery | no separately bound preparation | explicit current-hash compare-and-swap; staged records preserved without effects | `orders_prepare_test.py` |
-| Citation chronology | cached ledger/preparation could restore older claims or ids | cite reconciles without authoring; tick reads fresh metadata, preserving later known ids during outages | `orders_current_test.py` |
-| Legacy archive interruption | a source move could separate the saved rows from their backup | an exact-byte archive is published before ledger save; the source stays in place, and an equal full-cohort retry skips another save | `orders_import_capture_test.py`, `orders_legacy_test.py` |
-| Completed lesson replacement recovery | existing evidence could acknowledge an unsaved same-loop edit | captured predecessor and sealed authored-source token recover only the accepted row | `orders_retry_view_test.py` |
+| Writers of standing instruction counters in code | 0 (instructions told the model to edit Markdown by hand) | 1 (`scripts/lib/orders.py` uses `orders_ledger.py`) | Run `grep -rln "loops_since_recurrence" scripts hooks packages`. Remove tests and Markdown. Only `orders_ledger.py`, `orders.py`, `lessons.py`, and their Codex copies remain. |
+| Entries with a hash chain | 0 | Each entry that `orders.py` writes | `orders_ledger.verify(ledger)` gives `[]`. A hand edit gives `order_chain_broken` and names the entry. |
+| Rule for decay | instructions ("K=5") | `orders_ledger.K = 5`. Tests check 4 ticks (active) and 5 (decayed). The decayed entry stays in the ledger. | `scripts/tests/orders_test.py` |
+| Graduation condition | The model counted files and read Markdown. | 10 or more different completed source-bound retros, typed recurrence, and decay. | `orders_test.py`, `lessons_test.py`, `orders_lifecycle_test.py` |
+| Lessons for dispatch | The model copied from Markdown. | `lessons.py query --format contract`: sorted, verbatim, stable SHA-256. | `lessons_test.py` |
+| Unavailable currentness | n/a | Exit 3, previous K-id kept, and no ledger-text fallback. | `orders_test.py`, `orders_repair_test.py`, `lessons_test.py` |
+| Lifecycle effect before durable loop end | The instructions applied a tick before loop end. | No effect. Record and prepare hold inputs. Tick applies only after the owned loop data records its end. | `orders_lifecycle_test.py` |
+| Recovery of changed prepared inputs | No binding for prepared inputs. | Explicit compare-and-swap with the current hash. The command keeps prepared records without lifecycle effects. | `orders_prepare_test.py` |
+| Citation chronology | Cached ledger or prepared data could put earlier claims or IDs back. | Cite reconciles without a write to knowledge. Tick reads current metadata and keeps subsequent known IDs during outages. | `orders_current_test.py` |
+| Legacy archive interruption | A source move could put the saved rows and their saved copy in different locations. | The writer publishes an archive with the same bytes before it writes the ledger. The source stays in its directory. A retry with the same full cohort skips a second save. | `orders_import_capture_test.py`, `orders_legacy_test.py` |
+| Recovery of a replacement for a completed lesson | Earlier records could acknowledge an unsaved edit for the same loop. | The captured predecessor and sealed authored-source token recover only the accepted row. | `orders_retry_view_test.py` |
 
-Counters: `order.record|prepare|tick|render|import|cite` and `lesson.query|predicate` trace rows are counted by
-`scripts/lib/memory_counters.py` (`by_command`, `by_reason_code`), which `scripts/measure_graph_alignment.py` already embeds
-under the `memory` key; no edit to that script is needed. Runbook entry: `docs/RUNBOOK.md` "Standing order stored without
-a cite, or a lesson missing from dispatch". Decision: `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
+The `scripts/lib/memory_counters.py` module counts `order.record|prepare|tick|render|import|cite` and `lesson.query|predicate` in `by_command` and `by_reason_code`.
+The `scripts/measure_graph_alignment.py` script includes them in `memory` without changes.
+See "Standing order stored without a cite, or a lesson missing from dispatch" in `docs/RUNBOOK.md`.
+The decision is in `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
 
-Limits: Claude and Codex native completion now enforce prepare, validated graph save, tick and render. Both Stop paths
-refuse missing or stale D4 receipts and views. An explicitly reviewed old complete graph can carry a separate
-source-bound admission that never changes progress or ages orders. The exact file hash is checked at admission; later
-completion bookkeeping does not revoke it. `orders_ticked` is a post-save observation, and a
-failed apply/receipt after completion means pending teardown. The one same-user lock covers currentness,
-reconciliation, bounded sync, ledger save and both render writes. The rendered receipt also checks the ledger and
-both view hashes under the lock, with no
-exactly-once network claim. New completed recurrences revive tombstones; replay cannot reset counters. Current live,
-verified owner-cited lesson text is legitimate typed memory; transcript advisory observations remain metadata only.
-Uncited claims are diagnostic and excluded from dispatch, promotion and views. Claims over 500 collapsed characters
-are refused, never truncated. Schema3 history needs the matching `retro_check` validator; absence is unknown/refused.
-The chain and source hashes are cooperating-agent safeguards. Legacy fixture imports preserve all five entries,
-counters, full text and first-seen provenance; a live hand-written-file migration was not verified.
-Each imported row seals the SHA-256 of the full raw source, including its preamble. A retry requires that hash and
-every saved row to match. The archive is a separate copy, so the source stays in place. After a save error, success
-requires the canonical ledger to equal the expected sealed rows. Otherwise import refuses and keeps the archive.
-Archive and ledger publication are not one atomic operation. Current reads
-exclude nonfinite expiries; scope labels remain opaque as supplied by Muninn's cwd-filtered
-repository list. Receipt parsing requires physical LF records and finite JSON numbers; Unicode inside a legitimate
-JSON string remains supported. Linked preparation/receipt/sidecar paths refuse before content read/open/create.
+Claude and Codex native loop end must prepare, check the graph write, tick, and write views.
+The two Stop checks refuse missing or stale D4 receipts and views.
+A previous completed graph can use source-bound admission after explicit inspection. Admission does not change loop data or age standing instructions.
+The admission check compares the full file hash. Subsequent bookkeeping for loop end does not revoke it.
 
-For an explicit replacement with existing session/loop evidence, prepared `replaces_source` captures the canonical
-`lesson_source` (including an explicit null when none existed). The canonical token hashes owned binding and authored
-row fields, excluding mutable Muninn observations, and is saved with its lesson under the existing chain. Tick applies
-only a missing observation or a replacement whose predecessor still matches; equal published source is already applied.
-A different later authored source is preserved, with exit 3/pending unless exact validated success evidence already
-acknowledges this preparation. An unbound pure `record` update clears the old token. Older absent predecessor data is
-not retroactively invented. Captured null cannot authorize a delayed replacement without its own published source or
-exact validated acknowledgement; even an unchanged null-source predecessor cannot prove authorship. Direct completed
-explicit record remains available. Publication followed by a lost receipt and then another authored replacement can remain
-honestly pending: the latest source and predecessor do not establish that historical application.
+The `orders_ticked` entry records work after the ledger write. If local apply or receipt write fails after loop end, teardown stays pending.
+One same-user lock covers currentness, reconciliation, bounded sync, the ledger write, and the two view writes.
+The receipt checks the ledger and the two view hashes with the lock. It cannot guarantee that a network operation happens only one time.
+
+New completed recurrences revive tombstones. Replay cannot set the counters again.
+Current live lesson text with a checked owner cite can be typed memory. Transcript advisory observations stay metadata.
+
+Uncited claims are diagnostic. The dispatch, promotion, and view writers do not use them.
+The writer refuses claims with more than 500 collapsed characters. It does not truncate them.
+
+Schema 3 history uses the matching `retro_check` validator. Without it, the result is unknown or refused.
+The chain and source hashes act as cooperating-agent safeguards.
+Legacy fixture imports keep all five entries, counters, full text, and first-seen provenance. The tests did not check a live migration of a hand-written file.
+
+Each imported row seals the SHA-256 of the full raw source with its preamble. A retry checks that hash and each saved row.
+The archive is a different copy, so the source stays in its directory.
+After a write error, a correct import must have a canonical ledger equal to the expected sealed rows.
+If it does not, the command refuses and keeps the archive. It does not publish the archive and ledger atomically together.
+
+Current reads skip nonfinite expiries. Scope labels stay as Muninn gives them in the repo list selected by cwd.
+Receipt parsing checks physical LF records and finite JSON numbers. It accepts Unicode in a correct JSON string.
+The reader refuses linked prepared data, receipt, and sidecar paths before a read, open, or create.
+
+For an explicit replacement with saved session and loop records, prepared `replaces_source` records the canonical `lesson_source`.
+It records null explicitly if there was no source. The token hashes the owned binding and authored fields, without mutable Muninn observations.
+The writer saves the token with the lesson in the chain.
+
+Tick applies only if there is no observation or if the replacement has the same predecessor.
+An equal published source means the update took effect. Tick keeps a different subsequent authored source.
+Without a checked success record for the same prepared inputs, it gives exit 3 and stays pending.
+
+An unbound pure `record` update clears the previous token. The writer does not invent missing predecessor data for previous records.
+A captured null cannot authorize a subsequent replacement without its own published source or a checked acknowledgement for that replacement.
+An unchanged null predecessor cannot prove authorship.
+
+Explicit record remains available for a completed loop. Publication, loss of a receipt, and a replacement can keep the operation pending.
+The latest source and predecessor cannot prove that the previous write took effect.
 
 ## Retro and handoff (`retro.json` schema 3, `teardown.jsonl`, `handoff_derive.py`)
 
-Final section of the lane D measurement: what changed for the retro and the handoff, with the counters that show it.
+This part gives the lane D measurements for the retrospective and handoff.
 
 | Measure | Before | After | How measured |
 | --- | ---: | ---: | --- |
-| Writers of `retro.json` | the model, by hand from a prose table | 1 (`scripts/lib/retro.py assemble`) | `scripts/tests/retro_test.py`: a hand-written v2 or hash-less v3 retro is refused as `retro_not_assembled` on both providers |
-| Hash checks on retro copies of progress/evals/proof sources | 0 (Codex read only `schema_version >= 1`; Claude the same) | 7 recomputed sources (`progress.decisions_absorbed`, `progress.loop_stop_counts`, `progress.authorising_prompt_raw`, `evals.json`, `proof.json`, `proof_results.jsonl`, `teardown.jsonl`) plus 3 verbatim copies compared (`decisions_absorbed`, `envelope`, `loop_stop_counts`) | `retro_check.source_hashes`; `retro_test.py` (one byte of a decision flipped after assembly is `retro_source_mismatch` naming `progress.decisions_absorbed`); `packages/tests/test_codex_completion.py` for the Codex gate |
-| Decisions chain checked at completion | no | yes, `retro_decisions_chain_broken` names the seq | `retro_test.py`, `test_codex_completion.py` |
-| Teardown steps proven to have run | none (prose "run these five steps in order") | `teardown.jsonl`: `proof_run`, `decisions_flushed`, `orders_prepared`, `retro_assembled` required in that order; `orders_ticked` is a post-completion apply observation and `lessons_written` is optional; a gap is `retro_steps_missing` | `retro_test.py` ordering test and its removed-check control |
-| Proofs satisfied by | exact-string transcript match (before the proof-results unit) | controller run rows on a hash chain; the retro additionally binds `proof_results.jsonl` | `proof_run_test.py`, `retro_test.py` |
-| Handoff Goal/Decisions/Done/Next | re-derived from conversation memory | `handoff_derive.py` JSON skeleton (graph `summarize`/`inspect`, progress and Muninn decisions with K-ids and cites, lessons, proof status); each unreachable source listed in `degraded[]` with a reason code, exit 3 | `scripts/tests/handoff_derive_test.py` |
-| Silent loss when Muninn is down | n/a | 0: completion is not blocked (that would deadlock the loop); the gate prints `Memory degraded: N decision(s) not in Muninn (<reason>: n)` and the handoff lists the reason | `retro_test.py` degrade test, `loop_stall_guard_test.py` |
+| Writers of `retro.json` | The model used a prose table and wrote it by hand. | 1 (`scripts/lib/retro.py assemble`) | In `scripts/tests/retro_test.py`, the two providers refuse a hand-written v2 or hash-less v3 retro with `retro_not_assembled`. |
+| Hash checks on source copies in the retro | 0 (Codex and Claude read only `schema_version >= 1`) | 7 source hashes and 3 verbatim copies. See below. | `retro_check.source_hashes` and `retro_test.py`. A change of one decision byte gives `retro_source_mismatch` for `progress.decisions_absorbed`. Codex gate checks use `packages/tests/test_codex_completion.py`. |
+| Decision chain check at loop end | no | yes, `retro_decisions_chain_broken` gives the seq | `retro_test.py`, `test_codex_completion.py` |
+| Verification that teardown steps ran | none (prose "run these five steps in order") | `teardown.jsonl` must have `proof_run`, `decisions_flushed`, `orders_prepared`, and `retro_assembled` in that sequence. The `orders_ticked` step records apply after loop end. The `lessons_written` step is optional. A missing step gives `retro_steps_missing`. | The `retro_test.py` sequence test and its control with the check removed. |
+| Source for proof verdict | Same-string check on transcript text before the proof-results unit | The controller uses hash-chained run rows. The retro also records a hash for `proof_results.jsonl`. | `proof_run_test.py`, `retro_test.py` |
+| Handoff Goal/Decisions/Done/Next | The model used conversation memory. | The `handoff_derive.py` JSON skeleton uses graph `summarize` and `inspect`, loop data, Muninn decisions with K-ids and cites, lessons, and proof status. An unreachable source gets a code in `degraded[]` and exit 3. | `scripts/tests/handoff_derive_test.py` |
+| Silent loss when Muninn is down | n/a | 0: the gate permits loop end to prevent deadlock. It prints `Memory degraded: N decision(s) not in Muninn (<reason>: n)`. The handoff gives the cause. | `retro_test.py` degradation test, `loop_stall_guard_test.py` |
 
-Counters (after): `retro.assemble`, `teardown.step` and `handoff.derive` trace rows are counted by
-`scripts/lib/memory_counters.py` (prefixes `retro.`, `teardown.`, `handoff.`). Read them with
-`python3 scripts/measure_graph_alignment.py --root . --json`, key `memory`: `rows`, `by_command` (for example
-`teardown.step`, `retro.assemble`, `handoff.derive`) and `by_reason_code` (`ok`, `memory_degraded`, `muninn_absent`, ...).
-`scripts/measure_graph_alignment.py` is not edited. A healthy loop shows one `retro.assemble/assembled/ok` row and at
-least four `teardown.step` rows; a `retro.assemble/degraded/memory_degraded` row means Muninn was unreachable at flush.
-The gate's own refusals are logged as `retro_gate=<code>` lines in the discipline log (`hook=loop_stall_guard`) and are
-reason codes `retro_not_assembled`, `retro_source_mismatch`, `retro_decisions_chain_broken`, `retro_steps_missing`.
-Runbook entry: `docs/RUNBOOK.md` "Retro rejected at completion, or a handoff printed `degraded`".
+The seven sources are `progress.decisions_absorbed`, `progress.loop_stop_counts`, `progress.authorising_prompt_raw`, `evals.json`, `proof.json`, `proof_results.jsonl`, and `teardown.jsonl`.
+The three copies are `decisions_absorbed`, `envelope`, and `loop_stop_counts`.
 
-Limits (written, not hidden): the hashes and chains are a cooperating-agent safeguard (a same-user agent can re-assemble
-over edited sources); completion counter keys are excluded from the source hash because the hook increments the counter
-when it consumes the declaration; a capitalized `Complete` counter added after orders preparation is removed during
-preparation validation only when the remaining source reproduces the bound hash; the `free` section is deliberately unhashed, so a claimed artifact or review theme there is
-only as good as its verifying check; the Codex retro carries empty `cost` and `hook_blocks` (no miners in that package);
-Muninn rows that reach `written` after assembly change the decisions hash, so re-assemble after any late flush; the
-handoff skeleton lists what recorded state shows, not what is true; the closure matrix status for rows 13 and gap5 is the
-matrix owner's to update after merge.
+The `scripts/lib/memory_counters.py` module counts `retro.assemble`, `teardown.step`, and `handoff.derive` using prefixes `retro.`, `teardown.`, and `handoff.`.
+Run `python3 scripts/measure_graph_alignment.py --root . --json` and read `memory` fields `rows`, `by_command`, and `by_reason_code`.
+Examples of command counts are `teardown.step`, `retro.assemble`, and `handoff.derive`. Cause codes include `ok`, `memory_degraded`, and `muninn_absent`.
+The measurement script stays the same.
+
+A healthy loop has one `retro.assemble/assembled/ok` row and four or more `teardown.step` rows.
+A `retro.assemble/degraded/memory_degraded` row means Muninn was unreachable during flush.
+The gate logs refusals as `retro_gate=<code>` in the discipline log (`hook=loop_stall_guard`).
+Its codes are `retro_not_assembled`, `retro_source_mismatch`, `retro_decisions_chain_broken`, and `retro_steps_missing`.
+See "Retro rejected at completion, or a handoff printed `degraded`" in `docs/RUNBOOK.md`.
+
+The hashes and chains are a cooperating-agent safeguard. The same user can edit the sources and assemble again.
+The source hash skips loop-end counters because the hook increments the counter when it consumes the declaration.
+The prepare check removes a capitalized `Complete` counter that was added after prepare only if the remaining data reproduces the bound hash.
+
+The `free` section has no hash. An artifact or inspection theme there is only as reliable as its check.
+The Codex retro has empty `cost` and `hook_blocks`. The package has no miners for them.
+
+If Muninn rows reach `written` after assembly, the decisions hash changes. Assemble again after a subsequent flush.
+The handoff skeleton gives the contents of recorded data. It does not prove that the contents are correct.
+The matrix owner updates rows 13 and `gap5` after merge.
 
 ## Proof results (`proof_results.jsonl`)
 
 | Measure | Before | After | How measured |
 | --- | ---: | ---: | --- |
-| Who executes a frozen proof cmd | the model, as its own Bash call; the gate string-matched the transcript | the controller runs the frozen command unchanged in pinned sandbox-runtime 0.0.65 | `proof_sandbox_test.py` (both providers, compound command, blocked host write and loopback connection) |
-| Evidence the gate reads | a transcript tool pair (Claude) or an exec result frame plus `status == pass` (Codex) | hash-chained run rows on both providers | `proof_run_test.py` (a perfectly matching transcript no longer satisfies a proof) |
-| `expect` | prose, never evaluated | `{exit_code, stdout_contains, stdout_not_contains}`, evaluated | `proof_run_test.py` expect tests; skipping the evaluation fails them |
-| Tamper detection | none | edited proof.json, wrong cmd hash and removal of a nonfinal row block (`proof_stale_cmd`, `proof_chain_broken`); removal of a valid-prefix tail is undetected | `proof_run_test.py` mutation controls and current-head review |
-| Codex loop with no executable surface | could not complete | completes with `none: <reason>` or a typed choice about proof execution | `packages/tests/test_codex_completion.py` |
+| Executor for a frozen proof cmd | The model used Bash and the gate checked transcript text. | The controller runs the same command in pinned sandbox-runtime 0.0.65. | `proof_sandbox_test.py` tests the two providers, a compound command, blocked host writes, and a blocked loopback connection. |
+| Record that the gate reads | A transcript tool pair in Claude, or an exec result frame and `status == pass` in Codex. | Hash-chained run rows for the two providers. | In `proof_run_test.py`, a transcript that agrees cannot satisfy the proof. |
+| `expect` | The instructions had prose that the gate did not check. | The gate checks `{exit_code, stdout_contains, stdout_not_contains}`. | The `proof_run_test.py` expect tests report an error if the check is removed. |
+| Tamper detection | none | An edit to `proof.json`, an incorrect command hash, or removal of a row before the last row blocks (`proof_stale_cmd`, `proof_chain_broken`). The gate cannot find removal of a tail if the prefix is correct. | The `proof_run_test.py` mutation controls and inspection of the current head. |
+| Codex loop with no executable surface | The loop could not end. | The loop can end with `none: <reason>` or a typed decision about proof execution. | `packages/tests/test_codex_completion.py` |
 
-Counters: `proof.freeze|run|gate` trace rows are counted by `scripts/lib/memory_counters.py` (prefix `proof.`), embedded under
-the `memory` key of `scripts/measure_graph_alignment.py`; no edit to that script. Runbook entry: `docs/RUNBOOK.md`
-"Proof gate blocked a `complete` declaration".
+The `scripts/lib/memory_counters.py` module counts `proof.freeze|run|gate` with prefix `proof.`.
+The `scripts/measure_graph_alignment.py` script includes them in `memory` without changes.
+See "Proof gate blocked a `complete` declaration" in `docs/RUNBOOK.md`.
 
-Limits (written, not hidden): a same-user agent can forge rows and recompute the chain (cooperating-agent safeguard);
-the gate checks the frozen command ran and matched `expect`, not that it is a good proof; the freeze hashes the canonical
-JSON, so a re-freeze after an edit is the sanctioned (and traced) way to change a proof; `graph.py complete --transcript`
-is accepted and ignored; schema 1 proofs are refused at freeze (they ignore structured `expect`); the destructive
-classifier is literal-pattern, not a sandbox; each run row records HEAD, and the gate refuses a stale HEAD;
-the gate has no off-switch by design.
+The same user can forge rows and calculate the chain again. This is a cooperating-agent safeguard.
+The gate checks if the frozen command ran and met `expect`. It cannot assess proof quality.
+
+The freeze hashes canonical JSON. To change a proof, freeze again after the edit. The command logs that freeze.
+
+The command accepts and ignores `graph.py complete --transcript`. Freeze refuses schema 1 proofs because they ignore structured `expect`.
+The destructive classifier uses literal patterns. The sandbox is a different control.
+
+Each run row records HEAD. The gate refuses a stale HEAD. The gate has no off-switch.

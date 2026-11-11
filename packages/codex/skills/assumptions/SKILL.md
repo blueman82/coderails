@@ -5,19 +5,11 @@ description: Inventory and label assumptions about the subject supplied with an 
 
 # Assumptions
 
-Treat the text supplied with the explicit `$coderails-codex:assumptions` mention
-as the subject.
+Use the text that accompanies an explicit `$coderails-codex:assumptions` mention as the subject.
 
-List every assumption you are currently making about the subject, including the
-user's task, the codebase, the environment, and relevant state.
+List all your assumptions about the subject. Include the user's task, codebase, environment, and related conditions.
 
-For each assumption:
+- Use `(verified)` only if a check in this session shows the assumption is correct. Use a tool result, file read, or direct statement from the user.
+- Use `(inferred)` if the assumption comes from context, memory, a pattern, or a different assumption.
 
-- Mark it `(verified)` only when it was directly observed in this session through
-  command or tool output, a file read, or an explicit user statement.
-- Mark it `(inferred)` when it comes from context, recall, pattern matching, or
-  any other assumption.
-
-Return only a table with the columns `Assumption`, `Source`, and `Confidence`.
-Put the verification label in `Confidence`. Perform no other work in the same
-turn.
+Give only a table with the columns `Assumption`, `Source`, and `Confidence`. Put the label in `Confidence`. Do no other work in this turn.

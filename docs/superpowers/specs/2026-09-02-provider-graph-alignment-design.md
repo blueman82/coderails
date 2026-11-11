@@ -1,55 +1,62 @@
 # Provider graph-alignment design
 
-> Implementation supersession note (2026-09-21): the approved design below is retained as the pre-cutover specification. Its shell filenames and proposed `cmp` delivery wording are superseded by the two-provider Python clean-break amendment in [the implementation plan](../plans/2026-09-03-provider-graph-alignment-implementation.md). Current delivery is `install.py` using `scripts/installer/files.py`; current provider parity tests are `packages/tests/test_provider_graph_parity.py`. The semantic source remains `packages/graph-semantics/graph_semantics.py`, independently materialized byte-for-byte into both provider bundles. This note does not change the frozen semantic contract.
+> Implementation update (2026-09-21). The approved design below is the specification before the cutover.
+> The two-provider Python clean-break change in [the implementation plan](../plans/2026-09-03-provider-graph-alignment-implementation.md) replaces the shell paths and proposed `cmp` instructions below.
+
+> Current installation uses `install.py` and `scripts/installer/files.py`. Current parity tests are in `packages/tests/test_provider_graph_parity.py`.
+> The semantic source remains `packages/graph-semantics/graph_semantics.py`. Each provider bundle contains a byte-for-byte copy.
+> This update does not change the frozen semantic contract.
 
 ## Problem and decision
 
-The Claude graph contract is defined by `skills/agentic-loop/loop-state.md` and `skills/agentic-loop/execution-graph.md`, while the Codex contract is implemented in `packages/codex/skills/agentic-loop/scripts/graph.py`. (verified) Their current state shapes differ, including the active-wave identifier. (verified)
+The Claude graph contract comes from `skills/agentic-loop/loop-state.md` and `skills/agentic-loop/execution-graph.md`. Codex implements its contract in `packages/codex/skills/agentic-loop/scripts/graph.py`. (verified)
+The two formats differ. The active-wave identifier is one difference. (verified)
 
-**Decision.** New graph state is interpreted and mutated by one canonical Python graph-semantic core. Claude and Codex call it through thin provider-local adapters. The core owns only graph validation, readiness, wave transitions, joins, retry transitions, and graph-completion eligibility. (verified)
+**Decision.** One canonical Python core reads and changes new graph data. Claude and Codex use it through thin provider-local adapters.
+The core only validates the graph and controls node readiness, changes to waves and retries, joins, and eligibility to complete. (verified)
 
-This supersedes the wiki's historical independent-runtime policy for graph semantics only. (inferred) It preserves the safety purpose of that policy by keeping scheduling, routing, transcript parsing, raw evidence, hooks, locking integration, and provider dispatch ownership local to each provider. (verified)
+This replaces the wiki's historical policy of one runtime for each provider for graph semantics only. (inferred)
+Each provider continues to own scheduling, routing, transcript parsing, raw records, hooks, lock integration, and worker starts.
+This keeps the safety property of that policy. (verified)
 
 ## Non-goals
 
 - No shared scheduler, daemon, worker launcher, routing table, or provider selection policy. (verified)
-- No shared transcript parser, evidence collector, evidence-store schema, or raw evidence ownership. (verified)
-- No change to Claude `Agent` dispatch, Claude evidence, Claude locks, or Claude hooks. (verified)
-- No change to Codex `spawn_agent` dispatch, Codex evidence, or Codex hooks. (verified)
-- No reconciliation between `work_units` and `graph.nodes`. They remain separate views with separate lifecycle consumers. (verified)
-- No migration, rewriting, or reinterpretation of historical state files. (verified)
+- No shared transcript parser, collector or storage schema for verification records, or owner of raw records. (verified)
+- No change to Claude `Agent` dispatch, records, locks, or hooks. (verified)
+- No change to Codex `spawn_agent` dispatch, records, or hooks. (verified)
+- No reconciliation between `work_units` and `graph.nodes`. Each has its own lifecycle and consumers. (verified)
+- No migration, rewriting, or reinterpretation of historical graph files. (verified)
 - No grandfathered semantic branch, legacy fallback, compatibility shim,
   dual-reader, dual-writer, automatic conversion, or mixed-version wave.
   (verified)
 
 ## Functional preservation and clean break
 
-The migration must preserve every existing provider capability and safety
-property: validation, readiness, wave transitions, joins, retry exhaustion,
-stale handling, hard stops, locks, atomic writes, native dispatch, raw-evidence
-binding, evaluation gates, proof gates, retrospective gates, and completion
-gates. A refactor is not accepted because tests are green if it silently drops
-one of those behaviours. (verified)
+Keep all existing provider functions and safety properties during migration. They include validation, readiness, wave changes, joins, retry exhaustion, stale handling, and hard stops.
+They also include locks, atomic writes, native dispatch, raw-evidence binding, and gates for evals, proofs, retrospectives, and loop end.
+Green tests do not justify a refactor that silently removes one of these behaviors. (verified)
 
-The preserved behaviour is implemented once in the aligned schema-v3 contract,
-not retained through legacy compatibility. Before deleting or replacing a
-semantic path, the implementation must identify its consumers, cover its
-observable behaviour in the frozen corpus or provider-local tests, and remove
-the obsolete path in the same change. Historical v1/v2 state files are data,
-not a compatibility surface: leave them untouched and reject them clearly.
-(verified)
+Use the aligned schema-v3 contract as the one implementation of this behavior. Keep no legacy compatibility path.
+
+Before removing or replacing a semantic path, identify its consumers. Test its observable behavior with the frozen corpus or provider-local tests.
+Remove the obsolete path in the same change. Keep historical v1/v2 graph files unchanged. The aligned runtime must reject them clearly. (verified)
 
 ## Canonical graph contract
 
 ### Scope and versioning
 
-The canonical format is `schema_version: 3`. (inferred) It applies only when a provider creates a new state after this change. Existing `schema_version: 1` and `2` files remain untouched, but the aligned runtime must reject them with a clear compatibility error. This makes no promise about old-reader compatibility: there is no migration, dual-write, conversion, or mixed-version wave. (inferred)
+The canonical format is `schema_version: 3`. It applies only to new graph files after this change. (inferred)
+Keep existing `schema_version: 1` and `2` files unchanged. The aligned runtime must reject them with a clear compatibility error.
+There is no promise of compatibility with earlier readers. Do not migrate, dual-write, convert, or run mixed-version waves. (inferred)
 
-The graph core receives a complete state document and returns a complete proposed state document or a validation error; it does not locate files, acquire locks, read transcripts, or perform I/O. (inferred)
+The core receives the full `progress.json` document. It gives a full proposed document or a validation error.
+It does not find files, get locks, read transcripts, or do I/O. (inferred)
 
 ### Root graph fields
 
-`progress.json` retains provider-owned root fields such as `session_id`, `loop_id`, `revision`, lifecycle `status`, `work_units`, and completion artifacts. (verified) A new canonical root starts with `revision: 1`. (inferred) Its canonical `graph` value is:
+`progress.json` keeps provider-owned root fields such as `session_id`, `loop_id`, `revision`, lifecycle `status`, `work_units`, and artifacts for loop end. (verified)
+A new canonical root starts with `revision: 1`. (inferred) Its canonical `graph` value is:
 
 ```json
 {
@@ -61,11 +68,18 @@ The graph core receives a complete state document and returns a complete propose
 }
 ```
 
-`graph.nodes` is keyed only by Claude-derived stable IDs. The authoritative grammar is `S-2|S-1|S0|S0.4|S0.5|S1|S2|S2.5|S2.6|J2|S2.7a|S2.7b|S2.7c|S2.7d[i]|S2.7e|S2.8|J2.8|U3[i]|U4[i]|U4b-review[i]|U5[i]|U5-repair[i]|U6[i]|U7/8[i]|U4b-merge-gate[i]|U10-respawn[i]|J12-all-units|G10|G11|G12|S9-wiki|S9-docs|S13-proof|S13-retro|S13-complete`, where every `[i]`, including `S2.7d[i]`, is a positive base-10 work-unit index. `S*` are single-run steps, `U<i>*` are per-work-unit steps, `J*` are joins, and `G*` are cross-cutting guards. (verified) IDs are durable graph keys, never display text. (inferred)
+`graph.nodes` uses only stable IDs from Claude. The authoritative grammar is:
+`S-2|S-1|S0|S0.4|S0.5|S1|S2|S2.5|S2.6|J2|S2.7a|S2.7b|S2.7c|S2.7d[i]|S2.7e|S2.8|J2.8|U3[i]|U4[i]|U4b-review[i]|U5[i]|U5-repair[i]|U6[i]|U7/8[i]|U4b-merge-gate[i]|U10-respawn[i]|J12-all-units|G10|G11|G12|S9-wiki|S9-docs|S13-proof|S13-retro|S13-complete`.
 
-The authoritative display-label registry, with its exact Claude source phase/action mapping, is:
+Each `[i]` is a positive base-10 work-unit index. This includes `S2.7d[i]`.
+`S*` steps run one time. `U<i>*` steps run for each work unit.
+Use `J*` for IDs of joins. Use `G*` for IDs of checks that apply across the graph. (verified)
 
-| ID template | Display label | Exact Claude source phase/action |
+IDs are durable graph keys. Do not use them as display text. (inferred)
+
+The authoritative display-label registry maps each label to its Claude source phase and step:
+
+| ID template | Display label | Claude source phase and step |
 | --- | --- | --- |
 | `S-2` | `Initialize loop state` | `Stub state` |
 | `S-1` | `Improve prompt` | `Improve prompt` |
@@ -75,37 +89,37 @@ The authoritative display-label registry, with its exact Claude source phase/act
 | `S1` | `Plan work` | `Plan` |
 | `S2` | `Run preflight` | `Plan` — pre-flight agent result, wiki/theme intake, retro lessons, and clean-base check |
 | `S2.5` | `Resolve design fork` | `S2` design scout |
-| `S2.6` | `Choose disposition` | `S2` disposition scout |
+| `S2.6` | `Choose disposition` | `S2` scout for how to retire paths |
 | `J2` | `Preflight decisions joined` | `S2.5` and `S2.6` joined |
 | `S2.7a` | `Write specification` | durable `spec.md` |
 | `S2.7b` | `Write implementation plan` | durable `plan.md` |
 | `S2.7c` | `Freeze loop evals` | loop-scope evals frozen |
 | `S2.7d[i]` | `Freeze unit i evaluation` | PR-scope evals frozen for unit `i` |
-| `S2.7e` | `Freeze proof plan` | `proof.json` or no-executable disposition |
-| `S2.8` | `Assign model roles` | recorded model role for every build unit |
+| `S2.7e` | `Freeze proof plan` | `proof.json` or decision that there is no executable surface |
+| `S2.8` | `Assign model roles` | recorded model role for each build unit |
 | `J2.8` | `Implementation ready` | first eligible unit inputs joined |
 | `U3[i]` | `Build unit i` | worker produced unit `i` artifact/OPEN PR |
 | `U4[i]` | `Verify unit i artifact` | orchestrator artifact check |
-| `U4b-review[i]` | `Review unit i` | required review and post-review artifact |
+| `U4b-review[i]` | `Review unit i` | mandatory inspection and post-review artifact |
 | `U5[i]` | `Diagnose unit i` | source-of-truth premise confirmed and diagnosis disconfirmed |
-| `U5-repair[i]` | `Repair unit i` | distinct fix attempt applied and verified |
+| `U5-repair[i]` | `Repair unit i` | different repair applied and checked |
 | `U6[i]` | `Resolve continuation` | in-scope continuation decision resolved |
 | `U7/8[i]` | `Push or deploy unit i` | stack-specific push/deploy tactic |
-| `U4b-merge-gate[i]` | `Merge gate unit i` | exact-head review/eval/integrity gate |
-| `U10-respawn[i]` | `Respawn unit i` | new versioned worker and fresh dispatch |
-| `J12-all-units` | `All units joined` | every unit merge gate passed |
+| `U4b-merge-gate[i]` | `Merge gate unit i` | inspection, eval, and integrity gate for the current head |
+| `U10-respawn[i]` | `Respawn unit i` | new versioned worker and new worker start |
+| `J12-all-units` | `All units joined` | each unit merge gate succeeded |
 | `G10` | `Guard replacement worker` | replacement worker names versioned |
 | `G11` | `Check confidence labels` | worker prompts and reports labelled |
-| `G12` | `Fresh artifact check` | fresh artifact recheck at boundary |
+| `G12` | `Fresh artifact check` | check the current artifact again at the boundary |
 | `S9-wiki` | `Update wiki` | clustered wiki ingest and lint |
 | `S9-docs` | `Sync docs` | `/sync-docs` audit and triage |
 | `S13-proof` | `Run frozen proofs` | frozen proof commands ran and passed |
 | `S13-retro` | `Write loop retrospective` | Phase 13 report and artifacts written |
 | `S13-complete` | `Complete loop` | `Complete loop` |
 
-Display labels are deliberately human-readable and need not repeat the internal source title verbatim; the source-mapping column is the traceability contract. (inferred)
+Display labels are for human readers. The source-mapping column identifies the source step. The labels can use different words from the source titles. (inferred)
 
-Each node contains at least:
+Each node contains these minimum fields:
 
 ```json
 {
@@ -118,140 +132,213 @@ Each node contains at least:
 }
 ```
 
-`label` is the canonical human-readable text from this registry; template labels substitute the decimal index verbatim. Node kind is determined by the ID prefix: `S*`, `U*`, `J*`, or `G*`. (inferred) `respawn.generation` is a non-negative core-owned integer and `respawn.intent` is either `null` or `{ "generation": <integer>, "reason": <nonblank string> }`; it records a requested fresh provider worker for that generation, never a provider worker or evidence reference. (inferred) `graph_role` is optional provider-owned dispatch metadata, not a canonical graph field. (inferred)
+`label` is the canonical human-readable text from this registry. Template labels use the decimal index verbatim.
+The ID prefix `S*`, `U*`, `J*`, or `G*` identifies the node type. (inferred)
 
-The nine-token accepted state/result vocabulary is exactly: `pending`, `ready`, `running`, `blocked`, `done`, `skipped`, `failed`, `hard-stop`, and `stale`. (verified) `done` and `skipped` are terminal-success persisted statuses. `hard-stop` is a terminal failure persisted status; `stale` is persisted non-success and cannot release a dependency. `pending`, `ready`, `running`, and `blocked` are non-terminal persisted statuses. (verified)
+The core owns `respawn.generation`, a non-negative integer. `respawn.intent` is `null` or `{ "generation": <integer>, "reason": <nonblank string> }`.
+It records the plan to start a new provider worker for that generation. It records no worker or verification-record pointer. (inferred)
+The provider owns the optional `graph_role` metadata for dispatch. It is not a canonical graph field. (inferred)
 
-`failed` is accepted only as a `record_wave` result for retryable work, never as a persisted canonical node status in newly-created v3 state. In the same atomic transition, the core increments `retry.attempts` and maps the node to `pending`; if the increment exhausts `retry.max`, it maps the node to `hard-stop`. Validation rejects a persisted `failed` status in newly-created v3 state. (verified) A `stale` `record_wave` result is accepted only with a `stale_check` object whose `checked` is boolean `true` and whose `method` and `result` are nonblank strings recording the check that made it stale. The core persists `stale`, clears the active wave, and makes completion ineligible; stale work cannot automatically retry, release a dependency, or complete. (inferred)
+The core accepts only these nine status or result tokens:
+`pending`, `ready`, `running`, `blocked`, `done`, `skipped`, `failed`, `hard-stop`, and `stale`. (verified)
 
-`respawn_stale(node_id, reason)` is the only permitted recovery of a persisted `stale` node. Its preconditions are: the stable node is `stale`; it retains a valid `stale_check`; `active_wave` is `null`; and `reason` is nonblank. The core increments `respawn.generation`, records `respawn.intent` with that generation and reason, preserves the stale audit evidence/history, sets the same stable node to `pending`, and does not increment `retry.attempts`. It creates no node, changes no edge or join, and does not dispatch. At the later `begin_wave`, the adapter must allocate a fresh provider-native worker identity for the recorded respawn generation and validate it before it sends normalized evidence to `record_wave`; worker and evidence references are neither required nor recorded before dispatch. (inferred)
+In the graph file, `done` and `skipped` are terminal success statuses. The `hard-stop` status is a terminal error.
+The `stale` status is not a success and cannot release a dependency.
+The stored `pending`, `ready`, `running`, and `blocked` statuses are non-terminal. (verified)
 
-`hard_stop(node_id, reason)` is a core-owned operation for a replacement that cannot be prepared or validated. It requires an existing node, a nonblank reason, and a node that is not `done` or `skipped`; it persists `hard-stop` with the reason and leaves topology unchanged. If the node is in an active wave, the core removes only that unstarted node from the wave and retains the remaining active nodes; if none remain, it clears `active_wave`. This is the explicit exception to normal complete-wave recording for a worker that could not be prepared or validated before dispatch. No provider adapter may mutate canonical graph fields directly. (inferred)
+The core accepts `failed` only as a `record_wave` result for work that can retry. Validation rejects persisted `failed` as a node status in new v3 graph data.
+In the same atomic change, the core increments `retry.attempts`. It sets the node to `pending`, or `hard-stop` if the increment exhausts `retry.max`. (verified)
 
-`edges` is an array of `{ "from": "<node-id>", "to": "<node-id>" }`. Both IDs must exist and an edge may not self-loop. (verified) `joins` is an object keyed by the join node ID; every entry must repeat that key in `id`:
+A `stale` result from `record_wave` needs a `stale_check` object. Its `checked` field must be boolean `true`.
+Its `method` and `result` must be nonblank strings that record the check that found the work stale.
+The core persists `stale`, clears the active wave, and blocks loop end.
+Stale work cannot retry automatically, release a dependency, or complete. (inferred)
+
+Only `respawn_stale(node_id, reason)` can make a stored `stale` node eligible to retry.
+The stable node must be `stale` and keep a correct `stale_check`. `active_wave` must be `null`. `reason` must be nonblank.
+
+The core increments `respawn.generation`, records `respawn.intent` with that generation and `reason`, and keeps the stale audit records and history.
+It sets the same stable node to `pending` without an increment to `retry.attempts`.
+It adds no node, changes no edge or join, and starts no worker.
+
+At the next `begin_wave` for the node, the adapter must give the worker a new provider-native identity for the recorded respawn generation.
+Validate it before sending normalized records to `record_wave`. Worker and record pointers are optional before the worker starts, and the adapter does not record them then. (inferred)
+
+`hard_stop(node_id, reason)` is a core operation for a replacement that the adapter cannot prepare or validate.
+Use an existing node. Its status must be other than `done` or `skipped`. The `reason` must be nonblank.
+The core persists `hard-stop` with the `reason` and keeps the topology unchanged.
+
+If the node is in an active wave, the core removes only that unstarted node. Other active nodes stay in the wave.
+If no nodes stay, the core clears `active_wave`.
+This permits the core to record less than a complete wave if the adapter cannot prepare or validate a worker before dispatch.
+Provider adapters must not change canonical graph fields directly. (inferred)
+
+`edges` is an array of `{ "from": "<node-id>", "to": "<node-id>" }`. Each ID must name an existing node. An edge cannot connect a node to itself. (verified)
+`joins` is an object with the join node ID as key. Each entry must use that key in `id`:
 
 ```json
 "J2": {"id": "J2", "mode": "all", "inputs": ["S2.5", "S2.6"], "released": false}
 ```
 
-The join key, `join.id`, and the corresponding node ID must be identical. (inferred) A join releases only when every input is terminal-success. (verified)
+The join key, `join.id`, and the corresponding node ID must have the same value. (inferred)
+A join releases only if each input has a terminal success status. (verified)
 
-An active wave is either `null` or:
+An active wave is `null` or an object like this:
 
 ```json
 {"wave_id": "wave-3", "revision": 7, "nodes": ["S2.5", "S2.6"]}
 ```
 
-`active_wave.wave_id` is the sole wave identifier in the canonical contract. (verified) The core requires a complete, exact result set for that wave before it transitions any node or releases joins. (verified)
+`active_wave.wave_id` is the only wave identifier in the canonical contract. (verified)
+The core changes nodes or releases joins only after it gets a result for each node in that wave and no other nodes. (verified)
 
 ### Operations and invariants
 
-The core exposes a minimal semantic API: `validate`, `ready`, `begin_wave`, `record_wave`, `respawn_stale`, `hard_stop`, `inspect`, and `can_complete`. (inferred) It validates identity, graph topology, retry bounds, status vocabulary, active-wave consistency, and join consistency before every mutation. (inferred)
+The core has this minimal semantic API: `validate`, `ready`, `begin_wave`, `record_wave`, `respawn_stale`, `hard_stop`, `inspect`, and `can_complete`. (inferred)
+Before each change, it validates identity, topology, retry limits, status vocabulary, active-wave consistency, and join consistency. (inferred)
 
-`begin_wave` selects all currently ready independent non-join nodes in stable node-ID order, marks them `running`, and records one `active_wave`. (inferred) `record_wave` accepts only the matching `wave_id` and exactly the active node set; a rejected record leaves state unchanged. (verified) `can_complete` accepts the canonical graph only and returns either `eligible` or ordered blocking reasons; it ignores `work_units`. (inferred)
+`begin_wave` selects all non-join nodes that can start independently. It uses a stable sequence by node ID, marks them `running`, and records one `active_wave`. (inferred)
 
-`work_units` is optional and independent of `graph.nodes`. Schema-v3 requires the same strict object contract for both providers: `{ "<unit-id>": { "status": "pending" | "in-progress" | "blocked" | "done" | "dropped", "dropped_reason"?: "..." } }`. An absent, `null`, or empty object passes the optional predicate. A nonempty value must be an object keyed by unit ID with object entries; every entry must be `done`, or `dropped` with a nonblank `dropped_reason`, for final `work_units` eligibility. Any array, malformed object or entry, unknown status, or unreasoned `dropped` blocks final completion. Codex adopts this v3 contract and the Claude adapter/hook carries it for v3; Claude's historical v1/v2 array tolerance is irrelevant because aligned runtime rejects those schemas. Final completion requires both graph eligibility and this independent provider predicate, followed by the provider-native evidence, evaluation, proof, and retrospective gates; adapters must not map or reconcile `work_units` to graph nodes. (inferred)
+`record_wave` accepts only the matching `wave_id` and the complete set of active nodes. If it rejects a record, the graph stays unchanged. (verified)
+`can_complete` accepts only the canonical graph. It gives `eligible` or a sequence of conditions that block it. It ignores `work_units`. (inferred)
+
+`work_units` is optional. It has its own contract apart from `graph.nodes`. Schema v3 uses the same strict object contract for each provider:
+`{ "<unit-id>": { "status": "pending" | "in-progress" | "blocked" | "done" | "dropped", "dropped_reason"?: "..." } }`.
+If there is no field, or if the field is `null` or an empty object, the optional check succeeds.
+A nonempty value must be an object with unit IDs as keys and objects as entries.
+
+For the `work_units` check to succeed, each entry must be `done` or `dropped` with a nonblank `dropped_reason`.
+An array, malformed object or entry, unknown status, or `dropped` without a nonblank `dropped_reason` blocks loop end.
+Codex and the Claude adapter and hook apply this v3 contract. The aligned runtime rejects the v1/v2 schemas that let Claude accept arrays.
+
+To end the loop, the graph and the provider's `work_units` must each qualify.
+Then the native provider checks its verification records, evals, proofs, and retrospectives.
+Adapters must not map or reconcile `work_units` to nodes in the graph. (inferred)
 
 ## Component boundaries and ownership
 
 | Component | Owns | Must not own |
 | --- | --- | --- |
-| Canonical Python core | Contract validation and graph-state transitions | Files, locks, dispatch, provider routing, transcripts, raw evidence |
-| Claude adapter | Claude state envelope mapping, lock/atomic-write integration, evidence binding, eval/proof/retro completion gates, `Agent` dispatch handoff, Claude hooks | Codex APIs or evidence |
-| Codex adapter | Codex state envelope mapping, lock/atomic-write integration, evidence binding, eval/proof/retro completion gates, `spawn_agent` handoff, Codex hooks | Claude APIs or evidence |
+| Canonical Python core | Contract validation and changes to the graph | Files, locks, dispatch, provider routing, transcripts, raw verification records |
+| Claude adapter | Claude envelope mapping, locks and atomic writes, record binding, eval/proof/retro gates, `Agent` handoff, Claude hooks | Codex APIs or records |
+| Codex adapter | Codex envelope mapping, locks and atomic writes, record binding, eval/proof/retro gates, `spawn_agent` handoff, Codex hooks | Claude APIs or records |
 | Contract fixtures and parity tests | Provider-neutral semantic inputs and expected outputs | Provider dispatch simulation as a shared runtime |
 
-Provider adapters pass the core only normalized semantic evidence references needed by the state contract; each provider creates, validates, and retains its own raw evidence and transcript material. (inferred) A provider adapter may add provider-owned fields outside the canonical graph namespace, but it may not change canonical semantic fields or status meanings. (inferred)
+Provider adapters give the core only normalized pointers to verification records that the semantic contract needs.
+Each provider makes, validates, and keeps its own raw records and transcript material. (inferred)
+A provider adapter can add its own fields in other namespaces. It must not change canonical semantic fields or status meanings. (inferred)
 
 ## Packaging and clean-break compatibility
 
-The maintained source of the core is exactly `packages/graph-semantics/`; neither provider owns a hand-maintained fork. (inferred) Implementation must modify the existing `install.sh` to materialize copies at `skills/agentic-loop/scripts/graph_semantics.py` and `packages/codex/skills/agentic-loop/scripts/graph_semantics.py` before provider installation; the current installer does not do this. Installer-supported delivery is the only delivery path. The installer must verify each generated copy with `cmp` against the source, and test/CI must repeat that verification. Generated copies are never hand-edited. (inferred)
+The only maintained source is `packages/graph-semantics/`. The providers must not keep their own forks. (inferred)
+Change the existing `install.sh` to make copies at `skills/agentic-loop/scripts/graph_semantics.py` and `packages/codex/skills/agentic-loop/scripts/graph_semantics.py` before provider installation.
+The installer did not do this at the time of this design. Use only the installer to supply copies.
 
-The core must not import provider packages or invoke provider commands. (inferred) This permits independently installed provider plugins while avoiding two maintained semantic implementations. (inferred)
+The installer must compare each copy with the source using `cmp`. Tests and CI must do the same check.
+Do not edit generated copies by hand. (inferred)
 
-This is a clean break for newly created graph state, not a migration project. (verified) v1/v2 files remain untouched but are rejected by the aligned runtime; there is no old-reader compatibility promise, dual-write, automatic conversion, or mixed-version wave. (inferred)
+The core must not import provider packages or invoke provider commands. (inferred)
+This lets you install each provider plugin independently with one maintained semantic implementation. (inferred)
+
+This is a clean break for new graph files. (verified)
+Keep v1/v2 files unchanged. The aligned runtime rejects them. It makes no promise of compatibility with earlier readers.
+There is no dual-write, automatic conversion, or mixed-version wave. (inferred)
 
 ## Concurrency and atomicity
 
-Each provider remains responsible for its existing state-path resolution and locking mechanism. (verified) It must lock around: read current state, call the pure core operation, validate the result, and atomically replace the state file. (inferred) The core's complete-wave requirement prevents partial result commits; the provider lock prevents competing writers from both accepting the same wave. (inferred)
+Each provider owns its existing graph path resolution and locks. (verified)
+With the lock held, read the current file, invoke the pure core operation, validate the result, and replace the file atomically. (inferred)
+The core needs results for the complete wave before it writes them. The provider lock prevents two writers from accepting the same wave. (inferred)
 
-Only one orchestrator may mutate a given state file at a time. (verified) The design does not introduce cross-provider locks because providers do not share a state file or scheduler. (inferred)
+Only one orchestrator can change a given graph file at a time. (verified)
+Providers share no graph file or scheduler. The design needs no cross-provider locks. (inferred)
 
 ## Python quality contract
 
-Every Python file in the repository, including the five pre-existing files and
-all migration output, must pass the same hard quality gate before this work is
-complete. No existing Python violation is grandfathered, waived, or converted
-into a permanent exception. (verified)
+The same strict quality gate must accept all Python files before the work is complete.
+This includes the five existing Python files and the files from migration.
+Do not waive or keep an existing violation. (verified)
 
-`pyproject.toml` must be the authoritative Python-tool configuration. The
-strict pre-commit quality path must require: Ruff linting with PEP 8,
-import-order, modernization, bugbear, simplification, annotation, naming, and
-Google-style PEP 257 docstring rules; Black formatting; Pyright strict typing;
-and mypy strict typing. Missing required Python tools must fail strict mode,
-not downgrade to advisory output. The graph-semantic runtime itself remains
-standard-library-only; these are development checks, not runtime imports.
-(inferred)
+`pyproject.toml` must be the authoritative Python tool configuration. The strict pre-commit quality gate must run these checks:
 
-Public Python modules, classes, functions, and methods require complete
-Google-style docstrings. Private implementation details receive a docstring
-only when their contract is not obvious from a typed signature and name.
-Comments must explain a durable why, constraint, safety property, or
-non-obvious trade-off; they must not narrate code, cite a transient session, or
-leave commented-out code. PEP 20 compliance is a review requirement alongside
-the mechanical checks because no formatter can prove it. (inferred)
+- Ruff with PEP 8, import sorting, modernization, bugbear, simplification, type hints, naming, and Google-style PEP 257 docstring rules.
+- Black formatting.
+- Pyright strict typing.
+- mypy strict typing.
 
-The quality baseline work must first inventory every current violation, repair
-all of them, then add regression coverage that makes a representative violation
-fail the commit gate. Every later migration phase runs the same strict gate.
-(verified)
+If a mandatory Python tool is unavailable, strict mode must stop with an error. Do not downgrade to advisory output.
+These are development checks. The graph-semantic runtime uses only the Python standard library. (inferred)
+
+Write complete Google-style docstrings for public Python modules, classes, functions, and methods.
+For private code, write a docstring only if the typed signature and name do not make the contract clear.
+Use comments for a durable purpose, constraint, safety property, or non-obvious trade-off.
+Do not narrate code, cite temporary sessions, or keep commented-out code.
+An inspection must check PEP 20 too, because a formatter cannot prove compliance. (inferred)
+
+For the quality baseline, first list all current violations and correct them.
+Then add a regression test that shows the commit gate rejects a representative violation.
+Run the same strict gate in each subsequent migration phase. (verified)
 
 ## Test strategy
 
-`packages/tests/provider_graph_parity.test.sh` remains provider-local for its existing raw-evidence checks. (verified) A separate canonical fixture corpus is the authoritative provider-neutral contract seam, limited to core and adapter semantics; it does not inspect raw provider evidence. (inferred)
+`packages/tests/provider_graph_parity.test.sh` keeps its existing provider-local checks for raw records. (verified)
+The canonical fixture corpus is the authoritative provider-neutral contract for core and adapter semantics. It does not examine raw provider records. (inferred)
 
-- Test the core directly for valid topology, malformed/unknown references, nine-status validation, readiness, fan-out/join release, exact wave matching, retry exhaustion, exact `stale_check` validation, `respawn_stale` generation/intent and unchanged topology, `hard_stop` preconditions, completion eligibility, and rejected-state immutability. (inferred)
-- Run the same frozen canonical fixture corpus through the core and each adapter and require byte-equal canonical graph output and identical errors for semantic failures. (inferred)
-- Keep provider-local tests for raw-evidence binding, transcript handling, locks, hooks, and native dispatch. The canonical corpus must not normalize or inspect raw provider evidence. (verified)
-- Keep a negative control that breaks exact active-wave result matching and proves the canonical fixture seam fails. (verified)
-- Test the schema-v3 `work_units` predicate through both adapters: absent, `null`, and empty object succeed; `done` and reasoned `dropped` succeed; arrays, malformed entries, unknown statuses, and unreasoned `dropped` block final completion. (inferred)
+- Test correct topology, malformed or unknown pointers, all nine statuses, and readiness in the core.
+  Test fan-out, join release, and the full active-wave match.
+
+- Test retry exhaustion, all `stale_check` fields, `respawn_stale` generation and intent with unchanged topology, and `hard_stop` preconditions.
+  Test eligibility to complete and confirm that refusal does not change the graph. (inferred)
+- Run the same frozen corpus through the core and each adapter.
+  Canonical graph outputs and semantic error outputs must agree byte for byte. (inferred)
+- Keep provider-local tests for raw-evidence binding, transcripts, locks, hooks, and native dispatch.
+  The canonical corpus must not normalize or examine raw provider records. (verified)
+- Keep a negative control with an incorrect active-wave result set. Show that the canonical corpus rejects it. (verified)
+- Test schema-v3 `work_units` through each adapter. A missing field, `null`, or an empty object succeeds.
+  The `done` status succeeds. The `dropped` status succeeds with a nonblank `dropped_reason`.
+  Arrays, malformed entries, unknown statuses, and `dropped` without a nonblank `dropped_reason` block loop end. (inferred)
 
 ## Implementation work units and dependencies
 
-1. Establish the Python quality baseline: configure and enforce the quality contract, remediate every existing Python violation, and prove the commit gate rejects representative violations. This is the prerequisite for all implementation. (verified)
-2. Freeze the schema-v3 canonical fixture corpus with ID, label, join-ID, accepted-token, persisted-`failed` rejection, exact `stale_check`, `respawn_stale` generation/intent, `hard_stop`, provider `work_units` eligibility, and `wave_id` assertions. (inferred)
-3. Extract the pure core into the single maintained package and direct unit tests at the frozen corpus. Depends on 1 and 2. (inferred)
-4. Add the Claude thin adapter, preserving its native locks, evidence, hooks, and `Agent` handoff. Depends on 1, 2, and 3. (inferred)
-5. Add the Codex thin adapter, preserving its native evidence, hooks, and `spawn_agent` handoff. Depends on 1, 2, and 3. (inferred)
-6. Package the one source into both standalone provider bundles and run parity, provider-local tests, and negative controls. Depends on 4 and 5. (inferred)
+1. Set the Python quality baseline before implementation. Configure the quality gate, correct all existing Python violations, and show that the gate rejects representative violations. (verified)
+2. Freeze the schema-v3 canonical fixture corpus. Check IDs, labels, join IDs, accepted tokens, and refusal of persisted `failed`.
+   Check all `stale_check` fields, `respawn_stale` generation and intent, `hard_stop`, provider `work_units` eligibility, and `wave_id`. (inferred)
+3. Move the pure core to the one maintained package. Use the frozen corpus for direct unit tests. Do this after 1 and 2. (inferred)
+4. Add the thin Claude adapter. Keep its native locks, records, hooks, and `Agent` handoff. Do this after 1, 2, and 3. (inferred)
+5. Add the thin Codex adapter. Keep its native records, hooks, and `spawn_agent` handoff. Do this after 1, 2, and 3. (inferred)
+6. Package the one source in the two standalone provider bundles. Run parity tests, provider-local tests, and negative controls. Do this after 4 and 5. (inferred)
 
-Steps 4 and 5 may proceed in parallel after step 3; steps 1, 2, 3, and 6 are serial gates. (inferred)
+Steps 4 and 5 can run in parallel after step 3. Steps 1, 2, 3, and 6 are serial gates. (inferred)
 
 ## Risks and rollback
 
 | Risk | Mitigation | Rollback |
 | --- | --- | --- |
-| Semantic drift hidden by adapter translation | Frozen fixtures and authoritative parity results | Revert both adapters; leave historical files untouched; aligned runtime rejects them |
-| Provider-native evidence becomes shared by accident | Core has no transcript/evidence I/O; local tests retain ownership checks | Remove the offending adapter mapping; do not add evidence to the core |
-| Concurrent writes produce invalid state | Provider lock surrounds pure-core transition and atomic replacement | Disable the new adapter path before any state conversion; historical states remain untouched |
-| Bundle copy drifts from maintained source | Assembly equivalence check in CI | Rebuild bundles from the single source; never patch a generated copy |
+| Adapter translation hides a semantic difference | Frozen fixtures and authoritative parity results | Revert the two adapters. Keep historical files unchanged. The aligned runtime rejects them. |
+| Providers share native records by accident | The core has no transcript or record I/O. Local tests keep ownership checks. | Remove the adapter mapping that caused the problem. Do not add records to the core. |
+| Concurrent writes give invalid graph data | Provider lock spans the pure-core operation and atomic replacement | Disable the new adapter path before conversion. Keep historical graph files unchanged. |
+| Bundle copy differs from maintained source | Assembly equivalence check in CI | Build the bundles again from the one source. Do not patch a generated copy. |
 
-Rollback never rewrites schema-v3 state automatically. A provider encountering such state after rollback must fail clearly and require the implementation that created it to restore compatibility. (inferred)
+Rollback does not rewrite schema-v3 graph files automatically.
+If a provider reads a v3 file after rollback, it must give a clear error. Use the implementation that made the file to regain compatibility. (inferred)
 
 ## Acceptance criteria
 
-- Exactly one maintained Python graph-semantic source exists; no hand-maintained Claude/Codex semantic forks remain. (inferred)
-- New canonical graph states use schema version 3, root `revision: 1`, the authoritative ID grammar and label registry, accepted nine-token state/result vocabulary, persisted-`failed` rejection, persisted-`stale` checks, `active_wave.wave_id`, and join key/`join.id` equality. (inferred)
-- Claude and Codex adapters use their native dispatch, evidence, hooks, and locking; neither invokes the other provider. (verified)
-- No shared scheduler, routing, transcript parsing, or raw-evidence owner is introduced. (verified)
-- `work_units` remains independent from `graph.nodes`. (verified)
-- The frozen canonical fixture corpus passes for the core and both adapters; provider-local `provider_graph_parity` raw-evidence checks remain provider-local; the active-wave negative control fails. (inferred)
-- `install.sh` materializes both generated copies before provider installation, and installer plus test/CI `cmp`-verify them against `packages/graph-semantics/`. (inferred)
-- Historical states are neither migrated nor rewritten, and the aligned runtime rejects v1/v2. (verified)
-- Every existing and migrated Python file passes the enforced Python quality contract; no Python exception list grows. (verified)
-- The capability inventory has a frozen test or provider-local acceptance
-  assertion for every retired semantic path; no functional loss or legacy
-  compatibility branch remains. (verified)
+- Keep only one Python graph-semantic source. Claude and Codex have no hand-maintained semantic forks. (inferred)
+- New canonical graph files use schema version 3 and root `revision: 1`.
+  They use the authoritative ID grammar and label registry and all nine accepted status or result tokens.
+  They reject persisted `failed` and check persisted `stale`. They use `active_wave.wave_id` and require the join key to equal `join.id`. (inferred)
+- Claude and Codex adapters each use their own native dispatch, records, hooks, and locks. They do not invoke the other provider. (verified)
+- No shared scheduler, routing, transcript parsing, or owner of raw records. (verified)
+- `work_units` keeps its own contract apart from `graph.nodes`. (verified)
+- The frozen canonical corpus succeeds for the core and the two adapters. The `provider_graph_parity` checks for raw records stay provider-local.
+  The active-wave negative control gives a negative result. (inferred)
+- `install.sh` makes the two generated copies before provider installation.
+  The installer and test or CI checks compare them with `packages/graph-semantics/` using `cmp`. (inferred)
+- Keep historical files unchanged. The aligned runtime rejects v1/v2. (verified)
+- All existing and migrated Python files satisfy the quality contract. Do not add to the Python waiver lists. (verified)
+- The inventory has a frozen test or provider-local assertion for each retired semantic path.
+  Keep all functions and remove the legacy compatibility branches. (verified)
 
 ## Did Not Verify
 

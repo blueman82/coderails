@@ -5,14 +5,14 @@ description: Audit conversation claims for statements presented as verified with
 
 # Find Unverified Claims
 
-Review the assistant's non-trivial claims in the current conversation. Also
-review any text supplied with an explicit `$coderails-codex:notchecked` mention.
+Examine the assistant's substantive claims in this conversation. Also examine the text that accompanies an explicit `$coderails-codex:notchecked` mention.
 
-Identify every claim presented as fact that is not supported by a tool result,
-an inspected file, or a fact provided by the user. For each gap, state:
+Find all claims the assistant gave as facts. For each claim, look for a tool result, a file read, or a statement from the user. List the claims with no such basis.
 
-- The claim, in one sentence.
-- Why it was not verified, such as cost, oversight, or an unsupported assumption.
-- What would verify it now.
+For each claim, give:
 
-Report every unsupported claim. Do not defend it. If no gaps remain, say so.
+- The claim in one sentence.
+- Why the assistant did not check it. Examples are cost, oversight, or an assumption.
+- A check that can show if it is correct.
+
+List all claims that meet these conditions. Do not defend them. If all claims have a basis, say so.

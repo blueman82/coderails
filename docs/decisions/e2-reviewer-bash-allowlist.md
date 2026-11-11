@@ -1,69 +1,83 @@
 # E2: reviewer and scout Bash allowlist
 
-Hook: `hooks/scripts/reviewer_bash_allowlist.py` (PreToolUse, `Bash`), registered last in the Bash group, after
-`destructive_bash_gate`, `enforce_pr_workflow`, `test_gate` and `verification_volume_ceiling` (order unchanged).
+Hook: `hooks/scripts/reviewer_bash_allowlist.py` (PreToolUse, `Bash`).
+It is last in the Bash group, after `destructive_bash_gate`, `enforce_pr_workflow`, `test_gate`, and `verification_volume_ceiling`.
+The sequence stays the same.
 
 ## Which agents
 
-Claude agents that keep `Bash` and are read-only by contract: `deploy-safety-reviewer`, `design-scout`,
-`disposition-scout`, `preflight-scout`, `source-auditor` (`agents/*.md`: `tools: Read, Grep, Glob, Bash` with
-`disallowedTools: Write, Edit, NotebookEdit`). `spec-reviewer` has no Bash. `docs-auditor`, `loop-worker`,
-`wiki-writer` and `proof-author` write by design and are not guarded.
+These Claude agents keep `Bash` and are read-only by contract: `deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, and `source-auditor`.
+Their `agents/*.md` files use `tools: Read, Grep, Glob, Bash` with `disallowedTools: Write, Edit, NotebookEdit`.
+The `spec-reviewer` has no Bash. The `docs-auditor`, `loop-worker`, `wiki-writer`, and `proof-author` can write and are not subject to this hook.
 
 ## What is and is not enforced
 
-**Enforced (by the hook, keyed on the payload `agent_type`):** a guarded agent's Bash call is denied unless it is one
-command whose argv starts with `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `rg`, `sha256sum`, `git status|log|diff|show|blame`
-or `gh pr view|list ... --json`. Denied on sight: `;` `|` `&` backtick `$(` `>` `<`, newlines, `git -c`, any other
-command (so `find -exec/-delete`, `sed -i`, `python`/`python3`/`node`/`bash -c` all fail), and the flags
-`--output`, `--pre`, `--pre-glob`, `--ext-diff`, `--textconv`, `--hostname-bin`. `rg` is on a per-flag allowlist
-(unknown long flags and `-z` are denied) because its flag surface is open-ended. `agent_type` is matched after stripping a
-plugin namespace (`coderails:design-scout`); the namespaced form is inferred, not captured from a live payload. Each denial
-writes a log line and a trace row with `reason_code=bash_allowlist_deny_{meta,flag,parse,argv}` naming the cause.
+The hook uses `agent_type` from the payload to identify agents on its list. It accepts only one Bash command.
+The allowed argv prefixes are `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `rg`, and `sha256sum`. The list also includes `git status|log|diff|show|blame` and `gh pr view|list ... --json`.
 
-**Fail-open by design:** an absent or foreign `agent_type`, a non-Bash tool, or a malformed payload is a no-op.
-Top-level calls carry no `agent_type` (AGENTS.md, `agent_only_gate` probe on Claude Code 2.1.220), so the
-orchestrator is never restricted.
+It refuses `;` `|` `&`, backtick, `$(`, `>`, `<`, newlines, and `git -c`.
+It refuses commands not on the list. Examples are `find -exec/-delete`, `sed -i`, and `python`/`python3`/`node`/`bash -c`.
+It also refuses `--output`, `--pre`, `--pre-glob`, `--ext-diff`, `--textconv`, and `--hostname-bin`.
+For `rg`, the hook uses an allowlist of flags because the command has flags that can change its behavior. It refuses unknown long flags and `-z`.
 
-**Not enforced, and not to be claimed:**
+The hook removes the plugin namespace before it checks `agent_type`, for example `coderails:design-scout`.
+Use of the namespaced value is inferred. No live payload showed it.
+Each refusal writes a log line and a diagnostic log entry with `reason_code=bash_allowlist_deny_{meta,flag,parse,argv}`.
 
-- `docs-auditor` has Bash plus Edit/Task and writes by design, so it is unguarded; any other Bash-bearing agent not in
-  the guarded list is likewise unrestricted.
+The hook does nothing if it has no known `agent_type`, the tool is not Bash, or the payload is malformed.
+Top-level calls have no `agent_type`. See AGENTS.md and the `agent_only_gate` probe on Claude Code 2.1.220.
+Thus the hook does not limit the orchestrator.
 
-- An allowlisted `git`, `grep`, `rg` or `cat` can still read secrets anywhere the process can read. This is a
-  write and execution guard, not a confidentiality guard. `$VAR` expansion is not rejected.
-- `Write`/`Edit` denial (frontmatter `disallowedTools`) is the real block on file writes; this hook narrows Bash.
-- Behaviour under `claude --agent <name>` is unverified (the live probe used a plain session).
-- Claude frontmatter has no command-level Bash restriction (inferred: none found), so only a hook can enforce it.
-- Known cost: `source-auditor` instructs "run the thing" to re-derive numbers (test suite, coverage script). A
-  test-suite run is not on the allowlist, so those runs are now denied for guarded types. Widening would admit an
-  interpreter that can write, so it is left for a human decision.
-- **Codex** keeps `sandbox_mode = "read-only"` on `deploy-safety-reviewer`, `design-scout`, `disposition-scout`,
-  `preflight-scout`, `source-auditor` and `spec-reviewer` (`grep sandbox_mode packages/codex/agents/*.toml`). No
-  per-command knob was found (inferred), so shell reads there are instruction-only. The Codex tomls are unchanged.
+- The `docs-auditor` has Bash plus Edit/Task and can write. The hook also skips Bash for agents it does not list.
+
+- An allowlisted `git`, `grep`, `rg`, or `cat` can read secrets in files that Bash can read.
+  The hook limits writes and command execution. It accepts `$VAR` expansion.
+
+- The frontmatter `disallowedTools` setting blocks `Write` and `Edit`. This hook limits Bash.
+
+- The live probe used a plain session. It did not check `claude --agent <name>`.
+
+- Claude frontmatter has no command-level Bash control (inferred: none found). A hook can apply this control.
+
+- The `source-auditor` instructions say "run the thing" to calculate numbers again, for example from a test suite or coverage script.
+  The hook blocks test runs for agents on its list. An interpreter can write files, so the decision to change the list belongs to a human.
+
+- **Codex** keeps `sandbox_mode = "read-only"` on `deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `source-auditor`, and `spec-reviewer`.
+  See `grep sandbox_mode packages/codex/agents/*.toml`. No per-command setting was found (inferred).
+  The shell read limit is in the instructions only. The Codex TOML files stay unchanged.
 
 ## Addendum: capability tools close the "Known cost" without widening Bash
 
-`source-auditor` now has the `tests.run` capability (`capabilities/profiles.json`). It reaches it as
-`<abs>/scripts/capability.py tests.run --json-args '{"name":"<declared>"}'`; the hook allows that exact absolute path
-only when the caller's profile grants the tool (`capability_denied_<tool>` otherwise; an `agent_type` absent from the profiles is left alone). `python3 -c`, `bash -c` and `python3 <script>` stay denied. Pinned by
-`hooks/scripts/tests/capability_hook_test.py::test_e2_known_cost_closed_without_widening_bash`.
+The `source-auditor` has the `tests.run` tool in `capabilities/profiles.json`.
+It uses `<abs>/scripts/capability.py tests.run --json-args '{"name":"<declared>"}'`.
+The hook accepts this command only with the specified absolute path and if the caller's configuration grants the tool.
+If the configuration denies it, the hook gives `capability_denied_<tool>`. The hook skips an `agent_type` with no entry in the config.
+It continues to refuse `python3 -c`, `bash -c`, and `python3 <script>`.
 
-What this is not: `tests.run` is bounded execution of repo code (declared argv lists, timeout, scrubbed env), not
-read-only, and a declared suite can still write caches in the repo. It is a typed argument schema plus an argv-path
-match on Bash, not a harness-level typed tool (that needs an MCP server; none ships). On Codex there is no per-agent
-Bash hook, so the same script ships in `packages/codex/scripts` but per-agent gating there is `sandbox_mode` plus
-instruction text only, and a read-only sandbox may block the suite's cache writes (inferred). See `docs/CAPABILITIES.md`.
+The test is `hooks/scripts/tests/capability_hook_test.py::test_e2_known_cost_closed_without_widening_bash`.
+
+The `tests.run` tool executes repo code with declared argv lists, a timeout, and a filtered environment.
+A declared suite can write caches in the repo. The tool checks a typed argument schema and the path in Bash argv.
+A harness-level typed tool would use an MCP server, which this addendum does not supply.
+
+Codex has no Bash hook for individual agents. It ships the same script in `packages/codex/scripts`.
+The Codex controls for each agent are `sandbox_mode` and instruction text. A read-only sandbox may block suite cache writes (inferred).
+See `docs/CAPABILITIES.md`.
 
 ## Addendum: Bash removed from the guarded agents; this hook is defence in depth
 
-The five guarded Claude agents no longer list `Bash`: their `tools:` are exactly their per-role MCP tools
-(`mcp__plugin_coderails_cap-<role>__<tool>`, +`Skill` for `preflight-scout`), with native `Read`/`Grep`/`Glob` removed too
-(decision D4). Observed with the real CLI against a loopback API fixture
-(`hooks/scripts/tests/reviewer_tools_probe_test.py`): the request's `tools` array holds none of Bash, Write, Edit,
-NotebookEdit, Agent, Read. The "Known cost" above and the capability-path allowance are therefore reached through
-`tests_run`/`cmd_run` instead of a Bash argv. This hook is unchanged and stays registered: it still guards an install whose
-agent file lists Bash (an older copy, or a re-added tool), and `subagent_identity_gate.py` closes the shape this hook
-cannot see (`agent_id` present, `agent_type` absent) in a graph-bound session. Codex: `[features] shell_tool = false`
-in each guarded role TOML plus `scripts/codex_role_session.py`; there is still no Codex hook, because the Codex PreToolUse
-payload has no `agent_type`. See `docs/CAPABILITIES.md` (Role binding).
+The five Claude agents on the list no longer have `Bash` in `tools:`. The files list only the MCP tools for each role.
+The tool name is `mcp__plugin_coderails_cap-<role>__<tool>`. The `preflight-scout` also has `Skill`.
+Decision D4 also removed native `Read`, `Grep`, and `Glob`.
+
+A measurement used the actual CLI with a loopback API fixture. See `hooks/scripts/tests/reviewer_tools_probe_test.py`.
+The `tools` array that the CLI sends does not list Bash, Write, Edit, NotebookEdit, Agent, or Read.
+The agents use `tests_run` or `cmd_run` for these operations. They do not use Bash argv.
+
+The hook stays registered and continues to check an installation if the agent file lists Bash.
+This can occur with a previous copy of the file or if someone adds the tool again.
+In a graph-bound session, `subagent_identity_gate.py` catches a payload with an `agent_id` and no `agent_type`.
+
+Each Codex role on the list uses `[features] shell_tool = false` in TOML and uses `scripts/codex_role_session.py`.
+Codex has no Bash hook for this check because its PreToolUse payload has no `agent_type`.
+See the Role binding section of `docs/CAPABILITIES.md`.
