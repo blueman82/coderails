@@ -197,13 +197,17 @@ def hook_table(registry: dict[str, Any], messages: dict[str, Any]) -> str:
     rows = [
         *(f"{provider.title()} protocol: {protocol}." for provider, protocol in registry["protocols"].items()),
         "",
-        "| Provider | Event | Matcher | Hook | Options | Mode | Default | Category | Action | Failure | Limit |",
+        "| Provider | When | Matcher | Hook | Options | Mode | Default | Category | Step | On error | Limit |",
         "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for provider, data in registry["providers"].items():
         for event, groups in data["hooks"].items():
             for group in groups:
                 matcher = str(group.get("matcher", "all"))
+                if re.fullmatch(r"\w+(?:\|\w+)+", matcher):
+                    matcher_label = " or ".join(f"`{option}`" for option in matcher.split("|"))
+                else:
+                    matcher_label = f"`{matcher}`"
                 for hook in group["hooks"]:
                     name = _hook_name(hook["command"], provider)
                     control = controls[name]
@@ -214,10 +218,10 @@ def hook_table(registry: dict[str, Any], messages: dict[str, Any]) -> str:
                     cells = (
                         provider,
                         event,
-                        matcher,
+                        matcher_label,
                         f"`{name}.py`",
-                        options or "-",
-                        control["mode"],
+                        f"`{options}`" if options else "-",
+                        f"`{control['mode']}`",
                         control["activation"],
                         control["category"],
                         message["remediation"],
@@ -232,10 +236,10 @@ def reason_table(root: Path, messages: dict[str, Any]) -> str:
     """Use the existing memory catalog as an input; never copy its entries into messages.json."""
     source = root / messages["memory_source"]
     memory = _object(runpy.run_path(str(source)).get("REASONS"), "memory reasons")
-    rows = ["| Control | Category | Action |", "|---|---|---|"]
+    rows = ["| Control | Category | Step |", "|---|---|---|"]
     for name, item in messages["hooks"].items():
         rows.append(f"| `{name}` | {item['category']} | {item['remediation']} |")
-    rows += ["", "| Source | Emitted reason | Action |", "|---|---|---|"]
+    rows += ["", "| Source | Code | Step |", "|---|---|---|"]
     for code, item in sorted(messages["reasons"].items()):
         rows.append(f"| `{item['source']}` | `{code}` | {item['remediation']} |")
     for code, action in sorted(memory.items()):
