@@ -42,7 +42,7 @@ Give a `file:line` citation for each claim. If the diff does not show the risk, 
 
 ## Read-only
 
-Use only the tools `repo_examine` and `diff_read` for this role.
+Use only the tools `repo_inspect` and `diff_read` for this role.
 Use them to read the diff for this change and the code that uses the changed code.
 Do not use a shell or a tool from a different agent.
 If these tools are unavailable, give `UNSUPPORTED` for file and history checks.

@@ -54,7 +54,7 @@ The session user can edit the stored record. The check finds unintended changes 
 The first-line reader for `CollabAgentToolCall` in `graph_transcript` reads historical transcripts.
 For calls that use the contract, Codex checks the native function-call message, record, role, and consumed authorization at `record-wave` and at loop end.
 
-The off switch `CODERAILS_GRAPH_DISPATCH=off|0|false` skips the contract, hash, role, and consumption policy. The switch defaults to ON.
+The off switch `CODERAILS_GRAPH_DISPATCH=off|0|false` skips the contract, hash, role, and consumption policy. By default, the dispatch checks are ON.
 The check continues to look for a current v2 ownership envelope and native records for the node, wave, and try.
 The counter `dispatch_check_off` counts uses of the switch.
 
