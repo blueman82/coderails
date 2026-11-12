@@ -6,10 +6,9 @@ effort: high
 
 # Premortem
 
-For a premortem, assume the plan failed. Work backward to find why. Use
-the findings before commitment, while you can still change the plan.
+For a premortem, start with the assumption that the plan did not succeed. Find the causes of that outcome. Use the results to change the plan before you commit to it.
 
-This skill works on plans, decisions, arguments, features, architectures, or your own previous response. The user may explicitly invoke it (`premortem this`, `premortem <X>`) or it may be appropriate to trigger it proactively before a high-stakes commitment.
+This skill works on plans, decisions, arguments, features, architectures, or your own previous response. The user can invoke it directly (`premortem this`, `premortem <X>`). You can also use it before a high-stakes commitment.
 
 ---
 
@@ -18,43 +17,42 @@ This skill works on plans, decisions, arguments, features, architectures, or you
 ### Step 1: Establish what's being premortemed
 
 If the subject is clear from context, identify it directly. For example,
-the user might ask you to assess a plan or your previous answer. If the
+the user might want you to check a plan or your previous answer. If the
 subject is unclear, ask: "What specifically should I premortem?"
 
 ### Step 2: Reason adversarially
 
-Use a `<thinking>` block to reason before writing output. The goal is genuine adversarial thinking, not a checklist. Work through:
+Use a `<thinking>` block before you write the output. Use these questions to find where the plan could break.
 
-- **Assumptions:** Which assumption might be false?
-- **Execution:** Where could execution fail, even with a sound plan?
-- **People:** Who might resist, disengage, or act differently?
+- **Assumptions:** Which assumption might be incorrect?
+- **Execution:** Where could a sound plan break during execution?
+- **Participants:** Who might resist, disengage, or act differently?
 - **Dependencies:** Which external condition might change or fail?
 - **Optimism:** Where does the plan assume too much success?
-- **Unknown factors:** What has the plan not considered?
+- **Unknowns:** What does the plan omit?
 - **Timing:** Which sequence or deadline could slip?
 
-Select the most plausible and consequential failures. Keep the list short
-and specific.
+Select the problems that are most likely and would cause the most damage. Keep the list short and connect each item to the plan.
 
 ### Step 3: Assess each failure
 
-For each significant failure mode, give a brief verdict:
-- **Likelihood**: low / medium / high (use judgment)
-- **Impact**: if it happens, how bad?
+Give a brief verdict for each important problem.
+- **Likelihood**: use judgment to select `low`, `medium`, or `high`.
+- **`Impact`**: how much damage could it cause?
 - **Mitigation**: what would actually reduce this risk?
 
-Give an action that reduces the risk. "Monitor closely" does not do this.
+Give a step that reduces the risk. "Monitor closely" does not do this.
 "Add a circuit breaker" and "validate assumption X before commitment"
-are concrete actions.
+are concrete steps.
 
 ### Step 4: Verdict
 
-End with one direct verdict:
-- Is this plan basically sound with specific risks to address?
+End with one clear verdict.
+- Can the plan succeed if you correct the listed risks?
 - Are there structural problems that should reshape the plan?
-- Is there a fatal flaw that makes the plan unlikely to succeed as stated?
+- Does a defect make the plan unlikely to succeed as specified?
 
-If you assess your own answer, say so. Update your recommendation if needed.
+If you check your own answer, say so. Update your recommendation if needed.
 
 ---
 
@@ -86,13 +84,13 @@ If you assess your own answer, say so. Update your recommendation if needed.
 
 ## What good looks like
 
-- Failure modes are *specific to this plan*, not generic project risks copy-pasted from a template.
+- Connect each problem to this plan.
 - Mitigations are *actionable*, not reassurances.
-- The verdict is *direct* — it doesn't hedge by listing everything as "worth considering".
-- If the plan is mostly fine, say so. A premortem that finds catastrophe in everything is as useless as one that finds nothing.
+- Give a clear verdict. Do not list all problems as "worth considering".
+- If the plan is sound overall, say so. A premortem that finds catastrophe in everything is as useless as one that finds nothing.
 
 ## What to avoid
 
-- Generic risk lists ("team alignment", "scope creep", "technical debt") without grounding them in *this specific plan*.
-- Softening a serious finding. State when an idea has a serious flaw.
-- Exhaustive lists. Give a few specific failure modes.
+- Generic risk lists ("team alignment", "scope creep", "technical debt") without grounding them in *this plan*.
+- Downplaying an important defect. Say if the idea has an important defect.
+- Long lists. Give a short list of problems that can stop the plan.

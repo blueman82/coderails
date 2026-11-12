@@ -14,17 +14,17 @@ description: TypeScript-specific coding standards and idioms. Invoked by enginee
 
 ### Type Safety
 - **Strict mode always** — `"strict": true` in tsconfig.json
-- **No `any` type** — Use `unknown` and narrow, or define proper types
-- **Explicit return types** on exported functions
-- **Discriminated unions** over type assertions
+- **No `any` type** — Use `unknown` and narrow, or define correct types
+- **Explicit result types** on exported functions
+- Prefer **discriminated unions** to type assertions
 
 ### Null Handling
-- **Optional chaining** (`?.`) instead of nested null checks
-- **Nullish coalescing** (`??`) instead of `|| defaultValue`
-- **Non-null assertion (!)** only when you've verified safety
+- **Optional chaining** (`?.`) replaces nested null checks
+- **Nullish coalescing** (`??`) replaces `|| defaultValue`
+- **Non-null assertion (!)** only if you checked that it is safe
 
 ### Switch Statements
-- **Exhaustive checks** — Never use `default` that swallows cases
+- **Check all variants.** Do not use `default` to ignore unhandled variants
 - Use `assertNever` pattern for compile-time exhaustiveness
 
 ### Patterns
@@ -32,7 +32,7 @@ description: TypeScript-specific coding standards and idioms. Invoked by enginee
 - Type inference where type is obvious from assignment
 - Object shorthand (`{ name }` not `{ name: name }`)
 - Arrow functions for callbacks
-- Template literals over string concatenation
+- Prefer template literals to string concatenation
 
 ---
 
@@ -51,7 +51,7 @@ description: TypeScript-specific coding standards and idioms. Invoked by enginee
 
 ## Imperative → Declarative Patterns (MANDATORY)
 
-Scan for these anti-patterns and replace with idiomatic TypeScript.
+Find these anti-patterns and replace them with idiomatic TypeScript.
 
 ### Loop Anti-Patterns
 
@@ -63,7 +63,7 @@ Scan for these anti-patterns and replace with idiomatic TypeScript.
 | Nested `for` loops | `.flatMap()` | `for (a of lists) { for (b of a) { ... } }` → `lists.flatMap(a => a.map(...))` |
 | Index-based `for (let i)` | `for...of` / `.forEach()` / `.entries()` | `for (let i = 0; i < arr.length; i++)` → `for (const [i, val] of arr.entries())` |
 | Loop building object | `Object.fromEntries()` | `const obj = {}; for (...) { obj[k] = v; }` → `Object.fromEntries(pairs.map(...))` |
-| Loop with running total | `.reduce()` | `let sum = 0; for (x of items) sum += x;` → `items.reduce((s, x) => s + x, 0)` |
+| Loop that updates a total | `.reduce()` | `let sum = 0; for (x of items) sum += x;` → `items.reduce((s, x) => s + x, 0)` |
 | Loop counting matches | `.filter().length` | `let n = 0; for (x of items) { if (pred(x)) n++; }` → `items.filter(pred).length` |
 | Loop with type narrowing | `.filter()` with type predicate | `for (x of items) { if (isString(x)) result.push(x); }` → `items.filter(isString)` |
 
@@ -72,18 +72,18 @@ Scan for these anti-patterns and replace with idiomatic TypeScript.
 | Anti-Pattern | Replacement |
 |-------------|-------------|
 | `if/else if` chain (5+) | Object lookup / `Map` / `Record<K, V>` |
-| Nested ternaries 3+ deep | Extract to function or `switch` |
-| Repeated `typeof` checks | Type guard function (`value is T`) |
-| Flag accumulation in loop | `.some()` / `.every()` |
-| Nested conditionals 3+ deep | Guard clauses / early returns |
-| `switch` with identical patterns per case | Object/Map dispatch |
+| Nested ternaries 3+ deep | Use a function or `switch` |
+| Multiple `typeof` checks of the same value | Type guard function (`value is T`) |
+| Loop that updates a flag | `.some()` / `.every()` |
+| Nested conditionals 3+ deep | Check preconditions first and exit if they do not hold |
+| `switch` with the same pattern in each branch | Object/Map dispatch |
 
 ### Accumulation Anti-Patterns
 
 | Anti-Pattern | Replacement |
 |-------------|-------------|
-| Manual array concat | Spread `[...a, ...b]` |
-| Manual object merge | Spread `{ ...a, ...b }` |
+| Manual array concat | Use the spread syntax `[...a, ...b]` |
+| Manual object merge | Use the spread syntax `{ ...a, ...b }` |
 | String concat in loop | `.join()` or template literal |
 | Manual grouping | `Map` + `.reduce()` or `Object.groupBy()` (ES2024) |
 | Manual counting | `.reduce()` to `Map` |
@@ -94,7 +94,7 @@ Scan for these anti-patterns and replace with idiomatic TypeScript.
 
 | Anti-Pattern | Replacement |
 |-------------|-------------|
-| Sequential `await` in loop | `Promise.all()` for independent operations |
+| Sequential `await` in loop | `Promise.all()` if the operations can run independently |
 | `.then()` chains | `async/await` |
 | Manual error collection | `Promise.allSettled()` |
 | Callback nesting (callback hell) | `async/await` |
@@ -105,7 +105,7 @@ Scan for these anti-patterns and replace with idiomatic TypeScript.
 ## Example: Before/After
 
 ```typescript
-// BEFORE (violations: any, verbose null checks, no return type)
+// BEFORE (violations: `any`, verbose null checks, no result type)
 function getDisplayName(user: any) {
     if (user !== null && user !== undefined) {
         if (user.profile !== null && user.profile !== undefined) {
@@ -119,7 +119,7 @@ function getDisplayName(user: any) {
 ```
 
 ```typescript
-// AFTER (typed, optional chaining, nullish coalescing, return type)
+// AFTER (typed, optional chaining, nullish coalescing, result type)
 interface User {
     profile?: {
         displayName?: string;
@@ -184,7 +184,7 @@ function handleResult<T>(result: Result<T>): T | never {
     throw new Error(result.error);
 }
 
-// Exhaustive switch
+// Check all variants
 type Status = 'pending' | 'active' | 'completed' | 'failed';
 
 function assertNever(x: never): never {
@@ -251,21 +251,21 @@ function speak(animal: Dog | Cat): void {
 
 Before completing TypeScript code changes:
 
-- [ ] No `any` type — use `unknown` or proper types
-- [ ] Explicit return types on exported functions
+- [ ] No `any` type — use `unknown` or correct types
+- [ ] Explicit result types on exported functions
 - [ ] Optional chaining (`?.`) for null checks
 - [ ] Nullish coalescing (`??`) not `||` for defaults
 - [ ] Discriminated unions for variant types
-- [ ] Exhaustive switch with `assertNever`
+- [ ] `switch` checks all variants with `assertNever`
 - [ ] `as const` for literal types
 - [ ] Object shorthand used
 - [ ] Template literals (not string concatenation)
 - [ ] Arrow functions for callbacks
-- [ ] `.map`/`.filter`/`.reduce` over `for` loops with `push`
-- [ ] `.find`/`.some`/`.every` over `for` with `break`
-- [ ] `.flatMap` over nested `for` loops
-- [ ] `Object.fromEntries` over loop building objects
-- [ ] `Promise.all` over sequential `await` in loops
-- [ ] Object/Map dispatch over `if/else if` chains (5+)
-- [ ] Guard clauses over nested conditionals 3+ deep
-- [ ] `[...new Set()]` over manual dedup
+- [ ] `.map`/`.filter`/`.reduce` replace `for` loops with `push`
+- [ ] `.find`/`.some`/`.every` replace `for` with `break`
+- [ ] `.flatMap` replaces nested `for` loops
+- [ ] `Object.fromEntries` replaces loops that build objects
+- [ ] `Promise.all` replaces sequential `await` in loops if operations can run independently
+- [ ] Object/Map dispatch replaces `if/else if` chains (5+)
+- [ ] Check preconditions first and exit before nested conditionals 3+ deep
+- [ ] `[...new Set()]` replaces manual deduplication

@@ -1,56 +1,70 @@
 # Dispatch contract measurement
 
-[Graph alignment measurement](graph-alignment-measurement.md).
+[Measurement of provider parity](graph-alignment-measurement.md).
 
-This note describes the source contract in the candidate plugin. It does not show that an installed hook ran.
+This document describes the source contract in the candidate plugin. It does not show that an installed hook ran.
 
-| Evidence | Status |
+| Verification | Status |
 |---|---|
-| Source | Both providers use the same graph contract and source check modules. |
-| Local | Focused contract and dispatch tests exercise allowed and refused requests. |
-| Installed | A new Claude session and a new Codex session still need allowed and refused dispatch checks. |
-| Operation | Trace counts need a named session and its native records before they can describe use. |
+| Source | The two providers use the same graph contract and source check modules. |
+| Local | Contract and dispatch tests check operations that the hook accepts or refuses. |
+| Installed | Run allowed and refused dispatch checks in a new Claude session and a new Codex session. |
+| Operation | To use the log counts, name the session and get its native records. |
 
 ## Structured dispatch envelope and role assertion (measurement note)
 
-`begin-wave` saves one record in `graph.dispatches[dispatch_id]`. The record binds the node, wave, revision, attempt,
-one authorization use, and a digest of the rendered prompt sections. Its closed contract binds the role, model role,
-base reference, source checkout, source manifest and hashes, publication command, lesson digest, write scope, phase
-choices, and required context. `graph_contract_render.py` defines the exact field order. One machine field records
-whether old code is kept or removed.
+`begin-wave` saves one record in `graph.dispatches[dispatch_id]`.
+The record identifies the node, wave, revision, and try. It records one authorization use and a digest of the rendered prompt sections.
 
-The shared contract code checks the prompt, record, role and required skills and checks. Both providers use copies of
-the shared code. A source-bound item also checks its assigned Git checkout and current commit before a worker starts.
-The checkout must be clean for tracked and ordinary untracked files. Git-ignored files are outside this check.
+The closed contract sets the role, model role, base ref, source checkout, source manifest and hashes, and publication command.
+It also sets the lesson digest, write scope, phase selection, and mandatory context.
+The field sequence is in `graph_contract_render.py`. One machine field records if the worker keeps or removes previous code.
 
-Graph state minor 3 sets `context_from_revision`. A new dispatch at or after that revision must bind required context
-from the registered node and item facts. Older saved prompt hashes remain readable before the cutoff. Conversion
-refuses an open wave or damaged old dispatch record. The Claude and Codex guards check new requests. Completion checks
-the saved native record again.
+The shared contract checks the prompt, record, role, and mandatory skills and checks.
+The two providers use copies of the shared code. Before a worker starts, a source-bound item also checks its assigned Git checkout and current commit.
+The checkout must be clean for tracked and usual untracked files. The check skips files that Git ignores.
 
-Authorization writes `authorize-dispatch/refused/<code>` or `authorize-dispatch/authorized/dispatch_authorized` to
-`recovery-trace.jsonl`. `scripts/lib/dispatch_counters.py` counts these rows. Its `--trace-json` option also reads a
-graph measurement from standard input. JSON `null` is refused. These are event counts, not unique worker counts.
+Version 3 of `state_minor` sets `context_from_revision`.
+At or after that revision, a new dispatch must include the context from the registered node and item facts.
+The reader can read prompt hashes saved before the cutoff.
+
+Conversion refuses an open wave or a damaged dispatch record from before conversion.
+The Claude and Codex guards check new dispatches. Checks at the end of the loop read the saved native record again.
+
+Authorization writes `authorize-dispatch/refused/<code>` or `authorize-dispatch/authorized/dispatch_authorized` to `recovery-trace.jsonl`.
+The script `scripts/lib/dispatch_counters.py` counts these entries. Its `--trace-json` option also reads a graph measurement from standard input.
+The reader refuses JSON `null`. It counts log entries, so one worker can have more than one count.
+
 Flip condition:
-`role_mismatch` above zero means a prompt names the wrong agent type (a scout dispatched as `general-purpose`);
-`dispatch_replayed` above zero means a spawn was retried or a prompt was reused; `dispatch_sections_missing` means
-orchestrators are not pasting `prompt_sections` verbatim; `dispatch_authorized` against the loop's wave count shows the
-guard sees every spawn. Negative controls (each fails its row of `packages/tests/test_provider_dispatch_envelope.py`):
-compare only the first line, skip the digest recompute, drop the replay record, delete the role assertion, restore
-`TASK_NAME` in the Codex hook. Limits: the sandboxed Bash launcher carries no agent type (role not asserted there); the
-PreToolUse `tool_use_id` is unverified, so single use falls back to a consumed flag; a plugin agent that is not installed
-cannot run a guarded scout; Codex role containment is out of scope (`agent_type == role` only); the stored record is a
-plain same-user file (drift detection, not tamper evidence); `graph_transcript`'s `CollabAgentToolCall` first-line reader is
-a historical-transcript path; contract-era Codex binding now also rechecks the native function-call message, record,
-role and consumed authorization at `record-wave` and completion. Off-switch `CODERAILS_GRAPH_DISPATCH=off|0|false`
-(default ON) bypasses contract/hash/role/consumption policy but still requires a current v2 ownership envelope and
-native node/wave/attempt evidence; `dispatch_check_off` counts its use. Claude evidence matches a non-null hook tool id
-to the native Agent call and re-asserts role, consumption and one spawn per id. Prompt body, `write_scope`, unguarded
-roles, `SendMessage`/resume and absent hook tool ids remain the RUNBOOK limits.
 
-Current native Codex calls give the hook an encrypted prompt. The hook records `dispatch_prompt_unverifiable` and refuses
-the spawn without consuming its dispatch record. These checks do not establish a successful native Codex graph worker.
-Run graph work through the checked local Codex OAuth driver after it is installed.
+- `role_mismatch` above zero means the prompt names the incorrect agent type, for example a scout dispatched as `general-purpose`.
+- `dispatch_replayed` above zero means a spawn ran again or someone used the prompt again.
+- `dispatch_sections_missing` means the orchestrator did not copy `prompt_sections` verbatim.
+- Compare `dispatch_authorized` with the loop's wave count to check that the hook sees each spawn.
+
+Negative controls in `packages/tests/test_provider_dispatch_envelope.py` each make one test fail.
+Check only the first line, skip the step that calculates the digest, or drop the replay record. Two more controls remove the role assertion or put `TASK_NAME` back in the Codex hook.
+
+The sandboxed Bash launcher carries no agent type, so it does not check the role.
+The check cannot verify PreToolUse `tool_use_id`, so it uses a consumed flag to limit authorization to one use.
+A guarded scout can run only if the plugin agent is installed.
+Codex role containment is out of scope. The contract checks only `agent_type == role`.
+
+The session user can edit the stored record. The check finds unintended changes but cannot prove that no one edited the file.
+The first-line reader for `CollabAgentToolCall` in `graph_transcript` reads historical transcripts.
+For calls that use the contract, Codex checks the native function-call message, record, role, and consumed authorization at `record-wave` and at loop end.
+
+The off switch `CODERAILS_GRAPH_DISPATCH=off|0|false` skips the contract, hash, role, and consumption policy. By default, the dispatch checks are ON.
+The check continues to look for a current v2 ownership envelope and native records for the node, wave, and try.
+The counter `dispatch_check_off` counts uses of the switch.
+
+For Claude, the native Agent call must have the same tool ID as the non-null ID in the hook.
+The check looks again at the role, consumption, and single spawn for that ID.
+See the RUNBOOK for limits on prompt body, `write_scope`, unguarded roles, `SendMessage` or resume, and missing hook tool IDs.
+
+Current native Codex calls give the hook an encrypted prompt. The hook records `dispatch_prompt_unverifiable`.
+It refuses the spawn without consuming its dispatch record. These checks do not show that a native Codex graph worker ran.
+Run graph work through the checked local Codex OAuth driver after you install it.
 
 **Reproduce.**
 

@@ -1,116 +1,127 @@
 # Workflow gate measurement
 
-This note defines publication-gate rows, hook outcomes, and Stop checks. It explains the measurements and their limits.
-Publication rows come from `scripts/lib/publication_gate.py` and its diff manifest.
-The rows come from the same user account as the agent.
+This document defines publication-gate entries, hook outcomes, Stop checks, and their limits.
+Publication entries come from `scripts/lib/publication_gate.py` and its diff manifest.
+The agent and log writer use the same user account.
 
-| Evidence | Status |
+| Verification | Status |
 |---|---|
-| Source | The publication checks, trace writers, and hook reason catalog exist in the candidate plugin. |
-| Local | Focused tests can prove an allowed or refused result for a fixed command and state. |
-| Installed | A fresh trusted provider session must show that the hook ran and refused a negative control. |
-| Server | The GitHub `integrity-review` rule must be activated and checked separately. Source code does not activate it. |
+| Source | The candidate plugin has the publication checks, diagnostic log writers, and hook code catalog. |
+| Local | Tests can show an accepted or refused result for a fixed command and data. |
+| Installed | A new trusted provider session must show that the hook ran and refused a negative control. |
+| Server | Turn on and check the GitHub `integrity-review` rule independently. Source code does not turn it on. |
 
 ## Rows
 
-Every refusal writes non-authoritative trace rows (`<loop dir>/<session>/trace.jsonl`; the session id is
-the sanitized `<repo>@pr-<N>` or `<repo>@<branch>` label (falling back to `pr-<N>`/`local` when metadata fails),
-tallied by `measure_graph_alignment.py` into `trace.by_reason` keyed
-`command/outcome/reason_code`:
+A refusal appends advisory entries to `<loop dir>/<session>/trace.jsonl`.
+The session ID is the sanitized label `<repo>@pr-<N>` or `<repo>@<branch>`.
+If metadata lookup fails, it uses `pr-<N>` or `local`.
+The `measure_graph_alignment.py` script counts them in `trace.by_reason` with key `command/outcome/reason_code`.
 
 | Row | Meaning |
 |---|---|
-| `diff-manifest/ok/diff_manifest_ok` | a diff passed the policy |
-| `diff-manifest/refused/<code>` | enforce refused for `<code>` (one row per violation) |
-| `diff-manifest/warned/<code>` | advisory saw a violation and let it through |
-| `diff-manifest/failed_open/<manifest_unreadable\|manifest_internal_error>` | advisory could not evaluate |
-| `diff-manifest/legacy/manifest_legacy_absent` | the policy has no `manifest` key |
-| `diff-manifest/warned/diff_manifest_mode_invalid` | an unknown `diff_manifest` value was treated as enforce |
-| `review-passes/ok/review_passes_ok` | the artifact's passes covered every pass the diff requires |
-| `review-passes/refused/<code>` | `<code>` is `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`, `review_artifact_missing`, `review_policy_unreadable` or `review_policy_modified` |
-| `eval-level/ok/eval_level_ok` | the selected suite named the current PR head and every P0 passed, its level covered the live diff and declared/posted work-unit floor, the late-freeze stamp matched, and the suite verified with a full frozen SHA at level 1 or 2 |
-| `eval-level/refused/<code>` | `<code>` is `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`, `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, `integrity_stripped`, `not_frozen`, `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed`, `eval_head_mismatch`, `eval_result_mismatch` or `eval_level_diff_unavailable` |
-| `publication/refused/<code>` | the gate refused; `<code>` is `diff_manifest:<code>`, a review or eval-level code, `pr_repo_override`, `pr_base_mutation`, or a later unit's code |
-| `routine/<outcome>/<code>` | a routine event from `scripts/routine_log.py`: `<outcome>` is `stage_ok`, `run_ok`, `run_abort`, `run_refused` or `run_incomplete`; `<code>` is the closed per-routine reason code (`none` for `stage_ok`/`run_ok`), e.g. `routine/run_abort/docs_sync_deny`, `routine/run_refused/merge`, `routine/run_incomplete/incomplete-run`; keyed by the routine name as session id |
-| `verify-merged/ok/verified` | `scripts/verify_merged.py` confirmed a PR landed (by content, or by merge-commit ancestry) |
-| `verify-merged/refused/<code>` | `<code>` is the first reason: `pr_number_invalid`, `origin_repo_unresolved`, `repo_mismatch`, `gh_failed`, `not_merged`, `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`, `content_preexisting`, `content_check_failed`, or `content_check_required` (keyed `<repo>@pr-<N>`). An option-shaped PR argument returns JSON before parsing and writes no trace row. |
-| `argv/denied/ceiling_exceeded` | the verification-volume ceiling denied a 3rd+ full suite or `post_evals.py post\|validate-structure` in one worktree (keyed by the session that ran it) |
-| `argv/denied/protected_paths_unreadable` | `policy/protected_paths.json` was missing or ill-shaped and an edit on main was refused (fail closed) |
+| `diff-manifest/ok/diff_manifest_ok` | The diff satisfied the policy. |
+| `diff-manifest/refused/<code>` | The `enforce` mode refused with `<code>` and wrote one entry for each violation. |
+| `diff-manifest/warned/<code>` | The `advisory` mode found a violation and let publication continue. |
+| `diff-manifest/failed_open/manifest_unreadable` or `diff-manifest/failed_open/manifest_internal_error` | The `advisory` mode could not check the diff. |
+| `diff-manifest/legacy/manifest_legacy_absent` | The policy has no `manifest` key. |
+| `diff-manifest/warned/diff_manifest_mode_invalid` | The check used `enforce` because the `diff_manifest` setting was unknown. |
+| `review-passes/ok/review_passes_ok` | The artifact satisfied all mandatory passes for the diff. |
+| `review-passes/refused/<code>` | Codes are `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`, `review_artifact_missing`, `review_policy_unreadable`, or `review_policy_modified`. |
+| `eval-level/ok/eval_level_ok` | The suite names the current PR head and all P0 results show success. Its level satisfies the live diff and the declared or posted work-unit floor. The late-freeze stamp agrees. At level 1 or 2, the check accepts a full frozen SHA. |
+| `eval-level/refused/<code>` | Codes are `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`, `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, and `integrity_stripped`. Other codes are `not_frozen`, `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed`, `eval_head_mismatch`, `eval_result_mismatch`, and `eval_level_diff_unavailable`. |
+| `publication/refused/<code>` | The gate refused with `diff_manifest:<code>`, an inspection or eval-level code, `pr_repo_override`, `pr_base_mutation`, or a subsequent unit code. |
+| `routine/<outcome>/<code>` | The `scripts/routine_log.py` script logs outcomes `stage_ok`, `run_ok`, `run_abort`, `run_refused`, or `run_incomplete`. Each procedure has a closed code list. The code is `none` for `stage_ok` and `run_ok`. Examples are `routine/run_abort/docs_sync_deny`, `routine/run_refused/merge`, and `routine/run_incomplete/incomplete-run`. The procedure name is the session ID. |
+| `verify-merged/ok/verified` | The `scripts/verify_merged.py` script checked a merge by content or merge-commit ancestry. |
+| `verify-merged/refused/<code>` | The first code is one of `pr_number_invalid`, `origin_repo_unresolved`, `repo_mismatch`, `gh_failed`, `not_merged`, or `merged_at_missing`. Other codes are `fetch_failed`, `merge_commit_unreachable`, `content_absent`, `content_preexisting`, `content_check_failed`, and `content_check_required`. The key is `<repo>@pr-<N>`. An option-shaped PR argument gives JSON before parsing and writes no entry. |
+| `argv/denied/ceiling_exceeded` | In one worktree, the ceiling denied a third or subsequent full suite or `post_evals.py post` or `post_evals.py validate-structure`. The key is the calling session. |
+| `argv/denied/protected_paths_unreadable` | The gate cannot find or parse `policy/protected_paths.json`. It refuses edits on `main`. |
 
-Manifest codes are `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`,
-`special_file_type`, `mode_change`, `status_not_allowed`, `too_many_paths`, `manifest_unreadable` and
-`manifest_internal_error`. `diff_manifest_mode_invalid` is a warning about forced enforcement, not a verdict code.
-`foreign_session` belongs to the diagnostic CLI's explicit `--session` comparison. Publication checks unit owner-field
-shape and worktree equality; it does not authenticate those owner fields.
+Manifest codes include `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, and `special_file_type`.
+Other codes are `mode_change`, `status_not_allowed`, `too_many_paths`, `manifest_unreadable`, and `manifest_internal_error`.
+The `diff_manifest_mode_invalid` code warns that the check used `enforce`. It is advisory.
 
-Routine counters count emitted events, not unique completed jobs. `run_incomplete` is provisional; explicit
-`begin --new` closes an open previous id with `run_abort/incomplete-run`. An unspawnable gate emits
-`run_refused/<gate>`. A failed log write (`log_unwritable`) or foreign state (`routine_mismatch`) is reported on stderr
-without a success trace or state advancement. Partial file writes and the runner's unlocked fallback appends are not
-transactional or authoritative counter evidence; inspect JSONL, human log and state together.
+The diagnostic CLI gives `foreign_session` for an explicit `--session` that does not agree.
+Publication checks the unit owner-field structure and the worktree path. It does not authenticate the owner fields.
+
+The counters count log entries. One run can have more than one entry. The `run_incomplete` result is provisional.
+An explicit `begin --new` closes an open previous ID with `run_abort/incomplete-run`.
+If a gate cannot start, the runner logs `run_refused/<gate>`.
+
+If a log write fails, stderr gives `log_unwritable`. If the data belongs to a different procedure, stderr gives `routine_mismatch`.
+These errors do not log success or update the saved status.
+A write can stop before the end, and the runner can append without a lock in fallback.
+These entries cannot prove the status update succeeded. Examine JSONL, the human-readable log, and the saved status together.
 
 ## Counters
 
     python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py
 
-prints `{command: {outcome/reason_code: count}}` for `diff-manifest`, `review-passes`, `eval-level`, `publication`, `argv`, `routine` and `verify-merged`. Add a command name to
-`COMMANDS` in that file when a unit adds a new row family; `measure_graph_alignment.py` is at its line limit and is not
-edited.
+The command prints `{command: {outcome/reason_code: count}}`.
+It counts `diff-manifest`, `review-passes`, `eval-level`, `publication`, `argv`, `routine`, and `verify-merged`.
+When a unit adds a new entry type, add the command name to `COMMANDS` in the counter.
+The `measure_graph_alignment.py` script stays unchanged because it is at its line limit.
 
-The retained hook telemetry includes a typed decision record with the hook, observed decision, reason code,
-parameters, and repair action. A trace row keeps the detailed emitted reason when one exists. A telemetry cause such
-as `deny` is a coarse observed result, not a second detailed reason. `scripts/gen_hooks.py --check` checks generated
-hook registrations and reason tables. It does not prove that an installed hook ran.
+Hook telemetry keeps a typed record with the hook, observed decision, cause code, parameters, and repair step.
+The diagnostic log keeps the full code if the hook writes one. A telemetry cause such as `deny` gives the broader result.
+The `scripts/gen_hooks.py --check` command checks hook registrations and code tables. It cannot show that an installed hook ran.
 
 ## How to read it
 
-- Healthy: `ok` rows dominate and `refused` rows are rare and each traceable to a real out-of-scope diff.
-- Many `refused/manifest_unreadable`: check policy, diff, paired flags and requested unit metadata, including its manifest,
-  owner fields and worktree. These rows do not identify an out-of-scope path.
-- Any `refused/manifest_internal_error`: a bug in the gate; file it.
-- `refused/eval_head_mismatch` means the selected suite omits or disagrees with the current PR head;
-  `refused/eval_result_mismatch` means a GO artifact contains a P0 that did not pass. Correct the head/evidence,
-  rerun and regrade the evals, then re-post with `post_evals.py post <PR> <evals.json>`. These use the existing
-  `eval-level/refused/<code>` and `publication/refused/<code>` rows and counters.
-- `warned` rows with no `refused` rows mean the install is on `advisory` (the earlier default behavior).
-- No `publication/*` rows at all proves nothing: it is also what a disabled hook, an untrusted Codex plugin or
-  `diff_manifest: off` look like. Push emits `diff-manifest` rows without `publication` rows. Confirm active registration
-  and observe a denial through the relevant installed consumer before claiming installed enforcement.
+- In usual operation, most entries are `ok`. Each rare `refused` entry corresponds to a diff external to its scope.
+- If many entries have `refused/manifest_unreadable`, check policy, diff, paired flags, and unit metadata.
+  Check its manifest, owner fields, and worktree. These entries cannot identify a path external to the scope.
+- A `refused/manifest_internal_error` entry marks a bug. File it.
+
+- A `refused/eval_head_mismatch` entry means the suite has no current PR head or its head is different.
+  A `refused/eval_result_mismatch` entry means a GO artifact has a P0 without success.
+  Correct the head or verification records, run and grade the evals again, then post with `post_evals.py post <PR> <evals.json>`.
+  The `eval-level/refused/<code>` and `publication/refused/<code>` counters include these codes.
+- If there are `warned` entries and no `refused` entries, the installation uses `advisory`, the previous default.
+- No `publication/*` entries do not prove the gate ran. Possible causes include a disabled hook, an untrusted Codex plugin, or `diff_manifest: off`.
+  Push writes `diff-manifest` entries without `publication` entries.
+  Check active registration and observe a denial through the installed consumer before you claim that the check applies.
 
 ### Argv rows
 
-- `argv/denied/ceiling_exceeded` should be rare and each traceable to a loop that re-ran a full suite. The count files
-  (`<loop dir>/verification-ceiling/<sha1>__<target>.count`, Codex `$PLUGIN_DATA/verification-ceiling/`) are the
-  authority, the trace rows only tally denials. Optional `work_units[u].verification{run_all,post_evals}` mirrors require
-  an exact payload session and existing `CLAUDE_LOOP_ID`, schema-3 in-progress state, one physical worktree match and
-  its running `U3[<id>]` registration in `active_wave.nodes`. A skipped mirror does not change the ceiling decision.
-  Both native `add-unit --worktree` CLIs register and persist the unit worktree. Supplied fixtures alone do not prove
-  installed integration.
-- Any `argv/denied/protected_paths_unreadable` means `policy/protected_paths.json` is broken in the installed plugin:
-  edits on main are refused until it is repaired. Commit, push and merge recognition rows are not written; a drop in
-  gated commits after the classifier shipped cannot be told apart from fewer commits.
+- An `argv/denied/ceiling_exceeded` entry should be rare and correspond to a loop that ran a full suite again.
+  The authoritative count files are `<loop dir>/verification-ceiling/<sha1>__<target>.count` and Codex `$PLUGIN_DATA/verification-ceiling/`.
+  Diagnostic log entries count only denials.
+
+  The optional mirror uses `work_units[u].verification{run_all,post_evals}`.
+  It uses only the same payload session and `CLAUDE_LOOP_ID`, an in-progress schema-3 loop, and one physical worktree for the unit.
+  That unit must have an active `U3[<id>]` in `active_wave.nodes`. A skipped mirror does not change the ceiling decision.
+
+  The two native `add-unit --worktree` CLIs record the unit worktree. Fixtures alone do not prove installed integration.
+
+- An `argv/denied/protected_paths_unreadable` entry means the installed plugin has a problem with `policy/protected_paths.json`.
+  The hook refuses edits on `main` until repair. It does not log recognition of commits, pushes, or merges.
+  Fewer gated commits after the classifier shipped can also mean fewer commits overall.
 
 ### Procedure scripts
 
-`verify_merged.py` is the only one of the prose-to-script helpers that writes rows. `wiki_lint.py stale`, `memory_dir.py`,
-`detect_test_command.py`, `merge.py --describe` and `check.py --json` are read-only and print their result (`memory_dir.py`
-prints a path; the others print JSON); they
-write no trace rows, so there is no count of how often a skill ran them. A rising `verify-merged/refused/content_absent`
-or `content_check_required` means claims of "merged" are not being backed by content (or the skill is called without
-`--grep` on squash merges), not that merges are failing.
-`content_preexisting` means the needle predates the merge; `content_check_failed` means Git could not establish presence
-or absence (for example, a shallow clone lacks the first parent). Neither is a merge-failure count. Restore history or
-choose a new needle before retrying. Wiki candidate/data-gap counts and quality feedback are advisory output, not
-installed-call or enforcement measurements; the Codex quality adapter attempts no external tools.
+Only `verify_merged.py` writes entries. The `wiki_lint.py stale`, `memory_dir.py`, `detect_test_command.py`, `merge.py --describe`, and `check.py --json` commands are read-only.
+The `memory_dir.py` command prints a path. The other commands print JSON.
+They write no entries to count their use.
+
+An increase in `verify-merged/refused/content_absent` or `content_check_required` means the "merged" claims have no content record.
+It can also mean the caller omitted `--grep` on a squash merge. These counts do not measure merge errors.
+
+The `content_preexisting` code means the search text predates the merge.
+The `content_check_failed` code means Git could not check for the text, for example if a shallow clone has no first parent.
+The two codes do not count merge errors. Put back the history or select new search text before you try again.
+
+Wiki candidate counts, data-gap counts, and quality feedback are advisory. They do not count installed calls or enforcement.
+The Codex quality adapter uses no external tools.
 
 ## Hook and Stop measurements (F2)
 
-Use the [resource and Stop runbook](RUNBOOK.md#host-resource-errors-or-bounded-stop-checks) to diagnose these observations.
-Hook telemetry and graph trace counters are separate records.
+For procedures, see the [resource and Stop runbook](RUNBOOK.md#host-resource-errors-or-bounded-stop-checks).
+Hook telemetry and graph diagnostics use different records.
 
 ### Hook telemetry
 
-Both providers use `hook_telemetry.jsonl`. Directory selection uses this precedence; it does not test writability:
+The two providers use `hook_telemetry.jsonl`. They select the directory in this sequence without a write check:
 
 1. `CODERAILS_HOOK_TELEMETRY_DIR`.
 2. The parent of `CLAUDE_DISCIPLINE_LOG`, then the parent of `CODERAILS_DISCIPLINE_LOG`.
@@ -118,94 +129,102 @@ Both providers use `hook_telemetry.jsonl`. Directory selection uses this precede
 4. `~/.claude` for Claude, or `~/.coderails/codex` for Codex.
 
 Before an append, a file larger than 1,000,000 bytes replaces `hook_telemetry.jsonl.1`.
-Only one rotated generation is retained. Rows contain no prompt, payload or exception text.
+The writer keeps only one previous log. Entries have no prompt, payload, or error text.
 
 | Field | Meaning |
 |---|---|
-| `ts` | UTC timestamp, to whole seconds |
-| `hook` | Instrumented hook or child-call label |
-| `cause` | Outcome classification below |
-| `exit` | Hook exit code, negative child return code, or `null` when unspecified |
-| `duration_ms` | Integer elapsed milliseconds inside `run`; direct records default to zero |
-| `open_fds` | Open descriptors in the recording process, excluding the listing handle; `null` if unavailable |
-| `pid` | Recording process ID; a child-signal row still names its recording parent |
-| Optional extras | Only `errno`, `signal`, `error` (exception class) and `diagnostic_hint`; no exception message |
+| `ts` | UTC timestamp in seconds |
+| `hook` | Hook or child-call label |
+| `cause` | Outcome type below |
+| `exit` | Hook exit code, negative child exit code, or `null` if unspecified |
+| `duration_ms` | Integer milliseconds in `run`. Other entries default to 0. |
+| `open_fds` | Open descriptors for the writer, without the listing handle. `null` if unavailable. |
+| `pid` | Writer PID. A child-signal entry gives the parent PID that wrote it. |
+| Optional fields | Only `errno`, `signal`, `error` (class name of the error), and `diagnostic_hint`. There is no error message. |
 
-Classification uses typed markers set where output is emitted. `mark_deny` marks a denial;
-`mark_block` marks a Stop block. It does not search message prose or load an external Sentinel component.
+The writer uses typed markers where the hook writes its output. The `mark_deny` function marks a denial. The `mark_block` function marks a Stop block.
+It does not read message prose or use an external Sentinel component.
 
 | Result seen by `hook_telemetry.run` or `note_child` | `cause` |
 |---|---|
 | Exit 0 with a block marker | `block` |
 | Exit 0 with a deny marker and no block marker | `deny` |
-| Exit 0 without either marker | `ok` |
+| Exit 0 with no marker | `ok` |
 | Exit 2 | `block` |
 | Other explicit exit | `exit` |
-| Uncaught `EMFILE`, `ENFILE`, `EAGAIN` or `ENOMEM` exception | `resource` |
-| Other uncaught exception | `exception` |
-| Handled SIGTERM | `sigterm`, exit 143 |
-| Negative child return code | `native_signal`, with signal name and negative `exit` |
+| Uncaught `EMFILE`, `ENFILE`, `EAGAIN`, or `ENOMEM` | `resource` |
+| Other uncaught error | `exception` |
+| SIGTERM with a signal handler | `sigterm`, exit 143 |
+| Negative child exit code | `native_signal`, with signal name and negative `exit` |
 
-A caught resource fault that emits typed deny/block records `deny`/`block`, rather than necessarily `resource`.
-An emitted `request_human_approval` block records `block`; there is no separate approval cause enum.
-Exit 0 alone does not mean an action was allowed. Refusal words alone do not mean an action was blocked.
-A `native_signal` row describes child termination, not the guarded action's result.
-On macOS it adds a crash-report location hint. SIGTERM warns that the action was not gated;
-neither that warning nor a signal row proves enforcement. SIGKILL and crashes can prevent any final row.
+If the hook catches a resource fault and writes typed deny or block, it records `deny` or `block`. It does not necessarily record `resource`.
+A `request_human_approval` block records `block`. There is no other cause for approval.
+Exit 0 alone cannot show if a gate let an operation continue. Refusal words alone cannot show if a gate blocked it.
+
+A `native_signal` entry reports that a child stopped. It cannot give the gated operation's result.
+On macOS it adds a hint about the crash report location.
+SIGTERM warns that the gate did not check the operation. A warning or signal does not prove enforcement.
+SIGKILL and crashes can prevent the last entry.
 
 ### Stop traces and counters
 
-`graph_completion_guard/blocked/stop_row_missing` is a graph trace row, not a hook telemetry cause.
-It records failed completion verification without a consumable stop row. A current typed stop row lives in
-`progress.json.stops[]`; consumption does not itself write that refusal row or prove graph completion.
+The `graph_completion_guard/blocked/stop_row_missing` entry is a graph diagnostic record.
+It shows that the check could not check loop end without a Stop row to consume.
+The current typed Stop row is in `progress.json.stops[]`. Consumption does not write that refusal entry or prove loop end.
 
-From the repository root, run the maintained read-only counter:
+From the repository root, run the read-only counter:
 
 ```sh
 python3 scripts/lib/stop_counters.py --since 2026-11-03T00:00:00+00:00
 ```
 
-Omit `--since` for all available rows. The counter uses `CLAUDE_AGENTIC_LOOP_DIR`, or `~/.coderails/agentic-loop`.
+For all available entries, do not give `--since`.
+The counter uses `CLAUDE_AGENTIC_LOOP_DIR` or `~/.coderails/agentic-loop`.
 It reads `<root>/*/trace.jsonl` and `<root>/*/*/recovery-trace.jsonl`.
-Output includes `stop_row_missing`, `stale_stop_row`, `convert_ok` and each `convert_refused_<code>` total.
-These are reason-code occurrences, deduplicated by `event_id` within each file. Rows without an event ID can count
-separately; malformed or unreadable rows are skipped. They are not counts of unique actions, completed loops or elapsed time.
-`--since` selects timestamps at or after the supplied ISO string. Use consistent timestamp formats.
-`--trace-json` instead consumes `measure_graph_alignment.py` JSON on stdin and still reads recovery traces.
-It cannot be combined with `--since`; an aggregate cannot be filtered afterward.
+The output includes `stop_row_missing`, `stale_stop_row`, `convert_ok`, and a total for each `convert_refused_<code>`.
+
+The counter counts occurrences of each code and deduplicates by `event_id` in each file.
+Entries with no ID can count on their own. The counter skips malformed or unreadable entries.
+These counts do not measure unique operations, completed loops, or elapsed time.
+
+The `--since` option selects timestamps at or after the supplied ISO string. Use the same timestamp format.
+The `--trace-json` option reads JSON from `measure_graph_alignment.py` on stdin and also reads recovery logs.
+Do not use it with `--since`. The reader cannot select an earlier aggregate by timestamp.
 
 ### Timing and coverage limits
 
-Codex starts a nine-second aggregate Stop deadline before input reading, under a ten-second hook registration.
-Lookup, inspection, stop consumption, completion verification, status and recovery share that deadline.
-The status helper further caps each child at two seconds and all status work at four seconds, within the earlier deadline.
-Measure the entire entrypoint's wall time, not the sum of independent per-call allowances.
-For each trial, record the exact head/version, provider, input conditions, command, output, exit and wall time.
-One trial below ten seconds does not guarantee every host finishes within that time.
-`duration_ms` excludes process startup and teardown; it is not that full wall-clock measurement.
+Codex starts a nine-second aggregate Stop deadline before it reads input. Hook registration gives ten seconds.
+Lookup, inspection, Stop consumption, loop-end checks, status, and recovery share that deadline.
+The status helper gives each child two seconds and all status work four seconds, subject to the earlier deadline.
 
-Telemetry writes fail open and can be lost, rotated or interleaved. Descriptor counts can be unavailable.
-Missing rows do not prove that a hook allowed an action or did not run.
-Correlate typed output, telemetry, graph traces/state and active registration before interpreting a result.
-All files are same-user observations and non-authoritative. Source-only or synthetic checks do not establish installed
-trust, native-provider use, real-account operation, server enforcement or successful native worker recovery.
-The existing integrity opt-in and enforcing publication callers remain separate; see [integrity setup](INTEGRITY-GATE.md#turn-on-the-gate)
-and [publication limits](#limits).
+Measure wall time for the full hook entry point.
+For each trial, record the head and version, provider, input conditions, command, output, exit code, and wall time.
+One trial below ten seconds cannot guarantee that all hosts finish in that time.
+The `duration_ms` field does not count startup and teardown. It cannot give full wall time.
 
-Source: [telemetry implementation](../hooks/scripts/lib/hook_telemetry.py),
+If a telemetry write does not succeed, the hook continues. Entries can drop, rotate, or interleave. Descriptor counts can be unavailable.
+Missing entries cannot prove that the hook accepted an operation or did not run.
+Compare typed output, telemetry, graph diagnostic records and data, and active registration before you interpret a result.
+
+The same user owns these advisory files. Source or synthetic checks cannot prove installed trust, native-provider use, live-account operation, server enforcement, or native recovery.
+Integrity opt-in and the publication gate have their own checks. See [integrity setup](INTEGRITY-GATE.md#turn-on-the-gate) and [publication limits](#limits).
+
+Sources: [telemetry implementation](../hooks/scripts/lib/hook_telemetry.py),
 [Stop counter](../scripts/lib/stop_counters.py), [Codex Stop guard](../packages/codex/hooks/scripts/graph_completion_guard.py),
 [Codex hook primitives](../packages/codex/hooks/scripts/hook_common.py),
 [notice timing](../hooks/scripts/lib/stall_notice.py) and [hook registration](../packages/codex/hooks/hooks.json).
 
 ## Limits
 
-The rows are written by the same user that the gate constrains and never decide anything. They measure how often the
-gate fired, not whether publication paths exist that bypass it (a merge made from a browser or a script the Codex hook
-cannot match is invisible). The gate is a cooperating-agent safeguard: an agent with write access to
-`.coderails/workflow.config.yaml` can set `diff_manifest: off`, and that change is itself a diff the gate reviews only if
-the policy denies the path. The shipped policy denies additions or modifications to its own policy paths and workflow
-config, but it reads the local checkout's effective config. A same-worktree progress file with forged nonblank owner
-fields can pass the metadata check. Claude's direct manifest arm runs without config or a transcript; raw Git operations,
-unmatched scripts/aliases and browser merges are not observations of this publication gate. Direct hooks cannot pin
-the subsequent remote merge head or base; `merge.py` uses `--match-head-commit` for the head. Trace-write failure is ignored, so missing rows
-also cannot prove that a check did not run.
+The same user that the gate constrains writes these entries. The gate does not read them for a decision.
+They count gate calls. They cannot show a browser merge or a merge in a script the Codex hook cannot recognize.
+
+This is a cooperating-agent safeguard. An agent with write access to `.coderails/workflow.config.yaml` can set `diff_manifest: off`.
+The gate checks that edit as a diff only if the policy denies the path.
+The default policy denies new or changed files at its own paths and the workflow config. The gate reads the resolved config of the local checkout.
+
+A same-worktree loop data file can satisfy the metadata check with forged owner fields.
+The Claude manifest hook runs without a config or transcript. The logs have no entries for raw Git operations, unmatched scripts or aliases, or browser merges.
+
+A hook cannot pin the head or base of the next remote merge. The `merge.py` helper uses `--match-head-commit` for the head.
+A log write error does not block the operation. Missing entries cannot prove a check did not run.

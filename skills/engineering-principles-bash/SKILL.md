@@ -8,57 +8,60 @@ paths: "**/*.sh"
 # Engineering Principles Bash - Language-Specific Standards
 
 **Version:** 1.0.0
-**Purpose:** Enforce shell idioms and safety patterns on `.sh` files. Shebang-identified shell scripts without a `.sh` extension are routed here by the `engineering-principles` coordinator's own dispatch table before this skill loads — see that skill's Phase 0 for the detection logic; this file doesn't need to duplicate it.
+
+Apply shell idioms and safety patterns to `.sh` files.
+Phase 0 of `engineering-principles` also selects this skill for shell shebangs without a `.sh` extension.
 
 ---
 
-Coderails-owned hooks, workflow helpers, launchers, and tests are Python. The rules below apply when working on shell code in another project or integration; they do not describe the implementation of Coderails Python modules.
+Coderails hooks, workflow helpers, launchers, and tests use Python.
+Use these rules for shell code in other projects or integrations.
 
 ## Bash Idioms (MANDATORY)
 
 ### Safety Header
-- **`set -euo pipefail`** at the top of every standalone script that is *executed* (not sourced) — `-e` stops on the first unhandled error, `-u` turns a typo'd variable name into a hard failure instead of a silent empty string, `-o pipefail` makes a failure anywhere in a pipeline propagate instead of being masked by the last command's exit status.
-- **Sourced library files are the deliberate exception.** A file that is `source`d into other scripts (helper libraries, hook utilities) must NOT impose `set -e`/`set -u` on its caller — that decision belongs to the top-level script. If you add `set -e` to a library file, say so in a comment and confirm every caller actually wants it.
-- **PreToolUse/hook scripts are a second deliberate exception.** A hook invoked by the Claude Code harness in a shell-based integration must degrade gracefully and almost always `exit 0` even on internal failure — a hook that aborts hard can break the calling harness rather than just failing its own check. These scripts intentionally skip `set -e` and guard every risky read with `|| true` or an explicit fallback. This is not sloppiness; it is a documented tradeoff for a different execution context. Don't "fix" a hook script by bolting on `set -euo pipefail` without checking whether that changes its failure mode from "degrade" to "abort."
+- Put `set -euo pipefail` at the top of each standalone script that you run. The `-e` option stops on an unhandled error. The `-u` option stops on an unset name, such as a typing error. The `-o pipefail` option reports an error from a command in the pipeline. The last command’s success cannot hide it.
+- **Sourced libraries.** If a caller uses `source` on the file, let the top-level script control `set -e` and `set -u`. If you set `set -e` in a library, explain it in a comment. Check that each caller can use this setting.
+- **PreToolUse and other hooks.** In a shell integration with Claude Code, a hook usually uses `exit 0` on internal errors. A hook that aborts can break the harness. These hooks leave `set -e` off and check risky reads with `|| true` or a fallback. Before you add `set -euo pipefail`, check if the hook changes from "degrade" to "abort."
 
 ### Quoting & Expansion
-- **Quote every variable expansion** unless you specifically want word-splitting or globbing (`"$var"`, not `$var`). Unquoted expansions are the single most common source of bugs when a value contains spaces, globs, or is empty.
-- **Quote command substitutions too**: `local x="$(cmd)"`, not `local x=$(cmd)` used later unquoted.
-- **Prefer `"${arr[@]}"` over `${arr[*]}`** when iterating or passing an array — `[@]` preserves element boundaries, `[*]` flattens to one word.
-- **Use `printf '%s\n'` instead of `echo`** for arbitrary/untrusted content — `echo` interprets some sequences differently across shells (`echo -n`, `-e`) and can misbehave if the string starts with a flag-like token (e.g. `echo "$user_input"` where the input is literally `-n`).
+- **Put double quotes around each expansion.** Use `"$var"` unless you intend word splitting or globbing. Without quotes, spaces, globs, and empty values can cause errors.
+- **Put double quotes around command substitutions.** Use `local x="$(cmd)"` and double quotes when you use the value. Do not use `local x=$(cmd)` and then use the value without quotes.
+- **Prefer `"${arr[@]}"` to `${arr[*]}` for arrays.** With `[@]`, each element stays one word. With `[*]`, the elements become one word.
+- **Use `printf '%s\n'` for arbitrary or untrusted content.** The `echo` command interprets some sequences differently in different shells. For example, a value of `-n` can be a flag in `echo "$user_input"`. The same issue applies to `echo -n` and `-e`.
 
 ### `[[ ]]` over `[ ]`
-- Use `[[ ]]` (bash's extended test) instead of POSIX `[ ]` in bash scripts: no word-splitting/glob-expansion of unquoted operands, supports `&&`/`||`/`=~` directly, and `==`/`!=` pattern matching. `[ ]` is only appropriate when a script must stay POSIX-`sh`-portable (rare in this repo — check the shebang: `#!/bin/sh` means stay in `[ ]`, `#!/bin/bash` or `#!/usr/bin/env bash` means `[[ ]]` is available and preferred).
+- Use `[[ ]]` in Bash scripts. It does not apply word-splitting or glob expansion to unquoted operands. It accepts `&&`, `||`, `=~`, and `==` or `!=` pattern checks. Use `[ ]` for POSIX portability. If the shebang is `#!/bin/sh`, use `[ ]`. If it is `#!/bin/bash` or `#!/usr/bin/env bash`, prefer `[[ ]]`.
 
 ### Avoid Footguns
-- **Never `eval` untrusted input.** If you find yourself reaching for `eval` to build a command dynamically, there is almost always a safer construct: an array of arguments (`cmd=(git commit -m "$msg")`; `"${cmd[@]}"`), a `case` dispatch, or a function-name lookup (`"$fn_name" "$@"` — calling a function by variable name doesn't need `eval`).
-- **Avoid unquoted glob expansion in loops** (`for f in *.txt` breaks when there are zero matches, unless `nullglob` is set, and breaks on filenames with spaces if `IFS` isn't handled). Prefer `find ... -print0 | while IFS= read -r -d '' f` for anything touching a real filesystem, or `shopt -s nullglob` when a plain glob loop is genuinely simpler and the empty-match case is handled.
-- **Don't rely on word-splitting as your loop mechanism.** `for word in $(some_command)` splits on whitespace unconditionally, including inside values that shouldn't be split. Prefer `while IFS= read -r line; do ... done < <(some_command)` when lines (not words) are the unit, or an array (`mapfile -t lines < <(some_command)`) when you need random access afterward.
-- **`cd` inside a subshell, not the caller's shell**, when you only need a temporary directory change: `(cd "$dir" && cmd)` instead of `cd "$dir"; cmd; cd -` — the subshell can't leak a directory change back to the rest of the script even if an earlier step fails partway through.
+- **Do not use `eval` on untrusted input.** Build a command with an argument array (`cmd=(git commit -m "$msg")` and `"${cmd[@]}"`). Or use `case` or a function lookup such as `"$fn_name" "$@"`.
+- **Use a loop that handles empty results and spaces.** With no matches, `for f in *.txt` can get the literal glob. With an unquoted filename expansion, Bash can read the parts as different words. Prefer `find ... -print0 | while IFS= read -r -d '' f` for filesystem entries. For a simpler glob loop, use `shopt -s nullglob` and check the empty result.
+- **Do not use word-splitting in a loop.** The loop `for word in $(some_command)` uses whitespace as word boundaries. For lines, use `while IFS= read -r line; do ... done < <(some_command)`. For random access, use an array with `mapfile -t lines < <(some_command)`.
+- **Use `cd` in a subshell for a temporary directory change.** Prefer `(cd "$dir" && cmd)` to `cd "$dir"; cmd; cd -`. The parent directory stays the same if the command fails.
 
 ### Fail-Fast Argument & Precondition Validation
-- **Validate arguments before doing any work**, and fail with a clear message on stderr. Check required parameters, repository identity and branch constraints before mutating Git state.
-- **A helper that can fail must say why it failed**, not just return non-zero. Centralize the stderr format while preserving the caller's exit-status contract.
-- **No silent `|| true` without a reason.** `|| true` (or `|| :`) suppresses a command's failure — sometimes correct (a best-effort cleanup step, a check where "not found" and "lookup failed" are both fine to treat as absent), but it hides a real bug just as often. When you use it, say in a comment *why* this particular failure is safe to ignore.
+- **Check arguments before work.** Check required parameters, repo identity, and branch limits before changing Git data. If a check fails, give a clear message on stderr and a nonzero status.
+- **A helper must report its error.** Give an error message and a nonzero status. Use one stderr format and keep the caller’s exit-status contract.
+- **Document each `|| true` or `|| :`.** These expressions hide an error from the caller. They can be correct for best-effort cleanup. For example, "not found" and "lookup failed" can mean that data is unavailable. Write a comment that says why this error can be ignored.
 
 ### Function Decomposition Over Monolithic Scripts
-- **Break a script into named functions** for argument parsing, precondition validation, execution and reporting. A short `main` function should make their order visible.
-- **Namespace function names when a library is sourced by multiple callers**, such as `widget::create` and `widget::exists`, to avoid silent collisions.
-- **Avoid a monolithic script.** A body of 100 or more lines with no function boundaries hides its control flow and `set -e` failure points. Extract named steps even when each runs once.
+- **Use named functions** for argument parsing, precondition checks, execution, and reporting. Use a short `main` to show the sequence.
+- **Use a namespace if multiple callers source the same library.** For example, use `widget::create` and `widget::exists` to prevent name collisions.
+- **Keep function boundaries in long scripts.** A body of 100 or more lines without functions hides control flow and points where `set -e` can stop the script. Make named functions for one-time steps too.
 
 ### Avoiding Global Mutable State
-- **Prefer `local` for every function-scoped variable.** A bash function's variables are global by default; forgetting `local` on a loop counter or accumulator is a classic source of one function silently corrupting another's state. Declare function-scoped shell variables explicitly, for example `local force_with_lease=0 msg="" want_add=0`, at the top of the function body. Python modules use Python scoping instead.
-- **Command substitution runs in a subshell.** A variable assigned inside `$(...)` does not survive in the caller. Capture stdout when only a value is needed; invoke the function directly when its variable assignments must remain visible.
-- **A subshell-local cache does not persist across calls.** Make the lifetime explicit. Do not describe a variable set by a command-substituted helper as a script-wide cache.
+- **Use `local` for names scoped to a function.** Bash names are global by default. A function can change a loop counter or accumulator that a different function uses. For example, use `local force_with_lease=0 msg="" want_add=0` at the start of the function. Python modules use Python scoping.
+- **Command substitution uses a subshell.** A name you set in `$(...)` does not stay set in the caller. Capture stdout if you only require a value. Invoke the function directly to keep the names it sets.
+- **A subshell-local cache lasts only for that subshell.** Specify the cache lifetime. Do not use a command substitution helper to make a script-wide cache.
 
 ### `shellcheck`-Clean Patterns
-- Run `shellcheck` on every new or modified script when it's available (`command -v shellcheck`). Common findings worth fixing on sight:
-  - **SC2086** (unquoted variable) — quote it.
-  - **SC2046** (unquoted command substitution) — quote it, or if word-splitting is intentional, mark it with a `# shellcheck disable=SC2046` comment explaining why.
-  - **SC2164** (`cd` without `||` or `set -e` covering it) — `cd "$dir" || exit 1` or rely on an active `set -e`, explicitly.
-  - **SC2155** (`local x=$(cmd)` masks the command's exit status with `local`'s own) — declare and assign separately: `local x; x=$(cmd)`.
-  - **SC2181** (checking `$?` instead of the command directly) — `if cmd; then` not `cmd; if [[ $? -eq 0 ]]; then`.
-- A `# shellcheck disable=SCxxxx` is a documented exception, not a way to silence the tool — it should sit next to a comment explaining why the flagged pattern is intentional here.
+- If `command -v shellcheck` succeeds, run `shellcheck` on each new or changed script. Check these diagnostics first.
+  - **SC2086**. Put double quotes around the expansion.
+  - **SC2046**. Put double quotes around the command substitution. To use word-splitting intentionally, add `# shellcheck disable=SC2046` and a comment that says why.
+  - **SC2164**. Use `cd "$dir" || exit 1` or explicitly rely on active `set -e`.
+  - **SC2155**. The `local` in `local x=$(cmd)` hides the command’s exit status. Use two statements: `local x; x=$(cmd)`.
+  - **SC2181**. Check the command directly with `if cmd; then`. Do not use `cmd; if [[ $? -eq 0 ]]; then`.
+- Put a comment with each `# shellcheck disable=SCxxxx` that says why the pattern is intentional.
 
 ---
 
@@ -66,14 +69,20 @@ Coderails-owned hooks, workflow helpers, launchers, and tests are Python. The ru
 
 | Pattern | Before | After |
 |---------|--------|-------|
-| Guard clause | `if [[ cond ]]; then ... rest of function ... fi` | `[[ ! cond ]] && return 1` / `[[ ! cond ]] && { err "..."; }`, then continue unindented |
-| Declare-then-assign | `local x=$(cmd)` | `local x; x=$(cmd)` (preserves `cmd`'s exit status) |
-| Array over word-splitting | `for w in $(cmd)` | `mapfile -t words < <(cmd)` then `for w in "${words[@]}"` |
-| Direct test | `cmd; if [[ $? -eq 0 ]]; then` | `if cmd; then` |
+| Check before the function body | `if [[ cond ]]; then ... rest of function ... fi` | `[[ ! cond ]] && return 1` / `[[ ! cond ]] && { err "..."; }`, then continue unindented |
+| Declare-then-assign | `local x=$(cmd)` | `local x; x=$(cmd)` (keeps the exit status from `cmd`) |
+| Array for loop values | `for w in $(cmd)` | `mapfile -t words < <(cmd)` then `for w in "${words[@]}"` |
+| Check the command directly | `cmd; if [[ $? -eq 0 ]]; then` | `if cmd; then` |
 | No useless cat | `cat file \| grep pattern` | `grep pattern file` |
 | No backticks | `` `cmd` `` | `$(cmd)` |
-| Explicit failure reason | `cmd \|\| true` (no comment) | `cmd \|\| true  # best-effort: cleanup step, ok if nothing to remove` |
-| `[[ ]]` over `[ ]` | `[ "$x" = "y" ]` | `[[ "$x" == "y" ]]` |
+| Comment on ignored errors | An ignored error without a comment | A comment that says why the error is safe to ignore |
+| Bash conditional test | `[ "$x" = "y" ]` | `[[ "$x" == "y" ]]` |
+
+For best-effort cleanup, add a comment to `cmd || true`:
+
+```bash
+cmd || true  # best-effort: cleanup step, ok if nothing to remove
+```
 
 ---
 
@@ -81,7 +90,7 @@ Coderails-owned hooks, workflow helpers, launchers, and tests are Python. The ru
 
 ```bash
 # BEFORE (violations: no set -e, unquoted expansions, [ ] with no quoting,
-# eval on a dynamic string, no local, $? check, silent || true)
+# eval on a dynamic string, no local, $? check, silent `|| true`)
 process() {
   files=$1
   for f in $files
@@ -101,10 +110,10 @@ process() {
 ```
 
 ```bash
-# AFTER (set -e at script top; quoted expansions; [[ ]]; no eval — direct
-# invocation with an array; local; direct test; positionals consumed before
-# the array capture, so `shift` isn't dead code; no unnecessary || true —
-# `rm -f` already exits 0 on missing files)
+# AFTER: set -e at the top, quoted expansions, and [[ ]].
+# Use an argument array, local names, and a direct command test.
+# Read the first positional value and use `shift` before you build the array.
+# `rm -f` exits 0 for missing files, so no `|| true` is necessary.
 set -euo pipefail
 
 process() {
@@ -138,12 +147,12 @@ main() {
   [[ -z "$branch" ]] && { usage; exit 1; }
   [[ "${2:-}" == "--force" ]] && force=1
 
-  # Fail fast on preconditions before doing any real work.
+  # Check preconditions before starting the work.
   git rev-parse --verify "$branch" >/dev/null 2>&1 \
     || { printf 'Unknown branch: %s\n' "$branch" >&2; exit 1; }
 
-  # ... actual work, e.g. skip an interactive confirmation when --force was given ...
-  [[ "$force" -eq 1 ]] || : # placeholder: real work reads $force here
+  # Do the work. For example, skip interactive confirmation if the caller gives `--force`.
+  [[ "$force" -eq 1 ]] || : # The work reads $force here.
 }
 
 main "$@"
@@ -155,8 +164,7 @@ main "$@"
 
 ```bash
 #!/usr/bin/env bash
-# lib/widget.sh — sourced by multiple callers; deliberately no set -e/-u here
-# (that decision belongs to the top-level script that sources this file).
+# Callers source lib/widget.sh. The top-level script controls set -e and set -u.
 
 widget::create() {
   local name="${1:-}"
@@ -176,17 +184,17 @@ widget::exists() {
 
 Before completing bash/shell code changes:
 
-- [ ] `set -euo pipefail` at the top of every standalone executed script (not sourced libraries, not harness hooks — see Safety Header exceptions)
-- [ ] Every variable expansion quoted (`"$var"`, `"${arr[@]}"`, `"$(cmd)"`)
-- [ ] `[[ ]]` used instead of `[ ]` (unless the shebang requires POSIX `sh`)
-- [ ] No `eval` on anything that isn't project-owned, non-attacker-controlled config — and even then, commented as to why
+- [ ] `set -euo pipefail` at the top of each standalone script you run. Follow the Safety Header rules for libraries and hooks.
+- [ ] Put double quotes around each expansion (`"$var"`, `"${arr[@]}"`, `"$(cmd)"`)
+- [ ] Use `[[ ]]` unless the shebang specifies POSIX `sh`.
+- [ ] Use `eval` only with project-owned config that an attacker cannot control. Write a comment that says why you use it.
 - [ ] No unquoted glob loops (`for f in *.txt`) without `nullglob` or a `find -print0` alternative
 - [ ] No word-splitting used as a loop mechanism (`for w in $(cmd)`) — use `mapfile`/`while read`
-- [ ] Every function-scoped variable declared `local`
-- [ ] No `local x=$(cmd)` — declare and assign on separate lines so `cmd`'s exit status isn't masked
+- [ ] Use `local` for each name scoped to a function.
+- [ ] Use one statement for `local` and one to set the value. Keep the command’s exit status.
 - [ ] No `cmd; if [[ $? -eq 0 ]]` — test the command directly
-- [ ] Every `|| true` / `|| :` has a comment explaining why the failure is safe to ignore
-- [ ] Functions namespaced (`namespace::function`) in any file sourced by more than one caller
-- [ ] Guard clauses / early returns over deep nesting
-- [ ] Script decomposed into functions once it does more than one clearly separable thing — no 100+ line monolithic body
-- [ ] `shellcheck` run and clean (or disables are commented with a reason) when `shellcheck` is available
+- [ ] Each `|| true` or `|| :` has a comment that says why you can ignore a nonzero exit.
+- [ ] Use `namespace::function` if more than one caller sources the file.
+- [ ] Check conditions and exit the function to prevent deep nesting.
+- [ ] Use a function for each step that can run independently. Keep function boundaries in scripts of 100 or more lines.
+- [ ] If available, run `shellcheck`. Correct the problems it reports or document why you disable a check.

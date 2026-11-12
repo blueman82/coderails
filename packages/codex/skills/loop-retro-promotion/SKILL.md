@@ -5,166 +5,150 @@ description: On-demand promotion routine that mines accumulated agentic-loop ret
 
 # Loop Retro Promotion
 
-On-demand pipeline. It is dormant until enough loop history exists, then
-promotes durable, repo-agnostic lessons out of `standing-orders.md` /
-`retro.json` and into `skills/agentic-loop/learned-failure-modes.md`.
-A user-owned external scheduler may invoke this routine in the future, but the
-native Codex plugin includes and configures no scheduler.
+Invoke this skill on demand. It stays dormant until it has sufficient loop history.
+Then it promotes durable lessons that apply across repositories from `standing-orders.md` and `retro.json` into `skills/agentic-loop/learned-failure-modes.md`.
+A user-owned scheduler can invoke it in the future. The native Codex plugin includes and configures no scheduler.
 
-**State machine.** The run log, stage order, manifest check, gate refusals and
-cleanup are one script, `routine_run.py`, shared with `docs-sync` (spec:
-`routines/loop-retro-promotion.json`; policy:
-`policy/retro-promotion.policy.json`). It needs no hooks. Set `SKILL_DIR` to the
-absolute directory containing this `SKILL.md` and write `RR` for
-`python3 "$SKILL_DIR/../../scripts/routine_run.py" --log <repo-key-dir>/promotion-runs.log loop-retro-promotion`
-(`--log` is required because the loop-history directory is resolved at run
-time, below). `routine_run.py` appends a JSONL event row (closed outcomes
-`stage_ok`, `run_ok`, `run_abort`, `run_refused`, `run_incomplete`; closed
-reason codes in the spec) and derives the legacy marker line (`run=ok`,
-`abort=<code>`, `refused=<gate>`, `abort=incomplete-run`). Do not write terminal
-markers by hand; an outcome or code outside the closed lists exits 2.
-`RR begin` refuses an open run even across midnight. Explicit `RR begin --new`
-first aborts the previous open id. `log_unwritable` refuses state advancement;
-inspect both logs and state for partial writes. Same-user forgery and runner
-limits are in `docs/routines.md`.
+**Run controller.** `routine_run.py` handles the log, step sequence, manifest check, gate refusals, and cleanup. This skill shares it with `docs-sync`.
+The spec is `routines/loop-retro-promotion.json`. The policy is `policy/retro-promotion.policy.json`. The script needs no hooks.
+
+Set `SKILL_DIR` to the absolute directory containing this `SKILL.md`. Use `RR` for:
+`python3 "$SKILL_DIR/../../scripts/routine_run.py" --log <repo-key-dir>/promotion-runs.log loop-retro-promotion`.
+The command needs `--log` because it resolves the loop history directory at run time (see below).
+
+`routine_run.py` appends a JSONL row and derives the legacy marker.
+The accepted results are `stage_ok`, `run_ok`, `run_abort`, `run_refused`, and `run_incomplete`. The spec lists the accepted codes.
+The legacy markers are `run=ok`, `abort=<code>`, `refused=<gate>`, and `abort=incomplete-run`.
+Do not write terminal markers by hand. An unlisted result or code gives exit 2.
+
+`RR begin` refuses an open run across midnight too. Explicit `RR begin --new` first aborts the previous open ID.
+If `log_unwritable` prevents an update, examine the two logs and the run file for unfinished writes.
+See `docs/routines.md` for same-user forgery and runner limits.
 
 ## 1. Predicate evaluation (always runs, even when dormant)
 
-Start the run log, then evaluate the graduation predicate before mining,
-branching or editing:
+Start the run log. Check the graduation predicate before you mine, branch, or edit:
 
-1. Resolve the configured loop-history directory from
-   `CODERAILS_AGENTIC_LOOP_DIR`; default to
-   `$HOME/.coderails/agentic-loop`. The caller must scope this directory to
-   the current repo. Do not call a root plugin hook or graph helper.
-2. Run `RR begin`. It writes the provisional `run_incomplete` row before the
-   predicate read, so an interrupted or refused read cannot look like a
-   successful dormant run.
-3. Run `python3 "$SKILL_DIR/../../scripts/lib/lessons.py" --dir <repo-key-dir> --session <native caller session id> predicate`
-   (resolve the path from this `SKILL.md`) and read `graduation` from its JSON;
-   do not count files or read Markdown by hand. It checks **>= 10 distinct completed retros**
-   with owned validated progress and matching source hashes,
-4. `recurred` **>= 1** — an order in `orders.json` whose typed `last_recurred` !=
-   `created` (one full lifecycle: created, then recurred at least once), and
-5. `decayed` **>= 1** — an order with `status: decayed` (one clean decay).
-   `met` is true only when all three hold.
+1. Resolve the loop history directory from `CODERAILS_AGENTIC_LOOP_DIR`. The default is `$HOME/.coderails/agentic-loop`.
+   The caller must scope this directory to the current repository. Do not invoke a root plugin hook or graph helper.
 
-On exit 2, run `RR abort predicate_refused`. On exit 3, run
-`RR abort predicate_degraded`. For malformed output or any other unexpected
-result, run `RR abort predicate_unavailable`. Never turn these cases into
-`finish no_drift`; do not use a generated view or ledger claim as fallback.
-Schema3 history requires the matching `retro_check` validator; unavailable validation is an explicit refusal.
-Pass the actual caller's native session id so degraded reads remain attributable; do not infer environment presence.
+2. Run `RR begin`. It writes the provisional `run_incomplete` row before it reads the predicate.
+   An interrupted or refused read does not count as a completed dormant run.
+3. Run `python3 "$SKILL_DIR/../../scripts/lib/lessons.py" --dir <repo-key-dir> --session <native caller session id> predicate`.
+   Find the script relative to this `SKILL.md`. Read `graduation` from its JSON.
+   Do not count files or read Markdown by hand.
+   It checks for **10 or more different completed retros** with owned and validated `progress.json` files and matching source hashes.
 
-After a successful evaluation, append one line to `<repo-key-dir>/promotion-runs.log`:
+4. `recurred` **>= 1**. A record in `orders.json` has typed `last_recurred` different from `created`.
+   This is one full lifecycle with one or more recurrences after creation.
+5. `decayed` **>= 1**. A record has `status: decayed`, for one clean decay.
+   The result is `met` only if all three conditions hold.
+
+On exit 2, run `RR abort predicate_refused`. On exit 3, run `RR abort predicate_degraded`.
+For malformed output or a different error, run `RR abort predicate_unavailable`.
+Do not use `finish no_drift` for these results. Do not use a generated view or ledger claim as fallback.
+
+Schema 3 history needs the matching `retro_check` validator. If the validator is unavailable, the tool refuses explicitly.
+Give the caller's actual native session ID so the tool can identify the source of a degraded read.
+Do not infer which environment values are available.
+
+If the predicate check succeeds, append one line to `<repo-key-dir>/promotion-runs.log`:
 
 ```
 <ISO8601> predicate=<met|unmet> retros=<n> lifecycle=<0|1> decay=<0|1>
 ```
 
-If the predicate is unmet, this is a dormant run — the log line IS the run's
-artifact. No branch, no PR, no gate chain. A dormant stop is a correct,
-successful no-op, not a failure: run `RR finish no_drift` (emits `run_ok`, so a
-last-marker reading of the log is green). STOP here.
+If the predicate is unmet, the run is dormant. The log line is the artifact.
+Do not make a branch or PR, or run the gate sequence.
+Run `RR finish no_drift`. It writes `run_ok`, so the last-marker rule reports success. Stop here.
 
-If the predicate is met, continue to §2. The standing `run_incomplete` row from
-`begin` is the fail-safe in-progress marker for the entire met-path — mining,
-drafting AND delivery: any death anywhere after met-determination leaves
-`abort=incomplete-run` as the last terminal marker, so the log records failure
-regardless of which step it died in.
+If the predicate is met, continue to §2. The `run_incomplete` row from `begin` applies to mining, drafting, and publication.
+If the run ends before one of these steps finishes, `abort=incomplete-run` stays as the last terminal marker.
 
 ## 2. Mining
 
-If the predicate is met, read all `retro.json` files under
-`<repo-key-dir>/*/retro.json` plus the `candidates` list from the
-`lessons.py ... predicate` output of §1 (the typed standing orders; the
-generated `standing-orders.md` is only a view of them).
-Preserve each candidate's `memory` metadata with its revision, body, supports and expiry.
-A conditional or condition-expiring Note returns `learning_conditional_use_unsupported` and is excluded from promotion.
+If the predicate is met, read all `retro.json` files at `<repo-key-dir>/*/retro.json`.
+Also read the typed `candidates` list from `lessons.py ... predicate` in §1. The generated `standing-orders.md` is only a view.
+
+Keep each candidate's `memory` metadata with revision, body, source records, and expiry.
+A conditional or condition-expiring Note gives `learning_conditional_use_unsupported`. Do not promote it.
 Do not turn an unresolved free-text condition into unconditional guidance.
-Candidates carry current, live, verified owner-cited lesson text from Muninn. Retros lacking complete owned sources
-cannot inflate the graduation count; free-text notes cannot substitute for typed recurrence fields.
-Select ONLY failure modes that:
 
-- recurred **>= 2** times, and
-- across **>= 2** distinct `session_id`s, and
-- whose lesson is **repo-agnostic** — it would apply to any repo running the
-  agentic-loop skill, not just this one.
+Candidates have current, live, verified owner-cited lesson text from Muninn.
+Retros without full owned sources do not increase the graduation count. Free-text notes cannot replace typed recurrence fields.
+Select problems only if all these conditions hold:
 
-Reject repo-specific lessons even if they meet the recurrence bar — they
-stay in the typed standing orders (`scope: repo`), they do not get promoted.
-`lessons.py predicate` already applies the recurrence, distinct-session and
-`scope: agnostic` bars; the repo-agnostic judgement is confirmed here.
+- They recurred **>= 2** times.
+- They recurred across **>= 2** different `session_id`s.
+- The lesson applies across repositories that use the agentic-loop skill.
+
+Do not promote lessons for one repository, regardless of recurrence. They stay in the typed records with `scope: repo`.
+`lessons.py predicate` checks recurrence, different sessions, and `scope: agnostic`.
+Check here that the lesson actually applies across repositories.
 
 ## 3. Drafting
 
-For each selected lesson, append one entry to `learned-failure-modes.md`
-under `## Promoted lessons`, containing:
+For each selected lesson, append one entry to `learned-failure-modes.md` in `## Promoted lessons`. Give these fields:
 
-- **Failure mode** — what went wrong.
-- **Lesson** — stated as an imperative.
-- **Evidence** — the contributing session ids and the recurrence count.
+- **`Failure mode`** — what went incorrect.
+- **Lesson** — write it as an imperative.
+- **`Evidence`** — the contributing session IDs and recurrence count.
 - **Promotion date** — ISO8601.
 
 ## 4. Delivery — full gate chain, manifest-locked
 
-Run the stages in this order; `RR stage NAME` and `RR run-gate STAGE -- ARGV`
-enforce it (a call out of order aborts the run: `stage_out_of_order`).
+Use the sequence below. `RR stage NAME` and `RR run-gate STAGE -- ARGV` check it.
+A step out of sequence aborts the run with `stage_out_of_order`.
 
-1. `fetch_branch`: fetch `origin/main`, branch off the freshly-fetched tip,
-   then `RR stage fetch_branch` (records the branch for cleanup).
-2. `evals_frozen`: invoke `$coderails-codex:task-evals` with scope `pr` and
-   freeze it — BEFORE making the edit — then `RR stage evals_frozen`.
-3. `edit_made`: make the edit (the append from step 3, above), then **commit
-   it** — `git add skills/agentic-loop/learned-failure-modes.md` and commit —
-   then `RR stage edit_made`. The manifest check is a **commit-range** diff: it
-   compares two commits, so it cannot see an uncommitted working-tree edit.
-   Skip the commit and the range is empty, the one-path check fails, and the
-   run aborts every time. Stage the ONE target path by name, never
-   `git add -A`: a stray would otherwise be swept into the same commit.
-4. `manifest_check`: `RR stage manifest_check`. It runs
-   `diff_manifest.py --policy policy/retro-promotion.policy.json` over
-   `origin/main...HEAD` (three-dot, with rename detection). The policy allows
-   exactly one path, modified (`M`):
-   `skills/agentic-loop/learned-failure-modes.md`. A second path
-   (`too_many_paths`), a rename or copy from any source, a deletion, or an
-   addition of any other file (`status_not_allowed`, `out_of_manifest`) is an
-   **ABORT WITH CLEANUP**: `run_abort` with that reason code. **ABORT, never
-   warn-and-continue.** Three-dot because the base of a two-dot diff moves when
-   a sibling PR merges mid-run; rename detection because
-   `git mv scripts/gate.sh skills/agentic-loop/learned-failure-modes.md` would
-   otherwise look like the permitted file.
+1. `fetch_branch`: Fetch `origin/main`. Make the branch from that fetched head.
+   Run `RR stage fetch_branch` to record the branch for cleanup.
+2. `evals_frozen`: Invoke `$coderails-codex:task-evals` with scope `pr` and freeze it before you edit.
+   Then run `RR stage evals_frozen`.
+3. `edit_made`: Append the entry from Step 3. Use `git add skills/agentic-loop/learned-failure-modes.md` and commit it.
+   Then run `RR stage edit_made`.
 
-   **What this check does NOT catch, stated plainly:** it is a PATH check, not
-   a CONTENT check. A commit that legitimately modifies only
-   `learned-failure-modes.md`, but fills it with something other than a mined
-   lesson, is a lone `M` of the permitted path and PASSES here. That residual
-   is held by the mining rules in section 2 and by the review/eval gates in
-   steps 6-8 — not by this step. No path-based manifest can close it.
+   The manifest check compares two commits. It cannot see an uncommitted working-tree edit.
+   Without the commit, the range is empty and the one-path check aborts the run.
+   Add only the named path to the Git index. Do not use `git add -A`, which can add unrelated changes.
+
+4. `manifest_check`: Run `RR stage manifest_check`.
+   It runs `diff_manifest.py --policy policy/retro-promotion.policy.json` against `origin/main...HEAD`.
+   The policy permits only one path with status `M`: `skills/agentic-loop/learned-failure-modes.md`.
+
+   A second path gives `too_many_paths`. If a file is renamed, copied, removed, or added, the check gives `status_not_allowed` or `out_of_manifest`.
+   A violation ends the run with `run_abort`, the applicable code, and cleanup. **Abort without continuing.**
+
+   The three-dot diff avoids a moving two-dot base when a sibling PR merges during the run.
+   Rename detection shows the source in `git mv scripts/gate.sh skills/agentic-loop/learned-failure-modes.md`.
+
+   **This check looks only at paths.** An `M` for `learned-failure-modes.md` can satisfy it with content other than a mined lesson.
+   The mining rules in section 2 and the inspection and eval gates in steps 6–8 check the content.
+   A path-based manifest cannot check it.
+
 5. `push`: `RR run-gate push -- python3 "$SKILL_DIR/../../scripts/push.py"`.
-6. `review`: spawn the installed `spec-reviewer` custom agent to review the
-   current PR head against the mined evidence and one-file manifest (wait for
-   it and close it), then `RR stage review`.
+6. `review`: Start the installed `spec-reviewer` custom agent. It examines the current PR head against the mined records and one-file manifest.
+   Wait for it and close it. Then run `RR stage review`.
 7. `post_review`: `RR run-gate post_review -- python3 "$SKILL_DIR/../../scripts/post_review.py" post <PR#> --summary <file>`.
 8. `post_evals`: `RR run-gate post_evals -- python3 "$SKILL_DIR/../../scripts/post_evals.py" post <PR#> <evals.json>`.
-9. `merge`: `RR run-gate merge -- python3 "$SKILL_DIR/../../scripts/merge.py" <PR#>`,
-   then `RR finish ok` — the ONLY point that emits `run_ok` for a delivery run,
-   after the `merge` stage row.
+9. `merge`: `RR run-gate merge -- python3 "$SKILL_DIR/../../scripts/merge.py" <PR#>`.
+   Then run `RR finish ok`. Only this command writes `run_ok` for a publication run, after the `merge` row.
 
-`run-gate` exits non-zero when a gate fails and the PR is still open: it
-records `run_refused` for that gate, cleans up and never emits `run_ok`.
-For merge, the runner checks the exact PR and head after the command. A
-confirmed merge can advance despite a CLI error; an unknown result stays red
-and blocks cleanup. A merged PR is never closed or logged as an abort. Never
-wait, poll or retry for a gate, and never invent a marker (`RR abort CODE` /
-`RR refuse GATE` accept only the spec's closed reason codes). Cleanup runs once,
-in code, with `git` and `gh` only: close the PR and delete the current local
-branch only while still on the branch recorded at `fetch_branch`. The remote
-branch is left intact.
+`run-gate` exits non-zero if a gate does not succeed and the PR stays open.
+It writes `run_refused` for that gate and runs cleanup. It does not write `run_ok`.
+For merge, it checks the named PR and head after the command.
+A confirmed merge can continue despite a CLI error. An unknown result stays red and blocks cleanup.
+
+Do not close a merged PR or log it as an abort.
+Do not wait, poll, or try again for a gate. Do not invent a marker.
+`RR abort CODE` and `RR refuse GATE` accept only codes listed in the spec.
+
+The code runs cleanup one time with only `git` and `gh`.
+It closes an open PR. It removes the current local branch only if it is the branch recorded at `fetch_branch`.
+It keeps the remote branch.
 
 ## 5. Prohibitions
 
-This pipeline writes exactly one repo file.
-It never edits SKILL.md, hook scripts, gate logic, its own skill definition, external scheduler configuration, or the graduation predicate.
-It never relaxes, reorders, or skips a gate.
-It merges only via `$coderails-codex:merge`, never raw `gh pr merge`, so the package merge script's artifact checks remain in force.
+This pipeline writes only the named repository file.
+Do not edit SKILL.md, hook scripts, gate logic, this skill definition, external scheduler configuration, or the graduation predicate.
+Do not relax, change the sequence of, or skip gates.
+Merge only through `$coderails-codex:merge` so the package-local script checks the artifacts. Do not use raw `gh pr merge`.

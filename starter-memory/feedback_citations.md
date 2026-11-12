@@ -4,8 +4,9 @@ description: Source-cited claims are verifiable; bare assertions are not — for
 type: feedback
 originSessionId: 445479ca-d469-4749-b261-83394794c9a4
 ---
-Every non-trivial claim cites its source — `file:line`, tool output, exact quote, or git reference — or labels itself `(inferred)`. No bare assertions about code, files, behavior, or external state.
 
-**Why:** Bare assertions are unverifiable by the user and indistinguishable from hallucination. Cited claims either hold up under check or fail visibly. The user requested this on 2026-05-01 as the core mechanic for trustable output.
+For each substantive claim, cite its source or label it `(inferred)`. Use a `file:line` citation, tool output, verbatim quote, or Git identifier. Give that basis for claims about code, files, behavior, or external conditions.
 
-**How to apply:** Any response asserting something about the codebase, files, function behavior, API shape, or external state. Acceptable forms: `path/file.py:42`, "tool returned X", quoted user statement, or explicit `(inferred)` tag.
+**Why**. The user cannot check claims with no cited basis. With a citation, the user can check the claim and find errors. On 2026-05-01 the user identified this rule as central to results they can trust.
+
+**When to apply**. Use this rule in replies about code, files, function behavior, API shape, or external conditions. Examples are `path/file.py:42`, tool output, a statement from the user, or an explicit `(inferred)` tag.
