@@ -1,163 +1,129 @@
 # Execution graph — stable contract
 
-Detail-carrier for [SKILL.md](SKILL.md)'s "The phases" section. This is a contract spec, not a
-phase-by-phase instruction — consult it whenever you need a node's exact prerequisites, readiness
-predicate, or skip condition; the phase prose in SKILL.md covers what to *do*, this file covers
-what makes a node *ready*.
+Use this file with "The phases" in [SKILL.md](SKILL.md).
+It gives each node’s prerequisites, readiness predicate, and skip condition.
+For the steps to do, use the phase instructions in SKILL.md.
 
-Before dispatching any candidate node, run the read-only readiness query
-`python3 "${PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.py" <path-to-progress.json> <node-id>`,
-where `PLUGIN_ROOT` resolves as follows. Prefer `${CLAUDE_PLUGIN_ROOT}` when
-it is set in your shell — it is substituted in command frontmatter and in
-`hooks.json`'s own hook command strings, for both a directory-marketplace and
-a packaged install, but it is normally unset in an orchestrator-issued Bash
-call, since it is not substituted into your own Bash tool calls. Before
-dispatching against whatever it resolves to, confirm the script actually
-exists at that path (e.g. `[ -f "$PLUGIN_ROOT/hooks/scripts/lib/graph_readiness.py" ]`)
-— a packaged install's cache copy can predate this script's introduction. The
-script prints JSON `{"ready": bool, "reason_code": ...}`; a missing script, or
-output that is not that JSON, is a resolution failure and is distinct from a
-typed not-ready verdict. This script is an orchestrator preflight and is advisory by
-design: the enforcing check is `begin-wave`, which opens only core-ready nodes
-whatever this script says. If the file is
-missing, stop and report that PLUGIN_ROOT resolved to a directory without this
-script — do not dispatch. When `${CLAUDE_PLUGIN_ROOT}` is unset, do not
-construct or guess a path — reuse the plugin root you already have from this
-session's own rendered context instead: the currently-loaded skill's own
-"Base directory for this skill:" line, or a plugin-root path already
-substituted into other rendered skill/template text this session (e.g. a
-`source` command from a `/coderails:*` slash command). Never `git rev-parse
---show-toplevel` of the invoking repo — that's the *user's* project, not the
-plugin's location. Do not hand-construct a versioned plugin cache path (e.g.
-guessing a version under `~/.claude/plugins/cache/`) — if `${CLAUDE_PLUGIN_ROOT}`
-itself resolves to a cache copy, that's the harness's answer and the
-file-existence check above is what catches a stale one, not a blanket ban on
-the directory. If neither `${CLAUDE_PLUGIN_ROOT}` nor a plugin-root path is
-available anywhere in this session's rendered context, stop — report that the
-plugin root is unresolvable and do not dispatch the node.
-Dispatch only nodes it reports `"ready": true` for (exit 0 iff ready). Its
-`reason_code` is exactly one of `ready`, `predecessor_pending` (a real
-non-terminal predecessor), `node_unknown` (the node is not in the graph),
-`node_not_pending` (already running or terminal), `graph_blocked` (an active wave or hard stop),
-`join_not_dispatchable` (joins release automatically), or
-`state_unreadable` (missing or malformed `progress.json`); treat each non-ready
-code as a different next step, never as one undifferentiated "blocked". Conversely, a node with no recorded incoming edges is vacuously
-`ready` — register the candidate's node and edges before querying, not after.
-Run ready independent nodes in one wave, but preserve every listed dependency.
-The orchestrator is the only writer of `progress.json`: collect a wave's results, then do one
-read-modify-write before releasing its join. Inside an authorised loop, the
-`U*` lane below repeats per work-unit.
+Before starting a candidate node, run the read-only query
+`python3 "${PLUGIN_ROOT}/hooks/scripts/lib/graph_readiness.py" <path-to-progress.json> <node-id>`.
 
-**Resolving and recording a wave — the native Python CLI.** Use
-`python3 "${PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py"` with the same
-verified plugin-root resolution above. The CLI uses the provider's own lock,
-transcript parser and independently installed pure graph semantics.
+If `${CLAUDE_PLUGIN_ROOT}` is set in the shell, use it as `PLUGIN_ROOT`.
+The harness fills it in for command frontmatter and commands in `hooks.json`, for a directory marketplace or a packaged install.
+The harness usually does not set it in the orchestrator’s Bash calls.
 
-1. Run `plan <path-to-progress.json>` before dispatch. It returns a JSON array
-   of instruction sources. A source with `unresolved:true` must be resolved
-   before executing that node. Joins are automatic and are never Agent calls.
-   Instruction sources, roles and `skip_when_met` come from the machine-readable
-   spec (`packages/graph-semantics/graph-spec.yaml`, thresholds in `policy.yaml`):
-   a node whose `skip_when_met` is `true` (for example `S2.7a` below the
-   `design_doc_min_units` threshold) is recorded as skipped, not dispatched. Every
-   load refuses a graph that omits an edge the spec requires between two nodes it
-   holds (`spec_edge_missing`). `graph.py instantiate <state> --session <s> --loop-id <l>
-   [--profile units-only|full] [--unit <n>]...` builds the spec's graph into an
-   empty started loop and stamps `graph.spec_sha256`; a stamped graph also
-   rejects unknown nodes, missing spec nodes and a changed spec.
-2. Run `begin-wave <path-to-progress.json>` immediately before dispatch. It
-   records exactly the ready nodes as running, captures the native transcript
-   cursor, stores one single-use dispatch record per node in `graph.dispatches`
-   (its closed contract: role, model_role, base_ref, worktree, manifest, source_manifest_sha256,
-   source_head_sha, publication_command, disposition, lessons, lessons_sha256, write_scope, skip_phases, scope, required_context) and returns each dispatch's
-   `dispatch_id`, `prompt_prefix` and `prompt_sections`. A failure means no
-   dispatch is authorized; a state older than `state_minor` 3 must be converted
-   first (`graph.py convert`, which refuses while a wave is open).
-3. Paste, verbatim, the returned `prompt_prefix` as the first prompt line, then
-   `prompt_sections`, then the instruction body from the resolved source plus
-   the task brief. User restrictions take precedence. The envelope is
-   `CODERAILS_GRAPH_DISPATCH={"dispatch_id":"disp_...","envelope_version":2,"loop_id":"<loop>","node_id":"U3[1]","revision":4,"session_id":"<session>","wave_id":"wave-4"}`.
-   `loop_dispatch_guard.py` looks the id up in `graph.dispatches`, cross-checks
-   every ownership field against the record and state, recomputes the sections
-   digest from the stored contract, requires the rendered sections verbatim in
-   the prompt and consumes the id (a second use is `dispatch_replayed`). It then
-   asserts the role: dispatch as `subagent_type: coderails:<role>` for the
-   node's contract role. Roles that run read-only scouts (profiles `guarded_agents`:
-   preflight-scout, design-scout, disposition-scout, source-auditor,
-   deploy-safety-reviewer) accept only that typed agent; other roles also accept
-   `general-purpose`; anything else is `role_mismatch`. Resolution is a correct
-   `begin-wave` paste, never hand-edited ownership or a substituted role. A
-   unit worker's `publication_command` names its concrete unit and resolved
-   `progress.json`; the guard checks that command against the active state
-   path. For a first push on a stacked branch, register the parent with
-   `add-unit --base-branch <parent>`; later pushes use the live PR base.
-   The push script validates those flags, the registered manifest, both paths
-   of any rename in the PR diff, and any recorded worktree before transport.
-   Register a new source manifest with `add-unit --manifest <glob> --worktree <absolute-checkout>`.
-   The assigned checkout must be a clean Git root with a committed HEAD. Registration
-   stores its manifest binding; dispatch also binds its current HEAD. The existing
-   `assign-worktree` operation applies the same checks to a pending unit.
-   Both native and driver dispatch adapters read `lessons.py --dir <repo-key-dir>
-   --session <owner> query --format contract` before taking the progress lock.
-   They put the typed rows and their digest in the existing contract and recheck the
-   snapshot before authorization. A missing, refusing, or stale lesson result refuses
-   dispatch. An explicit `memory.backend: off` keeps the eligible local ledger rows;
-   that result is empty only when no active eligible orders exist.
-   Historical v2 records retain
-   their original rendered sections and digest. A plugin agent that is not
-   installed in the session cannot run a guarded
-   scout, and the sandboxed Bash launcher carries no agent type (handoff H3).
-4. Collect every node's result before recording. Run
-   `record-wave <path-to-progress.json> '{"wave_id":"<wave>","results":{"<node>":{"outcome":"done","evidence":"<artifact result>"}}}'`
-   with exactly the active node set. Evidence supplied by the caller is prose;
-   do not insert native identities, including nested or serialized copies.
-   The adapter derives them from actual parent Agent requests/results, child
-   transcripts, role attribution and harness terminal notifications. Every
-   child in a fan-out must qualify. Worker claims and echoed notification text
-   cannot establish completion.
-   When a design fork does not exist, record `S2.5` as `skipped` with
-   `no_design_fork: <reason>`. When no existing path is retired, use
-   `no_retired_path: <reason>` for `S2.6`. Each record gets a typed skip reference
-   for this wave. It cannot replace a prior scout attempt. A `non_independent`
-   fallback needs a prior refused scout call, an exact assistant request naming
-   this loop and retry, and the next direct user reply `approve`. The native
-   approval check refuses a missing, changed or foreign reply.
-5. The sole locked read/validate/write applies the whole wave, retry bounds and
-   every newly satisfied all-input join. Partial, extra, stale or foreign results
-   leave state unchanged. Never edit joins or increment retry counts yourself.
+Check that the script is available with `[ -f "$PLUGIN_ROOT/hooks/scripts/lib/graph_readiness.py" ]`.
+A packaged install can have a cache copy from before this script.
+The query prints `{"ready": bool, "reason_code": ...}`.
+If you have no script or the output has a different shape, report a path or query problem and stop.
+Report that result as a query problem. Use a typed not-ready verdict only if the JSON has the specified shape.
 
-**Eval ownership differs from dispatch ownership.** Frozen dispatch evals bind
-`session_id` + `loop_id` only. Their frozen revision can precede the active graph
-revision: beginning a wave must not invalidate the suite. The dispatch envelope
-still binds the exact current revision, wave and node. Nonempty `work_units`
-requires valid frozen loop evals before implementation. Completion requires the
-final revision's neutral grading and identity-bound completion artifacts.
+The query gives advice. The `begin-wave` check opens only core-ready nodes.
 
-**Failure and replacement.** A `failed` wave result increments the bounded
-retry counter. In a FULL graph, `U4`, `U4b-review`, and `U4b-merge-gate` become
-blocked until `record-repair <state> --session <session> --unit <unit>
---failed-node <node> --kind source|artifact|check --identity <distinct-id>
---diagnosis <reason>` records a diagnosed repair. That transition requeues `U4`
-and downstream verification. Other nodes return to pending; every node
-hard-stops at its retry limit.
-A `stale` result also requires `stale_check: {"checked":true,"method":"<artifact check>","result":"<observation>"}`
-in that same result. Idle alone is insufficient. After checking the actual
-artifact, run `respawn-stale <state> --session <session> --node <node> --reason <reason>`
-for a new generation; preserve all prior native evidence. The provider supplies
-fresh worker identity on the next dispatch. A fake generation or reused child
-cannot satisfy completion.
+If `${CLAUDE_PLUGIN_ROOT}` is unset, use a plugin-root path from this session’s rendered context.
+For example, read "Base directory for this skill:" or a rendered `source` command from a `/coderails:*` slash command.
+Do not use `git rev-parse --show-toplevel` on the user’s project to find the plugin.
+Do not guess a version path in `~/.claude/plugins/cache/`.
+If the harness gives a cache path, use the file check above to check that copy.
+If no plugin path is available, report it and do not start the node.
 
-**Sequential tail and joins.** `S9-wiki -> S9-docs` remains a plain dependency:
-record the wiki outcome before a new plan can dispatch docs. `J12-all-units`
-is never dispatched; recording its final successful input releases it in the
-same locked write. Every unit's merge-gate node must remain an explicit input.
+Start only nodes with `"ready": true`. Exit 0 means `ready`.
+The `reason_code` can be one of these values:
 
-Node IDs are stable documentation identifiers. `S*` nodes run once; `U<i>*`
-nodes run once per work-unit `i`; `J*` nodes are explicit joins. A skipped node
-is still recorded as `skipped: <predicate>` in loop state; it is not a failed
-node and cannot satisfy a prerequisite by omission.
+- `ready`: The query allows the node to start.
+- `predecessor_pending`: A predecessor is not terminal.
+- `node_unknown`: The graph does not have this node.
+- `node_not_pending`: The node is `running` or terminal.
+- `graph_blocked`: An active wave or hard stop blocks the graph.
+- `join_not_dispatchable`: The graph releases joins automatically.
+- `state_unreadable`: There is no `progress.json`, or its format is incorrect.
 
-<!-- BEGIN GENERATED graph-spec:diagram -->
+Use the next step for the code you get. Do not report all results as "blocked".
+A node without recorded incoming edges gives `ready`.
+Add the candidate node and its edges before the query.
+Run nodes with `ready` in one wave if they have no dependencies on each other.
+Keep all listed dependencies.
+
+The orchestrator is the only writer of `progress.json`.
+Collect the wave results, then do one read, change, and write before the join releases.
+In a loop with user authorization, use the `U*` lane for each work unit.
+
+**Use the native Python CLI for waves.**
+Use `python3 "${PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py"` with the plugin-root rules above.
+The CLI uses the provider’s own lock, transcript parser, and install of the pure graph semantics.
+
+1. Run `plan <path-to-progress.json>` before starting nodes. It gives a JSON array of instruction sources. If a source has `unresolved:true`, resolve it first. The graph releases joins automatically without Agent calls.
+
+   The spec `packages/graph-semantics/graph-spec.yaml` supplies instruction sources, roles, and `skip_when_met`. Thresholds are in `policy.yaml`. If a node’s `skip_when_met` is `true`, record a skip and do not start it. For example, skip `S2.7a` below `design_doc_min_units`. Each load checks for a spec edge between nodes in the graph. A missing edge gives `spec_edge_missing`.
+
+   Run `graph.py instantiate <state> --session <s> --loop-id <l> [--profile units-only|full] [--unit <n>]...` to build the spec graph in an empty started loop. It records `graph.spec_sha256`. A graph with that stamp also refuses unknown nodes, missing spec nodes, and a changed spec.
+
+2. Run `begin-wave <path-to-progress.json>` immediately before starting workers. It sets `running` only for nodes that satisfy the readiness predicate and captures the native transcript cursor. It writes one single-use record for each node in `graph.dispatches`.
+
+   The closed contract has these fields: `role`, `model_role`, `base_ref`, `worktree`, `manifest`, `source_manifest_sha256`, and `source_head_sha`. It also has `publication_command`, `disposition`, `lessons`, `lessons_sha256`, `write_scope`, `skip_phases`, `scope`, and `required_context`.
+
+   The command gives each `dispatch_id`, `prompt_prefix`, and `prompt_sections`. If the command fails, do not start the worker. If `state_minor` is below 3, run `graph.py convert` first. It refuses if a wave is open.
+
+3. Copy `prompt_prefix` verbatim onto the first prompt line. Then copy `prompt_sections`, the resolved source’s instruction body, and the task brief. Follow the user’s restrictions first. The envelope is `CODERAILS_GRAPH_DISPATCH={"dispatch_id":"disp_...","envelope_version":2,"loop_id":"<loop>","node_id":"U3[1]","revision":4,"session_id":"<session>","wave_id":"wave-4"}`.
+
+   The `loop_dispatch_guard.py` hook looks up the ID in `graph.dispatches`. It compares each ownership field with the record and graph data. It calculates the sections digest from the saved contract. It checks for the verbatim rendered sections in the prompt. It consumes the ID and refuses a second use with `dispatch_replayed`.
+
+   Use `subagent_type: coderails:<role>` for the node’s contract role. The read-only scout roles in `guarded_agents` accept only that type: preflight-scout, design-scout, disposition-scout, source-auditor, and deploy-safety-reviewer. Other roles also accept `general-purpose`. Other values give `role_mismatch`. If refused, copy the correct fields from `begin-wave`. Do not edit ownership or change the role by hand.
+
+   The unit’s `publication_command` names the unit and resolved `progress.json`. The guard compares the command with the active path. For the first push of a stacked branch, use `add-unit --base-branch <parent>`. Subsequent pushes use the live PR base. Before transport, the push script checks the flags, registered manifest, two paths in a PR rename, and recorded worktree.
+
+   Use `add-unit --manifest <glob> --worktree <absolute-checkout>` for a new source manifest. The checkout must be a clean Git root with a committed HEAD. Registration saves the manifest binding. The dispatch record binds its contract to the current HEAD. The `assign-worktree` command applies the same checks to a pending unit.
+
+   The native and driver adapters run `lessons.py --dir <repo-key-dir> --session <owner> query --format contract` before they lock `progress.json`. They put the typed rows and digest in the contract and check the snapshot again before authorization. If there is no result or the result is refused or stale, the adapters refuse to start a worker. With explicit `memory.backend: off`, they keep eligible local ledger rows. That result is empty only if no active record qualifies.
+
+   Historical v2 records keep their initial rendered sections and digest. The plugin agent must be installed in this session for a guarded scout. The sandboxed Bash launcher has no agent type (handoff H3).
+
+4. Collect all results before recording. Run `record-wave <path-to-progress.json> '{"wave_id":"<wave>","results":{"<node>":{"outcome":"done","evidence":"<artifact result>"}}}'` with the active node set only. Use prose for the caller’s `evidence`. Do not add native IDs to the result, its nested data, or its serialized data.
+
+   The adapter gets IDs from the parent Agent calls and results, child transcripts, role attribution, and harness terminal notifications. Each child in a fan-out must qualify. A worker claim or echoed notification cannot show that the work ended.
+
+   If there is no design fork, record `S2.5` as `skipped` with `no_design_fork: <reason>`. If no path retires, use `no_retired_path: <reason>` for `S2.6`. Each record gets a typed skip citation for this wave. It cannot replace a prior scout try.
+
+   For a `non_independent` fallback, use the prior refused scout call. Send the user an explicit approval question that names the loop and retry. The next direct user reply must be `approve`. The native approval check refuses a missing, changed, or unrelated reply.
+
+5. One locked read, validation, and write applies the full wave, retry limits, and newly satisfied all-input joins. The graph data does not change for a missing, unexpected, stale, or mismatched result. Do not edit joins or increase retry counts by hand.
+
+**Eval and dispatch ownership.**
+Frozen dispatch evals bind only `session_id` and `loop_id`.
+Their frozen revision can be earlier than the active graph revision.
+The start of a wave does not invalidate the suite.
+The dispatch envelope binds the active revision, wave, and node.
+
+If `work_units` is nonempty, use frozen loop evals that pass validation before implementation.
+To complete the graph, use neutral grading for the last revision and artifacts bound to the graph identity.
+
+**Retry and replacement.**
+A `failed` wave result increases the bounded retry counter.
+In a FULL graph, `U4`, `U4b-review`, and `U4b-merge-gate` become blocked.
+
+To record the repair, use `record-repair <state> --session <session> --unit <unit> --failed-node <node> --kind source|artifact|check --identity <distinct-id> --diagnosis <reason>`.
+This requeues `U4` and its dependent verification nodes.
+Other nodes go to pending. Each node hard-stops at its retry limit.
+
+For a `stale` result, include `stale_check: {"checked":true,"method":"<artifact check>","result":"<observation>"}` in the same result.
+An idle notice alone does not satisfy this check.
+After you check the artifact, run `respawn-stale <state> --session <session> --node <node> --reason <reason>` for a new generation.
+Keep the previous native records.
+The provider gives the new worker identity when it starts.
+A fake generation or reused child cannot complete the graph.
+
+**Wiki, docs, and joins.**
+For `S9-wiki -> S9-docs`, record the wiki result before a new plan can start docs.
+Do not start a worker for `J12-all-units`.
+The graph releases that join in the same locked write that records its last satisfactory input.
+Keep each unit’s merge-gate node as an explicit input.
+
+The node IDs are stable.
+An `S*` node runs one time. A `U<i>*` node runs for work unit `i`. A `J*` node is a join.
+
+Record a skipped node as `skipped: <predicate>` in the graph data.
+The record satisfies the prerequisite as a skip. Include that record.
+
+<!-- START GENERATED graph-spec:diagram -->
 ```mermaid
 flowchart TD
     n_S_2["S-2"]
@@ -227,62 +193,64 @@ flowchart TD
 ```
 <!-- END GENERATED graph-spec:diagram -->
 
-The diagram and the table below are generated from
-`packages/graph-semantics/graph-spec.yaml` and `policy.yaml` by
-`python3 scripts/gen_graph_docs.py` (`--check` fails the test run on drift);
-edit the spec, never the generated regions. The diagram is a shape guide; the
-table is authoritative where a line would be ambiguous.
+The command `python3 scripts/gen_graph_docs.py` makes the diagram and table from `packages/graph-semantics/graph-spec.yaml` and `policy.yaml`.
+The `--check` option fails the test if they are different from those sources.
+Edit the spec to change them.
+Use the diagram to see the graph shape and the table for each dependency.
 
-<!-- BEGIN GENERATED graph-spec:table -->
-| ID | Kind | Node / true prerequisites | Ready when | Conditional skip or join |
+<!-- START GENERATED graph-spec:table -->
+| ID | Type | Node / prerequisites | Conditions to satisfy | Conditional skip or join |
 |---|---|---|---|---|
-| `S-2` | `node` | Start state (`graph.py start`) | path helper returns the session-owned state path | never skipped |
-| `S-1` | `node` | Improve prompt | prompt is adopted, revised, or explicit opt-out is recorded | full-autonomous auto-adopts; otherwise one bounded input point |
-| `S0` | `node` | Read envelope | envelope class and stop conditions are recorded | never skipped |
-| `S0.4` | `node` | Model-cost notice | notice emitted | never a gate; no model switch is performed by the orchestrator |
-| `S0.5` | `node` | Operating rules | confidence, verification, and `LOOP-STOP` rules are active | never skipped |
+| `S-2` | `node` | Start the loop with `graph.py start`. | The path helper gives the session its loop path. | Do not skip. |
+| `S-1` | `node` | Revise the prompt. | The workflow records the prompt selection. Accept the proposed prompt, revise it, or record an opt-out. | Full autonomy accepts the proposed prompt automatically. In other modes, get user input at one step. |
+| `S0` | `node` | Read envelope | envelope class and stop conditions are recorded | Do not skip. |
+| `S0.4` | `node` | Model-cost notice | notice emitted | This notice does not block the workflow. The orchestrator does not change the model. |
+| `S0.5` | `node` | Operating rules | confidence, verification, and `LOOP-STOP` rules are active | Do not skip. |
 | `S1` | `node` | Plan | work-unit list, dependencies, and success criteria exist | Phase 1 confirmation may be `awaiting-input` |
-| `S2` | `node` | Plan | pre-flight agent result, wiki/theme intake, retro lessons, and clean-base check exist | never spawn implementation before this node |
-| `S2.5` | `node` | `S2` | design scout returned a recommendation and flip-condition | skip when no unresolved design fork |
-| `S2.6` | `node` | `S2` | disposition scout returned a result for every retirement unit | skip when no named existing path is retired |
-| `J2` | `join` | `S2.5` and `S2.6` | all triggered scouts returned; orchestrator validated and absorbed both results in one state write | skipped branches contribute an explicit skip record |
+| `S2` | `node` | Plan | pre-flight agent result, wiki/theme intake, retro lessons, and clean-base check exist | Start implementation only after this node. |
+| `S2.5` | `node` | `S2` | The scout gives a recommendation and the condition that would change it. | skip when no unresolved design fork |
+| `S2.6` | `node` | `S2` | The scout gives a result for each retirement unit. | skip when no named existing path is retired |
+| `J2` | `join` | `S2.5` and `S2.6` | All applicable scouts give results. The orchestrator checks them and records them in one write. | skipped branches contribute an explicit skip record |
 | `S2.7a` | `node` | `J2` | durable `spec.md` exists | only if `work_units >= 3` or a cross-unit dependency exists |
-| `S2.7b` | `node` | `S2.7a` | durable `plan.md` exists and matches the work-unit list | same predicate as `S2.7a`; `S2.7b` is sequential after it |
-| `S2.7c` | `node` | `S2` plus authorising prompt | loop-scope evals are frozen before build | required for any `work_units >= 1` loop or an irreversible-surface trigger; NOT gated by `S2.7a`'s ≥3-work-unit threshold |
-| `S2.7d[i]` | `node` | `S2` plus each unit definition | PR-scope evals are frozen before that unit builds | skip only for a unit with no PR; required before its merge gate |
-| `S2.7e` | `node` | `S2` plus executable-surface decision | blind `proof.json` exists, or explicit no-executable disposition is recorded | required for every executable loop; independent of `S2.7a/b` |
-| `S2.8` | `node` | `S2` and `S2.7b` when triggered | every build unit has one recorded model role | may run beside independent evidence branches; never releases a unit without its required inputs |
-| `J2.8` | `join` | `S2.8`, plus `S2.7d[i]`/`S2.7e` where required | all inputs for the first eligible unit are present | later units wait on their own true prerequisites |
-| `U3[i]` | `node` | `J2.8`, unit dependencies, and required eval/proof inputs | worker produced the unit's committed artifact/OPEN PR terminal state | units with `blockedBy` dependencies wait; independent units may run in waves |
-| `U4[i]` | `node` | `U3[i]` | artifact, worktree, PR, and worker report were checked by the orchestrator (a `NEEDS_DECISION`/`OUTSIDE_SCOPE`/`IRREVERSIBLE_ACTION` result is validated by `record-wave` through `skills/agentic-loop/scripts/worker_status.py`, recorded in `worker_statuses` with one typed stop row, and counts as a failed attempt; the orchestrator surfaces it to the human) | idle is not failure; failed artifact check enters repair |
-| `U4b-review[i]` | `node` | `U4[i]` | required review Skill, security/deploy review when triggered, and SHA-bound post-review artifact exist | review findings go to `U5[i]`; no merge on a missing artifact |
-| `U5[i]` | `guard` | `U4b-review[i]` | source-of-truth premise is confirmed and diagnosis is disconfirmed | premise disproven is a hard-stop; otherwise spawn the repair worker |
-| `U5-repair[i]` | `guard` | `U5[i]` | distinct fix attempt applied and locally verified | back to `U4[i]`; at most 5 distinct attempts per failure |
-| `U6[i]` | `node` | current unit is verified and any in-scope confirmation decision is resolved | envelope permits autonomous continuation or required approval is granted | no extra ask inside the envelope |
-| `U7/8[i]` | `node` | `U6[i]` | stack-specific push/deploy tactic completed, if applicable | skip when no push/deploy surface; these phases do not add generic policy |
-| `U4b-merge-gate[i]` | `node` | `U4b-review[i]`, `U6[i]`, `U7/8[i]`, PR-scope eval, review artifact, and integrity attestation | exact-head review/eval/integrity checks and gate-time smoke pass; merge reports `MERGED` | any missing/stale/failing gate enters `U5-repair[i]` or hard-stop after retry bound |
-| `U10-respawn[i]` | `guard` | `U4[i]` artifact check shows dispatch failure/idle without artifact | new versioned worker name and fresh dispatch exist | not triggered by an idle ping alone; returns to `U4[i]` |
-| `J12-all-units` | `join` | every unit's merge gate passed | each merged PR and dependent deployment evidence is freshly rechecked | no unit may be silently omitted |
-| `G10` | `guard` | any respawn path | every replacement worker name is versioned | cross-cutting Phase 10 guard; no standalone work |
-| `G11` | `guard` | every worker dispatch and report | prompts and reports carry confidence labels | cross-cutting Phase 11 guard; no standalone work |
-| `G12` | `guard` | every artifact boundary | the orchestrator freshly rechecks the artifact before releasing a dependent node | cross-cutting Phase 12 guard; `J12-all-units` is its final aggregate join |
-| `S9-wiki` | `node` | `J12-all-units` | clustered wiki ingest and lint landed and were verified on `origin/main` | skip only when no wiki update is in scope; still record the skip |
-| `S9-docs` | `node` | `S9-wiki` | one `/sync-docs` audit completed and findings triaged | pre-existing drift is reported, not folded into scope |
-| `S13-proof` | `node` | `S9-docs` | every frozen proof command ran verbatim in the orchestrator session and passed | absent proof requires the recorded no-executable disposition |
-| `S13-retro` | `node` | `S13-proof` | Phase 13 report, cost, decisions, artifacts, eval result, standing orders, and feedback are written | never a mid-loop checkpoint |
-| `S13-complete` | `node` | `S13-retro` | final aggregate verification passes; `progress.json` is complete and `retro.json` is valid | terminal node; emits `LOOP-STOP: complete` |
+| `S2.7b` | `node` | `S2.7a` | durable `plan.md` exists and matches the work-unit list | Use the same condition as `S2.7a`. Start `S2.7b` after `S2.7a`. |
+| `S2.7c` | `node` | `S2` plus authorising prompt | loop-scope evals are frozen before build | Run if `work_units >= 1` or if an irreversible operation is in scope. The `S2.7a` minimum of 3 units does not apply here. |
+| `S2.7d[i]` | `node` | `S2` plus each unit definition | PR-scope evals are frozen before that unit builds | Skip only if the unit has no PR. Complete this step before its merge gate. |
+| `S2.7e` | `node` | `S2` plus executable-surface decision | A blind `proof.json` exists, or the record says the loop has no executable surface. | Run for each loop with an executable surface. The conditions for `S2.7a/b` do not apply here. |
+| `S2.8` | `node` | `S2` and `S2.7b` when triggered | The record has one model role for each build unit. | This node can run in parallel with branches that collect their own results. A unit must have all necessary inputs before it can start. |
+| `J2.8` | `join` | `S2.8`, plus `S2.7d[i]`/`S2.7e` where required | All inputs exist for the first eligible unit. | Each subsequent unit waits for its own prerequisites. |
+| `U3[i]` | `node` | `J2.8`, unit dependencies, and required eval/proof inputs | The worker has made the unit's committed artifact or opened its PR, as specified. | A unit with unfinished `blockedBy` dependencies waits. Units without dependencies on each other can run in waves. |
+| `U4[i]` | `node` | `U3[i]` | The orchestrator checks the artifact, worktree, PR, and worker report. For `NEEDS_DECISION`, `OUTSIDE_SCOPE`, or `IRREVERSIBLE_ACTION`, `record-wave` checks the result through `skills/agentic-loop/scripts/worker_status.py`. It records the result in `worker_statuses` with one typed stop row. This counts as one unsuccessful try. The orchestrator tells the user. | Inactivity alone does not show a problem. If the check rejects the artifact, start repair. |
+| `U4b-review[i]` | `node` | `U4[i]` | Run the mandatory `/pr-review-toolkit:review-pr` Skill. Run `security-review` and `deploy-safety` when the policy requires them. The post-review artifact must apply to the PR head SHA. | Send problems from the inspection to `U5[i]`. Merge only when the artifact exists. |
+| `U5[i]` | `guard` | `U4b-review[i]` | The source proves the premise. The check disproves the diagnosis. | If the source disproves the premise, stop. If it proves the premise, dispatch the repair worker. |
+| `U5-repair[i]` | `guard` | `U5[i]` | The worker makes a different repair and checks it locally. | Go back to `U4[i]`. For each problem, try a different repair up to 5 times. |
+| `U6[i]` | `node` | The current unit passes its checks. The user or workflow has made each applicable decision in scope. | envelope permits autonomous continuation or required approval is granted | Continue without a new approval if the envelope permits the work. |
+| `U7/8[i]` | `node` | `U6[i]` | stack-specific push/deploy tactic completed, if applicable | Skip if the unit has no push or deploy step. These phases add no general policy. |
+| `U4b-merge-gate[i]` | `node` | `U4b-review[i]`, `U6[i]`, `U7/8[i]`, the PR-scope eval, the inspection artifact, and the integrity attestation | The inspection, eval, integrity, and gate-time smoke checks pass for the PR head SHA. The merge reports `MERGED`. | If a gate has no result, gives a stale result, or fails, go to `U5-repair[i]`. Stop if the retry limit prevents repair. |
+| `U10-respawn[i]` | `guard` | The `U4[i]` artifact check shows that dispatch did not succeed or the worker has no output and no artifact. | A new versioned worker name and a new dispatch exist. | An idle ping alone does not cause a respawn. After a respawn, go back to `U4[i]`. |
+| `J12-all-units` | `join` | The merge gate passed for each unit. | Check each merged PR and its dependent deployment results again. | no unit may be silently omitted |
+| `G10` | `guard` | Each respawn path | Each replacement worker name includes a version. | Apply this guard during Phase 10. It has no work of its own. |
+| `G11` | `guard` | Each worker dispatch and report | prompts and reports carry confidence labels | Apply this guard during Phase 11. It has no work of its own. |
+| `G12` | `guard` | Each artifact boundary | the orchestrator freshly rechecks the artifact before releasing a dependent node | Apply this guard during Phase 12. `J12-all-units` is the last join for this guard. |
+| `S9-wiki` | `node` | `J12-all-units` | The grouped wiki ingest and lint changes are on `origin/main`. Check that branch for the changes. | Skip only if no wiki update is in scope. Record the skip. |
+| `S9-docs` | `node` | `S9-wiki` | One `/sync-docs` audit has run. The auditor has classified the results. | pre-existing drift is reported, not folded into scope |
+| `S13-proof` | `node` | `S9-docs` | Each frozen proof command ran without changes in the orchestrator session and passed. | If there is no proof, the record must say the loop has no executable surface. |
+| `S13-retro` | `node` | `S13-proof` | The record includes the Phase 13 report, cost, decisions, artifacts, eval result, `standing-orders.md`, and feedback. | Run at the end of the loop. |
+| `S13-complete` | `node` | `S13-retro` | The last set of checks passes. `progress.json` is complete and `retro.json` passes validation. | The graph ends here. The node gives `LOOP-STOP: complete`. |
 <!-- END GENERATED graph-spec:table -->
 
-Rows marked `guard` describe conditional procedures; `instantiate` does not create dispatchable graph nodes for them.
-An ordinary failed wave result retries its node up to its bound. A stale worker with a completed artifact check uses
-`respawn-stale` on that worker node. Review findings require repair and a fresh review before the review node can be
-recorded done; an unresolved finding cannot release its dependent merge gate.
-`S0.5`, `U4`, `U4b-review`, `U6`, and `S13-complete` carry the Phase 11/12
-confidence-label and fresh-evidence rules; they are guards on the nodes above,
-not extra work. A review finding, failing eval, smoke failure, or verification
-failure follows the conditional `U5 -> U5-repair -> U4` procedure. The diagnosed
-repair is recorded with `record-repair` and a distinct source SHA, artifact ID,
-or check ID. The machine refuses a duplicate identity and enforces the policy's
-repair bound. The node also hard-stops after five recorded failures. Independent
-failure domains may use parallel repair workers, each with its own bound, then
-join at `U4`.
+Rows marked `guard` give conditional procedures.
+The `instantiate` command does not make graph nodes for them.
+An ordinary `failed` wave result retries the node to its limit.
+After you check a stale worker’s artifact, use `respawn-stale` on its node.
+
+If a reviewer reports an issue, correct it and get a new reviewer check before recording that node as done.
+The merge gate cannot open while a reported issue is unresolved.
+Nodes `S0.5`, `U4`, `U4b-review`, `U6`, and `S13-complete` use the Phase 11 and 12 confidence labels and current check results.
+Those checks apply to the listed nodes.
+
+For a reviewer issue or an unsuccessful eval, smoke test, or verification, use `U5 -> U5-repair -> U4`.
+Use `record-repair` with the diagnosis and a different source SHA, artifact ID, or check ID.
+The graph refuses a duplicate identity and applies the policy’s repair limit.
+The node also hard-stops after five recorded unsuccessful tries.
+Use parallel repair workers for unrelated problems, each with its own limit.
+Collect their results at `U4`.

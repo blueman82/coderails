@@ -10,13 +10,13 @@ Config: !`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.py" resolve-config`
 
 ## Pre-flight: engineering-principles check
 
-**Skip condition**: If `$ARGUMENTS` contains `--quick`, skip this section entirely and go straight to push. Strip `--quick` from the arguments before passing to push.py.
+**Skip condition**: If `$ARGUMENTS` contains `--quick`, go directly to push. Remove `--quick` from the arguments to push.py.
 
-**Skip condition**: If `config.engineering_principles_paths` is null or empty (or config is `NO_CONFIG`), skip this section entirely and go straight to push.
+**Skip condition**: Go directly to push if `config.engineering_principles_paths` is null or empty, or if config is `NO_CONFIG`.
 
-**Non-interactive context**: A sub-task may have no interactive user turn. In that case, log findings and continue to push.
+**Non-interactive context**: A sub-task can have no interactive user turn. If so, log the results and continue to push.
 
-**Trigger**: Determine the base branch first: `git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@.*/@@'` (falls back to `main` if unset). Then run `git diff --name-only $(git merge-base HEAD <base>)..HEAD` and check if ANY changed files match the patterns listed in `config.engineering_principles_paths`.
+Get the base branch first with `git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@.*/@@'`. Use `main` if the result is unset. Then run `git diff --name-only $(git merge-base HEAD <base>)..HEAD`. Check changed files against the patterns in `config.engineering_principles_paths`.
 
 If **no files match**, skip to push.
 
@@ -29,56 +29,53 @@ Apply this decision rule to engineering-principles output:
 - **Blocking**: A deviation from a documented architectural convention. Examples include DI protocol patterns, module registration rules, and required tests for public contract changes. Block and prompt.
 - **Non-blocking**: Style preferences, readability suggestions, naming opinions. Log the note and proceed.
 
-If blocking findings exist, present them as a numbered list and ask: **"Fix these before pushing, or push as-is?"** Then follow the user's answer.
+If results block the push, give the user a numbered list and prompt: **"Fix these before pushing, or push as-is?"** Follow the user's answer.
 
-If no blocking findings, proceed silently.
+If no results block the push, continue silently.
 
 ---
 
 ## Push
 
-Execute the push workflow script. Remove `--quick` from arguments if present.
-If this session owns a graph unit in this worktree, pass its exact `--unit <id> --progress <absolute state path>`
-to the script. Read both values from the active graph. Do not guess them.
+Run the push workflow script. Remove `--quick` from the arguments if they contain it. If this session owns a graph unit in this worktree, pass `--unit <id> --progress <absolute state path>`. Read the two values from the active graph. Do not guess them.
 
-The `enforce_pr_workflow` hook checks the trusted push helper before action authority. For a graph unit,
-run from its canonical assigned worktree with the exact unit ID and absolute progress path owned by this session.
-If the hook refuses the binding, read the active graph and correct the directory or arguments before retrying.
-Without an active graph unit, omit both flags. This read-only preflight does not consume a receipt;
-the existing authority and receipt checks still apply.
-The hook recognizes the documented `${CLAUDE_PLUGIN_ROOT}` form and direct Python script options.
-Python `-c`/`-m`, arbitrary shell variables and custom execution trampolines are outside this preflight;
-invoke the helper directly for graph publication.
+The `enforce_pr_workflow` hook checks the trusted push helper before it checks authority for the push. For a graph unit, run from its canonical assigned worktree. Use the unit ID and absolute graph path that this session owns. If the hook refuses the binding, read the active graph. Correct the directory or arguments before you retry.
 
-`push.py` stages modified tracked files with `git add -u`. It does not stage new files, which prevents unrelated files from entering the PR. If you created a new file for this PR, pass its path with a separate `--add <path>` flag. Do not stage new files with a broad `git add` command.
+If there is no active graph unit, omit the two flags. This read-only check does not consume a receipt. The authority and receipt checks continue to apply.
 
-Use a separate `--add` flag per file, one path per occurrence — never a space-separated variable like `--add $FILES`. `--add` consumes exactly one token, so `--add $FILES` would stage only the first file and the rest would be silently misparsed as extra arguments (the next token becomes part of the commit message). Name individual files, not directories or globs — a directory would stage everything under it, including files that aren't yours. Example shape:
+The hook accepts the documented `${CLAUDE_PLUGIN_ROOT}` syntax and direct Python script options. The check excludes Python `-c`/`-m`, arbitrary shell expansions, and custom execution wrappers. Invoke the helper directly for graph publication.
+
+`push.py` adds modified tracked files to the index with `git add -u`. New files stay out of the index unless you name them. This keeps unrelated files out of the PR. Use `--add <path>` for each new file in the PR. Do not add new files to the index with a broad `git add` command.
+
+Use one `--add` flag for each file. Give one path with each flag. Do not use a space-separated expansion such as `--add $FILES`. The flag reads only the first token as the path. The script misreads the other tokens as arguments without a warning. The next token becomes part of the commit message.
+
+Name individual files. Do not use directories or globs. A directory adds all its contents to the index and can add files you do not own.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/push.py" "$ARGUMENTS" --add path/to/newfile --add path/to/another
 ```
 
 The script handles:
-1. Staging tracked-modified files, plus any `--add <path>` files named explicitly
-2. Creating commit (with provided message or auto-generated)
-3. Pushing branch to origin
-4. Creating or updating Pull Request
+1. Add modified tracked files and the files you name with `--add <path>` to the index.
+2. Commit with the given message or a generated message.
+3. Push the branch to the `origin` remote.
+4. Open or update the PR.
 
 ## JIRA Auto-Resolve
 
-After the PR is created, check for a linked JIRA ticket and resolve it:
+After the PR opens, check for a linked JIRA ticket and resolve it:
 
 ```bash
 BRANCH=$(git branch --show-current)
 JIRA_KEY=$(git config branch.$BRANCH.jira-ticket 2>/dev/null)
 ```
 
-If `JIRA_KEY` is set, transition the ticket to **Resolved** via whichever Jira route you have:
+If `JIRA_KEY` is set, use the available Jira MCP to set the ticket status to **Resolved**:
 Read `config.jira.mcp_namespace` from the project config. Use `jira` if the value is unset or the config is `NO_CONFIG`.
 
-Call `mcp__<mcp_namespace>__transition_jira_status_by_name` with `{issueIdOrKey: JIRA_KEY, statusName: "<config.jira.transitions.resolve>", comment: "..."}`.
+Use `mcp__<mcp_namespace>__transition_jira_status_by_name` with `{issueIdOrKey: JIRA_KEY, statusName: "<config.jira.transitions.resolve>", comment: "..."}`.
 
-A non-default namespace uses the normal permission system. It can prompt once or use a `mcp__<mcp_namespace>__*` rule in `settings.json` `permissions.allow`. See INSTALLATION.md.
+A non-default namespace uses the standard permission system. It can show a one-time prompt or use a `mcp__<mcp_namespace>__*` rule in `settings.json` `permissions.allow`. See INSTALLATION.md.
 
 Then:
 1. Use comment text: `"Resolved via PR merge. Work implemented via AI-assisted development (Claude Code). Branch: $BRANCH."`

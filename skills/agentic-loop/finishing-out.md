@@ -1,97 +1,77 @@
 # Finishing out
 
-Detail-carrier for two loop-finish mechanics referenced from the main skill by a one-line
-link each: the orchestrator's own completion claim (Phase 13), and per-work-unit branch
-cleanup (Phase 4b).
+This file gives two procedures from the loop skill.
+The first checks the orchestrator’s Phase 13 claim.
+The second removes worktrees for merged work units in Phase 4b.
 
 ## Orchestrator-level superpowers:verification-before-completion at loop finish-out
 
-The graph's `S13-complete` node and SKILL.md's two existing `superpowers:verification-before-completion` references (Phase 3/3a worker
-construction-discipline lines) discipline the WORKERS' claims. Nothing disciplines the
-ORCHESTRATOR's own final completion claim. Before recording the Phase 13 `complete` stop
-(`graph.py stop --category complete`, then the rendering line), the orchestrator applies `superpowers:verification-before-completion` to its
-OWN completion claim — "all authorised work done, all gates passed" is itself a
-completion claim that requires fresh verification evidence, not recall.
+The graph’s `S13-complete` node and the two `superpowers:verification-before-completion` instructions in SKILL.md apply to worker claims in Phases 3 and 3a.
+The orchestrator must check its own claim too.
+Before you record the Phase 13 `complete` stop with `graph.py stop --category complete`, apply `superpowers:verification-before-completion`.
+Then write the status line for the user.
 
-Concretely, before declaring `complete`, re-run the evidence the claim rests on:
-- each merged PR's `mergedAt` via `gh pr view` — the single final aggregate check that
-  every unit's terminal artifact actually exists;
-- the loop-scope eval `result` from `post_evals.py grade-loop`;
-- the wiki/sync-docs artifacts landed on origin/main.
+The claim "all authorised work done, all gates passed" must come from new verification results.
+Before you declare `complete`, do these checks again:
 
-**Scoping.** This gates ONLY the Phase 13 `complete` declaration, NOT each per-unit merge
-claim — Phase 12 already covers per-unit merge-claim re-checks, and adding VBC per-merge
-here would duplicate Phase 12. This is the single aggregate check at loop end, not a
-repeat of the per-merge one.
+- Use `gh pr view` to read each merged PR's `mergedAt`. Check each unit's terminal artifact.
+- Read the loop-scope eval `result` from `post_evals.py grade-loop`.
+- Check that the wiki and sync-docs artifacts are on `origin/main`.
+
+Do this aggregate check only for the Phase 13 `complete` declaration.
+Phase 12 checks the claim for each unit’s merge.
 
 ## Per-unit branch finishing via superpowers:finishing-a-development-branch
 
-When a work-unit's PR is merged, finish the branch/worktree using
-`superpowers:finishing-a-development-branch`'s Step 6 mechanics: `cd` to main repo root,
-check lock state, `git worktree remove <path>`, `git worktree prune` — gated by the
-provenance check: only remove worktrees the loop itself created (under
-`.worktrees/`/`worktrees/`), never a harness-owned workspace. This runs per-work-unit at
-Phase 4b, not deferred to the loop-level teardown.
+After a work unit’s PR merges, follow Step 6 of `superpowers:finishing-a-development-branch`.
+Do this for each unit in Phase 4b before loop teardown.
+Remove only worktrees that the loop made in `.worktrees/` or `worktrees/`.
+Do not remove a workspace that belongs to the harness.
 
-**Native-first, same as entry.** `superpowers:using-git-worktrees` Step 1a prefers a native worktree
-tool over `git worktree add` for entry; teardown mirrors that. If a native worktree tool
-is available (e.g. `ExitWorktree`) **and it owns this worktree**, prefer it over the
-`git worktree remove` mechanics above. The git path below is the fallback both for
-worktrees the native tool does not own, and for worktrees it does own but a lock
-resolution below says to defer instead of remove.
+For the Git procedure, `cd` to the primary repo root and check the lock status.
+If the checks below allow removal, run `git worktree remove <path>` and `git worktree prune`.
 
-**Scope limit — `ExitWorktree` only owns what it created this session.** It operates
-only on a worktree created by `EnterWorktree` *in this same session*. A worktree
-switched into via `EnterWorktree`'s `path` parameter (e.g. one created by
-`git worktree add` per `superpowers:using-git-worktrees` Step 1b, then entered by path) is NOT owned
-by it — calling `ExitWorktree` there yields `action: "keep"` only, never `"remove"`.
-Called with no active `EnterWorktree` session at all, it is a silent no-op: it reports no
-active worktree session and changes nothing on disk. In either case, do not treat a
-`"keep"` result or a no-op as removal — fall back to the git path: `cd` to the main repo
-root, then `git worktree remove` (Step 6 mechanics above).
+**Use the native tool first if it owns the worktree.**
+Step 1a of `superpowers:using-git-worktrees` prefers the native worktree tool to `git worktree add` for entry.
+Follow the same rule for teardown.
+If a native tool such as `ExitWorktree` owns this worktree, use it.
+Use the Git procedure if the native tool does not own the worktree.
+If a lock means you must defer removal, follow the lock procedure below.
 
-**Caveat — never remove the worktree that is the shell's current cwd, via `git worktree
-remove`.** `git worktree remove` fails when run from inside the worktree being removed
-(per `superpowers:finishing-a-development-branch`'s Common Mistakes). If using the git fallback,
-`cd` to the main repo root FIRST, then remove — mandatory, not optional, when the loop's
-own cwd is inside the worktree being finished.
+**`ExitWorktree` owns only worktrees made by `EnterWorktree` in this session.**
+The `path` parameter lets `EnterWorktree` select an existing worktree without owning it.
+For example, Step 1b of `superpowers:using-git-worktrees` uses `git worktree add` before selecting a path.
+For that worktree, `ExitWorktree` gives only `action: "keep"`.
+It cannot use `"remove"`.
+Without an active `EnterWorktree` session, it reports that there is no active worktree and makes no changes.
 
-**Caveat — a locked worktree splits into two cases that need opposite actions, and the
-cwd check takes precedence.** Step 6 checks lock state before removing. The operative
-test is executable directly: is the locked worktree path this session's own cwd? Nothing
-in this repo gives an agent its own harness session pid to compare against the lock's
-pid, so pid-naming is explanation, not the check to run.
+If you get a `"keep"` result or a no-op, the worktree remains.
+Use the Git procedure.
+Run `cd` to the primary repo root, then run `git worktree remove` as described in Step 6.
 
-- **The locked path is this session's own cwd** — NOT a defer case, even if the lock
-  reason also happens to name a pid. The lock exists because the harness locked the
-  worktree on the calling session's behalf, not because another session is using it. Use
-  the native `ExitWorktree` tool with `action: "remove"` (subject to the scope limit
-  above), which exits the session from the worktree and removes it in one step — `git
-  worktree remove` cannot do this from inside the worktree it's removing, and forcing the
-  git path would break the running session.
-- **The locked path is NOT this session's own cwd** — some other session is still
-  working in the worktree. Report and defer, never force, regardless of whether the
-  worktree is also this session's cwd for some other reason. A merged PR does not by
-  itself mean the worktree is safe to remove — forcing it out mid-loop would yank that
-  other session. This precedence holds even when the lock also happens to be reachable
-  from this session: a live pid naming a different session always wins over any other
-  fact about the worktree.
+**Change out of the worktree before using Git to remove it.**
+As the `Common Mistakes` section in `superpowers:finishing-a-development-branch` says, `git worktree remove` fails if the shell’s cwd is the worktree it removes.
+For the Git procedure, `cd` to the primary repo root first.
 
-Locked by a dead pid still means: clear the stale lock and remove, with a notice.
+**Check a locked worktree against this session’s cwd.**
+Step 6 checks the lock before removal.
+The repo does not give the agent its harness session PID. You cannot compare it to the PID in a lock.
+Check if the locked path is this session’s cwd.
 
-**Caveat — the squash-merge safety check must use content identity, not ancestry.**
-`ExitWorktree` with `action: "remove"` refuses when the worktree has uncommitted files or
-commits not on the original branch, reporting them as work that would be discarded. After
-a SQUASH merge those commits are legitimately merged, but `git log --oneline
-origin/main..HEAD` being empty is NOT the right confirmation — it can never pass here.
-Squash rewrites the SHAs that land on `origin/main`, so the branch's own original commit
-SHAs never appear in `origin/main`'s ancestry, and `origin/main..HEAD` keeps listing them
-forever, even though their content already landed. Checking ancestry after a squash
-reproduces the exact failure this caveat exists to prevent: the agent can never pass
-`discard_changes: true`, so it defers forever on work that is genuinely done.
+- **The path is this session’s cwd.** The harness can lock it for this session. A PID in the lock text alone does not change the check. If the native tool owns this worktree, use `ExitWorktree` with `action: "remove"`. It exits the worktree and removes it in one step. Do not use Git to override a lock from that worktree.
+- **The path is different from this session’s cwd.** If a different live session owns the lock, report it and defer removal. Do not override the lock. A merged PR does not make removal safe while that session uses the worktree.
 
-Confirm the content actually merged instead: `git diff origin/main HEAD` shows no
-differences (the worktree's content is already present on `origin/main`, byte for byte —
-squash preserves content identity even though it discards ancestry) AND the PR reports
-`state: MERGED` (`gh pr view <n> --json state`). Only pass `discard_changes: true` once
-both hold. Never pass `discard_changes: true` on a refusal you haven't verified this way.
+If the lock identifies a different live session, defer removal regardless of access from this session.
+If the lock identifies a dead PID, clear the stale lock, remove the worktree, and report it.
+
+**For a squash merge, check content identity.**
+With `action: "remove"`, `ExitWorktree` refuses to discard uncommitted files or commits missing from the initial branch.
+A squash merge can include the changes in `origin/main` with different commit SHAs.
+Then `git log --oneline origin/main..HEAD` continues to list the branch commits.
+It cannot show that the content merged.
+A check that requires this list to be empty can defer removal indefinitely.
+
+Run `git diff origin/main HEAD` to check that the content matches byte for byte.
+Use `gh pr view <n> --json state` to check for `state: MERGED`.
+Use `discard_changes: true` only if the diff has no differences and the PR has that status.
+If a check fails, do not use `discard_changes: true`.

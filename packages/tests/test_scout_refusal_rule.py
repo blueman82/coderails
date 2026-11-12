@@ -13,42 +13,47 @@ CLAUDE = ROOT / "skills/agentic-loop/phases-setup.md"
 CODEX = ROOT / "packages/codex/skills/agentic-loop/SKILL.md"
 GRAPH = ROOT / "skills/agentic-loop/execution-graph.md"
 DESIGN_SCOUT = ROOT / "packages/codex/agents/design-scout.toml"
-HEAD = "**Scout spawn refusal fails closed.**"
-# Whole sentences, so a reversed or reordered rule cannot satisfy them.
+HEAD = "**Stop on scout spawn refusal.**"
+END = "The skip records let `J2` release."
+# Match complete sentences so reversed advice cannot satisfy the test.
 COMMON = (
-    "do not silently downgrade to the orchestrator's or a worker's own read.",
-    "Without an independent scout the loop HALTS for the human: do not continue past the refusal.",
-    "A `non_independent` fallback requires explicit human approval.",
+    "If the design scout or a reviewer cannot start, do not use an orchestrator or worker read as the scout.",
+    "If no scout can do the check independently, stop the loop and wait for the user.",
+    "A `non_independent` fallback needs explicit user approval.",
     "The next direct user reply must be `approve`.",
-    "The native record command checks both transcript messages and refuses a missing or different reply.",
-    "Only then record `S2.5` as `skipped` with evidence beginning `non_independent: human approved`",
-    "run `graph.py record-decision` with that phase and decision text.",
-    "A `non_independent` read never counts as an independent review or as `done`.",
-    "A no-fork skip uses `no_design_fork: <reason>` and needs no scout spawn.",
+    "The native record command checks the two transcript messages. It refuses a missing or different reply.",
+    "Only after that reply, record `S2.5` as `skipped` with an `evidence` prefix of `non_independent: human approved`.",
+    "Run `graph.py record-decision` with that phase and decision text.",
+    "A `non_independent` read cannot count as a check by a different agent or as `done`.",
+    "If there is no design fork, record `no_design_fork: <reason>` before a scout call.",
 )
 CODEX_ONLY = (
-    "Retry the spawn with the same `task_name`;",
-    "a refused call never satisfies `done`",
-    "retry with a FRESH `task_name`, never the same one.",
+    "Try the spawn again with the same `task_name`.",
+    "A refusal does not satisfy `done`.",
+    "Try with a new `task_name`. Do not use the same name.",
 )
-CLAUDE_ONLY = ("Claude has no `task_name`",)
+CLAUDE_ONLY = ("Claude has no `task_name` binding.",)
 
 
 def rule(path: Path) -> str:
-    """Return the scout-refusal rule paragraph of a doc."""
+    """Return the scout-refusal section, including its approval and skip rules."""
     text = path.read_text()
-    return text.split(HEAD, 1)[1].split("\n\n", 1)[0]
+    start = text.index(HEAD) + len(HEAD)
+    return text[start : text.index(END, start)]
 
 
 class ScoutRefusalRuleTests(unittest.TestCase):
     """Sentence-anchored guards on the scout-refusal rule."""
 
     def test_common_sentences_in_both(self) -> None:
-        """Both rule paragraphs carry every shared sentence."""
+        """Both rule sections carry every shared sentence in order."""
         for path in (CLAUDE, CODEX):
             r = rule(path)
-            for s in COMMON:
-                self.assertIn(s, r, f"{path.name} missing sentence {s!r}")
+            offset = 0
+            for sentence in COMMON:
+                position = r.find(sentence, offset)
+                self.assertGreaterEqual(position, 0, f"{path} missing or reordered sentence {sentence!r}")
+                offset = position + len(sentence)
 
     def test_provider_split(self) -> None:
         """Codex task_name mechanics stay out of the Claude text."""
@@ -86,7 +91,7 @@ class ScoutRefusalRuleTests(unittest.TestCase):
     def test_codex_rule_beside_retry_rule(self) -> None:
         """Codex rule sits after the retry rule, before review."""
         text = CODEX.read_text()
-        self.assertLess(text.index("re-issue it with the same printed `task_name`"), text.index(HEAD))
+        self.assertLess(text.index("try again with the same printed `task_name`"), text.index(HEAD))
         self.assertLess(text.index(HEAD), text.index("## Review and release"))
 
     def test_codex_design_scout_exists(self) -> None:

@@ -28,19 +28,19 @@ $ARGUMENTS
 
 ## Parse Arguments
 
-The raw args block above contains what the user typed after `/prep`. **Parse it yourself.** Do not use positional `$1`/`$2` substitution. It splits on whitespace without respecting quotes. It also breaks tokens that contain `/`, `:`, or spaces.
+The raw arguments block contains what the user typed after `/prep`. Parse that block directly. Do not use positional `$1`/`$2` substitution. It uses whitespace as the delimiter and ignores quotes. It also breaks tokens that contain `/`, `:`, or spaces.
 
-Extract four fields from `$ARGUMENTS`:
+Read four fields from `$ARGUMENTS`:
 
-1. **Branch name** (required). The first whitespace-separated token that starts with `feature/`, `bug/`, or `bugfix/`. If no such token exists, ask the user for the branch name before doing anything else.
+1. Use the first whitespace-separated token that starts with `feature/`, `bug/`, or `bugfix/` as the required **Branch name**. If there is no such token, get the branch name from the user before you continue.
 
-2. **Issue Type** (optional). Look for `--type X` / `--issuetype X` flag OR the literal word `Task`/`Bug` after the branch name. If neither present, infer:
+2. For the optional **Issue Type**, look for `--type X` or `--issuetype X`. You can also use the literal word `Task`/`Bug` after the branch name. If the input gives no type, infer it:
    - `feature/*` → `Task`
    - `bug/*` / `bugfix/*` → `Bug`
 
-3. **Summary** (optional). Look for `--summary "..."` flag (handle both double and single quotes; take everything up to the matching close-quote). If a flag-quoted summary isn't present, generate one by humanising the branch name (e.g. `feature/user-auth` → "Implement user auth").
+3. For the optional **Summary**, look for `--summary "..."`. Accept double or single quotes. Read all text up to the matching closing quote. If the flag has no quoted summary, convert the branch name to plain language. Example: `feature/user-auth` → "Implement user auth".
 
-4. **Description** (optional). Look for `--description "..."` or `--desc "..."`. If absent, generate one from the branch name and issue type. Always include `Branch: <branch>` in the final description body.
+4. For the optional **Description**, look for `--description "..."` or `--desc "..."`. If there is no description, write one from the branch name and issue type. Always include `Branch: <branch>` in the description body.
 
 ### Accepted input shapes
 
@@ -57,7 +57,7 @@ If the args have a different shape but the intent is clear, parse them and proce
 
 ## Task Part 1: Worktree Creation
 
-Feature and bug work must be isolated in a git worktree — never branch off or edit on main.
+Use an isolated Git worktree for feature and bug work. Do not start a branch or edit files in the `main` checkout.
 
 1. Derive the worktree path from the branch description:
    - Strip the `feature/`, `bug/`, or `bugfix/` prefix from the parsed branch name
@@ -65,7 +65,7 @@ Feature and bug work must be isolated in a git worktree — never branch off or 
    - Example: `bug/fix-timeout` with `worktree_base: /Users/you/Documents/Github/my-project` → `/Users/you/Documents/Github/my-project-fix-timeout`
    - In minimal mode (NO_CONFIG), `worktree_base` is the git root, so the worktree is a sibling dir, e.g. `/path/to/repo` → `/path/to/repo-fix-timeout`.
 
-2. Create the worktree:
+2. Make the worktree:
    - If `config.worktree_script` is non-null, run from the project root:
      ```bash
      <config.worktree_script> <derived-path> <branch-name>
@@ -79,58 +79,60 @@ Feature and bug work must be isolated in a git worktree — never branch off or 
 
 ## Task Part 1b: Progress Stub (best-effort, non-blocking)
 
-After you create the worktree, initialize a current-schema `progress.json` only if the resolved path is absent. This step is optional. Do not overwrite an active or completed loop. Keep the existing ownership, graph, review cache, and hook-owned fields. A failure does **not** abort `/prep`. Graph dispatch and completion use their own gates.
+After you make the worktree, you can initialize a current-schema `progress.json` if there is no file at the resolved path. Do not overwrite an active or completed loop. Keep ownership, graph data, the reviewer cache, and hook-owned fields. If initialization does not succeed, `/prep` continues. The graph has its own dispatch and end gates.
 
-Run the path helper to resolve the path. Do not compute it yourself. The helper uses cwd and `$CLAUDE_CODE_SESSION_ID` as path keys and reads them automatically without arguments:
+Run the path helper to resolve the path. Use its output. The helper reads the current working directory and `$CLAUDE_CODE_SESSION_ID` as path keys. Run it without arguments.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/lib/agentic_loop_path.py"
 ```
 
-If that path is absent, put the user's `/prep` invocation, verbatim, in a temporary file and run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<a unique non-blank id>" --prompt-file "$PROMPT_FILE"`. `start` writes the current-schema state atomically and refuses (with a `[reason_code=...]`) to replace an unfinished loop, so it adopts existing state consistently with the agentic-loop workflow. Never hand-write `progress.json`.
+If no file exists at that path, put the user's `/prep` invocation verbatim in a temporary file. Run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/agentic-loop/scripts/graph.py" start "$STATE" --session "$CLAUDE_CODE_SESSION_ID" --loop-id "<a unique non-blank id>" --prompt-file "$PROMPT_FILE"`. The `start` command writes the current graph schema atomically. It refuses to replace an unfinished loop and gives a `[reason_code=...]`. This keeps existing graph data as the agentic-loop workflow does. Do not hand-write `progress.json`.
 
-If the path helper is unavailable, or `start` fails for any reason, log a warning to the user and continue to Task Part 2. The worktree and branches are already safe at this point.
+If the path helper is unavailable or `start` does not succeed, give the user a warning and continue to Task Part 2. At this point the worktree and branches are safe.
 
 ## Task Part 2: Jira Ticket Creation
 
-**Skip this entire section if `config.jira` is null.**
+**Skip this section if `config.jira` is null.**
 
-**How to reach Jira:** Determine the MCP tool namespace from `config.jira.mcp_namespace` (default: `jira` if unset). Build tool names at runtime:
-- Create ticket: `mcp__<mcp_namespace>__create_jira_issue`
-- Transition status: `mcp__<mcp_namespace>__transition_jira_status_by_name`
-- Search/query: `mcp__<mcp_namespace>__search_jira_issues`
+Read the Jira MCP tool namespace from `config.jira.mcp_namespace`. Use `jira` if the value is unset. Build the tool names at runtime:
+- Open a ticket: `mcp__<mcp_namespace>__create_jira_issue`
+- Change ticket status: `mcp__<mcp_namespace>__transition_jira_status_by_name`
+- Find tickets: `mcp__<mcp_namespace>__search_jira_issues`
 
-The `allowed-tools` frontmatter pre-authorises `mcp__jira__*` for the zero-config default. For a different namespace, calls still work but are governed by the normal permission system (one-time prompt or a `mcp__<mcp_namespace>__*` rule in `settings.json` `permissions.allow` — see INSTALLATION.md). If no Jira MCP is available at all, skip and tell the user Jira features need a Jira MCP server configured; the branches are already created, so this is non-fatal.
+The `allowed-tools` frontmatter pre-authorises `mcp__jira__*` for the zero-config default. A different namespace uses the standard permission system. It can show a one-time prompt or use a `mcp__<mcp_namespace>__*` rule in `settings.json` `permissions.allow`. See INSTALLATION.md.
 
-After successfully creating the branches, create a Jira ticket:
+If no Jira MCP is available, skip the Jira steps. Tell the user that Jira functions need a configured Jira MCP server. The Git branches are safe and `/prep` can continue.
 
-1. Create the ticket with these exact settings:
+Open a Jira ticket only after the Git operations make the branches:
+
+1. Use these settings for the ticket:
    - **Project key**: `config.jira.project`
    - **Issue type**: parsed or inferred type
    - **Summary**: parsed or generated summary
-   - **Assignee**: the currently authenticated Jira user (use `get_current_user` or equivalent; do not hardcode)
+   - **Assignee**: use `get_current_user` or an equivalent tool to get the authenticated Jira user. Do not hardcode it.
    - **Description**: parsed or generated description (always include `Branch: <branch>`)
-   - **Epic link**: Set `config.jira.epic_field` (e.g. `customfield_12345` — set for your project) to `config.jira.epic` (only if both are non-null)
-   - **Component**: Set to `config.jira.component_name` (id: `config.jira.component_id`) — only if both component_name and component_id are non-null
+   - **Epic link**: If the two values are non-null, set `config.jira.epic_field` (e.g. `customfield_12345` for your project) to `config.jira.epic`.
+   - **Component**: If the name and ID are non-null, use `config.jira.component_name` with ID `config.jira.component_id`.
 
 2. Use the update parameter for these fields:
-   - **Fix Version** (only if `config.jira.fix_version` is non-null): `{"fixVersions": [{"set": [{"name": "<config.jira.fix_version>"}]}]}`
+   - If `config.jira.fix_version` is non-null, set the Jira **Fix Version**: `{"fixVersions": [{"set": [{"name": "<config.jira.fix_version>"}]}]}`
    - **Story points** (only if `config.jira.points_field` is non-null): `{"<config.jira.points_field>": [{"set": 1}]}`  (e.g. `customfield_67890` — set for your project)
 
-3. After successful creation, advance the ticket out of its initial state:
-   - Transition to `config.jira.transitions.start` (e.g. `"In Progress"` — set for your project in workflow.config.yaml) using `mcp__<mcp_namespace>__transition_jira_status_by_name`. Run `mcp__<mcp_namespace>__get_jira_transitions` on one of your project's issues to find the correct name. If `config.jira.transitions.start` is null, skip this step.
-   - **Then** attempt `config.jira.transitions.resolve` the same way, but treat a failure as non-fatal — not every project workflow exposes this transition from the start state. If it fails (or if the field is null), leave the ticket at the start state and continue; do not abort `/prep`.
+3. After Jira opens the ticket, change its status:
+   - If `config.jira.transitions.start` is set, use `mcp__<mcp_namespace>__transition_jira_status_by_name` to set that status. An example is `"In Progress"` from workflow.config.yaml. Use `mcp__<mcp_namespace>__get_jira_transitions` on an issue in the project to find the correct name. Skip this step if the setting is null.
+   - Then try `config.jira.transitions.resolve` with the same tool. Jira workflows can disallow this status change from the start status. If Jira rejects it or the setting is null, keep the ticket at its start status and continue `/prep`.
 
-4. Store the ticket key in git branch config for auto-resolve at push time:
+4. Record the ticket key in Git branch config so push can resolve it automatically:
    ```bash
    git config branch.<branch-name>.jira-ticket <KEY>
    ```
 
 ## Important Notes
-- Git operations are performed first to ensure workspace safety
-- Jira ticket creation follows only after successful branch creation
+- Run Git operations first to keep the workspace safe.
+- Open the Jira ticket only if Git makes the branches.
 - Story points and fixVersions must use update parameter with "set" operation
-- If Jira creation fails, the Git branches are already created and safe
+- If Jira cannot open a ticket, the Git branches are safe.
 - The stored git config key enables /push to auto-resolve the ticket on PR creation
 
-Report both the branch creation and Jira ticket key (if created) to the user after completion.
+Report the branch and the Jira ticket key if Jira opened a ticket.
