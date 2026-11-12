@@ -232,7 +232,7 @@ class CountersAndDocsTests(unittest.TestCase):
     def test_sandboxed_workers_paragraph(self) -> None:
         """(f) The four closed residuals are no longer listed as open; the remaining ones are named."""
         text = (ROOT / "AGENTS.md").read_text()
-        start = text.index("**Sandboxed workers")
+        start = text.index("**Worker sandbox.**")
         section = text[start : text.index("### Skills", start)]
         for closed in (
             "Primary `.git`-write residual",
@@ -245,8 +245,8 @@ class CountersAndDocsTests(unittest.TestCase):
         for remaining in (
             "api.anthropic.com",
             "denyRead",
-            "launcher is trusted",
-            "never sandboxed",
+            "The launcher uses the operator's Git authorization without the sandbox.",
+            "The orchestrator has no sandbox.",
             "sandbox_mode",
             "cooperating-agent safeguard",
         ):

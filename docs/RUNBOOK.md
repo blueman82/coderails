@@ -1,12 +1,14 @@
 # Runbook: hook and trace observability
 
-Trace rows are NON-AUTHORITATIVE: fail-open, append-only, one `event_id` per event, written by
-`hooks/scripts/lib/trace_row.py` to `<agentic-loop dir>/<session_id>/trace.jsonl` (the same per-session directory
-`autonomous_gate.py` uses, with or without a loop). Rows hold `schema_version`, `event_id`, `session_id`, `loop_id`
-(null outside a loop), `ts`, `command`, `outcome`, `reason_code` and sha256-hashed `inputs`. No gate decision
-reads them. Counters dedupe by `event_id`, skip torn lines, and key tallies as `command/outcome/reason_code`.
+The `hooks/scripts/lib/trace_row.py` writer appends advisory entries to `<agentic-loop dir>/<session_id>/trace.jsonl`.
+It writes one `event_id` for each operation. A write error cannot block the operation.
+The `autonomous_gate.py` hook uses the same session directory with or without a loop.
 
-Query hook trace records with:
+An entry has `schema_version`, `event_id`, `session_id`, `loop_id`, `ts`, `command`, `outcome`, `reason_code`, and SHA-256 hashes in `inputs`.
+The `loop_id` is null when there is no loop. Gate decisions do not use these entries.
+Counters deduplicate by `event_id`, skip torn lines, and use `command/outcome/reason_code` as the tally key.
+
+Read the diagnostic log counters with:
 
 ```
 python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['trace'])"
@@ -14,1417 +16,370 @@ python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import 
 
 ## Native observation report
 
-- Command: `python3 scripts/observation_report.py <cohorts.json>`. Use the cohort fields and count definitions in
-  [Native session observations](OBSERVATION-REPORT.md).
-- Result: exit 0 prints a JSON metadata report. Exit 2 prints an input or file error on stderr.
-  The report does not change the cohort, source files or trace cache.
-- On a hash or link error, preserve the input files and the stderr reason. Check the declared file hashes,
-  provider, session, parser version and source references. Restore the original bound files or prepare a new declared
-  cohort from the new source files. Do not change a hash only to suppress the refusal.
-- Observation counts come from the report's eligible sessions and their native reader events. Inspect the bound
-  event IDs and source references when a count differs from the dashboard. The report command emits no command-attempt
-  or refusal ledger. Its stderr reasons do not have separate trace counters.
-- Publication checks have their own callers, rows and counters. Use [Workflow gates: measurement note](workflow-gates-measurement.md)
-  for the default-ON publication checks. Use [Integrity gate](INTEGRITY-GATE.md) for the opt-in integrity status,
-  activation steps and trust limits. Those records describe the named publication control. They do not prove that
-  the observation report ran or count its validation refusals.
+- Run `python3 scripts/observation_report.py <cohorts.json>`. See the cohort fields and count definitions in [native session observations](OBSERVATION-REPORT.md).
+
+- Exit code 0 gives a JSON metadata report. Exit code 2 gives an input or file error on stderr.
+  The report does not change the cohort, source files, or diagnostic log cache.
+
+- If there is a hash or binding error, keep the input files and stderr message.
+  Check the declared file hashes, provider, session, parser version, and source refs.
+  Put back the initial bound files or prepare a new declared cohort from the new source files.
+  Do not change a hash only to suppress the refusal.
+
+- Observation counts use eligible sessions and native reader entries.
+  If a count differs from the dashboard, examine the IDs and source refs in the bound data.
+  The command has no ledger of its runs or refusals. There are no dedicated diagnostic counters for its stderr codes.
+
+- The publication checks use their own callers, log entries, and counters.
+  See [workflow gate measurements](workflow-gates-measurement.md) for default-ON publication checks.
+  See [integrity gate instructions](INTEGRITY-GATE.md) for the opt-in integrity status, activation steps, and trust limits.
+  These records apply to the named publication control. They cannot show that the observation report ran or count its refusals.
 
 ## Generated hook and memory reasons
 
-The first table gives an action for each control category. The second table lists literal reason codes found in the named source files and the maintained memory reason catalog. Dynamic reason codes can also occur. A trace record keeps the detailed emitted code. A hook telemetry record keeps the coarser observed result, such as `deny` or `block`. Read the record's action text. This table is not an exhaustive list of dynamic codes.
+The first table gives a step for each control category.
+The second gives codes from the named source files and the memory code catalog.
+The diagnostic log keeps the full code. Hook telemetry keeps a broader result such as `deny` or `block`.
+Read the instructions for that record. Dynamic codes can also occur.
 
 <!-- hook-reasons:start -->
-| Control | Category | Action |
+| Control | Category | Step |
 |---|---|---|
-| `action_authority_gate` | action authority gate | Use the configured authority path for the exact action and session. |
+| `action_authority_gate` | operation authority gate | Use the authority path set in config for this operation and session. |
 | `agent_model_routing_nudge` | agent model routing nudge | Select a model role that fits the task when the suggestion is useful. |
-| `agent_only_gate` | agent only gate | Dispatch source work to an agent or use the allowed workflow command. |
+| `agent_only_gate` | agent only gate | Send source work to an agent or use the allowed workflow command. |
 | `check_confidence_labels` | check confidence labels | Add the correct confidence label to each claim that needs one. |
 | `check_verify_loop` | check verify loop | Complete the verification section and mark each unresolved check. |
-| `comment_citation_gate` | comment citation gate | State the durable rule in the comment without a session label. |
+| `comment_citation_gate` | comment citation gate | Write the durable rule in the comment without a session label. |
 | `autonomous_gate` | autonomous input gate | Use the typed authority command, or continue after the authority expires. |
 | `destructive_bash_gate` | destructive bash gate | Use a safe command that avoids the blocked operation. |
-| `enforce_pr_workflow` | enforce pr workflow | Run the required PR review and post current-head evidence. |
-| `graph_completion_guard` | graph completion guard | Resolve the graph state and record a valid stop result. |
-| `inject_bootstrap` | inject bootstrap | Check the plugin root and hook registration when context is absent. |
-| `inject_context` | inject context | Check the prompt hook registration when context is absent. |
+| `enforce_pr_workflow` | PR workflow gate | Run `review-pr`. Post the records for the current PR head. |
+| `graph_completion_guard` | check for graph closeout | Resolve the graph status and record a stop result that meets the rules. |
+| `inject_bootstrap` | add bootstrap context | Check the plugin root and hook registration if there is no context. |
+| `inject_context` | add prompt context | Check the prompt hook registration if there is no context. |
 | `loop_dispatch_guard` | loop dispatch guard | Use the current owned graph dispatch envelope and role. |
 | `loop_stall_guard` | loop stall guard | Record the required stop and complete unresolved graph work. |
-| `loop_state_guard` | loop state guard | Restore owned graph and graded loop eval evidence. |
-| `no_edit_on_main` | no edit on main | Move the source edit to a feature branch. |
+| `loop_state_guard` | check for loop status | Put the owned graph and graded loop eval records back. |
+| `no_edit_on_main` | primary branch edit gate | Move the source edit to a feature branch. |
 | `offload_push_guard` | offload push guard | Keep the push in the authorised workflow. |
-| `pr_publication_gate` | pr publication gate | Complete the required review and eval steps for this PR head. |
-| `quality_feedback` | quality feedback | Read the quality result and correct reported source findings. |
-| `remember_inject_cap_guard` | remember inject cap guard | Set the memory injection cap or use the documented opt-in patch. |
-| `reviewer_bash_allowlist` | reviewer bash allowlist | Use an allowed read-only command or a granted capability tool. |
-| `subagent_identity_gate` | subagent identity gate | Dispatch with a native agent type that the graph can identify. |
-| `test_gate` | test gate | Fix the failed tests before the commit. |
-| `unregistered_loop_guard` | unregistered loop guard | Register the active agentic loop graph before more dispatches. |
+| `pr_publication_gate` | pr publication gate | Complete the required `review-pr` and eval steps for this PR head. |
+| `quality_feedback` | quality feedback | Read the quality result and correct the source problems it lists. |
+| `remember_inject_cap_guard` | remember inject cap guard | Set the limit for added memory text or use the documented opt-in patch. |
+| `reviewer_bash_allowlist` | reviewer bash allowlist | Use an allowed read-only command or a tool that your grant permits. |
+| `subagent_identity_gate` | subagent identity gate | Start the agent with a native type that the graph can identify. |
+| `test_gate` | test gate | Correct the tests with errors before you commit. |
+| `unregistered_loop_guard` | unregistered loop guard | Record the active agentic loop graph before you send more work. |
 | `verification_volume_ceiling` | verification volume ceiling | Use focused tests after the allowed full-suite runs. |
-| `voice_announce` | voice announce | Read the loop state when a spoken notice is absent. |
-| `wiki_taxonomy_gate` | wiki taxonomy gate | Write the page under a directory allowed by the wiki schema. |
+| `voice_announce` | voice announce | Read the loop status if you did not get a spoken notice. |
+| `wiki_taxonomy_gate` | wiki taxonomy gate | Write the page in a directory that the wiki schema permits. |
 | `worker_containment_gate` | worker containment gate | Use the required containment acknowledgement or a low-risk path. |
 
-| Source | Emitted reason | Action |
+| Source | Code | Step |
 |---|---|---|
-| `hooks/scripts/action_authority_gate.py` | `action_authority_failed_open` | Use the configured authority path for the exact action and session. |
+| `hooks/scripts/action_authority_gate.py` | `action_authority_failed_open` | Use the authority path set in config for this operation and session. |
 | `hooks/scripts/autonomous_gate.py` | `authority_corrupt_ignored` | Use the typed authority command, or continue after the authority expires. |
 | `hooks/scripts/destructive_bash_gate.py` | `authority_denied_destructive_shell` | Use a safe command that avoids the blocked operation. |
 | `hooks/scripts/autonomous_gate.py` | `authority_deny` | Use the typed authority command, or continue after the authority expires. |
 | `hooks/scripts/autonomous_gate.py` | `authority_expired_allow` | Use the typed authority command, or continue after the authority expires. |
 | `hooks/scripts/autonomous_gate.py` | `authority_phrase_ignored` | Use the typed authority command, or continue after the authority expires. |
-| `hooks/scripts/subagent_identity_gate.py` | `bash_agent_type_absent` | Dispatch with a native agent type that the graph can identify. |
+| `hooks/scripts/subagent_identity_gate.py` | `bash_agent_type_absent` | Start the agent with a native type that the graph can identify. |
 | `hooks/scripts/verification_volume_ceiling.py` | `ceiling_exceeded` | Use focused tests after the allowed full-suite runs. |
 | `hooks/scripts/verification_volume_ceiling.py` | `ceiling_legacy_migrated` | Use focused tests after the allowed full-suite runs. |
 | `packages/codex/hooks/scripts/loop_dispatch_guard.py` | `codex_native_worker_uncontained` | Use a parent Codex sandbox that contains the worker. |
 | `hooks/scripts/check_confidence_labels.py` | `confidence_label_missing` | Add the correct confidence label to each claim that needs one. |
-| `hooks/scripts/subagent_identity_gate.py` | `config_rejected` | Fix .coderails/workflow.config.yaml and retry. |
+| `hooks/scripts/subagent_identity_gate.py` | `config_rejected` | Correct .coderails/workflow.config.yaml and retry. |
 | `hooks/scripts/worker_containment_gate.py` | `containment_ack_receipt` | Use the required containment acknowledgement or a low-risk path. |
 | `hooks/scripts/worker_containment_gate.py` | `containment_ack_required` | Use the required containment acknowledgement or a low-risk path. |
 | `hooks/scripts/worker_containment_gate.py` | `containment_fallback_low_risk` | Use the required containment acknowledgement or a low-risk path. |
 | `hooks/scripts/worker_containment_gate.py` | `containment_gate_error` | Use the required containment acknowledgement or a low-risk path. |
 | `hooks/scripts/worker_containment_gate.py` | `containment_unavailable` | Use the required containment acknowledgement or a low-risk path. |
-| `hooks/scripts/action_authority_gate.py` | `denied_gate_error` | Use the configured authority path for the exact action and session. |
-| `hooks/scripts/lib/hook_state.py` | `hook_state_unreadable` | Restore the owned hook state file and retry. |
-| `hooks/scripts/lib/hook_state.py` | `nudge_first` | The first nudge was recorded; continue the required workflow. |
-| `hooks/scripts/lib/hook_state.py` | `nudge_suppressed` | The earlier nudge still applies; check the loop state. |
-| `hooks/scripts/action_authority_gate.py` | `receipt_consumed` | Use the configured authority path for the exact action and session. |
+| `hooks/scripts/action_authority_gate.py` | `denied_gate_error` | Use the authority path set in config for this operation and session. |
+| `hooks/scripts/lib/hook_state.py` | `hook_state_unreadable` | Put the owned hook status file back. Then retry. |
+| `hooks/scripts/lib/hook_state.py` | `nudge_first` | The hook recorded the first nudge. Continue the required workflow. |
+| `hooks/scripts/lib/hook_state.py` | `nudge_suppressed` | The earlier nudge applies. Check the loop status. |
+| `hooks/scripts/action_authority_gate.py` | `receipt_consumed` | Use the authority path set in config for this operation and session. |
 | `hooks/scripts/loop_stall_guard.py` | `stale_stop_row` | Record the required stop and complete unresolved graph work. |
 | `packages/codex/hooks/scripts/graph_completion_guard.py` | `stop_row_missing` | Record the current Stop result before the loop completes. |
 | `hooks/scripts/check_verify_loop.py` | `verify_loop_missing` | Complete the verification section and mark each unresolved check. |
-| memory | `bad_record` | the record failed validation (type, scope, tag, date, empty claim, or loop scope without a loop id). |
+| memory | `bad_record` | The record has an error in its type, scope, tag, date, claim text, or loop ID. A claim must have text, and loop scope must have a loop ID. |
 | memory | `cite_bad_approval` | the approval must be a short user prompt (80 chars or fewer) that directly follows the reply it answers. |
-| memory | `cite_not_own_session` | the cite ref belongs to another session; only a prompt of the caller's own session (--session) can anchor a write. |
-| memory | `cite_not_user` | the cite must anchor in a user prompt; cite the owner's own words or use the approved-reply form. |
-| memory | `cite_too_short` | a quote-only cite needs 12 to 300 characters; quote more of the user's prompt or cite an approval with its reply. |
-| memory | `cite_unresolved` | the cite ref was not found in `muninn session <root>`, or the approval has no reply before it; check the ref. |
-| memory | `decision_blank_decision` | a decision needs a non-blank decision text; nothing was written. |
+| memory | `cite_not_own_session` | The ref points to a different session. Only a user prompt from the calling session (`--session`) can authorize the write. |
+| memory | `cite_not_user` | The citation must point to a user prompt. Cite the owner's words or use the approved-reply syntax. |
+| memory | `cite_too_short` | A quote-only citation must have 12 to 300 characters. Use more text from the user's prompt or cite the approval with its reply. |
+| memory | `cite_unresolved` | The ref did not occur in `muninn session <root>`, or the approval has no preceding reply. Check the ref. |
+| memory | `decision_blank_decision` | A decision must have text. The command did not write a record. |
 | memory | `decision_blank_phase` | a decision needs a non-blank phase (for example 2.5). |
-| memory | `decision_invalid_chain` | the decision chain is damaged; inspect and preserve the loop state before any further sync. |
-| memory | `decision_state_error` | the loop state could not be read, validated or locked; nothing was written. |
-| memory | `decision_sync_unknown` | a decision sync may have reached Muninn; inspect the store before any manual retry. |
-| memory | `decision_wrong_loop` | the loop changed after the caller read it; read its current loop ID before recording. |
-| memory | `decision_wrong_revision` | the graph changed after the caller read it; read its revision before recording. |
-| memory | `decision_wrong_session` | the loop state belongs to another session; record only from the owning session. |
-| memory | `graph_unavailable` | graph.py summarize or inspect failed for this state, so the done and next-step lists are empty; run the command by hand and read stderr. |
-| memory | `handoff_state_unreadable` | handoff_derive could not read the loop's progress.json; pass the real state path. |
-| memory | `handwritten_protected` | the render target is hand-written (no generator marker); render to a new path. |
-| memory | `learning_conditional_use_unsupported` | The Note is saved with conditions or conditional expiry. Legacy dispatch/promotion/render cannot evaluate those conditions; retain its metadata and do not use it unconditionally. |
-| memory | `learning_evidence_mismatch` | The retained evidence identity, selector, scope or source window does not match. |
-| memory | `learning_form_unsupported` | This reader supports Notes only; Guide use remains unsupported. |
-| memory | `learning_no_change` | The saved request completed without applying knowledge. It is not a written Note. |
-| memory | `learning_no_matching_record` | The completed request produced no active note with this exact task and text. Inspect its receipt and notes. |
-| memory | `learning_pending` | Muninn has accepted the task request. Keep its R_ ID and check the same request later. |
-| memory | `learning_project_unavailable` | The calling project directory is unavailable; do not use the graph key. |
-| memory | `learning_quote_mismatch` | A retained selected excerpt did not pass public quote-check; no cite is asserted. |
-| memory | `learning_read_limit` | The read exceeded a time, reply, record or support limit; results are incomplete. |
-| memory | `learning_receipt_unavailable` | The request has no supported committed receipt; acceptance alone is not a save. |
-| memory | `learning_record_ambiguous` | Several receipts match the exact K-id/revision. No request identity was selected. |
+| memory | `decision_invalid_chain` | The decision chain has damage. Examine and preserve the loop data before you sync again. |
+| memory | `decision_state_error` | The command could not read, check, or lock the loop data. It did not write a record. |
+| memory | `decision_sync_unknown` | Muninn can have received the decision. Examine the store before you retry by hand. |
+| memory | `decision_wrong_loop` | The loop changed after the caller read it. Read the current loop ID before you record the decision. |
+| memory | `decision_wrong_revision` | The graph changed after the caller read it. Read the current revision before you record the decision. |
+| memory | `decision_wrong_session` | The loop belongs to a different session. Record the decision only from the session that owns the loop. |
+| memory | `graph_unavailable` | `graph.py summarize` or `graph.py inspect` did not succeed for this graph. The done and next-step lists are empty. Run the command by hand and read stderr. |
+| memory | `handoff_state_unreadable` | `handoff_derive` could not read the loop's `progress.json`. Supply the path to that file. |
+| memory | `handwritten_protected` | The target has no generator marker and is hand-written. Write the view to a new path. |
+| memory | `learning_conditional_use_unsupported` | The Note has conditions for use or expiry. Legacy dispatch, promotion, and render cannot check those conditions. Keep the metadata. Do not use the Note unconditionally. |
+| memory | `learning_evidence_mismatch` | The saved record identity, selector, scope, or source window differs from the binding. |
+| memory | `learning_form_unsupported` | This reader reads Notes only. It cannot use Guides. |
+| memory | `learning_no_change` | The saved task ended without a change to knowledge. No Note was written. |
+| memory | `learning_no_matching_record` | The completed task gave no active Note for this task and text. Examine the receipt and Notes. |
+| memory | `learning_pending` | Muninn accepted the learning task. Keep its R_ ID and use it to check the same task again. |
+| memory | `learning_project_unavailable` | The calling project directory is unavailable. Do not use the graph key. |
+| memory | `learning_quote_mismatch` | The saved excerpt differs from the source in the public quote check. Do not cite it. |
+| memory | `learning_read_limit` | The read exceeded a time, reply, record, or source limit. It did not give all results. |
+| memory | `learning_receipt_unavailable` | The learning task has no committed receipt that this reader can use. Muninn can accept the task without writing a Note. |
+| memory | `learning_record_ambiguous` | More than one receipt matches this K-id and revision. No learning task was selected. |
 | memory | `learning_record_changed` | Listed and shown current revisions differ. Read again with the same binding. |
-| memory | `learning_record_expired` | The current Note has reached its timed expiry and cannot be used. |
-| memory | `learning_request_failed` | The saved Muninn request failed or was cancelled. Inspect it with `muninn learn show R_ID`. |
-| memory | `learning_request_mismatch` | Request project, task, source window or receipt identity differs from its binding. |
-| memory | `learning_request_unknown` | Muninn may have accepted a request without returning its R_ ID. Inspect `muninn learn list`; do not submit again. |
-| memory | `learning_selection_unavailable` | A required E-id/ref/hash/selected excerpt is unavailable; no cite is asserted. |
-| memory | `learning_source_authority` | The complete support set must be live, primary, unflagged, unredacted direct-owner user prompts. Current Muninn has no normal/restricted classification; do not infer one. |
-| memory | `learning_source_changed` | A physical source or its exact retained provenance changed; no cite is asserted. |
-| memory | `learning_source_unavailable` | A required live physical original is unavailable; no cite is asserted. |
-| memory | `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
-| memory | `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix the named entry and rerun import-legacy, preserving the original. |
-| memory | `legacy_uncited` | The legacy import has no retained current request selection; keep it explicitly uncited. |
-| memory | `lesson_not_current` | The saved request has no exact eligible current Note. Inspect its retained receipt; a caller quote cannot repair authority. |
-| memory | `memory_backend_invalid` | memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml. |
-| memory | `memory_backend_off` | memory.backend is off in the workflow config; set it to muninn (or remove the key) to write typed memory. |
-| memory | `muninn_absent` | muninn is not on PATH; install it (the Markdown path is not a fallback). |
-| memory | `muninn_bad_output` | Muninn returned a reply that does not match the task request or current-note contract; inspect its output. |
-| memory | `muninn_error` | muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and read stderr. |
-| memory | `muninn_old_ledger` | the installed Muninn command lacks task requests, or this record has only an old K-id; legacy bindings cannot establish current request provenance. |
-| memory | `muninn_schema_incomplete` | the D4 adapter expects retired v2 columns or tables; inspect the current store with `muninn doctor`, then redesign the adapter. |
-| memory | `muninn_schema_old` | the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2. |
-| memory | `muninn_store_missing` | no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once. |
-| memory | `muninn_timeout` | muninn hung past 10s; run `muninn know list` by hand and check store locks. |
-| memory | `no_user_cite` | The local diagnostic has no verified current owner citation. A caller quote cannot establish request evidence. |
-| memory | `order_already_ticked` | this session and logical loop were already counted; the tick was skipped (informational). |
-| memory | `order_bad_id` | an explicit order id must match [a-z0-9][a-z0-9_-]{0,119}; use a canonical id. |
-| memory | `order_blank_field` | an order needs a non-blank failure mode and lesson; nothing was written. |
-| memory | `order_chain_broken` | orders.json was edited by hand (the hash chain names the order); restore it from backup or review the named order, then re-seal by recording through orders.py. |
-| memory | `order_id_collision` | that order id already names another failure mode or scope; use its real identity or a distinct id. |
-| memory | `order_lesson_too_long` | the collapsed lesson exceeds 500 characters; provide a shorter complete claim, never truncate it. |
-| memory | `order_loop_ineligible` | the owned graph or work units are incomplete or stopped; finish the existing completion requirements. |
-| memory | `order_loop_unknown` | no source at <repo-key dir>/<session>/progress.json; pass the owning --session and its separate logical --loop. |
-| memory | `order_not_complete` | preparation is prospective; durably save owned progress as complete before applying recurrence or aging. |
-| memory | `order_not_found` | no order with that id in orders.json; check the id with `orders.py lessons`. |
-| memory | `order_pending_teardown` | completion saved but local apply or its observation failed; retry tick with the same bound source. |
-| memory | `order_retro_validator_unavailable` | schema3 retros require the matching retro_check validator; install the matching validator before graduation. |
-| memory | `order_source_invalid` | progress, preparation or observations are malformed; restore genuine validated source artifacts. |
-| memory | `order_source_mismatch` | the prepared source/hash is stale; before completion use prepare --refresh-from-sha256 with its CURRENT evidence_sha256. |
-| memory | `order_state_error` | orders, preparation or receipt could not be read, locked or written; check the repo-key dir, orders.lock and persistent teardown.jsonl.lock. |
-| memory | `order_wrong_session` | the source directory, session or logical loop is foreign; use the owning directory and identifiers. |
-| memory | `refused_approval_needs_reply` | a short approval needs the reply it answers cited too; use the approved-reply form (--approval REF). |
-| memory | `refused_bad_contradicts` | the contradicted K-id does not exist. |
-| memory | `refused_bad_kind` | the record kind is not one muninn accepts. |
-| memory | `refused_bad_loop_scope` | the loop id is invalid, or --global was combined with a loop scope. |
-| memory | `refused_bad_supersedes` | the superseded K-id is missing, not current, or in another scope. |
-| memory | `refused_bad_tags` | tags must match [a-z0-9_-]{1,32}. |
+| memory | `learning_record_expired` | The current Note reached its expiry time. Do not use it. |
+| memory | `learning_request_failed` | The saved Muninn task did not finish successfully, or it was cancelled. Examine it with `muninn learn show R_ID`. |
+| memory | `learning_request_mismatch` | The binding and the learning task differ in project, task, source window, or receipt identity. |
+| memory | `learning_request_unknown` | Muninn can accept a learning task without giving its R_ ID. Examine `muninn learn list`. Do not send the task again. |
+| memory | `learning_selection_unavailable` | An E-id, ref, hash, or excerpt is necessary but unavailable. Do not cite this Note. |
+| memory | `learning_source_authority` | Use only live, primary, unflagged, unredacted prompts directly from the owner as sources. Current Muninn has no `normal` or `restricted` classes. Do not infer a class. |
+| memory | `learning_source_changed` | A physical source or its saved provenance changed. Do not cite it. |
+| memory | `learning_source_unavailable` | A necessary live source file is unavailable. Do not cite it. |
+| memory | `legacy_missing` | There is no hand-written `standing-orders.md` to import. The file may not be there, may have no text, or may come from a generator. |
+| memory | `legacy_parse_error` | The local legacy input has an entry with missing data, an ambiguous meaning, or a collision. Correct that entry and run `import-legacy` again. Keep the initial file. |
+| memory | `legacy_uncited` | The legacy import has no saved selection for the current learning task. Keep it uncited. |
+| memory | `lesson_not_current` | The saved learning task has no current Note that meets its rules. Examine its saved receipt. A caller quote cannot give it authority. |
+| memory | `memory_backend_invalid` | Set `memory.backend` to `muninn` or `off` in `.coderails/workflow.config.yaml`. |
+| memory | `memory_backend_off` | The workflow config sets `memory.backend` to `off`. To write typed memory, set it to `muninn` or remove the key. |
+| memory | `muninn_absent` | Install `muninn` and put it on `PATH`. The Markdown path cannot serve as a fallback. |
+| memory | `muninn_bad_output` | The Muninn reply does not agree with the learning task or the current Note rules. Examine the output. |
+| memory | `muninn_error` | Muninn gave a nonzero exit code or JSON that cannot be read. Run the same `muninn know ...` command again and read stderr. |
+| memory | `muninn_old_ledger` | The installed Muninn command has no learning tasks, or this record has only an earlier K-id. Legacy bindings cannot establish the source of the current learning task. |
+| memory | `muninn_schema_incomplete` | The D4 adapter expects retired v2 columns or tables. Examine the current store with `muninn doctor`. Then redesign the adapter. |
+| memory | `muninn_schema_old` | The D4 adapter expects retired schema v2. Current Muninn uses schema v1. Do not migrate the store to v2. |
+| memory | `muninn_store_missing` | There is no Muninn store at `$MUNINN_HOME` or `~/.local/share/muninn`. Run `muninn ingest` one time. |
+| memory | `muninn_timeout` | Muninn took more than 10 seconds. Run `muninn know list` by hand and check the store locks. |
+| memory | `no_user_cite` | The local diagnostic has no checked citation from the current owner. A caller quote cannot prove the learning task. |
+| memory | `order_already_ticked` | The tick skipped this session and logical loop because the count includes them. |
+| memory | `order_bad_id` | Use the format `[a-z0-9][a-z0-9_-]{0,119}` for the standing instruction ID. |
+| memory | `order_blank_field` | A standing instruction must have text for the problem and the lesson. The command did not write an entry. |
+| memory | `order_chain_broken` | Someone edited `orders.json` by hand. The hash chain names the entry. Use a saved copy or examine the named entry. To seal the entry again, record it with `orders.py`. |
+| memory | `order_id_collision` | That ID names a different problem or scope. Use the ID for this entry or make a new one. |
+| memory | `order_lesson_too_long` | The collapsed lesson has more than 500 characters. Write a shorter complete claim. Do not truncate it. |
+| memory | `order_loop_ineligible` | The owned graph or work units did not finish or have stopped. Complete the required work. |
+| memory | `order_loop_unknown` | There is no source at `<repo-key dir>/<session>/progress.json`. Supply the `--session` that owns it and the logical `--loop`. |
+| memory | `order_not_complete` | The prepared data is for future use. Apply recurrence or aging only after the owned `progress.json` records `complete`. |
+| memory | `order_not_found` | There is no entry with that ID in `orders.json`. Check the ID with `orders.py lessons`. |
+| memory | `order_pending_teardown` | The saved loop is complete, but the local update or its observation did not succeed. Retry `tick` with the same source binding. |
+| memory | `order_retro_validator_unavailable` | Schema 3 retros use the matching `retro_check` validator. Install it before graduation. |
+| memory | `order_source_invalid` | The `progress.json` file, prepared data, or observations have a format error. Put the correct checked source files back. |
+| memory | `order_source_mismatch` | The prepared source or hash is out of date. Before the loop ends, run `prepare --refresh-from-sha256` with its current `evidence_sha256`. |
+| memory | `order_state_error` | The command could not read, lock, or write the standing instructions, prepared data, or receipt. Check the repo-key directory, `orders.lock`, and `teardown.jsonl.lock`. |
+| memory | `order_wrong_session` | The source directory, session, or logical loop does not belong to this operation. Use the directory and IDs that own it. |
+| memory | `refused_approval_needs_reply` | For a short approval, also cite the reply it answers. Use `--approval REF`. |
+| memory | `refused_bad_contradicts` | There is no K-id for the contradiction. |
+| memory | `refused_bad_kind` | Muninn does not accept this record type. |
+| memory | `refused_bad_loop_scope` | The loop ID has an error, or the caller used `--global` with loop scope. |
+| memory | `refused_bad_supersedes` | There is no K-id to supersede, or the K-id is out of date or has a different scope. |
+| memory | `refused_bad_tags` | Use tags with the format `[a-z0-9_-]{1,32}`. |
 | memory | `refused_bad_valid_until` | valid_until must be a future ISO date. |
 | memory | `refused_no_caller_session` | quote-only writes need CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID in the environment. |
-| memory | `refused_not_citable` | the cited event is a subagent thread; only the orchestrator session can write typed records. |
-| memory | `refused_not_found` | the cite ref does not resolve; run `muninn ingest` and check the ref. |
-| memory | `refused_other` | muninn refused with a code not listed here; the reason is `refused_<code>`, read it and the muninn docs. |
+| memory | `refused_not_citable` | The citation points to a subagent thread. Only the orchestrator session can write typed records. |
+| memory | `refused_not_found` | The ref does not resolve. Run `muninn ingest` and check the ref. |
+| memory | `refused_other` | Muninn refused the write with a code this catalog does not list. Read `refused_<code>` and the Muninn docs. |
 | memory | `refused_preference_needs_user` | a preference must cite a user prompt. |
-| memory | `refused_quote_length` | the quote must be 12 to 300 characters (a shorter one is valid only as a whole approval prompt). |
-| memory | `refused_quote_not_found` | the quote is not verbatim in the cited event; copy it exactly. |
+| memory | `refused_quote_length` | A quote must have 12 to 300 characters. A shorter quote must be the full approval prompt. |
+| memory | `refused_quote_not_found` | The quote differs from the cited text. Copy the source text verbatim. |
 | memory | `refused_text_length` | the claim must be 1 to 500 characters. |
-| memory | `refused_uncited` | muninn got no citation; pass --cite/--quote. |
-| memory | `restricted_refused` | restricted records are never written by the adapter; write a normal-sensitivity claim. |
-| memory | `retro_decisions_chain_broken` | decisions_absorbed fails verify_chain (the failing seq is named); restore the rows, record decisions only through `graph.py record-decision`, then re-assemble. |
-| memory | `retro_free_invalid` | --free-file must hold one JSON object; nothing was assembled. |
-| memory | `retro_not_assembled` | retro.json is below schema_version 3 or has no source_hashes; run `python3 scripts/lib/retro.py assemble <state-dir> --session <session_id>` instead of writing it by hand. |
-| memory | `retro_source_mismatch` | a hashed source (named in the message) changed after the retro was assembled; re-run retro.py assemble once the sources are final. |
-| memory | `retro_state_error` | progress.json is unreadable, so nothing was assembled. |
-| memory | `retro_steps_missing` | a teardown step is missing or out of order in teardown.jsonl; run proof.py run --all (or proof.py disposition), flush decisions, orders.py prepare and retro.py assemble, in that order. |
-| memory | `retro_wrong_session` | the loop state belongs to another session; assemble only from the owning session. |
-| memory | `uncited_write` | give a verbatim --quote (and --cite ref); a record without a quote is never written. |
+| memory | `refused_uncited` | Muninn got no citation. Supply `--cite` and `--quote`. |
+| memory | `restricted_refused` | The adapter does not write restricted records. Write a normal-sensitivity claim. |
+| memory | `retro_decisions_chain_broken` | The `verify_chain` check rejected `decisions_absorbed`. The message gives the sequence number. Put the rows back. Record decisions only with `graph.py record-decision`. Then assemble again. |
+| memory | `retro_free_invalid` | `--free-file` must contain one JSON object. The command did not assemble a retro. |
+| memory | `retro_not_assembled` | `retro.json` has a schema version below 3 or has no `source_hashes`. Run `python3 scripts/lib/retro.py assemble <state-dir> --session <session_id>`. |
+| memory | `retro_source_mismatch` | A hashed source changed after assembly. The message names it. Run `retro.py assemble` again when the source files are complete. |
+| memory | `retro_state_error` | The command could not read `progress.json`. It did not assemble a retro. |
+| memory | `retro_steps_missing` | Check `teardown.jsonl` for a missing step or an incorrect sequence. Run `proof.py run --all` or `proof.py disposition`. Then flush decisions. Next run `orders.py prepare`. Last, run `retro.py assemble`. |
+| memory | `retro_wrong_session` | The loop belongs to a different session. Assemble only from the session that owns it. |
+| memory | `uncited_write` | Supply a verbatim `--quote` and `--cite ref`. The adapter cannot write a record without a quote. |
 <!-- hook-reasons:end -->
 
-## No trace rows appear
+## Hook diagnostics
 
-- Symptom: `trace.rows` is 0 although gates fired (`gate_blocks` counts are nonzero).
-- Query: the command above; then `ls ${CLAUDE_AGENTIC_LOOP_DIR:-~/.coderails/agentic-loop}/<session_id>/trace.jsonl`.
-- Remediation: the writer fails open, so an unwritable directory or an unsafe session id (contains `/` or `..`,
-  or is empty) silently drops rows. Fix the directory permissions; do not make the gate depend on the write.
+- <a id="no-trace-rows-appear"></a>[No diagnostic log entries](RUNBOOK-HOOKS.md#no-trace-rows-appear)
+- <a id="gate-seems-off-config-key-or-wiki-schema"></a>[Config or wiki schema does not activate a gate](RUNBOOK-HOOKS.md#gate-seems-off-config-key-or-wiki-schema)
+- <a id="guarded-action-denied-config_rejected-or-wiki-schema-fail-closed"></a>[Config or wiki schema blocks an operation](RUNBOOK-HOOKS.md#guarded-action-denied-config_rejected-or-wiki-schema-fail-closed)
+- <a id="discipline-lint-advisories-climbing"></a>[Discipline advisories increase](RUNBOOK-HOOKS.md#discipline-lint-advisories-climbing)
+- <a id="reviewerscout-bash-command-denied"></a>[Reviewer or scout Bash denial](RUNBOOK-HOOKS.md#reviewerscout-bash-command-denied)
+- <a id="subagent-bash-denied-for-absent-agent_type"></a>[Subagent Bash denial without agent type](RUNBOOK-HOOKS.md#subagent-bash-denied-for-absent-agent_type)
+- <a id="guarded-role-has-no-tools-or-no-shell"></a>[Role has no tools or shell](RUNBOOK-HOOKS.md#guarded-role-has-no-tools-or-no-shell)
+- <a id="capability-tool-refused-or-denied"></a>[Tool refusal](RUNBOOK-HOOKS.md#capability-tool-refused-or-denied)
+- <a id="capability-mcp-server-refused-a-call-or-will-not-start"></a>[MCP server refusal](RUNBOOK-HOOKS.md#capability-mcp-server-refused-a-call-or-will-not-start)
+- <a id="authority-object-refused-or-changed"></a>[Authority object refusal or change](RUNBOOK-HOOKS.md#authority-object-refused-or-changed)
+- <a id="manifest-says-no-loop-or-the-wrong-loop"></a>[Manifest cannot find the loop](RUNBOOK-HOOKS.md#manifest-says-no-loop-or-the-wrong-loop)
+- <a id="autonomous-input-denial-is-wrong"></a>[Autonomy and input denial](RUNBOOK-HOOKS.md#autonomous-input-denial-is-wrong)
 
-## Gate seems off (config key or wiki schema)
-
-- Symptom: a configured gate (wiki taxonomy, wiki-debt, integrity, eval signing) does nothing, or a config key seems ignored.
-- Query: `python3 scripts/lib/config.py resolve-config --json | jq .unknown_keys` (also `.findings`); counts via
-  `python3 scripts/lib/config_counters.py` for `config_unknown_key`, `config_bad_type`, `config_bad_value`, `config_unreadable`,
-  `wiki_schema_missing`, `wiki_schema_invalid`, `wiki_schema_legacy` (scope with `--since 2026-10-05T00:00:00`; the same rows
-  also appear in `measure_graph_alignment.py --json` under `trace.by_reason`; trace rows: `config/warned/<code>`, `wiki_taxonomy_gate/failed_closed/<code>`).
-- Remediation: fix the key (the finding carries a did-you-mean hint) or the value; `resolve-config --json` prints
-  `valid:false` and exits 1 while any finding remains. Reading is non-authoritative for ordinary gates (they warn and
-  trace), but the guarded actions below fail closed. `wiki_schema_legacy` identifies an older vault record. The wiki
-  gate requires `wiki.schema.json`; restore that file to allow writes in an identified vault.
-
-## Guarded action denied: config_rejected or wiki schema fail-closed
-
-- Symptom: `gh pr merge` or `git push` to main (action-authority hook), `push.py`/`merge.py` (diff-manifest check) or a
-  write inside the wiki vault is denied with `config_rejected` ("did you mean ..."), `wiki_schema_missing` or
-  `wiki_schema_invalid`.
-- Query: trace rows `action_authority/denied/config_rejected`, `diff-manifest/refused/config_rejected`,
-  `wiki_taxonomy_gate/failed_closed/<config_rejected|wiki_schema_missing|wiki_schema_invalid>`; counts via
-  `python3 scripts/lib/config_counters.py` (`config_rejected`, `config_bad_value`, `wiki_schema_fail_closed`).
-- Remediation: run `python3 scripts/lib/config.py resolve-config --json`, fix each finding (typo'd key, wrong type, value
-  outside the enum), or restore `wiki.schema.json` (`page_types` non-empty list of directory names). Only the guarded
-  action is denied; other commands and tools can continue. Without a config file, config-dependent gates do not run.
-  The diff-manifest check still uses its shipped policy. An ambiguous wiki identity (no `wiki_path`, another repository,
-  or a path that is not a vault) does not block a write.
-- Limit: a same-user agent can remove the config file or set a control to `off`; no hook guards
-  `.coderails/workflow.config.yaml`. Removing the file does not disable the default diff-manifest check. Review config
-  diffs like code. The diff-manifest policy can list the config file as a protected path. `evals.require_signatures`
-  fails closed: only an explicit `false` turns it off. Malformed lines and duplicate keys are
-  `config_unparseable_line` / `config_duplicate_key` findings.
-- Defaults: the diff-manifest check uses `enforce` mode and `policy/diff-policy.default.json` even without a config file.
-  An existing config with no other keys enables `sandbox_workers: true` and `evals.require_signatures: true`.
-  `action_authority` defaults to `enforce`, including without a config file. Shipped example and init presets also
-  use `enforce`. Explicit `advisory` warns about missing receipts; explicit `off` disables this receipt gate.
-  Invalid configuration refuses guarded actions. Preserve intentional project settings when migrating.
-
-## Discipline lint advisories climbing
-
-- Symptom: `confidence_labels` or `verify_loop` advisories climb. These two hooks no longer block (demoted by user
-  override, `docs/decisions/2026-10-04-not-in-gate-demotion.md`); the pre-demotion `blocked` series is history.
-- Query: `trace.by_reason` for `check_confidence_labels/demoted/confidence_label_missing` and
-  `check_verify_loop/demoted/verify_loop_missing` (keys are `command/outcome/reason_code`; `blocked` and `warned`
-  rows are the older series and are separate); `gate_blocks.claude.gates.<gate>` for `demoted`/`would_block`.
-  `blocked / decisions` now falls to about 0 by construction; compare `demoted / decisions` instead.
-- Remediation: a rising `demoted` count means the model is skipping labels or DNV tags, not that a gate is stuck.
-  Fix the prompt or instruction text; there is nothing to unblock.
-
-## Reviewer/scout Bash command denied
-
-- Symptom: a read-only reviewer or scout reports a denied Bash call.
-- Query: `trace.by_reason` for `reviewer_bash_allowlist/denied/bash_allowlist_deny_<cause>`, cause one of `meta`
-  (chaining/redirection), `flag` (dangerous or unknown rg flag), `parse` (bad quoting), `argv` (command not on the list).
-  The discipline log line carries `agent_type`, `argv0` and a 12-char sha of the command.
-- Remediation: rerun the inspection with a single allowlisted read-only command (no chaining, redirection or
-  interpreters). If a legitimate command is missing, add its exact argv prefix to the allowlist with a test.
-
-## Subagent Bash denied for absent agent_type
-
-- Symptom: a subagent's Bash call is denied with `bash_agent_type_absent`.
-- Query: `trace.by_reason` for `subagent_identity_gate/denied/bash_agent_type_absent`; the discipline log line
-  `hook=subagent_identity_gate` carries the session. Counters: `python3 scripts/measure_graph_alignment.py --root . --json`.
-- Remediation: dispatch the role by its `subagent_type` (for example `coderails:design-scout`) so the payload carries an
-  `agent_type`; guarded roles act through their MCP tools and have no Bash. Do not widen the hook: it denies only
-  `agent_id` without `agent_type` in a graph-bound session. Codex has no counterpart (no `agent_type` at PreToolUse).
-
-## Guarded role has no tools or no shell
-
-- Symptom: a reviewer/scout reports it cannot run a command or read a file, or a skill step is UNSUPPORTED.
-- Cause: by design the six guarded agents hold only `mcp__plugin_coderails_cap-<role>__*` tools (+`Skill` for
-  preflight-scout). If the tools are missing entirely, `.claude-plugin/plugin.json` lacks `mcpServers` or
-  `capabilities/mcp.json` is stale: run `python3 scripts/capability_profiles_validate.py --check`, and `--write-mcp` to
-  regenerate. Codex: launch the role with `scripts/codex_role_session.py`; a native Codex child of a guarded role has no
-  shell and no capability tools. The launcher refuses a cwd under a project `.codex/` directory
-  (move the audit elsewhere or remove it). Set `subagent_identity_gate: off` in the repo config to disable the
-  identity gate (default ON).
-
-## Capability tool refused or denied
-
-- Symptom: a reviewer/scout (usually `source-auditor` running `tests.run`) is refused a `scripts/capability.py` call.
-- Query: `trace.by_reason` for `reviewer_bash_allowlist/denied/capability_denied_<tool>`,
-  `capability_unknown_tool` or `capability_bad_argv` (hook side, one row per decision;
-  `reviewer_bash_allowlist/allowed/capability_allowed_<tool>` counts grants), and `capability/refused/capability_*`
-  (script side: `args_invalid`, `path_denied`, `bad_ref`, `no_repo`, `tests_unknown_name`, `sandbox_unavailable`, `io_error`). Narrow with
-  `python3 scripts/measure_graph_alignment.py --root . --json | jq '.trace.by_reason | with_entries(select(.key|test("capability")))'`.
-  Hook rows need a session id (payload `session_id`); script rows use env `CLAUDE_SESSION_ID` or `CODEX_THREAD_ID`
-  (unverified that the harness sets it) and otherwise land under the `unattributed` session directory. `"traced": false`
-  now means only that the trace library or disk failed; the hook also logs `denied=1 reason_code=...` to its log, so an empty query is not proof
-  of no refusals.
-- Remediation: `capability_denied_*` means the agent's profile lacks the tool; change `capabilities/profiles.json`
-  deliberately (the validator test keeps frontmatter and Codex sandboxes in step), never widen Bash. `bad_argv` means
-  the call was not exactly `<abs path>/scripts/capability.py <tool> --json-args '<json>'`; the path must be absolute.
-  `tests_unknown_name` means the name is not in `profiles.json` `tests`.
-
-## Capability MCP server refused a call or will not start
-
-- Symptom: a role's `capability_mcp.py` exits 2 at launch, or a `tools/call` returns an error or `isError`.
-- Query: `python3 scripts/lib/capability_counters.py` (counts per reason code over `CLAUDE_AGENTIC_LOOP_DIR`), or
-  `trace.by_reason` for `capability/refused/capability_mcp_refused` (startup), `capability_wrong_role` (a tool outside the
-  role's profile), `capability_args_invalid|path_denied|bad_ref` (arguments) and `capability/ok/<tool>` (grants). Rows carry
-  hashed inputs `{tool, role, via: mcp}`; MCP servers read the session id from `CLAUDE_SESSION_ID`, then
-  `CLAUDE_CODE_SESSION_ID`, then `CODEX_THREAD_ID`, else the `unattributed` directory.
-- Remediation: `capability_mcp_refused` means the `--role` is missing from `capabilities/profiles.json`, holds no capability
-  tool, or the flags are wrong (stderr names which). `capability_wrong_role` means the profile does not grant that tool;
-  change the profile deliberately (the validator keeps agent files in step). `path_denied` on a `worktree` argument means
-  the path is not in `git worktree list` of the server's cwd repo. `cmd.run` only runs `named_commands` entries.
-
-## Authority object refused or changed
-
-- Symptom: `authority.py` refuses a command, or an object disappeared.
-- Query: `trace.by_reason` for `authority/created|narrowed|revoked` and `authority/refused/authority_refused_<cause>`, cause one of `exists`,
-  `widen_scope`, `widen_max_prs`, `narrow_empty`, `not_revocable`, `missing`, `expired`, `malformed`, `invalid`,
-  `create_invalid`, `write_failed`, `foreign` (an unsafe session id cannot be traced; stderr only).
-- Remediation: inspect with `python3 scripts/authority.py inspect --session <exact id>`. A foreign-session refusal
-  means the id did not match exactly; ids are never sanitised.
-
-## Manifest says no loop, or the wrong loop
-
-- Symptom: the SessionStart manifest shows `loop: none` or `loop: unknown` although a loop is running, or the
-  session injected the static fallback.
-- Query: `python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['context'])"`,
-  or `jq 'select(.command|startswith("context_"))|.reason_code' ${CLAUDE_AGENTIC_LOOP_DIR:-~/.coderails/agentic-loop}/<session_id>/trace.jsonl`.
-  Reason codes: `manifest_ok`, `manifest_graph_invalid`, `manifest_no_session`, `manifest_state_unreadable`,
-  `manifest_payload_malformed`, `manifest_error`, `route_match`, `route_payload_malformed`, `route_none`
-  (an unrouted prompt: no row is written). Events with a missing or unsafe session id are filed under
-  `<loop dir>/_unattributed/trace.jsonl`.
-- Remediation: `loop: none` for a foreign or unsafe session id is correct (ids match exactly, never sanitised). For
-  `manifest_state_unreadable` repair progress.json; for `manifest_graph_invalid` run `graph.py inspect <state>`.
-  Check `CLAUDE_AGENTIC_LOOP_DIR` (wins) versus `CODERAILS_AGENTIC_LOOP_DIR`. Routes are advisory text only.
-  `route_meta` counts required, offered, recorded, and dropped skill routes within the four-skill budget. It does not
-  show that the agent read or used a skill. The active graph contract supplies required routes before keyword matches.
-
-## Autonomous input denial is wrong
-
-- Symptom: `AskUserQuestion` / `request_user_input` is denied when the user no longer wants autonomy, or is allowed
-  right after "autonomous" (the word grants nothing; use the installed `authorise` command or skill).
-- Query: `trace.by_reason` for `authority/granted/authority_granted_command` (the typed grant),
-  `autonomous/ignored/authority_phrase_ignored` (the phrase was seen and ignored; the hint with the grant command was shown),
-  `autonomous/blocked/authority_deny`,
-  `autonomous/allowed/authority_expired_allow`,
-  `autonomous/ignored/authority_corrupt_ignored` (authority.json cannot be read: it grants nothing),
-  `authority/refused/authority_refused_write_failed` (the grant could not write, so nothing is suppressed),
-  `authority/refused/authority_refused_foreign`. Inspect with
-  `python3 scripts/authority.py inspect --session <exact id>`.
-- Remediation: revoke with `python3 scripts/authority.py revoke --session <id>`. Old `crack_on_active` files have no effect and remain on disk. Allowed right after "autonomous": the word only prints the grant command
-  (`authority_phrase_ignored`); type `/coderails:authorise` (fixed defaults, `max_prs` 0; Codex: `$coderails-codex:authorise`) to grant. `authority_expired_allow` shows the 24h object lapsed;
-  grant again (an expired file is replaced; a live one is refused `authority_refused_exists`). `authority_refused_unsafe_session` also
-  means `/coderails:authorise` got an empty or unsubstituted (`${...}`) session id: the substitution in the command file is not
-  live-probed (see `docs/decisions/e3-authority-object.md`); check the session ID, then retry the command. Objects without `granted_by: command` grant nothing. The command can replace an expired or invalid object. An agent with file access can write the unsigned `granted_by: command` label directly. The hint tells agents not to grant authority for the user.
-- Baseline note: the old 103 fires / 5 blocks figure (`docs/graph-alignment-measurement.md`) came from discipline-log
-  telemetry; after-numbers come from trace rows, so they are not comparable. Reproduce:
-  `python3 scripts/measure_graph_alignment.py --root . --json`.
+The manifest codes are `manifest_ok`, `manifest_graph_invalid`, `manifest_no_session`, `manifest_state_unreadable`, `manifest_payload_malformed`, `manifest_error`, `route_match`, `route_payload_malformed`, and `route_none`.
 
 ## Memory degraded (Muninn authoritative)
 
-- Symptom: a typed lesson, decision or handoff read/write printed `{"degraded": "<reason_code>"}` and exited 3.
-  Muninn is the only typed-memory store. There is NO Markdown fallback: a degrade is reported with its reason code,
-  never skipped and never replaced by hand-written Markdown. `memory.backend: off` is the one explicit way to run
-  without it (reason `memory_backend_off`, traced).
-- Query: `python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['memory'])"`
-  (`rows`, `by_reason_code`, `by_command`; deduped by `event_id`; commands `memory.*`, `decision.*`, `order.*`,
-  `lesson.*`, `proof.*`, `retro.*`, `teardown.*`, `handoff.*`), or
-  `grep '"command": "memory\.' <agentic-loop dir>/<session_id>/trace.jsonl`. An unsafe session id writes no row; an unset
-  or empty session id (CLI without `CLAUDE_SESSION_ID` or `--session`) writes rows under the fixed id
-  `memory-adapter-nosession`. A muninn refusal keeps its original code in the reason (`refused_<code>`).
-- Remediation (reason code: one-line fix, single source `scripts/lib/memory_reasons.py`):
+- Symptom: a typed lesson, decision, or handoff operation gives `{"degraded": "<reason_code>"}` and exits with code 3.
+  Muninn is the only typed-memory store. On degradation, the command shows its code and does not write Markdown.
+  To run without Muninn, explicitly set `memory.backend: off`. The command logs `memory_backend_off`.
+
+- Query: Run `python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['memory'])"`.
+  Read `rows`, `by_reason_code`, and `by_command`. The counter deduplicates by `event_id`.
+  Commands are `memory.*`, `decision.*`, `order.*`, `lesson.*`, `proof.*`, `retro.*`, `teardown.*`, and `handoff.*`.
+  To read the diagnostic log directly, use `grep '"command": "memory\.' <agentic-loop dir>/<session_id>/trace.jsonl`.
+
+  A session ID that fails the safety check produces no entry.
+  With an unset or empty session ID (CLI without `CLAUDE_SESSION_ID` or `--session`), the command uses `memory-adapter-nosession`.
+  A Muninn refusal keeps its initial code in `refused_<code>`.
+
+- Remediation: Use the code to select a procedure. The code source is `scripts/lib/memory_reasons.py`.
 
 | Code | Remediation |
 |------|-------------|
-| `memory_backend_off` | memory.backend is off in the workflow config; set it to muninn (or remove the key) to write typed memory. |
-| `memory_backend_invalid` | memory.backend must be muninn or off; fix the value in .coderails/workflow.config.yaml. |
-| `muninn_absent` | muninn is not on PATH; install it (the Markdown path is not a fallback). |
-| `muninn_old_ledger` | Current consumers require task requests and retained R-id bindings. The standalone legacy CLI still requires retired schema-v2 flags. |
-| `muninn_timeout` | muninn hung past 10s; run `muninn know list` by hand and check store locks. |
-| `muninn_error` | muninn exited nonzero or returned unparseable JSON; rerun the same `muninn know ...` command and read stderr. |
-| `muninn_bad_output` | The public request, receipt or current Note response does not match the supported model. Inspect the exact retained request. |
-| `learning_pending` | Muninn has accepted the task request. Keep its R_ ID and check the same request later. |
-| `learning_request_unknown` | Muninn may have accepted a request without returning its R_ ID. Inspect `muninn learn list`; do not submit again. |
-| `learning_request_failed` | The saved Muninn request failed or was cancelled. Inspect it with `muninn learn show R_ID`. |
-| `learning_no_matching_record` | The completed request has no unique eligible current Note for this exact task and text. Zero or multiple matching records cause this result. Inspect its receipt and notes. |
-| `learning_no_change` | The saved request completed without applying knowledge. It is not a written Note. |
-| `learning_request_mismatch` | Request project, task, source window or receipt identity differs from its binding. |
-| `learning_receipt_unavailable` | The request has no supported committed receipt; acceptance alone is not a save. |
-| `learning_record_changed` | Listed and shown current revisions differ. Read again with the same binding. |
-| `learning_record_expired` | The current Note has reached its timed expiry and cannot be used. |
-| `learning_record_ambiguous` | Several receipts match the exact K-id/revision. No request identity was selected. |
-| `learning_form_unsupported` | This reader supports Notes only; Guide use remains unsupported. |
-| `learning_conditional_use_unsupported` | The Note is saved with conditions or conditional expiry. Legacy dispatch/promotion/render cannot evaluate those conditions; retain its metadata and do not use it unconditionally. |
-| `learning_selection_unavailable` | A required E-id/ref/hash/selected excerpt is unavailable; no cite is asserted. |
-| `learning_evidence_mismatch` | The retained evidence identity, selector, scope or source window does not match. |
-| `learning_source_changed` | A physical source or its exact retained provenance changed; no cite is asserted. |
-| `learning_source_unavailable` | A required live physical original is unavailable; no cite is asserted. |
-| `learning_source_authority` | The complete support set must be live, primary, unflagged, unredacted direct-owner user prompts. Current Muninn has no normal/restricted classification; do not infer one. |
-| `learning_quote_mismatch` | A retained selected excerpt did not pass public quote-check; no cite is asserted. |
-| `learning_read_limit` | The read exceeded a time, reply, record or support limit; results are incomplete. |
-| `learning_project_unavailable` | The calling project directory is unavailable; do not use the graph key. |
-| `muninn_store_missing` | no Muninn store at $MUNINN_HOME (or ~/.local/share/muninn); run `muninn ingest` once. |
-| `muninn_schema_old` | the D4 adapter expects retired schema v2; current Muninn uses schema v1. Do not migrate the store to v2. |
-| `muninn_schema_incomplete` | the D4 adapter expects retired v2 columns or tables. Inspect the current store with `muninn doctor`, then redesign the adapter. |
-| `uncited_write` | give a verbatim --quote (and --cite ref); a record without a quote is never written. |
-| `restricted_refused` | restricted records are never written by the adapter; write a normal-sensitivity claim. |
-| `bad_record` | the record failed validation (type, scope, tag, date, empty claim, or loop scope without a loop id). |
-| `handwritten_protected` | the render target is hand-written (no generator marker); render to a new path. |
-| `cite_not_user` | the cite must anchor in a user prompt; cite the owner's own words or use the approved-reply form. |
-| `cite_too_short` | a quote-only cite needs 12 to 300 characters; quote more of the user's prompt or cite an approval with its reply. |
-| `cite_unresolved` | the cite ref (or the quote, for a quote-only cite) was not found in `muninn session <root>`, or the approval has no reply before it, or no session id was given; check the ref. |
-| `cite_not_own_session` | the cite ref belongs to another session; only a prompt of the caller's own session (--session) can anchor a write. |
-| `cite_bad_approval` | the approval must be a short user prompt (80 chars or fewer) that directly follows the reply it answers. |
-| `refused_uncited` | muninn got no citation; pass --cite/--quote. |
-| `refused_not_found` | the cite ref does not resolve; run `muninn ingest` and check the ref. |
-| `refused_not_citable` | the cited event is a subagent thread; only the orchestrator session can write typed records. |
-| `refused_quote_length` | the quote must be 12 to 300 characters (a shorter one is valid only as a whole approval prompt). |
-| `refused_quote_not_found` | the quote is not verbatim in the cited event; copy it exactly. |
-| `refused_approval_needs_reply` | a short approval needs the reply it answers cited too; use the approved-reply form (--approval REF). |
-| `refused_preference_needs_user` | a preference must cite a user prompt. |
-| `refused_bad_supersedes` | the superseded K-id is missing, not current, or in another scope. |
-| `refused_bad_contradicts` | the contradicted K-id does not exist. |
-| `refused_bad_valid_until` | valid_until must be a future ISO date. |
-| `refused_bad_tags` | tags must match [a-z0-9_-]{1,32}. |
-| `refused_bad_loop_scope` | the loop id is invalid, or --global was combined with a loop scope. |
-| `refused_bad_kind` | the record kind is not one muninn accepts. |
-| `refused_text_length` | the claim must be 1 to 500 characters. |
-| `refused_no_caller_session` | quote-only writes need CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID in the environment. |
-| `refused_other` | muninn refused with a code not listed here; the reason is `refused_<code>`, read it and the muninn docs. |
-| `decision_wrong_session` | the loop state belongs to another session; record only from the owning session. |
-| `decision_wrong_loop` | the loop changed after the caller read it; read the current loop ID before recording. |
-| `decision_wrong_revision` | the graph changed after the caller read it; read the current revision before recording. |
-| `decision_blank_phase` | a decision needs a non-blank phase (for example 2.5). |
-| `decision_blank_decision` | a decision needs a non-blank decision text; nothing was written. |
-| `decision_invalid_chain` | the decision chain is damaged; inspect and preserve the loop state before any further sync. |
-| `decision_sync_unknown` | a decision sync may have reached Muninn; inspect the store before any manual retry. |
-| `decision_state_error` | the loop state could not be read, validated or locked; nothing was written. |
-| `order_chain_broken` | orders.json was edited by hand (the hash chain names the order); restore it from backup or review the named order, then re-seal by recording through orders.py. |
-| `order_blank_field` | an order needs a non-blank failure mode and lesson; nothing was written. |
-| `order_lesson_too_long` | the collapsed lesson exceeds 500 characters; provide a shorter complete claim, never truncate it. |
-| `order_bad_id` | an explicit order id must match [a-z0-9][a-z0-9_-]{0,119}; use a canonical id. |
-| `order_id_collision` | that id names another failure mode or scope; use its real identity or a distinct id. |
-| `order_not_found` | no order with that id in orders.json; check the id with `orders.py lessons`. |
-| `order_state_error` | orders, preparation or receipt could not be read, locked or written; check the repo-key dir, orders.lock and persistent teardown.jsonl.lock. |
-| `order_loop_unknown` | no source at <repo-key dir>/<session>/progress.json; pass its owning --session and separate logical --loop. |
-| `order_wrong_session` | the source directory, session or logical loop is foreign; use the owning directory and identifiers. |
-| `order_source_invalid` | progress, preparation or observations are malformed; restore genuine validated source artifacts. |
-| `order_source_mismatch` | the prepared source/hash is stale; before completion use `prepare --refresh-from-sha256` with its CURRENT `evidence_sha256`. |
-| `order_loop_ineligible` | graph or work units are incomplete or stopped; finish the existing completion requirements. |
-| `order_not_complete` | preparation is prospective; durably save owned progress complete before recurrence or aging. |
-| `order_pending_teardown` | completion saved but local apply or observation failed; retry tick with the same bound source. |
-| `order_retro_validator_unavailable` | schema3 retros need the matching retro_check.py validator; reconcile that source dependency before graduation. |
-| `order_already_ticked` | this session and logical loop were already counted; the tick was skipped (informational). |
-| `no_user_cite` | The local diagnostic has no verified current owner citation. A caller quote cannot establish request evidence. |
-| `legacy_uncited` | The legacy import has no retained current request selection; keep it explicitly uncited. |
-| `legacy_parse_error` | the local legacy input has an incomplete, ambiguous or colliding entry; fix it while preserving the original. |
-| `legacy_missing` | there is no hand-written standing-orders.md to import (absent, empty or already generated). |
-| `lesson_not_current` | The saved request has no exact eligible current Note. Inspect its retained receipt; a caller quote cannot repair authority. |
-| `retro_not_assembled` | For a new loop, assemble schema-3 retro.json with `retro.py assemble` after the final stop and orders preparation. Preserve the source artifacts. For an old completed loop, see the recovery rule below. |
-| `retro_source_mismatch` | A named source changed after assembly; finish that source and re-assemble. |
-| `retro_decisions_chain_broken` | Restore the damaged decision row; record decisions through the graph CLI. |
-| `retro_steps_missing` | Run the missing proof, decision flush or orders preparation step, then re-assemble. |
-| `decisions_not_flushed` | Flush decisions before the final stop and orders preparation. If an incomplete loop already has a stale preparation, use the supported `prepare --refresh-from-sha256` path after the final source update, then assemble the retro. |
-| `retro_state_error` | Restore the owned, readable progress.json before assembly. |
-| `retro_wrong_session` | Use the session that owns progress.json. |
+| `memory_backend_off` | The config sets `memory.backend` to `off`. To write typed memory, set it to `muninn` or remove the key. |
+| `memory_backend_invalid` | Set `memory.backend` to `muninn` or `off` in `.coderails/workflow.config.yaml`. |
+| `muninn_absent` | Install `muninn` and put it on PATH. There is no Markdown fallback. |
+| `muninn_old_ledger` | Current consumers use task calls and saved R-id bindings. The standalone legacy CLI uses retired schema-v2 flags. |
+| `muninn_timeout` | Muninn gave no result in 10 seconds. Run `muninn know list` by hand and check store locks. |
+| `muninn_error` | Muninn gave a nonzero exit code or JSON that cannot be read. Run the same `muninn know ...` command again and read stderr. |
+| `muninn_bad_output` | The public task, receipt, or current Note response does not agree with the expected model. Examine the saved task. |
+| `learning_pending` | Muninn accepted the task. Keep its R_ ID and check that task again. |
+| `learning_request_unknown` | Muninn may have accepted the task without giving its R_ ID. Examine `muninn learn list`. Do not send the task again. |
+| `learning_request_failed` | The saved Muninn task did not succeed or was cancelled. Examine it with `muninn learn show R_ID`. |
+| `learning_no_matching_record` | The completed task has no eligible current Note or has more than one for this task and text. Examine its receipt and Notes. |
+| `learning_no_change` | The saved task finished without a change to knowledge. It wrote no Note. |
+| `learning_request_mismatch` | The task and binding differ in project, task, source window, or receipt identity. |
+| `learning_receipt_unavailable` | The task has no committed receipt that the reader can use. Muninn can accept a task without writing a Note. |
+| `learning_record_changed` | Listed and shown current revisions are different. Read again with the same binding. |
+| `learning_record_expired` | The current Note reached its expiry time. Do not use it. |
+| `learning_record_ambiguous` | More than one receipt matches this K-id and revision. The reader selected no task identity. |
+| `learning_form_unsupported` | This reader reads Notes only. It cannot use Guides. |
+| `learning_conditional_use_unsupported` | The Note has conditions for use or expiry. Legacy dispatch, promotion, and render cannot check those conditions. Keep the metadata. Do not use the Note unconditionally. |
+| `learning_selection_unavailable` | An E-id, ref, hash, or selected excerpt is necessary but unavailable. Do not cite the Note. |
+| `learning_evidence_mismatch` | The saved record identity, selector, scope, or source window does not agree with the binding. |
+| `learning_source_changed` | A physical source or its saved provenance changed. Do not cite it. |
+| `learning_source_unavailable` | A necessary live physical source is unavailable. Do not cite it. |
+| `learning_source_authority` | All sources must be live, primary, unflagged, unredacted user prompts from the owner. Current Muninn has no `normal` or `restricted` class. Do not infer a class. |
+| `learning_quote_mismatch` | The public quote check refused a selected excerpt. Do not cite it. |
+| `learning_read_limit` | The read went above a time, reply, record, or source limit. It did not give all results. |
+| `learning_project_unavailable` | The caller's project directory is unavailable. Do not use the graph key. |
+| `muninn_store_missing` | There is no Muninn store at `$MUNINN_HOME` or `~/.local/share/muninn`. Run `muninn ingest` one time. |
+| `muninn_schema_old` | The D4 adapter expects retired schema v2. Current Muninn uses schema v1. Do not migrate the store to v2. |
+| `muninn_schema_incomplete` | The D4 adapter expects retired v2 columns or tables. Examine the current store with `muninn doctor`. Then redesign the adapter. |
+| `uncited_write` | Supply a verbatim `--quote` and `--cite ref`. The adapter cannot write a record without a quote. |
+| `restricted_refused` | The adapter does not write restricted records. Write a normal-sensitivity claim. |
+| `bad_record` | The record has an error in its type, scope, tag, date, claim text, or loop ID. A claim must have text, and loop scope must have a loop ID. |
+| `handwritten_protected` | The hand-written target has no generator marker. Write the view to a new path. |
+| `cite_not_user` | The cite must point to a user prompt. Cite the owner's words or use the approved-reply syntax. |
+| `cite_too_short` | A quote-only cite must have 12 to 300 characters. Use more of the user's prompt or cite an approval with its reply. |
+| `cite_unresolved` | The cite ref or quote-only text did not occur in `muninn session <root>`. This also applies if the approval has no preceding reply or the caller gave no session ID. Check the ref. |
+| `cite_not_own_session` | The ref points to a different session. Only a user prompt from the calling session (`--session`) can authorize the write. |
+| `cite_bad_approval` | The approval must be a short user prompt (80 chars or fewer) that directly follows the reply it answers. |
+| `refused_uncited` | Muninn got no citation. Supply `--cite` and `--quote`. |
+| `refused_not_found` | The ref does not resolve. Run `muninn ingest` and check the ref. |
+| `refused_not_citable` | The citation points to a subagent thread. Only the orchestrator session can write typed records. |
+| `refused_quote_length` | A quote must have 12 to 300 characters. A shorter quote must be the full approval prompt. |
+| `refused_quote_not_found` | The quote differs from the cited text. Copy the source text verbatim. |
+| `refused_approval_needs_reply` | For a short approval, also cite the reply it answers. Use `--approval REF`. |
+| `refused_preference_needs_user` | A preference must cite a user prompt. |
+| `refused_bad_supersedes` | There is no K-id to supersede, or the K-id is out of date or has a different scope. |
+| `refused_bad_contradicts` | There is no K-id for the contradiction. |
+| `refused_bad_valid_until` | The `valid_until` field must be a future ISO date. |
+| `refused_bad_tags` | Use tags with the format `[a-z0-9_-]{1,32}`. |
+| `refused_bad_loop_scope` | The loop ID has an error, or the caller used `--global` with loop scope. |
+| `refused_bad_kind` | Muninn does not accept this record type. |
+| `refused_text_length` | The claim must be 1 to 500 characters. |
+| `refused_no_caller_session` | The environment must have `CLAUDE_CODE_SESSION_ID` or `CODEX_SESSION_ID` for quote-only writes. |
+| `refused_other` | Muninn refused the write with a code this table does not list. Read `refused_<code>` and the Muninn docs. |
+| `decision_wrong_session` | The loop belongs to a different session. Record the decision only from the session that owns the loop. |
+| `decision_wrong_loop` | The loop changed after the caller read it. Read the current loop ID before you record the decision. |
+| `decision_wrong_revision` | The graph changed after the caller read it. Read the current revision before you record the decision. |
+| `decision_blank_phase` | A decision must give a phase, for example 2.5. |
+| `decision_blank_decision` | A decision must have text. The command did not write a record. |
+| `decision_invalid_chain` | The decision chain has damage. Examine and keep the loop data before you sync again. |
+| `decision_sync_unknown` | Muninn may have received the decision. Examine the store before you retry by hand. |
+| `decision_state_error` | The command could not read, check, or lock the loop data. It did not write a record. |
+| `order_chain_broken` | Someone edited `orders.json` by hand. The hash chain names the entry. Use a saved copy or examine the named entry. To seal the entry again, record it with `orders.py`. |
+| `order_blank_field` | A standing instruction must have text for the problem and the lesson. The command did not write an entry. |
+| `order_lesson_too_long` | The collapsed lesson has more than 500 characters. Write a shorter complete claim. Do not truncate it. |
+| `order_bad_id` | Use the format `[a-z0-9][a-z0-9_-]{0,119}` for the standing instruction ID. |
+| `order_id_collision` | That ID names a different problem or scope. Use the ID for this entry or make a new one. |
+| `order_not_found` | There is no entry with that ID in `orders.json`. Check the ID with `orders.py lessons`. |
+| `order_state_error` | The command could not read, lock, or write the instructions, prepared data, or receipt. Check the repo-key directory, `orders.lock`, and the durable `teardown.jsonl.lock`. |
+| `order_loop_unknown` | There is no source at `<repo-key dir>/<session>/progress.json`. Supply the `--session` that owns it and the logical `--loop`. |
+| `order_wrong_session` | The source directory, session, or logical loop does not belong to this operation. Use the directory and IDs that own it. |
+| `order_source_invalid` | The `progress.json` file, prepared data, or observations have a format error. Put the correct checked source files back. |
+| `order_source_mismatch` | The prepared source or hash is out of date. Before the loop ends, run `prepare --refresh-from-sha256` with its current `evidence_sha256`. |
+| `order_loop_ineligible` | The owned graph or work units did not finish or have stopped. Complete the necessary work. |
+| `order_not_complete` | The prepared data is for future use. Apply recurrence or aging only after the owned `progress.json` records `complete` durably. |
+| `order_pending_teardown` | The saved loop is complete, but the local update or its observation did not succeed. Retry `tick` with the same source binding. |
+| `order_retro_validator_unavailable` | Schema 3 retros use the corresponding `retro_check.py` validator. Make the validator available before graduation. |
+| `order_already_ticked` | The tick skipped this session and logical loop because the count includes them. |
+| `no_user_cite` | The local diagnostic has no checked citation from the current owner. A caller quote cannot prove the task provenance. |
+| `legacy_uncited` | The legacy import has no saved selection for the current task. Keep it uncited. |
+| `legacy_parse_error` | The local legacy input has an entry with missing data, an ambiguous meaning, or a collision. Correct the entry and keep the initial file. |
+| `legacy_missing` | There is no hand-written `standing-orders.md` to import. The file may not be there, may have no text, or may come from a generator. |
+| `lesson_not_current` | The saved task has no current Note that satisfies its conditions. Examine its saved receipt. A caller quote cannot give it authority. |
+| `retro_not_assembled` | For a new loop, run `retro.py assemble` for schema-3 `retro.json` after the last Stop and the steps that prepare standing instructions. Keep the source artifacts. See the recovery rule below for a previous completed loop. |
+| `retro_source_mismatch` | A named source changed after assembly. Finish that source and assemble again. |
+| `retro_decisions_chain_broken` | Put back the damaged decision row. Record decisions through the graph CLI. |
+| `retro_steps_missing` | Run the missing proof, flush decisions, or prepare standing instructions as needed. Then assemble again. |
+| `decisions_not_flushed` | Flush decisions before the last Stop and before you prepare standing instructions. If an unfinished loop has stale prepared data, use `prepare --refresh-from-sha256` after the last source update. Then assemble the retro. |
+| `retro_state_error` | Put the readable, owned `progress.json` back before assembly. |
+| `retro_wrong_session` | Use the session that owns `progress.json`. |
 | `retro_free_invalid` | Supply one JSON object in the free-file. |
-| `handoff_state_unreadable` | Pass the readable, owned progress.json to handoff_derive. |
-| `graph_unavailable` | Run graph.py summarize and inspect to diagnose the unavailable graph. |
+| `handoff_state_unreadable` | Give the readable, owned `progress.json` to `handoff_derive`. |
+| `graph_unavailable` | Run `graph.py summarize` and `graph.py inspect` to find why the graph is unavailable. |
 
-Retained schema-1 and schema-2 retros are historical records. This version requires schema 3 when it checks completion. An old completed loop can lack the proof results and orders receipts that schema 3 binds. Do not rewrite its retro or claim that an install upgrades it. For a historical completion check or teardown retry, use the prior plugin version in an isolated checkout. Start a new session and loop for new work, and use the current teardown sequence.
+Schema-1 and schema-2 retros are historical records. This version checks loop end with schema 3.
+A historical completed loop may have no proof results or receipts for standing instructions that schema 3 uses.
+Do not rewrite its retro or claim that an install upgrades it.
+For a historical check at loop end or a teardown retry, use the previous plugin version in an isolated checkout.
+Start a new session and loop for new work, and use the current teardown sequence.
 
-After this version writes a schema-3 retro, a code rollback to the preceding proof-only version cannot validate that retro. Its orders command can refuse graduation with `order_retro_validator_unavailable`. Keep a matching version with `retro_check.py` in an isolated checkout for a completion check or orders retry on that loop. Preserve its progress, proof, retro and orders receipts together; a code rollback does not convert them.
+A code rollback to the previous proof-only version cannot validate a schema-3 retro after this version writes it.
+Its command for standing instructions can refuse graduation with `order_retro_validator_unavailable`.
+Keep a corresponding version with `retro_check.py` in an isolated checkout to check loop end or retry standing instructions for that loop.
+Keep its loop data, proof, retro, and receipts for standing instructions together. A code rollback does not change those records.
 
-- Limits: only the orchestrator session can write (subagent threads are not citable); cites must anchor in a user
-  prompt; the hash-chained ledgers are a cooperating-agent safeguard, not a security boundary. Measurement note: compare
-  `by_reason_code` before and after a change; a rising `muninn_absent` or `refused_approval_needs_reply` is the signal.
-  See `docs/decisions/2026-10-05-memory-authoritative.md`.
+Only the orchestrator session can write because subagent threads cannot supply a cite. The cite must point to a user prompt.
+The hash-chained ledgers are a cooperating-agent safeguard. The same user can change the files.
 
-## Current request and citation boundary
+Compare `by_reason_code` before and after a change. Look for an increase in `muninn_absent` or `refused_approval_needs_reply`.
+See `docs/decisions/2026-10-05-memory-authoritative.md`.
 
-Run decision, order, lesson and handoff commands from the actual mapped project repository.
-The graph-state key directory and plugin checkout are separate paths. Current reads never use `--all-projects`.
-A local saved result needs its retained R-id, source window and project, the same request receipt, and one exact
-current K-id/revision with the expected kind, task and content. Submission or acceptance is not a save.
+## Memory operations
 
-The reader retains the Note body, reason, conditions, expiry and complete selected support mapping.
-It verifies every required E-id, ref, hash and selection using public `open` and `quote-check` calls.
-The supported citation boundary requires primary, unflagged, unredacted direct-owner user prompts for every support.
-Missing selection, changed originals, wrong scope/authority and blank quotes produce explicit degradation.
-Current Muninn has no normal/restricted classification. `privacy_classification: unknown` states that limit;
-the reported scope, source, redaction and authority checks do not establish semantic privacy classification.
-The standalone legacy adapter keeps its separate normal-only schema-v2 boundary.
+- <a id="current-request-and-citation-boundary"></a>[Task and citation rules](RUNBOOK-MEMORY.md#current-request-and-citation-boundary)
+- <a id="decision-recorded-locally-but-muninn-sync-degraded"></a>[Local decision with degraded Muninn sync](RUNBOOK-MEMORY.md#decision-recorded-locally-but-muninn-sync-degraded)
+- <a id="standing-order-stored-without-a-cite-or-a-lesson-missing-from-dispatch"></a>[Standing instructions and missing lessons](RUNBOOK-MEMORY.md#standing-order-stored-without-a-cite-or-a-lesson-missing-from-dispatch)
 
-Changing only local lesson text does not make an unknown submission safe to repeat.
-If task and source session are unchanged, the earlier unknown observation and claim hash remain intact.
-The result adds `reconciliation_reason: learning_request_unknown`. No window or request is guessed from text.
-A genuinely new authored task or source session can establish its own marker before submission.
+## Stop, scheduled runs, and proof checks
 
-A conditional Note can be saved and displayed with its conditions. No free-text condition is assumed true.
-Dispatch, promotion and generated order views return `learning_conditional_use_unsupported` until their consumer
-can retain and enforce conditional use. Guides return `learning_form_unsupported`.
+- <a id="a-stop-has-no-recorded-row"></a>[Missing Stop row](RUNBOOK-STOP-AND-PROOF.md#a-stop-has-no-recorded-row)
+- <a id="host-resource-errors-or-bounded-stop-checks"></a>[Host resource errors and Stop checks](RUNBOOK-STOP-AND-PROOF.md#host-resource-errors-or-bounded-stop-checks)
+- <a id="a-routine-run-ended-incomplete-aborted-or-refused"></a>[Unfinished or refused scheduled run](RUNBOOK-STOP-AND-PROOF.md#a-routine-run-ended-incomplete-aborted-or-refused)
+- <a id="proof-gate-blocked-a-complete-declaration"></a>[Proof gate denial](RUNBOOK-STOP-AND-PROOF.md#proof-gate-blocked-a-complete-declaration)
 
-Handoff reads retained local requests first. For extra exact-task decisions, it can read completed RequestView
-metadata through `learn list --state completed`, then filter exact project/task before reading request details.
-The public API has no project/task filter or pagination for that list. Foreign metadata is neither logged nor
-shown. Only an exact K-id/revision receipt join selects a request. Ambiguous joins refuse.
-Each decoded reply is limited to 2 MiB; scans are limited to 100 requests, 100 current records and 100 supports.
-Current request/extra-record reads have a 30-second external-call budget, with individual calls limited to 10 seconds.
-A limit returns `learning_read_limit`; it never becomes an empty successful read. Handoff never enqueues or retries.
+Proof codes:
 
-Source checks do not close original I native/live/installed/release acceptance. Codex live qualification remains
-separate, and Claude live qualification remains incomplete.
+- `proof_unexecuted`, `proof_failed`, `proof_expect_mismatch`, `proof_stale_cmd`, `proof_stale_head`.
+- `proof_chain_broken`, `proof_cmd_destructive`, `proof_sandbox_unavailable`, `proof_output_limit`, `proof_no_proofs`.
+- `proof_disposition_no_reason`, `proof_disposition_legacy`, `proof_withdrawn_unobserved`.
 
-## Decision recorded locally but Muninn sync degraded
+## Publication checks
 
-- Symptom: `graph.py record-decision` printed `"exit_code": 3` and a `muninn.reason_code`. The decision was appended
-  to `progress.json` `decisions_absorbed` before the sync attempt. For `unknown` or `syncing`, the Muninn copy may
-  already exist; inspect both stores before any recovery. A loop restarted during sync may no longer contain that row.
-  Trace rows: `decision.record/recorded/ok`, then `decision.sync/<written|degraded|disabled>/<reason_code>`.
-- Query: `python3 -c "import json;[print(r['seq'],r['muninn']) for r in json.load(open('progress.json'))['decisions_absorbed']]"`,
-  or `grep '"command": "decision\.' <agentic-loop dir>/<session_id>/trace.jsonl`. Chain check:
-  `python3 -c "import json,sys;sys.path.insert(0,'.');from scripts.lib import decision_record as d;print(d.verify_chain(json.load(open('progress.json'))['decisions_absorbed']))"`.
-- Fix: inspect the retained `request_id` with `muninn learn show R_ID` from the mapped project repository.
-  A pending request remains pending until its own committed receipt identifies one exact current Note.
-  `flush-decisions` inspects a retained R-id, source window and project. An unknown result without that binding
-  cannot be submitted again automatically. A caller quote cannot replace selected evidence.
-- Limits: the chain is a cooperating-agent safeguard (a same-user agent can rewrite file and chain), and dropping the
-  last row is detected only by the in-file head anchor, which the same agent can also rewrite. Measurement note: `docs/typed-records-measurement.md`.
+- <a id="diff-manifest-check-warned-or-refused"></a>[Diff-manifest warning or refusal](RUNBOOK-PUBLICATION.md#diff-manifest-check-warned-or-refused)
+- <a id="required-review-passes-refused-a-merge"></a>[Mandatory inspection pass refusal](RUNBOOK-PUBLICATION.md#required-review-passes-refused-a-merge)
+- <a id="standalone-wiki-security-applicability"></a>[Standalone wiki applicability](RUNBOOK-PUBLICATION.md#standalone-wiki-security-applicability)
+- <a id="eval-level-or-suite-integrity-refused-a-merge"></a>[Eval level or suite integrity refusal](RUNBOOK-PUBLICATION.md#eval-level-or-suite-integrity-refused-a-merge)
 
-## Standing order stored without a cite, or a lesson missing from dispatch
+## Shell checks and receipt authority
 
-- Symptom: `orders.py record` exited 3 with `muninn.reason_code` (`learning_pending`, `learning_request_unknown`, `muninn_absent`), or
-  `lessons.py query` / `orders.py lessons` exited 3 with `{"degraded": ...}`, or an order you recorded is absent from the
-  list. Before completion, `record` stages bound inputs and syncs the cited claim without lifecycle effects. After
-  owned progress is durably complete, local apply records recurrence and aging in `orders.json`. A degraded store
-  result retains any prior K-id. `lessons` never prints ledger text when Muninn is down (`memory.backend: off` is the
-  explicit switch). Trace rows: `order.record|prepare|tick|render|import|cite`, `lesson.query|predicate`.
-- Query: `python3 scripts/lib/lessons.py --dir <repo-key dir> --session <known native caller id> query --format contract`
-  reads current cited lessons. Diagnostic `orders.py ... lessons` also returns an `excluded` list naming entries
-  is retracted, expired or superseded, reason `lesson_not_current`), or
-  `grep -E '"command": "(order|lesson)\.' <agentic-loop dir>/<session_id>/trace.jsonl`. A hand edit of `orders.json` is
-  refused with `order_chain_broken` naming the order.
-- Fix: run `orders.py --dir <repo-key dir> --session <native session> cite <id>` from the mapped project repository.
-  This inspects the retained task request. The deprecated `--quote` input is ignored and disclosed as `quote_ignored`.
-  A timeout without a retained R-id stays unknown across restarts; do not submit it again.
-  Legacy imports remain uncited local diagnostics. They do not create a current request binding.
-- Apply contract: use `--dir <repo-key dir> --session <provider session>` with the separate logical `--loop` copied
-  from `<repo-key dir>/<session>/progress.json`. Stage `record` inputs before completion. The native `graph.py
-  complete` command prepares orders before the progress lock, rechecks the prepared source under that lock, saves
-  completion, then ticks and renders after it releases the lock. Claude `mark-complete` uses this same path and also
-  stamps the invocation marker. Preparation ages nothing. The tick holds the orders lock and records `orders_ticked`
-  after its ledger save. A failed completion save ages nothing. Repeat the native completion command to resume a
-  pending tick or render without a second age change; do not edit `progress.json`.
-  Render holds the orders lock while it writes both views. The receipt checks the ledger and both view hashes under
-  that lock. If they differ, completion stays pending; repeat the native completion command to render again.
-  The Claude Stop guard and Codex `verify-completion` block when the tick or bound generated views are incomplete.
-  If render fails on the installed Muninn API, the pending result and later verifier show its actual reason code.
-  Source support for the current request API does not qualify native dispatch, installed operation or a real memory
-  round trip. Those acceptance checks remain separate. Do not substitute ledger text for a current cited claim.
-- Pre-D4 complete loop: review its retained evidence before the exact-hash admission. The receipt then follows only
-  completion bookkeeping; other graph changes still block. See `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
-- Completed text replacement: when this session/loop observation already exists, explicit `record` captures
-  `replaces_source` in the prepared row. The canonical `lesson_source` hashes owned binding, authored fields and that
-  predecessor, excluding mutable store observations, and is sealed/saved with the lesson. Ordinary tick recovers only
-  the accepted row while preserving counters and evidence; an equal published token needs no replay. A later authored
-  source is preserved. Without an exact validated success receipt for this preparation, a conflicting retry stays
-  pending and emits no false completion receipt. Older absent predecessor fields are never retroactively invented;
-  a captured null is distinct and cannot authorize delayed replacement without its own published source or exact
-  validated acknowledgement, even if no later edit occurred. Direct completed explicit record remains available.
-  Publication, receipt loss and then a later replacement can remain pending because these
-  two retained facts do not prove historical application. Unbound pure-model record updates clear an old source token.
-- Preparation recovery: changed sources are refused by default. Before completion, use
-  `prepare --loop <logical loop> --refresh-from-sha256 <CURRENT evidence_sha256>` only with the canonical hash returned
-  by the current preparation. Comparison happens under the same orders lock. Resolved directories, session and
-  logical loop must match; revision cannot roll back, and no matching local tick or recurrence may already exist.
-  Staged records are preserved, with no lifecycle effects. Wrong/stale hashes, invalid/foreign/complete sources and
-  prior application refuse unchanged. A durably saved replacement with a failed preparation receipt leaves progress
-  incomplete; ordinary unchanged `prepare` repairs the receipt without another replacement or duplicate observation.
-  After durable completion, retry `tick` only. Flush and reload pending source updates before final prepare/refresh.
-- Receipt publication: D4 refuses linked preparation, receipt and persistent sidecar paths before read/open/create.
-  It holds orders.lock, then `teardown.jsonl.lock`, and validates every prior physical LF JSONL object, finite JSON
-  number and terminal newline before deduplication, preserves prior bytes, and atomically publishes a complete
-  fsynced sibling. Short writes make progress until complete; a zero write or partial-write exception leaves canonical
-  evidence untouched. An ambiguous error after replacement needs an ordinary prepare/tick retry, without duplicate
-  lifecycle effects. Pre-existing malformed or newline-less evidence is refused untouched; restore genuine evidence,
-  never truncate or skip a tail. Other teardown publishers must adopt the same sidecar/framing/atomic publication
-  contract to preserve concurrent events. D6 adoption remains pending; its latest-step dedupe policy is separate.
-- Shared identity: an id binds failure mode and scope across the ledger and every valid retained preparation before
-  record/cite sync or local application. Historical preparations still constrain identity after progress advances;
-  they establish no present eligibility, currentness, citation or lifecycle effect. Same identities in other sessions
-  are accepted recurrences; conflicts and foreign/malformed stored bindings refuse before superseding a store claim.
-- Current citation: explicit `record` alone may replace lesson text. `cite` reconciles the current tagged claim even
-  when the ledger holds older text, without a knowledge write. A formerly cited id without a current replacement
-  refuses; a genuinely uncited first attachment still validates the owner's quote. Distinct simultaneous current
-  claims refuse as `lesson_not_current`. Tick performs current reads without knowledge writes; outages retain saved
-  K-ids over stale preparation metadata and return explicit degradation. Idempotent tick retry may refresh metadata
-  without repeating lifecycle effects. Promotion uses the current cited join, independent of cached write state.
-- Limits: the one same-user orders lock covers currentness, reconciliation, bounded sync and direct atomic ledger
-  save; it provides no exactly-once network guarantee. Current tagged claims are reconciled even for degraded/pending
-  local records. Only a new completed session+loop recurrence resets a counter or revives a tombstone; replaying the
-  same observation cannot rejuvenate it. Current lesson consumers verify project/task and revision bindings, live
-  sources, owner authority, redaction status and selected user quotes. These checks do not establish semantic
-  privacy classification. Current Notes report `privacy_classification: unknown`. The standalone legacy schema-v2
-  CLI keeps its separate normal-only boundary. Original I graph metadata and native integration remain unqualified.
-  Diagnostic `orders.py lessons` may show uncited rows (`cited: false`); contract queries,
-  promotion and views exclude them. Owner-cited lesson text is legitimate typed memory; advisory transcript
-  observations remain metadata only. Failed reads exit 3, with no ledger-text fallback. A fresh cited claim can
-  supersede prior text. Legacy import retains full source text and first-seen provenance, preserves decayed counters,
-  and refuses incomplete/colliding entries or an external source path without changing the original.
-- Legacy retry: each row seals the SHA-256 of the exact source bytes. `import-legacy` skips a complete cohort only
-  when saved rows, timestamp and source hash match. It reuses only an exact archive, else publishes a new copy without
-  replacing an occupied name. Mixed or divergent rows refuse. Archive publication precedes ledger save. A failed or
-  uncertain save keeps source and archive; success requires a canonical ledger equal to the expected sealed rows.
-- Graduation still requires >=10 distinct completed source-bound retros, recurrence and decay. Schema2 records need
-  complete typed fields and their genuine completed progress hash. Schema3 delegates to `retro_check.check`; an absent
-  validator returns `order_retro_validator_unavailable`, rather than a known zero count. Both ledger and source hashes
-  remain a cooperating-agent safeguard: the same user can rewrite and recompute them.
-  Measurement note: `docs/typed-records-measurement.md`; overlap decision:
-  `docs/decisions/2026-10-05-orders-vs-muninn-overlap.md`.
-- Lesson attribution: pass the known native caller id with `--session`. The CLI also recognizes CLAUDE_SESSION_ID,
-  CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID and CODEX_SESSION_ID, in that order; explicit input wins. Joined reads carry
-  that id through query, predicate, diagnostic lessons and render to underlying degraded adapter traces. Environment
-  support in source and private fixtures does not prove a variable is exported in an installed provider session.
+- <a id="commit-push-or-ceiling-gate-behaves-differently-than-the-text-suggests-argv-classifier"></a>[Shell classifier and ceiling checks](RUNBOOK-SHELL-AND-AUTHORITY.md#commit-push-or-ceiling-gate-behaves-differently-than-the-text-suggests-argv-classifier)
+- <a id="action-authority-hook-denied-a-merge-or-push-or-warned-in-advisory"></a>[Receipt authority for merges and pushes](RUNBOOK-SHELL-AND-AUTHORITY.md#action-authority-hook-denied-a-merge-or-push-or-warned-in-advisory)
 
-## A stop has no recorded row
+## Graph operations and recovery
 
-- Symptom: the Stop hook blocks with `stop_row_missing`. Final text cannot release it. Run `graph.py stop` in the
-  current turn with a valid category, reason code, reason, state path, and session. The command writes `stops[]`.
-- Query: run `python3 scripts/graph_alignment_stops.py --json` for `stops_recorded`, `stops_consumed`, and
-  `stop_row_missing`. Run `python3 scripts/lib/stop_counters.py` for refusal codes. A stale row reports
-  `stale_stop_row`. The hook owns `loop_stop_counts`; never edit it or `stops[]` by hand.
-- Remediation: use the refusal code from `graph.py stop`. A foreign session, unknown category or reason code, or
-  unresolved graph on `complete` needs a source correction. A valid row is consumed once. Codex can release an
-  `awaiting-input` or `approval-gate` row while graph work is pending. `complete` needs a resolved graph and its evidence.
-  See `docs/graph-alignment-measurement.md` for limits and commands.
-
-## Host resource errors or bounded Stop checks
-
-`EMFILE`, `ENFILE`, `EAGAIN` and `ENOMEM` during required Git reads indicate host resource exhaustion.
-`destructive_patterns.git_output` raises `HostResourceError` for these errors. Both providers' destructive-command gates
-then deny the unchecked action. This does not establish that the action is destructive or that graph state is invalid.
-Ordinary nonzero Git exits still return an empty lookup. Other Git failures are not all classified as resource faults.
-
-The Codex `graph_completion_guard` starts one **nine-second aggregate budget** before reading its input.
-State lookup, `inspect`, `consume-stop`, `verify-completion`, status and recovery calls share the remaining time.
-The hook registration allows ten seconds, leaving time to emit its response. A lookup or graph-check timeout emits
-`decision: block`: graph state was not verified. Status or recovery failure cannot establish completion.
-This is a configured deadline, not a universal wall-clock guarantee; see the [measurement limits](workflow-gates-measurement.md#hook-and-stop-measurements-f2).
-
-An unresolved graph can call `request_human_approval`. Codex emits `decision: block` and a human-approval
-`systemMessage`; Claude emits the notice and blocks Stop with exit 2. Notices use a key containing loop, revision,
-session, active wave and hard stop. A repeated notice is suppressed for 900 seconds, while Stop remains blocked.
-After that lease, a persistent stall can notify and attempt recovery again. A status check can attempt `recover-wave`
-for a waiting worker; a timeout leaves its outcome unknown. Codex does not record the notice marker after its deadline
-expires, so an exhausted deadline does not suppress the next notice. Never treat a notice as successful worker recovery.
-
-A valid `approval-gate` stop row with reason code `needs_approval` can be consumed once while graph work remains.
-The typed row permits that Stop; its reason text does not decide the result. Consumption neither grants action authority
-nor completes the graph. Follow [the recorded-stop procedure](#a-stop-has-no-recorded-row) for the current provider.
-`request_human_approval` is a function, not a telemetry cause: a blocked request records `block`.
-
-To diagnose a refusal:
-
-1. Record the provider, hook, source version or commit, session ID, and active hook registration.
-2. Open its matching `hook_telemetry.jsonl` row. Compare `ts`, `pid`, typed output and the scoped session trace.
-   The [measurement note](workflow-gates-measurement.md#hook-and-stop-measurements-f2) defines paths, causes and counters.
-3. Read the named graph state and evidence without changing them. For resource faults, correct host resource pressure.
-   For a graph or evidence refusal, correct the named fault through its maintained workflow.
-4. Retry the refused action and inspect its new output and rows. Keep the prior refusal evidence.
-
-Do not remove graph state, disable checks or raise limits to clear an unexplained refusal.
-Change the interpreter only after evidence shows an interpreter fault.
-These same-user hooks and file-based observations are non-authoritative cooperating-agent safeguards.
-Source checks and synthetic inputs do not prove installed hook trust, native-provider execution, real-account operation,
-server rules or successful native worker recovery. Integrity activation and publication checks remain separate;
-see [the integrity setup](INTEGRITY-GATE.md#turn-on-the-gate) and [publication measurement limits](workflow-gates-measurement.md#limits).
-
-Source: [Git lookup](../hooks/scripts/lib/destructive_patterns.py),
-[Claude gate](../hooks/scripts/destructive_bash_gate.py), [Codex gate](../packages/codex/hooks/scripts/destructive_bash_gate.py),
-[Codex Stop guard](../packages/codex/hooks/scripts/graph_completion_guard.py),
-[Stop registration](../packages/codex/hooks/hooks.json), [Claude Stop guard](../hooks/scripts/loop_stall_guard.py)
-and [shared notice helper](../hooks/scripts/lib/stall_notice.py).
-
-## A routine run ended incomplete, aborted or refused
-
-- Symptom: the dashboard gate for `docs-sync` or `loop-retro-promotion` reads red; the run log's last marker is
-  `abort=incomplete-run`, `abort=<code>`, `refused=<gate>`, `incomplete=merged` or `incomplete=merge-unknown`.
-- Query: the JSONL beside the run log (`run-{date}.jsonl`, `promotion-runs.jsonl`): the last row for the newest
-  `run_id` gives `stage`, `outcome` (`stage_ok`, `run_ok`, `run_abort`, `run_refused`, `run_incomplete`) and
-  `reason_code`. Counters: `trace.by_reason` keys `routine/<outcome>/<reason_code>`, tallied by
-  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py` (key `routine`).
-- Codes: `incomplete-run` (the session ended after `begin`), `stage_out_of_order`, `runner_exit_no_terminal` (the runner
-  saw the child exit with no terminal row), `audit_failed`/`mining_failed`, the diff-manifest codes from the
-  `manifest_check` stage (`out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `special_file_type`,
-  `status_not_allowed`, `too_many_paths`, `manifest_unreadable`, `manifest_internal_error`), and a gate name
-  (`push`, `review`, `post_review`, `post_evals`, `merge`) for `run_refused`.
-- Remediation: `incomplete-run` and `runner_exit_no_terminal` mean the agent session stopped early; read the run
-  output under the runner's runs dir and fix the cause. `begin` refuses an open run even across midnight, or a same-day
-  abort/refusal. Use `begin --new` explicitly to replace it; an open previous run first gets `run_abort incomplete-run`.
-  A refusal names the gate that exited non-zero or could not start (`gate_spawn_failed` on stderr). Cleanup prints
-  `cleanup_failed: <step>` when a PR or local branch could not be closed; inspect the exact PR before any manual
-  cleanup. The remote branch is retained. `routine_unknown`/`reason_code_invalid`/`outcome_invalid` (exit 2)
-  mean a caller used a value outside the closed lists.
-- `merged_incomplete` means GitHub confirms the pinned PR merged but the local
-  run did not finish. Do not abort it or close its PR. `merge_state_unknown`
-  means GitHub could not confirm the pinned PR and head; restore that read
-  before you retry or clean up. A changed head also remains unknown.
-- `log_unwritable` refuses advancement or terminal state: inspect both event logs and the persisted state for partial
-  output from an interrupted/failed write, then repair the destination. `routine_mismatch` means the log belongs to a
-  different routine; select the correct routine log. Do not finish or replace another routine's state.
-- Limits: see `docs/routines.md` "Routine state machine and event log".
-
-## Proof gate blocked a `complete` declaration
-
-If one frozen proof suite must be replaced within the same graph, keep the original `proof.json` intact. Obtain a
-pending schema-2 candidate and a separate author report from an isolated proof author. Keep both input files outside
-the active graph. Review them, then run:
-
-```bash
-python3 scripts/lib/proof.py supersede <state-dir> --candidate <candidate-path> \
-  --reason "<why the original cannot run>" --original-sha256 <raw-proof-json-sha256> \
-  --author-evidence <report-path>
-python3 scripts/lib/proof.py freeze <state-dir>
-python3 scripts/lib/proof.py run <state-dir> --all
-python3 scripts/lib/proof.py status <state-dir>
-```
-
-For each proof, the controller makes a private copy of committed `HEAD`. The proof runs there. It cannot read the original checkout. The controller uses fixed system paths for Git and Node. It refuses a committed tree that has a symlink. It starts the pinned sandbox from its cached absolute path. A missing or changed cached runtime records `sandbox_unavailable`.
-
-The command stores one candidate by content hash and appends a chained `supersede` row. It binds the original and
-candidate raw and canonical hashes, loop identity, report bytes, reason, and issuance HEAD. Both providers use the
-same selected suite. Only freeze and run rows after that binding count. The run HEAD must match the current checkout.
-A second replacement, changed original or candidate, missing report, or invalid chain blocks. Keep the report at
-its recorded path. An orphan candidate
-file has no effect. The CLI checks report bytes, not the author's identity or independence; review that separately.
-
-- Symptom: `loop_stall_guard` (Claude) or `graph.py complete` / `verify-completion` (Codex) names frozen proofs as
-  `P1(proof_...)`. The gate reads only `proof_results.jsonl` beside `proof.json`, written by the controller via
-  `scripts/lib/proof.py`; the transcript and the `status` field are never consulted.
-- Query: `python3 scripts/lib/proof.py status <state-dir>` (latest verdict per proof), or
-  `python3 scripts/measure_graph_alignment.py --root . --json | python3 -c "import sys,json;print(json.load(sys.stdin)['memory'])"`
-  (`by_reason_code` over `proof.freeze|run|gate` rows), or `grep '"command": "proof\.' <agentic-loop dir>/<session_id>/trace.jsonl`.
-- Remediation (reason code: fix, single source `scripts/lib/proof_results.py` `REASONS`):
-  `proof_unexecuted`: run `proof.py run <state-dir> --all`. `proof_failed`: the latest run exited nonzero or timed
-  out; fix the cause, re-run. `proof_expect_mismatch`: exit code or stdout did not match the frozen `expect`.
-  `proof_stale_cmd`: proof.json changed after the freeze row, or the run row hashes a different cmd; run
-  `proof.py freeze` then `run`. `proof_stale_head`: the run repository, HEAD, or source tree differs; run it
-  again from the current repository checkout. `proof_chain_broken`: a retained row was edited or a nonfinal row was
-  lost. Preserve `proof_results.jsonl` and start a new session and loop. `proof_cmd_destructive`: the cmd matches the
-  destructive classifier and was never executed; reword the proof. `proof_output_limit`: combined stdout and stderr
-  exceeded 1 MiB. The controller stopped the process group and recorded an `output_limit` row. Its output hashes cover
-  captured bytes only; the excerpt starts with `partial output`. Reduce output and run the proof again.
-  `proof_sandbox_unavailable`: the pinned sandbox did not start. Prepare and check the pinned runtime, then retry:
-
-  ```bash
-  npx --yes @anthropic-ai/sandbox-runtime@0.0.65 --help
-  npx --offline --yes @anthropic-ai/sandbox-runtime@0.0.65 --help
-  ```
-
-  The first command can download the runtime. The second confirms that the offline command used by `proof.py` works.
-  `proof_disposition_no_reason`: with no proof.json record `proof.py disposition <state-dir>
-  --none --reason-code <code> --reason <text>`; a bare `none` or a code outside `DISPOSITION_CODES` (`docs_only`,
-  `no_executable_surface`, `research_only`, `superseded`, `other`) is rejected, and a valid disposition is echoed in the
-  gate output. `proof_no_proofs`: proof.json holds no non-withdrawn proof (an empty or withdrawn-only document); freeze a
-  real proof or record a disposition. `proof_disposition_legacy` is a trace note
-  only (string `none: <reason>` accepted). `proof_withdrawn_unobserved`: a withdrawn proof needs a failed/timeout run row
-  and a reason.
-- The proof command runs inside a separate pinned OS sandbox. It can read host files. It can write only to a fresh
-  temporary directory, named by `TMPDIR`, and cannot use the network. The repository and loop state stay read-only to
-  the proof command. The controller writes the result row after the command ends. A proof that needs temporary files
-  must write them under `TMPDIR`. If the runtime is absent or the sandbox does not start, the run fails closed.
-  This proof runner uses `/tmp` for its private scratch on macOS and Linux. Windows proof runs fail closed until a
-  Windows scratch policy is implemented and checked. The live containment probe for this release ran on macOS.
-- Limit: a same-user agent can forge rows and recompute the chain, as it could forge a transcript. The chain detects
-  changes to retained rows and removal of a nonfinal row. It cannot detect removal of a final row when the remaining
-  rows form a valid prefix. The latest freeze wins, so an agent can weaken a command or withdraw a failing proof and
-  re-freeze. If the controller is killed before it appends a refusal, an earlier pass can remain the latest row.
-  A disposition's reason is checked for presence and an enum code, not truth.
-- Retained schema 1 proof files are historical evidence. Do not edit or convert them. For new work, start a new
-  session and loop with a schema 2 proof. The current runner cannot recheck completion or retry teardown for an old
-  schema 1 loop. Use the prior plugin version in an isolated checkout for that historical recovery operation.
-- Off-switch: none, by design. The proof gate is intentionally non-disableable on both providers (default ON, no config
-  key or env var); the previous transcript-based check was removed, so there is no earlier behaviour to fall back to.
-
-## Diff-manifest check warned or refused
-
-For a graph unit's exact `push.py --unit N --progress PATH` command, the unit
-record needs a nonempty manifest. Register `--base-branch <parent>` with
-`graph.py add-unit` before the first push of a stacked branch; once a PR exists,
-its live base must match that recorded branch. The command checks staged files
-and the complete PR diff, including both rename paths, against the unit manifest
-before transport. Register an absolute worktree path with `add-unit --worktree`, or use
-`assign-worktree --session S --loop-id L --unit N --worktree ABS_PATH` after checkout setup.
-The latter fills an unassigned existing unit under the graph lock, even during an active wave;
-it preserves the revision and refuses a different assignment. The recorded path must match the Git checkout root at push time.
-Staged paths use Git's NUL-delimited output, so non-ASCII file names keep their literal manifest names.
-
-- Symptom: `push.py`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`)
-  refuses with `diff_manifest:<code>` and prints `! diff_manifest <code>: <path>` on stderr. The check is ON by default
-  (`diff_manifest: enforce`, no config file needed, shipped policy `policy/diff-policy.default.json`); `off` and
-  `advisory` (warn only) are the explicit switches. `scripts/diff_manifest.py [--policy FILE]` is a diagnostic verdict
-  reader: it reports unreadable inputs with exit 0; the publication callers refuse them under enforce.
-- Query: `trace.by_reason` for `diff-manifest/ok/diff_manifest_ok`, `diff-manifest/warned|refused/<code>` (rows are keyed by
-  `<repo>@<branch>` or `<repo>@pr-<N>`), `publication/refused/diff_manifest:<code>` (one row per refusal from the single
-  publication gate, every path), plus `diff-manifest/failed_open/manifest_unreadable` (advisory only),
-  `diff-manifest/legacy/manifest_legacy_absent` (policy file without a manifest key; also written by the gate) and `diff-manifest/refused/foreign_session`. Tally them with
-  `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`
-  (`manifest_counters.py` still tallies only `diff-manifest`). See `docs/workflow-gates-measurement.md`.
-- Codes: `out_of_manifest`, `denied_path`, `docs_sync_deny`, `docs_sync_deletion`, `not_linked_worktree`, `special_file_type` (type change, symlink or gitlink), `mode_change`, `status_not_allowed` (policy `statuses`), `too_many_paths` (policy `max_paths`), `manifest_unreadable`, `manifest_internal_error`, `diff_manifest_mode_invalid` (unknown mode, treated as enforce).
-- Remediation: a real violation means the diff left its declared scope. Keep the refused unit and its history;
-  remove out-of-scope changes from the proposed publication through the usual worktree workflow.
-  `add-unit` registers only a new unit ID; it cannot change an existing unit's manifest.
-  `assign-worktree` can bind only a pending unit to an unassigned or identical recorded checkout path,
-  using its existing manifest. It cannot widen that manifest or repair an active assignment.
-  If only the assigned checkout is unavailable, restore it at its recorded path without changing the stored binding.
-  If the required binding or scope cannot be restored, keep publication on HOLD and preserve progress, proofs and
-  dispatch history. A different manifest needs a separately validated new-graph plan and source registration;
-  this procedure does not migrate the refused unit or transfer its authority and proof results.
-  Do not hand-add hashes, reset status or treat `convert` as a source-binding repair.
-  `push.py`/`merge.py --unit N --progress PATH` bind publication to the registered manifest.
-  `manifest_unreadable` means the policy file, progress.json or diff (or an
-  unresolved PR head) could not be read: it refuses under enforce (fails open only under advisory); fix the path.
-  `manifest_internal_error` refuses under enforce; advisory records `failed_open` and continues, including when repository
-  metadata lookup fails. Set `diff_manifest: off` to disable. Invalid modes, including an empty mode, enforce and report
-  `diff_manifest_mode_invalid`. A null policy value selects the shipped default; the typed config grammar also coerces
-  an empty nullable scalar to null.
-- Limits: a cooperating-agent safeguard. A same-user agent can edit the config to `off`; direct hooks only see merges
-  `guarded_segments` can match; Codex hooks need `/hooks` trust before they run. Claude checks the manifest even without
-  config or a transcript; its review/eval sequence still needs both.
-- Hardening notes: `mode_change` refuses a chmod (100644 to 100755). The default denylist is best-effort secret shapes
-  (`.env*`, `*.pem`, `*.key`, `*.p12`, `credentials*.json`, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa|dsa|ecdsa|ed25519*`)
-  and the gate's own files (`.coderails/workflow.config.yaml`, `policy/diff-policy*.json`, the Codex copy), so a PR that
-  edits or deletes them is refused; deleting a secret-shaped path is allowed. It cannot catch a secret under another name. The gate reads config
-  and policy from the local checkout: a same-user boundary, not a defence against someone who controls that checkout.
-  `--unit` without `--progress` (or the reverse) refuses `manifest_unreadable`. Both separated and `--unit=N`/`--progress=PATH`
-  forms are supported; empty or repeated flag values refuse. A requested unit must exist and carry a string-list `manifest`
-  and a nonblank absolute `worktree` whose real path equals the current Git repository root. The progress object must carry
-  nonblank string `session_id` and `loop_id` fields. Missing, malformed or mismatched metadata refuses `manifest_unreadable`;
-  `push.py` reports `publication:graph_owner_missing` before transport when either owner field is blank or absent.
-  That refusal writes `publication/refused/graph_owner_missing` to the publication session trace.
-  A missing, relative or foreign checkout reports `publication:worktree_invalid` with a matching refusal trace.
-  A PR base that differs from the recorded base reports `publication:base_mismatch`. Staged or branch paths outside
-  the unit manifest report `diff_manifest:out_of_manifest`. These preflight refusals write `publication/refused/<code>`
-  before the later policy gate runs; `trace.by_reason` can count them.
-  `manifest: []` refuses publication. A session that owns a graph unit in this worktree must supply both flags.
-  Without a matching graph unit, standalone publication uses the policy alone. Unit and policy
-  manifests both apply, so a unit cannot widen policy scope. Custom policies retain the default denylist. An unreadable config
-  refuses `manifest_internal_error` and emits its refusal trace. Direct-merge hooks parse
-  the target with `scripts/lib/merge_target.py` (flag values skipped, URL and branch resolved through gh); `-R/--repo`, another
-  repo's URL, multiple targets or an unknown branch deny `pr_number_invalid`; `GH_REPO` retargeting denies `pr_repo_override`.
-  A same-call `gh pr edit` or `gh api .../pulls/N` plus merge denies `pr_base_mutation`; make the edit in a separate call so the next check sees
-  the new base.
-  The diff uses the PR's live `baseRefOid` and checked head, not the local default branch. `merge.py` accepts one number, URL or branch
-  and pins all gates and the merge to the same head
-  with `--match-head-commit`; a hook
-  cannot pin the agent's own `gh pr merge`, so a push or out-of-band base retarget between the hook check and that merge
-  is a known gap. Unit metadata
-  is a shape and worktree check, not publisher authentication: a same-user actor can forge owner fields for the same
-  worktree. It does not compare a worker's session with its parent's. Raw Git operations and unseen aliases remain
-  outside this manifest arm.
-
-## Required review passes refused a merge
-
-- Symptom: `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex `pr_publication_gate`) refuses with
-  `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`,
-  `review_artifact_missing` or `review_policy_unreadable`. The check is the second entry of the single publication gate
-  (`scripts/lib/publication_gate.py`), ON by default with no config. The required names come only from
-  `policy/review_policy.json` (`review-pr` always; `security-review` for `hooks/`, `scripts/`, `install.py`,
-  `uninstall.py`, `.claude-plugin/`, `packages/codex/hooks/`, `packages/codex/scripts/`, and the control files
-  `policy/`, `capabilities/`, `agents/`, `commands/`, `AGENTS.md`, `workflow.config.yaml`, `.coderails/`, their Codex
-  copies and the Codex post-review/merge skills; `deploy-safety` for `launchd/`,
-  `scripts/integrity-gate/`, `scripts/installer/`, `.github/workflows/`, `skills/dashboard/runner/`), matched against
-  the PR diff from its live `baseRefOid` to the checked head (renames count both sides). Config `review_passes: off` skips the check (absent or any other value
-  enforces; `diff_manifest: off` does not touch it). The policy file is the control, and deleting or corrupting it
-  refuses (`review_policy_unreadable`), it does not allow.
-- Artifact: `post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]` posts two comments for one head.
-  The first has the v1 marker, a passes line, an optional compat-findings line, and the review text. The passes line
-  gives the name, verdict, blocking value, and summary hash for each pass. The second has the same v1 marker, the
-  same optional compat-findings line, and the same general review text. It lets
-  the current server integrity check read the review. The local gate accepts the pair only when the comments are
-  adjacent and the general review text is identical. The script derives each verdict from the text. A Critical finding
-  fails the pass. A present passes line must include `review-pr` with a verdict bound to its summary. An old single
-  comment with no passes line can satisfy `review-pr` for a docs-only diff when its Critical section is clean. Once a
-  passes comment exists for that head,
-  a missing, malformed, or stale companion refuses the pair (`review_passes_malformed`).
-- Query: `trace.by_reason` for `review-passes/ok/review_passes_ok` and `review-passes/refused/<code>`, plus
-  `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
-- Remediation: spawn the missing reviewer (`security-reviewer`, `deploy-safety-reviewer`; both providers ship them),
-  write its findings to a file in the post-review grammar, re-run `post_review.py post` with `--pass NAME=FILE`. A
-  `failed` pass needs the Critical finding fixed and the artifact re-posted for the new head. `review_artifact_missing`
-  also covers a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
-- Limits: the gate re-derives each pass from the posted sections (hash and verdict; a mismatch is
-  `review_passes_malformed`), so a hand-posted passes line without its text is refused. A pass still proves only that a
-  summary was posted for that name, not that a reviewer wrote it or that the review was substantive: `post_review.py`
-  takes any file for any pass, so the PR author can self-issue a `## No findings` security-review or deploy-safety
-  pass. The same user can write any summary, so this is a cooperating-agent safeguard. `blocking` is derived and never waives a
-  required pass. The Codex hook only sees merges `guarded_segments` can match and needs `/hooks` trust. Row-9 wording in
-  the closure matrix (`.json` policy file) is not recorded in this repo: the matrix lives outside it.
-
-
-### Standalone wiki security applicability
-
-The shipped path policy stays in force. Only `security-review` can use the typed
-`not_applicable` result for `standalone_wiki_prose_v3`. `review-pr` must pass.
-Other required specialists must pass. A plain NOT APPLICABLE message is not a pass.
-
-Use the same resolved helper as the posting command:
-
-```bash
-python3 <resolved post_review.py> na-scope <PR>
-python3 <resolved post_review.py> validate <security-summary-file> --pass-name security-review
-```
-
-`na-scope` prints compact current binding, authored inventory and complete context metadata.
-It supplies no inspection or authority. All tracked non-tree paths at merge base, live base and
-head count as context, except the authored page endpoints. Include unchanged Markdown and assets;
-filenames do not prove inertness. Identical path/entry facts may share explicit tree-membership tags.
-Give this data and approved source context to `security-reviewer`. The role's structured
-`## Not applicable` JSON form records repository purpose, the complete context digest and
-explicit assessment path groups. Every context path must occur in one group, with no omissions,
-duplicates, foreign paths or glob selectors. Each group must contain only unchanged base entries
-or only changed base entries; the latter need a nonempty base-change assessment. Exact immutable
-mode/type/blob facts at all three trees enter the digest. Keep complete=true and unresolved=[].
-The v3 form needs `effect_state` at `consumer_scope` and in each reference group.
-The closed states are `effect_free`, `active` and `unknown`. The initial state is `unknown`;
-only explicit `effect_free` at both levels permits N/A. Known execution, access-control or
-instruction-loading effects use `active` and need the ordinary applicable inspection, even
-with complete coverage and unresolved=[]. Unknown, missing, malformed and other states refuse.
-The whole declaration covers repository purpose, all authored operations, all merge-base/live-base/head
-facts, and authored merge-base-to-head operations combined with live-base context and group interactions.
-Each group covers its members at all three trees and their role in that whole combination.
-Do not infer `effect_free` from suffixes, modes, unchanged files or an empty unresolved list.
-Version 1 and 2 records refuse. Do not add affirmative declarations to them automatically.
-Do not convert this result into `## No findings`. Post it with the ordinary general summary:
-`post <PR> --summary <general-file> --pass security-review=<security-summary-file>`.
-
-The writer and publication gate independently read the actual remote base branch tip,
-unique merge base and head. Every affected entry must match between merge base and live base.
-Both rename names, deletion sources, added-path absence, blobs, types and modes count.
-Only nonempty A/M/D/R ordinary `100644` Markdown inventories qualify. Control files,
-plugin command manifests and security matches outside root hooks/commands collisions refuse.
-Known unchanged code, pages, data and settings need actual inspection. Unknown context refuses.
-Complete path coverage binds the statement to objects, not to semantic truth or reviewer identity.
-The helper uses batched tree/blob reads, never a process loop over context paths.
-The complete final comment must fit 65536 characters. Compact preparation must fit 131072 bytes;
-refuse oversized output, do not truncate it or raise the cap. Both bounds include all serialized data. Missing objects, unresolved context and moved bindings refuse.
-A stale scope needs a new complete inspection. The writer checks before/after each post and reuse.
-The same shared publication gate checks merge helpers and direct publication hooks.
-
-Old readers reject this result. Keep installation on HOLD until the merged release passes
-[Installing coderails](../INSTALLATION.md), using paths relative to the release checkout.
-Select explicit new provider versions and matching manifest/marketplace metadata.
-Stop new graph work and drain affected sessions with their owners. Preserve old runtime,
-state/config/eval/proof/retro/Muninn backups with hashes. Unknown quiescence keeps the HOLD.
-Use `release_manifest.py snapshot`, both maintained installer dry runs, then those installers.
-Start new sessions; complete Codex `/hooks` trust. Verify explicit installed paths with
-`release_manifest.py verify` and `installed_parity.py --require-both`; check allowed/refused routes.
-Do not copy helper files into an active version. A new inspection must use both the new writer
-and reader. Preserve old runtime/state together for rollback; these checks do not prove all
-installed behavior or bytecode authenticity. No current wiki pass or install follows from this change.
-
-The finite path list is not proof that unlisted prose is inert. Scope checks prove consistency
-with selected objects, not substantive inspection or independent authorship. A same-user author
-can issue an assessment. The Actions status reads only the ordinary companion and does not
-validate this scope. Get a new applicable inspection or complete eligible scope for
-`required_review_not_applicable_invalid:security-review`; never fabricate a no-findings pass.
-
-## Eval level or suite integrity refused a merge
-
-- Symptom: `post_evals.py post`, `merge.py`, a direct `gh pr merge` (Claude `enforce_pr_workflow`, Codex
-  `pr_publication_gate`) refuses with `level_below_derived`, `late_freeze_unstamped`, `suite_hash_mismatch`,
-  `suite_hash_marker_mismatch`, `chain_broken`, `chain_truncated`, `integrity_stripped`, `not_frozen`,
-  `eval_facts_missing`, `eval_artifact_missing`, `eval_artifact_unreadable`, `eval_embed_malformed`,
-  `eval_head_mismatch`, `eval_result_mismatch` or `eval_level_diff_unavailable`.
-  The check is the third entry of the single publication gate, ON by default (config
-  `eval_level: off` is the optional switch). The minimum level comes from `policy/surface_policy.json` applied to the PR diff
-  from its live `baseRefOid` to the checked head (`scripts/lib/eval_level.py`). An unavailable PR base refuses the check and
-  cannot certify an on-time freeze. Level 2 applies to an irreversible path (`install.py`, `launchd/`, `.github/workflows/`,
-  `hooks/hooks.json`, ...) or three work units, level 1 for any outward path (`hooks/`, `scripts/`, `skills/`, ...) or two
-  units, else 0; only the anchored docs and test directories are neutral, every unlisted path (`AGENTS.md`, `.claude-plugin/`, ...) is outward.
-- Artifact: line 1 is the unchanged v1 marker, line 2 is `<!-- coderails-eval-facts v1 derived_min_level=N
-  late_freeze=0|1 suite=<16 hex> -->`, then the summary and the fenced embed whose `gate_facts` block is stamped by
-  `post_evals.py post <PR> <evals.json> [--progress PROGRESS]`. The merge side ignores the stamped level and recomputes it
-  from the live diff, the embed's declared `facts` and posted `gate_facts` (lower bounds), and the optional
-  `--unit N --progress PATH` flags of `merge.py`. Omitting progress on a direct hook call cannot erase a posted count.
-  The facts-line displayed minimum is informational at merge; the enforced floor is recomputed. The late-freeze
-  flag and suite hash are checked against the embedded suite, and the marker and embedded levels must agree.
-  The selected suite must name the current PR head and every P0 must pass under the same neutral GO rule used
-  by posting; a valid frozen hash or signature does not establish those volatile head/status fields.
-- Query: `trace.by_reason` for `eval-level/ok/eval_level_ok` and `eval-level/refused/<code>`, plus
-  `publication/refused/<code>`. Tally with `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`.
-- Remediation: `level_below_derived` means the suite was frozen at a lower level than the diff needs; write a suite at the
-  derived level (the level is part of the suite hash, so editing it after the freeze is `suite_hash_mismatch`), smoke-run
-  it and re-post. `suite_hash_mismatch` after an intentional oracle edit: `post_evals.py amend <evals.json> <eval_id>
-  <reason> <actor>`, then re-post. `late_freeze_unstamped`/`eval_facts_missing`: re-post with the current
-  `post_evals.py post` (an artifact posted by the old recipe has no facts line and is refused for outward diffs).
-  `eval_artifact_unreadable` is a failed trusted-comment fetch (identity, permission, comments): retry or check `gh auth`.
-  `not_frozen` also rejects a missing, abbreviated or symbolic `frozen_sha` at level 1 or 2 on every merge route;
-  stamping it late does not satisfy the full 40-hex commit requirement.
-  A retained version 1 suite has unverifiable freeze timing, even if its SHA resolves before the branch base. A new
-  version 2 suite binds `frozen_sha` and `frozen_at` in its signed hash. If its freeze SHA is late or missing, work on
-  a copy. Set `CODERAILS_KEYS_DIR` to the preserved signing directory. Run `post_evals.py amend <copy> <eval_id>
-  'frozen_sha <40-hex SHA> frozen_at <ISO8601> timing=late' <actor>`. For version 1, use `timing=unverifiable`.
-  The reason must match that token exactly and bind both fields.
-  The posting and merge gates check the signed amendment. A plain `freeze_disclosure` or justification does not
-  clear this refusal. Regrade and post the copy.
-  `eval_head_mismatch` means the selected suite's head is absent or stale; `eval_result_mismatch` means its P0
-  statuses contradict GO. Correct the head/evidence, rerun and regrade the evals, then re-post with
-  `post_evals.py post <PR> <evals.json>`; the existing eval-level and publication trace rows/counters expose both codes.
-- Limits: a cooperating-agent safeguard. The work-unit count of a diff cannot be derived from the diff, so the floor
-  without `--progress` (and without a declared lower bound) assumes one unit; the PR author can omit the progress file.
-  `verify_suite` is tamper-evident, not tamper-proof: the suite hash and amendment chain are unkeyed and a signature is
-  optional, so a same-user agent can recompute `frozen_hash`/`suite_hash` after editing a cmd and post it with `gh api`;
-  nothing ties the embed to the hash recorded at smoke-run time (see `skills/task-evals/SKILL.md`). Only a naive edit is
-  caught. `late_freeze` is attestation, not evidence: an empty, abbreviated or rev-expression `frozen_sha` counts as late
-  (a level-0 suite may omit it) and level >= 1 needs a full 40-hex sha, but an honest-looking real sha cannot be proven to
-  be the freeze commit, and the
-  timing requirement for any version 1 suite, or a late or unresolved version 2 SHA, accepts only a verified signed
-  amendment with the exact SHA, timestamp and timing token. The surface
-  classes are globs: irreversible wins, then the anchored docs and test directories (`none`), and every other path is
-  outward (level 1), so a new control directory needs no entry to be covered, only an irreversible one does. The policy and
-  `eval_level.py`/`publication_gate.py` are themselves irreversible (editing them forces level 2), but they are read from the
-  running checkout, so run `merge.py` from main, not from the PR branch. The gate trusts the posted comment's author (the
-  authenticated, write-permission login), not the content. Config `eval_level: off` skips the check (absent or any other
-  value enforces) and records `eval-level/skipped/eval_level_off`.
-
-## Commit, push or ceiling gate behaves differently than the text suggests (argv classifier)
-
-- Symptom: `test_gate` did not run (or ran) for a `git commit`; `destructive_bash_gate` denied or allowed a
-  `--no-verify`/`-n` commit; `enforce_pr_workflow` / the Codex action hook missed a `git -C d push origin main`; the
-  verification-volume ceiling denied the 3rd `run_all.py`, `test_codex_hooks.py` or `post_evals.py post|validate-structure`
-  after a branch rename, or did not deny in a second repo; an edit on main was denied with `protected_paths_unreadable`.
-- Mechanism: the byte-identical `lib/shell_context.py` copies produce exact source segments, unwrapped argv and local
-  invocation directories; `lib/argv_match.py` classifies their Git/script operations. The producer splits the command on `; && || | & ( )`,
-  backticks and newlines outside quotes, drops shell comments, and unwraps assignments, leading redirections, shell
-  keywords, per-wrapper options (`env/sudo/command/exec/time/nohup/nice/timeout/stdbuf/setsid/xargs/uv run`), absolute
-  paths and `bash [-o x] -c '...'`. Literal `cd`, `env --chdir` and shell-c directories are local to their
-  shell scope; successive relative Git `-C` options compose. Repository-dependent test/workflow/receipt reads replay
-  the original Git prefix (including separate/attached `--git-dir` and `--work-tree`) from the pre-Git directory.
-  For a protected push, Git directory options must select the payload's physical worktree and Git directory.
-  A selector for the same worktree reaches the normal review check; an unknown or different selection is denied.
-  Help and dry-run flags exempt only their own operation. It recognises Git by subcommand (`-nm` decoded) and
-  scripts by basename plus the first positional operation after supported leading `--progress` options. A path named
-  `post` in `validate-embed` does not count as a ceremony. Plain quoted text such as `echo "git commit"` matches
-  nothing. Command substitutions inside double quotes are checked. If shlex cannot parse (unbalanced quote),
-  whitespace splitting may over-match plain words, but a split `-c`
-  body is seen only as its first word. Active Bash ANSI-C quotes and `-c` behind unsupported shell options are
-  refused as opaque execution by the hook consumers.
-- Ceiling key: `sha1(realpath(git common dir) + realpath(toplevel))` plus the target, in
-  `<loop dir>/verification-ceiling/` (Codex `$PLUGIN_DATA/verification-ceiling/`). A renamed branch keeps its count; a
-  linked worktree or a second clone starts at zero. To reset, delete the worktree count file and any existing current
-  branch legacy count file (the digest is printed in no message; compute it, or list the directory by mtime). Each
-  charge raises an existing legacy branch-keyed count under both file locks, so a rollback retains an upgraded count.
-  New legacy files are not created, preserving independent new worktree counters. The worktree key remains
-  authoritative for the current hook; branch renames retain its count. A crash between the two writes can leave a
-  conservative legacy overcount. A fresh worktree or renamed branch with no matching legacy file has no rollback
-  continuity to an older branch-keyed hook.
-  The count is mirrored into `progress.json`
-  `work_units[u].verification{run_all,post_evals}` only when the actual payload session and existing `CLAUDE_LOOP_ID`
-  exactly own a schema-3 in-progress loop, exactly one physical worktree unit matches, and that unit has a running
-  `U3[<id>]` node registered in `active_wave.nodes`. Unknown, foreign or ambiguous input is left unchanged. Codex
-  reuses the native progress file's persistent regular flock, nonblocking, and preserves its mode on atomic save;
-  Claude retains its existing directory lock. A busy/erroring optional mirror cannot exempt the file counter.
-  One shell command can contain several counted runs. The hook locks all affected counters in a fixed order, then
-  computes each total. If any run exceeds the ceiling, it blocks the command and charges only the exceeded counters.
-  A disk write error can leave a partial count after an earlier counter was written; the command is still blocked.
-  Both native `add-unit --worktree` CLIs register and persist the unit worktree. Fixture mirroring alone does not
-  prove installed unit accounting.
-- `protected_paths_unreadable`: `policy/protected_paths.json` (both plugin copies) is missing, torn or ill-shaped, so
-  `no_edit_on_main` and the in-Bash source-write check refuse every non-owner edit on main/master until it is repaired.
-  Owner permission files stay denied on every branch. Keys: `source_extensions`, `plugin_source_globs`, `doc_extensions`,
-  `doc_names`, `settings_files`. Adding `.rs` to `source_extensions` protects `sed -i x.rs` on main with no code change;
-  `no_edit_on_main` treats every suffix not in `doc_extensions`/`doc_names` as protected already. The hardcoded
-  `policy/protected_paths.json` path also denies Edit/apply_patch and supported in-Bash writes on main for both copies,
-  including normalized `./` and `..` aliases. Owner settings paths are normalized before matching on every branch.
-- Query: `trace.by_reason` for `argv/denied/ceiling_exceeded` and `argv/denied/protected_paths_unreadable`
-  (`python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/workflow_gate_counters.py`).
-  See `docs/workflow-gates-measurement.md`.
-- Limits: still no full shell parser. Literal `eval` bodies are checked. Aliases, shell functions, run-time-built command names,
-  and scripts that themselves run `git commit` or `run_all.py` are not seen. Wrapper
-  options are only partly modelled; variable expansion and command-local `GIT_DIR`/`GIT_WORK_TREE` assignments are not
-  evaluated. Merge-script matching retains its existing anchored source policy, including its interpreter-option
-  boundary; Git/GH operations use the shared context. Abbreviated `--no-verify` flags are recognised.
-  A new worktree/clone starts a fresh
-  counter; subagent calls bypass the ceiling and the same user can edit its count files. A cooperating-agent
-  safeguard, not a barrier.
-
-## Action-authority hook denied a merge or push (or warned in advisory)
-
-- Symptom: `gh pr merge` or `git push` to main/master is denied with "needs an action receipt (<code>)" (default
-  enforce), or a stderr "action_authority (advisory)" warning appears under explicit advisory. Only explicit
-  `action_authority: off` disables this receipt gate. Invalid configuration denies with `config_rejected`.
-- Query: `jq -r 'select(.command=="action_authority" or .command=="action_receipt") | [.outcome,.reason_code]|@tsv' <loop dir>/<session>/trace.jsonl`,
-  or `trace.receipts.by_reason_code` from `python3 scripts/measure_graph_alignment.py --root . --json` (deduped by
-  event_id). Codes: `denied_<code>` / `advisory_<code>` where `<code>` is one of `no_receipt`, `hash_mismatch`,
-  `repository_mismatch`, `ref_mismatch`, `sha_mismatch`, `signature_missing`, `signature_invalid`, `signer_unknown`, `trust_root_missing`, `binding_unknown` (repository+ref+sha not computable: fail closed), `state_mutated_before_guard` (a ref/HEAD/remote-moving step precedes the guarded one in the same command), `expired`, `revoked`, `consumed`, `foreign_session`, `foreign_loop`, `kind_mismatch`, `no_session` (payload had no session_id; traced under session dir `_no_session`), `malformed`;
-  `receipt_consumed` (allowed); `trust_root_user_tier` (an allow that rested on the agent-writable trust root: cooperating-agent safeguard); `action_authority_failed_open` (advisory without loaded live authority errored and allowed); `denied_gate_error` (unexpected error under enforce or loaded live authority); `denied_budget_lock_unavailable` / `denied_budget_release_failed` (merge budget lock or cleanup failed; ambiguous reservation remains spent);
-  `receipt_approved` / `receipt_revoked` / `receipt_refused_no_tty` (CLI).
-  Authority codes (also from `enforce_pr_workflow`, which denies before consuming anything): `denied_authority_denied` (the session's authority lists the category in `denied`; a receipt cannot override it),
-  `denied_max_prs_exceeded` (executed merges in the session, counted from `.executed` markers of every merge receipt whatever its `authority_id`, reached `max_prs`; 0 = none; narrow/grant again with `authority.py`), `approval_requirement_missing` (a guarded action's permit verdict omitted its required approval; refused before consuming a receipt), `authority_denied_destructive_shell` (destructive gate, force-with-lease family),
-  `scripts/merge.py` rows are `merge_py_<code>` (refused: `no_receipt`, `no_session`, `binding_unknown`, `sha_mismatch`, `consumed`, ...)
-  and `merge_py_receipt_executed` (allowed). Counters: `scripts/lib/receipt_counters.py` `gate_summary(by_reason)` (the CLI below prints it as `gate`; wiring it into `measure_graph_alignment.py` itself is a handoff to the lane that owns that file).
-  Optional enforce-mode mint command for a merge: `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge --command 'python3 <absolute merge.py path> <N> --expected-head <40-hex PR head>' --cwd <repo dir>`;
-  `gh pr merge <N> --match-head-commit <40-hex PR head>` works with its own exact command text. `max_prs` counts every executed merge receipt in the session, including one minted before the authority was granted.
-- In advisory mode, a live authority reserves a budget slot before a plain `gh pr merge` runs. The hook cannot read
-  that command's result. A failed command can leave a pending entry in `<loop dir>/<session>/merges/` and block a
-  later merge. Check the exact PR and head on GitHub. If the merge did not happen and the PR is still open, an
-  operator can release only that pending entry with `scripts.lib.merge_budget.settle(path, False)` while holding
-  `merge_budget.lock(session)`. Keep completed entries; they record used budget.
-- If reservation cleanup or lock teardown fails, the hook denies the command. It keeps any reservation whose
-  release is uncertain. Check the PR and head before releasing a pending entry by the procedure above.
-- `action_authority_failed_open`: the row carries `inputs.error_class` (sha256 of the exception class name; compare with
-  `printf ZeroDivisionError | shasum -a 256`) and `loop_id` when known; the hook's stderr (hook log) prints
-  `action_authority failed open: <Class>: <message>`. A session-less failure is traced under `_no_session`.
-- `marker_write_failed` or `executed_marker_unavailable`: a receipt note or execution marker failed. The hook
-  denies the command and rolls back only this batch's new markers while holding its claim lock.
-  `marker_cleanup_failed` means cleanup failed: consumed markers stay in place if execution state is uncertain.
-  Fix the file fault and mint a new receipt. A killed hook can leave a partial spend; confirm the command did not
-  run before any manual recovery.
-- Remediation for default enforce mode: the owner runs one-time `python3 scripts/authority_keys.py init` at their
-  terminal (`ssh-keygen` accepts an empty passphrase; `show` prints fingerprints), then approves the exact command:
-  `python3 scripts/action_receipt_cli.py approve-action --session <id> --kind merge|git_push --command '<exact command>' --cwd <directory it runs in>`
-  Signatures remain required. A usable unprotected key needs no passphrase; `--key <public-key-path>` can select an
-  available agent-backed key. The approval CLI still requires the owner's controlling terminal. An autonomy grant
-  does not replace this action receipt. An agent must not create a PTY or call the signer to impersonate approval.
-  (single-use, 1h by default; the CLI computes repository+ref+SHA itself, signs, and refuses without a tty with
-  `receipt_refused_no_tty`; add `--loop <loop id>` when the session authority has a loop; `inspect-receipt` /
-  `revoke-receipt` take `--receipt-id`). `signer_unknown` / `trust_root_missing`
-  mean the signers file does not list the key that signed (or does not exist). `hash_mismatch` means args, cwd or branch differ from the minted
-  command; `sha_mismatch` means HEAD (push source) or the PR head moved since minting: re-mint. `git push origin feature:main` binds
-  the sha of `feature`, not HEAD. `foreign_session` means the receipt was minted for a different `session_id`: subagents share their parent's `session_id`, so mint under the session the hook reports. Or set `action_authority: off` in `.coderails/workflow.config.yaml`.
-- Scope of one receipt: each guarded segment of a chained command (`a && b`) needs its own receipt; a leading
-  `cd <dir>` moves the directory the hash binds (mint with `--cwd` set to where the command really runs). The binding comes from
-  `scripts/lib/action_binding.py` (push: refspec source sha and destination ref; merge: live PR head via `gh pr view`, 4s timeout);
-  unknowable means `binding_unknown`, fail closed. Bindable forms only: `git [-C dir] push <remote> <ref>` (no env prefix,
-  `-c`, `--git-dir`; a push without an explicit refspec is guarded but is `binding_unknown`; `HEAD` alone means the current branch; the repository is the push url) and
-  `gh pr merge <n> --match-head-commit <live head sha>` (or `gh api .../merge -f sha=<sha>`).
-  `scripts/merge.py <n> --expected-head <live head sha>` binds a helper receipt. Bare `scripts/merge.py <n>` is
-  unbindable under receipt enforcement because it fetches the head after the hook. The receipt must name the same
-  helper path that runs. For Codex this is the absolute `packages/codex/scripts/merge.py` path.
-  Use `python3 <absolute helper path>` for enforce mode. Direct executable invocation is unsupported because it has
-  a different command hash.
-  `gh api --method PUT .../pulls/<n>/merge-async -f sha=<sha>` is guarded but unbindable: GitHub may merge open
-  downstack requests too, so one receipt or budget slot cannot cover its effects. Enforce mode and advisory mode
-  with a live authority deny it. Advisory mode without live authority warns and permits it.
-  Run ref-moving steps (`commit`, `branch -f`, `reset`, `config`, ...) as separate commands before the guarded one.
-- Counters: `python3 scripts/measure_graph_alignment.py --root . | python3 scripts/lib/receipt_counters.py` prints `receipts`
-  and `trust` (signature, trust-root, binding and `state_mutated_before_guard` counts). Measurement: one hook run is well under 1 s
-  with one receipt (single run, not a benchmark; 50 receipts could approach the 10 s hook timeout).
-- Residuals (docs/decisions/p3-human-only-minting.md): `.consumed`/`.revoked` markers are agent-writable files, so unlinking one
-  replays or un-revokes a receipt until it expires; junk files can crowd the 50-receipt cap (deny, not allow);
-  unexpected errors deny under enforce or loaded live authority, and fail open in advisory without live authority.
-  An unreadable authority file appears absent in advisory mode. A same-user agent can also write a deeply nested file (`[` x 7000) into `authority.json` or `receipts/`: it is read
-  as malformed (`RecursionError` is caught in `read_receipt`/`read_authority`), so it denies rather than crashing the hook open; it is the
-  same same-user class as the markers above.
-- Unmatched merge routes (Limits): `gh api` merge forms are matched with the endpoint anywhere in argv and the GraphQL
-  `mergePullRequest`/`enablePullRequestAutoMerge` mutations (unbindable, so always denied); other routes (the web UI, `git merge` into main via
-  a script, a tool that calls the API directly) are not seen by any command hook.
-- Codex: the hook imports the byte-identical mirrored libs and the package ships `scripts/action_receipt_cli.py` and
-  `scripts/authority_keys.py` (same owner-run rules).
-- Limits: the user-tier trust root (`~/.coderails/keys/receipt_signers`) is agent-writable, so it is a
-  cooperating-agent safeguard. An agent with Accessibility or control of the owner's terminal is out of scope
-  (docs/decisions/p3-human-only-minting.md). The hash covers only the command text the hook sees, not aliases, functions, eval/xargs or scripts that
-  push (sudo/time/subshell/`bash -c`/`gh api .../merge` wrappers are unwrapped; an env assignment prefix is kept and makes the command unbindable). Limits: scope 500 chars, 8 KB per receipt,
-  50 receipts per session (`receipt_refused_scope_too_long`, `receipt_refused_too_many`). Protected branches are main and master only.
-
-## Typed state, verdicts and attestation (merge blocked by `attest_*`, eval verdict, hook state)
-
-- Symptom: `gh pr merge` or `merge.py` is refused with `attest_missing`, `attest_not_success`, `attest_wrong_creator`
-  or `attest_not_bound`. One parser (`scripts/lib/integrity_attestation.py`, mirrored byte-identically into
-  `packages/codex/scripts/lib/`) is the only code that knows `integrity=pass` / `sha=`; `integrity_status.py` (merge.py)
-  and `pr_merge_gate.py` (hook) fetch with `gh` and render the message from its closed code.
-- Query: `python3 scripts/lib/state_counters.py [--since <ISO ts>]` counts `attest_*` (trace `pr_merge_gate/denied/<code>`,
-  written when the hook payload carries a session id), `hook_state_unreadable`, `nudge_first`/`nudge_suppressed` and
-  `eval_verdict_<status>`.
-- Remediation: `attest_missing`/`attest_not_success` mean the root-owned daemon has not attested this head yet (wait or
-  push a fresh head); `attest_wrong_creator` means `integrity_review.machine_user` disagrees with the status poster;
-  `attest_not_bound` means the description is not exactly `integrity=pass sha=<head>` as whole tokens. Never bypass.
-- Limit: the daemon (`scripts/integrity-gate`, root-installed separately) does not import the parser; a test asserts the
-  daemon's real success description parses. Codex has no PreToolUse merge hook; only `integrity_status.py` applies there.
-- Eval verdicts: `loop_evals.read_loop_evals()` returns a frozen `EvalVerdict{status, tamper_code}` (`status` is one of
-  GO, VERIFICATION_LEVEL0, FROZEN, NO-GO, ABSENT, UNJUSTIFIED, UNSTAMPED, STALE, TAMPERED); callers match on the fields,
-  never on `TAMPERED:<code>` text. A blocked completion writes trace `loop_state_guard/blocked/eval_verdict_<status>`.
-  The cost line in the retro is a `CostReport{state, message}` whose state is logged as `cost_report=<state>`.
-- Readiness: `graph_readiness.py <progress.json> <node>` prints JSON `{"ready": bool, "reason_code": ...}` (exit 0 iff
-  ready): `ready`, `predecessor_pending`, `node_unknown`, `node_not_pending`, `graph_blocked`,
-  `join_not_dispatchable`, `state_unreadable`. A missing script or non-JSON output is a
-  resolution failure, not a not-ready verdict. Not-ready verdicts on a readable state write trace
-  `graph_readiness/not_ready/<code>`; `state_unreadable` has no session to trace under. Every `progress.json` write now
-  carries `updated_at` (Claude `atomic_progress_update`, Codex `graph_io.write`); a refused transition leaves bytes unchanged.
-- Hook state: `<loop dir>/<session>/hook_state.json` `{schema_version, ordinals{absent_blocked}, arms[{hook,ordinal}],
-  nudged{<hook>:true}}` is the only source for absent-state grace and `offload_push_guard` / `unregistered_loop_guard`
-  nudge dedupe (exact session directory, so session `ab` never matches `abc`). `discipline.log` is audit output and is
-  never read for these decisions. A missing or torn file never releases grace and is traced
-  `hook_state_unreadable` (outcome `missing` on the first Stop of a session, which is expected once; `torn` is a fault).
-  A torn file also suppresses the nudge, traced the same way: an advisory must not repeat unrecorded. Nudges trace
-  `nudge_first` / `nudge_suppressed`. Remediation for `torn`: delete the file by hand (the hook will not repair it).
-  Limit (same-user boundary): `hook_state.json` is a plain file owned by the session user, so state is advisory, not
-  tamper-evident. An agent with Bash/Write can pre-create it (an `ordinals.absent_blocked` equal to the current
-  invocation count releases absent-state grace with no prior block) or set `nudged.<hook>=true` to silence a nudge.
-  Grace and nudge dedupe are guard-rails against accident, not a defence against a hostile same-user agent.
-- Limits: Codex has no corresponding hooks (`hooks.json` carries no `loop_state_guard`, `offload_push_guard` or
-  `unregistered_loop_guard`), so hook state, `EvalVerdict` and `CostReport` are Claude-side; Codex gets the shared
-  attestation parser and the `updated_at` stamp. `mine_hook_blocks` still counts the log's exact `session=` token;
-  moving it to trace rows needs every gate to emit rows (Phase 6).
-
-## Graph refused with `spec_*`, or `instantiate` refused
-
-- Symptom: any graph command (`inspect`, `begin-wave`, `add-unit`, `complete`, ...) fails with `spec_edge_missing`,
-  `spec_unknown_node`, `spec_node_missing` or `spec_hash_mismatch`; or `graph.py instantiate` fails with
-  `instantiate_refused_<foreign|state|nonempty|bad_id>`.
-- Query: `python3 scripts/lib/spec_counters.py [--since <ISO ts>]` counts those codes plus `instantiate_ok`,
-  `instantiate_noop` and `skip_when_met` (one count per `plan` call in which a node's skip predicate held). Each refused
-  load also leaves a `load/refused/<code>` row in the loop's `recovery-trace.jsonl`.
-- Remediation: `spec_edge_missing` names the missing edge (for example `J2.8 -> U3[2]`): the spec requires it whenever both
-  nodes exist, so add the edge by registering units with `graph.py add-unit` (which wires it) rather than editing
-  `progress.json`. For a graph stamped by `instantiate`: `spec_hash_mismatch` means `graph-spec.yaml` changed after the
-  graph was built (finish that loop on the old spec checkout, or start a new loop); `spec_unknown_node` /
-  `spec_node_missing` mean nodes were added or removed by hand. `instantiate` builds only into an empty started loop
-  (`instantiate_refused_nonempty` otherwise); a re-run with the same profile and units is `instantiate_noop`.
-- Edit the graph structure in `packages/graph-semantics/graph-spec.yaml` / `policy.yaml` (JSON syntax) and run
-  `python3 scripts/gen_graph_docs.py`; `scripts/tests/gen_graph_docs_test.py` fails the run when the generated tables drift.
-  The installer materializes both files next to `graph_spec.py` in each provider's `agentic-loop/scripts`.
-- Off-switch: `CODERAILS_GRAPH_SPEC=off` (also `0` or `false`) in the environment skips the whole spec check on load
-  (default ON; unset to re-enable). Use it only to rescue a loop whose graph a spec change has stranded, then rebuild it.
-  `spec_join_inputs` (a stamped graph's join is missing or lacks a unit's input) and `spec_profile_downgrade` (the stamp is
-  below `policy.yaml` `graph.profile`) are the other refusal codes.
-- Limits: `policy.yaml` default `graph.profile` is `full`. Every spec node must belong to FULL; a spec
-  that removes one from FULL is refused with `spec_profile` before instantiate. `instantiate --profile units-only`
-  requires the owner to lower the policy floor to `units-only` first; the flag alone is refused. Spec edges are
-  enforced only between nodes that exist, so an unstamped (hand-built or `start`-built) graph that never creates `J2.8` or
-  the prep nodes is not refused: making `start` stamp via `instantiate`, or having `plan`/`begin-wave` refuse an unstamped
-  graph once `full` is chosen, is an open owner decision. Join inputs are enforced on stamped graphs only. Downgrade path:
-  a hand-editing agent can delete `graph.spec_sha256` (back to the weaker unstamped check) or rewrite `spec_profile` and drop
-  the extra nodes, edges and joins; the policy profile floor refuses the second only while `policy.yaml` says `full`.
-  `loop_evals_min_units` is documented but not read by any hook yet. Judgement skip rules (irreversible-surface triggers,
-  `no PR` units) stay prose: `skip_when_met` is only the machine predicate and is a hint, not a recorded skip. Same-user
-  boundary: the spec, policy and `progress.json` are plain files the session user can edit; this is drift detection for a
-  cooperating agent, not tamper evidence.
-
-## A procedure script (wiki_lint, verify_merged, merge --describe, memory_dir, detect_test_command, check --json) answered unexpectedly
-
-- `wiki_lint.py stale --repo R --vault V`: typed `wiki_stale_days` (default 30; zero valid) sets candidate age.
-  A source commit more than 7 days after the page date proves potential drift. With no comparable repo source, an old
-  page is stale with `basis: date_only`; this weaker result also keeps a `no_repo_sources` gap. `data_gaps` names unresolvable sources,
-  missing commit dates, missing `last_updated` and `no_repo_sources`. Missing directories exit 2 (`repo_unavailable`, `vault_unavailable`);
-  bad thresholds report `wiki_stale_days_invalid`. Repair and rerun. Point-in-time/structural directories are excluded.
-- `verify_merged.py <PR> [--grep STR --path P]` exits 0 only when confirmed (`content` or `merge-commit-ancestry`).
-  Refusals: `pr_number_invalid` (PR is not a positive decimal number), `origin_repo_unresolved` (origin is not a supported
-  GitHub URL), `repo_mismatch` (`GH_REPO` names another host or repository), `gh_failed`, `not_merged`,
-  `merged_at_missing`, `fetch_failed`, `merge_commit_unreachable`, `content_absent`, `content_preexisting` (needle predates
-  merge), `content_check_failed` (Git error or missing parent), and `content_check_required` (no needle and no true
-  two-parent ancestry). A squash needs `--grep`. Choose a new needle or restore missing history. For a parsed PR request,
-  the script attempts a `verify-merged/<ok|refused>/<reason>` trace row. An option-shaped PR such as `--comments` returns
-  a JSON `pr_number_invalid` refusal before parsing and does not write a trace row. Trace rows feed `trace.by_reason` and
-  the `verify-merged` counter.
-- `merge.py --describe` prints JSON from `VERIFY_STAGES` then `publication_gate.CHECKS`, without remote contact.
-  Conditional stages may skip; earlier refusals stop execution. Target/auth/state/approval checks precede those stages.
-- `memory_dir.py [--provider claude|codex]` prints a path even if absent: realpath, every non-alphanumeric becomes `-`.
-  `detect_test_command.py` returns null for zero/several candidates; callers ask before writing configuration. Missing
-  projects exit 2 (`directory_unavailable`); malformed/blank npm test scripts are not candidates. Repair input and rerun.
-- `scripts/quality/check.py --json` emits `{scanned, findings[{path,line,message}], external_ok}` with tools on stderr.
-  Both feedback hooks disclose findings, unusable JSON, nonzero checker exits and external failures, with bounded diagnostics.
-  The Codex adapter runs built-in checks only; `external_ok: true` means no external tools were attempted.
-- Limits: skills choose these helpers; verification writes a trace. Same-user `gh`/clone/dates/sources/config are trusted.
-  Wiki lint is advisory; presence on base and absence at the first parent do not prove PR authorship.
-
-See [graph specification recovery](RUNBOOK-GRAPH-SPEC.md).
-
-## Source-bound dispatch upgrade and rollback
-
-This boundary applies to both provider installs. Before activating the source-bound dispatch and publication
-runtime, finish active loops with the runtime that created them, including worker publication and completion.
-Do not upgrade an in-flight implementation or publication wave. Existing assigned units can lack
-`source_manifest_sha256`; the new publication check refuses them with `publication:source_manifest_mismatch`.
-`assign-worktree` only accepts pending units, so it cannot repair an already active assignment. Readability of an
-old dispatch record does not establish that its unit can publish under this runtime.
-
-Start new loops on the new runtime only after the old loops have drained. Keep each loop's matching runtime
-available in an isolated checkout with its progress, dispatch history, proof, orders and retro artifacts preserved
-together. Historical state can also require an older completion/retro reader, as described above; do not assume
-all retained histories can be checked by the pre-upgrade runtime.
-
-Once a new loop stores expanded source/lesson dispatch contracts, reverting code alone is not a safe resume or
-verification procedure: older closed-field readers can reject those contracts. Retain the matching newer runtime
-for that loop through publication, completion and any later verification or retry. A rollback for future work does
-not convert existing records. Do not hand-add hashes, relabel units, reset status, edit frozen evidence, or treat
-`graph.py convert` as an automatic migration for missing source bindings. There is no automatic migration in this
-rollout procedure and no publication bypass is authorized.
-
-Native/global installation remains on HOLD until operational qualification separately verifies this drain and
-runtime-retention procedure. Source review, local tests and a successful commit gate do not establish that an
-installed upgrade, rollback or live-provider loop has been qualified.
-
-Assigned-source inspection refuses effective Git `filter` attributes before status can invoke a clean/process
-helper. Unused filter/LFS configuration alone is permitted. It does not disable a conversion and silently treat
-raw file bytes as the filtered HEAD representation. The refusal also covers explicit `-filter`: Git's attribute
-output cannot distinguish that value from the literal driver name `unset`. An actual `!filter` reset has no
-effective filter row. Inspection does not change attributes, filter configuration or index metadata. Keep the
-trusted assigned checkout and its configuration stable during inspection; these reads are not an atomic snapshot
-or a boundary against concurrent same-user filesystem changes. A refused filtered checkout needs an owner-reviewed
-source workflow; this reader provides no automatic filter migration or bypass.
-It also refuses checkouts containing Git submodule entries before status can inspect a nested checkout and run
-that checkout's filters. It does not ignore submodule dirtiness or claim that nested source has been validated.
-
-## Dispatch refused: `dispatch_*` or `role_mismatch`
-
-- Symptom: `loop_dispatch_guard` (Claude `Agent`, Codex `spawn_agent`, which this Codex host reports to hooks as
-  `collaborationspawn_agent`) denies a spawn in a graph-bound session, or
-  `begin-wave` / `graph.py authorize-dispatch` fails. The hook message names the failure; the reason code is a row in the
-  loop's `recovery-trace.jsonl` (`authorize-dispatch/refused/<code>`, allowed spawns are `authorized/dispatch_authorized`).
-- Query: `python3 scripts/lib/dispatch_counters.py [--since <ISO ts>]` counts `dispatch_authorized` and every refusal code.
-- If the Codex hook cannot create or write its temporary message file, it denies the spawn with
-  `dispatch_message_unavailable` and records that code in `discipline.log`. Repair local scratch storage and retry.
-- If the hook input or its local check raises unexpectedly, the hook denies the spawn with `dispatch_hook_error`
-  and records that code in `discipline.log`. Plaintext envelope first lines over 8192 characters get the same denial.
-  Codex config discovery, graph discovery, and graph commands share a seven-second budget so a stalled Git lookup or
-  held graph lock cannot outlive the ten-second hook limit.
-  Config and graph discovery use strict reads for this hook. An ordinary spawn is free when config is valid or absent
-  and graph state is absent. Unsafe session IDs, completed graph state, lookup errors, and multiple fallback graphs deny
-  the spawn.
-  Inspect the hook input and local runtime; do not treat the spawn as authorized.
-- Codes and fixes: `dispatch_missing_envelope` (no/old/garbled first-line `CODERAILS_GRAPH_DISPATCH` envelope: paste the
-  `prompt_prefix` from `plan` or `begin-wave`; a plaintext Codex spawn needs it, while an opaque native hook message uses the exact issued `task_name` and call id),
-  `dispatch_unknown_id` (the id was never issued: run `begin-wave`), `dispatch_foreign` (session, loop, node, wave or Codex
-  `task_name` is not the record's), `dispatch_stale_revision` (the envelope predates the graph's current revision:
-  re-run `begin-wave` after `recover-wave`), `dispatch_attempt_mismatch` (the stored attempt does not match its dispatch id
-  or the node's next attempt: inspect state and recover the wave), `dispatch_replayed` (the id was already used: one spawn per id; a retry needs a
-  new wave), `dispatch_call_id_missing` (the opaque native hook message has no usable call id: check the native hook payload), `dispatch_contract_altered` (the stored contract no longer matches its digest or lost a field: the state was
-  edited, restart the wave via `recover-wave`), `dispatch_sections_missing` (the pasted contract block was edited or left
-  out: paste `prompt_sections` verbatim), `role_mismatch` (dispatch a guarded scout as `coderails:<role>` / Codex
-  `agent_type: <role>`; other roles accept their own type or `general-purpose` on Claude, and their own type or omitted
-  `agent_type` on Codex; a different named native role such as `explorer` is refused),
-  `dispatch_state_unconverted` (`state_minor` < 3 or a malformed contract/context cutoff: run
-  `graph.py convert --check` then `convert` for old state; inspect malformed current state without editing frozen evidence;
-  conversion refuses while a wave is open, `convert_refused_active_wave_in_flight`),
-  `dispatch_context_mismatch` (typed required skills or checks differ from the registered node and unit facts: recover
-  the wave and use the new `prompt_sections`; do not edit the stored record),
-  `dispatch_publication_mismatch` (the stored unit worker command names a different unit, push script or progress path:
-  use the exact `publication_command` returned by `begin-wave`), `dispatch_unauthorized` (Claude
-  `record-wave` / completion found a bound spawn whose record the PreToolUse guard never consumed, i.e. a spawn the hook did
-  not see: re-dispatch it through the guard via `recover-wave`). A Claude graph-bound `Agent` call with no
-  `subagent_type` is refused as `role_mismatch` before native dispatch.
-- Off-switch: `CODERAILS_GRAPH_DISPATCH=off` (also `0` or `false`) in the hooks and graph CLI bypasses the contract hash,
-  rendered sections, role and single-use checks. A graph-bound spawn still needs the current v2 envelope issued by
-  `begin-wave`, the recorded task name on Codex, and frozen evals; native evidence still binds its node, wave and attempt.
-  An absent or v1 envelope is refused. Claude graph-bound Agent calls must include a nonblank `subagent_type`, including
-  `general-purpose` for unguarded roles; a missing type cannot be bound to native evidence. An ordinary Agent outside a
-  graph is unaffected. Each allowed spawn leaves an
-  `authorize-dispatch/reported/dispatch_check_off` trace row. Default ON; unset to re-enable. Use it only to rescue a
-  loop wedged by a bad contract or an uninstalled plugin agent.
-- Codex evidence rollout: `CODERAILS_A6_EVIDENCE_WRITE` defaults OFF. While OFF, the new reader can validate old and new
-  references, `reject-invalid-dispatch --report-only` works, and attempts to persist invalid-dispatch or encrypted-message
-  evidence fail without changing `progress.json`; the dispatch off-switch also keeps its old no-receipt behavior. After
-  installing and trusting this reader, check active old graphs with
-  `inspect` and completed ones with `verify-completion` before setting the variable to `on` for new writes. Once either
-  new reference shape is stored, turn writing OFF to stop further new records, but keep this reader installed for later
-  completion and verification. The prior plugin reader cannot verify those histories, even after a loop is complete;
-  reinstalling it is not a rollback path. Enabling writes also changes how plaintext authorization binds native call IDs,
-  before either new reference shape is stored. The owner must accept the resulting reader pin before enabling writes.
-- Bad `add-unit --model-role` is `add_unit_refused_bad_field` (allowed: `fast-mechanical`, `default`, `frontier`).
-- Limits: a plugin agent that is not installed in the session cannot run a guarded scout (refused, never downgraded); the
-  sandboxed Bash launcher carries no agent type, so the role is asserted on the `Agent` and `spawn_agent` routes only
-  (handoff H3); single use is keyed on the PreToolUse `tool_use_id` when the payload has one (unverified) and otherwise on
-  a consumed flag, so a hook retried without an id reads as a replay; Codex role containment (no shell, per-role MCP) is
-  not asserted, only `agent_type == role`; `progress.json` and the sections are plain same-user data, so this is drift and
-  substitution detection for a cooperating agent, not tamper evidence.
-- Limits, coverage: (1) the contract is advisory to the worker: the envelope proves the dispatch was authorized and the
-  rendered block is present as a substring, not that the rest of the prompt is faithful; text before, after or around the
-  block is unconstrained and `write_scope` is prompt text only, not enforced. (2) Only the six capability-guarded roles
-  (`deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `preflight-scout`, `security-reviewer`, `source-auditor`) are role-contained;
-  `spec-reviewer` (empty capability list), the `shell.raw` roles (`docs-auditor`, `wiki-writer`, `proof-author`) and nodes
-  with no `agent_role` (default `loop-worker`) may run as explicit `general-purpose` on Claude, or with omitted or exact
-  role `agent_type` on Codex, with full tools. (3) Re-entry is not covered: the matchers are `Agent`, `spawn_agent`, and
-  `collaborationspawn_agent` only, so `SendMessage` on
-  Claude and resume / `send_input` on Codex can give a finished or running worker a fresh prompt outside any envelope.
-  (4) Both providers re-check current-wave dispatches at `record-wave` and completion. Codex requires a native
-  `spawn_agent` function-call message with its v2 record, role and consumed authorization.
-  Current Codex native calls give the hook an encrypted worker prompt.
-  The hook refuses them with `dispatch_prompt_unverifiable` before a worker starts.
-  Do not retry a native graph spawn.
-  Use the checked local Codex OAuth graph driver after it is installed.
-  Until then, stop graph dispatch. A task-name-only legacy event
-  cannot bind a contract-era wave. Claude matches a non-null hook `tool_use_id` to the native Agent call; when the hook
-  supplies no id, it retains the consumed flag and one-spawn-per-id check without claiming call-id proof. Historical
-  pre-contract attempts retain their original evidence rules. Claude hooks can still fail open if the hook times out
-  (10 s in `hooks.json`) before it denies.
-
-## Disposition refused, compat findings blocked a merge, or a worker status stopped the loop
-
-- `add-unit` says `add_unit_refused_disposition`: `--disposition preserve-compat` needs both a non-blank `--named-blocker`
-  and `--removal-ticket`; `--disposition clean-break` takes neither; either flag without `--disposition` is refused. The
-  unit is stored as `work_units[u].disposition = {kind, named_blocker?, removal_ticket?}` and is what the dispatch
-  contract carries. `graph.py disposition-audit <state>` prints every unit's kind and exits 1 on a hand-edited unit that
-  broke the rule; `complete` / `verify-completion` refuse the same unit on both providers (default ON, no switch).
-- For an existing pending unit with no choice, run `graph.py set-unit-disposition <state> --session S --loop-id L
-  --revision R --unit N --disposition preserve-compat --named-blocker TEXT --removal-ticket ISSUE
-  --source-ref URL` (or `clean-break` without blocker and ticket). The command requires the current revision and an
-  inactive wave. It records the source reference and a new revision. It refuses repeated disposition flags or a second stored choice. Inspect the source
-  and choose the value before this command; the command does not prove that a source supports the choice.
-- `/coderails:merge` says `compat_findings_nonzero`: the posted review artifact carries a second line
-  `<!-- coderails-compat-findings v1 pr=N head_sha=S count=K disposition=D -->` (built by
-  `post_review.py compat-line <pr> <sha> --count K --disposition D`) with `disposition=clean-break` and `K > 0`. Remove the
-  retained compatibility code, creating a new head SHA, and post a fresh review; or register the unit `preserve-compat`
-  with a blocker and ticket. Posting a passing review on the same SHA cannot override an earlier refusing compat line.
-  `compat_findings_malformed` means a current line with that prefix is not exactly the typed form.
-  Legacy review artifacts may omit the compatibility line. The current-head v1 review artifact remains required.
-  The Codex direct merge hook applies the same compatibility check, including when required review passes are off.
-  The v1 review marker the root-owned integrity daemon matches is unchanged. Any refusing line for the
-  head wins; the merge refusal is a stderr reason code, not a trace row (merge.py has no loop session).
-- Limits: `K` and `D` are the reviewer's own judgement, not a measurement, and a same-user agent can write any line, so
-  this is drift detection for a cooperating reviewer, not tamper evidence. The gate reads the PR's artifact only; it does
-  not cross-check `D` against `work_units[u].disposition`.
-- `record-wave` says `worker_status_<code>` (`not_an_object`, `unknown_status`, `missing_field`, `unknown_field`,
-  `bad_field`): a result carrying a `status` key is not a valid typed worker status, so the WHOLE report was rejected and
-  `progress.json` is byte-identical; fix the worker's result (the schema is in `scripts/worker_status.py`) and record
-  again. `final_report_invalid`: a `done` result for a dispatch with `final_report_required` lacks a valid
-  `final_report {claims: [{text, label, source?}], did_not_verify: [{item, tag, reason}]}` (non-empty claims, a `verified`
-  claim cites a source, tags `resolved|unverifiable`). Both leave a `record-wave/refused/<code>` trace row.
-- A valid typed status is recorded, not refused: `worker_statuses[]` gets a `decision_pending` row, the node is recorded
-  as a failed attempt; at the retry limit the terminal slot stays available behind that pending decision, so an answer
-  can resume the node. ONE typed
-  stop row is written in the same save (`awaiting-input/needs_human_input` for `NEEDS_DECISION`, `approval-gate/needs_approval`
-  for `OUTSIDE_SCOPE` and `IRREVERSIBLE_ACTION`; approval outranks input when a wave returns both). The Stop guard releases
-  that row once. Ask the human with `to_decision_request()`, then log the answer with `graph.py record-decision <state>
-  --session S --phase P --decision D --chosen C [--flip-condition F] --worker-status-seq <seq>`: it appends one typed row
-  to `decisions_absorbed` and marks that status resolved. `python3 scripts/lib/worker_counters.py` reports
-  `pending_statuses` (rows still `decision_pending`) and `decision_recorded`.
-- `record-decision` says `record_decision_refused_<foreign|field|state|status|chosen|human>`: the session does not own the
-  graph, a flag is blank, `decisions_absorbed` is not an array of objects, `--worker-status-seq` names no pending status
-  (unknown, already resolved, duplicated, or malformed), `--chosen` is not one of a `NEEDS_DECISION` status's options,
-  or the status is an approval gate (`OUTSIDE_SCOPE`, `IRREVERSIBLE_ACTION`) and `--human-answer` was not passed. Nothing is written. It does
-  not bump the revision. Limits: `phase`, `decision` and `chosen` are free text outside a status-linked answer (no enum,
-  no check against the graph); hand-appended `{phase, decision}` rows stay valid and unnumbered. There is no caller
-  authentication: `--session` and `--human-answer` are self-asserted, so a same-user agent can still forge a human
-  answer (or write any row); the flag makes that a deliberate act, not tamper evidence. Only the orchestrator should
-  pass `--human-answer`, and only after the human replied.
-- Limits: shape is checked, truth is not (a worker can write any claim); only results of dispatches with a begin-wave
-  record require the report, so a pre-conversion state behaves as before; `check_confidence_labels` and
-  `check_verify_loop` stay advisory lints on the orchestrator's own text.
+- <a id="typed-state-verdicts-and-attestation-merge-blocked-by-attest_-eval-verdict-hook-state"></a>[Typed records, eval verdicts, and attestation](RUNBOOK-DISPATCH.md#typed-state-verdicts-and-attestation-merge-blocked-by-attest_-eval-verdict-hook-state)
+- <a id="graph-refused-with-spec_-or-instantiate-refused"></a>[Spec and instantiate refusal](RUNBOOK-GRAPH-SPEC.md)
+- <a id="a-procedure-script-wiki_lint-verify_merged-merge---describe-memory_dir-detect_test_command-check---json-answered-unexpectedly"></a>[Procedure script results](RUNBOOK-DISPATCH.md#a-procedure-script-wiki_lint-verify_merged-merge---describe-memory_dir-detect_test_command-check---json-answered-unexpectedly)
+- <a id="source-bound-dispatch-upgrade-and-rollback"></a>[Upgrade and rollback for source-bound dispatch](RUNBOOK-DISPATCH.md#source-bound-dispatch-upgrade-and-rollback)
+- <a id="dispatch-refused-dispatch_-or-role_mismatch"></a>[Dispatch or role refusal](RUNBOOK-DISPATCH.md#dispatch-refused-dispatch_-or-role_mismatch)
+- <a id="disposition-refused-compat-findings-blocked-a-merge-or-a-worker-status-stopped-the-loop"></a>[Retirement decision, compatibility, and worker status](RUNBOOK-DISPATCH.md#disposition-refused-compat-findings-blocked-a-merge-or-a-worker-status-stopped-the-loop)

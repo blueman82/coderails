@@ -159,23 +159,24 @@ class HookGenerationTests(unittest.TestCase):
         self.assertEqual(self.check(), 1)
         shutil.copyfile(ROOT / "hooks/hooks.json", path)
         readme = self.root / "README.md"
-        readme.write_text(readme.read_text().replace("registered for its provider event", "hand edited", 1))
+        readme.write_text(readme.read_text().replace("Runs on its provider trigger", "hand edited", 1))
         self.assertEqual(self.check(), 1)
 
     def test_default_and_advisory_modes_are_declared(self) -> None:
         """The catalog preserves optional controls and advisory modes."""
         registry = json.loads((self.root / "hooks/registry.json").read_text())
         controls = registry["controls"]
-        self.assertIn("enforce by default", controls["action_authority_gate"]["activation"])
+        self.assertIn("Default mode is `enforce`.", controls["action_authority_gate"]["activation"])
         self.assertIn("off unless", controls["test_gate"]["activation"])
         self.assertEqual(controls["check_confidence_labels"]["mode"], "advisory")
         self.assertEqual(controls["check_verify_loop"]["mode"], "advisory")
 
-    def test_matcher_pipe_is_escaped_once(self) -> None:
-        """A generated Markdown matcher stays in one table cell."""
+    def test_matcher_labels_keep_alternatives_in_one_cell(self) -> None:
+        """List literal alternatives and escape pipes in a regular expression."""
         table = (self.root / "AGENTS.md").read_text()
-        self.assertIn("startup\\|resume\\|clear\\|compact", table)
-        self.assertNotIn("startup\\\\|resume", table)
+        self.assertIn("| `startup` or `resume` or `clear` or `compact` |", table)
+        self.assertIn(r"| `^(?:spawn_agent\|collaborationspawn_agent)$` |", table)
+        self.assertNotIn(r"spawn_agent\\|collaborationspawn_agent", table)
 
 
 if __name__ == "__main__":

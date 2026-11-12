@@ -1,294 +1,278 @@
 # AGENTS.md — Coderails
 
-Single source read at conversation start. Covers the repo working guide (below) and the coderails wiki schema (`## Wiki schema` near the end). `CLAUDE.md` is a thin pointer here — edit here, not there.
+Read this file at the start of the conversation. It contains the repo working guide and the Coderails wiki schema. See `## Wiki schema` near the end. `CLAUDE.md` points to this file. Make changes to the guide here.
 
-Wiki vault: `../coderails-wiki` relative to the plugin, or wherever `/wiki-init` placed it.
+The wiki vault is at `../coderails-wiki` from the plugin directory, or at the path that `/wiki-init` set.
 
-For any coderails question, lookup, or context, use the `wiki-query` skill; for staleness or health checks, use `wiki-lint`. Prefer both over grepping source or the vault directly — the wiki holds compounded understanding, not just facts derivable from re-reading code.
+Use `wiki-query` for Coderails questions, lookups, and context. Use `wiki-lint` for wiki health or stale content. Use these skills before you examine the source or vault by hand. The wiki records decisions and relationships that you cannot always get from the code alone.
 
 ## Current integrity-gate replacement
 
-The semantic judge is replaced by a mechanical `integrity-review` attestor in a trusted GitHub Actions workflow. It checks SHA-bound review/eval evidence, command/eval structure, policy paths, provenance fields, and bounded diff input. It never runs PR code or comment commands and never asks an LLM for a verdict. Authoritative: `docs/INTEGRITY-GATE.md`, `.github/workflows/integrity-review.yml`, `scripts/integrity-gate/integrity_actions.py`, and `integrity_review.enabled` config. The GitHub rule must be activated separately; source code alone does not make it live.
+The trusted GitHub workflow runs the `integrity-review` attestor. This attestor replaces the semantic judge. It checks SHA-bound PR reviewer and eval records. It also checks command and eval structure, policy paths, provenance fields, and the diff input limit. It does not run PR code or commands from comments. It does not use an LLM to get a verdict.
+
+See `docs/INTEGRITY-GATE.md`, `.github/workflows/integrity-review.yml`, `scripts/integrity-gate/integrity_actions.py`, and the `integrity_review.enabled` config. The source code does not turn on the GitHub rule. Turn on the rule in GitHub.
 
 ## What this repo is
 
-Two independent plugins, not an application:
-- Working Claude Code plugin at repo root.
-- Native Codex plugin at `packages/codex/`.
+The repo has two plugins. Each plugin runs on its own.
 
-`install.py` defaults to Claude; `--provider codex` for Codex. Claude plugin bundles:
-1. Workflow commands — `prep → push → merge → wiki` chain (`commands/*.md`)
-2. Skills — agentic-loop, planning-sequence, premortem, handoff (`skills/*/SKILL.md`)
-3. Discipline loop — advisory lints on confidence labels and unverified claims; blocking hooks on destructive bash, failing tests (`hooks/`)
+- The Claude Code plugin is at the repo root.
+- The native Codex plugin is at `packages/codex/`.
 
-The plugin instructions and Python runtime need no compilation. The dashboard TypeScript packages have their own build and test commands. Source = Markdown instructions, maintained Python hooks/workflow scripts, and dashboard TypeScript. Version-controlled in your own fork/repo. Former shell runtime and test entrypoints are maintained Python; generic shell-policy examples and external tools remain supported.
+`install.py` installs the Claude plugin by default. Use `--provider codex` to install the Codex plugin.
 
-**Agentic-loop graph runtime**: The `agentic-loop` skill keeps durable graph state in `progress.json`. The graph records nodes, edges, joins, status, outcomes, and retries. Readiness checks and plan/record helpers support wave dispatch. The model reads the graph, dispatches ready work, and records results; there is no automatic scheduler. Each provider has its own graph adapter, locks, and native evidence reader. The sole maintained pure semantics live in `packages/graph-semantics/graph_semantics.py` and are copied byte-for-byte into both independent installs. `graph_vocab.py` defines the sole stop enum. `decision_chain.py` provides pure decision hashes and chain checks. `graph_convert.py` provides `graph.py convert` and versioned `state_minor`. `graph_spec.py`, `graph-spec.yaml`, and `policy.yaml` define node types and thresholds. Every load refuses a missing spec edge. `graph.py instantiate` builds from the spec. `scripts/gen_graph_docs.py` renders the docs. The current graph schema is 3; there is no legacy reader or alternate writer.
+The Claude plugin includes these components.
+
+1. Workflow commands for `prep → push → merge → wiki` in `commands/*.md`.
+2. The agentic-loop, planning-sequence, premortem, and handoff skills in `skills/*/SKILL.md`.
+3. Advisory lints for confidence labels and unverified claims. Hooks in `hooks/` block destructive Bash commands and commits when tests do not succeed.
+
+The plugin instructions and Python runtime use no compilation step. The dashboard TypeScript packages have their own build and test commands. The source includes Markdown instructions, Python hooks and workflow scripts, and dashboard TypeScript. Keep your version in your fork or repo. Python replaces the former shell runtime and test entry points. The plugins can use generic shell policy examples and external tools.
+
+**Agentic-loop graph runtime.** The `agentic-loop` skill stores the graph in `progress.json`. The graph records nodes, edges, joins, status, outcomes, and retries. Readiness checks and helpers for planning and recording are available for wave dispatch. The model reads the graph, sends work when its readiness checks succeed, and records the results. There is no automatic scheduler.
+
+Each provider has its own graph adapter, locks, and reader for native records. The pure semantics source is `packages/graph-semantics/graph_semantics.py`. The two installations get copies with the same bytes. `graph_vocab.py` defines the only stop enum. `decision_chain.py` calculates pure decision hashes and checks the chain.
+
+`graph_convert.py` provides `graph.py convert` and versioned `state_minor`. `graph_spec.py`, `graph-spec.yaml`, and `policy.yaml` define node types and thresholds. Each load refuses a missing spec edge. `graph.py instantiate` builds from the spec. `scripts/gen_graph_docs.py` writes the docs. The graph uses schema 3, with no legacy reader or a second writer.
+
 ## How the pieces wire together
 
-```
-.claude-plugin/plugin.json      → plugin manifest (name, version, metadata)
-.claude-plugin/marketplace.json → local-directory marketplace entry (source: ./)
-hooks/hooks.json                → maps lifecycle events → hook scripts
-  └─ hooks/scripts/*.py         → the actual gate/nudge logic
-commands/*.md                   → slash commands (frontmatter + prose instructions)
-  └─ scripts/*.py               → Python commands (push.py, merge.py)
-       └─ scripts/lib/git_common.py → shared git/gh/PR helpers, imported by both
-       └─ scripts/lib/config.py     → workflow.config.yaml resolver (single source of truth; see "Config resolution")
-  └─ scripts/sandbox/*.py       → srt sandbox wrapper for spawned workers (see "Sandboxed workers")
-  └─ scripts/integrity-gate/*        → trusted GitHub Actions evidence check and `integrity-review` status
-skills/*/SKILL.md               → skills with triggering descriptions
-agents/*.md                     → subagent definitions the skills spawn (deploy-safety-reviewer,
-                                  design-scout, disposition-scout, docs-auditor,
-                                  loop-worker, preflight-scout, proof-author, security-reviewer,
-                                  source-auditor, spec-reviewer, wiki-writer)
-packages/codex/                 → independent native Codex plugin root
-  ├─ .codex-plugin/plugin.json  → Codex plugin manifest
-  ├─ skills/*/SKILL.md          → native Codex skills, including former commands
-  ├─ hooks/hooks.json           → Codex hook registration
-  ├─ hooks/scripts/*.py         → Codex-only hook scripts using PLUGIN_ROOT
-  └─ agents/*.toml              → agents installed by install.py --provider codex
-instructions/                   → the discipline rules appended to ~/.claude/CLAUDE.md
-starter-memory/                 → feedback memories seeded into the user's memory dir
-docs/                            → long-form reference split out of this file
-examples/, launchd/             → sample configs and macOS scheduling plists
-```
+- `.claude-plugin/plugin.json` has the Claude plugin name, version, and metadata. `.claude-plugin/marketplace.json` sets the local-directory source to `./`.
+- `hooks/hooks.json` tells the provider when to run the hooks. The checks and nudges are in `hooks/scripts/*.py`.
+- `commands/*.md` has the slash command frontmatter and instructions. The commands use Python in `scripts/*.py`, for example `push.py` and `merge.py`.
+- The two commands use the Git, gh, and PR helpers in `scripts/lib/git_common.py`. For `workflow.config.yaml`, see `scripts/lib/config.py` and "Config resolution".
+- `scripts/sandbox/*.py` uses srt to start sandboxed workers. `scripts/integrity-gate/*` checks records and gives the `integrity-review` status in the trusted GitHub workflow.
+- `skills/*/SKILL.md` holds skills and their descriptions. `agents/*.md` holds the subagent definitions that the skills use.
+- Claude roles include `deploy-safety-reviewer`, `design-scout`, `disposition-scout`, `docs-auditor`, `loop-worker`, and `preflight-scout`. Other roles are `proof-author`, `security-reviewer`, `source-auditor`, `spec-reviewer`, and `wiki-writer`.
+- `packages/codex/` is the native Codex plugin root. Its manifest is `.codex-plugin/plugin.json`. Its `skills/*/SKILL.md` files include former commands.
+- The Codex plugin uses `hooks/hooks.json` and `hooks/scripts/*.py` with `PLUGIN_ROOT`. The command `install.py --provider codex` installs `agents/*.toml`.
+- The installer adds rules from `instructions/` to `~/.claude/CLAUDE.md` and feedback memories from `starter-memory/` to the user's memory directory.
+- `docs/` has documentation. `examples/` and `launchd/` have sample configs and macOS scheduling plists.
 
-`${CLAUDE_PLUGIN_ROOT}` in `hooks.json` resolves to this repo's root at runtime — how hook commands locate `hooks/scripts/*.py`.
+`${CLAUDE_PLUGIN_ROOT}` in `hooks.json` resolves to the repo root at run time. Hook commands use it to find `hooks/scripts/*.py`.
 
 ## Two enforcement mechanisms — don't confuse them
 
-- **Hooks = mechanical enforcement.** Run automatically on lifecycle events, can *block* (exit 2 / `permissionDecision: deny`). Use when behaviour must be enforced regardless of Claude's cooperation.
-- **Slash commands = advisory.** Claude must *choose* to invoke them. Encode a workflow, don't rely on them to enforce one.
+- **Hooks apply rules mechanically.** They run automatically at set points in the session. They can block with exit code 2 or `permissionDecision: deny`.
+- **Slash commands give guidance.** Claude must invoke them. Use them to give workflow instructions. They cannot make the workflow mandatory.
 
-"Make X mandatory" → a `PreToolUse` hook, not a command.
+Use a `PreToolUse` hook to make a rule mandatory without depending on Claude to follow it.
 
-**Enforcement ceiling.** A local hook checks evidence of *invocation*, not of *completion* — e.g. `enforce_pr_workflow` is satisfied by a hollow `/coderails:push` or `/pr-review-toolkit:review-pr` step that ran but did nothing. A hook runs inside the agent's own trust domain (no privilege boundary), so it's a **redirect-and-audit layer** (steers a cooperating agent, leaves a `discipline.log` trail), not a tamper-proof barrier. The real "no unreviewed change reaches `main`" guarantee is **server-side: GitHub branch protection** (required PR + reviews + no direct pushes) — no local agent can fake that; local hooks complement it, don't replace it. Same ceiling applies to Stop-hook gates: they force a declared step to *appear*, not to *be real*.
+**Limits of local hooks.** A local hook checks that a step ran. It cannot show that the step did its work. For example, `enforce_pr_workflow` accepts an invocation of `/coderails:push` or `/pr-review-toolkit:review-pr` if that invocation did nothing.
 
-**This repo** deliberately does not enable general branch protection (2026-07-15, standing decision) — so for ordinary PRs the server-side layer is absent and the redirect-and-audit layer is the whole story, by design.
+The hook runs in the agent's trust domain. There is no privilege boundary. It gives an agent instructions and writes a `discipline.log` record. It cannot prevent tampering. Stop hooks can make a declared step show in the records, but cannot prove the step did its work.
 
-**One server-side exception: integrity-review.** The planned GitHub ruleset on `main` requires a PR and successful `integrity-review` status from the GitHub Actions app. The workflow validates the head SHA's review/eval evidence and policy as data. Activate and verify the rule after the workflow reaches `main`; local hooks cannot substitute for it.
+GitHub branch protection can make PRs and reviewer approvals mandatory for `main` and block direct pushes. A local agent cannot forge those server checks. Local hooks supplement GitHub branch protection.
 
-**Sandboxed workers narrow the ceiling for worker processes only, never the orchestrator.** `config.sandbox_workers` is ON by default (true or absent; `enforced_by_code`, read by `scripts/sandbox/containment.py`). `resolve()` returns `sandboxed` only when the OS sandbox (macOS `sandbox-exec` + `rg`, or Linux `bwrap`), `npx`, the pinned srt (0.0.65, in the npx cache) **and** an owner-provisioned worker credential all exist; otherwise it is `fallback` (reason `sandbox_unavailable` / `worker_credential_missing`, graph implementation dispatch stops) and `false` is `off`. The credential is the file `~/.coderails/worker_credential` (mode 0600, one line `ANTHROPIC_API_KEY=...` or `CLAUDE_CODE_OAUTH_TOKEN=...` from `claude setup-token`); until the owner creates it the mode stays `fallback`. A loopback probe (2026-10-05) showed headless claude with an isolated HOME and `CLAUDE_CONFIG_DIR` sends either credential (`x-api-key` for the API key, `Authorization: Bearer` for the OAuth token); that a live account accepts it is unverified. In `sandboxed` mode an implementation-unit worker runs as a separate OS process via `@anthropic-ai/sandbox-runtime` (srt, pinned) — outside the agent's trust domain, the first non-hook layer. The orchestrator itself is never sandboxed.
+The standing decision of 2026-07-15 is to use no general branch protection in this repo. Ordinary PRs use the local hooks without the general server checks.
 
-How a sandboxed worker runs (`scripts/sandbox/spawn_sandboxed_worker.py`): the launcher takes a `git clone --no-hardlinks` of the worktree into a per-worker scratch directory and runs the worker there, so the **primary `.git` (refs, hooks, config) is not writable at all** and srt's cwd-anchored `.git/hooks`/`.git/config` denies cover the repository the worker can actually write. The rendered settings allow writes only to that scratch directory (plus the worker's own `/tmp/claude-<uid>/<slug>` state dir): not `~/.claude`, not `~/.claude.json`, not the shared `$TMPDIR`. HOME, `CLAUDE_CONFIG_DIR`, `XDG_*` and `TMPDIR` all point inside the scratch directory, and the child environment is rebuilt from an allowlist (PATH, LANG, TERM, the worker credential): no inherited `GH_TOKEN` or `ANTHROPIC_API_KEY`, and `CODERAILS_HEADLESS_RUN` stays unset. GitHub network egress is blocked inside the sandbox. The worker no longer pushes. After a clean exit the launcher checks the graph U3 unit's declared manifest and new Git objects for known secrets, imports **exactly the worker's branch** (private ref + fast-forward-only merge into the worktree repository) and pushes it from outside the sandbox with the operator's own git auth; if the worker moved any other branch, including `main`/`master`, rewrote history, or committed out-of-manifest files, nothing is imported or pushed (`branch_import_refused`). A non-zero worker exit imports nothing; the clone stays in the scratch directory.
+The planned GitHub ruleset for `main` makes a PR and a `success` status for `integrity-review` from the `github-actions` app mandatory. The workflow checks the PR reviewer and eval records for the head SHA. It reads these records and the policy as data.
 
-For the local Claude graph driver, C is prepared before prompt authorization and D remains a separately reserved pristine root publication checkout. The driver captures fixed untrusted proposed source into private objects, checks scope and known secrets, then materializes it without moving D HEAD/index. Root review and publication remain downstream. Resume never reapplies C over later root edits; partial transfer or destination drift quarantines D. Trusted-H ignore rules classify new generated products; worker ignore/config/index/filters are never authority. This does not prove a coherent terminal tree or stopped descendants. See `docs/WORKER-CONTAINMENT.md`.
+After the workflow reaches `main`, turn on the GitHub rule and check it. The local hooks cannot replace the rule.
 
-In-process fallback is gated, not silent: `hooks/scripts/worker_containment_gate.py` (separate from `loop_dispatch_guard.py`) denies every in-process graph U3 dispatch when `resolve()` is `fallback` (`containment_unavailable`). When `resolve()` is `sandboxed`, it denies an in-process graph U3 dispatch regardless of native role if the unit's `manifest`/`write_scope` can touch `HIGH_RISK_PREFIXES` (`hooks/`, `scripts/`, `capabilities/`, `agents/`, `skills/`, `commands/`, `.claude-plugin/`, `.coderails/`, `.github/`, all of `packages/codex/` and `packages/graph-semantics/`, `workflow.config*`, the config schemas, `install.sh`, `install.py`, `pyproject.toml`, `AGENTS.md`, `CLAUDE.md`; entries are normalised, and `..`, absolute, backslash, non-ASCII and brace-glob entries count as high risk) or is undeclared (`containment_ack_required`) unless the owner mints a `worker_fallback` receipt (`action_receipt_cli.py approve-action --kind worker_fallback --command 'worker_fallback <unit>'`: signed, single-use, bound to repository + branch + base sha + unit). A low-risk unit is allowed and traced `containment_fallback_low_risk`. Counters: `scripts/lib/containment_counters.py`.
+**Worker sandbox.** If `config.sandbox_workers` is `true` or has no value, the control is on. The control is `enforced_by_code`. The reader is `scripts/sandbox/containment.py`.
 
-Named residuals — what is closed: the shared-`$TMPDIR`, `~/.claude`/`~/.claude.json`-write, primary-refs/hooks/config and full-`gh`-token holes of the previous design. What remains, so this is a **cooperating-agent safeguard, not absolute isolation**:
-- **Network egress.** Only `api.anthropic.com` is allowed. A worker can still send data to the Anthropic API with its dedicated credential; GitHub domains are blocked inside the sandbox.
-- **Reads are unrestricted.** `denyRead` is empty (deny-read breaks toolchains), so a worker can read anything the user can read under the real HOME, including `~/.claude.json` and other credentials on disk. Only the environment is scrubbed.
-- **The launcher is trusted.** It runs unsandboxed with the operator's git auth, clones, imports and pushes; a bug or a malicious clone config there is outside this containment (git calls on the clone ignore its `fsmonitor` and hooks).
-- **The orchestrator is never sandboxed**, and `sandbox_workers`, the manifest a unit is judged by and the receipt trust root are agent-editable same-user state.
-- **Codex process evidence has one graph route.** `loop_dispatch_guard.py` refuses native U3 spawns while `sandbox_workers` is on. Use the existing OAuth graph driver and its issued dispatch, immutable prompt, terminal receipt, publication checks and sealed evidence. `packages/codex/scripts/codex_worker.py` remains a standalone OAuth process under `workspace-write`; its output and trace cannot complete a graph node. Both explicitly select ChatGPT login and the OpenAI provider and allowlist the inherited environment. Native `spawn_agent` inherits the parent `sandbox_mode` and cannot prove per-worker containment. The driver uses the existing user OAuth location; HOME and CODEX_HOME are not isolated, and reads or same-user token access remain residuals.
-- **Default ON is conditional.** Until the owner provisions `~/.coderails/worker_credential` (and the sandbox runtime is present), `resolve()` is `fallback` (`worker_credential_missing`/`sandbox_unavailable`) and graph implementation dispatch stops with `containment_unavailable`. Live-account acceptance of the credential with a custom `CLAUDE_CONFIG_DIR` is unverified (loopback probe only).
-- **Role scope.** The gate acts on graph U3 envelopes regardless of the optional native role label. A low-risk unit is traced, not forced into the launcher.
-- **Secret exfiltration through the push.** The worker holds the live API credential and reads are unrestricted, so it can read secrets under the real HOME (`~/.config/gh`, `~/.ssh`, `~/.git-credentials`) or reach a keychain-backed git credential helper via the real user's passwd HOME. The launcher scans new commit objects, including binary blobs and intermediate commits, for the worker credential and known secret patterns before import or push (`branch_import_refused`); an unrecognised or encoded secret format is not detected.
+`resolve()` gives `sandboxed` only when all four components are available.
 
-Sandboxing is write-containment, not a correctness/review substitute: a sandboxed worker's PR clears the same review/eval/hook-seam gates as any other. It narrows filesystem writes and credential scope only.
+- The OS sandbox is `sandbox-exec` with `rg` on macOS, or `bwrap` on Linux.
+- `npx` is available.
+- The npx cache has srt 0.0.65.
+- The owner has set up the worker credential.
+
+If a component is unavailable, `resolve()` gives `fallback` with `sandbox_unavailable` or `worker_credential_missing`. The graph stops sending implementation work. If the setting is `false`, the result is `off`.
+
+The credential is one line in `~/.coderails/worker_credential` with mode 0600. It is `ANTHROPIC_API_KEY=...` or `CLAUDE_CODE_OAUTH_TOKEN=...` from `claude setup-token`. The mode stays `fallback` until the owner sets up the file.
+
+A loopback probe on 2026-10-05 showed that headless Claude sends each credential type with an isolated `HOME` and `CLAUDE_CONFIG_DIR`. It uses `x-api-key` for an API key or `Authorization: Bearer` for an OAuth token. The probe did not check if a live account accepts it.
+
+In `sandboxed` mode, `@anthropic-ai/sandbox-runtime` runs the implementation worker in its own OS sandbox. This isolates the worker from the agent's trust domain. The orchestrator has no sandbox.
+
+**How a sandboxed worker runs.** The launcher in `scripts/sandbox/spawn_sandboxed_worker.py` runs `git clone --no-hardlinks` into a scratch directory for that worker. The worker runs there and cannot write to the primary `.git` refs, hooks, or config. The srt rules for `.git/hooks` and `.git/config` apply in the worker's own checkout.
+
+The worker can write only to its scratch directory and its own `/tmp/claude-<uid>/<slug>` data directory. It cannot write to `~/.claude`, `~/.claude.json`, or the shared `$TMPDIR`. The launcher sets `HOME`, `CLAUDE_CONFIG_DIR`, `XDG_*`, and `TMPDIR` to paths in scratch. It builds the child environment from `PATH`, `LANG`, `TERM`, and the worker credential. It does not copy `GH_TOKEN` or `ANTHROPIC_API_KEY` from the parent. It keeps `CODERAILS_HEADLESS_RUN` unset.
+
+The sandbox blocks GitHub network traffic. The worker does not push. If the worker exits with code 0, the launcher checks the U3 manifest and checks new Git objects for known secrets. It imports only the worker's branch, through a private ref and a fast-forward-only merge. It then pushes with the operator's Git authorization without the worker sandbox.
+
+The launcher gives `branch_import_refused` if the worker moves a different branch, such as `main` or `master`. It gives the same code for a history rewrite or a file in the commit that the manifest does not list. It does not import or push. If the worker exits with a nonzero code, the launcher does not import and leaves the clone in scratch.
+
+The local Claude graph driver prepares execution checkout C before prompt authorization. It reserves clean checkout D for root publication. The driver captures the fixed, untrusted proposed source in private Git objects. It checks scope and known secrets. It copies the proposal to D without changing D's HEAD or index. The root then checks and publishes it.
+
+If work continues after a stop, the driver keeps edits that the root made after the copy. If the copy does not finish or the destination differs, the driver quarantines D. The ignore rules from trusted H classify new generated files. The driver does not use the worker's ignore rules, config, index, or filters as authority.
+
+These checks do not prove that the terminal tree is coherent or that descendant workers stopped. See `docs/WORKER-CONTAINMENT.md`.
+
+**In-process fallback.** `hooks/scripts/worker_containment_gate.py` is a different hook from `loop_dispatch_guard.py`. If `resolve()` gives `fallback`, it denies each in-process graph U3 dispatch with `containment_unavailable`.
+
+If `resolve()` gives `sandboxed`, it checks all native roles. It blocks in-process graph U3 dispatch if `manifest` or `write_scope` can touch `HIGH_RISK_PREFIXES`, or if the unit does not declare a scope. The code is `containment_ack_required`. The hook lets the dispatch continue if the owner issues a `worker_fallback` receipt. It lets low-risk units continue and logs `containment_fallback_low_risk`. See `scripts/lib/containment_counters.py` for counts.
+
+The high-risk paths include `hooks/`, `scripts/`, `capabilities/`, `agents/`, `skills/`, `commands/`, `.claude-plugin/`, `.coderails/`, and `.github/`. They also include all of `packages/codex/` and `packages/graph-semantics/`. Other entries are `workflow.config*`, the config schemas, `install.sh`, `install.py`, `pyproject.toml`, `AGENTS.md`, and `CLAUDE.md`. The hook normalizes entries. It counts `..`, absolute paths, backslashes, non-ASCII, and brace globs as high risk.
+
+The owner uses `action_receipt_cli.py approve-action --kind worker_fallback --command 'worker_fallback <unit>'`. The signed receipt can be used one time. The signature covers the repo, branch, base SHA, and unit.
+
+The worker cannot write to the shared `$TMPDIR`, `~/.claude`, `~/.claude.json`, or the primary Git refs, hooks, or config. It does not inherit the full `gh` token. This is a cooperating-agent safeguard with these limits.
+
+- **Network.** The sandbox allows traffic only to `api.anthropic.com`. The worker can send data to the Anthropic API with its dedicated credential. The sandbox blocks GitHub domains.
+- **Reads.** `denyRead` is empty because a read restriction breaks toolchains. The worker can read what the user can read in the user's `HOME`. This includes `~/.claude.json` and credentials on disk. The launcher filters only the environment.
+
+- **Launcher.** The launcher uses the operator's Git authorization without the sandbox. It clones, imports, and pushes. The sandbox cannot contain a launcher bug or a malicious clone config. Git calls on the clone ignore its `fsmonitor` and hooks.
+
+- **Orchestrator.** The orchestrator has no sandbox. An agent with the same user permissions can edit `sandbox_workers`, the unit manifest, and the receipt trust root.
+
+- **Codex worker records.** If `sandbox_workers` is on, `loop_dispatch_guard.py` refuses native U3 spawns.
+  Use the OAuth graph driver with its issued dispatch, immutable prompt, terminal receipt, publication checks, and sealed worker records.
+  The standalone OAuth helper in `packages/codex/scripts/codex_worker.py` runs with `workspace-write`. Its output and telemetry cannot complete a graph node.
+
+  The driver and helper select ChatGPT login and the OpenAI provider. They use an allowlist for the inherited environment.
+  Native `spawn_agent` inherits the parent's `sandbox_mode`. It cannot prove containment for an individual worker.
+
+  The driver uses the user's OAuth location. It shares `HOME` and `CODEX_HOME`. The worker can read files and can access tokens as the same user.
+
+- **Conditions for sandbox mode.** The owner must supply `~/.coderails/worker_credential`. The sandbox runtime must be available.
+  Until then, `resolve()` gives `fallback` with `worker_credential_missing` or `sandbox_unavailable`.
+  The graph stops implementation work with `containment_unavailable`.
+  The loopback probe did not check if a live account accepts the credential with a custom `CLAUDE_CONFIG_DIR`.
+
+- **Role scope.** The gate checks graph U3 envelopes without regard to the optional native role label.
+  It logs low-risk units and lets them run without the launcher.
+
+- **Secrets in a push.** The worker holds the live API credential and can read secrets in the user's `HOME`.
+  Examples are `~/.config/gh`, `~/.ssh`, and `~/.git-credentials`. It can also use a keychain-backed Git credential helper through the user's passwd `HOME`.
+  Before import or push, the launcher checks new commit objects for the worker credential and known secret patterns.
+
+  It checks binary blobs and commits from the base to the branch head. If it finds a secret, it gives `branch_import_refused`.
+  It cannot find a secret in a format that the check does not recognize, such as an encoded value.
+
+The sandbox limits file writes and credential scope. A sandboxed worker's PR must clear the same reviewer, eval, and hook checks as other PRs.
 
 ### Skills↔hooks seam convention
 
-When a skill instructs an action a hook gates — `git merge`/`gh pr create`/`gh pr merge` → `enforce_pr_workflow`; code-file/plugin-source edits on main → `no_edit_on_main`; `git commit` → `test_gate` — the skill must name the gating hook and the resolution path. Adding a hook that gates a common action → update the skills that instruct it. `enforce_pr_workflow`'s merge gate recognises PR-review evidence as the `/pr-review-toolkit:review-pr <PR#>` Skill invocation (PR number in args), NOT a manually-spawned agent fanout — the agentic loop must invoke the Skill to clear the merge gate.
+If a skill tells the agent to run a gated step, name the hook and tell the agent how to satisfy it. For `git merge`, `gh pr create`, or `gh pr merge`, name `enforce_pr_workflow`. For source or plugin edits on `main`, name `no_edit_on_main`. For `git commit`, name `test_gate`. If a new hook gates a step in a usual workflow, update the skills that tell the agent to do that step.
 
-`/coderails:post-review <PR#>` runs after `review-pr` (and after findings are applied + pushed) to post the SHA-bound review artifact. `/merge` (`scripts/merge.py`) gates on a live-fetched PR comment carrying that artifact for the current head SHA — fail-closed: a `gh` fetch failure or no matching artifact both block.
+For the Claude merge gate, invoke the Skill `/pr-review-toolkit:review-pr <PR#>`. Give the PR number as an argument. A set of reviewer agents alone does not satisfy the Skill invocation check. After `review-pr`, apply the corrections and push them. Then use `/coderails:post-review <PR#>` for the current head. The merge helper fetches the SHA-bound comment live and blocks if the fetch or artifact check does not succeed.
 
-Required reviewers (default ON, part of the one publication gate that `merge.py` and both direct-merge arms call): `policy/review_policy.json` maps changed paths to required pass names (`review-pr` always; `security-review` for `hooks/`, `scripts/`, `install.py`, `uninstall.py`, `.claude-plugin/`, the Codex hook/script trees and the control files themselves (`policy/`, `capabilities/`, `agents/`, `commands/`, `AGENTS.md`, `workflow.config.yaml`, `.coderails/`, the Codex copies, the Codex post-review/merge skills) so the policy cannot be weakened on `review-pr` alone; `deploy-safety` for `launchd/`, `scripts/integrity-gate/`, `scripts/installer/`, `.github/workflows/`, `skills/dashboard/runner/`). `scripts/post_review.py post <PR> --summary FILE [--pass NAME=FILE ...]` posts the v1 marker plus a second `coderails-review-passes v1` line whose verdicts are derived from the validated summaries; the gate refuses with `required_review_missing:<name>`, `required_review_failed:<name>`, `review_passes_malformed`, `review_artifact_missing` or `review_policy_unreadable` (fail closed). A v1 artifact with no passes line supplies only its validated `review-pr` summary, so a `hooks/` PR is refused until re-posted. Switch: config `review_passes: off` skips this check (default and any other value enforce; independent of `diff_manifest`). The gate re-derives every pass from the posted sections (hash and verdict) and treats a mismatch as `review_passes_malformed`; a Critical line other than the single token `None` is a finding. Limits: a pass proves a summary with that hash and verdict was posted for that name, not that a reviewer wrote it or that the review was substantive; `post_review.py` accepts any file for any pass, so the PR author (same user) can self-issue a `## No findings` pass for `security-review` or `deploy-safety`, and nothing binds a pass to a reviewer agent. See the RUNBOOK entry "Required review passes refused a merge".
-
-Derived eval level (default ON, the third check of the same publication gate): `verification_level` is a floor computed from the PR diff, not a choice. `policy/surface_policy.json` classifies paths `irreversible` (`install.py`, `uninstall.py`, `launchd/`, `scripts/integrity-gate/`, `scripts/installer/`, `.github/workflows/`, both `hooks.json`), `outward` (`commands/`, `skills/`, `hooks/`, `scripts/`, `agents/`, `packages/codex/`, `policy/`, `capabilities/`) or none (only the anchored docs and test directories; every unlisted path such as `AGENTS.md` is outward; the policy and its reader are irreversible); `scripts/lib/eval_level.py` turns that plus work units into the minimum (0 only for one unit and no outward surface, 1 for outward or two units, 2 for irreversible or three units). `scripts/post_evals.py post <PR> <evals.json> [--progress PATH]` (the only supported way to post; the old `$ARGUMENTS` shell recipe is gone) validates the PR number in code (`pr_number_invalid`), runs structure (including `verify_suite` and `not_frozen`), discriminating and embed validation, and writes the body: the unchanged v1 marker as line 1, a `coderails-eval-facts v1` line (`derived_min_level`, `late_freeze`, `suite`) as line 2, the summary, and the embed with a code-stamped `gate_facts`. Refusals: `level_below_derived`, `suite_hash_mismatch`, `chain_broken`, `integrity_stripped`, `not_frozen`, `late_freeze_unstamped`, `suite_hash_marker_mismatch`, `eval_facts_missing` (a v1 artifact with no facts line is refused for outward diffs until re-posted). Merge side (`merge.py`, Claude `enforce_pr_workflow`, Codex `pr_publication_gate`) recomputes everything from the live diff and ignores the stamped level. Limits: a cooperating-agent safeguard; a diff alone cannot show how many work units produced it, so without `--progress` or a declared lower bound it counts one. The suite hash and chain are unkeyed (a same-user agent can recompute them and post with `gh api`) and `late_freeze` is attestation, not evidence; the check detects naive edits only. Config `eval_level: off` skips it. See the RUNBOOK entry "Eval level or suite integrity refused a merge" and `docs/workflow-gates-measurement.md` (counters prefix `eval-level/`).
-
-Bounded standalone-wiki applicability: only `security-review` may use `not_applicable`, with boundary
-`standalone_wiki_prose_v3`. `review-pr` must pass. `post_review.py na-scope <PR>` prepares complete immutable
-inventory data; it supplies no inspection. The exact `## Not applicable` JSON summary binds repository, PR,
-base branch, actual remote base tip, unique merge base, head and inventory digest. Each affected page entry
-must match between merge base and live base, including both rename names and absence. Controls, command
-plugin manifests, nonordinary modes and non-page changes refuse. The context digest binds all
-tracked non-tree entries across merge base/live base/head outside authored page endpoints, including
-unchanged Markdown. Explicit assessment groups must cover that complete path set one time each;
-missing, duplicate, foreign or glob-selected paths refuse. Group base-change state must be uniform,
-with nonempty text only for changed base entries. Whole consumer_scope and each group need explicit
-`effect_state=effect_free`. States are `effect_free`, `active` or `unknown`; start at `unknown`.
-Known execution/access/instruction effects, unknown or missing states refuse, even with complete coverage
-and unresolved=[]. The whole state covers all M/B/H facts and authored M-to-H operations combined with
-live-B context and group interactions; each group covers its members in that combination. Do not infer
-an affirmative state from filenames, modes or unchanged files. Version 1 and 2 records refuse.
-Unknown context refuses. Tree/blob reads are batched.
-Compact preparation is bounded at 131072 bytes; the complete final comment at 65536 characters. Both writers and the shared
-publication reader recheck the facts. Invalid scope returns `required_review_not_applicable_invalid:security-review`.
-Malformed summaries still return `review_passes_malformed`. Same-user assessments do not prove semantic
-non-execution or reviewer independence. Actions still reads the ordinary general-review companion; its status
-does not validate N/A scope. See the RUNBOOK entry below for complete limits and release steps. Old readers
-reject the new result. Follow `INSTALLATION.md`: select reviewed new versions,
-drain affected sessions, preserve old runtime/state backups, run maintained installer dry runs, install, start
-new sessions, trust Codex hooks and verify installed parity. Unknown quiescence or incomplete qualification
-keeps installation on HOLD. Never hotpatch an active installed reader or bypass an old gate.
-
-Second, additive merge gate — task evals: `/coderails:task-evals` freezes an ungraded `evals.json` before implementation and grades actual results afterward (see `skills/task-evals/SKILL.md`); `/coderails:post-evals <PR#>` validates and posts it as a SHA-bound PR comment (`coderails-eval-summary`, via `scripts/lib/eval_artifact.py`). `scripts/merge.py` reads it right after the review-artifact gate — same fail-closed rc semantics: `gh` fetch failure or `NO-GO`/missing artifact both block. Loop scope: `loop_state_guard` also requires a loop-scope `evals.json` when `progress.json`'s `work_units` ≥1, blocking stop if none — fail-open when `work_units` is absent. A loop-scope `result` must be computed by `scripts/post_evals.py grade-loop` (never hand-written) and carry a valid `grading` stamp, or `loop_state_guard` demotes an otherwise-valid `GO`/`VERIFICATION_LEVEL0` to `UNSTAMPED` and blocks.
-
-Third, additive merge gate — GitHub Actions attestation: when `config.integrity_review.enabled` is true, `scripts/merge.py` and `enforce_pr_workflow` require the newest `integrity-review` status on the exact head SHA to be successful, posted by `github-actions[bot]`, carrying `integrity=pass sha=<head>`. Wrong creator, missing status, stale SHA, non-success state, malformed description, or fetch failure all block. The GitHub ruleset is the server boundary.
-
-Fourth seam instance: `agentic-loop` Phase 13 records the final `complete` stop after all progress updates, then prepares orders and assembles `retro.json` (`schema_version` 3) beside `progress.json` with `python3 scripts/lib/retro.py assemble <state-dir> --session <id>`. `loop_stall_guard` (Claude) and `graph.py complete`/`verify-completion` (Codex) check it through `scripts/lib/retro_check.py`. It refuses a hand-written or older retro (`retro_not_assembled`), recomputes the source hashes and decisions chain, and requires `proof_run`, `decisions_flushed`, `orders_prepared`, `retro_assembled` in order (`retro_steps_missing`). Preparation must match D4's owner/source-bound artifact and receipt. The Claude Stop hook consumes the recorded row after the completion save; only that final row's consumed bit is normalized for the source check. After durable completion, `orders.py tick` emits `orders_ticked`; that observation is excluded from the frozen preparation hash. A Muninn degrade is disclosed, never blocking. Cooperating-agent safeguard, not a security boundary. Assemble also writes the dated cost and top-level `models_used` from the cost miner, which fails open. See `skills/agentic-loop/SKILL.md` Phase 13 / `teardown.md`.
+Keep the required reviewer passes and eval level for the changed paths. The merge and Stop checks also use the GitHub status, loop evals, proof results, and retrospective where configured. See [publication and loop checks](docs/HOOK-BEHAVIOR.md#publication-and-loop-checks) for the pass policy, wiki applicability, and Phase 13 requirements.
 
 ## Hook event map (`hooks/hooks.json`)
 
-This manual guide explains hook behavior. It is not the source for installed registration. The generated table below gives the exact event, matcher, and order for both providers. The generator does not check this guide's prose; review it against code when behavior changes.
-
-| Event | Script | Mode |
-|---|---|---|
-| `SessionStart` | `inject_bootstrap.py` | silent — injects `using-coderails` skill into every new session |
-| `SessionStart` | `remember_inject_cap_guard.py` | warn-only by default (writes nothing unless `REMEMBER_INJECT_CAP_AUTOWRITE=1`): reports that the memory-injection byte cap (`REMEMBER_INJECT_MAX_BYTES`, default 8000) is absent from another plugin's `session-start-hook.sh`; stamped once per plugin version in `~/.claude/coderails/remember_inject_cap_warned`. Opted in, it patches that file (whole-block literal replace from `hooks/patches/`, refuses + asks for hand re-application on shape mismatch), leaves a rolling `.coderails-bak-*` backup. Scoped to the `for MFILE...done` loop only, not the enclosing `if`. Never blocks session start |
-| `UserPromptSubmit` | `inject_context.py` | silent — prepends `[ctx]` (cwd, branch, date); first prompt of a session also appends the discipline reminder |
-| `UserPromptSubmit` | `autonomous_gate.py` | context-only — NEVER grants. When the raw prompt contains the word "autonomous" (case-insensitive, word-boundary; no negation/quote/question heuristics) and the session holds no live authority, it emits `additionalContext` "no authority granted; type /coderails:authorise" and traces `autonomous/ignored/authority_phrase_ignored`. The old phrase "crack on" does not trigger this hint. The only mint is the typed `authority.py grant` (`/coderails:authorise` pre-executes it; `disable-model-invocation: true`). Cooperating-agent safeguard: it stops accidental and pasted-text grants, not a hostile same-user agent that runs `authority.py grant` itself (see [docs/decisions/e3-authority-object.md](docs/decisions/e3-authority-object.md)) |
-| `Stop` + `SubagentStop` | `check_confidence_labels.py` | advisory lint, never blocks: a ≥200-char response with no `(verified)`/`(inferred)`/`(guess)` label emits an `[discipline-advisory]` `additionalContext`, logs `demoted=1 reason_code=confidence_label_missing`, appends an `outcome=demoted` trace row and exits 0 on every path (`Stop` in or out of a loop, `SubagentStop`; reads `last_assistant_message` directly, avoiding the parent-transcript flush race). `Stop` only: exempt (exit 0) when `CODERAILS_HEADLESS_RUN=1`. Demoted by user override of the unmet e1 criteria (`docs/decisions/2026-10-04-not-in-gate-demotion.md`) |
-| `Stop` + `SubagentStop` | `check_verify_loop.py` | advisory lint, never blocks: any untagged `## Did Not Verify` bullet (only `(unverifiable: <reason>)` clears it), or a missing section after a 3+-file turn, emits an `[discipline-advisory]` `additionalContext`, logs `demoted=1 reason_code=verify_loop_missing`, appends an `outcome=demoted` trace row and exits 0 on every path. `loop_state_guard`/`loop_stall_guard` stay Stop-only blocking guards. `Stop` only: exempt when `CODERAILS_HEADLESS_RUN=1` |
-| `Stop` | `voice_announce.py` | observe-only, always exits 0 — speaks a loop lifecycle event (complete/waiting-on-human/stopped/stall) via macOS `say`. Silent outside a loop or on empty text extraction. Debounced per kind. Runs first in the Stop array |
-| `Stop` | `loop_state_guard.py` | block when a loop is active but no session-owned `progress.json` exists (nag-once grace: stands down after one absent-block per session+invocation count; session-mismatch/stale-complete carry no grace). Also gates loop-scope evals when `work_units` ≥1: blocks unless a sibling `evals.json` grades `GO`/`VERIFICATION_LEVEL0` with a non-blank `verification_justification` and a valid stamp — `ABSENT`, `NO-GO`, `UNJUSTIFIED`, `UNSTAMPED` each block; fails open when `work_units` is absent |
-| `Stop` | `loop_stall_guard.py` | block when a loop is active and incomplete with no recorded current-turn `stops[]` row (`stop_row_missing`); shares `loop_state_guard`'s absent-`progress.json` grace (keyed off its log line). On `complete`, also blocks if `retro.json` is absent/malformed/below `schema_version` 3 or fails `retro_check` (stale source hashes, broken decisions chain, missing teardown step), and if a sibling `proof.json` exists but any frozen proof is unexecuted or last-failed in the controller-recorded proof results. Under current schema 3, absent `proof.json` blocks unless `progress.json.proof_disposition` is `"none"`/`"none: <reason>"`. A sibling `withdrawn_proofs` array is mined the same pass, stricter — blocks unless the proof ran, last failed, carries `withdrawn_reason`, and its `id` isn't also in `.proofs`; combined 100-entry cap. On an unresolved native graph the blocking Stop adds one notice per graph state (loop, revision, session, active wave, hard stop), re-shown once per 900s lease while the stall persists, carrying `graph.py summarize` status and, for a silent wave, one bounded `recover-wave` attempt (it can respawn a worker that is alive but silent, so a duplicate is possible; retry.max bounds it); the dedupe marker is written only after the notice is printed, and markers of older revisions of the same loop are pruned. Codex `graph_completion_guard.py` shares the helper and key but delivers the notice as a `decision: block` JSON on stdout (reason and systemMessage, exit 0) rather than stderr and exit 2 |
-| `Stop` | `unregistered_loop_guard.py` | nudge, never blocks — flags a dispatch-heavy session (≥3 Agent-dispatch turns) with no `progress.json` and no `agentic-loop` invocation |
-| `Stop` + `SubagentStop` | `offload_push_guard.py` | nudge, never blocks — final text names a `git push` to `main`/`master` AND an offload-to-user cue (`! ` prefix, "your own shell", "run this yourself"). At most once per session. Runs last in both arrays |
-| `PreToolUse` (Bash) | `destructive_bash_gate.py` | block — permanent blocklist: `rm -rf`, naked `git push --force`/`-f`, `git reset --hard`, SQL `DROP TABLE/DATABASE/SCHEMA` and `TRUNCATE TABLE`, `dd if=`, `mkfs.*`, `chmod -R 777`, `git commit --no-verify`, `git clean -f/--force`, `find -delete/--delete`, `truncate -s/--size`, `shred`, a `.env` literal path token read or write (`.envrc`/`.env.example`/`.sample`/`.template`/`.dist` allowed). Also blocks in-Bash source edits (`sed -i`, `perl -i`, redirects, `tee`, `cp`/`mv`/`dd of=` onto source/plugin-markdown) on main/master. Denies backtick/`$(...)`/process-substitution inside `push.py`/`merge.py`/`post_review.py`/`post_evals.py` args. `--force-with-lease` conditionally allowed |
-| `PreToolUse` (Bash) | `enforce_pr_workflow.py` | block — `gh pr create` without `/coderails:push`; `gh pr merge <N>` without `review-pr <N>` (per-PR, not consumed — one review satisfies later merges); `git merge` on main/master without review-pr since the last merge (consume-on-use); `git push` to main/master without review-pr. `scripts/merge.py <N>` gated identically. Scans subagent transcripts. `merge-base/-file/-tree`, `--abort/--continue/--quit/--skip` excluded. No-op without `workflow.config.yaml`. Post review-pr check, also blocked without a SHA-bound `GO` eval artifact for the head; `gate_smoke_verify` then re-executes every verification_level≥1 eval's `cmd`/`negative_control` in a detached worktree at the trusted SHA and denies independently on failure |
-| `PreToolUse` (Bash) | `test_gate.py` | block on `git commit` if tests fail — opt-in only; persist complete stdout/stderr per command run, report measurements and reader path instead of a fixed failure excerpt |
-| `PreToolUse` (Bash) | `verification_volume_ceiling.py` | block — hard-blocks the 3rd+ invocation per work-unit (branch) of `hooks/scripts/tests/run_all.py` or a `post_evals.py validate-structure` ceremony; no override |
-| `PreToolUse` (Bash) | `action_authority_gate.py` | Default `action_authority: enforce` checks a single-use signature bound to the command, repository, ref, SHA, session and loop, including with no config. Invalid config denies guarded actions. Explicit `advisory` traces and warns; explicit `off` disables this receipt gate. The owner issues each approval at a terminal; a passphrase is optional and an autonomy grant does not replace the receipt. The user-tier signers file is writable by the same user as the agent; this is a cooperating-agent safeguard, not independent approval. Unexpected errors deny a guarded command under enforce or a loaded live authority; advisory without live authority fails open. See [docs/decisions/p3-human-only-minting.md](docs/decisions/p3-human-only-minting.md) and the RUNBOOK. |
-| `PreToolUse` (Bash), Codex only (`packages/codex/hooks/hooks.json`) | `pr_publication_gate.py` | block, default on — the Codex port of the `enforce_pr_workflow` merge arm, not a second route: denies `gh pr merge`/`gh api .../merge`/`merge.py` when `scripts/lib/publication_gate.evaluate` returns a violation (reason code first, e.g. `diff_manifest:denied_path`); an unresolvable PR or any internal error also denies. `diff_manifest: off` disables the manifest check, `review_passes: off` the review check, and `eval_level: off` the derived eval-level check. Needs `/hooks` trust; see the "Fourth, default-on publication gate" paragraph for limits |
-| `PreToolUse` (Bash) | `reviewer_bash_allowlist.py` | block — only for `agent_type` in `deploy-safety-reviewer`/`design-scout`/`disposition-scout`/`preflight-scout`/`security-reviewer`/`source-auditor`: allows only a single read-only command (`ls`/`cat`/`head`/`tail`/`wc`/`grep`/`rg`/`sha256sum`, `git status\|log\|diff\|show\|blame`, `gh pr view\|list --json`); denies chaining, redirection, substitution, `--output`/`--pre`/`--ext-diff`, interpreters. Also allows the exact absolute path of `scripts/capability.py <repo.inspect\|diff.read\|tests.run\|pr.comment> --json-args '<json>'` only when `capabilities/profiles.json` grants that tool to the caller (`capability_denied_<tool>`); the guarded set is derived from that file. Typed args plus an argv-path match, not a harness-level typed tool; Codex has no per-agent Bash hook (sandbox_mode + instructions only), see [docs/CAPABILITIES.md](docs/CAPABILITIES.md). Absent `agent_type` is a no-op, as is any non-guarded one. Defence in depth: the five guarded agent files no longer list `Bash` at all (their `tools:` are exactly their per-role MCP tools), so this hook only matters for an install whose agent file still lists Bash. Ceilings: [docs/decisions/e2-reviewer-bash-allowlist.md](docs/decisions/e2-reviewer-bash-allowlist.md) |
-| `PreToolUse` (Bash) | `subagent_identity_gate.py` | block — a Bash call whose payload carries a non-blank `agent_id` but no usable `agent_type` (absent, blank or not a string) in a graph-bound session (this session's `progress.json` carries `graph` and names this session) is denied, reason `bash_agent_type_absent`, with a discipline-log line and a trace row. A call with no `agent_id` (the orchestrator), any non-blank `agent_type`, no `progress.json`, a foreign session's `progress.json` or a non-Bash tool is untouched. Claude only: Codex PreToolUse payloads carry no `agent_type`/`agent_id`, so Codex has no equivalent hook (its guard is `shell_tool = false` role files plus contained role sessions, see [docs/CAPABILITIES.md](docs/CAPABILITIES.md)). Cooperating-agent safeguard: it relies on the harness filling `agent_id`. |
-| `PreToolUse` (AskUserQuestion) | `autonomous_gate.py` | block — denies `AskUserQuestion` when this session has a valid, unexpired authority that includes `autonomous_decisions` in `scope` (`authority_deny`). An expired, revoked, torn, foreign, or empty-scope object does not trigger that denial. Old `crack_on_active` flags have no effect. This gate applies only to the tool call. The loop hard-stops use `LOOP-STOP` declarations. |
-| `PreToolUse` (Write/Edit/MultiEdit) | `no_edit_on_main.py` | block — on main/master, blocks edits to any file except `.md`/`.txt`/`.rst`, `.yaml`/`.yml`/`.json`/`.toml`/`.ini`/`.cfg`, `.gitignore`, `LICENSE`. Plugin source markdown (`skills/*/SKILL.md`, `commands/*.md`) also blocked when that repo carries `.claude-plugin/plugin.json` (keyed off the file's own repo). Separately blocks `.claude/settings.json`/`.claude/settings.local.json` edits on any branch, any repo |
-| `PreToolUse` (Write/Edit/MultiEdit) | `comment_citation_gate.py` | block — denies new/changed comments citing a session-artifact label (`E#:`, `F# fix/design`, `CHANGE B#/C#`, `Task A#`, `TA-I#`, "reviewer finding", `eval E#`, `WU#:`, `C2`, "per the plan/design/session", "per F#"). Scoped to comment-bearing fields; `.md` out of scope. `PR #NN` survives (durable checkable artifact) |
-| `PreToolUse` (Write/Edit/MultiEdit) | `wiki_taxonomy_gate.py` | block — writes into an unsanctioned top-level directory of an LLM wiki vault. Inert until `.coderails/workflow.config.yaml` exists. Sanctioned dirs read live from `wiki.schema.json` (`page_types` + `structural_dirs`), never hardcoded; a missing/invalid schema fails open with a `wiki_schema_missing`/`wiki_schema_invalid` trace row and the drift test guards this file's `## Page types` tables against it. Vault identified positively: `wiki_path` from `.coderails/workflow.config.yaml` (relative to `CLAUDE_PLUGIN_ROOT` unless absolute) must equal the write's repo root exactly; ≥2 parsed dirs existing on disk is a secondary sanity check only. Fails open on any ambiguity (schema/config absent, not a git repo, `wiki_path` null/unresolvable, zero page types, write outside vault, <2 dirs present). `raw/`, vault-root files (no directory component), and dotfile dirs (`.git/`, `.obsidian/`, `.claude/`) always allowed |
-| `PreToolUse` (`Bash\|Edit\|Write\|MultiEdit\|Read\|Grep\|Glob\|WebFetch\|NotebookEdit`) | `agent_only_gate.py` | nudge by default, block opt-in (`AGENT_ONLY_GATE_ENFORCE=1`) — steers the orchestrator from inline do-work calls toward `Agent`. `agent_id` present in the payload iff the call originates inside a dispatched subagent (empirically confirmed) → always allow. `agent_id` absent + the Bash command is entirely one whole-command carve-out (`gh`, `git`, `scripts/push\|merge\|post_review\|post_evals.py`, optional interpreter prefix, no chaining/substitution) → always allow. Otherwise: `additionalContext` nudge by default, hard `deny` under the env flag. `Agent`/`TodoWrite`/`TaskCreate`/`AskUserQuestion`/`ExitPlanMode` are never gated |
-| `PreToolUse` (`Agent`) | `agent_model_routing_nudge.py` | advisory nudge only, never denies — when `tool_input.model` is absent and the description/prompt carries a mechanical word (rename/format/boilerplate/scaffold/reformat/relabel/find-replace) or a complex one (design/architecture/redesign/re-architect), nudges `haiku`/`opus` respectively. Silent if `model` set, neither/both match |
-| `PreToolUse` (`Agent`) | `loop_dispatch_guard.py` | block — every graph-bound native Agent request must carry the v2 `CODERAILS_GRAPH_DISPATCH` envelope and the rendered contract sections `begin-wave` issued (looked up in `graph.dispatches`, every ownership field cross-checked, sections digest recomputed from the stored contract, single use). The contract's role is asserted: guarded scout roles (profiles `guarded_agents`) must be dispatched as `coderails:<role>`, other roles accept that or `general-purpose`, anything else is `role_mismatch`. Reason codes `dispatch_missing_envelope`, `dispatch_unknown_id`, `dispatch_foreign`, `dispatch_stale_revision`, `dispatch_replayed`, `dispatch_contract_altered`, `dispatch_sections_missing`, `role_mismatch` land as `recovery-trace.jsonl` rows. Nonempty work-unit rosters require owned frozen loop evals before implementation. Frozen suites bind session + loop only, not the evolving graph revision. Missing/foreign ownership fails closed. The Python sandbox launcher invokes this same guard directly before scratch allocation. Completion still requires final neutral grading, native evidence, proofs and retrospective. |
+For hook behavior and limits, see [the hook instructions](docs/HOOK-BEHAVIOR.md). The generated table below lists the installed registrations.
 
 ### Generated hook registration
 
-The table below lists the current provider registration and the action for each control. Run `python3 scripts/gen_hooks.py --check` after a hook change.
+The table lists the current provider registration and the step for each control. Run `python3 scripts/gen_hooks.py --check` after a hook change.
 
 <!-- hook-registry:start -->
-Claude protocol: Claude hook event response: exit 0 JSON or exit 2 block.
-Codex protocol: Codex hook event response: exit 0 JSON decision.
+Claude protocol: Exit with code 0 and JSON, or with code 2 to block.
+Codex protocol: Exit with code 0 and a JSON decision.
 
-| Provider | Event | Matcher | Hook | Options | Mode | Default | Category | Action | Failure | Limit |
+| Provider | When | Matcher | Hook | Options | Mode | Default | Category | Step | On error | Limit |
 |---|---|---|---|---|---|---|---|---|---|---|
-| claude | SessionStart | startup\|resume\|clear\|compact | `inject_bootstrap.py` | async=False | silent | registered for its provider event | inject bootstrap | Check the plugin root and hook registration when context is absent. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | SessionStart | startup\|resume\|clear\|compact | `remember_inject_cap_guard.py` | async=False | advisory | warns by default; auto-write requires explicit opt-in | remember inject cap guard | Set the memory injection cap or use the documented opt-in patch. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | UserPromptSubmit | all | `inject_context.py` | timeout=5 | silent | registered for its provider event | inject context | Check the prompt hook registration when context is absent. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | UserPromptSubmit | all | `autonomous_gate.py` | timeout=5 | block | the phrase grants nothing; a live typed authority can block questions | autonomous input gate | Use the typed authority command, or continue after the authority expires. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | Stop | all | `voice_announce.py` | timeout=15, async=True | observe | registered for its provider event | voice announce | Read the loop state when a spoken notice is absent. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | Stop | all | `check_confidence_labels.py` | timeout=15 | advisory | registered for its provider event | check confidence labels | Add the correct confidence label to each claim that needs one. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | Stop | all | `check_verify_loop.py` | timeout=15 | advisory | registered for its provider event | check verify loop | Complete the verification section and mark each unresolved check. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | Stop | all | `loop_state_guard.py` | timeout=15 | block | registered for its provider event | loop state guard | Restore owned graph and graded loop eval evidence. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | Stop | all | `loop_stall_guard.py` | timeout=15 | block | registered for its provider event | loop stall guard | Record the required stop and complete unresolved graph work. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | Stop | all | `unregistered_loop_guard.py` | timeout=15 | nudge | registered for its provider event | unregistered loop guard | Register the active agentic loop graph before more dispatches. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | Stop | all | `offload_push_guard.py` | timeout=15 | nudge | registered for its provider event | offload push guard | Keep the push in the authorised workflow. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | SubagentStop | all | `check_confidence_labels.py` | timeout=15 | advisory | registered for its provider event | check confidence labels | Add the correct confidence label to each claim that needs one. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | SubagentStop | all | `check_verify_loop.py` | timeout=15 | advisory | registered for its provider event | check verify loop | Complete the verification section and mark each unresolved check. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | SubagentStop | all | `offload_push_guard.py` | timeout=15 | nudge | registered for its provider event | offload push guard | Keep the push in the authorised workflow. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Bash | `destructive_bash_gate.py` | timeout=5 | block | registered for its provider event | destructive bash gate | Use a safe command that avoids the blocked operation. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Bash | `enforce_pr_workflow.py` | timeout=10 | block | inactive without workflow config | enforce pr workflow | Run the required PR review and post current-head evidence. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Bash | `test_gate.py` | timeout=180 | block | off unless test commands are configured | test gate | Fix the failed tests before the commit. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Bash | `verification_volume_ceiling.py` | timeout=5 | block | registered for its provider event | verification volume ceiling | Use focused tests after the allowed full-suite runs. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Bash | `reviewer_bash_allowlist.py` | timeout=5 | block | registered for its provider event | reviewer bash allowlist | Use an allowed read-only command or a granted capability tool. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Bash | `subagent_identity_gate.py` | timeout=5 | block | registered for its provider event | subagent identity gate | Dispatch with a native agent type that the graph can identify. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Bash | `action_authority_gate.py` | timeout=10 | block | enforce by default; advisory warns; off requires explicit configuration | action authority gate | Use the configured authority path for the exact action and session. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | AskUserQuestion | `autonomous_gate.py` | timeout=5 | block | the phrase grants nothing; a live typed authority can block questions | autonomous input gate | Use the typed authority command, or continue after the authority expires. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Bash\|Edit\|Write\|MultiEdit\|Read\|Grep\|Glob\|WebFetch\|NotebookEdit | `agent_only_gate.py` | timeout=5 | nudge | nudge by default; AGENT_ONLY_GATE_ENFORCE=1 blocks | agent only gate | Dispatch source work to an agent or use the allowed workflow command. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Agent | `agent_model_routing_nudge.py` | timeout=5 | nudge | registered for its provider event | agent model routing nudge | Select a model role that fits the task when the suggestion is useful. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Agent | `loop_dispatch_guard.py` | timeout=10 | block | registered for its provider event | loop dispatch guard | Use the current owned graph dispatch envelope and role. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Agent | `worker_containment_gate.py` | timeout=10 | block | registered for its provider event | worker containment gate | Use the required containment acknowledgement or a low-risk path. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Write\|Edit\|MultiEdit | `no_edit_on_main.py` | timeout=5 | block | registered for its provider event | no edit on main | Move the source edit to a feature branch. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Write\|Edit\|MultiEdit | `comment_citation_gate.py` | timeout=5 | block | registered for its provider event | comment citation gate | State the durable rule in the comment without a session label. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PreToolUse | Write\|Edit\|MultiEdit | `wiki_taxonomy_gate.py` | timeout=5 | block | inactive without workflow config and a resolved wiki | wiki taxonomy gate | Write the page under a directory allowed by the wiki schema. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| claude | PostToolUse | Write\|Edit\|MultiEdit | `quality_feedback.py` | timeout=10 | advisory | registered for its provider event | quality feedback | Read the quality result and correct reported source findings. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | SessionStart | startup\|resume\|clear\|compact | `inject_bootstrap.py` | timeout=10, additionalContextLimit=1200 | silent | registered for its provider event | inject bootstrap | Check the plugin root and hook registration when context is absent. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | UserPromptSubmit | all | `inject_context.py` | timeout=10, additionalContextLimit=500 | silent | registered for its provider event | inject context | Check the prompt hook registration when context is absent. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | UserPromptSubmit | all | `autonomous_gate.py` | timeout=10 | block | the phrase grants nothing; a live typed authority can block questions | autonomous input gate | Use the typed authority command, or continue after the authority expires. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | Stop | all | `graph_completion_guard.py` | timeout=10 | block | registered for its provider event | graph completion guard | Resolve the graph state and record a valid stop result. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | Stop | all | `check_confidence_labels.py` | timeout=10 | advisory | registered for its provider event | check confidence labels | Add the correct confidence label to each claim that needs one. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | SubagentStop | all | `check_confidence_labels.py` | timeout=10 | advisory | registered for its provider event | check confidence labels | Add the correct confidence label to each claim that needs one. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PreToolUse | ^Bash$ | `destructive_bash_gate.py` | timeout=10 | block | registered for its provider event | destructive bash gate | Use a safe command that avoids the blocked operation. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PreToolUse | ^Bash$ | `test_gate.py` | timeout=180 | block | off unless test commands are configured | test gate | Fix the failed tests before the commit. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PreToolUse | ^Bash$ | `verification_volume_ceiling.py` | timeout=10 | block | registered for its provider event | verification volume ceiling | Use focused tests after the allowed full-suite runs. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PreToolUse | ^Bash$ | `pr_publication_gate.py` | timeout=60 | block | applies to guarded Codex publication commands | pr publication gate | Complete the required review and eval steps for this PR head. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PreToolUse | ^Bash$ | `action_authority_gate.py` | timeout=10 | block | enforce by default; advisory warns; off requires explicit configuration | action authority gate | Use the configured authority path for the exact action and session. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PreToolUse | ^request_user_input$ | `autonomous_gate.py` | timeout=10 | block | the phrase grants nothing; a live typed authority can block questions | autonomous input gate | Use the typed authority command, or continue after the authority expires. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PreToolUse | ^(?:spawn_agent\|collaborationspawn_agent)$ | `loop_dispatch_guard.py` | timeout=10 | block | registered for its provider event | loop dispatch guard | Use the current owned graph dispatch envelope and role. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PreToolUse | ^apply_patch$ | `no_edit_on_main.py` | timeout=10 | block | registered for its provider event | no edit on main | Move the source edit to a feature branch. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PreToolUse | ^apply_patch$ | `comment_citation_gate.py` | timeout=10 | block | registered for its provider event | comment citation gate | State the durable rule in the comment without a session label. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PreToolUse | ^apply_patch$ | `wiki_taxonomy_gate.py` | timeout=10 | block | inactive without workflow config and a resolved wiki | wiki taxonomy gate | Write the page under a directory allowed by the wiki schema. | deny or block with a visible reason | Runs in the caller trust domain; server policy remains the release boundary. |
-| codex | PostToolUse | ^apply_patch$ | `quality_feedback.py` | timeout=15, additionalContextLimit=1000 | advisory | registered for its provider event | quality feedback | Read the quality result and correct reported source findings. | continue and record the failure | Runs in the caller trust domain; server policy remains the release boundary. |
+| claude | SessionStart | `startup` or `resume` or `clear` or `compact` | `inject_bootstrap.py` | `async=False` | `silent` | Runs on its provider trigger | add bootstrap context | Check the plugin root and hook registration if there is no context. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | SessionStart | `startup` or `resume` or `clear` or `compact` | `remember_inject_cap_guard.py` | `async=False` | `advisory` | Gives a warning by default. Set REMEMBER_INJECT_CAP_AUTOWRITE=1 to write the patch. | remember inject cap guard | Set the limit for added memory text or use the documented opt-in patch. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | UserPromptSubmit | `all` | `inject_context.py` | `timeout=5` | `silent` | Runs on its provider trigger | add prompt context | Check the prompt hook registration if there is no context. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | UserPromptSubmit | `all` | `autonomous_gate.py` | `timeout=5` | `block` | The phrase gives no authority. A live typed authority can block questions. | autonomous input gate | Use the typed authority command, or continue after the authority expires. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | Stop | `all` | `voice_announce.py` | `timeout=15, async=True` | `observe` | Runs on its provider trigger | voice announce | Read the loop status if you did not get a spoken notice. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | Stop | `all` | `check_confidence_labels.py` | `timeout=15` | `advisory` | Runs on its provider trigger | check confidence labels | Add the correct confidence label to each claim that needs one. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | Stop | `all` | `check_verify_loop.py` | `timeout=15` | `advisory` | Runs on its provider trigger | check verify loop | Complete the verification section and mark each unresolved check. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | Stop | `all` | `loop_state_guard.py` | `timeout=15` | `block` | Runs on its provider trigger | check for loop status | Put the owned graph and graded loop eval records back. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | Stop | `all` | `loop_stall_guard.py` | `timeout=15` | `block` | Runs on its provider trigger | loop stall guard | Record the required stop and complete unresolved graph work. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | Stop | `all` | `unregistered_loop_guard.py` | `timeout=15` | `nudge` | Runs on its provider trigger | unregistered loop guard | Record the active agentic loop graph before you send more work. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | Stop | `all` | `offload_push_guard.py` | `timeout=15` | `nudge` | Runs on its provider trigger | offload push guard | Keep the push in the authorised workflow. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | SubagentStop | `all` | `check_confidence_labels.py` | `timeout=15` | `advisory` | Runs on its provider trigger | check confidence labels | Add the correct confidence label to each claim that needs one. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | SubagentStop | `all` | `check_verify_loop.py` | `timeout=15` | `advisory` | Runs on its provider trigger | check verify loop | Complete the verification section and mark each unresolved check. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | SubagentStop | `all` | `offload_push_guard.py` | `timeout=15` | `nudge` | Runs on its provider trigger | offload push guard | Keep the push in the authorised workflow. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Bash` | `destructive_bash_gate.py` | `timeout=5` | `block` | Runs on its provider trigger | destructive bash gate | Use a safe command that avoids the blocked operation. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Bash` | `enforce_pr_workflow.py` | `timeout=10` | `block` | Off without workflow config | PR workflow gate | Run `review-pr`. Post the records for the current PR head. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Bash` | `test_gate.py` | `timeout=180` | `block` | off unless test commands are configured | test gate | Correct the tests with errors before you commit. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Bash` | `verification_volume_ceiling.py` | `timeout=5` | `block` | Runs on its provider trigger | verification volume ceiling | Use focused tests after the allowed full-suite runs. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Bash` | `reviewer_bash_allowlist.py` | `timeout=5` | `block` | Runs on its provider trigger | reviewer bash allowlist | Use an allowed read-only command or a tool that your grant permits. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Bash` | `subagent_identity_gate.py` | `timeout=5` | `block` | Runs on its provider trigger | subagent identity gate | Start the agent with a native type that the graph can identify. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Bash` | `action_authority_gate.py` | `timeout=10` | `block` | Default mode is `enforce`. Mode `advisory` gives a warning. Set `off` in the config to disable. | operation authority gate | Use the authority path set in config for this operation and session. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `AskUserQuestion` | `autonomous_gate.py` | `timeout=5` | `block` | The phrase gives no authority. A live typed authority can block questions. | autonomous input gate | Use the typed authority command, or continue after the authority expires. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Bash` or `Edit` or `Write` or `MultiEdit` or `Read` or `Grep` or `Glob` or `WebFetch` or `NotebookEdit` | `agent_only_gate.py` | `timeout=5` | `nudge` | Default mode gives a nudge. AGENT_ONLY_GATE_ENFORCE=1 blocks. | agent only gate | Send source work to an agent or use the allowed workflow command. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Agent` | `agent_model_routing_nudge.py` | `timeout=5` | `nudge` | Runs on its provider trigger | agent model routing nudge | Select a model role that fits the task when the suggestion is useful. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Agent` | `loop_dispatch_guard.py` | `timeout=10` | `block` | Runs on its provider trigger | loop dispatch guard | Use the current owned graph dispatch envelope and role. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Agent` | `worker_containment_gate.py` | `timeout=10` | `block` | Runs on its provider trigger | worker containment gate | Use the required containment acknowledgement or a low-risk path. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Write` or `Edit` or `MultiEdit` | `no_edit_on_main.py` | `timeout=5` | `block` | Runs on its provider trigger | primary branch edit gate | Move the source edit to a feature branch. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Write` or `Edit` or `MultiEdit` | `comment_citation_gate.py` | `timeout=5` | `block` | Runs on its provider trigger | comment citation gate | Write the durable rule in the comment without a session label. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PreToolUse | `Write` or `Edit` or `MultiEdit` | `wiki_taxonomy_gate.py` | `timeout=5` | `block` | Runs only with workflow config and a resolved wiki path | wiki taxonomy gate | Write the page in a directory that the wiki schema permits. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| claude | PostToolUse | `Write` or `Edit` or `MultiEdit` | `quality_feedback.py` | `timeout=10` | `advisory` | Runs on its provider trigger | quality feedback | Read the quality result and correct the source problems it lists. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| codex | SessionStart | `startup` or `resume` or `clear` or `compact` | `inject_bootstrap.py` | `timeout=10, additionalContextLimit=1200` | `silent` | Runs on its provider trigger | add bootstrap context | Check the plugin root and hook registration if there is no context. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| codex | UserPromptSubmit | `all` | `inject_context.py` | `timeout=10, additionalContextLimit=500` | `silent` | Runs on its provider trigger | add prompt context | Check the prompt hook registration if there is no context. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| codex | UserPromptSubmit | `all` | `autonomous_gate.py` | `timeout=10` | `block` | The phrase gives no authority. A live typed authority can block questions. | autonomous input gate | Use the typed authority command, or continue after the authority expires. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| codex | Stop | `all` | `graph_completion_guard.py` | `timeout=10` | `block` | Runs on its provider trigger | check for graph closeout | Resolve the graph status and record a stop result that meets the rules. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| codex | Stop | `all` | `check_confidence_labels.py` | `timeout=10` | `advisory` | Runs on its provider trigger | check confidence labels | Add the correct confidence label to each claim that needs one. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| codex | SubagentStop | `all` | `check_confidence_labels.py` | `timeout=10` | `advisory` | Runs on its provider trigger | check confidence labels | Add the correct confidence label to each claim that needs one. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
+| codex | PreToolUse | `^Bash$` | `destructive_bash_gate.py` | `timeout=10` | `block` | Runs on its provider trigger | destructive bash gate | Use a safe command that avoids the blocked operation. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| codex | PreToolUse | `^Bash$` | `test_gate.py` | `timeout=180` | `block` | off unless test commands are configured | test gate | Correct the tests with errors before you commit. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| codex | PreToolUse | `^Bash$` | `verification_volume_ceiling.py` | `timeout=10` | `block` | Runs on its provider trigger | verification volume ceiling | Use focused tests after the allowed full-suite runs. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| codex | PreToolUse | `^Bash$` | `pr_publication_gate.py` | `timeout=60` | `block` | Applies to Codex publication commands that the gate checks | pr publication gate | Complete the required `review-pr` and eval steps for this PR head. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| codex | PreToolUse | `^Bash$` | `action_authority_gate.py` | `timeout=10` | `block` | Default mode is `enforce`. Mode `advisory` gives a warning. Set `off` in the config to disable. | operation authority gate | Use the authority path set in config for this operation and session. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| codex | PreToolUse | `^request_user_input$` | `autonomous_gate.py` | `timeout=10` | `block` | The phrase gives no authority. A live typed authority can block questions. | autonomous input gate | Use the typed authority command, or continue after the authority expires. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| codex | PreToolUse | `^(?:spawn_agent\|collaborationspawn_agent)$` | `loop_dispatch_guard.py` | `timeout=10` | `block` | Runs on its provider trigger | loop dispatch guard | Use the current owned graph dispatch envelope and role. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| codex | PreToolUse | `^apply_patch$` | `no_edit_on_main.py` | `timeout=10` | `block` | Runs on its provider trigger | primary branch edit gate | Move the source edit to a feature branch. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| codex | PreToolUse | `^apply_patch$` | `comment_citation_gate.py` | `timeout=10` | `block` | Runs on its provider trigger | comment citation gate | Write the durable rule in the comment without a session label. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| codex | PreToolUse | `^apply_patch$` | `wiki_taxonomy_gate.py` | `timeout=10` | `block` | Runs only with workflow config and a resolved wiki path | wiki taxonomy gate | Write the page in a directory that the wiki schema permits. | Deny or block and show why | Runs in the caller's trust domain. Server policy controls release. |
+| codex | PostToolUse | `^apply_patch$` | `quality_feedback.py` | `timeout=15, additionalContextLimit=1000` | `advisory` | Runs on its provider trigger | quality feedback | Read the quality result and correct the source problems it lists. | Continue and record the error | Runs in the caller's trust domain. Server policy controls release. |
 <!-- hook-registry:end -->
 
 ### Enforcement ceilings — deliberate, not bugs
 
-- **Bash blocklists are enumerated families, not exhaustive.** Obfuscated forms, variable filenames, quoted paths with spaces, here-docs, process substitution, `python -c open(...)` writes remain uncaught.
-- **Eval-gate coverage boundary.** Enforced only at `/coderails:merge` (config-independent) and `gh pr merge <N>` via `enforce_pr_workflow` (config-dependent, inactive under `NO_CONFIG`). NOT enforced on raw `git merge`/`git push` to main/master (no PR number to resolve an artifact against) or in any `NO_CONFIG` repo. Both enforced points then run `scripts.post_evals.smoke_verify` — three failure modes: `gh` fetch failure, `NO-GO`/missing artifact, failed re-execution.
-- **`no_edit_on_main` allowlist breadth is intentional (fail-safe).** `.sh` blocked on main, `.json`/`.yaml` config stays editable. Settings.json `Write`/`Edit` permission covers any legitimate override.
-- **Command parser limits.** The Claude and Codex plugins use the same literal command parser.
-  It finds supported Git, GitHub, and script commands in shell text. It tracks literal directory changes.
-  It guards a literal `eval` body but does not evaluate variables or build commands at run time.
-  It does not resolve aliases or shell functions. An incomplete quote can make a command unclear.
-  Some wrapper options can also make a command unclear. A receipt must not approve an unclear action.
-  The policy file protects plugin source paths. The trace uses the `argv/` prefix.
-  See the command parser entry in `docs/RUNBOOK.md` for checks and limits.
-- **Wiki/workflow sequence past merge is advisory.** `/wiki-ingest` + `/wiki-lint` after merge are slash commands; nothing enforces them.
-- **`check_verify_loop`, `check_confidence_labels`, both loop guards** all short-circuit on `stop_hook_active=true` (the two loop guards block at most once per turn; the two discipline lints are advisory and exit 0 either way) — intentional infinite-loop safety valve. `voice_announce` reads it too (via its shared loop helper), no observable effect (always exits 0).
-- **TDD is not enforced test-first.** `test_gate` only checks tests pass at commit time.
-- **Test-output delivery is not observable from capture alone.** Both providers retain complete per-command logs under `~/.coderails/test-output/` (override: `CODERAILS_TEST_OUTPUT_DIR`). The provider-local `hooks/scripts/test_output.py` reader measures explicit full/ranged/literal-search retrievals. Default reads always return metadata and guidance; the agent expands requests as needed, without predicting line ranges across runs. Emitted bytes are not confirmed delivered bytes; direct file reads are unobserved. Completed logs compress automatically; a 1 GiB compressed-log budget (`CODERAILS_TEST_LOG_BUDGET_BYTES`) expires oldest completed logs first while protecting active and just-completed runs. Protected logs may exceed the budget; compact metrics and expiry records persist. See [retained test-gate output](docs/REFERENCE.md#retained-test-gate-output) for usage and measurement limits.
-- **Authority objects (E3) control the autonomous input gate.** Run `scripts/authority.py grant --session <id> --max-prs N [...]` to write an object with `granted_by: command`. `/coderails:authorise` and the Codex `authorise` skill use this internal command. The word "autonomous" only prints a hint. The `create` alias is removed. The grant writes `<loop dir>/<session_id>/authority.json`; `inspect|narrow|revoke` manage it. Both providers use the same validator. The validator refuses objects without `granted_by: command`. Old `crack_on_active` flags remain on disk but have no effect. Expiry and revocation end the denial. Both gates read the loop root from `CLAUDE_AGENTIC_LOOP_DIR` (Codex falls back to `CODERAILS_AGENTIC_LOOP_DIR`), so one `authority.py revoke` covers both providers. A failed grant reports `authority_refused_write_failed` and grants nothing. An agent with file access can write the unsigned `granted_by` label directly; this is a safeguard for cooperating agents. See [docs/decisions/e3-authority-object.md](docs/decisions/e3-authority-object.md) and the RUNBOOK entry.
-- **Skill invocation, ask-on-ambiguity, verify-memory are structurally unenforceable by hooks** — they depend on Claude's internal reasoning, which a hook can't observe.
-- **No `SubagentStart` event exists.** `inject_bootstrap.py` can't inject `using-coderails` into subagents; they get it only via the orchestrator's system prompt.
-- **`/coderails:post-review` validates summary structure, not provenance.** Proves an auditable SHA-bound artifact exists, not that the review was substantive; the same holds for each pass in passes[] (a validated summary was posted, nothing more). The `review-pr` arm of `enforce_pr_workflow` is expected to demote block→nudge once the artifact gate is verified live — never before, or a window opens with neither gate active.
-- **Model-role routing is advisory, hook-enforced only as a nudge.** `agentic-loop` Phase 2.8 assigns a role (`fast-mechanical`/`default`/`frontier`) + effort per task (table in Phase 2.8, defaults + fable-escalation in `model-routing.md`), asserted at spawn sites (Phases 2, 2.5, 3, 3a, 9, 10). `agent_model_routing_nudge.py` is the only hook touching this — advisory only. No hook enforces *correct* role selection; a `frontier`-role worker still produces a fully-gated PR. Phase 2.8 also sanctions a legitimate `default`-vs-`frontier` judgement call a blunt gate can't distinguish from a disallowed spawn without a self-reported carve-out (reintroducing the same trust problem).
-- **`agent_only_gate`'s detection is real but narrow.** `agent_id` presence/absence was confirmed empirically on Claude Code 2.1.220 via a live probe (top-level Bash/Agent calls carried no `agent_id`; a subagent's Bash call carried both `agent_id`/`agent_type`; `session_id` was identical across all three, so it alone can't distinguish them). This answers "did this call originate at top level," not "is the orchestrator cooperating" — a top-level session doing real work in-context and never calling `Agent` is invisible until it attempts a do-work call. Hard top-level block isn't default because it would deadlock this repo's own shipping path (`enforce_pr_workflow`, `merge.py`, every workflow command assume the orchestrator runs `gh`/`git`/`scripts/*.py` inline). `AGENT_ONLY_GATE_ENFORCE=1` opts into hard-blocking with the same workflow-chain carve-out. Unverified: behaviour under `claude --agent <name>` mode (reportedly sets `agent_type` even on top-level calls, per docs) — the live probe used a plain headless session, not `--agent` mode.
-- **Headless-run exemption is env-triggered, `Stop`-only, inside the agent trust domain.** `check_confidence_labels.py`, `check_verify_loop.py` skip enforcement when `CODERAILS_HEADLESS_RUN=1` is in their process env — a headless `claude -p` run has no interactive turn left to satisfy a repair-turn block. Does NOT extend to `SubagentStop`: the two discipline lints still emit their advisory for worker output regardless of the flag. Set in exactly one place: `skills/dashboard/app/src/app/api/run/route.ts`'s `spawn(...)` call — a second set-site (including a session setting it on itself) is a security finding. `scripts/sandbox/spawn_sandboxed_worker.py` force-unsets it before launching a sandboxed worker so no inherited value leaks the exemption in; keep the two in lockstep.
-- **Headless routine runs have a hook-free state machine, not a hook.** `docs-sync` and `loop-retro-promotion` run under `claude -p`, where `PreToolUse` hooks do not fire, so their stage order, manifest check (`diff_manifest.py` with the U1 policy file), gate refusals (any non-zero gate exit is `run_refused`) and cleanup (git and gh only) are `scripts/routine_run.py` (specs in `routines/*.json`, Codex copy under `packages/codex/`). Events are JSONL rows with a closed outcome enum and per-routine reason codes (`scripts/routine_log.py`; an invented outcome exits 2), from which the legacy `run=ok`/`abort=`/`refused=` marker lines are derived; `begin` writes a provisional `run_incomplete` row, and the dashboard runner appends `run_abort runner_exit_no_terminal` when a child exits with no terminal row. Limit: an agent that never calls the script is caught only by that standing row and the runner check. Counters prefix `routine/`; see `docs/routines.md` and the RUNBOOK entry "A routine run ended incomplete, aborted or refused".
+See [hook limits](docs/HOOK-BEHAVIOR.md#hook-limits).
 
-**Hook script conventions** (follow when editing/adding a script):
-- Use the provider-local Python payload reader with a five-second total deadline, including partial input on an open pipe. Empty/invalid input stands aside where the hook contract is fail-open; do not extend the hook timeout to conceal an unbounded read.
-- Cheap skip gates precede expensive transcript parsing. Hooks use maintained Python functions, not embedded Bash implementations or compatibility wrappers.
-- Stop blocks use exit 2 and stderr; PreToolUse emits `hookSpecificOutput.permissionDecision: "deny"` and exits 0.
+**Hook script conventions.** Follow these rules when you add or edit a script.
+
+- Use the provider-local Python payload reader with a total deadline of five seconds. The same deadline applies if only part of the input arrives. Let empty or invalid input continue where the hook is fail-open. Do not extend the hook timeout to conceal an unbounded read.
+- Run cheap skip checks before costly transcript parsing. Hooks use maintained Python functions. Do not embed Bash implementations or compatibility wrappers.
+- Claude Stop blocks write to stderr and exit with code 2. PreToolUse writes `hookSpecificOutput.permissionDecision: "deny"` and exits with code 0.
 - Append escaped structured audit records to `$CLAUDE_DISCIPLINE_LOG` (default `~/.claude/discipline.log`).
-- Use the provider's bounded transcript stabilization helper when the native harness may still be flushing its final response.
-- Native worker labels belong to the provider. Carry agent instruction bodies explicitly and correlate graph nodes through ownership envelopes/native call identities, never a custom label alone.
+- The harness can be late to write the last reply. Use the provider's helper that waits for the transcript with a time limit.
+- Native worker labels belong to the provider. Include the agent's instructions. Correlate graph nodes through ownership envelopes and native call identities. Do not rely on a custom label alone.
 
 ## Workflow command architecture
 
-`/coderails:workflow` is the umbrella orchestrator; every phase delegates to a standalone sub-command that also works alone:
+`/coderails:workflow` coordinates the steps. Each phase uses a subcommand that can also run on its own.
 
 ```
 /workflow  →  /prep → (code) → /push → /pr-review-toolkit:review-pr → /coderails:post-review → (ship-it) → /merge → /wiki-ingest + /wiki-lint
 ```
 
-Two interactive pauses: the code/iterate loop, and final ship-it authorization. Everything else auto-chains. `/coderails:post-review <PR#>` sits between `review-pr` and ship-it, converting ephemeral review output into the durable SHA-bound review artifact; `/merge` fetches live PR comments and requires a matching artifact for the current head SHA — fail-closed. Both the agentic loop (Phase 4b) and non-loop `/workflow` (Phase 3) post the same artifact; `/merge` checks both the same way. `scripts/merge.py` holds the gate in its `OPEN` branch before `gh pr merge`.
+The workflow pauses for the user to code and test. It pauses again for ship-it authorization. The other steps run automatically. After `review-pr` and before ship-it, `/coderails:post-review <PR#>` writes a durable SHA-bound reviewer artifact.
 
-**Config resolution** — workflow command frontmatter runs `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.py" resolve-config`. The maintained `config_path(start_dir)` walks upward from the current directory to the Git root, selecting the nearest `.coderails/workflow.config.yaml`; nearest wins without merging. `resolve-config` emits its contents or `NO_CONFIG`. Commands and workflow gates import the same provider-local resolver. Adding a config field requires updating workflow/prep/push/init instructions. Init preserves and validates configuration before moving migrated files to Trash. There is no runtime fallback to legacy paths; `NO_CONFIG` means not initialized.
+Agentic-loop Phase 4b and non-loop `/workflow` Phase 3 post the same artifact. The `/merge` command fetches live PR comments and checks for an artifact for the current head SHA. It blocks if the fetch or check does not succeed. The gate is in the `OPEN` branch of `scripts/merge.py` before `gh pr merge`.
 
-**`scripts/` vs `commands/`** — `push.py`/`merge.py` hold deterministic git plumbing (commit, push, `gh pr create`, merge); `.md` commands hold prose/decision logic and shell out to those scripts. Shared git/gh helpers live in `scripts/lib/git_common.py` — add reusable primitives there, not inline.
+**Config resolution.** Workflow command frontmatter runs `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.py" resolve-config`. The maintained `config_path(start_dir)` checks the current directory and its parents up to the Git root. It uses the nearest `.coderails/workflow.config.yaml` and does not merge configs. `resolve-config` gives its contents or `NO_CONFIG`.
 
-**Procedures that moved out of prose:** `scripts/wiki_lint.py stale` checks the typed `wiki_stale_days` setting (default 30). `scripts/verify_merged.py <PR> [--grep S --path P]` checks content, or ancestry for a true merge commit; the `verify-merged-pr` skill and agentic-loop phase 9 call it. `scripts/merge.py --describe` prints the gate list from `VERIFY_STAGES` and `publication_gate.CHECKS` without remote contact. `scripts/memory_dir.py` and `scripts/detect_test_command.py` serve memory-consolidation and test-gate-setup. These four helpers have byte-identical provider copies. The two `merge.py` copies also differ in provider command names and Codex-only strict config validation. `scripts/quality/check.py --json` supplies both `quality_feedback.py` hooks. A skill must still choose to call its script; see the RUNBOOK procedure entry for limits and reason codes.
+Commands and gates use the same provider-local resolver. If you add a config field, update the workflow, prep, push, and init instructions. Init keeps and checks the config before it moves migrated files to Trash. The runtime does not use legacy config paths. `NO_CONFIG` means the project has no initialized config.
+
+**`scripts/` and `commands/`.** `push.py` and `merge.py` run commit, push, `gh pr create`, and merge operations deterministically. The `.md` commands give instructions and decisions. They use the shell to run these scripts. Add shared Git and gh helpers to `scripts/lib/git_common.py`.
+
+**Script procedures.** `scripts/wiki_lint.py stale` checks typed `wiki_stale_days` (default 30). The `verify-merged-pr` skill and agentic-loop Phase 9 use `scripts/verify_merged.py <PR> [--grep S --path P]`. It checks content, or ancestry for a merge commit with two parents. `scripts/merge.py --describe` reads `VERIFY_STAGES` and `publication_gate.CHECKS` and prints the gate list without contacting the remote.
+
+`scripts/memory_dir.py` serves memory-consolidation. `scripts/detect_test_command.py` serves test-gate-setup. The wiki lint, merge verification, memory directory, and test detection helpers have provider copies with the same bytes. The two `merge.py` copies use different provider command names. Only Codex has strict config validation in that helper.
+
+The two `quality_feedback.py` hooks use `scripts/quality/check.py --json`. The skill must invoke its script. See the RUNBOOK procedure entry for limits and codes.
 
 ## Project-specific assumptions (change when generalising)
 
 - **Auth host**: `push.py` requires a `github.com` remote (`scripts.lib.git_common.require_repo`).
-- **Jira fields**: `prep.md` reads `config.jira.epic_field`/`points_field`; transition names are project-specific (see INSTALLATION.md "Notes").
-- **Jira route**: commands build Jira MCP tool names from `config.jira.mcp_namespace` (default `jira` → `mcp__jira__*`). Add `"mcp__<namespace>__*"` to `.claude/settings.json` for non-default namespaces; without a Jira MCP, Jira steps no-op.
+- **Jira fields.** `prep.md` reads `config.jira.epic_field` and `points_field`. Jira workflow status changes have names for each project. See INSTALLATION.md "Notes".
+- **Jira tools.** Commands use `config.jira.mcp_namespace`. The default `jira` gives `mcp__jira__*`. For a different namespace, add `"mcp__<namespace>__*"` to `.claude/settings.json`. If Jira MCP is unavailable, the commands skip Jira steps.
 
 ## Working in this repo
 
-- Editing a command/skill: effective after `/reload-plugins` — nothing to compile.
-- Editing a hook: same; test by triggering the event, checking `~/.claude/discipline.log`. `python3 install.py --dry-run` previews changes.
-- `install.py` is idempotent — re-running won't duplicate CLAUDE.md edits or overwrite seeded memories. Preserve that.
-- `uninstall.py` must reverse exactly what `install.py` adds (CLAUDE.md block, settings keys) while preserving user data (`discipline.log`, memories). Keep the two in lockstep.
-- `instructions/self-checking-discipline.md` is the authoritative copy `install.py` appends to `~/.claude/CLAUDE.md` — edit there, not the installed copy.
+- After a command, skill, or hook edit, use `/reload-plugins`. There is no compilation step.
+- To test a hook, trigger it and check `~/.claude/discipline.log`. Use `python3 install.py --dry-run` to preview changes.
+- Keep `install.py` idempotent. A second run must not duplicate CLAUDE.md edits or overwrite seeded memories.
+- `uninstall.py` must remove the block in CLAUDE.md and settings keys that `install.py` adds. Keep user data such as `discipline.log` and memories. Update the installer and uninstaller together.
+- Edit `instructions/self-checking-discipline.md`. This is the source that `install.py` adds to `~/.claude/CLAUDE.md`.
 
 ## Requirements
 
-Python 3.9+ (standard-library runtime) · Claude Code 2.1.x for the root provider or Codex CLI for the native provider · `gh` and `git` on PATH for workflow commands · authenticated GitHub host for `/push`/`/merge` · `pr-review-toolkit@claude-plugins-official` for the Claude `/workflow` review stage. `jq` is not a Python runtime dependency. See `docs/CODE-QUALITY.md` for development and test-only tools.
+- Use Python 3.9 or newer. The runtime uses the standard library and has no `jq` dependency.
+- Use Claude Code 2.1.x for the root plugin, or Codex CLI for the native Codex plugin.
+- Put `gh` and `git` on PATH. Use an authenticated GitHub host for `/push` and `/merge`.
+- Install `pr-review-toolkit@claude-plugins-official` for the Claude `/workflow` PR checks.
+- See `docs/CODE-QUALITY.md` for development and test tools.
 
 ---
 
@@ -296,9 +280,11 @@ Python 3.9+ (standard-library runtime) · Claude Code 2.1.x for the root provide
 
 Based on the LLM Wiki pattern: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
 
-Single source of truth for coderails wiki conventions. Do NOT create a separate `schema.md` inside the vault.
+This is the only source for Coderails wiki conventions. Do not make a `schema.md` in the vault.
 
-**Location**: `../coderails-wiki` (set during `/wiki-init`). Vault path/git flow (`wiki_path`, `wiki_git_worktree`, `wiki_git_bypass_flag`, `wiki_git_pull_path`) and supervision mode (`wiki_supervision`) are flat keys in `.coderails/workflow.config.yaml` — see the `wiki-ingest`, `wiki-lint`, `wiki-query` skills' Step 0.
+**Location.** `/wiki-init` sets the vault path, usually `../coderails-wiki`. The flat keys in `.coderails/workflow.config.yaml` set the vault path, Git flow, and supervision mode.
+
+The keys are `wiki_path`, `wiki_git_worktree`, `wiki_git_bypass_flag`, `wiki_git_pull_path`, and `wiki_supervision`. See Step 0 of `wiki-ingest`, `wiki-lint`, and `wiki-query`.
 
 ```
 coderails-wiki/
@@ -314,28 +300,28 @@ coderails-wiki/
   assets/           ← charts and images
 ```
 
-**Three layers**: (1) raw sources (immutable) — the plugin repo (commands, hooks, scripts, skills, install.py, CLAUDE.md); read from, never modify. (2) The wiki — LLM-generated markdown in the vault; Claude owns this layer entirely. (3) This file — tells Claude how the wiki is structured; the maintainer edits it, Claude reads it.
+**Three layers.**
+
+1. The plugin repo supplies immutable source files. Examples are commands, hooks, scripts, skills, `install.py`, and `CLAUDE.md`. Read them for wiki work. Do not change them.
+2. Claude owns the wiki's LLM-generated Markdown in the vault.
+3. This file tells Claude how to structure the wiki. The maintainer edits it. Claude reads it.
 
 ## Page types
 
-> **`wiki.schema.json` (repo root) is the source of truth.** Both
-> `wiki_taxonomy_gate.py` copies read its `page_types` and `structural_dirs`
-> at runtime and fail open, leaving a `wiki_schema_missing` or
-> `wiki_schema_invalid` trace row, if it is absent or unusable. The tables
-> below are documentation; `hooks/scripts/tests/config_docs_drift_test.py`
-> fails the build when they stop matching the schema, or when this heading
-> is renamed or removed.
+> **`wiki.schema.json` in the repo root is the source of truth.** The two `wiki_taxonomy_gate.py` copies read `page_types` and `structural_dirs` at run time. If there is no usable schema, the hook lets the write continue. It logs `wiki_schema_missing` or `wiki_schema_invalid`.
+
+> The tables below document the schema. The build fails if the tables differ from the schema or if this heading changes or is removed. See `hooks/scripts/tests/config_docs_drift_test.py`.
 
 | Type | Directory | Naming | Purpose |
 |---|---|---|---|
 | command | `commands/` | `<command-name>.md` | Documents one slash command: what it does, config fields, scripts invoked |
-| hook | `hooks/` | `<script-name>.md` | Documents one hook script: event, mode, logic, block condition |
-| skill | `skills/` | `<skill-name>.md` | Documents one skill: purpose, trigger phrases, phases, failure modes encoded |
-| design | `design/` | `<topic>.md` | Architectural decisions and invariants; evergreen |
-| investigation | `investigations/` | `<topic>_<YYYY-MM-DD>.md` | Point-in-time analysis filed during a workflow session; may be superseded |
-| source | `sources/` | `pr_<N>_<slug>.md` | Immutable record of a merged PR, created by `/wiki-ingest` |
+| hook | `hooks/` | `<script-name>.md` | Documents when one hook runs, its mode, its logic, and when it blocks |
+| skill | `skills/` | `<skill-name>.md` | Documents one skill's purpose, trigger phrases, phases, and problems it prevents |
+| `design` | `design/` | `<topic>.md` | Lasting architectural decisions and invariants |
+| investigation | `investigations/` | `<topic>_<YYYY-MM-DD>.md` | Analysis for a point in a workflow session. A subsequent analysis can supersede it. |
+| source | `sources/` | `pr_<N>_<slug>.md` | Immutable record of a merged PR from `/wiki-ingest` |
 
-**Not page types — structural directories.** Skeletons/charts, no frontmatter, never `[[wiki-link]]`ed:
+**Structural directories.** Their files have no wiki frontmatter. Do not use `[[wiki-link]]` for them.
 
 | Directory | Naming | Purpose |
 |---|---|---|
@@ -343,11 +329,13 @@ coderails-wiki/
 | `assets/` | freeform | Charts and images generated for wiki pages (e.g. matplotlib output) |
 | `dashboard-runs/` | `<routine>.md` | Scheduled-routine run notes, `type: routine-run`, written by `skills/dashboard/runner` |
 
-`dashboard-runs/` is operational output, not wiki content — follows none of the page-format rules, never linked, not touched by `/wiki-ingest`/`/wiki-lint`. The Obsidian plugin's direct-exec path writes separate per-run notes into the same folder with `status: running|done|failed` and no `type` field; treat both as non-wiki regardless of frontmatter shape. See `docs/routines.md`.
+`dashboard-runs/` holds run output. Do not apply wiki page rules or wiki links to it. The `/wiki-ingest` and `/wiki-lint` commands skip it.
+
+The Obsidian plugin's direct-exec path writes one note for each run in the same directory. It sets `status` to `running`, `done`, or `failed` and has no `type` field. Use the two types of notes as run output regardless of their frontmatter. See `docs/routines.md`.
 
 ## Page format
 
-Every page needs:
+Use this frontmatter for each page.
 
 ```yaml
 ---
@@ -360,24 +348,32 @@ tags: []           # freeform list
 ---
 ```
 
-Body rules: `[[wiki-links]]` for cross-references (`[[page_name]]`, no directory prefix). Keep pages under 2 minutes to read. Focus on knowledge that compounds (relationships, decisions, patterns), not facts derivable from reading source. Confidence-label non-trivial assertions: `(verified)`/`(inferred)`/`(guess)`. Flag contradictions inline as `> ⚠️ CONTRADICTION: <description>` — `/wiki-lint` scans for this marker.
+Use `[[wiki-links]]` for cross-references. Write `[[page_name]]` without a directory prefix. Write each page so that a reader can read it in less than two minutes. Record relationships, decisions, and patterns that build on other knowledge. Skip facts that a reader can get from source alone.
 
-**Enforcement model (wiki lens)**: the full hooks-vs-commands treatment lives in `## Two enforcement mechanisms` above. For wiki purposes: when documenting a hook page vs a command page, record which mechanism it is and what it can/can't guarantee; link to `[[enforcement-model]]` and cite the ceiling caveats verbatim.
+Mark substantive claims `(verified)`, `(inferred)`, or `(guess)`. Use `> ⚠️ CONTRADICTION: <description>` to mark a contradiction inline. The `/wiki-lint` command checks for this marker.
+
+**Enforcement model.** See `## Two enforcement mechanisms` above. On a hook or command page, name the mechanism and its guarantees and limits. Add `[[enforcement-model]]` and cite the limits verbatim.
 
 ## Workflows
 
-**Ingest** (after every PR merge) — `/wiki-ingest`, never write pages directly for PR content: (1) create `sources/pr_<N>_<slug>.md` from `templates/source.md`; (2) update affected pages with new knowledge; (3) append to `log.md`: `## [YYYY-MM-DD] ingest | PR #N merged: <description>`; (4) update `index.md` if new pages were created; (5) run `/wiki-lint`.
+**After each PR merge, use `/wiki-ingest`.** Do not write PR pages directly.
 
-**Query** — `/wiki-query` reads `index.md` first, fetches relevant pages, answers with citations. If a query reveals something non-obvious, file it back as an `investigations/` page — that is the birth condition for one.
+1. Make `sources/pr_<N>_<slug>.md` from `templates/source.md`.
+2. Update the related pages with new knowledge.
+3. Append `## [YYYY-MM-DD] ingest | PR #N merged: <description>` to `log.md`.
+4. If there are new pages, update `index.md`.
+5. Run `/wiki-lint`.
 
-**Lint** — `/wiki-lint`, always after ingest. Checks orphaned pages, stale `last_updated`, missing cross-references, contradictions. Fix anything related to the current PR; defer unrelated findings.
+**Query.** `/wiki-query` reads `index.md` first, fetches related pages, and answers with citations. If a query gives new knowledge that was not obvious, record it in an `investigations/` page.
+
+**Lint.** Run `/wiki-lint` after `/wiki-ingest`. It checks orphaned pages, stale `last_updated`, missing cross-references, and contradictions. Correct problems from the current PR. Defer unrelated problems.
 
 ## Conventions
 
 - Frontmatter tags: lowercase, hyphenated.
-- One concept per page — split a page that covers too much.
-- Source pages reference the PR number and key files changed.
+- Use one concept for each page. Use more pages if a page has multiple concepts.
+- Source pages give the PR number and important changed files.
 
-**Exploration boundary**: subagent/code exploration explores code; the wiki captures understanding. Use it when a wiki operation hits a specific gap (a query found no page, an ingest touches unfamiliar code, a lint finds a page you have specific reason to doubt) — not to routinely validate wiki content. The wiki is trusted by default, corrected by evidence.
+**When to examine code.** Use a subagent or examine code if a wiki operation cannot answer a question. Examples are no page for a query, unfamiliar code for `/wiki-ingest`, or a result from `/wiki-lint` that gives a basis to check a page. Use the wiki by default. Correct it when the source shows an error.
 
-**Evolution note**: this file is co-evolved. Convention changes (new page types, frontmatter fields, naming rules) — update this file first, then affected vault pages. The maintainer edits; Claude reads. Living system, not a snapshot.
+**Changes to conventions.** The maintainer updates this file before related vault pages. This applies to new page types, frontmatter fields, and naming rules. Claude reads the current rules.

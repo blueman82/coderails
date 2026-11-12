@@ -78,7 +78,12 @@ class HookRegistrationTests(unittest.TestCase):
         self.assertTrue(plugin)
         self.assertEqual(plugin, marketplace)
         guide = (ROOT / "AGENTS.md").read_text().lower()
-        for phrase in ("redirect-and-audit layer", "branch protection", "invocation"):
+        for phrase in (
+            "a local hook checks that a step ran. it cannot show that the step did its work.",
+            "it gives an agent instructions and writes a `discipline.log` record.",
+            "branch protection",
+            "invocation",
+        ):
             self.assertIn(phrase, guide)
 
 
