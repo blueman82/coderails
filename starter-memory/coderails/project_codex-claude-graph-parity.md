@@ -6,114 +6,74 @@ type: project
 
 # Codex and Claude graph parity
 
-> Historical baseline. The current implementation follows
-> `docs/superpowers/plans/2026-09-03-provider-graph-alignment-implementation.md`
-> and `skills/agentic-loop/execution-graph.md`: one maintained pure Python
-> semantic core at `packages/graph-semantics/graph_semantics.py`, exact copies
-> inside each independent plugin, and provider-local dispatch, locks and native
-> evidence. Stored progress uses schema 3 only. Native provider role labels and
-> explicit instruction delivery replace mandatory custom worker names. The
-> shell paths, initial checkout constraints and defect inventory below record
-> the earlier baseline; they are not current runtime instructions.
+> The current implementation follows `docs/superpowers/plans/2026-09-03-provider-graph-alignment-implementation.md` and `skills/agentic-loop/execution-graph.md`. Each plugin operates independently and uses a byte-for-byte copy of the maintained pure Python core at `packages/graph-semantics/graph_semantics.py`. Each provider owns its dispatch, locks, and native run records. The graph uses only schema 3. Native provider role labels and explicit instruction bodies replace mandatory custom worker names. The shell paths, checkout constraints, and defect inventory below describe the historical baseline only.
 
 ## Goal
 
-Make the independent Codex plugin perform the same graph engineering as the
-independent Claude plugin: the same graph state, readiness rules, waves, joins,
-retries, hard stops, completion checks, resume behaviour and proof tests. Keep
-provider dispatch native and separate: Claude uses `Agent`; Codex uses
-`spawn_agent`. Neither provider calls, routes to, or reviews through the other.
+Give Codex and Claude the same graph data, readiness rules, waves, joins, retries, hard stops, end checks, continuation behavior, and proof tests. The plugins operate independently. Claude dispatches through `Agent`. Codex dispatches through `spawn_agent`. Each provider sends work and reviewer tasks only to its own runtime.
 
-Parity alone is not enough if it copies known Claude defects. Treat the work as
-two explicit acceptance milestones: first prove matching behaviour, then prove
-the known graph gaps are closed for both providers. Completion means both
-milestones pass in clean, fresh provider sessions.
+Use two milestones. First prove matching behavior. Then prove that the repairs close the known graph defects for the two providers. Complete each milestone in clean, new provider sessions.
 
 ## Decisions
 
 - PR #427 is merged at `97c026eb4ea059e07b563f36cae52eb12e155372`.
-- The Claude plugin remains at the repository root. The Codex plugin remains at
-  `packages/codex`.
-- The providers must share graph semantics, not a runtime. Keep two independent
-  implementations and provider-local hooks, skills, agents and scripts.
-- Do not restore `skills/index.yaml`, shared provider routing, mixed-provider
-  review, provider handoffs, nested `codex exec`, the deleted custom Codex
-  runtime, a daemon or an MCP scheduler.
-- Use the surviving Claude graph as the behavioural source, but do not copy its
-  verified defects into Codex.
-- Both providers must use the same state meanings: nodes, edges, all-input
-  joins, pending/running/done/skipped/hard-stop states, an active wave, retry
-  attempts, evidence, completion and teardown.
-- Both providers remain manually operated at the native-agent boundary. Graph
-  code calculates and records work; the active provider session performs its
-  own native agent calls.
-- Keep review provider-local. Claude uses Claude reviewers. Codex uses Codex
-  reviewers. Review and merge evidence may be graph nodes, but never a
-  cross-provider join.
-- Preserve the user's three-agent concurrency limit unless explicitly changed.
+- The Claude plugin stays at the repository root. The Codex plugin stays at `packages/codex`.
+- Share graph semantics. Keep each provider's own implementation, hooks, skills, agents, and scripts.
+- Keep `skills/index.yaml`, shared provider routing, cross-provider inspection, and provider handoffs out of scope. Keep nested `codex exec` and the deleted custom Codex runtime out of scope. Do not add a daemon or an MCP scheduler.
+- Use the surviving Claude graph as the baseline for behavior. Do not copy its known defects into Codex.
+- Give nodes, edges, and all-input joins the same semantics in the two providers. Align `pending`, `running`, `done`, `skipped`, and `hard-stop`. Align active waves, retry counts, run records, end checks, and teardown.
+- Keep native agent dispatch manual in the two providers. The graph code calculates and records work. The active provider session calls its own agents.
+- Claude uses Claude reviewers. Codex uses Codex reviewers. Nodes can hold records of reviewer checks and merge. Do not use a cross-provider join for them.
+- Keep the user's three-agent concurrency limit unless the user explicitly changes it.
 
 ## Constraints
 
-- Start from a clean checkout containing merge `97c026e`. The current local
-  `main` may still be behind `origin/main`; verify before creating a worktree.
-- Do not alter the working Claude plugin merely to make packaging symmetrical.
-  Claude changes must fix a proved graph defect or establish the matching graph
-  contract.
-- Do not infer equal behaviour from matching agent names, skill names or hook
-  counts. Prove state transitions and provider-native dispatch in tests.
-- Plugin discovery, custom-agent installation and hook trust are already solved
-  by PR #427. Do not reopen them unless a parity test proves a regression.
-- Codex hooks run only after the user trusts them through `/hooks`; fresh-session
-  verification must include that step.
+- Start from a clean checkout with merge `97c026e`. Check if local `main` is behind `origin/main` before making a worktree.
+- Change the working Claude plugin only to correct a proven graph defect or make the graph contracts match.
+- Equal agent names, skill names, or hook counts cannot prove equal behavior. Test how graph data changes and how each provider dispatches work.
+- PR #427 resolved plugin discovery, custom-agent installation, and hook trust. Reopen them only if a parity test proves a regression.
+- Codex hooks run only after the user trusts them through `/hooks`. Include that step in each new session used for verification.
 - This handoff authorises planning and implementation of graph parity only. It
   does not authorise cross-review or a shared provider runtime.
 
 ## Schema / Taxonomy
 
-The matching behavioural contract must cover:
+Use the same contract for the two providers
 
-| Area | Required behaviour in both providers |
+| Area | Behavior for Claude and Codex |
 |---|---|
-| State | One durable loop record with session/loop ownership, revision, nodes, edges, joins, active wave, decisions and evidence |
-| Readiness | Unknown or malformed nodes fail closed; a node is ready only when every required predecessor has succeeded |
-| Dispatch | Resolve one complete ready wave, record it as active/running, then use the provider's native agent tool |
-| Recording | Accept exactly the active wave's result keys; reject partial or extra results without changing state |
-| Retry | A retryable failure returns to pending, increments attempts and preserves evidence; exhaustion becomes hard-stop |
-| Join | All-input joins release only after every input succeeds; release must be deterministic, not forgotten prose |
-| Resume | A fresh or compacted session discovers the active loop, running wave, ready work and hard-stop reason |
-| Completion | Cannot finish with pending/running/hard-stop nodes, unreleased joins, missing proof/evidence or missing retro |
-| Dispatch boundary | Claude calls `Agent`; Codex calls `spawn_agent`; graph code never starts another provider session |
+| Loop data | One durable loop record with session and loop ownership, revision, nodes, edges, joins, active wave, decisions, and run records |
+| Readiness | Reject unknown or malformed nodes. A node can start only after all required predecessors succeed. |
+| Worker dispatch | Resolve a complete wave of nodes that can start. Record it as active and `running`. Use the provider's native agent tool. |
+| Recording | Accept the active wave's full set of result keys only. Reject results with missing or unknown keys and keep the graph unchanged. |
+| Retry | If a node can retry, set it to `pending` and increment the try count. Keep its records. Set it to `hard-stop` if retries run out. |
+| All-input join | Release an all-input join only after all inputs succeed. Use deterministic code for release. |
+| Session continuation | A new or compacted session finds the active loop and the wave in flight if there is one. It finds work that can start and the cause of a hard stop. |
+| End checks | The loop cannot finish with `pending`, `running`, or `hard-stop` nodes, unreleased joins, or missing proof, run records, or retro. |
+| Provider dispatch boundary | Claude uses `Agent`. Codex uses `spawn_agent`. The graph code does not start a second provider session. |
 
 ## Known graph gaps to close
 
-Verified against merged commit `97c026e`:
+Checks against merged commit `97c026e` found these defects
 
-1. Claude retryable failures become `running`, but readiness only selects
-   `pending`/`ready`, so failed nodes can disappear from future waves.
-2. Claude readiness can approve an unknown node and does not fully validate the
-   graph before answering.
-3. Claude does not record an in-flight wave; a restart can duplicate dispatch,
-   and partial result sets are not checked against the planned wave.
-4. Claude's completion-marker order can bypass teardown checks on the completion
-   turn.
-5. Claude completion checks `work_units` but not unfinished graph nodes or joins.
-6. A stale loop evaluation can approve a later re-armed loop because artifacts
-   lack a unique loop identity.
-7. Claude's in-process loop-worker gate allows missing or foreign loop state.
+1. Claude sets a retryable node to `running` after an error. Readiness selects only `pending` and `ready`, so a node can drop out of future waves.
+2. Claude readiness can accept an unknown node. It does not validate the full graph before answering.
+3. Claude does not record a wave in flight. Starting again can duplicate dispatch. It does not check result sets with missing keys against the planned wave.
+4. The sequence of Claude's end markers can bypass teardown checks on the turn that ends the graph.
+5. Claude checks `work_units` before finishing. It does not check for unfinished graph nodes or joins.
+6. A stale loop eval can authorize a subsequent rearmed loop. Its artifact has no unique loop identity.
+7. Claude's in-process loop-worker gate accepts missing graph data or data from a different loop.
 8. Claude sandboxed workers bypass the in-process loop dispatch gate.
-9. Codex has no mechanical graph state, readiness calculator, active-wave
-   recorder, retry counter, join release or graph completion gate.
-10. Codex's current `progress.json` is optional and explicitly described as a
-    checkpoint, not a scheduler or enforcement system.
-11. Codex package tests prove package shape and instruction wording, not graph
-    behaviour.
+9. Codex has no mechanical graph record, readiness calculator, wave recorder, retry counter, join release, or gate for ending the graph.
+10. Codex's current `progress.json` is an optional checkpoint. It does not schedule or enforce work.
+11. Codex package tests prove package shape and instruction wording. They do not prove graph behavior.
 
-Deliberate limits, not gaps:
+Deliberate limits
 
-- Native agent dispatch remains model-driven for both providers.
+- The model controls native agent dispatch for the two providers.
 - No automatic background scheduler.
-- No shared runtime, provider router or cross-provider review.
-- Provider-local review and merge workflows remain multi-step boundaries.
+- No shared runtime, provider router, or cross-provider inspection.
+- Each provider uses its own multi-step workflow for reviewer checks and merge.
 
 ## Key files
 
@@ -121,41 +81,32 @@ Claude source and behaviour:
 
 - `skills/agentic-loop/SKILL.md`: Claude graph operating discipline.
 - `skills/agentic-loop/execution-graph.md`: graph shape, waves and joins.
-- `skills/agentic-loop/loop-state.md`: durable state and completion contract.
+- `skills/agentic-loop/loop-state.md` documents durable graph records and the rules for ending a loop.
 - `skills/agentic-loop/retry-until-green.md`: retry semantics.
-- `skills/agentic-loop/phases-setup.md`: initial graph state creation.
-- `skills/agentic-loop/teardown.md`: proof, retro and completion sequence.
-- `hooks/scripts/lib/graph_readiness.sh`: current readiness calculation.
+- `skills/agentic-loop/phases-setup.md` documents how to initialize graph data.
+- `skills/agentic-loop/teardown.md` documents the proof, retro, and end sequence.
+- `hooks/scripts/lib/graph_readiness.sh` calculates current readiness.
 - `hooks/scripts/lib/graph_executor.sh`: locked graph-state updates.
 - `hooks/scripts/lib/graph_dispatch.sh`: ready-wave planning, routing and result recording.
-- `hooks/scripts/lib/loop_state_common.sh`: shared loop-state and completion functions.
+- `hooks/scripts/lib/loop_state_common.sh` provides shared functions for graph data and end checks.
 - `hooks/scripts/loop_dispatch_guard.sh`: Claude Agent dispatch gate.
-- `hooks/scripts/loop_state_guard.sh`: state/eval Stop guard.
-- `hooks/scripts/loop_stall_guard.sh`: completion, proof and retro guard.
-- `scripts/sandbox/spawn-sandboxed-worker.sh`: separate Claude worker path that
-  must use the same graph/eval decision.
+- `hooks/scripts/loop_state_guard.sh` checks graph data and evals at Stop.
+- `hooks/scripts/loop_stall_guard.sh` guards the end of a loop and checks proof and retro.
+- `scripts/sandbox/spawn-sandboxed-worker.sh` is the sandboxed Claude worker path. It must use the same graph and eval decision.
 
 Codex target:
 
-- `packages/codex/skills/agentic-loop/SKILL.md`: currently instruction-only;
-  must operate the matching graph contract around native agent calls.
-- `packages/codex/hooks/hooks.json`: provider-native registration point for
-  resume/completion graph hooks.
-- `packages/codex/hooks/scripts/inject_bootstrap.sh`: report active graph state
-  after session start, resume or compaction.
-- `packages/codex/hooks/scripts/lib/hook_common.sh`: reuse for Codex hook input
-  and output handling.
-- `packages/codex/skills/workflow/SKILL.md`: provider-local review wave and
-  review/eval/merge nodes.
-- `packages/codex/scripts/merge.sh`: current-head review/eval/smoke merge gates;
-  reuse, do not rebuild.
-- `packages/codex/agents/*.toml`: native Codex workers/reviewers; already installed.
-- `packages/tests/codex_native_package.test.sh`: preserve removal of unsupported
-  mixed/runtime paths while adding graph-package assertions.
-- `packages/tests/codex_hooks.test.sh`: replace only the obsolete expectation
-  that all graph hooks are absent.
+- `packages/codex/skills/agentic-loop/SKILL.md` has instructions only. Operate the matching graph contract around native agent calls.
+- `packages/codex/hooks/hooks.json` registers native hooks to continue and end the graph.
+- `packages/codex/hooks/scripts/inject_bootstrap.sh` must report active graph status after session start, resume, or compaction.
+- Use `packages/codex/hooks/scripts/lib/hook_common.sh` for Codex hook input and output.
+- `packages/codex/skills/workflow/SKILL.md` uses a provider-local reviewer wave and nodes for reviewer checks, evals, and merge.
+- Use the existing current-head reviewer, eval, and smoke gates in `packages/codex/scripts/merge.sh`.
+- `packages/codex/agents/*.toml` holds installed native Codex workers and reviewers.
+- In `packages/tests/codex_native_package.test.sh`, keep checks that retired mixed and runtime paths stay removed. Add graph-package assertions.
+- In `packages/tests/codex_hooks.test.sh`, replace only the obsolete expectation that no graph hooks exist.
 
-Tests to inspect and extend:
+Examine and extend these tests
 
 - `hooks/scripts/tests/graph_readiness.test.sh`
 - `hooks/scripts/tests/graph_dispatch.test.sh`
@@ -168,16 +119,15 @@ Tests to inspect and extend:
 - `hooks/scripts/tests/loop_stall_guard.test.sh`
 - `hooks/scripts/tests/loop_state_guard_evals.test.sh`
 - `scripts/sandbox/tests/spawn_sandboxed_worker.test.sh`
-- New Codex provider-local graph behaviour test under `packages/tests/`.
+- Add a Codex provider-local graph behavior test in `packages/tests/`.
 
 ## Done so far
 
-- PR #427 created and merged the separate native Codex plugin.
+- PR #427 added and merged the standalone native Codex plugin.
 - The Claude root plugin remains provider-owned and functional.
-- The Codex package now has 37 skills, 10 custom agents, native hooks and
-  provider-local workflow scripts.
-- Shared routing, mixed review and the custom Codex runtime were removed.
-- Fresh Codex sessions discovered `coderails-codex:agentic-loop` before merge.
+- At this checkpoint the Codex package has 37 skills, 10 custom agents, native hooks, and provider-local workflow scripts.
+- The change removed shared routing, cross-provider inspection, and the custom Codex runtime.
+- New Codex sessions found `coderails-codex:agentic-loop` before merge.
 - Three read-only audits compared pre-PR `dfcd6366` with merged `97c026e`.
 - The audits proved Claude retained a manually operated mechanical graph while
   Codex currently has instruction-only dependency orchestration.
@@ -186,34 +136,19 @@ Tests to inspect and extend:
 
 ## Next steps
 
-1. Fetch `origin/main`, verify merge `97c026e` is present, require a completely
-   clean checkout, then create a dedicated feature worktree and branch.
-2. Freeze provider-parity success tests before implementation. Use the same
-   behavioural cases for both providers: malformed graph, unknown node,
-   `A || B -> join -> C`, active-wave exactness, retry success/exhaustion,
-   restart/resume and blocked early completion.
-3. Fix the verified Claude graph defects with the smallest changes to the
-   existing shell helpers and hooks. Do not add dispatch automation.
-4. Implement the same contract inside the Codex skill package. Prefer a small
-   deterministic skill-local helper and provider-native hooks; do not recreate
-   `packages/codex/runtime/` or add manifest fields.
+1. Fetch `origin/main` and check for merge `97c026e`. With a clean checkout, make a worktree and branch for the change.
+2. Freeze provider-parity tests before implementation. Test a malformed graph, an unknown node, `A || B -> join -> C`, and strict active-wave matching. Test retry success and exhaustion, starting again, and continuation. Test that the graph cannot finish before all end checks succeed.
+3. Correct the proven Claude graph defects with the smallest changes to its shell helpers and hooks. Do not add dispatch automation.
+4. Use the same contract in the Codex skill package. Prefer a small deterministic helper in the skill and provider-native hooks. Do not recreate `packages/codex/runtime/` or add manifest fields.
 5. Update the Codex skill so graph operations surround `spawn_agent`,
    `wait_agent`, result verification and `close_agent`. Keep `update_plan` as a
    display, not the durable source of truth.
-6. Add Codex session-start discovery and a provider-native Stop guard for active,
-   paused, hard-stop and complete states.
-7. Run provider-local unit and package tests, strict changed-file quality, a
-   clean temporary Codex install, and fresh Claude and Codex sessions.
-8. In each fresh session run the harmless graph `A || B -> join -> C`. Prove the
-   same state transitions and completion blocks, while observing Claude `Agent`
-   calls and Codex `spawn_agent` calls.
-9. Report parity separately from hardening: matching current behaviour is not
-   enough unless every known gap above is either fixed or explicitly accepted.
+6. Add Codex session-start discovery and a provider-native Stop guard for `active`, `paused`, `hard-stop`, and `complete`.
+7. Run provider-local unit and package tests and strict checks for changed files. Use a clean temporary Codex install. Start new Claude and Codex sessions.
+8. In each new session, run the harmless graph `A || B -> join -> C`. Prove the same graph changes and blocks on finishing. Record Claude `Agent` and Codex `spawn_agent` invocations.
+9. Report matching behavior and hardening results independently. For each known defect, report its repair or explicit approval to keep it.
 
 ## Open questions
 
-- Implementation language/location for the Codex helper: port the existing
-  Claude shell semantics into a skill-local script, or use a small Python helper.
-  Behaviour must match either way; do not create a general runtime package.
-- Whether to ship parity and graph hardening in one PR or two ordered PRs. The
-  final acceptance target is the same.
+- Which language and location should the Codex helper use? Copy the Claude shell semantics into a script in the skill or use a small Python helper. Keep behavior the same. Do not make a general runtime package.
+- Use one PR for parity and hardening, or two PRs in sequence? The criteria for accepting the work stay the same.

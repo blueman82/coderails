@@ -213,7 +213,7 @@ class Derive(StoreCase):
             text = (REPO / rel).read_text()
             step0 = text.split("### Step 0", 1)[1].split("### Step 1", 1)[0]
             self.assertIn("scripts/lib/handoff_derive.py", step0, rel)
-            self.assertIn("State `degraded[]` to the user", step0, rel)
+            self.assertIn('In the handoff, list each code in `degraded[]` below a "Memory degraded" line.', step0, rel)
 
     def test_unreadable_state_is_refused_and_nothing_is_written(self) -> None:
         """A missing progress.json exits 2 with a reason code."""

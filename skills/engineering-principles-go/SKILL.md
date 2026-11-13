@@ -15,20 +15,20 @@ paths: "**/*.go"
 ## Go Idioms (MANDATORY)
 
 ### Interface & Struct Patterns
-- **Accept interfaces, return structs** — Functions should accept interface parameters for flexibility, return concrete struct types for clarity
-- **Package-level organization** — No class-level thinking; organize by package responsibility
+- **Interface parameters and concrete struct results.** Use interface parameters for flexibility and concrete structs as function results for clarity.
+- **Package-level organization.** Group code by the work each package does. Do not organize it by classes.
 
 ### Error Handling
-- **Errors are values** — Handle them or return them, never ignore with `_ =`
-- **Wrap errors with context** — Use `fmt.Errorf("context: %w", err)` for stack traces
-- **Early returns** — Check errors immediately, return early
+- **Errors are values.** Add error-handling code or use `return` to give the error to the caller. Do not ignore it with `_ =`.
+- **Add context to errors.** Use `fmt.Errorf("context: %w", err)` to keep the error chain.
+- **Exit on error.** Check errors immediately and use `return` when an error occurs.
 
 ### Testing
-- **Table-driven tests** — Use `[]struct{ name string; ... }` pattern for test cases
+- **Table-driven tests** — Use `[]struct{ name string; ... }` pattern for test inputs
 - **Subtests** — Use `t.Run(tt.name, func(t *testing.T) { ... })`
 
 ### Naming & Style
-- **Short variable names in small scopes** — `i`, `n`, `err` are fine locally
+- **Short names in small scopes.** Use names such as `i`, `n`, or `err` locally.
 - **Exported = PascalCase, unexported = camelCase**
 - **Acronyms stay uppercase** — `HTTPClient`, not `HttpClient`
 
@@ -38,31 +38,31 @@ paths: "**/*.go"
 
 | Pattern | Before | After |
 |---------|--------|-------|
-| Early return | `if err != nil { ... } else { ... }` | `if err != nil { return err }` |
+| Exit on error | `if err != nil { ... } else { ... }` | `if err != nil { return err }` |
 | Error wrapping | `return err` | `return fmt.Errorf("context: %w", err)` |
 | No empty structs | `Type{}` without purpose | Remove or use `var t Type` |
-| No unused vars | `_ = validateInput(data)` | `if err := validateInput(data); err != nil { ... }` |
-| Named returns | `func() (int, error)` | `func() (count int, err error)` for docs |
-| No TODO comments | `// TODO: fix later` | Fix now or remove |
+| Use the result of a check | `_ = validateInput(data)` | `if err := validateInput(data); err != nil { ... }` |
+| Named function results | `func() (int, error)` | `func() (count int, err error)` for docs |
+| No TODO comments | `// TODO: fix later` | Correct the issue or remove the comment |
 
 ---
 
 ## Imperative → Idiomatic Patterns (MANDATORY)
 
-Go uses loops instead of map, filter, and reduce. Apply Go idioms that make
+Go uses loops for mapping, filtering, and reducing. Apply Go idioms that make
 the code shorter and clearer.
 
 ### Loop Anti-Patterns
 
 | Anti-Pattern | Replacement | Example |
 |-------------|-------------|---------|
-| Nested loops 3+ deep | Extract inner loops to functions | `for a: for b: for c:` → `for a: processB(a)` |
+| Nested loops 3+ deep | Move inner loops to functions | `for a: for b: for c:` → `for a: processB(a)` |
 | Manual string building in loop | `strings.Builder` or `strings.Join` | `s += item + ","` → `b.WriteString(item)` |
-| Append without pre-allocation | `make([]T, 0, len(src))` when size known | `var result []T` → `result := make([]T, 0, len(src))` |
-| Manual map building without size | `make(map[K]V, len(src))` when size known | `m := map[K]V{}` → `m := make(map[K]V, len(src))` |
+| Append without pre-allocation | `make([]T, 0, len(src))` when you know the capacity | `var result []T` → `result := make([]T, 0, len(src))` |
+| Manual map without an initial capacity | `make(map[K]V, len(src))` when you know the capacity | `m := map[K]V{}` → `m := make(map[K]V, len(src))` |
 | Manual contains check on slice | `map[T]bool` or `map[T]struct{}` lookup | `for _, v := range items { if v == target }` → `if lookup[target]` |
-| Range over index only | Use `_` or range value directly | `for i := range items { items[i].X }` → `for _, item := range items { item.X }` |
-| Manual reverse iteration | `slices.Reverse` (1.21+) or reverse index | `for i := len(s)-1; i >= 0; i--` → `slices.Reverse(s)` |
+| Range with index only | Use `_` or range value directly | `for i := range items { items[i].X }` → `for _, item := range items { item.X }` |
+| Manual iteration from last to first | `slices.Reverse` (1.21+) or index from last to first | `for i := len(s)-1; i >= 0; i--` → `slices.Reverse(s)` |
 | Manual min/max in loop | `min()`/`max()` builtins (1.21+) | `if x < current { current = x }` → `current = min(current, x)` |
 | Manual slice contains | `slices.Contains` (1.21+) | `for _, v := range s { if v == target }` → `slices.Contains(s, target)` |
 | Manual sort + unique | `slices.Sort` + `slices.Compact` (1.21+) | Manual dedup loop → `slices.Sort(s); slices.Compact(s)` |
@@ -72,11 +72,11 @@ the code shorter and clearer.
 | Anti-Pattern | Replacement |
 |-------------|-------------|
 | Long `switch`/`if-else` chain (5+) | `map[string]func()` dispatch table |
-| Repeated type assertions | `switch v := x.(type)` type switch |
-| Nested conditionals 3+ deep | Guard clauses / early return |
-| Flag accumulation in loop | Early return on first match |
-| `if init; cond` not used | Use short statement form: `if err := f(); err != nil` |
-| Boolean function with if/else return | Return expression directly: `return x > 0` |
+| Recurring type assertions | `switch v := x.(type)` type switch |
+| Nested conditionals 3+ deep | Check the condition and exit the function immediately if applicable |
+| Loop that updates a Boolean flag | Use `return` on the first match |
+| `if init; cond` not used | Use a short statement: `if err := f(); err != nil` |
+| Boolean function with a conditional result | Use the expression as the result: `return x > 0` |
 
 ### Concurrency Anti-Patterns
 
@@ -87,11 +87,11 @@ the code shorter and clearer.
 | Unbounded goroutine spawn | Worker pool with semaphore channel |
 | Manual mutex map | `sync.Map` (for append-heavy, read-many patterns) |
 | Select without `default` or timeout | Add `context.Context` deadline or `default` |
-| Channel for single value | Direct return or callback |
+| Go `chan` for one value | Use `return` or a callback |
 
 ### Stdlib Shortcuts
 
-| Manual Code | Use Instead |
+| Manual Code | Stdlib or Idiom |
 |-------------|-------------|
 | Manual HTTP handler chain | Middleware pattern / `http.Handler` wrapping |
 | Manual JSON field naming | Struct tags `json:"field_name"` |
@@ -107,7 +107,7 @@ the code shorter and clearer.
 ## Example: Before/After
 
 ```go
-// BEFORE (violations: error handling, nested if/else, unused var)
+// BEFORE (violations: error handling, nested if/else, unneeded name)
 func ProcessData(data []byte) (Result, error) {
     _ = validateInput(data)
     result, err := parse(data)
@@ -124,7 +124,7 @@ func ProcessData(data []byte) (Result, error) {
 ```
 
 ```go
-// AFTER (early returns, errors handled, no unused vars)
+// AFTER (exits on error, uses all local names)
 func ProcessData(data []byte) (Result, error) {
     if err := validateInput(data); err != nil {
         return Result{}, fmt.Errorf("validation failed: %w", err)
@@ -171,7 +171,7 @@ func summarize(groups [][]string) string {
 ```
 
 ```go
-// AFTER (strings.Builder, strings.Contains, early return)
+// AFTER (strings.Builder, strings.Contains, exit when the result is known)
 func summarize(groups [][]string) string {
     var b strings.Builder
     foundSpecial := false
@@ -236,7 +236,7 @@ type DataProcessor interface {
     Process(ctx context.Context, data []byte) (Result, error)
 }
 
-// Return struct
+// Concrete struct for the function result
 type processor struct {
     timeout time.Duration
     logger  Logger
@@ -257,20 +257,20 @@ func (p *processor) Process(ctx context.Context, data []byte) (Result, error) {
 
 Before completing Go code changes:
 
-- [ ] All errors handled or returned (no `_ =`)
+- [ ] All errors handled or sent to the caller (no `_ =`)
 - [ ] Errors wrapped with `fmt.Errorf("context: %w", err)`
-- [ ] Early returns used (no nested if/else)
-- [ ] Functions accept interfaces where appropriate
-- [ ] Functions return concrete structs
+- [ ] Use `return` to exit without nested if/else
+- [ ] Functions accept interfaces where applicable
+- [ ] Functions give concrete structs as results
 - [ ] Tests are table-driven with subtests
 - [ ] No TODO comments
 - [ ] No empty structs without purpose
 - [ ] No nested loops 3+ deep — extract to functions
-- [ ] `strings.Builder`/`strings.Join` over `+=` in loops
-- [ ] Pre-allocate slices/maps when size is known
-- [ ] `map[T]bool` or `slices.Contains` over manual contains loops
-- [ ] `errgroup.Group` over manual goroutine + WaitGroup
-- [ ] Type switch over repeated type assertions
-- [ ] Map dispatch over long switch/if-else chains (5+)
-- [ ] Guard clauses over nested conditionals 3+ deep
-- [ ] `min()`/`max()` builtins over manual tracking (1.21+)
+- [ ] Prefer `strings.Builder`/`strings.Join` to `+=` in loops
+- [ ] Pre-allocate slices/maps when you know the capacity
+- [ ] Prefer `map[T]bool` or `slices.Contains` to manual contains loops
+- [ ] Prefer `errgroup.Group` to manual goroutine + WaitGroup
+- [ ] Prefer a type switch to recurring type assertions
+- [ ] Prefer map dispatch to long switch/if-else chains (5+)
+- [ ] Check conditions and exit the function to prevent nesting 3 or more levels deep
+- [ ] Prefer `min()`/`max()` builtins to manual tracking (1.21+)

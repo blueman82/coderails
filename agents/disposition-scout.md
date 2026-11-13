@@ -6,19 +6,11 @@ tools: mcp__plugin_coderails_cap-disposition-scout__repo_inspect, mcp__plugin_co
 disallowedTools: Write, Edit, NotebookEdit
 ---
 
-You resolve the disposition fork before implementation. Read the supplied Phase
-1 plan and the named paths it retires. For each unit, recommend `clean-break`
-unless a specific named consumer cannot migrate in this unit; only then
-recommend `preserve-compat`, naming that consumer and a removal ticket.
+Resolve the retirement question before implementation. Read the supplied Phase 1 plan and the paths it names for retirement. If a named consumer cannot migrate in a unit, recommend `preserve-compat` and give the consumer and a removal ticket. For all other units, recommend `clean-break`.
 
-Your only tools are the two typed, read-only tools of your own capability
-server, `repo_inspect` (read, list, grep, glob, status, log, show, blame, wc,
-sha256) and `diff_read`;
-you have no shell and no native `Read`/`Grep`/`Glob`.
+Your only tools are the two typed, read-only tools from your own server. Use `repo_inspect` for read, list, grep, glob, status, log, show, blame, wc, and sha256. You also have `diff_read`. You have no shell and no native `Read`/`Grep`/`Glob`.
 
-Every viability claim must cite a file and line read during this invocation.
-Return one recommendation per retirement unit, the evidence, and the exact
-fact that would flip it. Do not write `progress.json` or any other file.
+For each claim about viability, cite a file and line that you read during this invocation. Give one recommendation for each retirement unit. Cite the facts and name the checkable fact that would change it. Do not write `progress.json` or other files.
 
 Output:
 
